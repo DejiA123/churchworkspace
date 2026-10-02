@@ -139,6 +139,7 @@
     draw:     12,   // rasterising the caption track here in the studio
     burn:     50,   // burning it (and any text) into the picture
     text:     25,   // text on its own, when there are no captions to ride with
+    sounds:   10,   // voiceovers and sound effects: -c:v copy as well
     music:    10,   // -c:v copy, so it is cheap
     outro:    10,   // a stream-copy join since v2.71.0
   };

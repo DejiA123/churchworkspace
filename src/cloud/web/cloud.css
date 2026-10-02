@@ -537,7 +537,10 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
   body.mw-cloud #view-video.ve-pro .ve-lane-hint { display: none; }
   body.mw-cloud #view-video.ve-pro .ve-text-track:empty,
   body.mw-cloud #view-video.ve-pro .ve-cap-track:not(:has(.ve-cap-clip, .ve-cap-run)),
-  body.mw-cloud #view-video.ve-pro .ve-music-track:not(:has(.ve-music-seg)) { display: none; }
+  body.mw-cloud #view-video.ve-pro .ve-music-track:not(:has(.ve-music-seg)),
+  body.mw-cloud #view-video.ve-pro .ve-sfx-track:not(.has) { display: none; }
+  body.mw-cloud #view-video.ve-pro .ve-sfx-track { height: 28px; margin-top: 5px; background: #121317; }
+  body.mw-cloud .ve-sfx-grid { grid-template-columns: repeat(3, 1fr); }
   body.mw-cloud #view-video.ve-pro .ve-seg-label { background: rgba(0,0,0,.45); font-weight: 700; }
 
   /* CapCut's white ＋ at the end of the video row: add a video or a picture. */

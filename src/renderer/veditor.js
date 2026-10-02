@@ -43,6 +43,8 @@
     aspect: 'reel-9x16',
     framing: { zoom: 1, offsetX: 0.5, offsetY: 0.5 }, // manual pan/zoom crop (used when auto-reframe is off)
     textOverlays: [], // [{id,text,x,y,w,h,start,end,color,sizePct,font,bold}]
+    sounds: [],       // [{id,path,label,kind:'voice'|'fx',start,dur,volume}] — the 🔊 Sounds row
+    soundSel: null,
     textSel: null,
     textEditing: null,
     /*
@@ -211,6 +213,8 @@
       // Audio is its OWN independent clip. Splitting the VIDEO does NOT split it —
       // it only splits when you select the audio row and Split there.
       ve.audio = [{ id: uid(), start: 0, end: info.durationSec, color: '#2ea043' }];
+      // sounds belong to the video they were placed on (a restored session brings its own)
+      if (!ve._restoring) { ve.sounds = []; ve.soundSel = null; }
       ve.audioSel = null; ve.activeRow = 'video';
 
       // a different recording is a different piece of work: it gets its own
@@ -693,6 +697,7 @@
     renderCapTrack();
     renderAudioSegments();
     renderMusicLane();
+    renderSoundTrack();
     renderOverlayGuide();
     renderMediaLayer();
   }
@@ -1190,6 +1195,7 @@
     renderTextOverlays();
     updateClipPlayButtons(); // the card ▶/⏸ tracks whether ITS clip is playing
     syncMusicPreview();      // the music bed follows the playhead
+    syncSoundPreview();      // …and so do voiceovers and sound effects
   }
 
   /** Real-editor behaviour: if NO main-lane clip covers the playhead (a gap, or
@@ -1204,7 +1210,8 @@
     const inClip = ve.segments.some((s) => (s.lane || 0) === 0 && t >= s.start && t < s.end && !cutAt(s, t));
     const inAudio = ve.audio.some((a) => t >= a.start && t < a.end);
     m.classList.toggle('hidden', inClip);
-    ve.refs.player.muted = !inClip || !inAudio;
+    // silent while a voiceover records, so the sermon does not leak into the mic
+    ve.refs.player.muted = !!ve._voiceMute || !inClip || !inAudio;
   }
 
   /**
@@ -4626,7 +4633,7 @@
    * themselves (🧹 Clear captions) record them, so only those can restore them.
    */
   function snapshotState(withCaps) {
-    const s = { segments: ve.segments, sel: ve.sel, textOverlays: ve.textOverlays, textSel: ve.textSel, audio: ve.audio, audioSel: ve.audioSel };
+    const s = { segments: ve.segments, sel: ve.sel, textOverlays: ve.textOverlays, textSel: ve.textSel, audio: ve.audio, audioSel: ve.audioSel, sounds: ve.sounds || [] };
     if (withCaps) {
       s.caps = {
         events: ve.capEvents, words: ve.capWords, offset: ve.capOffset || 0,
@@ -4652,6 +4659,7 @@
     const s = JSON.parse(json);
     ve.segments = s.segments; ve.sel = s.sel; ve.textOverlays = s.textOverlays; ve.textSel = s.textSel;
     if (s.audio) { ve.audio = s.audio; ve.audioSel = s.audioSel; }
+    if (s.sounds) { ve.sounds = s.sounds; if (!ve.sounds.some((x) => x.id === ve.soundSel)) ve.soundSel = null; renderSoundTrack(); syncSoundPreview(); }
     if (s.caps) {
       ve.capEvents = s.caps.events; ve.capWords = s.caps.words; ve.capOffset = s.caps.offset || 0;
       ve.capTarget = s.caps.targetId ? (ve.segments.find((x) => x.id === s.caps.targetId) || null) : null;
@@ -5217,6 +5225,7 @@
         }),
         audio: ve.audio || [],
         textOverlays: ve.textOverlays || [],
+        sounds: ve.sounds || [],
         music: ve.music || null,
         outro: ve.outro || null,
         outroAll: ve.outroAll !== false,
@@ -5283,6 +5292,7 @@
     }
     if (Array.isArray(tl.audio)) ve.audio = tl.audio;
     if (Array.isArray(tl.textOverlays)) ve.textOverlays = tl.textOverlays;
+    ve.sounds = Array.isArray(tl.sounds) ? tl.sounds : [];
     ve.music = tl.music || null;
     ve.outro = tl.outro || null;
     ve.outroAll = tl.outroAll !== false;
@@ -6864,6 +6874,7 @@
       capStyle, capGroup,
       capModel: ve.capModel || undefined,
       music: clone(ve.music), outro: clone(ve.outro), outroAll: ve.outroAll,
+      sounds: clone(ve.sounds || []),
       cover: clone(ve.cover),
       // already in the shape the compositor wants (null = plain crop)
       fill: (() => { try { return fillCfg(); } catch (e) { return null; } })(),
@@ -6910,6 +6921,7 @@
       // Text gets its own pass ONLY when there are no captions for it to ride with.
       keys.push('text');
     }
+    if (soundsFor(s).length) keys.push('sounds');
     if (musicFor(s)) keys.push('music');
     if (outroFor(s)) keys.push('outro');
     // The cover picture is not in here on purpose — see CHAIN_WEIGHTS.
@@ -10647,6 +10659,305 @@
         jobId: jid, deleteInput: true, outName: outNameFor(filePath),
       }), J(s, 'music'));
   }
+  /* ================= 🎙 VOICEOVER AND 🔊 SOUND EFFECTS =================
+   *
+   * CapCut's Audio → Voiceover and Audio → Sound effects, on a row of their
+   * own (🔊 Sounds) under the music. Each sound sits at a moment of the
+   * timeline (start, source time — like text), plays under the preview as the
+   * playhead crosses it, and is mixed into every export that covers it, re-timed
+   * onto the export's clock the same way text is (outTime).
+   */
+  function renderSoundTrack() {
+    const tr = document.getElementById('veSfxTrack');
+    if (!tr) return;
+    tr.style.width = trackW() + 'px';
+    const list = ve.sounds || [];
+    tr.classList.toggle('has', !!list.length);
+    if (!ve.video || !list.length) {
+      tr.innerHTML = '<span class="muted small ve-lane-empty">🔊 No sounds — 🎙 Voiceover or 🔊 Sound FX adds one at the playhead.</span>';
+      return;
+    }
+    tr.innerHTML = list.map((x) => {
+      const sel = ve.soundSel === x.id;
+      const w = Math.max(20, (x.dur || 1) * ve.pxPerSec);
+      const vol = Math.round((x.volume == null ? 1 : x.volume) * 100);
+      return `<div class="ve-sfx-clip ${x.kind === 'voice' ? 'voice' : 'fx'}${sel ? ' sel' : ''}" data-sid="${x.id}" style="left:${x.start * ve.pxPerSec}px;width:${w}px"
+        title="${attr2(x.label)} at ${fmt(x.start)} — ${vol}% volume. Drag to move it.${sel ? ' ✕ removes it.' : ''}">
+        <span class="ve-sfx-name">${x.kind === 'voice' ? '🎙' : '🔊'} ${escape2(x.label)}</span>${sel ? `<button type="button" class="ve-sfx-vol" data-svol="${x.id}" title="Volume — tap to change">${vol}%</button><button type="button" class="ve-sfx-x" data-sdel="${x.id}" title="Remove this sound">✕</button>` : ''}
+      </div>`;
+    }).join('');
+  }
+
+  function addSound({ path, label, kind, dur, volume, at }) {
+    if (!ve.video || !path) return null;
+    pushHistory();
+    const start = Math.max(0, at != null ? at : (ve.refs.player ? ve.refs.player.currentTime || 0 : 0));
+    const x = { id: uid(), path, label, kind, start, dur: Math.max(0.05, dur || 1), volume: volume == null ? 1 : volume };
+    ve.sounds.push(x);
+    ve.soundSel = x.id;
+    renderSoundTrack();
+    return x;
+  }
+  function removeSound(id) {
+    if (!ve.sounds.some((x) => x.id === id)) return;
+    pushHistory();
+    ve.sounds = ve.sounds.filter((x) => x.id !== id);
+    if (ve.soundSel === id) ve.soundSel = null;
+    renderSoundTrack();
+    syncSoundPreview();
+  }
+  const SOUND_VOLUMES = [1, 1.5, 2, 0.25, 0.5, 0.75];
+  function cycleSoundVolume(id) {
+    const x = ve.sounds.find((y) => y.id === id); if (!x) return;
+    pushHistory();
+    const cur = x.volume == null ? 1 : x.volume;
+    const i = SOUND_VOLUMES.findIndex((v) => Math.abs(v - cur) < 0.01);
+    x.volume = SOUND_VOLUMES[(i + 1) % SOUND_VOLUMES.length];
+    renderSoundTrack();
+    window.__toast && window.__toast(`${x.label}: ${Math.round(x.volume * 100)}% volume.`, 'good');
+  }
+
+  /* dragging a sound along its row (the touch bridge long-presses into this) */
+  function wireSoundTrack() {
+    const tr = document.getElementById('veSfxTrack');
+    if (!tr || tr._wired) return;
+    tr._wired = true;
+    tr.addEventListener('click', (e) => {
+      const del = e.target.closest('[data-sdel]');
+      if (del) { e.stopPropagation(); return removeSound(del.dataset.sdel); }
+      const vol = e.target.closest('[data-svol]');
+      if (vol) { e.stopPropagation(); return cycleSoundVolume(vol.dataset.svol); }
+    });
+    tr.addEventListener('mousedown', (e) => {
+      if (e.target.closest('[data-sdel],[data-svol]')) return;
+      const el = e.target.closest('.ve-sfx-clip');
+      if (!el) { if (ve.soundSel) { ve.soundSel = null; renderSoundTrack(); } return; }
+      e.preventDefault(); e.stopPropagation();
+      const x = ve.sounds.find((y) => y.id === el.dataset.sid); if (!x) return;
+      const pre = snapshotState();
+      const x0 = e.clientX, s0 = x.start;
+      let moved = false;
+      if (ve.soundSel !== x.id) { ve.soundSel = x.id; renderSoundTrack(); }
+      const mv = (ev) => {
+        const dt = (ev.clientX - x0) / ve.pxPerSec;
+        if (!moved && Math.abs(ev.clientX - x0) < 3) return;
+        moved = true;
+        x.start = Math.max(0, Math.min(dur(), s0 + dt));
+        const c = document.querySelector(`#veSfxTrack .ve-sfx-clip[data-sid="${x.id}"]`);
+        if (c) c.style.left = (x.start * ve.pxPerSec) + 'px';
+      };
+      const up = () => {
+        document.removeEventListener('mousemove', mv);
+        if (moved) { commitDragHistory(pre); renderSoundTrack(); }
+      };
+      document.addEventListener('mousemove', mv);
+      document.addEventListener('mouseup', up, { once: true });
+    });
+  }
+
+  /* the sounds under the preview, following the playhead */
+  const soundEls = new Map();
+  function syncSoundPreview() {
+    const p = ve.refs.player;
+    if (!p) return;
+    const t = p.currentTime || 0, playing = !p.paused;
+    const list = ve.sounds || [];
+    for (const x of list) {
+      let a = soundEls.get(x.id);
+      if (!a || a._src !== x.path) {
+        if (a) a.pause();
+        a = new Audio(); a.preload = 'auto'; a._src = x.path; a.src = fileUrl(x.path);
+        soundEls.set(x.id, a);
+      }
+      const inside = t >= x.start && t < x.start + x.dur;
+      if (playing && inside) {
+        const want = t - x.start;
+        a.volume = Math.max(0, Math.min(1, x.volume == null ? 1 : x.volume));
+        if (a.paused) { try { a.currentTime = want; } catch (e) {} a.play().catch(() => {}); }
+        else if (Math.abs(a.currentTime - want) > 0.35) { try { a.currentTime = want; } catch (e) {} }
+      } else if (!a.paused) a.pause();
+    }
+    for (const [id, a] of soundEls) if (!list.some((x) => x.id === id)) { a.pause(); soundEls.delete(id); }
+  }
+
+  /* ---- 🔊 Sound FX: a grid, tap to hear, ＋ to add at the playhead ---- */
+  let sfxCatalog = null;
+  async function openSfxPicker() {
+    if (!ve.video) return window.__toast && window.__toast('Open a video first.', 'error');
+    let m = document.getElementById('veSfxModal');
+    if (!m) {
+      m = document.createElement('div');
+      m.id = 'veSfxModal';
+      m.className = 'cap-modal hidden';
+      m.innerHTML = `<div class="cap-box ve-sfx-box">
+        <div class="cap-head"><strong>🔊 Sound effects</strong><button type="button" class="ghost-btn small" data-sfx-close>✕</button></div>
+        <p class="muted small ve-sfx-note">Tap one to hear it, ＋ to put it on the timeline at the playhead. Made by the studio — free to use anywhere.</p>
+        <div class="ve-sfx-grid"></div></div>`;
+      document.body.appendChild(m);
+      m.addEventListener('click', async (e) => {
+        if (e.target === m || e.target.closest('[data-sfx-close]')) { m.classList.add('hidden'); return; }
+        const add = e.target.closest('[data-sfx-add]');
+        const tile = e.target.closest('[data-sfx]');
+        if (!tile) return;
+        const kind = tile.dataset.sfx;
+        tile.classList.add('busy');
+        try {
+          const r = await window.api.audio.sfx(kind);
+          if (add) {
+            addSound({ path: r.path, label: r.name, kind: 'fx', dur: r.durationSec, volume: 1 });
+            m.classList.add('hidden');
+            window.__toast && window.__toast(`🔊 ${r.name} added at ${fmt(ve.refs.player.currentTime || 0)}.`, 'good');
+          } else {
+            const a = new Audio(fileUrl(r.path)); a.play().catch(() => {});
+          }
+        } catch (er) { window.__toast && window.__toast('⚠️ ' + (er.message || er), 'error'); }
+        finally { tile.classList.remove('busy'); }
+      });
+    }
+    if (!sfxCatalog) {
+      try { sfxCatalog = await window.api.audio.sfxList(); } catch (e) { sfxCatalog = []; }
+    }
+    m.querySelector('.ve-sfx-grid').innerHTML = (sfxCatalog || []).map((x) =>
+      `<div class="ve-sfx-tile" data-sfx="${x.id}" role="button" tabindex="0"><span class="ve-sfx-wave"></span><span class="ve-sfx-tname">${escape2(x.name)}</span><span class="muted small">${x.durationSec.toFixed(1)}s</span><button type="button" class="ve-sfx-add" data-sfx-add title="Add at the playhead">＋</button></div>`).join('');
+    m.classList.remove('hidden');
+  }
+
+  /* ---- 🎙 Voiceover: the microphone, while the video plays from the playhead ---- */
+  const rec = { stream: null, recorder: null, chunks: [], startAt: 0, t0: 0, timer: null, wasMuted: false, meter: null, ctx: null };
+  function voiceModal() {
+    let m = document.getElementById('veVoiceModal');
+    if (m) return m;
+    m = document.createElement('div');
+    m.id = 'veVoiceModal';
+    m.className = 'cap-modal hidden';
+    m.innerHTML = `<div class="cap-box ve-voice-box">
+      <div class="cap-head"><strong>🎙 Voiceover</strong><button type="button" class="ghost-btn small" data-vo-close>✕</button></div>
+      <div class="ve-voice-body">
+        <div class="ve-voice-time" data-vo-time>0:00</div>
+        <div class="ve-voice-meter"><i data-vo-level></i></div>
+        <button type="button" class="ve-voice-rec" data-vo-rec aria-label="Record"><span></span></button>
+        <div class="ve-voice-msg muted small" data-vo-msg>Recording starts at the playhead (${'0:00'}). The video plays silently so you can speak over it.</div>
+        <label class="ve-voice-opt"><input type="checkbox" data-vo-count checked> 3-second countdown</label>
+      </div></div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click', (e) => {
+      if (e.target === m || e.target.closest('[data-vo-close]')) return closeVoiceover();
+      if (e.target.closest('[data-vo-rec]')) return rec.recorder ? stopVoiceover() : startVoiceover();
+    });
+    return m;
+  }
+  function openVoiceover() {
+    if (!ve.video) return window.__toast && window.__toast('Open a video first.', 'error');
+    if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) || typeof MediaRecorder === 'undefined') {
+      return window.__toast && window.__toast('⚠️ This browser cannot record from the microphone. On a phone, open the studio in Safari or Chrome over https.', 'error', 9000);
+    }
+    const m = voiceModal();
+    m.querySelector('[data-vo-msg]').textContent = `Recording starts at the playhead (${fmt(ve.refs.player.currentTime || 0)}). The video plays silently so you can speak over it.`;
+    m.querySelector('[data-vo-time]').textContent = '0:00';
+    m.classList.remove('hidden');
+  }
+  function closeVoiceover() {
+    if (rec.recorder) { rec.cancel = true; stopVoiceover(); }
+    const m = document.getElementById('veVoiceModal'); if (m) m.classList.add('hidden');
+  }
+  async function startVoiceover() {
+    const m = voiceModal();
+    const msg = m.querySelector('[data-vo-msg]');
+    try {
+      rec.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    } catch (e) {
+      msg.textContent = '⚠️ The microphone was not allowed. Allow it for this site in the browser settings, then try again.';
+      return;
+    }
+    // a level meter, so it is obvious the phone is hearing you
+    try {
+      rec.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const an = rec.ctx.createAnalyser(); an.fftSize = 512;
+      rec.ctx.createMediaStreamSource(rec.stream).connect(an);
+      const buf = new Uint8Array(an.fftSize);
+      const lvl = m.querySelector('[data-vo-level]');
+      const draw = () => {
+        if (!rec.stream) return;
+        an.getByteTimeDomainData(buf);
+        let peak = 0; for (const v of buf) peak = Math.max(peak, Math.abs(v - 128));
+        lvl.style.width = Math.min(100, peak / 128 * 140) + '%';
+        rec.meter = requestAnimationFrame(draw);
+      };
+      draw();
+    } catch (e) { /* the meter is a nicety */ }
+    if (m.querySelector('[data-vo-count]').checked) {
+      for (const n of [3, 2, 1]) {
+        if (!rec.stream) return;
+        msg.textContent = `Recording in ${n}…`;
+        m.querySelector('[data-vo-time]').textContent = String(n);
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
+    if (!rec.stream) return;
+    const types = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg;codecs=opus'];
+    const type = types.find((t) => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
+    rec.chunks = []; rec.cancel = false;
+    rec.recorder = new MediaRecorder(rec.stream, type ? { mimeType: type } : undefined);
+    rec.recorder.ondataavailable = (ev) => { if (ev.data && ev.data.size) rec.chunks.push(ev.data); };
+    rec.recorder.onstop = () => finishVoiceover(type || rec.recorder.mimeType || '');
+    const p = ve.refs.player;
+    rec.startAt = p.currentTime || 0;
+    ve._voiceMute = true;
+    p.muted = true;
+    rec.recorder.start(250);
+    rec.t0 = Date.now();
+    p.play().catch(() => {});
+    m.querySelector('[data-vo-rec]').classList.add('on');
+    msg.textContent = 'Recording… tap ■ to stop.';
+    rec.timer = setInterval(() => { m.querySelector('[data-vo-time]').textContent = fmt((Date.now() - rec.t0) / 1000); }, 250);
+  }
+  function stopVoiceover() {
+    const m = voiceModal();
+    clearInterval(rec.timer); rec.timer = null;
+    if (rec.meter) cancelAnimationFrame(rec.meter);
+    try { if (rec.recorder && rec.recorder.state !== 'inactive') rec.recorder.stop(); } catch (e) {}
+    try { if (rec.stream) rec.stream.getTracks().forEach((t) => t.stop()); } catch (e) {}
+    try { if (rec.ctx) rec.ctx.close(); } catch (e) {}
+    rec.stream = null; rec.ctx = null;
+    const p = ve.refs.player; p.pause(); ve._voiceMute = false; updateGapMask(p.currentTime || 0);
+    m.querySelector('[data-vo-rec]').classList.remove('on');
+  }
+  async function finishVoiceover(type) {
+    const m = voiceModal();
+    const chunks = rec.chunks; rec.chunks = []; rec.recorder = null;
+    if (rec.cancel || !chunks.length) { rec.cancel = false; return; }
+    const msg = m.querySelector('[data-vo-msg]');
+    msg.textContent = 'Saving your voiceover…';
+    try {
+      const blob = new Blob(chunks, { type: type || 'audio/webm' });
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const ext = /mp4|aac|m4a/.test(type) ? 'm4a' : /ogg/.test(type) ? 'ogg' : 'webm';
+      const r = await window.api.audio.saveRecording({ bytes, ext });
+      addSound({ path: r.path, label: 'Voiceover', kind: 'voice', dur: r.durationSec || (blob.size ? 1 : 0), volume: 1, at: rec.startAt });
+      m.classList.add('hidden');
+      window.__toast && window.__toast(`🎙 Voiceover added at ${fmt(rec.startAt)} (${fmt(r.durationSec || 0)}).`, 'good');
+    } catch (e) {
+      msg.textContent = '⚠️ ' + (e.message || e);
+    }
+  }
+
+  /* ---- into the export: every sound this export covers, on its clock ---- */
+  function soundsFor(s) {
+    const snap = F(s);
+    const list = (snap && snap.sounds) || ve.sounds || [];
+    return list.filter((x) => x && x.path && x.start < s.end && x.start + (x.dur || 0) > s.start);
+  }
+  async function mixSoundsInto(s, filePath) {
+    const list = soundsFor(s);
+    if (!list.length) return filePath;
+    const sounds = list.map((x) => {
+      const from = Math.max(0, s.start - x.start);
+      return { path: x.path, at: outTime(s, Math.max(s.start, x.start), 'start'), from, dur: Math.max(0.05, (x.dur || 0) - from), volume: x.volume == null ? 1 : x.volume };
+    });
+    const jid = window.__newJobId();
+    return window.__runJob(`🔊 Adding ${sounds.length === 1 ? 'a sound' : sounds.length + ' sounds'} to "${(s && s.label) || 'your video'}"…`, jid,
+      () => window.api.video.mixSounds({ input: filePath, sounds, jobId: jid, deleteInput: true, outName: outNameFor(filePath) }), J(s, 'sounds'));
+  }
   /** Stick the chosen outro on the end. Returns the new path (or the old one). */
   async function appendOutroTo(s, filePath) {
     const snap = F(s);
@@ -10670,6 +10981,7 @@
    * while appending has to re-encode, doing it in this order re-encodes once.
    */
   async function finishExport(s, filePath) {
+    filePath = await mixSoundsInto(s, filePath);   // voiceovers and sound effects, on the export's clock
     filePath = await mixMusicInto(s, filePath);
     filePath = await appendOutroTo(s, filePath);
     return filePath;
@@ -10808,6 +11120,10 @@
     if (veOpenBtn) veOpenBtn.addEventListener('click', openFn);
     if (veOpenBtn2) veOpenBtn2.addEventListener('click', openFn);
     $('#veFindHighlights').addEventListener('click', findHighlights);
+    // 🎙 Voiceover and 🔊 Sound FX, and the row they land on
+    const voBtn = $('#veVoiceover'); if (voBtn) voBtn.addEventListener('click', openVoiceover);
+    const sfxBtn = $('#veSfxBtn'); if (sfxBtn) sfxBtn.addEventListener('click', openSfxPicker);
+    wireSoundTrack();
     const capShortsBtn = $('#veCapShorts'); if (capShortsBtn) capShortsBtn.addEventListener('click', captionAllShorts);
     $('#veExportEdited').addEventListener('click', exportEditedVideo);
     $('#veExportAll').addEventListener('click', exportAll);
@@ -11386,7 +11702,7 @@
     // Pressing play is you asking to watch, so following comes back on; scrolling
     // away during playback turns it off again (see the scroll listener).
     p.addEventListener('play', () => { ve.refs.play.textContent = '⏸'; setFollow(true, true); updateClipPlayButtons(); syncMusicPreview(true); startCapTick(); });
-    p.addEventListener('pause', () => { ve.refs.play.textContent = '▶'; updateClipPlayButtons(); syncMusicPreview(); stopCapTick(); });
+    p.addEventListener('pause', () => { ve.refs.play.textContent = '▶'; updateClipPlayButtons(); syncMusicPreview(); syncSoundPreview(); stopCapTick(); });
     p.addEventListener('ended', stopCapTick);
     p.addEventListener('seeked', () => syncMusicPreview(true));
     p.addEventListener('error', () => {
