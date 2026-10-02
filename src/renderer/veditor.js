@@ -125,6 +125,8 @@
      * decisions — the preset says the shape, this says the size.
      */
     quality: '1080p',
+    fps: 0,                  // 0 = the recording's own frame rate
+    bitrate: 'recommended',  // 'lower' | 'recommended' | 'higher'
     /*
      * Captions that were BURNED INTO the recording before it ever got here.
      * They cannot be removed — the picture under the words was never filmed —
@@ -5209,7 +5211,7 @@
         autoOnExport: !!(($('#veCapExports') || {}).checked),
       },
       look: {
-        aspect: ve.aspect, quality: ve.quality,
+        aspect: ve.aspect, quality: ve.quality, fps: ve.fps || 0, bitrate: ve.bitrate || 'recommended',
         fill: ve.fill, denoise: ve.denoise, fade: ve.fade, cover: ve.cover,
         framing: ve.framing,
         reframe: !!(($('#veAutoReframe') || {}).checked),
@@ -5280,6 +5282,9 @@
     const lk = data.look || {};
     if (lk.aspect && ve.presets[lk.aspect]) { ve.aspect = lk.aspect; setVal('#veAspect', lk.aspect); }
     if (lk.quality) { ve.quality = lk.quality; setVal('#veQuality', lk.quality); }
+    if (lk.fps != null) { ve.fps = Number(lk.fps) || 0; setVal('#veFps', String(ve.fps)); }
+    if (lk.bitrate) { ve.bitrate = lk.bitrate; setVal('#veBitrate', lk.bitrate); }
+    if (lk.fps != null || lk.bitrate) pushExportPrefs();
     if (lk.fill) ve.fill = lk.fill;
     if (lk.denoise) ve.denoise = lk.denoise;
     if (lk.cover) ve.cover = lk.cover;
@@ -6024,7 +6029,11 @@
         if (['light', 'medium', 'strong', 'max', 'studio'].includes(d.level)) ve.denoise.level = d.level;
       }
       const q = localStorage.getItem('mwExportQuality');
-      if (['720p', '1080p', '4k', 'source'].includes(q)) ve.quality = q;
+      if (['480p', '720p', '1080p', '4k', 'source'].includes(q)) ve.quality = q;
+      const fps = Number(localStorage.getItem('mwExportFps'));
+      if ([0, 24, 25, 30, 50, 60].includes(fps)) ve.fps = fps;
+      const rate = localStorage.getItem('mwExportRate');
+      if (['lower', 'recommended', 'higher'].includes(rate)) ve.bitrate = rate;
       const fd = JSON.parse(localStorage.getItem(FILL_KEYS.fade) || 'null');
       if (fd && typeof fd === 'object') {
         if (fd.in != null) ve.fade.in = clamp(+fd.in || 0, 0, 5);
@@ -6058,6 +6067,42 @@
       localStorage.setItem(FILL_KEYS.aiModel, ve.aiModel || '');
       localStorage.setItem(FILL_KEYS.asrModel, ve.asrModel || '');
       localStorage.setItem('mwExportQuality', ve.quality || '1080p');
+      localStorage.setItem('mwExportFps', String(ve.fps || 0));
+      localStorage.setItem('mwExportRate', ve.bitrate || 'recommended');
+    } catch (e) {}
+    pushExportPrefs();
+  }
+  /** What the studio is set to now — it keeps them, so it is asked first. */
+  function pullExportPrefs() {
+    const done = () => { ve._exportPrefsPulled = true; };
+    try {
+      if (!(window.api && window.api.video && window.api.video.getExportPrefs)) return done();
+      Promise.resolve(window.api.video.getExportPrefs()).then((p) => {
+        if (p) {
+          ve.fps = Number(p.fps) || 0;
+          ve.bitrate = p.rate || 'recommended';
+          setVal('#veFps', String(ve.fps));
+          setVal('#veBitrate', ve.bitrate);
+          try { localStorage.setItem('mwExportFps', String(ve.fps)); localStorage.setItem('mwExportRate', ve.bitrate); } catch (e) {}
+        }
+        done();
+      }, done);
+    } catch (e) { done(); }
+  }
+  /*
+   * Frame rate and bitrate are read by the ENCODER (video.setExportPrefs), not
+   * passed with each export, so they reach every kind of export there is. Sent
+   * whenever they change and once at start-up; the other end keeps them on disk.
+   */
+  function pushExportPrefs() {
+    // Never before the studio has said what it already has: a phone opening
+    // the cloud studio fresh would otherwise send its defaults and quietly
+    // undo the choice made on another device (or before a restart).
+    if (!ve._exportPrefsPulled) return;
+    try {
+      if (window.api && window.api.video && window.api.video.setExportPrefs) {
+        Promise.resolve(window.api.video.setExportPrefs({ fps: ve.fps || 0, rate: ve.bitrate || 'recommended' })).catch(() => {});
+      }
     } catch (e) {}
   }
 
@@ -10790,6 +10835,28 @@
     if (stylePickClose) stylePickClose.addEventListener('click', () => showCapStylePicker(false));
     // The "any colour you like" looks follow the swatch, so repaint their cards.
     const capColor = $('#capColor'); if (capColor) capColor.addEventListener('input', () => { renderCapStyleGrid(); renderCapStyleStrip(); });
+    // 🎞️ frame rate and 📶 bitrate, beside the size
+    const fpsSel = $('#veFps');
+    if (fpsSel) {
+      fpsSel.value = String(ve.fps || 0);
+      fpsSel.addEventListener('change', () => {
+        ve.fps = Number(fpsSel.value) || 0;
+        ve._exportPrefsPulled = true;   // an explicit choice always goes through
+        saveExportPrefs();
+        window.__toast && window.__toast(ve.fps ? `Exports will be ${ve.fps} frames a second.` : 'Exports will keep the recording\'s own frame rate.', 'good');
+      });
+    }
+    const rateSel = $('#veBitrate');
+    if (rateSel) {
+      rateSel.value = ve.bitrate || 'recommended';
+      rateSel.addEventListener('change', () => {
+        ve.bitrate = rateSel.value;
+        ve._exportPrefsPulled = true;
+        saveExportPrefs();
+        window.__toast && window.__toast(`Bitrate: ${rateSel.options[rateSel.selectedIndex].text}.`, 'good');
+      });
+    }
+    pullExportPrefs();
     const qSel = $('#veQuality');
     if (qSel) {
       qSel.value = ve.quality;

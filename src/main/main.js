@@ -329,6 +329,7 @@ app.whenReady().then(() => {
   // 🎤 Listen's cloud ear, from what this church saved last time. Doing it here
   // rather than when the studio first asks means the very first phrase of the
   // morning is already going to the right engine.
+  try { video.setExportPrefs((store.get('settings') || {}).exportPrefs || {}); } catch (e) {}
   try { loadCloudSpeech(); } catch (e) {}
   // …and the model that writes the social posts, which shares that same key.
   try { loadCloudWrite(); } catch (e) {}
@@ -692,6 +693,16 @@ ipcMain.handle('video:filmstrip', wrap(async (e, { input, count }) => {
   const n = count || 16;
   return cachedMedia(input, 'strip' + n, '.png', (output) => video.filmstrip(getCtx(), { input, count: n, output }));
 }));
+
+/* Frame rate and bitrate, CapCut's two other export dials: kept on disk and
+   handed to video.js, which every export reads (see setExportPrefs). */
+ipcMain.handle('video:setExportPrefs', wrap(async (e, p = {}) => {
+  const prefs = video.setExportPrefs(p);
+  const settings = store.get('settings') || {};
+  store.set('settings', Object.assign({}, settings, { exportPrefs: prefs }));
+  return prefs;
+}));
+ipcMain.handle('video:getExportPrefs', wrap(async () => video.getExportPrefs()));
 
 ipcMain.handle('video:makeProxy', wrap(async (e, { input, jobId }) => {
   return cachedMedia(input, 'proxy', '.mp4', (output) => video.makeProxy(getCtx(), { input, output, onProgress: onProgress(e, jobId) }));

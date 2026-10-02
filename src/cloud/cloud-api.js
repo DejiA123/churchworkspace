@@ -113,6 +113,8 @@ const ALLOWED = {
   'video:filmstrip': true,
   'video:waveform': true,
   'video:makeProxy': true,
+  'video:setExportPrefs': true,
+  'video:getExportPrefs': true,
   'video:audioSample': true,
   'video:detectSilence': true,
   'video:speechPauses': true,
