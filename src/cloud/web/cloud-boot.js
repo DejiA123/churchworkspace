@@ -1051,6 +1051,10 @@ let _hideTimer = null;
     rotate: '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
     sfx: '<path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="m19 4 1 2 2 1-2 1-1 2-1-2-2-1 2-1z"/>',
     transition: '<rect width="8" height="14" x="2" y="5" rx="1.5"/><rect width="8" height="14" x="14" y="5" rx="1.5"/><path d="m11 9 2 3-2 3"/>',
+    keyframe: '<path d="M12 3.5 20.5 12 12 20.5 3.5 12z"/><path d="M12 8.5 15.5 12 12 15.5 8.5 12z"/>',
+    chroma: '<rect width="18" height="14" x="3" y="5" rx="2.5"/><path d="M12 16.5c-2 0-3.2-1.4-3.2-3.1 0-1.9 1.5-3.4 3.2-3.4s3.2 1.5 3.2 3.4c0 1.7-1.2 3.1-3.2 3.1z"/><path d="M8 19v-1.2a4 4 0 0 1 8 0V19"/>',
+    template: '<rect width="18" height="18" x="3" y="3" rx="2.5"/><path d="M3 9h18"/><path d="M9 21V9"/>',
+    animate: '<path d="M5 18h6"/><path d="M3 13h5"/><path d="M5 8h4"/><path d="M14.5 6.5 19 12l-4.5 5.5"/><circle cx="15" cy="12" r="0.6"/>',
     sliders: '<line x1="4" x2="20" y1="7" y2="7"/><line x1="4" x2="20" y1="17" y2="17"/><circle cx="9" cy="7" r="2.4" fill="#fff"/><circle cx="15" cy="17" r="2.4" fill="#fff"/>',
   };
   const fineUri = (body) => 'url("data:image/svg+xml,' + encodeURIComponent(
@@ -1077,7 +1081,7 @@ let _hideTimer = null;
       { icon: 'sparkles', label: 'AI Shorts', ai: true, sheet: 'shorts', count: true },
       { icon: 'scissors', label: 'Edit', row: 'edit' },
       { icon: 'music', label: 'Audio', row: 'audio' },
-      { icon: 'type', label: 'Text', press: '#veAddText' },
+      { icon: 'type', label: 'Text', row: 'text' },
       { icon: 'captions', label: 'Captions', ai: true, sheet: 'insp', tab: '#veInspTabCaptions' },
       { icon: 'overlay', label: 'Overlay', row: 'overlay' },
       { icon: 'filters', label: 'Filters', fx: '#fxLook' },
@@ -1090,6 +1094,7 @@ let _hideTimer = null;
     edit: [
       { icon: 'scissors', label: 'Split', press: '#veSplit' },
       { icon: 'transition', label: 'Transition', call: 'transitionAtPlayhead' },
+      { icon: 'keyframe', label: 'Keyframe', call: 'keyframes' },
       { icon: 'zap', label: 'Speed', fx: '#fxSpeed' },
       { icon: 'volume', label: 'Volume', fx: '#fxVol' },
       { icon: 'trash', label: 'Delete', press: '#veDelClip' },
@@ -1118,10 +1123,17 @@ let _hideTimer = null;
       { icon: 'volume-x', label: 'Trim silence', press: '[data-vtool="autotrim"]' },
       { icon: 'volume', label: 'Clip sound', press: '#veOvSound' },
     ],
+    text: [
+      { icon: 'type', label: 'Add text', press: '#veAddText' },
+      { icon: 'template', label: 'Templates', call: 'textTemplates' },
+      { icon: 'animate', label: 'Animation', call: 'textAnimation' },
+      { icon: 'captions', label: 'Captions', ai: true, sheet: 'insp', tab: '#veInspTabCaptions' },
+    ],
     ratio: [],      // built from the desk's own list of shapes
     overlay: [
       { icon: 'image', label: 'Add media', press: '#veAddMedia' },
       { icon: 'overlay', label: 'To overlay', press: '#veOverlay' },
+      { icon: 'chroma', label: 'Chroma key', call: 'chromaKey' },
       { icon: 'eraser', label: 'Cut out', press: '#veCutOut' },
       { icon: 'volume', label: 'Sound', press: '#veOvSound' },
     ],

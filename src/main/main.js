@@ -1058,10 +1058,10 @@ ipcMain.handle('llm:removeModel', wrap(async (e, { modelId }) => {
 
 // `pieces` (present when the user closed gaps on this clip) cuts the pauses out
 // inside the export's own pass — no joined intermediate to render first.
-ipcMain.handle('sermon:exportShort', wrap(async (e, { input, startSec, endSec, preset, quality, pieces, fill, denoise, cover, fadeIn, fadeOut, label, jobId }) => {
+ipcMain.handle('sermon:exportShort', wrap(async (e, { input, startSec, endSec, preset, quality, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, label, jobId }) => {
   const safe = (label || 'short').replace(/[^\w.-]+/g, '_').slice(0, 40);
   const output = outPath(`short-${safe}-${stamp()}.mp4`);
-  await video.exportShort(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, pieces, fill, denoise, cover, fadeIn, fadeOut, output, onProgress: onProgress(e, jobId) });
+  await video.exportShort(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, output, onProgress: onProgress(e, jobId) });
   return output;
 }));
 
@@ -1087,18 +1087,18 @@ ipcMain.handle('video:attachThumb', wrap(async (e, { input, imagePath, atSec }) 
 ipcMain.handle('fs:rmdir', wrap(async (e, { dir }) => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch (er) {} return true; }));
 
 // Export a speaker-following (auto-reframed) 9:16 short from face-track keyframes.
-ipcMain.handle('sermon:exportReframed', wrap(async (e, { input, startSec, endSec, preset, quality, keyframes, pieces, fill, denoise, cover, fadeIn, fadeOut, label, jobId }) => {
+ipcMain.handle('sermon:exportReframed', wrap(async (e, { input, startSec, endSec, preset, quality, keyframes, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, label, jobId }) => {
   const safe = (label || 'short').replace(/[^\w.-]+/g, '_').slice(0, 40);
   const output = outPath(`short-${safe}-${stamp()}.mp4`);
-  await video.exportShortReframed(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, keyframes, pieces, fill, denoise, cover, fadeIn, fadeOut, output, onProgress: onProgress(e, jobId) });
+  await video.exportShortReframed(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, keyframes, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, output, onProgress: onProgress(e, jobId) });
   return output;
 }));
 
 // Export a short using a MANUAL pan/zoom crop the user dragged/zoomed in the preview.
-ipcMain.handle('sermon:exportFramed', wrap(async (e, { input, startSec, endSec, preset, quality, zoom, offsetX, offsetY, pieces, denoise, cover, fadeIn, fadeOut, label, jobId }) => {
+ipcMain.handle('sermon:exportFramed', wrap(async (e, { input, startSec, endSec, preset, quality, zoom, offsetX, offsetY, pieces, denoise, cover, fadeIn, fadeOut, motion, label, jobId }) => {
   const safe = (label || 'short').replace(/[^\w.-]+/g, '_').slice(0, 40);
   const output = outPath(`short-${safe}-${stamp()}.mp4`);
-  const res = await video.exportShortFramed(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, zoom, offsetX, offsetY, pieces, denoise, cover, fadeIn, fadeOut, output, onProgress: onProgress(e, jobId) });
+  const res = await video.exportShortFramed(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, zoom, offsetX, offsetY, pieces, denoise, cover, fadeIn, fadeOut, motion, output, onProgress: onProgress(e, jobId) });
   return res.output;
 }));
 
@@ -1382,7 +1382,7 @@ ipcMain.handle('captions:burnTrack', wrap(async (e, { input, track, jobId, outNa
   const files = list.map((im, i) => {
     const p = path.join(dir, `txt${i}.png`);
     fs.writeFileSync(p, Buffer.from(im.png));
-    return { path: p, start: im.start, end: im.end };
+    return { path: p, start: im.start, end: im.end, anim: im.anim, cx: im.cx, cy: im.cy };
   });
   const output = outPath(`${(outName || 'captioned').replace(/[^\w.-]+/g, '_').slice(0, 60)}-${stamp()}.mp4`);
   try {
@@ -1418,7 +1418,7 @@ ipcMain.handle('overlays:burnImages', wrap(async (e, { input, images, jobId, out
   const files = list.map((im, i) => {
     const p = path.join(dir, `ovl${i}.png`);
     fs.writeFileSync(p, Buffer.from(im.png));
-    return { path: p, start: im.start, end: im.end };
+    return { path: p, start: im.start, end: im.end, anim: im.anim, cx: im.cx, cy: im.cy };
   });
   const output = outPath(`${(outName || 'text').replace(/[^\w.-]+/g, '_').slice(0, 60)}-${stamp()}.mp4`);
   await video.burnImageOverlays(getCtx(), { input, images: files, output, onProgress: onProgress(e, jobId) });

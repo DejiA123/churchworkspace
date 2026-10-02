@@ -1107,6 +1107,10 @@ function highlightSpec(opts, fontPx) {
     // without touching the letter spacing inside either word.
     gapPx,
     trackPx,
+    // How the word is picked out (CapLayout's word modes). This engine is only
+    // the fallback for very long tracks, so a Box word is drawn as the block's
+    // colour on the word itself — the closest thing a subtitle line can carry.
+    mode: ['karaoke', 'reveal', 'box', 'pop'].includes(opts.wordMode) ? opts.wordMode : 'color',
   };
 }
 
@@ -1165,9 +1169,14 @@ function capHighlightLines(s, hl) {
   const render = (active) => {
     let k = 0;
     return parts.map((line) => line.map((w) => {
-      const t = (k === active)
-        ? `{\\1c${hl.on}}${assEscape(w)}{\\1c${hl.off}}`
-        : assEscape(w);
+      const now = k === active;
+      const on = hl.mode === 'karaoke' ? (active >= 0 && k <= active) : now;
+      let t = assEscape(w);
+      // Word by word: what has not been said yet is there but invisible, so the
+      // line keeps its shape as the words arrive.
+      if (hl.mode === 'reveal' && k > active) t = `{\\alpha&HFF&}${t}{\\alpha&H00&}`;
+      else if (on && hl.mode === 'pop' && now) t = `{\\fscx118\\fscy118\\1c${hl.on}}${t}{\\fscx100\\fscy100\\1c${hl.off}}`;
+      else if (on) t = `{\\1c${hl.on}}${t}{\\1c${hl.off}}`;
       k++;
       return t;
     }).join(gapTag ? `${gapTag} ${resetTag}` : ' ')).join('\\N');
@@ -1247,6 +1256,23 @@ function writeOverlayAss(overlays, { width, height, output }) {
     // name banner at 78% is a grey one — while the default black keeps the
     // slight translucency it has always had.
     if (o.bg) tags.push(o.bgColor ? '\\3a&H00&' : '\\3a&H38&');
+    // The arrival, in the subtitle engine's own words — the same timings the
+    // picture route uses (video.textAnimTimes), so the fallback moves alike.
+    const anim = video.textAnimOf(o.anim);
+    if (anim !== 'none') {
+      const { inD, outD } = video.textAnimTimes((Number(o.end) || 0) - (Number(o.start) || 0));
+      const inMs = Math.round(inD * 1000), outMs = Math.round(outD * 1000);
+      tags.push(`\\fad(${inMs},${outMs})`);
+      if (anim === 'rise') {
+        const at = tags.findIndex((t) => t.startsWith('\\pos('));
+        tags[at] = `\\move(${px},${py + Math.round(video.TEXT_RISE * height)},${px},${py},0,${inMs})`;
+      } else if (anim === 'pop') {
+        const k = Math.round(inMs * 0.7);
+        tags.push(`\\fscx60\\fscy60\\t(0,${k},\\fscx108\\fscy108)\\t(${k},${inMs},\\fscx100\\fscy100)`);
+      } else if (anim === 'zoom') {
+        tags.push(`\\fscx135\\fscy135\\t(0,${inMs},\\fscx100\\fscy100)`);
+      }
+    }
     return `Dialogue: 0,${assTime(o.start)},${assTime(o.end)},${o.bg ? 'OvlBox' : 'Ovl'},,0,0,0,,{${tags.join('')}}${assEscape(o.text)}`;
   }).join('\n');
   fs.writeFileSync(output, header + body, 'utf-8');

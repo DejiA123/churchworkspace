@@ -743,6 +743,7 @@
             </div>
             <div class="ve-tb-group" aria-label="Add">
               <button id="veAddText" title="Add text anywhere on the video — it's automatically included when you export clips">🔤 Text</button>
+              <button id="veTextTpl" title="Ready-made titles — a name banner, a verse, a quote, a social handle — that arrive animated. Tap one, then type your own words.">✨ Templates</button>
               <button id="veMusic" title="Background music — pick a track from your library or YouTube, set the volume, and it plays under every clip you export">🎵 Music</button>
               <button id="veClips" title="Your saved clips — outros, intros and stingers. Pick one and it's added to the end of every short you export.">🎬 Clips</button>
             </div>
@@ -875,6 +876,15 @@
                        fine over a bright stage and useless for the white name
                        banner every sermon short opens with. -->
                   <input type="color" id="vtBgColor" title="Backing panel colour" value="#000000" />
+                  <!-- How the words arrive (CapCut's "In" animation); the file
+                       moves the way the preview does. -->
+                  <select id="vtAnim" title="How this text arrives">
+                    <option value="none">No animation</option>
+                    <option value="fade">Fade</option>
+                    <option value="rise">Rise</option>
+                    <option value="pop">Pop</option>
+                    <option value="zoom">Zoom</option>
+                  </select>
                   <button id="vtDelete" title="Delete this text">🗑</button>
                 </div>
                 <div class="ve-novid" id="veNoVid">
@@ -1106,12 +1116,14 @@
             <button id="veRedo" title="Redo (Ctrl+Y)" aria-label="Redo" disabled>↷</button>
             <span class="ve-tl-sep"></span>
             <button id="veSplit" title="Split at playhead (S)">✂ Split</button>
+            <button id="veKeyframes" title="Keyframes — zoom in and move across the picture over time: a punch-in on the line that matters, a slow push, a pan. Put the playhead on a clip, then add keyframes to it.">◆ Keyframes</button>
             <button id="veCloseGap" title="Close gap (G) — join the selected clip with the one next to it into ONE short, removing the pause between them. Press once per pause.">🔗 Close gap</button>
             <button id="veOverlay" title="Move the selected clip to the Overlay lane (picture-in-picture)">📺 Overlay</button>
             <button id="veAddMedia" title="Put a SECOND video or a picture on top of this one. It lands at the playhead on an Overlay row — drag it anywhere on the timeline, drag its edges for how long it shows, and drag the box on the preview to place it in the frame. Drop two files and they take separate rows so both show at once. You can also drop files straight onto the timeline.">➕ Add media</button>
             <button id="veVoiceover" title="Record a voiceover with the microphone. The video plays (silently) from the playhead while you speak, so you can talk over the moment you are on — and it lands on the 🔊 Sounds row right there.">🎙 Voiceover</button>
             <button id="veSfxBtn" title="Sound effects — whoosh, impact, ding, riser and more. Made right here, free to use anywhere, dropped on the 🔊 Sounds row at the playhead.">🔊 Sound FX</button>
             <button id="veCutOut" class="hidden" title="Take the background out of the selected picture — a white or plain backdrop becomes transparent, so only the logo or the person is left on top of your video.">🪄 Cut out background</button>
+            <button id="veChromaKey" class="hidden" title="Chroma key — take the green (or blue) screen out of the selected video or picture, so only the person or object is left on top of your video.">🟩 Chroma key</button>
             <button id="veOvSound" class="hidden" title="Sound of the selected added video">🔊 Sound on</button>
             <span class="ve-tl-sep"></span>
             <button id="veAddClip" title="New clip at playhead">＋ Clip</button>
