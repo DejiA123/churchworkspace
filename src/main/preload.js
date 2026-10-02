@@ -70,6 +70,8 @@ contextBridge.exposeInMainWorld('api', {
     presets: () => call('video:presets'),
     filmstrip: (a) => call('video:filmstrip', a),
     makeProxy: (a) => call('video:makeProxy', a),
+    setExportPrefs: (a) => call('video:setExportPrefs', a),
+    getExportPrefs: () => call('video:getExportPrefs'),
     applyEdits: (a) => call('video:applyEdits', a),
     waveform: (a) => call('video:waveform', a),
     stabilize: (a) => call('video:stabilize', a),

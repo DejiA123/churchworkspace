@@ -1062,10 +1062,28 @@
                 <!-- What every export will do, said in one line (kept up to date by syncExportPrefUi). -->
                 <label class="ve-fill-row ve-insp-row" title="How many pixels every export has.">📐 Export size
                   <select id="veQuality" title="How many pixels every export has. 1080p is what social platforms want; 4K is for YouTube and for keeping a master copy. A recording smaller than the size you pick is stretched to fit it — the file really is that size, but the detail can only be what was filmed.">
+                  <option value="480p">📼 SD 480p</option>
                   <option value="720p">📺 HD 720p</option>
                   <option value="1080p" selected>🎬 Full HD 1080p</option>
                   <option value="4k">🏆 4K UHD</option>
                   <option value="source">📐 Same as the recording</option>
+                  </select>
+                </label>
+                <label class="ve-fill-row ve-insp-row" title="Frames per second in every export. The recording's own rate is the safe choice; 60 makes fast movement smoother; 24 looks like film.">🎞️ Frame rate
+                  <select id="veFps" title="Frames per second in every export">
+                  <option value="0" selected>Same as the recording</option>
+                  <option value="24">24 fps — cinematic</option>
+                  <option value="25">25 fps</option>
+                  <option value="30">30 fps — standard</option>
+                  <option value="50">50 fps</option>
+                  <option value="60">60 fps — smoothest</option>
+                  </select>
+                </label>
+                <label class="ve-fill-row ve-insp-row" title="How many bits every second of picture gets. Higher keeps fine detail when Instagram, TikTok or YouTube re-compress your upload; Lower makes smaller files.">📶 Bitrate
+                  <select id="veBitrate" title="How much detail every export keeps">
+                  <option value="lower">Lower — smaller files</option>
+                  <option value="recommended" selected>Recommended</option>
+                  <option value="higher">Higher — most detail</option>
                   </select>
                 </label>
                 <p class="ve-export-opts ve-insp-summary">🎚️ Every short exports as: <span id="veExportSummary" class="muted small">Crop to fill · noise off</span></p>

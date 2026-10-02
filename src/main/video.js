@@ -53,12 +53,44 @@ const even = (v) => Math.max(2, Math.round(v / 2) * 2);
  * rather than implying a sharpness that is not in the source.
  */
 const QUALITY = {
+  '480p':  { short: 480,  label: 'SD 480p',        crf: 20, qsv: 21, x264: 'medium' },
   '720p':  { short: 720,  label: 'HD 720p',        crf: 19, qsv: 20, x264: 'medium' },
   '1080p': { short: 1080, label: 'Full HD 1080p',  crf: 18, qsv: 19, x264: 'medium' },
   '4k':    { short: 2160, label: '4K UHD',         crf: 19, qsv: 20, x264: 'medium' },
 };
 const DEFAULT_QUALITY = '1080p';
-const qualityDef = (q) => QUALITY[String(q || '').toLowerCase()] || QUALITY[DEFAULT_QUALITY];
+
+/*
+ * FRAME RATE AND BITRATE — CapCut's two other export dials, beside the size.
+ *
+ * They are the operator's standing choice (like the size), so they live here
+ * rather than in every export call: every short, every edited video and every
+ * export that goes through encodeWithFallback reads them. main.js keeps them on
+ * disk and hands them over at startup, so a server restart never quietly
+ * changes what the next export looks like.
+ *
+ *   fps   0 = the recording's own rate (24-60, as before); otherwise 24/25/30/50/60
+ *   rate  'lower' (smaller files), 'recommended' (as before), 'higher' (more
+ *         bits — less smearing once a platform re-compresses it)
+ */
+const RATE_CRF = { lower: 4, recommended: 0, higher: -3 };
+const FPS_CHOICES = [24, 25, 30, 50, 60];
+let exportPrefs = { fps: 0, rate: 'recommended' };
+function setExportPrefs(p = {}) {
+  const fps = Number(p.fps) || 0;
+  exportPrefs = {
+    fps: FPS_CHOICES.includes(fps) ? fps : 0,
+    rate: Object.prototype.hasOwnProperty.call(RATE_CRF, p.rate) ? p.rate : 'recommended',
+  };
+  return exportPrefs;
+}
+const getExportPrefs = () => Object.assign({}, exportPrefs);
+
+const qualityDef = (q) => {
+  const base = QUALITY[String(q || '').toLowerCase()] || QUALITY[DEFAULT_QUALITY];
+  const d = RATE_CRF[exportPrefs.rate] || 0;
+  return d ? Object.assign({}, base, { crf: base.crf + d, qsv: base.qsv + d }) : base;
+};
 
 /**
  * The exact pixel frame for a preset at a quality tier.
@@ -109,6 +141,7 @@ function upscaleFactor(info, target) {
  * accepts (and to something a church laptop can actually encode).
  */
 function outputFps(info) {
+  if (exportPrefs.fps) return exportPrefs.fps;      // the operator's choice (see setExportPrefs)
   const src = Number(info && info.fps) || 30;
   if (!Number.isFinite(src) || src <= 0) return 30;
   return Math.max(24, Math.min(60, Math.round(src * 100) / 100));
@@ -2611,6 +2644,7 @@ const INFO_SHAPE = require('crypto').createHash('sha1').update(probeInfo.toStrin
 
 module.exports = {
   PRESETS, QUALITY, DEFAULT_QUALITY, qualityDef, presetSize, sourceSize, upscaleFactor, outputFps,
+  setExportPrefs, getExportPrefs, RATE_CRF, FPS_CHOICES,
   getInfo, INFO_SHAPE, trim, exportForPlatform, thumbnail,
   extractAudio, autoTrimSilence, merge, joinPieces, normalizePieces, addCaptions, exportShort, filmstrip, makeProxy, needsProxy, applyEdits,
   extractFrames, detectSceneCuts, exportShortReframed, exportShortFramed, attachThumbnail, waveform, stabilize, reverseClip, freezeFrame, hms, cutPlan,

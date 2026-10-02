@@ -226,6 +226,8 @@ let _hideTimer = null;
       trim: (a) => call('video:trim', a),
       export: (a) => call('video:export', a),
       extractAudio: (a) => call('video:extractAudio', a),
+      setExportPrefs: (a) => call('video:setExportPrefs', a),
+      getExportPrefs: () => call('video:getExportPrefs'),
       audioSample: (a) => call('video:audioSample', a),
       autoTrim: (a) => call('video:autoTrim', a),
       merge: (a) => call('video:merge', a),
@@ -1142,7 +1144,7 @@ let _hideTimer = null;
   }
 
   const plain = (s) => String(s || '').replace(/^[^\p{L}\p{N}]+/u, '').replace(/\s+/g, ' ').trim();
-  const QUALITY_SHORT = { '720p': '720p', '1080p': '1080p', '4k': '4K', source: 'Original' };
+  const QUALITY_SHORT = { '480p': '480p', '720p': '720p', '1080p': '1080p', '4k': '4K', source: 'Original' };
 
   function fillQuality(sel) {
     const q = $('#veQuality');
@@ -1182,6 +1184,16 @@ let _hideTimer = null;
     if (s) {
       s.disabled = !all || all.disabled;
       $('#cloudXpShortsSub').textContent = n ? `${n} short${n === 1 ? '' : 's'}, 9:16, ready for Reels, TikTok and Shorts` : 'Make shorts with AI Shorts first';
+    }
+    for (const sel of $$('#cloudExportSheet [data-mirror-sel]')) {
+      const src = $(sel.dataset.mirrorSel);
+      sel.closest('.cloud-xp-row').classList.toggle('hidden', !src);
+      if (!src) continue;
+      if (sel.options.length !== src.options.length) {
+        sel.innerHTML = '';
+        for (const o of src.options) sel.add(new Option(plain(o.textContent), o.value));
+      }
+      sel.value = src.value;
     }
     for (const box of $$('#cloudExportSheet [data-mirror]')) {
       const src = $(box.dataset.mirror);
@@ -1396,13 +1408,24 @@ let _hideTimer = null;
     xs.innerHTML = `
       <button type="button" class="cloud-xp-main" data-xp="shorts">${mi('sparkles')}<span>Export all shorts<small id="cloudXpShortsSub"></small></span></button>
       <button type="button" class="cloud-xp-main alt" data-xp="video">${mi('film')}<span>Export video<small id="cloudXpVideoSub"></small></span></button>
-      <div class="cloud-xp-row"><span>Quality</span><select id="cloudXpQuality" aria-label="Export quality"></select></div>
+      <div class="cloud-xp-row"><span>Resolution</span><select id="cloudXpQuality" aria-label="Export resolution"></select></div>
+      <div class="cloud-xp-row"><span>Frame rate</span><select data-mirror-sel="#veFps" aria-label="Frame rate"></select></div>
+      <div class="cloud-xp-row"><span>Bitrate</span><select data-mirror-sel="#veBitrate" aria-label="Bitrate"></select></div>
       <label class="cloud-xp-row"><span>Caption the shorts as they export</span><input type="checkbox" data-mirror="#veCapExports" /></label>
       <label class="cloud-xp-row"><span>Keep editing while it exports</span><input type="checkbox" data-mirror="#veBgExport" /></label>
       <button type="button" class="cloud-xp-link" data-xp="saved">Finished files — save them to this phone</button>
       <button type="button" class="cloud-xp-link" data-xp="more">More export settings</button>`;
     document.body.appendChild(xs);
     $('#cloudXpQuality').addEventListener('change', (e) => { setQuality(e.target.value); syncQualityPill(); });
+    // Frame rate and bitrate: the desk's own selects, mirrored both ways
+    for (const sel of xs.querySelectorAll('[data-mirror-sel]')) {
+      sel.addEventListener('change', () => {
+        const src = $(sel.dataset.mirrorSel);
+        if (!src || src.value === sel.value) return;
+        src.value = sel.value;
+        src.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    }
     for (const box of xs.querySelectorAll('[data-mirror]')) {
       box.addEventListener('change', () => {
         const src = $(box.dataset.mirror);
