@@ -5,6 +5,32 @@ const path = require('path');
 const ff = require('./ffmpeg');
 
 /** Run async task factories with limited concurrency. */
+/*
+ * THE PREVIEW LANE. Opening a video starts several pictures at once — the
+ * filmstrip's frames, the waveform, a thumbnail — and each is a decoder of the
+ * whole picture. On a desktop that is nothing; on a 512 MB server, six 4K
+ * decoders side by side measured 1.2 GB and the instance was killed. So on a
+ * small machine these jobs queue and run one at a time; anywhere else they
+ * keep their own parallelism.
+ */
+const machine = require('./machine');
+let previewBusy = 0;
+const previewQueue = [];
+function inPreviewLane(fn) {
+  const limit = machine.small() ? 1 : 8;
+  return new Promise((resolve, reject) => {
+    const go = () => {
+      previewBusy++;
+      Promise.resolve().then(fn).then(resolve, reject).finally(() => {
+        previewBusy--;
+        const next = previewQueue.shift();
+        if (next) next();
+      });
+    };
+    if (previewBusy < limit) go(); else previewQueue.push(go);
+  });
+}
+
 async function runLimited(factories, limit) {
   const results = []; let i = 0;
   async function worker() { while (i < factories.length) { const idx = i++; try { results[idx] = await factories[idx](); } catch (e) { results[idx] = null; } } }
@@ -1032,9 +1058,9 @@ async function exportForPlatform(ctx, { input, preset, fill, denoise, fadeIn, fa
 async function thumbnail(ctx, { input, timeSec = 1, output, width = 640 }) {
   const args = [
     '-ss', String(Math.max(0, timeSec)), '-i', input,
-    '-frames:v', '1', '-vf', `scale=${width}:-2`, '-y', output,
+    '-frames:v', '1', '-an', '-sn', '-dn', '-vf', `scale=${width}:-2`, '-y', output,
   ];
-  await ff.runFfmpeg(ctx.ffmpeg, args, {});
+  await inPreviewLane(() => ff.runFfmpeg(ctx.ffmpeg, args, {}));
   return output;
 }
 
@@ -2206,10 +2232,15 @@ async function filmstrip(ctx, { input, count = 16, height = 90, output }) {
     const t = (i + 0.5) * D / count;
     const f = path.join(dir, `t_${String(i).padStart(3, '0')}.png`);
     frames.push(f);
-    tasks.push(() => ff.runFfmpeg(ctx.ffmpeg,
-      ['-hwaccel', 'auto', '-ss', String(t), '-i', input, '-frames:v', '1', '-an', '-vf', `scale=-2:${height}`, '-y', f], {}));
+    // A long recording's tiles are tens of seconds apart, so the nearest
+    // KEYFRAME is as good a picture as the exact moment — and grabbing it skips
+    // decoding the frames in between: measured 0.18 s and 80 MB a tile on 4K
+    // HEVC, against 2.6 s and 168 MB. Short videos keep the exact frame.
+    const fast = D / count > 10 ? ['-noaccurate_seek', '-skip_frame', 'nokey'] : [];
+    tasks.push(() => inPreviewLane(() => ff.runFfmpeg(ctx.ffmpeg,
+      ['-hwaccel', 'auto', ...fast, '-ss', String(t), '-i', input, '-frames:v', '1', '-an', '-sn', '-dn', '-vf', `scale=-2:${height}`, '-y', f], {})));
   }
-  await runLimited(tasks, 6);
+  await runLimited(tasks, machine.small() ? 1 : 6);
   const have = frames.filter((f) => fs.existsSync(f) && fs.statSync(f).size > 0);
   try {
     if (have.length >= 2) {
@@ -2466,13 +2497,24 @@ async function saveRecording(ctx, { inputPath, output }) {
 }
 
 /** Render a waveform PNG for the whole audio track (for the timeline's audio row). */
+/*
+ * showwavespic keeps EVERY sample until the end, then draws. At a sermon's own
+ * 48 kHz in float that is 518 MB for 45 minutes — a whole small server, from a
+ * picture 2,400 pixels wide. The picture needs a few thousand samples per
+ * column at most, so the sound is brought down to a rate sized to its length
+ * (about six million samples, 16-bit) in large frames first: the same drawing,
+ * measured at 70 MB instead of 471 on a 45-minute stereo track.
+ */
+const WAVE_SAMPLES = 6e6;
 async function waveform(ctx, { input, width = 1600, height = 90, color = '0x4f7cff', output }) {
   const info = await getInfo(ctx, input);
   if (!info.hasAudio) throw new Error('This video has no audio track.');
-  const args = ['-i', input, '-filter_complex',
-    `[0:a]aformat=channel_layouts=mono,showwavespic=s=${width}x${height}:colors=${color}:scale=sqrt[v]`,
+  const rate = Math.max(1000, Math.min(8000, Math.round(WAVE_SAMPLES / Math.max(1, info.durationSec || 1))));
+  const args = ['-vn', '-sn', '-dn', '-i', input, '-filter_complex',
+    `[0:a]aresample=${rate},aformat=sample_fmts=s16:channel_layouts=mono,asetnsamples=n=8192,`
+    + `showwavespic=s=${width}x${height}:colors=${color}:scale=sqrt[v]`,
     '-map', '[v]', '-frames:v', '1', '-y', output];
-  await ff.runFfmpeg(ctx.ffmpeg, args, {});
+  await inPreviewLane(() => ff.runFfmpeg(ctx.ffmpeg, args, {}));
   return output;
 }
 
@@ -2511,14 +2553,65 @@ async function reverseClip(ctx, { input, startSec, endSec, output, onProgress })
     cleanup = clipPath;
   }
   const dur = (endSec != null && startSec != null) ? (endSec - startSec) : info.durationSec;
-  const args = ['-i', clipPath, '-vf', 'reverse'];
-  if (info.hasAudio) args.push('-af', 'areverse');
-  args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20');
-  if (info.hasAudio) args.push('-c:a', 'aac', '-b:a', '192k');
-  args.push('-movflags', '+faststart', '-y', output);
-  try { await ff.runFfmpeg(ctx.ffmpeg, args, { onProgress, totalDurationSec: dur }); }
-  finally { if (cleanup) try { fs.unlinkSync(cleanup); } catch (e) {} }
-  return output;
+  /*
+   * ffmpeg's reverse filter holds every frame of what it reverses: 90 MB a
+   * second of 1080p, 370 MB a second of 4K. A few seconds was enough to take a
+   * 512 MB server down (and a minute of 4K would take a desktop down too). So
+   * the clip is reversed in pieces sized to a memory budget — the LAST piece
+   * first, each one backwards — and the pieces are joined in that order, which
+   * is the whole clip backwards. The sound is reversed in one go (it is small).
+   */
+  const fps = Math.max(1, Math.min(120, Number(info.fps) || 30));
+  const frameMB = Math.max(0.1, ((info.width || 1920) * (info.height || 1080) * 1.5) / 1048576);
+  const budgetMB = machine.small() ? 64 : 1500;
+  const pieceSec = Math.max(0.25, Math.min(60, (budgetMB / frameMB) / fps));
+  try {
+    if (dur <= pieceSec) {
+      const args = ['-i', clipPath, '-vf', 'reverse'];
+      if (info.hasAudio) args.push('-af', 'areverse');
+      args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20');
+      if (info.hasAudio) args.push('-c:a', 'aac', '-b:a', '192k');
+      args.push('-movflags', '+faststart', '-y', output);
+      await ff.runFfmpeg(ctx.ffmpeg, args, { onProgress, totalDurationSec: dur });
+      return output;
+    }
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mw-rev-'));
+    try {
+      /*
+       * Pieces are exact FRAME ranges, not times: each one starts half a frame
+       * before its first frame and runs exactly its frame count, so no frame is
+       * read twice at a join or skipped — and each piece is stamped afresh
+       * (setpts on the frame number, passthrough timing) so none is duplicated
+       * on the way out either.
+       */
+      const total = Math.max(1, Math.round(dur * fps));
+      const per = Math.max(1, Math.floor(pieceSec * fps));
+      const n = Math.ceil(total / per);
+      const parts = [];
+      for (let i = n - 1; i >= 0; i--) {
+        const first = i * per, count = Math.min(per, total - first);
+        if (count < 1) continue;
+        const f = path.join(dir, `r${String(n - 1 - i).padStart(4, '0')}.mp4`);
+        const ss = first === 0 ? 0 : (first - 0.5) / fps;
+        // -t BEFORE -i: the piece has to END for the reverse filter, or it keeps
+        // reading (and holding) to the end of the file
+        await ff.runFfmpeg(ctx.ffmpeg, ['-ss', ss.toFixed(6), '-t', ((first === 0 ? count - 0.5 : count) / fps).toFixed(6), '-i', clipPath, '-an',
+          '-vf', `reverse,setpts=N/(${fps}*TB)`, '-fps_mode', 'passthrough',
+          '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-y', f], {
+          onProgress: onProgress ? (p) => onProgress(Math.round(((n - 1 - i) + p / 100) / (n + 1) * 100)) : undefined,
+          totalDurationSec: count / fps,
+        });
+        parts.push(f);
+      }
+      const list = path.join(dir, 'parts.txt');
+      fs.writeFileSync(list, parts.map((f) => `file '${path.basename(f)}'`).join('\n') + '\n');
+      const args = ['-f', 'concat', '-safe', '0', '-i', list];
+      if (info.hasAudio) args.push('-i', clipPath, '-map', '0:v', '-map', '1:a', '-af', 'areverse', '-c:a', 'aac', '-b:a', '192k');
+      args.push('-c:v', 'copy', '-movflags', '+faststart', '-shortest', '-y', output);
+      await ff.runFfmpeg(ctx.ffmpeg, args, { cwd: dir, onProgress: onProgress ? (p) => onProgress(Math.round((n + p / 100) / (n + 1) * 100)) : undefined, totalDurationSec: dur });
+      return output;
+    } finally { try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {} }
+  } finally { if (cleanup) try { fs.unlinkSync(cleanup); } catch (e) {} }
 }
 
 /** Hold a single frame (at timeSec) as a still for holdSec seconds, exported as its own clip. */
@@ -2963,7 +3056,7 @@ module.exports = {
   extractFrames, detectSceneCuts, exportShortReframed, exportShortFramed, attachThumbnail, waveform, stabilize, reverseClip, freezeFrame, hms, cutPlan,
   exportOverlayComposite, burnImageOverlays, burnCaptionTrack,
   TEXT_ANIMS, textAnimOf, textAnimTimes, textAnimScale, TEXT_RISE, textOverlaySteps,
-  cleanMotion, motionExpr, motionAt, motionChain, MOTION_MAX_Z, keyOf, transparentPng, writeTrackFrames, burnCaptionFrames,
+  cleanMotion, motionExpr, motionAt, motionChain, MOTION_MAX_Z, keyOf, inPreviewLane, transparentPng, writeTrackFrames, burnCaptionFrames,
   cropFirstChain, fillChain,
   simplifyKeyframes, buildLerpExpr, isCleanEncode,
   detectSilences, mixMusic, appendClips, audioSample,
