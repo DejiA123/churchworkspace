@@ -1325,6 +1325,16 @@ let _hideTimer = null;
     /* ---- pinch the timeline to zoom it ------------------------------- */
     const tl = $('#veTimeline');
     if (tl) {
+      // CapCut's ＋ at the end of the video row: put a video or picture on.
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'cloud-tl-add';
+      add.setAttribute('aria-label', 'Add a video or picture');
+      add.innerHTML = mi('plus');
+      add.addEventListener('click', () => { const t = $('#veAddMedia'); if (t && !t.disabled) t.click(); });
+      mirror(add, $('#veAddMedia'), {});
+      tl.appendChild(add);
+
       let pinch = null;
       const span = (ts) => Math.hypot(ts[0].clientX - ts[1].clientX, ts[0].clientY - ts[1].clientY);
       tl.addEventListener('touchstart', (e) => {
