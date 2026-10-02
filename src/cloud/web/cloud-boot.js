@@ -1266,6 +1266,22 @@ let _hideTimer = null;
       box.checked = !!(src && src.checked);
       box.closest('.cloud-xp-row').classList.toggle('hidden', !src);
     }
+    syncEnding();
+  }
+  /* The ending row: the outro's own picture, its name and length, and whether
+     it goes on. Read from the studio every time the sheet opens or the clip
+     library closes, so it never shows a stale choice. */
+  function syncEnding() {
+    const row = $('#cloudXpEnding'); if (!row) return;
+    const ed = window.VideoEditor;
+    const o = ed && ed.outroInfo ? ed.outroInfo() : null;
+    const sub = $('#cloudXpEndSub'), box = $('#cloudXpEndOn'), th = row.querySelector('.cloud-xp-end-thumb i');
+    const t = (sec) => { const x = Math.round(sec || 0); return `${Math.floor(x / 60)}:${String(x % 60).padStart(2, '0')}`; };
+    row.classList.toggle('has', !!o);
+    row.classList.toggle('on', !!(o && o.on));
+    if (box) box.checked = !!(o && o.on);
+    if (sub) sub.textContent = o ? `${o.name} · ${t(o.durationSec)}${o.on ? '' : ' · off'}` : 'Choose a clip or picture to end every short';
+    if (th) th.style.backgroundImage = o && o.thumb ? `url("${o.thumb}")` : '';
   }
 
   /*
@@ -1478,6 +1494,11 @@ let _hideTimer = null;
       <div class="cloud-xp-row"><span>Resolution</span><select id="cloudXpQuality" aria-label="Export resolution"></select></div>
       <div class="cloud-xp-row"><span>Frame rate</span><select data-mirror-sel="#veFps" aria-label="Frame rate"></select></div>
       <div class="cloud-xp-row"><span>Bitrate</span><select data-mirror-sel="#veBitrate" aria-label="Bitrate"></select></div>
+      <div class="cloud-xp-ending" id="cloudXpEnding">
+        <button type="button" class="cloud-xp-end-thumb" data-xp="ending-pick" aria-label="Choose the ending clip"><i></i></button>
+        <button type="button" class="cloud-xp-end-text" data-xp="ending-pick"><b>Ending</b><small id="cloudXpEndSub">Add your outro to the end of every short</small></button>
+        <label class="cloud-switch" aria-label="Add the ending to every short"><input type="checkbox" id="cloudXpEndOn" /><span></span></label>
+      </div>
       <label class="cloud-xp-row"><span>Caption the shorts as they export</span><input type="checkbox" data-mirror="#veCapExports" /></label>
       <label class="cloud-xp-row"><span>Keep editing while it exports</span><input type="checkbox" data-mirror="#veBgExport" /></label>
       <button type="button" class="cloud-xp-link" data-xp="saved">Finished files — save them to this phone</button>
@@ -1501,9 +1522,21 @@ let _hideTimer = null;
         src.dispatchEvent(new Event('change', { bubbles: true }));
       });
     }
+    const endOn = $('#cloudXpEndOn');
+    if (endOn) endOn.addEventListener('change', () => {
+      const ed = window.VideoEditor;
+      if (!ed || !ed.setOutroOn) return;
+      if (ed.setOutroOn(endOn.checked) === false) endOn.checked = false;   // none yet: the library opened
+      syncEnding();
+    });
+    // the clip library closing is the moment a new ending may have been chosen
+    const lib = $('#libModal');
+    if (lib && window.MutationObserver) new MutationObserver(() => { if (lib.classList.contains('hidden')) syncEnding(); })
+      .observe(lib, { attributes: true, attributeFilter: ['class'] });
     xs.addEventListener('click', (e) => {
       const b = e.target.closest('[data-xp]');
       if (!b || b.disabled) return;
+      if (b.dataset.xp === 'ending-pick') { const ed = window.VideoEditor; if (ed && ed.chooseOutro) ed.chooseOutro(); return; }
       const go = { shorts: '#veExportAll', video: '#veExportEdited', saved: '#cloudDownloads' }[b.dataset.xp];
       if (b.dataset.xp === 'more') return openSheet('insp', { tab: '#veInspTabExport' });
       closeSheet();

@@ -12807,6 +12807,20 @@
       openTransitionPicker(best.seg.id);
       return true;
     },
+    /** The outro that goes on the end of every short (CapCut's "ending"). */
+    outroInfo() {
+      const o = ve.outro;
+      return o ? { name: o.name, durationSec: o.durationSec || 0, on: ve.outroAll !== false, thumb: o.thumb ? fileUrl(o.thumb) : null } : null;
+    },
+    /** Switch the outro on or off for every short; with none chosen yet, open the library to choose one. */
+    setOutroOn(on) {
+      if (!ve.outro) { openLibrary('clips'); return false; }
+      ve.outroAll = !!on;
+      saveOutroPref(); renderOutroBar(); renderSegments(); updateMusicButton();
+      window.__toast && window.__toast(on ? `“${ve.outro.name}” ends every short` : 'Shorts export without the outro', on ? 'good' : '');
+      return ve.outroAll;
+    },
+    chooseOutro() { openLibrary('clips'); },
     /** The phone's Chroma key tool: the selected overlay, or one under the playhead. */
     chromaKey() { return openChromaKey(); },
     /** The phone's Keyframe tool: the clip under the playhead (or the selected one). */

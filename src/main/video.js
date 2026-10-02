@@ -2973,6 +2973,14 @@ async function appendClips(ctx, { input, output, clips = [], position = 'end', f
     .map((c) => (typeof c === 'string' ? { path: c } : c))
     .filter((c) => c && c.path && fs.existsSync(c.path));
   if (!list.length) throw new Error('No clip to add — pick one from the library first.');
+  /*
+   * An end card is never CROPPED to fit — that cuts the words off it — and on
+   * black bars a 16:9 card on a 9:16 short looks like a mistake. So when the
+   * short itself was cropped (or nothing was said), the card goes on its own
+   * blurred colours, the way CapCut does it; an explicit 'bars' or 'blur'
+   * choice is kept as it is.
+   */
+  if (fill == null || fillOpts(fill).mode === 'crop') fill = { mode: 'blur' };
   const main = await getInfo(ctx, input);
   const W = main.width || 1080, H = main.height || 1920;
   const fps = Math.max(1, Math.min(60, Math.round(main.fps || 30)));

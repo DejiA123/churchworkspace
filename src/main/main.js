@@ -852,9 +852,11 @@ ipcMain.handle('video:mixSounds', wrap(async (e, { input, sounds, jobId, outName
 }));
 
 // Append (or prepend) library clips — the outro on the end of every short.
-ipcMain.handle('video:appendClips', wrap(async (e, { input, clips, position, jobId, outName, deleteInput }) => {
+ipcMain.handle('video:appendClips', wrap(async (e, { input, clips, position, fill, jobId, outName, deleteInput }) => {
   const output = outPath(`${(outName || 'clip').replace(/[^\w.-]+/g, '_').slice(0, 60)}-${stamp()}.mp4`);
-  await video.appendClips(getCtx(), { input, output, clips: clips || [], position, onProgress: onProgress(e, jobId) });
+  // `fill` was sent by the studio all along and dropped here, so every outro
+  // card went on black bars whatever the short's own fill was
+  await video.appendClips(getCtx(), { input, output, clips: clips || [], position, fill, onProgress: onProgress(e, jobId) });
   if (deleteInput) removeIntermediate(input, output);
   return output;
 }));
