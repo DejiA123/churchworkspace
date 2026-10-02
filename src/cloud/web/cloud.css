@@ -245,10 +245,14 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
     --ph-dock: calc(68px + env(safe-area-inset-bottom));
     --ph-sheet: calc(var(--ph-tl) + var(--ph-dock));
     background: var(--ph-bg);
+    /* Apple's own face on an iPhone (what CapCut uses there), Roboto on Android. */
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Roboto, "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
     -webkit-tap-highlight-color: transparent;
     -webkit-user-select: none;
     user-select: none;
   }
+  body.mw-cloud button, body.mw-cloud select, body.mw-cloud input, body.mw-cloud textarea { font-family: inherit; }
   body.mw-cloud.mw-sheet-tall { --ph-sheet: min(78dvh, calc(100dvh - var(--ph-top) - 120px)); }
   body.mw-cloud input, body.mw-cloud textarea, body.mw-cloud [contenteditable] { -webkit-user-select: text; user-select: text; }
 
@@ -412,7 +416,7 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
     align-self: end;
     min-width: 0;
     padding: 0 8px 2px;
-    font-family: -apple-system, system-ui, "Segoe UI", sans-serif;
+    font-family: inherit;
     font-size: 11px; font-weight: 600;
     color: #c4c6cc;
     font-variant-numeric: tabular-nums;
@@ -550,7 +554,7 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
     display: flex; flex-direction: column; align-items: center; gap: 5px;
     background: transparent; border: 0; border-radius: 12px;
     color: #e4e5e9;
-    font: 500 10.5px/1.15 -apple-system, system-ui, "Segoe UI", sans-serif;
+    font-weight: 500; font-size: 10.5px; line-height: 1.15; font-family: inherit;
     letter-spacing: .1px;
     white-space: nowrap;
     cursor: pointer;

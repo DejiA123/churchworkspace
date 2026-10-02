@@ -984,12 +984,33 @@ let _hideTimer = null;
     'shrink': '<path d="m6 9 6 6 6-6"/>',
     'clapper': '<path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"/><path d="m6.2 5.3 3.1 3.9"/><path d="m12.4 3.4 3.1 4"/><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
   };
+  /*
+   * On the phone the icons are drawn finer, the way CapCut's are: the desk's
+   * 1.9 stroke reads well at 16px on a monitor and heavy at 24px on a phone.
+   * A few take CapCut's own shapes too — subtitles in a frame for Captions,
+   * three circles for Filters, the two arrows for full screen.
+   */
+  const PHONE_SHAPES = {
+    captions: '<rect width="18" height="14" x="3" y="5" rx="2.5"/><path d="M7 15h4"/><path d="M14 15h3"/><path d="M7 11h2"/><path d="M12 11h5"/>',
+    filters: '<circle cx="12" cy="8.5" r="5"/><circle cx="8.5" cy="14.5" r="5"/><circle cx="15.5" cy="14.5" r="5"/>',
+    fullscreen: '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/>',
+    overlay: '<rect width="12" height="12" x="9" y="9" rx="2"/><path d="M15 9V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h4"/>',
+    sliders: '<line x1="4" x2="20" y1="7" y2="7"/><line x1="4" x2="20" y1="17" y2="17"/><circle cx="9" cy="7" r="2.4" fill="#fff"/><circle cx="15" cy="17" r="2.4" fill="#fff"/>',
+  };
+  const fineUri = (body) => 'url("data:image/svg+xml,' + encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round">${body.replace(/fill="#fff"/g, 'fill="none"')}</svg>`) + '")';
   function addPhoneIcons() {
     if ($('#cloudPhoneIcons') || !window.MWIcons || !window.MWIcons.svgUri) return;
     const st = document.createElement('style');
     st.id = 'cloudPhoneIcons';
+    const all = Object.assign({}, window.MWIcons.ICONS || {}, PHONE_ICONS, PHONE_SHAPES);
+    const scope = (k) => ['.cloud-dock', '.cloud-bar', '.cloud-sheet-head', '.cloud-tl-add', '#view-video .ve-transport', '.cloud-export-sheet']
+      .map((r) => `${r} .mi[data-i="${k}"]`).join(',');
     st.textContent = Object.keys(PHONE_ICONS)
-      .map((k) => `.mi[data-i="${k}"]{--mi:${window.MWIcons.svgUri(PHONE_ICONS[k])}}`).join('\n');
+      .map((k) => `.mi[data-i="${k}"]{--mi:${window.MWIcons.svgUri(PHONE_ICONS[k])}}`).join('\n')
+      + '\n@media (max-width: 900px) {\n'
+      + Object.keys(all).map((k) => `${scope(k)}{--mi:${fineUri(all[k])}}`).join('\n')
+      + '\n}';
     document.head.appendChild(st);
   }
 
@@ -1004,8 +1025,8 @@ let _hideTimer = null;
       { icon: 'music', label: 'Audio', row: 'audio' },
       { icon: 'crop', label: 'Ratio', row: 'ratio' },
       { icon: 'target', label: 'Reframe', ai: true, sheet: 'insp', tab: '#veInspTabReframe' },
-      { icon: 'image', label: 'Overlay', row: 'overlay' },
-      { icon: 'palette', label: 'Look', sheet: 'insp', tab: '#veInspTabLook' },
+      { icon: 'overlay', label: 'Overlay', row: 'overlay' },
+      { icon: 'filters', label: 'Filters', sheet: 'insp', tab: '#veInspTabLook' },
       { icon: 'folder', label: 'Project', row: 'project' },
     ],
     edit: [
@@ -1030,7 +1051,7 @@ let _hideTimer = null;
     ratio: [],      // built from the desk's own list of shapes
     overlay: [
       { icon: 'image', label: 'Add media', press: '#veAddMedia' },
-      { icon: 'pip', label: 'To overlay', press: '#veOverlay' },
+      { icon: 'overlay', label: 'To overlay', press: '#veOverlay' },
       { icon: 'eraser', label: 'Cut out', press: '#veCutOut' },
       { icon: 'volume', label: 'Sound', press: '#veOvSound' },
     ],
