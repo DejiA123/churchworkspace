@@ -208,6 +208,7 @@ your domain. Cloudflare Tunnel or nginx do the job equally well.
 | `MW_CLOUD_CODE` | generated | the access code — **set this**, or it changes on restart |
 | `MW_CLOUD_UPLOADS` | `on` | `off` stops phones sending files up |
 | `GROQ_API_KEY` | — | a free Groq key: the sermon scan, captions and "remove pauses" are heard by Whisper Large in the cloud. Set it in the host's dashboard, never in the repo |
+| `MW_CLOUD_SOCIAL` | `on` | `off` takes the Social Scheduler off the phone and stops this server publishing anything |
 | `MW_MEMORY_MB`, `MW_CPUS` | read from the container | only for a host that hides its limits — see *A small server* below |
 
 ### A small server (512 MB)
@@ -227,6 +228,23 @@ is the single best thing to give a small server.
 
 * **Sign in once.** Tick *Keep me signed in* and the phone stays signed in for a
   month — through restarts of the server too.
+* **Home.** The app opens on a home screen with two doors — **Video Studio**
+  and **Social Scheduler** — what is running in the background, and your latest
+  exports with a **Post** button on each. The house in the studio's top bar
+  comes back here; the studio carries on exactly where it was.
+* **Exports you can walk away from.** Switch on *Keep editing while it exports*
+  in the Export sheet (or press *Run in the background* on any export). A live
+  chip in the top bar shows how far it has got, with a thin purple line under
+  the bar. Tap it for every job: its step, how long it has run and roughly how
+  long is left, and **Stop** — then, when it is done, each file with **Save**
+  (to the phone) and **Post** (straight into the scheduler).
+* **Messages** come out of one black capsule at the top of the screen, the way
+  an iPhone shows them, and never sit over the timeline.
+* **New versions.** An app on an iPhone's home screen is *resumed*, not
+  reopened, so it can go days without loading a new version. It asks the server
+  whenever it comes back to the front and offers **Refresh** when there is a
+  new one — never in the middle of an export. (A copy installed before this
+  existed needs closing fully once: swipe it away in the app switcher.)
 * **📁 Files** opens what is on the studio machine: finished exports, anything
   sent from a phone, and the Videos folder. **⬆ Send a video from this phone**
   uploads from the handset, in slices, and **picks up where it left off** if the
@@ -252,11 +270,42 @@ cards, NDI, projectors and stage screens on the church network. A browser in
 another country cannot reach any of that, and a button that pretends otherwise
 is worse than no button. They stay on the machine in the building.
 
-**Social Scheduler** is not here either, and that one is deliberate in a
-different way: it holds the access tokens for the church's Facebook, Instagram,
-YouTube and TikTok accounts. Those never leave the machine they were linked on.
-A cloud server also never runs the "post when the app is closed" scheduler, so
-two machines can never publish the same clip twice.
+The desk's **direct** Facebook, YouTube and TikTok sign-ins are not here
+either: they open a sign-in window on the machine itself. On a phone, accounts
+are linked through Zernio instead (below).
+
+---
+
+## The Social Scheduler on a phone
+
+Plan posts to **TikTok, YouTube, Instagram and Facebook** from the phone — the
+app's own scheduler, run by whichever machine is serving the page.
+
+1. **A free Zernio key, once.** Make a free account at zernio.com, copy an API
+   key (Settings → API keys) and paste it in *Scheduler → Accounts*. It is
+   stored on the server and **never sent back to any phone** — the page is only
+   ever told *whether* a key is set. Zernio's free plan links two accounts per
+   key; a second free key covers Facebook and Instagram.
+2. **Connect each account.** Tap *Connect*, sign in on that platform's own
+   page, come back to the app — the account appears.
+3. **Post.** *New post* (or *Post* on a finished export): pick the video, let
+   **✨ Write it for me** write the title and caption (the same writer as the
+   desk; it listens to the clip first), tick the accounts and choose a time —
+   *Best time* picks the next hour people actually look, in the phone's own
+   time zone. Several shorts at once are spread over the coming days.
+
+**It goes out with everything switched off.** A post is handed to Zernio the
+moment it is saved, and Zernio publishes it at its time. *Post now* on a
+planned post gives that booking back first, so nothing goes out twice; moving
+or deleting a post calls the booking off too.
+
+**Whose schedule is it?** The server's. A cloud server (Routes 2 and 3) keeps
+its own posts and accounts in its data folder, separate from the church PC —
+so there is never a second copy of a post to publish twice. When the church PC
+serves the page (Route 1), the phone is looking at the PC's own schedule and
+accounts. The server runs the scheduler for its posts (a booking that failed is
+retried; a post whose time has come is published); `MW_CLOUD_SOCIAL=off` takes
+the Scheduler off the phone and stands that down.
 
 ---
 
@@ -266,10 +315,16 @@ two machines can never publish the same clip twice.
   is ~650 million combinations, against 8 tries per quarter hour per address.
   Phone Studio's six digits are fine facing a church hall; they are not fine
   facing the internet.
-* **An allowlist of what may run**, by exact name — 75 of the app's 199
-  handlers. Not by prefix, so a handler added next month is refused until
-  somebody has thought about it. Settings (API keys, social tokens), accounts,
-  shells, dialogs, Go Live and Presentation are all absent.
+* **An allowlist of what may run**, by exact name — 100 of the app's 234
+  handlers (the server prints both numbers when it starts). Not by prefix, so a
+  handler added next month is refused until somebody has thought about it.
+  Settings, the desk's account channels, shells, dialogs, Go Live and
+  Presentation are all absent. The Social Scheduler's channels hand the phone
+  its accounts **without** their tokens, and take a Zernio key in without ever
+  giving one back out.
+* **The access code now guards posting as well as editing.** Anyone with it
+  can publish to the church's linked accounts — use a code nobody could guess,
+  and press *New code* if it may have got out.
 * **An allowlist of where it may run.** Every file path an instruction carries
   must resolve inside a few known media folders, checked recursively by
   argument name. A stolen token still cannot read `C:\Users`.

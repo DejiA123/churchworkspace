@@ -820,6 +820,76 @@ class Accounts {
     return { ...safe, connected: true };
   }
 
+  /*
+   * EASY CONNECT FROM A PHONE, IN TWO HALVES.
+   *
+   * connectZernio() above opens Zernio's page on THIS machine and then waits
+   * here for up to five minutes. From the Cloud Studio neither half works: the
+   * page has to open on the phone (a server has no browser to open it in), and
+   * a phone app sent to the background to sign in to TikTok may never hear a
+   * five-minute answer come back. So it is split. linkStart hands back the link
+   * to open (or the account, when it is linked already); linkClaim looks once,
+   * and keeps the account if it is there. The phone opens the link, and claims
+   * when it comes back to the front.
+   */
+  async zernioLinkStart(platform) {
+    const plat = ['youtube', 'facebook', 'instagram'].includes(platform) ? platform : 'tiktok';
+    const label = ZO_LABEL[plat] || 'TikTok';
+    const { apiKey, apiBase, redirectUrl } = zoCfg(this.store, plat);
+    if (!apiKey) throw new Error('Add your Zernio key first (free at zernio.com → Settings → API keys).');
+    const auth = { authorization: 'Bearer ' + apiKey };
+    let listed;
+    try { listed = await getJson(`${apiBase}/accounts`, { headers: auth }); }
+    catch (e) { throw new Error('Zernio did not accept the key (' + e.message + ') — copy it again from zernio.com → Settings → API keys.'); }
+    const acct = zoAccountOf(listed, plat);
+    if (acct) return { account: await this._zoKeep(plat, acct, apiKey) };
+    let profileId = '';
+    try {
+      const profs = await getJson(`${apiBase}/profiles`, { headers: auth });
+      const list = Array.isArray(profs) ? profs : (profs && (profs.profiles || profs.data)) || [];
+      const chosen = list.find((p) => p.isDefault || p.is_default) || list[0];
+      profileId = chosen ? String(chosen._id || chosen.id || chosen.profileId || '') : '';
+    } catch (e) { /* older API with no profiles */ }
+    let url = '';
+    try {
+      const q = { redirect_url: redirectUrl };
+      if (profileId) q.profileId = profileId;
+      const gen = await getJson(`${apiBase}/connect/${plat}?` + new URLSearchParams(q), { headers: auth });
+      url = gen && (gen.url || gen.authUrl || gen.connectUrl || gen.access_url);
+    } catch (e) {
+      throw new Error(this._connectErrorText(e.message, label, listed));
+    }
+    if (!url || !/^https:\/\//i.test(String(url))) throw new Error('Zernio did not return a ' + label + ' connect link — try again.');
+    return { url: String(url), platform: plat, label };
+  }
+
+  /** Is it linked yet? Keeps the account when it is; `{ pending: true }` when not. */
+  async zernioLinkClaim(platform) {
+    const plat = ['youtube', 'facebook', 'instagram'].includes(platform) ? platform : 'tiktok';
+    const { apiKey, apiBase } = zoCfg(this.store, plat);
+    if (!apiKey) throw new Error('Add your Zernio key first (free at zernio.com → Settings → API keys).');
+    const listed = await getJson(`${apiBase}/accounts`, { headers: { authorization: 'Bearer ' + apiKey } });
+    const acct = zoAccountOf(listed, plat);
+    if (!acct) return { pending: true };
+    return { account: await this._zoKeep(plat, acct, apiKey) };
+  }
+
+  /** Store a Zernio-linked account; hand back the record without its key. */
+  async _zoKeep(platform, acct, apiKey) {
+    const label = ZO_LABEL[platform] || 'TikTok';
+    const accountId = zoAccountId(acct);
+    const handle = String(acct.username || acct.handle || acct.name || '').replace(/^@/, '');
+    const picture = await fetchAvatarDataUri(acct.picture || acct.profileImage || acct.avatar || acct.social_images || '');
+    const rec = this._upsert({
+      id: zoIdPrefix(platform) + accountId, platform, via: 'zernio',
+      name: acct.displayName || acct.display_name || (handle ? '@' + handle : label + ' account'),
+      zoAccountId: accountId, username: handle,
+      token: apiKey, picture, connectedAt: new Date().toISOString(),
+    });
+    const { token, ...safe } = rec;
+    return { ...safe, connected: true };
+  }
+
   /** Live health check: asks the platform if the stored credentials still work. */
   async check(id) {
     const acc = this.byId(id);

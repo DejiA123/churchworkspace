@@ -2234,6 +2234,38 @@ ipcMain.handle('accounts:add', wrap(async (e, { connectId, selections }) => acco
 ipcMain.handle('accounts:remove', wrap(async (e, { id }) => accounts.remove(id)));
 ipcMain.handle('accounts:check', wrap(async (e, { id }) => accounts.check(id)));
 
+/* ------------- IPC: the Social Scheduler, from a phone (Cloud Studio) ---------
+ * The desk's account channels above open windows and wait on this machine.
+ * These are the halves a phone can use: the accounts WITHOUT their keys, the
+ * Zernio keys going IN and never coming back out (only "is one set"), and the
+ * two-step easy connect (accounts.zernioLinkStart / zernioLinkClaim). They are
+ * the only social channels the cloud allowlist admits — see cloud-api.js.
+ */
+const SOCIAL_KEYS = ['zoApiKey', 'zoApiKeyFb'];
+function socialKeyState() {
+  const acc = ((store.get('settings') || {}).accounts) || {};
+  return { zo: !!String(acc.zoApiKey || '').trim(), zoFb: !!String(acc.zoApiKeyFb || '').trim() };
+}
+ipcMain.handle('social:accounts', wrap(async () => ({ accounts: accounts.list(), keys: socialKeyState() })));
+ipcMain.handle('social:setKeys', wrap(async (e, patch = {}) => {
+  const s = store.get('settings') || {};
+  const acc = { ...(s.accounts || {}) };
+  for (const k of SOCIAL_KEYS) {
+    if (!patch || !(k in patch)) continue;
+    const v = String(patch[k] == null ? '' : patch[k]).trim();
+    if (v.length > 400 || /\s/.test(v)) {
+      throw new Error('That does not look like a Zernio API key — copy it again from zernio.com → Settings → API keys.');
+    }
+    acc[k] = v;
+  }
+  store.set('settings', { ...s, accounts: acc });
+  return socialKeyState();
+}));
+ipcMain.handle('social:linkStart', wrap(async (e, { platform } = {}) => accounts.zernioLinkStart(platform)));
+ipcMain.handle('social:linkClaim', wrap(async (e, { platform } = {}) => accounts.zernioLinkClaim(platform)));
+ipcMain.handle('social:unlink', wrap(async (e, { id } = {}) => accounts.remove(id)));
+ipcMain.handle('social:check', wrap(async (e, { id } = {}) => accounts.check(id)));
+
 ipcMain.handle('scheduler:testFb', wrap(async (e, { pageId, token }) => {
   const acc = (store.get('settings') || {}).accounts || {};
   return publisher.testFacebook({

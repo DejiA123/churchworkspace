@@ -17,13 +17,22 @@
  *
  * A running copy of this app does things besides edit video: it keeps a
  * heartbeat so the background poster knows the studio is open, and it runs the
- * Social Scheduler, which publishes posts when they come due. Two copies doing
- * that is how a church posts the same clip to Facebook twice.
+ * Social Scheduler, which publishes posts when they come due.
  *
- * So the scheduler and the heartbeat are stood down before main.js is loaded —
- * out here, in the open, rather than by a headless flag threaded through the
- * app. A cloud server EDITS. Posting stays with the machine the accounts were
- * linked on.
+ * The heartbeat is stood down before main.js is loaded — out here, in the open,
+ * rather than by a headless flag threaded through the app: it exists to tell
+ * the church PC's background poster that the PC's studio is open, and this is
+ * not that studio.
+ *
+ * The scheduler RUNS here, for the posts made here. The phone's Social
+ * Scheduler (cloud-social.js) is this server's own: its posts, and the
+ * accounts linked from the phone, live in this server's data folder and
+ * nowhere else, so there is no second copy of any post to publish twice. Most
+ * of them never need it anyway — a post to an account linked through Zernio
+ * is handed to Zernio the moment it is saved, and Zernio publishes it. The tick
+ * is for the rest: a booking that failed and must be retried, a post whose
+ * time has already come. MW_CLOUD_SOCIAL=off stands it down again, and takes
+ * the Scheduler off the phone.
  */
 
 const fs = require('fs');
@@ -64,19 +73,48 @@ const version = (() => {
 const shim = require('./electron-shim').install({ dataDir: DATA, mediaDir: MEDIA, version });
 
 /*
- * Stand the posting machinery down BEFORE main.js is loaded, by replacing the
- * two entry points it uses. Requiring them here first means main.js gets these
- * same module objects out of the cache.
+ * Patch the posting machinery BEFORE main.js is loaded. Requiring the modules
+ * here first means main.js gets these same module objects out of the cache.
  */
+const cloudApi = require('./cloud-api');
 const schedulerMod = require('../main/scheduler');
 if (schedulerMod.Scheduler && schedulerMod.Scheduler.prototype) {
-  schedulerMod.Scheduler.prototype.start = function () {
-    console.log('[cloud] social scheduler stood down — posting stays with the studio machine');
-    return this;
-  };
+  const proto = schedulerMod.Scheduler.prototype;
+  if (!cloudApi.SOCIAL_ON) {
+    proto.start = function () {
+      console.log('[cloud] social scheduler stood down (MW_CLOUD_SOCIAL=off)');
+      return this;
+    };
+  } else {
+    /*
+     * There is no window here for "posted" to be told to — the scheduler's
+     * desktop notification and its message to the studio window both land on
+     * the Electron stand-in. So both are passed on to the signed-in phones as
+     * well, which is where somebody is actually looking.
+     */
+    const notify = proto._notify;
+    proto._notify = function (title, body, postId) {
+      try { cloudApi.push('scheduler:notice', { title, body, postId }); } catch (e) {}
+      return notify.call(this, title, body, postId);
+    };
+    const pushUpdate = proto._pushUpdate;
+    proto._pushUpdate = function (postId) {
+      try { cloudApi.push('scheduler:changed', { postId }); } catch (e) {}
+      return pushUpdate.call(this, postId);
+    };
+  }
 }
 const autopostMod = require('../main/autopost');
 autopostMod.startHeartbeat = () => ({ stop() {} });
+
+/*
+ * "Open this page" from the app means the browser of whoever is in front of
+ * it. On a server that is a phone, so the link is sent there (the phone shows
+ * it as a button: a phone will not open a window nobody tapped for).
+ */
+shim.shim.shell.openExternal = async (url) => {
+  if (/^https:\/\//i.test(String(url || ''))) cloudApi.push('open:url', { url: String(url) });
+};
 
 /* ------------------------------------------------------------ the app itself */
 
@@ -87,7 +125,7 @@ console.log('  media:  ' + MEDIA);
 require('../main/main');       // 195 handlers, registered exactly as on the desktop
 
 const rpc = require('../main/rpc');
-const cloud = require('./cloud-api');
+const cloud = cloudApi;
 const captioner = require('../main/captioner');
 
 /** Where the offline AI assets are — the same rule main.js uses. */

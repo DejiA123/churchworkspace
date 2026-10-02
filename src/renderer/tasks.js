@@ -33,6 +33,12 @@
   const showCancel = (...a) => (window.__showCancel ? window.__showCancel(...a) : undefined);
   const jobWasCancelled = (...a) => (window.__jobWasCancelled ? window.__jobWasCancelled(...a) : false);
   const esc = (s2) => String(s2 == null ? '' : s2).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+  /* The set of jobs the operator stopped. The desk's shell declares it as a
+   * page-wide const; the Cloud Studio keeps its own inside cloud-boot.js and
+   * hands it over on window — reaching for the bare name there was a
+   * ReferenceError, so Stop on a background job did nothing on a phone. */
+  const cancelledJobs = () => (typeof _cancelledJobs !== 'undefined' ? _cancelledJobs
+    : (window.__cancelledJobs || (window.__cancelledJobs = new Set())));
   /* ===================== EXPORTS YOU CAN WALK AWAY FROM =====================
    *
    * WHAT WAS WRONG. An export is not one job; it is a chain of them — composite,
@@ -66,8 +72,8 @@
     const id = 'task_' + (++_taskSeq) + '_' + Date.now();
     _tasks.set(id, {
       id, title: title || 'Working…', step: '', percent: 0,
-      bg: !!opts.background, state: 'run', file: null, jobId: null,
-      at: Date.now(), batch: null,
+      bg: !!opts.background, state: 'run', file: null, files: [], jobId: null,
+      at: Date.now(), endedAt: 0, batch: null,
     });
     if (opts.background) renderDock();
     return id;
@@ -78,6 +84,15 @@
     t.batch = (i && n) ? `${i} of ${n}` : null;
     renderDock();
   }
+  /** A file this task has finished (a batch makes one per short). */
+  function addTaskFile(taskId, file) {
+    const t = _tasks.get(taskId); if (!t || !file) return;
+    if (!t.files.includes(file)) t.files.push(file);
+    if (t.bg) scheduleDock();
+  }
+  /* Where the running exports are shown on this page: the corner on the desk,
+     the progress pill at the top on a phone (cloud-boot.js says which). */
+  const bgPlace = () => (typeof window.__bgPlace === 'function' && window.__bgPlace()) || 'the corner';
   /** Move a running task out of the way. Everything left in its chain follows. */
   function sendTaskToBackground(taskId) {
     const t = _tasks.get(taskId);
@@ -85,7 +100,7 @@
     t.bg = true;
     hideOverlay();
     renderDock();
-    toast('⇥ Carrying on in the background. Keep working — the corner shows how it is going, '
+    toast(`⇥ Carrying on in the background. Keep working — ${bgPlace()} shows how it is going, `
       + 'and it saves whatever the timeline looked like when you started it.', 'good', 8000);
   }
   /** Close a task: 'done' keeps the chip around with the file, the rest fade it. */
@@ -93,6 +108,8 @@
     const t = _tasks.get(taskId); if (!t) return false;
     t.state = res.state || (res.ok === false ? 'fail' : 'done');
     t.file = res.file || null;
+    if (t.file && !t.files.includes(t.file)) t.files.push(t.file);
+    t.endedAt = Date.now();
     t.step = res.note || t.step;
     t.percent = t.state === 'done' ? 100 : t.percent;
     for (const [j, id] of _taskOfJob) if (id === taskId) _taskOfJob.delete(j);
@@ -238,6 +255,7 @@
     // trade one kind of stuck for another — and would drop a click on ✕ Stop
     // that landed between a rebuild and its listener.
     if (dockDirty && !paintDockProgress()) renderDock();
+    if (dockDirty) notifyTasks();
     // Nothing left to animate: stop, rather than tick for the rest of the session.
     if (!live) { clearInterval(_tickTimer); _tickTimer = null; }
   }
@@ -378,8 +396,39 @@
     if (_dockTimer) return;
     _dockTimer = requestAnimationFrame(() => { _dockTimer = null; renderDock(); });
   }
+  /*
+   * WHO ELSE IS WATCHING. The desk's dock is one view of the background jobs;
+   * the phone draws its own (a live pill and a jobs sheet — cloud-boot.js), so
+   * the list and every change to it are offered to anyone who asks.
+   */
+  const _taskListeners = new Set();
+  let _notifyQueued = false;
+  function notifyTasks() {
+    if (_notifyQueued || !_taskListeners.size) return;
+    _notifyQueued = true;
+    requestAnimationFrame(() => {
+      _notifyQueued = false;
+      for (const fn of _taskListeners) { try { fn(); } catch (e) { /* a view's own trouble */ } }
+    });
+  }
+  function tasksSnapshot() {
+    return Array.from(_tasks.values()).filter((t) => t.bg).map((t) => ({
+      id: t.id, title: t.title, step: t.step, state: t.state, file: t.file, files: t.files.slice(),
+      batch: t.batch, at: t.at, endedAt: t.endedAt,
+      percent: Math.round(Math.max(0, Math.min(100, t.percent || 0))),
+    }));
+  }
+  async function stopTask(id) {
+    const t = _tasks.get(id); if (!t || t.state !== 'run') return false;
+    t.step = 'Stopping…'; renderDock();
+    if (t.jobId) { cancelledJobs().add(t.jobId); try { await window.api.job.cancel(t.jobId); } catch (e) {} }
+    return true;
+  }
+  function clearTask(id) { const ok = _tasks.delete(id); renderDock(); return ok; }
+
   const ICONS = { run: '⏳', done: '✅', fail: '⚠️', stopped: '■' };
   function renderDock() {
+    notifyTasks();
     const box = $('#bgDock');
     if (!box) return;
     const list = Array.from(_tasks.values()).filter((t) => t.bg);
@@ -411,7 +460,7 @@
       const t = _tasks.get(b.dataset.stop); if (!t) return;
       b.disabled = true;
       t.step = 'Stopping…'; renderDock();
-      if (t.jobId) { _cancelledJobs.add(t.jobId); try { await api.job.cancel(t.jobId); } catch (e) {} }
+      if (t.jobId) { cancelledJobs().add(t.jobId); try { await window.api.job.cancel(t.jobId); } catch (e) {} }
     }));
     box.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => {
       _tasks.delete(b.dataset.close); renderDock();
@@ -448,7 +497,7 @@
         return result;
       } catch (err) {
         if (jobWasCancelled(jobId, err)) {
-          _cancelledJobs.delete(jobId);
+          cancelledJobs().delete(jobId);
           err.cancelled = true;
         }
         throw err;
@@ -480,7 +529,7 @@
     } catch (err) {
       if (!t || !t.bg) hideOverlay();
       if (jobWasCancelled(jobId, err)) {
-        _cancelledJobs.delete(jobId);
+        cancelledJobs().delete(jobId);
         toast('Stopped.', '');
         err.cancelled = true; // callers can tell "user stopped it" from "it broke"
       } else {
@@ -524,6 +573,7 @@
   window.__taskSay = taskSay;
   window.__taskProgress = taskProgress;
   window.__setTaskBatch = setTaskBatch;
+  window.__taskAddFile = addTaskFile;
   window.__chainBegin = chainBegin;
   window.__chainDone = chainDone;
   // For the tests: is the progress animation still running? (It must stop.)
@@ -543,6 +593,10 @@
   window.__chainWeights = CHAIN_WEIGHTS;   // read by the tests, not by the studio
   window.__taskRunning = taskRunning;
   window.__taskBackground = sendTaskToBackground;
+  window.__tasksList = tasksSnapshot;
+  window.__onTasks = (fn) => { _taskListeners.add(fn); return () => _taskListeners.delete(fn); };
+  window.__taskStop = stopTask;
+  window.__taskClear = clearTask;
   window.__backgroundCount = backgroundCount;
 
   /*

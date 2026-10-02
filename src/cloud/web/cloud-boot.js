@@ -65,6 +65,8 @@ let _hideTimer = null;
     events: null,
     downloads: [],      // { path, name, at } — what this session has finished
     online: true,
+    jobListeners: [],   // views that show the background jobs (the home screen)
+    eventListeners: {}, // server events other views want (the scheduler)
   };
   window.MWCloud = cloud;
 
@@ -194,6 +196,23 @@ let _hideTimer = null;
    * that reason — see the note in cloud-api.js. */
   window.MW_AI_BASE = '/ai/';
 
+  /*
+   * The frames auto-reframe looks at come back from the studio as paths with a
+   * `file://` URL beside them — right for the desktop window, and a picture
+   * this browser is not allowed to open (it means THIS device's disk). Every
+   * frame failed to load, the tracker saw nobody, and every "face-tracked"
+   * short quietly came out as a centre crop. So they are served back over the
+   * media route like everything else.
+   */
+  const servedFrames = (res) => {
+    if (!res || !Array.isArray(res.frames)) return res;
+    res.frames = res.frames.map((f) => Object.assign({}, f, {
+      url: f.path ? window.MW_FILE_URL(f.path) : f.url,
+      pairUrl: f.pairPath ? window.MW_FILE_URL(f.pairPath) : f.pairUrl,
+    }));
+    return res;
+  };
+
   /* -------------------------------------------------------- the api shim */
 
   /*
@@ -247,7 +266,7 @@ let _hideTimer = null;
       mixMusic: (a) => call('video:mixMusic', a),
       appendClips: (a) => call('video:appendClips', a),
       attachThumb: (a) => call('video:attachThumb', a),
-      extractFrames: (a) => call('video:extractFrames', a),
+      extractFrames: (a) => call('video:extractFrames', a).then(servedFrames),
     },
     job: { cancel: (id) => call('job:cancel', { id }) },
     reframe: {
@@ -283,7 +302,7 @@ let _hideTimer = null;
       exportShort: (a) => call('sermon:exportShort', a),
       exportReframed: (a) => call('sermon:exportReframed', a),
       exportFramed: (a) => call('sermon:exportFramed', a),
-      extractFrames: (a) => call('video:extractFrames', a),
+      extractFrames: (a) => call('video:extractFrames', a).then(servedFrames),
       attachThumb: (a) => call('video:attachThumb', a),
       rmdir: (dir) => call('fs:rmdir', { dir }),
     },
@@ -338,6 +357,26 @@ let _hideTimer = null;
       showItem: (p) => { offerDownload(p); return Promise.resolve(true); },
       openExternal: (u) => { window.open(u, '_blank', 'noopener'); return Promise.resolve(true); },
     },
+    // The Social Scheduler (cloud-social.js): the same names as the desk's
+    // preload, plus the phone's own account calls — keys go in, never out.
+    scheduler: {
+      list: () => call('scheduler:list'),
+      add: (post) => call('scheduler:add', { post }),
+      update: (id, patch) => call('scheduler:update', { id, patch }),
+      remove: (id) => call('scheduler:remove', { id }),
+      publishAuto: (id) => call('scheduler:publishAuto', { id }),
+      retry: (id) => call('scheduler:retry', { id }),
+      plans: () => call('scheduler:plans'),
+    },
+    social: {
+      suggestCopy: (a) => call('social:suggestCopy', a),
+      accounts: () => call('social:accounts'),
+      setKeys: (keys) => call('social:setKeys', keys),
+      linkStart: (platform) => call('social:linkStart', { platform }),
+      linkClaim: (platform) => call('social:linkClaim', { platform }),
+      unlink: (id) => call('social:unlink', { id }),
+      check: (id) => call('social:check', { id }),
+    },
     onJobProgress: (cb) => { jobProgressCbs.push(cb); return () => { jobProgressCbs = jobProgressCbs.filter((f) => f !== cb); }; },
     onSchedulerDue: () => () => {},
   };
@@ -370,37 +409,131 @@ let _hideTimer = null;
     .replace(/\(\s+/g, '(')
     .replace(/\s{2,}/g, ' ')
     .trim();
-  function toast(msg, kind = '', ms) {
-    const t = document.getElementById('toast');
-    if (!t) return;
+  /** Split a studio message into a bold headline and a softer line under it. */
+  function toastParts(msg, kind) {
     // a message that opens with a warning sign is a warning, whatever kind it was sent as
     const warn = !kind && /^\s*(?:⚠|🚫|⛔)/u.test(String(msg || ''));
     const k = kind === 'good' || kind === 'error' ? kind : (warn ? 'warn' : 'info');
     const text = toastText(msg) || String(msg || '');
-    t.setAttribute('role', k === 'error' ? 'alert' : 'status');
     // "Headline — the detail" (or "Headline. The detail.") reads as a bold
     // title over a softer line; anything else is a single line.
     let title = text, sub = '';
-    const cut = text.match(/^(.{4,52}?)(?:\s+—\s+|\.\s+)(.+)$/);
+    // a long message with no short headline still leads with its first sentence
+    const cut = text.match(/^(.{4,52}?)(?:\s+—\s+|\.\s+)(.+)$/) || (text.length > 64 && text.match(/^(.{4,110}?)(?:\.\s+|\s+—\s+)(.+)$/));
     if (cut) { title = cut[1].replace(/[.:]$/, ''); sub = cut[2].charAt(0).toUpperCase() + cut[2].slice(1); }
     else title = title.replace(/\.$/, '');   // a one-line note reads cleaner without its full stop
-    t.innerHTML = `<span class="toast-ic">${TOAST_ICONS[k]}</span><span class="toast-msg"><b class="toast-title"></b><span class="toast-sub"></span></span>`;
-    t.querySelector('.toast-title').textContent = title;
-    const subEl = t.querySelector('.toast-sub');
-    if (sub) subEl.textContent = sub; else subEl.remove();
-    t.className = 'toast toast-' + k + (kind && k !== kind ? ' ' + kind : '');
-    // restart the entrance even when a message replaces one still showing
-    void t.offsetWidth;
-    t.classList.add('toast-in');
-    clearTimeout(toast._t); clearTimeout(toast._t2);
-    const stay = ms || Math.min(7000, Math.max(3200, 1600 + text.length * 38));
-    toast._t = setTimeout(() => {
-      t.classList.remove('toast-in');
-      t.classList.add('toast-out');
-      toast._t2 = setTimeout(() => t.classList.add('hidden'), 260);
-    }, stay);
+    return { k, text, title, sub };
+  }
+  function toast(msg, kind = '', ms) {
+    const { k, text, title, sub } = toastParts(msg, kind);
+    island({ title, sub, kind: k, ms: ms || Math.min(7000, Math.max(3200, 1600 + text.length * 38)) });
   }
   window.__toast = toast;
+
+  /*
+   * THE ISLAND. Every message in the Cloud Studio comes out of one black capsule
+   * at the top of the screen, the way an iPhone shows a timer or a call: it
+   * drops in from under the top bar, springs to the size of what it has to say,
+   * and folds itself away. A message that arrives while another is showing does
+   * not stack a second box on the first — the capsule MORPHS to the new words.
+   *
+   * It can carry one button ("Refresh", "View"), the whole capsule can be
+   * tapped, and a flick upwards sends it away early. A finger anywhere else goes
+   * straight through: it never sits over a clip's trim handle the way a box
+   * along the bottom did.
+   */
+  let islandEl = null, islandCur = null, islandTimer = null;
+  function islandMount() {
+    if (islandEl) return islandEl;
+    islandEl = document.createElement('div');
+    islandEl.id = 'cloudIsland';
+    islandEl.className = 'cloud-island';
+    islandEl.setAttribute('role', 'status');
+    islandEl.setAttribute('aria-live', 'polite');
+    islandEl.innerHTML = '<div class="ci-body"></div>';
+    document.body.appendChild(islandEl);
+    islandEl.addEventListener('click', (e) => {
+      const m = islandCur;
+      if (!m) return;
+      const act = e.target.closest('[data-ci-act]');
+      const fn = act ? (m.action && m.action.onClick) : m.onTap;
+      if (!fn && !act) { islandHide(); return; }
+      islandHide();
+      if (fn) { try { fn(); } catch (er) {} }
+    });
+    // flick it up to dismiss it early
+    let y0 = null;
+    islandEl.addEventListener('touchstart', (e) => { y0 = e.touches[0].clientY; }, { passive: true });
+    islandEl.addEventListener('touchmove', (e) => {
+      if (y0 == null) return;
+      const dy = e.touches[0].clientY - y0;
+      if (dy < -14) { y0 = null; islandHide(); }
+    }, { passive: true });
+    islandEl.addEventListener('touchend', () => { y0 = null; });
+    return islandEl;
+  }
+  function islandHtml(m) {
+    const ic = TOAST_ICONS[m.kind] || TOAST_ICONS.info;
+    return `<span class="ci-ic ci-${m.kind}">${m.spin ? '<i class="ci-spin"></i>' : ic}</span>`
+      + `<span class="ci-tx"><b class="ci-title">${escHtml(m.title)}</b>${m.sub ? `<span class="ci-sub">${escHtml(m.sub)}</span>` : ''}</span>`
+      + (m.action ? `<button type="button" class="ci-act" data-ci-act>${escHtml(m.action.label)}</button>` : '')
+      + (m.onTap && !m.action ? '<span class="ci-chev" aria-hidden="true"></span>' : '');
+  }
+  /**
+   * Show a message in the island.
+   *   { title, sub?, kind: good|error|warn|info, ms?, sticky?, action?: {label, onClick}, onTap?, id? }
+   * A sticky message stays until it is tapped, replaced, or hidden by its id.
+   */
+  function island(m) {
+    if (!m || !m.title) return;
+    const el = islandMount();
+    const body = el.querySelector('.ci-body');
+    const msg = Object.assign({ kind: 'info' }, m);
+    const html = islandHtml(msg);
+    // Measure the new words at their own size, so the capsule can spring to it.
+    // Off to one side, not inside the capsule: on its way in the capsule is
+    // scaled down, and a measure taken in there came out a fifth too narrow —
+    // "TikTok connect", with the View button cut off.
+    const probe = document.createElement('div');
+    probe.className = 'ci-body ci-probe';
+    probe.innerHTML = html;
+    document.body.appendChild(probe);
+    const box = probe.getBoundingClientRect();
+    const w = Math.ceil(box.width) + 1;
+    const h = Math.ceil(box.height);
+    probe.remove();
+    const showing = el.classList.contains('on');
+    clearTimeout(islandTimer);
+    clearTimeout(island._swap);
+    islandCur = msg;
+    el.className = 'cloud-island ci-k-' + msg.kind + (msg.action || msg.onTap ? ' ci-tappable' : '');
+    el.setAttribute('role', msg.kind === 'error' ? 'alert' : 'status');
+    if (!showing) {
+      // start as a small pill tucked under the top bar
+      el.style.width = '120px'; el.style.height = '36px';
+      body.innerHTML = html;
+      body.classList.add('swap');
+      void el.offsetWidth;
+      el.classList.add('on');
+      body.classList.remove('swap');
+    } else {
+      el.classList.add('on');
+      body.classList.add('swap');
+      island._swap = setTimeout(() => { body.innerHTML = html; body.classList.remove('swap'); }, 110);
+    }
+    el.style.width = w + 'px';
+    el.style.height = h + 'px';
+    if (!msg.sticky) islandTimer = setTimeout(islandHide, msg.ms || 4200);
+  }
+  function islandHide(id) {
+    if (!islandEl) return;
+    if (id && (!islandCur || islandCur.id !== id)) return;
+    clearTimeout(islandTimer);
+    islandCur = null;
+    islandEl.classList.remove('on');
+  }
+  window.__island = island;
+  window.__islandHide = islandHide;
 
   let _jobCounter = 0;
   const newJobId = () => 'job_' + (++_jobCounter) + '_' + Date.now();
@@ -430,6 +563,7 @@ let _hideTimer = null;
 
   let _cancelJobId = null;
   const _cancelledJobs = new Set();
+  window.__cancelledJobs = _cancelledJobs;   // tasks.js stops background jobs through this
   function showCancel(jobId) {
     const b = $('#overlayCancel');
     _cancelJobId = jobId || null;
@@ -523,7 +657,21 @@ let _hideTimer = null;
       try { d = JSON.parse(e.data); } catch (er) { return; }
       showUploadProgress(d);
     });
+    for (const name of Object.keys(cloud.eventListeners)) attachEvent(es, name);
   }
+  function attachEvent(es, name) {
+    es.addEventListener(name, (e) => {
+      let d = {};
+      try { d = JSON.parse(e.data); } catch (er) { return; }
+      for (const fn of cloud.eventListeners[name] || []) { try { fn(d); } catch (er) {} }
+    });
+  }
+  /** Hear a server event by name — the connection may be remade, the listener stays. */
+  cloud.onEvent = (name, fn) => {
+    const fresh = !cloud.eventListeners[name];
+    (cloud.eventListeners[name] = cloud.eventListeners[name] || []).push(fn);
+    if (fresh && cloud.events) attachEvent(cloud.events, name);
+  };
 
   /* -------------------------------------------------------------- signing in */
 
@@ -1078,6 +1226,19 @@ let _hideTimer = null;
     'expand': '<path d="m18 15-6-6-6 6"/>',
     'shrink': '<path d="m6 9 6 6 6-6"/>',
     'clapper': '<path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"/><path d="m6.2 5.3 3.1 3.9"/><path d="m12.4 3.4 3.1 4"/><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
+    // the home screen, the jobs sheet and the scheduler
+    'home': '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5"/>',
+    'calendar': '<rect width="18" height="17" x="3" y="4.5" rx="2.5"/><path d="M3 9.5h18"/><path d="M8 2.5v4"/><path d="M16 2.5v4"/>',
+    'clock': '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    'send': '<path d="M21.5 2.5 10.6 13.4"/><path d="m21.5 2.5-7 19-3.9-8.1-8.1-3.9z"/>',
+    'chev-right': '<path d="m9 18 6-6-6-6"/>',
+    'refresh': '<path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/>',
+    'grid': '<rect width="7" height="7" x="3" y="3" rx="1.5"/><rect width="7" height="7" x="14" y="3" rx="1.5"/><rect width="7" height="7" x="3" y="14" rx="1.5"/><rect width="7" height="7" x="14" y="14" rx="1.5"/>',
+    'stop': '<rect width="12" height="12" x="6" y="6" rx="2"/>',
+    'key': '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.8-9.8"/><path d="m17 6 3 3"/><path d="m14.5 8.5 2 2"/>',
+    'external': '<path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/>',
+    'list': '<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><circle cx="4" cy="6" r=".6"/><circle cx="4" cy="12" r=".6"/><circle cx="4" cy="18" r=".6"/>',
+    'wand-sparkle': '<path d="m15 4 5 5L8 21l-5-5z"/><path d="M13 6l5 5"/><path d="M5 2.5v3M3.5 4h3"/><path d="M19.5 15.5v3M18 17h3"/>',
   };
   /*
    * On the phone the icons are drawn finer, the way CapCut's are: the desk's
@@ -1106,7 +1267,8 @@ let _hideTimer = null;
     const st = document.createElement('style');
     st.id = 'cloudPhoneIcons';
     const all = Object.assign({}, window.MWIcons.ICONS || {}, PHONE_ICONS, PHONE_SHAPES);
-    const scope = (k) => ['.cloud-dock', '.cloud-bar', '.cloud-sheet-head', '.cloud-tl-add', '#view-video .ve-transport', '.cloud-export-sheet']
+    const scope = (k) => ['.cloud-dock', '.cloud-bar', '.cloud-sheet-head', '.cloud-tl-add', '#view-video .ve-transport', '.cloud-export-sheet',
+      '.cloud-home', '.cloud-sched', '.cp-panel']
       .map((r) => `${r} .mi[data-i="${k}"]`).join(',');
     st.textContent = Object.keys(PHONE_ICONS)
       .map((k) => `.mi[data-i="${k}"]{--mi:${window.MWIcons.svgUri(PHONE_ICONS[k])}}`).join('\n')
@@ -1599,6 +1761,360 @@ let _hideTimer = null;
     sync();
   }
 
+  /* -------------------------------------------------------------- panels */
+
+  /*
+   * A SHEET THAT CAN COVER ANYTHING. The studio's own sheets live inside the
+   * editor's layout (they take the timeline's place), so they cannot come up
+   * over the home screen or the scheduler. These can: a sheet on its own dimmed
+   * backdrop, the way an iPhone brings up a share sheet, that you pull down by
+   * its grabber to put away. On a wide screen it is a card in the middle.
+   */
+  const CLOSE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg>';
+  const panels = [];
+  function openPanel(o = {}) {
+    if (o.id) closePanel(o.id, true);
+    const scrim = document.createElement('div');
+    scrim.className = 'cp-scrim';
+    const el = document.createElement('section');
+    el.className = 'cp-panel' + (o.cls ? ' ' + o.cls : '');
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    if (o.id) el.id = o.id;
+    el.innerHTML = '<header class="cp-head"><span class="cp-grab" aria-hidden="true"></span><h2 class="cp-title"></h2>'
+      + `<button type="button" class="cp-x" aria-label="Close">${CLOSE_SVG}</button></header>`
+      + '<div class="cp-body"></div><footer class="cp-foot"></footer>';
+    const z = 330 + panels.length * 4;
+    scrim.style.zIndex = String(z);
+    el.style.zIndex = String(z + 1);
+    document.body.append(scrim, el);
+    const p = {
+      id: o.id || '', el, scrim, onClose: o.onClose,
+      head: el.querySelector('.cp-head'), body: el.querySelector('.cp-body'), foot: el.querySelector('.cp-foot'),
+      setTitle(t) { el.querySelector('.cp-title').textContent = t || ''; },
+      close() { closePanel(p); },
+    };
+    p.setTitle(o.title);
+    panels.push(p);
+    document.body.classList.add('mw-panel');
+    requestAnimationFrame(() => requestAnimationFrame(() => { scrim.classList.add('on'); el.classList.add('on'); }));
+    scrim.addEventListener('click', () => p.close());
+    el.querySelector('.cp-x').addEventListener('click', () => p.close());
+    // Pull it down by the top to put it away.
+    let y0 = null, dy = 0;
+    p.head.addEventListener('touchstart', (e) => {
+      // (a sheet only on a phone — on a wide screen it is a card that stays put)
+      if (e.target.closest('button') || !window.matchMedia('(max-width: 900px)').matches) return;
+      y0 = e.touches[0].clientY; dy = 0; el.style.transition = 'none';
+    }, { passive: true });
+    p.head.addEventListener('touchmove', (e) => {
+      if (y0 == null) return;
+      dy = Math.max(0, e.touches[0].clientY - y0);
+      el.style.transform = `translateY(${dy}px)`;
+    }, { passive: true });
+    const end = () => {
+      if (y0 == null) return;
+      y0 = null; el.style.transition = ''; el.style.transform = '';
+      if (dy > 90) p.close();
+    };
+    p.head.addEventListener('touchend', end);
+    p.head.addEventListener('touchcancel', end);
+    return p;
+  }
+  function closePanel(which, instant) {
+    const p = typeof which === 'string' ? panels.find((x) => x.id === which) : which;
+    if (!p || panels.indexOf(p) < 0) return;
+    panels.splice(panels.indexOf(p), 1);
+    if (!panels.length) document.body.classList.remove('mw-panel');
+    p.el.classList.remove('on');
+    p.scrim.classList.remove('on');
+    if (instant) { p.el.remove(); p.scrim.remove(); }
+    else setTimeout(() => { p.el.remove(); p.scrim.remove(); }, 300);
+    if (p.onClose) { try { p.onClose(); } catch (e) {} }
+  }
+  const panelOf = (id) => panels.find((p) => p.id === id) || null;
+
+  /*
+   * The keyboard. A sheet sits on the bottom of the screen, which is exactly
+   * where an iPhone's keyboard comes up — over the caption being typed. The
+   * visual viewport says how much of the screen the keyboard has taken, and the
+   * sheets stand on top of it (--kb in cloud.css).
+   */
+  if (window.visualViewport) {
+    const vv = window.visualViewport;
+    const onKb = () => {
+      const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+      document.documentElement.style.setProperty('--kb', (kb > 90 ? kb : 0) + 'px');
+    };
+    vv.addEventListener('resize', onKb);
+    vv.addEventListener('scroll', onKb);
+  }
+
+  /* ----------------------------------------------------- background jobs */
+
+  /*
+   * WHAT IS RUNNING, WHERE A THUMB CAN REACH IT.
+   *
+   * On the desk the background exports sit in a box in the corner. On a phone
+   * that box was behind the tool dock and the sheets — "1 job running in the
+   * background", in grey, half hidden — and there was nothing to tap.
+   *
+   * So the phone gets three things, all fed by tasks.js's own list:
+   *   • a live chip in the top bar: a ring that fills, the percentage, and how
+   *     many are running. Green with a tick when something has finished;
+   *   • a thin purple line along the bottom of the top bar, the same number;
+   *   • tap the chip and the jobs sheet comes up: every export with its step,
+   *     its bar, how long it has been going and roughly how long is left, and
+   *     Stop — and once it is done, its files, to save to this phone or to
+   *     schedule as posts.
+   *
+   * A finished job stays on the sheet for the session; the desk's corner lets
+   * them go after a minute, but somebody who walked away has to find it there.
+   */
+  const jobs = { history: new Map(), last: new Map(), unseen: new Set(), sig: '', timer: null };
+  window.__bgPlace = () => (window.matchMedia('(max-width: 900px)').matches ? 'the jobs pill at the top' : 'the corner');
+  const baseName = (p) => String(p || '').split(/[\\/]/).pop();
+  const jobTitle = (t) => toastText(t.title || 'Export').replace(/[“”"]/g, '"');
+  /** "3 of 20" → { i: 3, n: 20 }. */
+  const batchOf = (t) => { const m = /(\d+)\s*of\s*(\d+)/.exec(t.batch || ''); return m ? { i: +m[1], n: +m[2] } : null; };
+  /** The whole job's progress — for a batch, the whole batch, not this short. */
+  function overallPct(t) {
+    if (t.state !== 'run') return t.state === 'done' ? 100 : t.percent;
+    const b = batchOf(t);
+    return b && b.n > 1 ? Math.min(99, ((b.i - 1) + t.percent / 100) / b.n * 100) : t.percent;
+  }
+  const clockOf = (ms) => {
+    const s = Math.max(0, Math.round(ms / 1000));
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
+    return h ? `${h}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}` : `${m}:${String(x).padStart(2, '0')}`;
+  };
+  function etaOf(t) {
+    const pc = overallPct(t), ran = Date.now() - t.at;
+    if (t.state !== 'run' || pc < 3 || ran < 8000) return '';
+    const left = ran * (100 - pc) / pc;
+    if (left < 60000) return 'less than a minute left';
+    const min = Math.round(left / 60000);
+    return min < 90 ? `about ${min} min left` : `about ${Math.floor(min / 60)} h ${min % 60} min left`;
+  }
+  const agoOf = (at) => {
+    const s = Math.round((Date.now() - at) / 1000);
+    return s < 45 ? 'just now' : s < 3600 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`;
+  };
+
+  function jobList() {
+    const live = window.__tasksList ? window.__tasksList() : [];
+    const ids = new Set(live.map((t) => t.id));
+    for (const t of live) jobs.history.set(t.id, t);
+    // a running job that is no longer listed was cleared; a finished one stays
+    for (const [id, t] of jobs.history) if (!ids.has(id) && t.state === 'run') jobs.history.delete(id);
+    return Array.from(jobs.history.values()).sort((a, b) =>
+      ((b.state === 'run') - (a.state === 'run')) || ((b.endedAt || b.at) - (a.endedAt || a.at)));
+  }
+
+  function jobFinished(t) {
+    jobs.unseen.add(t.id);
+    // "Done" on the chip is news, not a fixture: it lets itself go after a while.
+    setTimeout(() => { if (jobs.unseen.delete(t.id)) renderJobChips(jobList()); }, 5 * 60000);
+    // Every file it made goes on the Saved list as well: nothing finished is
+    // ever further than one tap away.
+    for (const f of t.files || []) {
+      if (!cloud.downloads.some((d) => d.path === f)) cloud.downloads.unshift({ path: f, name: baseName(f), at: Date.now() });
+    }
+    renderDownloadCount();
+    const n = (t.files || []).length;
+    const view = { label: 'View', onClick: openJobsSheet };
+    if (t.state === 'done') {
+      island({ kind: 'good', title: n > 1 ? `${n} videos ready` : 'Export finished', sub: jobTitle(t), action: view, ms: 8000, id: 'job-' + t.id });
+    } else if (t.state === 'fail') {
+      island({ kind: 'error', title: 'An export stopped', sub: toastText(t.step) || jobTitle(t), action: view, ms: 10000, id: 'job-' + t.id });
+    } else {
+      island({ kind: 'info', title: 'Stopped', sub: jobTitle(t), ms: 3500 });
+    }
+  }
+
+  function onJobsChanged() {
+    const list = jobList();
+    for (const t of list) {
+      const was = jobs.last.get(t.id);
+      if (was === 'run' && t.state !== 'run') jobFinished(t);
+      if (!was && t.state === 'run') jobs.fresh = t.id;
+      jobs.last.set(t.id, t.state);
+    }
+    renderJobChips(list);
+    if (panelOf('cloudJobs')) renderJobsSheet(list);
+    for (const fn of cloud.jobListeners) { try { fn(list); } catch (e) {} }
+  }
+
+  const RING = (r, cls) => `<svg viewBox="0 0 ${r * 2 + 6} ${r * 2 + 6}" class="${cls}" aria-hidden="true">`
+    + `<circle class="rt" cx="${r + 3}" cy="${r + 3}" r="${r}"/><circle class="rf" cx="${r + 3}" cy="${r + 3}" r="${r}" pathLength="100" stroke-dasharray="0 100"/></svg>`;
+  const TICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" class="cj-tick" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
+  const BANG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" class="cj-bang" aria-hidden="true"><path d="M12 6.5v7"/><path d="M12 17.5v.1"/></svg>';
+
+  /** A jobs chip, for whichever bar wants one. It keeps itself up to date. */
+  function makeJobChip() {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'cloud-jobchip hidden';
+    b.innerHTML = `<span class="cj-ic">${RING(7.5, 'cj-ring')}${TICK}${BANG}</span><span class="cj-tx"></span><span class="cj-n"></span>`;
+    b.addEventListener('click', openJobsSheet);
+    requestAnimationFrame(() => renderJobChips(jobList()));
+    return b;
+  }
+  function renderJobChips(list) {
+    const run = list.filter((t) => t.state === 'run');
+    const failed = list.some((t) => t.state === 'fail' && jobs.unseen.has(t.id));
+    const done = list.some((t) => t.state === 'done' && jobs.unseen.has(t.id));
+    const pct = run.length ? Math.round(run.reduce((n, t) => n + overallPct(t), 0) / run.length) : 0;
+    const state = run.length ? 'run' : failed ? 'fail' : done ? 'done' : '';
+    const label = state === 'run' ? `${run.length} running, ${pct}% — tap to see them`
+      : state === 'done' ? 'Finished — tap to see it' : state === 'fail' ? 'An export stopped — tap to see why' : 'Background jobs';
+    for (const chip of $$('.cloud-jobchip')) {
+      const was = chip.dataset.state || '';
+      chip.dataset.state = state;
+      chip.classList.toggle('hidden', !state);
+      // a job just started, or just finished: say so with a little bounce
+      if (state && (state !== was || jobs.fresh)) { chip.classList.remove('cj-pop'); void chip.offsetWidth; chip.classList.add('cj-pop'); }
+      const ring = chip.querySelector('.rf');
+      if (ring) ring.setAttribute('stroke-dasharray', `${Math.max(3, pct)} 100`);
+      chip.querySelector('.cj-tx').textContent = state === 'run' ? pct + '%' : state === 'done' ? 'Done' : state === 'fail' ? 'Stopped' : '';
+      chip.querySelector('.cj-n').textContent = run.length > 1 ? String(run.length) : '';
+      chip.setAttribute('aria-label', label);
+      chip.title = label;
+    }
+    jobs.fresh = null;
+    const line = $('#cloudBarProgress');
+    if (line) {
+      line.classList.toggle('on', !!run.length);
+      line.style.transform = `scaleX(${run.length ? Math.max(0.02, pct / 100) : 0})`;
+    }
+  }
+
+  function openJobsSheet() {
+    const list = jobList();
+    for (const t of list) jobs.unseen.delete(t.id);
+    renderJobChips(list);
+    const p = openPanel({
+      id: 'cloudJobs', title: 'Background jobs', cls: 'cp-jobs',
+      onClose: () => { clearInterval(jobs.timer); jobs.timer = null; jobs.sig = ''; },
+    });
+    p.body.addEventListener('click', onJobsClick);
+    p.foot.innerHTML = `<button type="button" class="cp-link" data-jobs="saved">${mi('download')}Everything finished this session</button>`;
+    p.foot.addEventListener('click', (e) => {
+      if (!e.target.closest('[data-jobs="saved"]')) return;
+      p.close();
+      const b = $('#cloudDownloads'); if (b) b.click();
+    });
+    jobs.sig = '';
+    renderJobsSheet(list);
+    clearInterval(jobs.timer);
+    jobs.timer = setInterval(() => paintJobs(jobList()), 1000);
+  }
+  window.__openJobs = openJobsSheet;
+
+  const jobSig = (list) => list.map((t) => `${t.id}:${t.state}:${(t.files || []).length}`).join('|');
+  function renderJobsSheet(list) {
+    const p = panelOf('cloudJobs'); if (!p) return;
+    const sig = jobSig(list);
+    if (sig === jobs.sig) { paintJobs(list); return; }
+    jobs.sig = sig;
+    const run = list.filter((t) => t.state === 'run').length;
+    p.setTitle(run ? `Running now · ${run}` : 'Background jobs');
+    const canSchedule = !!(window.MWSocial && window.MWSocial.compose);
+    if (!list.length) {
+      p.body.innerHTML = `<div class="cj-empty"><div class="cj-empty-art">${mi('layers')}</div><b>Nothing running</b>`
+        + '<p>Exports you send to the background show up here with their progress. To send every export here, switch on '
+        + '<em>Keep editing while it exports</em> in Export.</p></div>';
+      return;
+    }
+    p.body.innerHTML = list.map((t) => {
+      const id = escAttr(t.id);
+      if (t.state === 'run') {
+        return `<article class="cj-card run" data-id="${id}">`
+          + `<div class="cj-row"><div class="cj-big">${RING(19, 'cj-ring-lg')}<b class="cj-pc"></b></div>`
+          + `<div class="cj-main"><div class="cj-title">${escHtml(jobTitle(t))}</div><div class="cj-step"></div></div></div>`
+          + '<div class="cj-bar"><i></i></div>'
+          + '<div class="cj-meta"><span class="cj-time"></span><span class="cj-eta"></span></div>'
+          + `<div class="cj-btns"><button type="button" class="cj-btn danger" data-stop="${id}">${mi('stop')}Stop</button></div>`
+          + '</article>';
+      }
+      const files = t.files || [];
+      const ok = t.state === 'done';
+      const fileRows = files.map((f) => `<li><span class="cj-fname">${mi('film')}<span>${escHtml(baseName(f))}</span></span>`
+        + `<button type="button" class="cj-mini" data-save="${escAttr(f)}">${mi('download')}Save</button>`
+        + (canSchedule ? `<button type="button" class="cj-mini accent" data-sched="${escAttr(f)}">${mi('calendar')}Post</button>` : '')
+        + '</li>').join('');
+      return `<article class="cj-card ${ok ? 'done' : t.state === 'fail' ? 'fail' : 'stopped'}" data-id="${id}">`
+        + `<div class="cj-row"><span class="cj-badge">${ok ? TICK : BANG}</span>`
+        + `<div class="cj-main"><div class="cj-title">${escHtml(jobTitle(t))}</div>`
+        + `<div class="cj-step">${escHtml(toastText(t.step) || (ok ? 'Finished.' : 'Stopped.'))}</div></div>`
+        + `<button type="button" class="cj-x" data-clear="${id}" aria-label="Clear">${CLOSE_SVG}</button></div>`
+        + (fileRows ? `<ul class="cj-files">${fileRows}</ul>` : '')
+        + (canSchedule && files.length > 1 ? `<div class="cj-btns"><button type="button" class="cj-btn accent" data-sched-all="${id}">${mi('calendar')}Schedule all ${files.length} as posts</button></div>` : '')
+        + `<div class="cj-meta"><span>${ok ? 'Finished' : 'Ended'} ${agoOf(t.endedAt || t.at)}</span>${t.endedAt ? `<span>took ${clockOf(t.endedAt - t.at)}</span>` : ''}</div>`
+        + '</article>';
+    }).join('');
+    paintJobs(list);
+  }
+  /** Move the numbers where they already are — never rebuild under a finger. */
+  function paintJobs(list) {
+    const p = panelOf('cloudJobs'); if (!p) return;
+    if (jobSig(list) !== jobs.sig) { renderJobsSheet(list); return; }
+    for (const t of list) {
+      if (t.state !== 'run') continue;
+      const card = p.body.querySelector(`.cj-card[data-id="${CSS.escape(t.id)}"]`);
+      if (!card) continue;
+      const pc = Math.round(overallPct(t));
+      card.querySelector('.cj-pc').textContent = pc + '%';
+      card.querySelector('.rf').setAttribute('stroke-dasharray', `${Math.max(2, pc)} 100`);
+      card.querySelector('.cj-bar i').style.width = Math.max(2, pc) + '%';
+      const b = batchOf(t);
+      const step = toastText(t.step) || 'Starting…';
+      card.querySelector('.cj-step').textContent = b && b.n > 1 ? `Short ${b.i} of ${b.n} · ${t.percent}% · ${step}` : step;
+      card.querySelector('.cj-time').textContent = 'Running ' + clockOf(Date.now() - t.at);
+      card.querySelector('.cj-eta').textContent = etaOf(t);
+    }
+  }
+  async function onJobsClick(e) {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.stop) {
+      b.disabled = true;
+      b.innerHTML = `${mi('stop')}Stopping…`;
+      if (window.__taskStop) await window.__taskStop(b.dataset.stop);
+      return;
+    }
+    if (b.dataset.clear) {
+      if (window.__taskClear) window.__taskClear(b.dataset.clear);
+      jobs.history.delete(b.dataset.clear);
+      onJobsChanged();
+      return;
+    }
+    if (b.dataset.save) { offerDownload(b.dataset.save); return; }
+    if (b.dataset.sched) { closePanel('cloudJobs'); window.MWSocial.compose({ files: [b.dataset.sched] }); return; }
+    if (b.dataset.schedAll) {
+      const t = jobs.history.get(b.dataset.schedAll);
+      if (t) { closePanel('cloudJobs'); window.MWSocial.compose({ files: (t.files || []).slice() }); }
+    }
+  }
+
+  function installJobs() {
+    if (cloud.jobsInstalled) return;
+    cloud.jobsInstalled = true;
+    const bar = $('#cloudBar');
+    if (bar) {
+      const actions = $('#cloudBar .cloud-bar-actions') || bar;
+      const chip = makeJobChip();
+      chip.id = 'cloudJobsChip';
+      actions.insertBefore(chip, actions.firstChild);
+      const line = document.createElement('div');
+      line.id = 'cloudBarProgress';
+      line.className = 'cloud-bar-progress';
+      bar.appendChild(line);
+    }
+    if (window.__onTasks) window.__onTasks(onJobsChanged);
+    onJobsChanged();
+  }
+
   /* --------------------------------------------------------------- help */
 
   const HELP = `
@@ -1670,6 +2186,13 @@ let _hideTimer = null;
     if (cloud.started) return;
     cloud.started = true;
 
+    // The icon set first: the home screen draws with it.
+    if (window.MWIcons) window.MWIcons.mount([]);
+    addPhoneIcons();
+    // The home screen comes up at once, before the studio behind it has
+    // finished waking — nobody should see the editor flash past on the way.
+    if (window.MWSocial) { try { window.MWSocial.start(cloud.hello); } catch (e) { console.error(e); } }
+
     connectEvents();
 
     let presets = {};
@@ -1692,14 +2215,84 @@ let _hideTimer = null;
 
     installTouchBar();
     installPhoneEditor();
+    installJobs();
+    watchForUpdates();
 
     try {
       const hello = await fetch('/api/hello', { headers: authHeaders() }).then((r) => r.json());
-      cloud.hello = hello;
+      cloud.hello = Object.assign(cloud.hello || {}, hello);
       const where = $('#cloudWhere');
       if (where) where.textContent = hello.standalone ? 'on the server' : 'on the studio PC';
     } catch (e) { /* the studio still works; the label is decoration */ }
   }
+
+  /* ------------------------------------------------------------- updates */
+
+  /*
+   * A NEW VERSION, ON A PHONE THAT NEVER RELOADS.
+   *
+   * An app on an iPhone's home screen is not reopened, it is RESUMED: iOS keeps
+   * the page alive for days, so a fix deployed on Sunday was still not on the
+   * phone on Wednesday — the screenshot showed last week's messages. So the page
+   * asks the server which build it is serving whenever it comes back to the
+   * front (and every ten minutes while it is open), and when that is not the
+   * build this page was made from, the island offers to refresh.
+   *
+   * Never in the middle of an export: the chain of passes is driven from this
+   * page, and reloading it would leave the captions and the outro undone. The
+   * offer waits for the jobs to finish.
+   */
+  let updateAt = 0;
+  async function checkForUpdate(force) {
+    if (!myVersion || document.hidden) return;
+    if (!force && Date.now() - updateAt < 45000) return;
+    updateAt = Date.now();
+    let h = null;
+    try { h = await fetch('/api/hello', { cache: 'no-store', headers: authHeaders() }).then((r) => r.json()); }
+    catch (e) { return; }
+    const build = h && h.build;
+    if (!build || build === myVersion) return;
+    cloud.updateBuild = build;
+    offerUpdate();
+  }
+  function offerUpdate() {
+    if (!cloud.updateBuild) return;
+    const overlay = $('#overlay');
+    const busy = jobList().some((t) => t.state === 'run') || (overlay && !overlay.classList.contains('hidden'));
+    if (busy) { cloud.updateWaiting = true; return; }      // asked again when the jobs are done
+    cloud.updateWaiting = false;
+    island({
+      id: 'update', kind: 'info', sticky: true,
+      title: 'A new version is ready',
+      sub: 'Refresh to start using it — your edit is kept.',
+      action: { label: 'Refresh', onClick: refreshForUpdate },
+    });
+  }
+  async function refreshForUpdate() {
+    island({ id: 'update', kind: 'info', sticky: true, spin: true, title: 'Updating…' });
+    try { if (window.VideoEditor && window.VideoEditor.flushSession) await window.VideoEditor.flushSession(); } catch (e) {}
+    location.reload();
+  }
+  function watchForUpdates() {
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(); });
+    window.addEventListener('focus', () => checkForUpdate());
+    window.addEventListener('pageshow', () => checkForUpdate());
+    setInterval(() => checkForUpdate(true), 10 * 60 * 1000);
+    // the jobs that held the offer back have finished
+    cloud.jobListeners.push((list) => {
+      if (cloud.updateWaiting && !list.some((t) => t.state === 'run')) setTimeout(offerUpdate, 2500);
+    });
+    setTimeout(() => checkForUpdate(true), 4000);
+  }
+  cloud.checkForUpdate = checkForUpdate;
+
+  /* What the home screen and the scheduler (cloud-social.js) borrow from here. */
+  Object.assign(cloud, {
+    call, island, islandHide, toast, toastText, openPanel, closePanel, panelOf,
+    offerDownload, pickFiles, chooseFromDevice, refreshFiles, downloadUrl,
+    mi, esc: escHtml, escAttr, jobChip: makeJobChip, jobList, jobPct: overallPct, openJobs: openJobsSheet,
+    authHeaders, fileUrl: (p) => window.MW_FILE_URL(p),
+  });
 
   /* The version this page was built from, off this script's own URL — the page
    * may not run inline script, so there is nowhere else to be told it. */
@@ -1723,6 +2316,7 @@ let _hideTimer = null;
     let hello = null;
     try { hello = await fetch('/api/hello', { headers: authHeaders() }).then((r) => r.json()); }
     catch (e) { hello = null; }
+    cloud.hello = hello;
 
     if (hello && hello.signedIn) {
       $('#cloudGate').classList.add('gone');

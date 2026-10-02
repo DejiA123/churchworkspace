@@ -42,6 +42,9 @@ services:
       # the repo.
       - key: GROQ_API_KEY
         sync: false
+      # The phone's Social Scheduler is on by default (posts go out through
+      # Zernio — see CLOUD.md). Add MW_CLOUD_SOCIAL=off in the dashboard to take
+      # it off the phone and stop this server publishing anything.
     disk:
       name: studio-data
       mountPath: /data

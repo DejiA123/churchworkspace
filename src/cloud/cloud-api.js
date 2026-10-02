@@ -85,6 +85,34 @@ const allowedPath = (p) => guard.allowedPath(p);
 
 /* -------------------------------------------------------------- allowlist */
 
+/*
+ * THE SOCIAL SCHEDULER, FROM A PHONE.
+ *
+ * The posts, and the linked accounts WITHOUT their keys. A Zernio key can be
+ * set from here but never read back (social:setKeys answers "is one set", and
+ * nothing else); the desk's own accounts:* and settings:* channels stay
+ * refused, and so does the one-tap publish, which opens windows on the machine.
+ * Media paths on a post go through the same folder guard as every other path
+ * (path-guard.js knows `mediaPaths`). MW_CLOUD_SOCIAL=off leaves all of it out.
+ */
+const SOCIAL_ON = String(process.env.MW_CLOUD_SOCIAL || 'on').toLowerCase() !== 'off';
+const SOCIAL = {
+  'scheduler:list': true,
+  'scheduler:add': true,
+  'scheduler:update': true,
+  'scheduler:remove': true,
+  'scheduler:publishAuto': true,
+  'scheduler:retry': true,
+  'scheduler:plans': true,
+  'social:accounts': true,
+  'social:setKeys': true,
+  'social:linkStart': true,
+  'social:linkClaim': true,
+  'social:unlink': true,
+  'social:check': true,
+  'social:suggestCopy': true,
+};
+
 /**
  * What a signed-in browser may ask the studio machine to do.
  *
@@ -211,6 +239,9 @@ const ALLOWED = {
   // pictures the editor reads and writes (data URLs, under the media roots)
   'fs:readImageDataUrl': true,
   'fs:writeImageDataUrl': true,
+
+  // 🗓 the Social Scheduler — see SOCIAL below; added unless switched off
+  ...(SOCIAL_ON ? SOCIAL : {}),
 
   /*
    * Frame sampling for auto-reframe leaves a temp folder behind and must tidy
@@ -628,6 +659,7 @@ async function handle(req, res) {
     return send(res, 200, 'text/html; charset=utf-8', html);
   }
   if (p === '/cloud-boot.js') return sendWeb(req, res, 'cloud-boot.js');
+  if (p === '/cloud-social.js') return sendWeb(req, res, 'cloud-social.js');
   if (p === '/cloud.css') return sendWeb(req, res, 'cloud.css');
   if (p === '/manifest.webmanifest') return sendWeb(req, res, 'manifest.webmanifest');
   // A service worker may only control the scope it is served from, so this one
@@ -677,6 +709,11 @@ async function handle(req, res) {
       allowUpload: !!cfg.allowUpload,
       publicUrl: cfg.publicUrl || '',
       standalone: !!cfg.standalone,
+      // The build the page is made from right now. An installed phone app is
+      // resumed rather than reopened, and compares this with its own to know
+      // when to offer a refresh (cloud-boot.js, "updates").
+      build: page.assetKey(cfg.appVersion || '0'),
+      social: SOCIAL_ON,
     });
   }
 
@@ -990,7 +1027,7 @@ function resetCode(code) {
 function setPublicUrl(u) { cfg.publicUrl = u || ''; return cfg.publicUrl; }
 
 module.exports = {
-  start, stop, isRunning, state, status, resetCode, setPublicUrl, browse,
+  start, stop, isRunning, state, status, resetCode, setPublicUrl, browse, push,
   // exported for tests
-  ALLOWED, makeCode, encodeEnvelope, decodeEnvelope, allowedPath, _cfg: () => cfg,
+  ALLOWED, SOCIAL_ON, makeCode, encodeEnvelope, decodeEnvelope, allowedPath, _cfg: () => cfg,
 };
