@@ -812,6 +812,45 @@ ipcMain.handle('video:mixMusic', wrap(async (e, { input, musicPath, musicVolume,
   return output;
 }));
 
+/* =================== 🎙 VOICEOVER AND 🔊 SOUND EFFECTS ====================
+ *
+ * The Sounds row on the timeline. A voiceover arrives as the bytes the phone's
+ * (or the desk's) microphone recorded — WebM/Opus from Chrome, MP4/AAC from
+ * Safari — and is kept as an ordinary .m4a beside the exports. Sound effects
+ * are made here by ffmpeg (video.SFX) the first time they are asked for.
+ */
+ipcMain.handle('audio:sfxList', wrap(async () =>
+  Object.keys(video.SFX).map((id) => ({ id, name: video.SFX[id].name, durationSec: video.SFX[id].dur }))));
+ipcMain.handle('audio:sfx', wrap(async (e, { kind } = {}) => {
+  const r = video.SFX[kind];
+  if (!r) throw new Error('There is no sound effect called "' + kind + '".');
+  const dir = path.join(ensureOutputDir(), 'Sound effects');
+  fs.mkdirSync(dir, { recursive: true });
+  const out = path.join(dir, `${kind}.m4a`);
+  if (!fs.existsSync(out) || fs.statSync(out).size < 400) await video.makeSfx(getCtx(), { kind, output: out });
+  return { path: out, name: r.name, durationSec: r.dur };
+}));
+ipcMain.handle('audio:saveRecording', wrap(async (e, { bytes, ext } = {}) => {
+  const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || []);
+  if (buf.length < 200) throw new Error('Nothing was recorded — check the microphone and try again.');
+  if (buf.length > 300 * 1024 * 1024) throw new Error('That recording is too long to keep.');
+  const tmp = path.join(require('os').tmpdir(), `mw-voice-${Date.now()}.${String(ext || 'webm').replace(/[^a-z0-9]/gi, '').slice(0, 5) || 'webm'}`);
+  fs.writeFileSync(tmp, buf);
+  const dir = path.join(ensureOutputDir(), 'Voiceovers');
+  fs.mkdirSync(dir, { recursive: true });
+  const output = path.join(dir, `voiceover-${stamp()}.m4a`);
+  try { await video.saveRecording(getCtx(), { inputPath: tmp, output }); }
+  finally { try { fs.unlinkSync(tmp); } catch (er) {} }
+  const info = await video.getInfo(getCtx(), output);
+  return { path: output, durationSec: info.durationSec || 0 };
+}));
+ipcMain.handle('video:mixSounds', wrap(async (e, { input, sounds, jobId, outName, deleteInput }) => {
+  const output = outPath(`${(outName || 'sounds').replace(/[^\w.-]+/g, '_').slice(0, 60)}-${stamp()}.mp4`);
+  await video.mixSounds(getCtx(), { input, sounds: sounds || [], output, onProgress: onProgress(e, jobId) });
+  if (deleteInput) removeIntermediate(input, output);
+  return output;
+}));
+
 // Append (or prepend) library clips — the outro on the end of every short.
 ipcMain.handle('video:appendClips', wrap(async (e, { input, clips, position, jobId, outName, deleteInput }) => {
   const output = outPath(`${(outName || 'clip').replace(/[^\w.-]+/g, '_').slice(0, 60)}-${stamp()}.mp4`);

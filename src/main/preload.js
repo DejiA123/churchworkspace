@@ -71,6 +71,7 @@ contextBridge.exposeInMainWorld('api', {
     filmstrip: (a) => call('video:filmstrip', a),
     makeProxy: (a) => call('video:makeProxy', a),
     setExportPrefs: (a) => call('video:setExportPrefs', a),
+    mixSounds: (a) => call('video:mixSounds', a),
     getExportPrefs: () => call('video:getExportPrefs'),
     applyEdits: (a) => call('video:applyEdits', a),
     waveform: (a) => call('video:waveform', a),
@@ -503,6 +504,11 @@ contextBridge.exposeInMainWorld('api', {
     openExternal: (url) => call('shell:openExternal', { url }),
     showItem: (p) => call('shell:showItem', { path: p }),
     openPath: (p) => call('shell:openPath', { path: p }),
+  },
+  audio: {
+    sfxList: () => call('audio:sfxList'),
+    sfx: (kind) => call('audio:sfx', { kind }),
+    saveRecording: (a) => call('audio:saveRecording', a),
   },
   fs: {
     readImageDataUrl: (p) => call('fs:readImageDataUrl', { path: p }),

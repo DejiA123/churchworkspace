@@ -2212,6 +2212,82 @@ async function exportShortFramed(ctx, { input, startSec, endSec, preset = 'reel-
   return { output, cropW, cropH, cropX: cx, cropY: cy, srcW: info.width, srcH: info.height };
 }
 
+/* ============================ SOUND EFFECTS ============================
+ *
+ * CapCut's Sounds → Effects, made HERE rather than downloaded: each is a
+ * recipe for ffmpeg's own sound generators, so the studio carries no audio
+ * files, nothing has a licence attached, and a server with no internet still
+ * has all of them. Made once into the output folder's "Sound effects" and
+ * reused from there.
+ */
+const SFX = {
+  whoosh:    { name: 'Whoosh', dur: 0.9, src: "anoisesrc=c=pink:d=0.9:a=0.9", af: 'highpass=f=250,lowpass=f=3200,afade=t=in:d=0.4,afade=t=out:st=0.45:d=0.45,volume=2.2' },
+  swish:     { name: 'Swish', dur: 0.45, src: "anoisesrc=c=white:d=0.45:a=0.7", af: 'highpass=f=1200,lowpass=f=7000,afade=t=in:d=0.12,afade=t=out:st=0.15:d=0.3,volume=1.6' },
+  riser:     { name: 'Riser', dur: 2.2, src: "aevalsrc='0.35*sin(2*PI*(180*t+260*t*t))+0.12*(random(0)*2-1)*t/2.2':d=2.2", af: 'afade=t=in:d=1.6,afade=t=out:st=2.05:d=0.15' },
+  impact:    { name: 'Impact', dur: 1.6, src: "aevalsrc='(0.95*sin(2*PI*52*t)+0.4*sin(2*PI*104*t))*exp(-3.2*t)+0.35*(random(0)*2-1)*exp(-14*t)':d=1.6", af: 'lowpass=f=900' },
+  hit:       { name: 'Hit', dur: 0.45, src: "aevalsrc='(0.85*sin(2*PI*95*t)+0.35*(random(0)*2-1))*exp(-16*t)':d=0.45", af: 'lowpass=f=2500' },
+  ding:      { name: 'Ding', dur: 1.8, src: "aevalsrc='0.42*(sin(2*PI*1318*t)+0.5*sin(2*PI*2636*t)+0.22*sin(2*PI*3954*t))*exp(-2.6*t)':d=1.8", af: 'afade=t=in:d=0.004' },
+  chime:     { name: 'Chime', dur: 1.6, src: "aevalsrc='0.36*sin(2*PI*880*t)*exp(-3*t)+0.36*sin(2*PI*1320*(t-0.18))*exp(-3*(t-0.18))*gte(t,0.18)':d=1.6", af: 'afade=t=in:d=0.004' },
+  pop:       { name: 'Pop', dur: 0.18, src: "aevalsrc='0.9*sin(2*PI*(520-700*t)*t)*exp(-32*t)':d=0.18", af: 'afade=t=in:d=0.002' },
+  click:     { name: 'Click', dur: 0.08, src: "aevalsrc='(random(0)*2-1)*exp(-160*t)':d=0.08", af: 'highpass=f=1500,volume=1.4' },
+  shutter:   { name: 'Camera', dur: 0.35, src: "aevalsrc='(random(0)*2-1)*(exp(-120*t)+exp(-120*abs(t-0.13))*gte(t,0.13))':d=0.35", af: 'highpass=f=900,lowpass=f=8000,volume=1.3' },
+  drumroll:  { name: 'Drum roll', dur: 2.4, src: "aevalsrc='(random(0)*2-1)*0.42*(0.55+0.45*sin(2*PI*26*t))*min(1,0.35+t/1.6)':d=2.4", af: 'highpass=f=140,lowpass=f=1300,volume=2.4,afade=t=out:st=2.2:d=0.2' },
+  heartbeat: { name: 'Heartbeat', dur: 1.4, src: "aevalsrc='0.95*sin(2*PI*58*t)*exp(-22*t)+0.75*sin(2*PI*52*(t-0.26))*exp(-22*(t-0.26))*gte(t,0.26)':d=1.4", af: 'lowpass=f=300,volume=1.6' },
+  glitch:    { name: 'Glitch', dur: 0.6, src: "aevalsrc='0.5*sgn(sin(2*PI*(220+880*floor(random(0)*6))*t))*gt(sin(2*PI*14*t),-0.2)':d=0.6", af: 'lowpass=f=5000,afade=t=out:st=0.5:d=0.1,volume=0.8' },
+  boing:     { name: 'Boing', dur: 0.8, src: "aevalsrc='0.6*sin(2*PI*(120*t+80*sin(2*PI*7*t)/(2*PI*7)))*exp(-3.5*t)':d=0.8", af: 'afade=t=in:d=0.005' },
+  swoopdown: { name: 'Swoop down', dur: 1.0, src: "aevalsrc='0.4*sin(2*PI*(900*t-380*t*t))':d=1.0", af: 'afade=t=in:d=0.08,afade=t=out:st=0.6:d=0.4' },
+  tick:      { name: 'Clock tick', dur: 2.0, src: "aevalsrc='0.7*(random(0)*2-1)*exp(-260*mod(t,0.5))':d=2.0", af: 'highpass=f=2000,volume=1.5' },
+};
+async function makeSfx(ctx, { kind, output }) {
+  const r = SFX[kind];
+  if (!r) throw new Error('Unknown sound effect: ' + kind);
+  await ff.runFfmpeg(ctx.ffmpeg, ['-f', 'lavfi', '-i', r.src, '-af', `${r.af},aformat=channel_layouts=stereo`, '-ar', '48000',
+    '-t', String(r.dur), '-c:a', 'aac', '-b:a', '160k', '-y', output]);
+  return output;
+}
+
+/*
+ * A voiceover, or any sound, put back into the picture at its own moment.
+ * Each one is delayed to where it sits (`at`, seconds into THIS file) and mixed
+ * over the existing sound — normalize off, so the speaker does not get quieter
+ * every time a sound is added — and the picture is copied untouched.
+ */
+async function mixSounds(ctx, { input, sounds, output, onProgress }) {
+  const info = await getInfo(ctx, input);
+  const list = (sounds || []).filter((x) => x && x.path && Number(x.at) < (info.durationSec || Infinity));
+  if (!list.length) { fs.copyFileSync(input, output); return output; }
+  const args = ['-i', input];
+  for (const x of list) args.push('-i', x.path);
+  const parts = [];
+  const mixIn = [];
+  if (info.hasAudio) mixIn.push('[0:a]');
+  else { parts.push(`anullsrc=r=48000:cl=stereo,atrim=0:${(info.durationSec || 0).toFixed(3)}[base]`); mixIn.push('[base]'); }
+  list.forEach((x, i) => {
+    const ms = Math.max(0, Math.round((Number(x.at) || 0) * 1000));
+    const vol = Math.max(0, Math.min(4, Number(x.volume) == null || isNaN(Number(x.volume)) ? 1 : Number(x.volume)));
+    // `from`: a sound that began before this export's first frame plays from
+    // where the export joins it; `dur`: how much of it is on the timeline
+    const from = Math.max(0, Number(x.from) || 0);
+    const trim = (from > 0 || x.dur > 0)
+      ? `atrim=start=${from.toFixed(3)}${x.dur > 0 ? ':end=' + (from + Number(x.dur)).toFixed(3) : ''},asetpts=PTS-STARTPTS,` : '';
+    parts.push(`[${i + 1}:a]${trim}aresample=48000,aformat=channel_layouts=stereo,volume=${vol.toFixed(3)},adelay=${ms}|${ms}[s${i}]`);
+    mixIn.push(`[s${i}]`);
+  });
+  // a limiter on the sum: a sound on top of a loud moment must not clip
+  parts.push(`${mixIn.join('')}amix=inputs=${mixIn.length}:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.89:level=false[aout]`);
+  args.push('-filter_complex', parts.join(';'), '-map', '0:v?', '-map', '[aout]',
+    '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-y', output);
+  await ff.runFfmpeg(ctx.ffmpeg, args, { onProgress, totalDurationSec: info.durationSec });
+  return output;
+}
+
+/** A recording from the phone or the desk's microphone, made into an ordinary .m4a. */
+async function saveRecording(ctx, { inputPath, output }) {
+  await ff.runFfmpeg(ctx.ffmpeg, ['-i', inputPath, '-vn', '-ac', '1', '-ar', '48000', '-af', 'highpass=f=70',
+    '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', '-y', output]);
+  return output;
+}
+
 /** Render a waveform PNG for the whole audio track (for the timeline's audio row). */
 async function waveform(ctx, { input, width = 1600, height = 90, color = '0x4f7cff', output }) {
   const info = await getInfo(ctx, input);
@@ -2704,6 +2780,7 @@ const INFO_SHAPE = require('crypto').createHash('sha1').update(probeInfo.toStrin
 module.exports = {
   PRESETS, QUALITY, DEFAULT_QUALITY, qualityDef, presetSize, sourceSize, upscaleFactor, outputFps,
   setExportPrefs, getExportPrefs, RATE_CRF, FPS_CHOICES, TRANSITIONS, transitionOf,
+  SFX, makeSfx, mixSounds, saveRecording,
   getInfo, INFO_SHAPE, trim, exportForPlatform, thumbnail,
   extractAudio, autoTrimSilence, merge, joinPieces, normalizePieces, addCaptions, exportShort, filmstrip, makeProxy, needsProxy, applyEdits,
   extractFrames, detectSceneCuts, exportShortReframed, exportShortFramed, attachThumbnail, waveform, stabilize, reverseClip, freezeFrame, hms, cutPlan,

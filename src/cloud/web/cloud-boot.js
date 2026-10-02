@@ -227,6 +227,7 @@ let _hideTimer = null;
       export: (a) => call('video:export', a),
       extractAudio: (a) => call('video:extractAudio', a),
       setExportPrefs: (a) => call('video:setExportPrefs', a),
+      mixSounds: (a) => call('video:mixSounds', a),
       getExportPrefs: () => call('video:getExportPrefs'),
       audioSample: (a) => call('video:audioSample', a),
       autoTrim: (a) => call('video:autoTrim', a),
@@ -319,6 +320,12 @@ let _hideTimer = null;
       burnImages: (a) => call('overlays:burnImages', a),
     },
     fonts: { data: () => call('fonts:data') },
+    audio: {
+      sfxList: () => call('audio:sfxList'),
+      sfx: (kind) => call('audio:sfx', { kind }),
+      // the recording's bytes travel as binary (pack), not as text
+      saveRecording: (a) => call('audio:saveRecording', a),
+    },
     fs: {
       readImageDataUrl: (p) => call('fs:readImageDataUrl', { path: p }),
       writeImageDataUrl: (dataUrl, name) => call('fs:writeImageDataUrl', { dataUrl, name }),
@@ -807,7 +814,7 @@ let _hideTimer = null;
    * capability is not lost and it is not hidden behind a setting: the studio's
    * own ＋ Clip button does the same job at the playhead.
    */
-  const LONG_PRESS_SEL = '#veTrack, .ve-track, .ve-cap-track, .ve-text-track, .ve-audio-track, .ve-music-track';
+  const LONG_PRESS_SEL = '#veTrack, .ve-track, .ve-cap-track, .ve-text-track, .ve-audio-track, .ve-music-track, .ve-sfx-track';
   const LONG_PRESS_MS = 350;
   const SLOP_PX = 9;
 
@@ -1042,6 +1049,7 @@ let _hideTimer = null;
     fullscreen: '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/>',
     overlay: '<rect width="12" height="12" x="9" y="9" rx="2"/><path d="M15 9V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h4"/>',
     rotate: '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
+    sfx: '<path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="m19 4 1 2 2 1-2 1-1 2-1-2-2-1 2-1z"/>',
     transition: '<rect width="8" height="14" x="2" y="5" rx="1.5"/><rect width="8" height="14" x="14" y="5" rx="1.5"/><path d="m11 9 2 3-2 3"/>',
     sliders: '<line x1="4" x2="20" y1="7" y2="7"/><line x1="4" x2="20" y1="17" y2="17"/><circle cx="9" cy="7" r="2.4" fill="#fff"/><circle cx="15" cy="17" r="2.4" fill="#fff"/>',
   };
@@ -1102,6 +1110,8 @@ let _hideTimer = null;
     ],
     audio: [
       { icon: 'music', label: 'Music', press: '#veMusic' },
+      { icon: 'mic', label: 'Voiceover', press: '#veVoiceover' },
+      { icon: 'sfx', label: 'Sound FX', press: '#veSfxBtn' },
       { icon: 'volume', label: 'Volume', fx: '#fxVol' },
       { icon: 'mic', label: 'Clean voice', sheet: 'insp', tab: '#veInspTabAudio' },
       { icon: 'audio-lines', label: 'Extract', press: '[data-vtool="extract"]' },

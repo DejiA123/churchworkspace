@@ -1109,6 +1109,8 @@
             <button id="veCloseGap" title="Close gap (G) — join the selected clip with the one next to it into ONE short, removing the pause between them. Press once per pause.">🔗 Close gap</button>
             <button id="veOverlay" title="Move the selected clip to the Overlay lane (picture-in-picture)">📺 Overlay</button>
             <button id="veAddMedia" title="Put a SECOND video or a picture on top of this one. It lands at the playhead on an Overlay row — drag it anywhere on the timeline, drag its edges for how long it shows, and drag the box on the preview to place it in the frame. Drop two files and they take separate rows so both show at once. You can also drop files straight onto the timeline.">➕ Add media</button>
+            <button id="veVoiceover" title="Record a voiceover with the microphone. The video plays (silently) from the playhead while you speak, so you can talk over the moment you are on — and it lands on the 🔊 Sounds row right there.">🎙 Voiceover</button>
+            <button id="veSfxBtn" title="Sound effects — whoosh, impact, ding, riser and more. Made right here, free to use anywhere, dropped on the 🔊 Sounds row at the playhead.">🔊 Sound FX</button>
             <button id="veCutOut" class="hidden" title="Take the background out of the selected picture — a white or plain backdrop becomes transparent, so only the logo or the person is left on top of your video.">🪄 Cut out background</button>
             <button id="veOvSound" class="hidden" title="Sound of the selected added video">🔊 Sound on</button>
             <span class="ve-tl-sep"></span>
@@ -1134,6 +1136,7 @@
             <div class="ve-tl-label" id="veCapLabel">💬 Captions</div>
             <div class="ve-tl-label">🔊 Audio</div>
             <div class="ve-tl-label" id="veMusicLabel">🎵 Music</div>
+            <div class="ve-tl-label" id="veSfxLabel">🔊 Sounds</div>
           </div>
           <div class="ve-tl-scroll" id="veTlScroll">
             <div class="ve-ruler" id="veRuler"></div>
@@ -1146,6 +1149,7 @@
             <div class="ve-cap-track" id="veCapTrack"></div>
             <div class="ve-audio-track" id="veAudioTrack"></div>
             <div class="ve-music-track" id="veMusicTrack"></div>
+            <div class="ve-sfx-track" id="veSfxTrack"></div>
             <div class="ve-playhead" id="vePlayhead"></div>
           </div>
         </div>
