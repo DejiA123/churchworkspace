@@ -22,7 +22,8 @@ services:
     plan: starter            # free has no disk and sleeps — see the note above
     region: frankfurt        # change to the region nearest the church
     healthCheckPath: /api/hello
-    autoDeploy: false
+    # Every merge to main goes live by itself — no "Manual Deploy" to press.
+    autoDeploy: true
     envVars:
       - key: MW_CLOUD_PORT
         value: "10000"       # Render routes to $PORT, which is 10000 here
