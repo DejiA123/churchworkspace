@@ -813,16 +813,13 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
      the timeline — and a finger goes straight through them: one sitting on a
      clip's edge for four seconds was a clip that could not be trimmed. */
   body.mw-cloud .toast {
-    left: 14px; right: 14px; max-width: none;
-    transform: none;
+    left: 14px; right: 14px; margin: 0 auto; width: fit-content; max-width: calc(100% - 28px);
     z-index: 400;
     pointer-events: none;
     bottom: calc(var(--ph-dock) + var(--ph-tl) + var(--ph-tr) + 30px);
-    padding: 10px 14px;
-    border-radius: 14px;
-    background: rgba(28,29,34,.94);
-    backdrop-filter: blur(8px);
-    font-size: 13px; line-height: 1.4;
+    padding: 9px 15px 9px 9px;
+    border-radius: 18px;
+    font-size: 14px; line-height: 1.36;
   }
   body.mw-cloud.mw-sheet .toast { bottom: calc(var(--ph-sheet) + var(--ph-tr) + 30px); }
   /* a panel is up from the bottom: messages go to the top, off its controls */

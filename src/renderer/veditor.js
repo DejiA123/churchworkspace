@@ -6442,7 +6442,7 @@
     $('#veResumeYes').addEventListener('click', async () => {
       done();
       await applySession(saved);
-      window.__toast && window.__toast('Everything is back — clips, captions and all. Give it a name with Save.', 'good', 6000);
+      window.__toast && window.__toast('Everything is back — your clips, captions and edits, just as you left them.', 'good', 5000);
     });
     $('#veResumeNo').addEventListener('click', () => {
       done();

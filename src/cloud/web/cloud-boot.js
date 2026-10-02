@@ -350,13 +350,55 @@ let _hideTimer = null;
    * the progress overlay came across with the page), so the studio's own calls
    * land exactly where they expect to.
    */
+  /*
+   * THE MESSAGE PILL. One look on the phone and the desk: frosted glass, a small
+   * status mark in the kind's colour (done / problem / note), and the words —
+   * without the decorative emoji the studio's messages open with, which read as
+   * clutter beside a proper icon. Symbols that MEAN something in a sentence
+   * (▶ ◆ ✓ ✕ arrows) are kept. It slides in, and fades out rather than blinking.
+   */
+  const TOAST_ICONS = {
+    good: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
+    error: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 7v6.5"/><path d="M12 17.2v.1"/></svg>',
+    warn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 7v6.5"/><path d="M12 17.2v.1"/></svg>',
+    info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 11v6"/><path d="M12 7.2v.1"/></svg>',
+  };
+  const toastText = (msg) => String(msg == null ? '' : msg)
+    .replace(/(?![▶⏸◆◇✓✕↔↕→←↑↓★])[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}][\u{FE0F}\u{20E3}\u{200D}\p{Extended_Pictographic}]*/gu, '')
+    .replace(/️/g, '')
+    .replace(/\s+([,.;:!?)])/g, '$1')
+    .replace(/\(\s+/g, '(')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
   function toast(msg, kind = '', ms) {
-    const t = $('#toast');
+    const t = document.getElementById('toast');
     if (!t) return;
-    t.textContent = msg;
-    t.className = 'toast ' + kind;
-    clearTimeout(toast._t);
-    toast._t = setTimeout(() => t.classList.add('hidden'), ms || 4200);
+    // a message that opens with a warning sign is a warning, whatever kind it was sent as
+    const warn = !kind && /^\s*(?:⚠|🚫|⛔)/u.test(String(msg || ''));
+    const k = kind === 'good' || kind === 'error' ? kind : (warn ? 'warn' : 'info');
+    const text = toastText(msg) || String(msg || '');
+    t.setAttribute('role', k === 'error' ? 'alert' : 'status');
+    // "Headline — the detail" (or "Headline. The detail.") reads as a bold
+    // title over a softer line; anything else is a single line.
+    let title = text, sub = '';
+    const cut = text.match(/^(.{4,52}?)(?:\s+—\s+|\.\s+)(.+)$/);
+    if (cut) { title = cut[1].replace(/[.:]$/, ''); sub = cut[2].charAt(0).toUpperCase() + cut[2].slice(1); }
+    else title = title.replace(/\.$/, '');   // a one-line note reads cleaner without its full stop
+    t.innerHTML = `<span class="toast-ic">${TOAST_ICONS[k]}</span><span class="toast-msg"><b class="toast-title"></b><span class="toast-sub"></span></span>`;
+    t.querySelector('.toast-title').textContent = title;
+    const subEl = t.querySelector('.toast-sub');
+    if (sub) subEl.textContent = sub; else subEl.remove();
+    t.className = 'toast toast-' + k + (kind && k !== kind ? ' ' + kind : '');
+    // restart the entrance even when a message replaces one still showing
+    void t.offsetWidth;
+    t.classList.add('toast-in');
+    clearTimeout(toast._t); clearTimeout(toast._t2);
+    const stay = ms || Math.min(7000, Math.max(3200, 1600 + text.length * 38));
+    toast._t = setTimeout(() => {
+      t.classList.remove('toast-in');
+      t.classList.add('toast-out');
+      toast._t2 = setTimeout(() => t.classList.add('hidden'), 260);
+    }, stay);
   }
   window.__toast = toast;
 
