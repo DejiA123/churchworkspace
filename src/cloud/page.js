@@ -159,9 +159,12 @@ function build(opts = {}) {
   body = stripElement(body, /<aside[^>]*class="[^"]*\bsidebar\b[^"]*"[^>]*>/i, 'aside');
 
   // The Video Studio's own view is the only one left, so it is the active one.
+  // Matched by its id, whatever else is in its class list: the studio's
+  // section became `class="view ve-pro"`, an exact `class="view"` stopped
+  // matching, and on anything wider than a phone the studio was a blank page.
   body = body.replace(
-    new RegExp(`<section([^>]*)class="view"([^>]*)id="${KEEP_VIEW}"`, 'i'),
-    `<section$1class="view active"$2id="${KEEP_VIEW}"`,
+    new RegExp(`<section([^>]*)class="view((?: [^"]*)?)"([^>]*)id="${KEEP_VIEW}"`, 'i'),
+    `<section$1class="view active$2"$3id="${KEEP_VIEW}"`,
   );
 
   const styles = RENDERER_STYLES.map((f) => `  <link rel="stylesheet" href="/r/${f}?v=${key}" />`).join('\n');

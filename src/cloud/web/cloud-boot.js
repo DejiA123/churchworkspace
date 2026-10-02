@@ -962,6 +962,411 @@ let _hideTimer = null;
     else if (mq.addListener) mq.addListener(apply);      // older WebKit
   }
 
+  /* ---------------------------------------------------- the phone editor */
+
+  /*
+   * The other half of the phone layout in cloud.css: the top bar's quality and
+   * Export, the tool dock along the bottom, and the sheets that come up over
+   * the timeline. Every tool here PRESSES one of the desk's own buttons — the
+   * same handler, the same undo stack, the same disabled state — so a tool on
+   * the phone can never do something the desktop's button does not, and a
+   * button the studio greys out is greyed out here too.
+   */
+  const mi = (name, extra) => `<i class="mi${extra ? ' ' + extra : ''}" data-i="${name}"></i>`;
+
+  // Icons the desk has no use for, drawn in the same line style as its set.
+  const PHONE_ICONS = {
+    'chev-left': '<path d="m15 18-6-6 6-6"/>',
+    'zoom-in': '<circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="11" x2="11" y1="8" y2="14"/><line x1="8" x2="14" y1="11" y2="11"/>',
+    'zoom-out': '<circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="8" x2="14" y1="11" y2="11"/>',
+    'fit': '<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>',
+    'expand': '<path d="m18 15-6-6-6 6"/>',
+    'shrink': '<path d="m6 9 6 6 6-6"/>',
+    'clapper': '<path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"/><path d="m6.2 5.3 3.1 3.9"/><path d="m12.4 3.4 3.1 4"/><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
+  };
+  function addPhoneIcons() {
+    if ($('#cloudPhoneIcons') || !window.MWIcons || !window.MWIcons.svgUri) return;
+    const st = document.createElement('style');
+    st.id = 'cloudPhoneIcons';
+    st.textContent = Object.keys(PHONE_ICONS)
+      .map((k) => `.mi[data-i="${k}"]{--mi:${window.MWIcons.svgUri(PHONE_ICONS[k])}}`).join('\n');
+    document.head.appendChild(st);
+  }
+
+  /* What the dock holds. `press` is a desk button; `sheet` opens a sheet;
+     `row` swaps the dock for that row of tools; `check` toggles a desk box. */
+  const DOCK = {
+    main: [
+      { icon: 'sparkles', label: 'AI Shorts', ai: true, sheet: 'shorts', count: true },
+      { icon: 'captions', label: 'Captions', ai: true, sheet: 'insp', tab: '#veInspTabCaptions' },
+      { icon: 'scissors', label: 'Edit', row: 'edit' },
+      { icon: 'type', label: 'Text', press: '#veAddText' },
+      { icon: 'music', label: 'Audio', row: 'audio' },
+      { icon: 'crop', label: 'Ratio', row: 'ratio' },
+      { icon: 'target', label: 'Reframe', ai: true, sheet: 'insp', tab: '#veInspTabReframe' },
+      { icon: 'image', label: 'Overlay', row: 'overlay' },
+      { icon: 'palette', label: 'Look', sheet: 'insp', tab: '#veInspTabLook' },
+      { icon: 'folder', label: 'Project', row: 'project' },
+    ],
+    edit: [
+      { icon: 'scissors', label: 'Split', press: '#veSplit' },
+      { icon: 'trash', label: 'Delete', press: '#veDelClip' },
+      { icon: 'copy', label: 'Duplicate', press: '#veDupClip' },
+      { icon: 'link', label: 'Close gap', press: '#veCloseGap' },
+      { icon: 'plus', label: 'New clip', press: '#veAddClip' },
+      { icon: 'pen', label: 'Blade', blade: true },
+      { icon: 'magnet', label: 'Snap', press: '#veSnap', on: true },
+      { icon: 'repeat', label: 'Loop', check: '#veLoopSel' },
+      { icon: 'zoom-out', label: 'Zoom out', press: '#veZoomOut' },
+      { icon: 'fit', label: 'Fit', press: '#veZoomFit' },
+      { icon: 'zoom-in', label: 'Zoom in', press: '#veZoomIn' },
+      { icon: 'eye', label: 'Follow', press: '#veFollow', on: true },
+    ],
+    audio: [
+      { icon: 'music', label: 'Music', press: '#veMusic' },
+      { icon: 'volume', label: 'Sound', sheet: 'insp', tab: '#veInspTabAudio' },
+      { icon: 'volume', label: 'Clip sound', press: '#veOvSound' },
+    ],
+    ratio: [],      // built from the desk's own list of shapes
+    overlay: [
+      { icon: 'image', label: 'Add media', press: '#veAddMedia' },
+      { icon: 'pip', label: 'To overlay', press: '#veOverlay' },
+      { icon: 'eraser', label: 'Cut out', press: '#veCutOut' },
+      { icon: 'volume', label: 'Sound', press: '#veOvSound' },
+    ],
+    project: [
+      { icon: 'folder', label: 'Open', press: '#veOpen' },
+      { icon: 'save', label: 'Save', press: '#veSaveSession' },
+      { icon: 'layers', label: 'Sessions', press: '#veSessions' },
+      { icon: 'clapper', label: 'Outros', press: '#veClips' },
+      { icon: 'package', label: 'Batch', press: '#veBulk' },
+      { icon: 'download', label: 'Saved', press: '#cloudDownloads' },
+      { icon: 'book', label: 'Help', press: '#cloudHelp' },
+    ],
+  };
+
+  const SHEET_KINDS = ['shorts', 'insp', 'export'];
+  function closeSheet() {
+    document.body.classList.remove('mw-sheet', 'mw-sheet-tall', ...SHEET_KINDS.map((k) => 'mw-sheet-' + k));
+  }
+  function sheetTitle(t) { const el = $('#cloudSheetHead .cloud-sheet-title'); if (el) el.textContent = t; }
+  function inspTitle() {
+    const on = $('#view-video .ve-insp-tabs button.on .ve-tab-tx');
+    return on ? on.textContent.trim() : 'Settings';
+  }
+  function openSheet(kind, opts = {}) {
+    closeSheet();
+    document.body.classList.add('mw-sheet', 'mw-sheet-' + kind);
+    if (kind === 'insp' && opts.tab) { const t = $(opts.tab); if (t) t.click(); }
+    if (kind === 'export') renderExportSheet();
+    sheetTitle(kind === 'shorts' ? 'AI Shorts' : kind === 'export' ? 'Export' : inspTitle());
+    const body = kind === 'shorts' ? $('#view-video .ve-bin') : kind === 'insp' ? $('#view-video .ve-side') : $('#cloudExportSheet');
+    if (body) body.scrollTop = 0;
+  }
+
+  const plain = (s) => String(s || '').replace(/^[^\p{L}\p{N}]+/u, '').replace(/\s+/g, ' ').trim();
+  const QUALITY_SHORT = { '720p': '720p', '1080p': '1080p', '4k': '4K', source: 'Original' };
+
+  function fillQuality(sel) {
+    const q = $('#veQuality');
+    if (!q || !sel) return;
+    if (sel.options.length !== q.options.length) {
+      sel.innerHTML = '';
+      for (const o of q.options) sel.add(new Option(plain(o.textContent), o.value));
+    }
+    sel.value = q.value;
+  }
+  function setQuality(v) {
+    const q = $('#veQuality');
+    if (!q || q.value === v) return;
+    q.value = v;
+    q.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  function syncQualityPill() {
+    const q = $('#veQuality');
+    const tx = $('#cloudQualityTx');
+    if (q && tx) tx.textContent = QUALITY_SHORT[q.value] || plain(q.options[q.selectedIndex] && q.options[q.selectedIndex].textContent);
+    fillQuality($('#cloudQuality'));
+    fillQuality($('#cloudXpQuality'));
+  }
+
+  function renderExportSheet() {
+    syncQualityPill();
+    const ed = $('#veExportEdited');
+    const all = $('#veExportAll');
+    const n = $$('#veClipList .ve-clip').length;
+    const v = $('#cloudExportSheet [data-xp="video"]');
+    const s = $('#cloudExportSheet [data-xp="shorts"]');
+    if (v) {
+      v.disabled = !ed || ed.disabled;
+      const m = /\(([^)]+)\)/.exec(ed ? ed.textContent : '');
+      $('#cloudXpVideoSub').textContent = v.disabled ? 'Open a video first' : 'The whole edit as one file' + (m ? ' · ' + m[1] : '');
+    }
+    if (s) {
+      s.disabled = !all || all.disabled;
+      $('#cloudXpShortsSub').textContent = n ? `${n} short${n === 1 ? '' : 's'}, 9:16, ready for Reels, TikTok and Shorts` : 'Make shorts with AI Shorts first';
+    }
+    for (const box of $$('#cloudExportSheet [data-mirror]')) {
+      const src = $(box.dataset.mirror);
+      box.checked = !!(src && src.checked);
+      box.closest('.cloud-xp-row').classList.toggle('hidden', !src);
+    }
+  }
+
+  function installPhoneEditor() {
+    const view = $('#view-video');
+    if (!view || $('#cloudDock')) return;
+    if (window.MWIcons) window.MWIcons.mount([]);      // the icon set's own CSS
+    addPhoneIcons();
+
+    /* ---- the top bar: icons, the export quality, and Export ---------- */
+    const chip = (sel, icon, label) => {
+      const b = $(sel);
+      if (!b) return;
+      const badge = b.querySelector('.cloud-badge');
+      b.innerHTML = `${mi(icon, 'mi-l')}<span class="cloud-chip-tx">${label}</span>`;
+      if (badge) b.appendChild(badge);
+      b.setAttribute('aria-label', label);
+    };
+    chip('#cloudFiles', 'folder', 'Files');
+    chip('#cloudDownloads', 'download', 'Saved');
+
+    const actions = $('#cloudBar .cloud-bar-actions') || $('#cloudBar');
+    const qWrap = document.createElement('label');
+    qWrap.className = 'cloud-q';
+    qWrap.title = 'Export quality';
+    qWrap.innerHTML = '<span id="cloudQualityTx">1080p</span><select id="cloudQuality" aria-label="Export quality"></select>';
+    actions.appendChild(qWrap);
+    $('#cloudQuality').addEventListener('change', (e) => { setQuality(e.target.value); syncQualityPill(); });
+    const q = $('#veQuality');
+    if (q) q.addEventListener('change', syncQualityPill);
+    syncQualityPill();
+
+    const xp = document.createElement('button');
+    xp.id = 'cloudExport';
+    xp.className = 'cloud-export';
+    xp.textContent = 'Export';
+    xp.addEventListener('click', () => openSheet('export'));
+    actions.appendChild(xp);
+
+    /* ---- the play row: undo and redo where a thumb expects them -------- */
+    const right = $('#view-video .ve-transport-right');
+    if (right) {
+      const extra = document.createElement('span');
+      extra.className = 'cloud-tr-extra';
+      extra.innerHTML = `<button type="button" data-press="#veUndo" aria-label="Undo">${mi('undo')}</button>`
+        + `<button type="button" data-press="#veRedo" aria-label="Redo">${mi('redo')}</button>`;
+      right.insertBefore(extra, $('#veFull') || null);
+      for (const b of extra.querySelectorAll('[data-press]')) {
+        b.addEventListener('click', () => { const t = $(b.dataset.press); if (t && !t.disabled) t.click(); });
+        mirror(b, $(b.dataset.press), {});
+      }
+    }
+
+    /* ---- the dock ---------------------------------------------------- */
+    const dock = document.createElement('nav');
+    dock.id = 'cloudDock';
+    dock.className = 'cloud-dock';
+    dock.setAttribute('aria-label', 'Editing tools');
+    document.body.appendChild(dock);
+
+    // Ratio: one button per shape the desk offers, in the desk's own order.
+    const aspect = $('#veAspect');
+    const ratioRow = () => (aspect ? Array.from(aspect.options).map((o) => ({
+      ratio: o.value, label: plain(o.textContent).replace(/\s*\(.*\)$/, ''), short: (/(\d+:\d+)/.exec(o.textContent) || [, plain(o.textContent).slice(0, 4)])[1],
+    })) : []);
+
+    function buildRow(name) {
+      const row = document.createElement('div');
+      row.className = 'cloud-dock-row' + (name === 'main' ? ' on' : '');
+      row.dataset.row = name;
+      if (name !== 'main') {
+        const back = document.createElement('button');
+        back.type = 'button';
+        back.className = 'cloud-tool cloud-tool-back';
+        back.setAttribute('aria-label', 'Back');
+        back.innerHTML = mi('chev-left');
+        back.addEventListener('click', () => showRow('main'));
+        row.appendChild(back);
+      }
+      const items = name === 'ratio' ? ratioRow() : DOCK[name];
+      for (const t of items) row.appendChild(buildTool(t));
+      dock.appendChild(row);
+      return row;
+    }
+
+    function buildTool(t) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cloud-tool' + (t.ratio !== undefined ? ' cloud-tool-ratio' : '');
+      b.innerHTML = (t.ratio !== undefined ? `<b>${t.short}</b>` : mi(t.icon))
+        + `<span>${t.label}</span>`
+        + (t.ai ? '<span class="cloud-tool-ai">AI</span>' : '')
+        + (t.count ? '<span class="cloud-tool-count hidden" data-count></span>' : '');
+      b.addEventListener('click', () => act(t));
+      if (t.press) mirror(b, $(t.press), { on: t.on });
+      if (t.blade) mirror(b, $('#veToolBlade'), { on: true });
+      if (t.check) {
+        const box = $(t.check);
+        const sync = () => b.classList.toggle('on', !!(box && box.checked));
+        if (box) box.addEventListener('change', sync);
+        b._sync = sync; sync();
+      }
+      if (t.ratio !== undefined) {
+        const sync = () => b.classList.toggle('on', !!aspect && aspect.value === t.ratio);
+        if (aspect) aspect.addEventListener('change', sync);
+        b._sync = sync; sync();
+      }
+      return b;
+    }
+
+    function act(t) {
+      if (t.row) return showRow(t.row);
+      if (t.sheet) return openSheet(t.sheet, t);
+      if (t.press) { const el = $(t.press); if (el && !el.disabled) el.click(); return; }
+      if (t.blade) {
+        const blade = $('#veToolBlade');
+        const on = blade && blade.classList.contains('on');
+        const el = $(on ? '#veToolSelect' : '#veToolBlade');
+        if (el) el.click();
+        return;
+      }
+      if (t.check) {
+        const box = $(t.check);
+        if (box) { box.checked = !box.checked; box.dispatchEvent(new Event('change', { bubbles: true })); }
+        return;
+      }
+      if (t.ratio !== undefined && aspect && aspect.value !== t.ratio) {
+        aspect.value = t.ratio;
+        aspect.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }
+
+    function showRow(name) {
+      for (const r of dock.querySelectorAll('.cloud-dock-row')) {
+        const on = r.dataset.row === name;
+        r.classList.toggle('on', on);
+        if (on) {
+          r.scrollLeft = 0;
+          for (const b of r.querySelectorAll('.cloud-tool')) if (b._sync) b._sync();
+        }
+      }
+    }
+
+    for (const name of Object.keys(DOCK)) buildRow(name);
+
+    // How many shorts the AI has made, on the AI Shorts button.
+    const list = $('#veClipList');
+    const count = $('#cloudDock [data-count]');
+    if (list && count) {
+      const sync = () => {
+        const n = list.querySelectorAll('.ve-clip').length;
+        count.textContent = String(n);
+        count.classList.toggle('hidden', !n);
+      };
+      new MutationObserver(sync).observe(list, { childList: true });
+      sync();
+    }
+
+    /* ---- sheets ------------------------------------------------------ */
+    const head = document.createElement('div');
+    head.id = 'cloudSheetHead';
+    head.className = 'cloud-sheet-head';
+    head.innerHTML = '<span class="cloud-sheet-title"></span>'
+      + `<button type="button" class="cloud-sheet-act" data-press="#veExportAll">${mi('download')}Export all</button>`
+      + `<button type="button" class="cloud-sheet-size" aria-label="Make the panel taller">${mi('expand')}</button>`
+      + `<button type="button" class="cloud-sheet-done" aria-label="Done">${mi('check')}</button>`;
+    document.body.appendChild(head);
+    head.querySelector('.cloud-sheet-done').addEventListener('click', closeSheet);
+    const exportAll = head.querySelector('.cloud-sheet-act');
+    exportAll.addEventListener('click', () => { const t = $('#veExportAll'); if (t && !t.disabled) { closeSheet(); t.click(); } });
+    mirror(exportAll, $('#veExportAll'), {});
+    head.querySelector('.cloud-sheet-size').addEventListener('click', () => {
+      const tall = document.body.classList.toggle('mw-sheet-tall');
+      head.querySelector('.cloud-sheet-size').innerHTML = mi(tall ? 'shrink' : 'expand');
+    });
+    // Picking another tab inside the settings sheet retitles it.
+    const tabs = $('#view-video .ve-insp-tabs');
+    if (tabs) tabs.addEventListener('click', () => setTimeout(() => {
+      if (document.body.classList.contains('mw-sheet-insp')) sheetTitle(inspTitle());
+    }, 0));
+
+    const xs = document.createElement('div');
+    xs.id = 'cloudExportSheet';
+    xs.className = 'cloud-export-sheet';
+    xs.innerHTML = `
+      <button type="button" class="cloud-xp-main" data-xp="shorts">${mi('sparkles')}<span>Export all shorts<small id="cloudXpShortsSub"></small></span></button>
+      <button type="button" class="cloud-xp-main alt" data-xp="video">${mi('film')}<span>Export video<small id="cloudXpVideoSub"></small></span></button>
+      <div class="cloud-xp-row"><span>Quality</span><select id="cloudXpQuality" aria-label="Export quality"></select></div>
+      <label class="cloud-xp-row"><span>Caption the shorts as they export</span><input type="checkbox" data-mirror="#veCapExports" /></label>
+      <label class="cloud-xp-row"><span>Keep editing while it exports</span><input type="checkbox" data-mirror="#veBgExport" /></label>
+      <button type="button" class="cloud-xp-link" data-xp="saved">Finished files — save them to this phone</button>
+      <button type="button" class="cloud-xp-link" data-xp="more">More export settings</button>`;
+    document.body.appendChild(xs);
+    $('#cloudXpQuality').addEventListener('change', (e) => { setQuality(e.target.value); syncQualityPill(); });
+    for (const box of xs.querySelectorAll('[data-mirror]')) {
+      box.addEventListener('change', () => {
+        const src = $(box.dataset.mirror);
+        if (!src || src.checked === box.checked) return;
+        src.checked = box.checked;
+        src.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    }
+    xs.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-xp]');
+      if (!b || b.disabled) return;
+      const go = { shorts: '#veExportAll', video: '#veExportEdited', saved: '#cloudDownloads' }[b.dataset.xp];
+      if (b.dataset.xp === 'more') return openSheet('insp', { tab: '#veInspTabExport' });
+      closeSheet();
+      const el = $(go);
+      if (el && !el.disabled) el.click();
+    });
+
+    /* ---- pinch the timeline to zoom it ------------------------------- */
+    const tl = $('#veTimeline');
+    if (tl) {
+      let pinch = null;
+      const span = (ts) => Math.hypot(ts[0].clientX - ts[1].clientX, ts[0].clientY - ts[1].clientY);
+      tl.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 2) return;
+        // A first finger may have started a drag; a pinch is not one.
+        document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+        pinch = { d: span(e.touches) };
+      }, { passive: true });
+      tl.addEventListener('touchmove', (e) => {
+        if (!pinch || e.touches.length !== 2) return;
+        e.preventDefault();
+        const d = span(e.touches);
+        const r = d / pinch.d;
+        const step = (sel) => { const el = $(sel); if (el) el.click(); pinch.d = d; };
+        if (r > 1.2) step('#veZoomIn');
+        else if (r < 1 / 1.2) step('#veZoomOut');
+      }, { passive: false });
+      const done = (e) => { if (e.touches.length < 2) pinch = null; };
+      tl.addEventListener('touchend', done);
+      tl.addEventListener('touchcancel', done);
+      // iOS zooms the whole page on a pinch unless told not to.
+      tl.addEventListener('gesturestart', (e) => e.preventDefault());
+    }
+  }
+
+  /**
+   * Keep a phone tool in step with the desk button it presses: greyed out when
+   * that is, gone when that is hidden, lit when that is switched on.
+   */
+  function mirror(tool, target, { on } = {}) {
+    if (!tool) return;
+    if (!target) { tool.classList.add('cloud-tool-hidden'); tool.disabled = true; return; }
+    const sync = () => {
+      tool.disabled = !!target.disabled;
+      tool.classList.toggle('cloud-tool-hidden', target.classList.contains('hidden'));
+      if (on) tool.classList.toggle('on', target.classList.contains('on'));
+    };
+    new MutationObserver(sync).observe(target, { attributes: true, attributeFilter: ['disabled', 'class'] });
+    tool._sync = sync;
+    sync();
+  }
+
   /* --------------------------------------------------------------- help */
 
   const HELP = `
@@ -1054,6 +1459,7 @@ let _hideTimer = null;
     window.addEventListener('orientationchange', refit);
 
     installTouchBar();
+    installPhoneEditor();
 
     try {
       const hello = await fetch('/api/hello', { headers: authHeaders() }).then((r) => r.json());

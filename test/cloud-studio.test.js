@@ -206,6 +206,9 @@ async function run() {
   log(!/<script>/.test(html), 'the page has no inline script (its CSP forbids one)');
   log(html.includes('id="view-video"') && !html.includes('id="view-live"') && !html.includes('id="view-settings"'),
     'it carries the Video Studio and none of the studios a browser cannot drive');
+  // Without `active` the view is display:none — a blank page on a laptop.
+  log(/<section[^>]*class="view active[^"]*"[^>]*id="view-video"/.test(html),
+    'the studio is the active view, whatever else is in its class list');
   log(html.includes('rel="manifest"') && html.includes('veditor.js'), 'it is a PWA that loads the real editor');
   log(html.includes('tasks.js'), 'and the background-export layer, so a phone can walk away from an export');
 
