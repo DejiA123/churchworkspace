@@ -5005,8 +5005,10 @@
           : ` ⚠ Heard on this PC — the cloud ear could not (${ear.why || 'no answer'}).`;
       const aiMissed = useAi && ve.aiModel === 'cloud' && !(res.meta && res.meta.aiPass)
         ? ` ⚠ ☁️ Cloud AI did not judge this run (${(res.meta && res.meta.aiMissing) || (st && st.why) || 'no answer'}) — ranked by the rules instead.` : '';
-      ve._lastScanNote = { edNote, earNote, aiMissed };
-      window.__toast && window.__toast(`✨ Found ${res.clips.length} highlight${res.clips.length > 1 ? 's' : ''}${whole ? '' : ` in ${fmt(from)}–${fmt(to)}`}!${edNote}${earNote}${aiMissed} Review & tweak them, then Export.`, aiMissed ? 'error' : 'good', aiMissed || earNote.includes('⚠') ? 12000 : undefined);
+      // a server too small to read the words found these by the sound: say so
+      const memNote = res.meta && res.meta.lowMemory ? ` ⚠ ${res.meta.lowMemory}` : '';
+      ve._lastScanNote = { edNote, earNote, aiMissed, memNote };
+      window.__toast && window.__toast(`✨ Found ${res.clips.length} highlight${res.clips.length > 1 ? 's' : ''}${whole ? '' : ` in ${fmt(from)}–${fmt(to)}`}!${edNote}${earNote}${aiMissed}${memNote} Review & tweak them, then Export.`, aiMissed ? 'error' : 'good', aiMissed || memNote || earNote.includes('⚠') ? 12000 : undefined);
       // "Remove pauses" is part of the same click: the shorts land already tight,
       // rather than needing a second pass the user has to know to run.
       if (removePausesOn()) await removePausesIn(made);

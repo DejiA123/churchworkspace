@@ -95,6 +95,98 @@ function extractPcmOne(ffmpeg, input, from, dur, partial) {
   });
 }
 
+/*
+ * THE LOUDNESS, WITHOUT THE SOUND.
+ *
+ * extractPcm hands back the whole sermon as samples — an hour is 58 MB, and on
+ * the way it existed as chunks, then as pieces, then as the joined buffer, so
+ * the scan briefly held about three copies of it. All the scan ever does with
+ * the samples is buildEnvelope: one loudness figure per 50 ms. On a 512 MB
+ * server, those copies were the difference between a scan and a crash.
+ *
+ * This builds the same envelope while ffmpeg is still talking, 400 samples at
+ * a time, and keeps nothing else. It is the same arithmetic in the same order
+ * (test:envelope-stream checks it figure for figure against
+ * buildEnvelope(extractPcm(...))). The pieces line up with the hops because
+ * every piece but the last is a whole number of seconds — 8000 samples, twenty
+ * hops — and is trimmed or zero-padded to exactly that, as extractPcm does.
+ */
+async function extractEnvelope(ffmpeg, input, from, to, opts = {}) {
+  const a = Math.max(0, from || 0);
+  const len = to != null && to > a ? to - a : (opts.totalSec ? Math.max(0, opts.totalSec - a) : 0);
+  const n = len >= 600 ? Math.max(1, Math.min(opts.parallel || 1, Math.floor(len / 300))) : 1;
+  let parts;
+  if (n === 1) {
+    parts = [await envelopeOne(ffmpeg, input, a, len || null, null)];
+  } else {
+    const step = Math.ceil(len / n);
+    let done = 0;
+    parts = await Promise.all(Array.from({ length: n }, (_, k) => {
+      const s0 = a + k * step, d = Math.min(step, a + len - s0);
+      const last = k === n - 1;
+      return envelopeOne(ffmpeg, input, s0, d, last ? null : Math.round(d * SR))
+        .then((e) => { done++; if (opts.onPart) opts.onPart(done / n); return e; });
+    }));
+  }
+  const hops = parts.reduce((t, e) => t + e.hops, 0);
+  if (hops < 1) throw new Error('This video has no usable audio track to analyze.');
+  const db = new Float64Array(hops);
+  const rms = new Float64Array(hops);
+  let at = 0;
+  for (const e of parts) { db.set(e.db.subarray(0, e.hops), at); rms.set(e.rms.subarray(0, e.hops), at); at += e.hops; }
+  return { db, rms, hops };
+}
+/** One piece's envelope, straight off ffmpeg's stdout. `exact` samples, padded or cut, when given. */
+function envelopeOne(ffmpeg, input, from, dur, exact) {
+  return new Promise((resolve, reject) => {
+    const args = [];
+    if (from > 0) args.push('-ss', String(from));
+    args.push('-i', input);
+    if (dur) args.push('-t', String(dur));
+    args.push('-map', '0:a:0', '-vn', '-sn', '-dn', '-ac', '1', '-af', `aresample=${SR}:filter_size=8`,
+      '-f', 's16le', '-acodec', 'pcm_s16le', '-');
+    const proc = jobs.track(spawn(ffmpeg, args, { windowsHide: true }));
+    // grows as hops arrive; a piece of known length is sized once
+    let cap = exact ? Math.ceil(exact / HOP_SAMPLES) : 4096;
+    let db = new Float64Array(cap), rms = new Float64Array(cap);
+    let hops = 0, samples = 0;
+    let sumSq = 0, inHop = 0;
+    let odd = null;                       // a byte left over between chunks
+    const push = (r) => {
+      if (hops === cap) {
+        cap *= 2;
+        const d2 = new Float64Array(cap); d2.set(db); db = d2;
+        const r2 = new Float64Array(cap); r2.set(rms); rms = r2;
+      }
+      rms[hops] = r;
+      db[hops] = 20 * Math.log10(r / 32768 + 1e-9);
+      hops++;
+    };
+    const take = (v) => {
+      sumSq += v * v;
+      if (++inHop === HOP_SAMPLES) { push(Math.sqrt(sumSq / HOP_SAMPLES)); sumSq = 0; inHop = 0; }
+      samples++;
+    };
+    let stderr = '';
+    proc.stdout.on('data', (d) => {
+      let i = 0;
+      if (odd !== null) { take(Buffer.from([odd, d[0]]).readInt16LE(0)); odd = null; i = 1; }
+      for (; i + 1 < d.length; i += 2) {
+        if (exact && samples >= exact) return;
+        take(d.readInt16LE(i));
+      }
+      if (i < d.length) odd = d[i];
+    });
+    proc.stderr.on('data', (d) => { stderr += d.toString(); if (stderr.length > 40000) stderr = stderr.slice(-20000); });
+    proc.on('error', (e) => reject(new Error('Could not start ffmpeg: ' + e.message)));
+    proc.on('close', () => {
+      if (jobs.isCancelled()) return reject(new jobs.CancelledError());
+      if (exact) while (samples < exact) take(0);          // as extractPcm pads a short piece
+      resolve({ db, rms, hops });
+    });
+  });
+}
+
 /** Build the per-hop loudness envelope (dB) from an Int16LE PCM buffer. */
 function buildEnvelope(buf) {
   const n = Math.floor(buf.length / 2);
@@ -936,12 +1028,12 @@ async function analyzeSermon(ctx, opts = {}) {
   const T0 = Date.now();
   const mark = (l) => { if (process.env.MW_SHORTS_TIMING) console.error('[t] ' + l + ' ' + ((Date.now() - T0) / 1000).toFixed(1) + 's'); };
   report(3);
-  const buf = await extractPcm(ctx.ffmpeg, opts.input, OFF, END, {
+  // the loudness is built as the sound streams in — see extractEnvelope
+  const { db, hops } = await extractEnvelope(ctx.ffmpeg, opts.input, OFF, END, {
     totalSec: opts.totalSec || 0, parallel: opts.decodeParallel || 1, onPart: (f) => report(3 + Math.round(f * 40)),
   });
   mark('decoded audio');
   report(45);
-  const { db, hops } = buildEnvelope(buf);
   const dbS = smooth(db, 2); // ~150 ms smoothing for thresholding
   report(60);
 
@@ -1679,4 +1771,4 @@ function viralityAndReasons(c, aTop, contentUsed, norm) {
 
 module.exports = { analyzeSermon, contentScore, contentScoreV2, buildSentences, refineToSentences, selectWithCoverage, titleFromClip, viralityAndReasons,
   scoreLikeAnEditor, openerPenalty, closerPenalty, loopiness, transitionGap, topicSeam, cohesion, anaphora, quotableLine, readingAloud,
-  _internals: { buildEnvelope, extractPcm, pauseWindows, makeSnapper, SR, HOP } };
+  _internals: { buildEnvelope, extractPcm, extractEnvelope, pauseWindows, makeSnapper, SR, HOP } };

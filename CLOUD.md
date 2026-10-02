@@ -207,6 +207,19 @@ your domain. Cloudflare Tunnel or nginx do the job equally well.
 | `MW_CLOUD_MEDIA` | `<data>/media` | where recordings live |
 | `MW_CLOUD_CODE` | generated | the access code — **set this**, or it changes on restart |
 | `MW_CLOUD_UPLOADS` | `on` | `off` stops phones sending files up |
+| `GROQ_API_KEY` | — | a free Groq key: the sermon scan, captions and "remove pauses" are heard by Whisper Large in the cloud. Set it in the host's dashboard, never in the repo |
+| `MW_MEMORY_MB`, `MW_CPUS` | read from the container | only for a host that hides its limits — see *A small server* below |
+
+### A small server (512 MB)
+
+The studio reads the memory and CPUs the container really has (not the host's),
+and on anything under 2 GB it works within them: exports decode on one thread
+and keep x264's look-ahead short (a 1080p short peaks near 290 MB instead of
+680), the scan streams the sermon's loudness instead of holding the recording,
+and a speech model that would not fit is never started — it steps down to one
+that does (Tiny is fetched once if nothing else fits), or, with `GROQ_API_KEY`
+set, the listening happens in the cloud and costs the server nothing. That key
+is the single best thing to give a small server.
 
 ---
 
