@@ -772,10 +772,19 @@ let _hideTimer = null;
    * is the whole design — a bridge that grabs everything makes the page
    * unscrollable, which is how these usually go wrong.
    */
+  /*
+   * What a finger drags AT ONCE: the white trim handles and edges, and what
+   * sits on the picture (text, the crop frame, an overlay). Not the BODY of a
+   * clip on the timeline — the video clip spans the whole row, and grabbing it
+   * on touch meant a swipe to scroll the timeline moved the sermon instead.
+   * Clip bodies are picked up the way CapCut does it: swipe scrolls, a tap
+   * selects (the browser's own click), and a long press lifts the clip so it
+   * can be moved — the LONG_PRESS_SEL path below, which the rows contain.
+   */
   const DRAG_SEL = [
-    '.ve-seg', '.ve-seg-h', '.ve-audio-seg', '.ve-music-seg',
-    '.ve-cap-clip', '.ve-cap-edge', '[data-cedge]', '[data-capedge]',
-    '.ve-text-box', '.ve-text-resize', '.ve-text-clip', '.ve-tc-h', '[data-tedge]',
+    '.ve-seg-h', '.ve-audio-h', '.ve-cc-h',
+    '.ve-cap-edge', '[data-cedge]', '[data-capedge]',
+    '.ve-text-box', '.ve-text-resize', '.ve-tc-h', '[data-tedge]',
     '#veRuler', '#veCropFrame', '#veOverlayGuide', '.ve-ovg-resize', '[data-ovresize]',
   ].join(',');
 
@@ -797,12 +806,13 @@ let _hideTimer = null;
    * own ＋ Clip button does the same job at the playhead.
    */
   const LONG_PRESS_SEL = '#veTrack, .ve-track, .ve-cap-track, .ve-text-track, .ve-audio-track, .ve-music-track';
-  const LONG_PRESS_MS = 420;
+  const LONG_PRESS_MS = 350;
   const SLOP_PX = 9;
 
   function installTouchBridge() {
     let dragging = false;
     let pending = null;      // a long press being waited out
+    let held = null;         // the element the dragging finger first touched
 
     const mouse = (type, t, target) => {
       const ev = new MouseEvent(type, {
@@ -820,8 +830,32 @@ let _hideTimer = null;
       pending = null;
     };
 
+    /*
+     * A touch's moves and its lift are delivered to the element it STARTED on,
+     * even after that element has left the page. Picking a clip up makes the
+     * studio redraw the timeline — the very block under the finger is replaced —
+     * and from then on the moves went to a detached node and never reached the
+     * document: the clip lifted, moved once, and stuck. So while a finger drags,
+     * the element it touched is listened to as well (each event handled once).
+     */
+    const hold = (el) => {
+      release();
+      if (!el || !el.addEventListener) return;
+      held = el;
+      el.addEventListener('touchmove', onMove, { passive: false });
+      el.addEventListener('touchend', end);
+      el.addEventListener('touchcancel', end);
+    };
+    const release = () => {
+      if (!held) return;
+      held.removeEventListener('touchmove', onMove, { passive: false });
+      held.removeEventListener('touchend', end);
+      held.removeEventListener('touchcancel', end);
+      held = null;
+    };
+
     document.addEventListener('touchstart', (e) => {
-      if (e.touches.length !== 1) { cancelPending(); dragging = false; return; }
+      if (e.touches.length !== 1) { cancelPending(); dragging = false; release(); return; }
       const t = e.touches[0];
       const el = t.target;
       if (!el || !el.closest) return;
@@ -830,13 +864,16 @@ let _hideTimer = null;
       if (el.closest(DRAG_SEL)) {
         dragging = true;
         e.preventDefault();        // no scroll, no synthetic click, no 300ms wait
+        hold(el);
         mouse('mousedown', t, el);
         return;
       }
 
       if (el.closest(LONG_PRESS_SEL)) {
         // Hold still and this becomes a drag; move and it stays a scroll.
-        const start = { x: t.clientX, y: t.clientY, screenX: t.screenX, screenY: t.screenY };
+        // clientX/clientY by those names: mouse() reads them, and without them
+        // the studio was told the press landed at the screen's left edge
+        const start = { x: t.clientX, y: t.clientY, clientX: t.clientX, clientY: t.clientY, screenX: t.screenX, screenY: t.screenY };
         pending = {
           el,
           start,
@@ -845,13 +882,16 @@ let _hideTimer = null;
             dragging = true;
             // A short buzz is how a phone says "you are holding it now".
             try { if (navigator.vibrate) navigator.vibrate(12); } catch (er) {}
+            hold(el);
             mouse('mousedown', start, el);
           }, LONG_PRESS_MS),
         };
       }
     }, { passive: false, capture: true });
 
-    document.addEventListener('touchmove', (e) => {
+    function onMove(e) {
+      if (e.__mwTouch) return;             // already handled on the way down
+      e.__mwTouch = true;
       if (e.touches.length !== 1) return;
       const t = e.touches[0];
       if (pending) {
@@ -862,18 +902,22 @@ let _hideTimer = null;
       if (!dragging) return;
       e.preventDefault();
       mouse('mousemove', t, document);
-    }, { passive: false, capture: true });
+    }
+    document.addEventListener('touchmove', onMove, { passive: false, capture: true });
 
-    const end = (e) => {
+    function end(e) {
+      if (e.__mwTouch) return;
+      e.__mwTouch = true;
       // A tap that never became a hold is left alone: the browser turns it into
       // a click on its own, and the studio seeks there exactly as it would from
       // a mouse.
       cancelPending();
       if (!dragging) return;
       dragging = false;
+      release();
       const t = (e.changedTouches && e.changedTouches[0]) || { clientX: 0, clientY: 0, screenX: 0, screenY: 0 };
       mouse('mouseup', t, document);
-    };
+    }
     document.addEventListener('touchend', end, { capture: true });
     document.addEventListener('touchcancel', end, { capture: true });
   }
@@ -995,6 +1039,7 @@ let _hideTimer = null;
     filters: '<circle cx="12" cy="8.5" r="5"/><circle cx="8.5" cy="14.5" r="5"/><circle cx="15.5" cy="14.5" r="5"/>',
     fullscreen: '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/>',
     overlay: '<rect width="12" height="12" x="9" y="9" rx="2"/><path d="M15 9V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h4"/>',
+    rotate: '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
     sliders: '<line x1="4" x2="20" y1="7" y2="7"/><line x1="4" x2="20" y1="17" y2="17"/><circle cx="9" cy="7" r="2.4" fill="#fff"/><circle cx="15" cy="17" r="2.4" fill="#fff"/>',
   };
   const fineUri = (body) => 'url("data:image/svg+xml,' + encodeURIComponent(
@@ -1019,20 +1064,28 @@ let _hideTimer = null;
   const DOCK = {
     main: [
       { icon: 'sparkles', label: 'AI Shorts', ai: true, sheet: 'shorts', count: true },
-      { icon: 'captions', label: 'Captions', ai: true, sheet: 'insp', tab: '#veInspTabCaptions' },
       { icon: 'scissors', label: 'Edit', row: 'edit' },
-      { icon: 'type', label: 'Text', press: '#veAddText' },
       { icon: 'music', label: 'Audio', row: 'audio' },
+      { icon: 'type', label: 'Text', press: '#veAddText' },
+      { icon: 'captions', label: 'Captions', ai: true, sheet: 'insp', tab: '#veInspTabCaptions' },
+      { icon: 'overlay', label: 'Overlay', row: 'overlay' },
+      { icon: 'filters', label: 'Filters', fx: '#fxLook' },
+      { icon: 'sliders', label: 'Adjust', fx: '#fxBri' },
       { icon: 'crop', label: 'Ratio', row: 'ratio' },
       { icon: 'target', label: 'Reframe', ai: true, sheet: 'insp', tab: '#veInspTabReframe' },
-      { icon: 'overlay', label: 'Overlay', row: 'overlay' },
-      { icon: 'filters', label: 'Filters', sheet: 'insp', tab: '#veInspTabLook' },
+      { icon: 'palette', label: 'Look', sheet: 'insp', tab: '#veInspTabLook' },
       { icon: 'folder', label: 'Project', row: 'project' },
     ],
     edit: [
       { icon: 'scissors', label: 'Split', press: '#veSplit' },
+      { icon: 'zap', label: 'Speed', fx: '#fxSpeed' },
+      { icon: 'volume', label: 'Volume', fx: '#fxVol' },
       { icon: 'trash', label: 'Delete', press: '#veDelClip' },
       { icon: 'copy', label: 'Duplicate', press: '#veDupClip' },
+      { icon: 'rotate', label: 'Rotate', fx: '#fxRot' },
+      { icon: 'rewind', label: 'Reverse', press: '[data-vtool="reverse"]' },
+      { icon: 'snowflake', label: 'Freeze', press: '[data-vtool="freeze"]' },
+      { icon: 'hand', label: 'Stabilize', press: '[data-vtool="stabilize"]' },
       { icon: 'link', label: 'Close gap', press: '#veCloseGap' },
       { icon: 'plus', label: 'New clip', press: '#veAddClip' },
       { icon: 'pen', label: 'Blade', blade: true },
@@ -1045,7 +1098,10 @@ let _hideTimer = null;
     ],
     audio: [
       { icon: 'music', label: 'Music', press: '#veMusic' },
-      { icon: 'volume', label: 'Sound', sheet: 'insp', tab: '#veInspTabAudio' },
+      { icon: 'volume', label: 'Volume', fx: '#fxVol' },
+      { icon: 'mic', label: 'Clean voice', sheet: 'insp', tab: '#veInspTabAudio' },
+      { icon: 'audio-lines', label: 'Extract', press: '[data-vtool="extract"]' },
+      { icon: 'volume-x', label: 'Trim silence', press: '[data-vtool="autotrim"]' },
       { icon: 'volume', label: 'Clip sound', press: '#veOvSound' },
     ],
     ratio: [],      // built from the desk's own list of shapes
@@ -1132,6 +1188,26 @@ let _hideTimer = null;
       box.checked = !!(src && src.checked);
       box.closest('.cloud-xp-row').classList.toggle('hidden', !src);
     }
+  }
+
+  /*
+   * Speed, Volume, Filters, Adjust and Rotate are all in the studio's one
+   * effects panel (🎛️ Video quality). On the phone each is its own tool, so the
+   * panel opens AT that control rather than at the top of a long list.
+   */
+  function openFx(sel) {
+    const open = $('#veEffects');
+    if (!open || open.disabled) return;
+    closeSheet();
+    open.click();
+    setTimeout(() => {
+      const el = $(sel);
+      const row = el && (el.closest('label, .fx-row, .ve-fill-row, div') || el);
+      if (!row) return;
+      row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      row.classList.add('cloud-flash');
+      setTimeout(() => row.classList.remove('cloud-flash'), 1400);
+    }, 120);
   }
 
   function installPhoneEditor() {
@@ -1226,6 +1302,7 @@ let _hideTimer = null;
         + (t.count ? '<span class="cloud-tool-count hidden" data-count></span>' : '');
       b.addEventListener('click', () => act(t));
       if (t.press) mirror(b, $(t.press), { on: t.on });
+      if (t.fx) mirror(b, $('#veEffects'), {});
       if (t.blade) mirror(b, $('#veToolBlade'), { on: true });
       if (t.check) {
         const box = $(t.check);
@@ -1243,6 +1320,7 @@ let _hideTimer = null;
 
     function act(t) {
       if (t.row) return showRow(t.row);
+      if (t.fx) return openFx(t.fx);
       if (t.sheet) return openSheet(t.sheet, t);
       if (t.press) { const el = $(t.press); if (el && !el.disabled) el.click(); return; }
       if (t.blade) {

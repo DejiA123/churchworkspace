@@ -511,7 +511,7 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
   body.mw-cloud #view-video.ve-pro .cloud-tl-add {
     display: grid; place-items: center;
     position: absolute; z-index: 6;
-    right: 10px; top: 37px;
+    right: 7px; top: 37px;
     width: 34px; height: 34px; padding: 0;
     background: #fff; color: #000;
     border: 0; border-radius: 8px;
@@ -519,7 +519,9 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
   }
   body.mw-cloud #view-video.ve-pro .cloud-tl-add .mi { width: 20px; height: 20px; margin: 0; }
   body.mw-cloud #view-video.ve-pro .ve-timeline:has(.ve-seg-ov) .cloud-tl-add { top: 80px; }
-  body.mw-cloud #view-video.ve-pro .ve-tl-scroll { padding-right: 54px; }
+  /* the ＋ has a column of its own, so it never sits over a clip's white
+     right-hand edge (the studio fits the video to the scroller's width) */
+  body.mw-cloud #view-video.ve-pro .ve-tl-scroll { margin-right: 48px; }
 
   body.mw-cloud #view-video.ve-pro .ve-playhead { width: 2px; background: #fff; box-shadow: 0 0 6px rgba(0,0,0,.7); }
   body.mw-cloud #view-video.ve-pro .ve-playhead::before { left: -5px; border-width: 6px; border-top-color: #fff; }
@@ -734,6 +736,11 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
     font-size: 14px; font-weight: 700; text-align: center;
   }
 
+  /* a control the dock just opened the effects panel at */
+  body.mw-cloud .cloud-flash { animation: cloudFlash 1.4s ease-out; border-radius: 10px; }
+  @keyframes cloudFlash { 0%, 40% { box-shadow: 0 0 0 2px var(--ph-accent); background: rgba(34,211,238,.12); } 100% { box-shadow: 0 0 0 2px transparent; background: transparent; } }
+  body.mw-cloud .fx-side { z-index: 300; }
+
   /* --------------------------------------------- the studio's own modals */
 
   body.mw-cloud .cap-modal { place-items: end center; z-index: 300; }
@@ -758,15 +765,22 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
   body.mw-cloud select { font-size: 16px; }
 
   body.mw-cloud .overlay-box { width: 84vw; }
+  /* Messages float over the bottom of the PICTURE, as CapCut's do — never over
+     the timeline — and a finger goes straight through them: one sitting on a
+     clip's edge for four seconds was a clip that could not be trimmed. */
   body.mw-cloud .toast {
-    left: 12px; right: 12px; max-width: none;
+    left: 14px; right: 14px; max-width: none;
     transform: none;
     z-index: 400;
-    bottom: calc(var(--ph-dock) + 10px);
+    pointer-events: none;
+    bottom: calc(var(--ph-dock) + var(--ph-tl) + var(--ph-tr) + 30px);
+    padding: 10px 14px;
     border-radius: 14px;
-    font-size: 13.5px; line-height: 1.4;
+    background: rgba(28,29,34,.94);
+    backdrop-filter: blur(8px);
+    font-size: 13px; line-height: 1.4;
   }
-  body.mw-cloud.mw-sheet .toast { bottom: calc(var(--ph-sheet) + 10px); }
+  body.mw-cloud.mw-sheet .toast { bottom: calc(var(--ph-sheet) + var(--ph-tr) + 30px); }
 
   .cloud-files-box, .cloud-help-box { width: 100%; }
 }
