@@ -1609,7 +1609,7 @@ function buildLerpExpr(kf, fallback) {
  * time-varying crop window driven by face-tracking keyframes [{t,x}] (clip
  * relative, in SOURCE pixels), then scaled to the target preset.
  */
-async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'reel-9x16', quality, keyframes, pieces, fill, denoise, cover, fadeIn, fadeOut, output, onProgress }) {
+async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'reel-9x16', quality, keyframes, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, output, onProgress }) {
   const p = presetSize(preset, quality);
   const { info, cut, inputArgs, dur } = await shortSource(ctx, { input, startSec, endSec, pieces });
   const af = combineAf(await denoiseFilter(ctx, { input, denoise, startSec, endSec }), fadeFilter(fadeIn, fadeOut, dur));
@@ -1619,7 +1619,7 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
   // is being cropped. (The UI turns auto-reframe off when blur fill is picked;
   // this is the belt to that pair of braces.)
   if (fillOpts(fill).mode !== 'crop') {
-    await encodeWithFallback(ctx, { inputArgs, cut, vfCore: withCover(fillChain(info.width, info.height, p.w, p.h, fill), info.width, info.height, cover), af, dur, hasAudio: info.hasAudio, output, onProgress,
+    await encodeWithFallback(ctx, { inputArgs, cut, vfCore: withMotion(withCover(fillChain(info.width, info.height, p.w, p.h, fill), info.width, info.height, cover), motion, p.w, p.h), af, dur, hasAudio: info.hasAudio, output, onProgress,
       quality, fps: outputFps(info) });
     return output;
   }
@@ -1688,7 +1688,7 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
       const padGraph = (fmt) => {
         let fc = cutPre + `${srcV}split=2[bgs][fgs];[bgs]${bgChain}[bg];`
           + `[bg][fgs]overlay=${P}:0,crop=${cropW}:${cropH}:x='${xe}':y=0`
-          + `,scale=${p.w}:${p.h}:flags=lanczos,setsar=1,format=${fmt}[vout]`;
+          + `,scale=${p.w}:${p.h}:flags=lanczos,setsar=1${motionChain(motion, p.w, p.h) ? ',' + motionChain(motion, p.w, p.h) : ''},format=${fmt}[vout]`;
         if (af && info.hasAudio) fc += `;${srcA}${af}[aout]`;
         return fc;
       };
@@ -1739,7 +1739,7 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
     yExpr = buildLerpExpr(pts, Math.round(maxY / 2));
     xExpr = '0';
   }
-  const vfCore = withCover(`crop=${cropW}:${cropH}:x='${xExpr}':y='${yExpr}',scale=${p.w}:${p.h}:flags=lanczos,setsar=1`, info.width, info.height, cover);
+  const vfCore = withMotion(withCover(`crop=${cropW}:${cropH}:x='${xExpr}':y='${yExpr}',scale=${p.w}:${p.h}:flags=lanczos,setsar=1`, info.width, info.height, cover), motion, p.w, p.h);
   const enc = { quality, fps: outputFps(info) };
   try {
     await encodeWithFallback(ctx, { inputArgs, cut, vfCore, af, dur, hasAudio: info.hasAudio, output, onProgress, ...enc });
@@ -1747,7 +1747,7 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
     // If the dynamic reframe filter still fails for any reason, never leave the user
     // with nothing — fall back to a static centered crop of the same range.
     const staticVf = `scale=${p.w}:${p.h}:force_original_aspect_ratio=increase:flags=lanczos,crop=${p.w}:${p.h},setsar=1`;
-    await encodeWithFallback(ctx, { inputArgs, cut, vfCore: withCover(staticVf, info.width, info.height, cover), af, dur, hasAudio: info.hasAudio, output, onProgress, ...enc });
+    await encodeWithFallback(ctx, { inputArgs, cut, vfCore: withMotion(withCover(staticVf, info.width, info.height, cover), motion, p.w, p.h), af, dur, hasAudio: info.hasAudio, output, onProgress, ...enc });
   }
   return output;
 }
@@ -1766,7 +1766,7 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
  * and the operator sees nothing at all. `still` (or a picture file extension)
  * picks the looping path.
  *
- * overlays: [{ src, srcStart, srcEnd, tlStart, x, y, wFrac, still, mute, opacity }]
+ * overlays: [{ src, srcStart, srcEnd, tlStart, x, y, wFrac, still, mute, opacity, key }]
  *   src            overlay's source file (this video, another video, or a picture)
  *   srcStart/End   which footage of src to show. A still has no "where", so it
  *                  uses only the LENGTH (srcEnd - srcStart) as its time on screen
@@ -1776,10 +1776,20 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
  *   still          force the looped-picture path (otherwise read from the extension)
  *   mute           drop this overlay's own sound
  *   opacity        0..1 for watermarks (default 1 = solid)
+ *   key            { color '#rrggbb', sim, blend } to key out a green/blue screen
  * baseStart/baseEnd (optional): render only that RANGE of the base (used when a
  * short is being exported — its PiP overlays are composited into just its range;
  * tlStart is then relative to baseStart, i.e. to the output's own clock).
  */
+/** A chroma key as the filter wants it, or null when there is none. */
+function keyOf(k) {
+  if (!k || !/^#?[0-9a-f]{6}$/i.test(String(k.color || ''))) return null;
+  return {
+    hex: String(k.color).replace('#', '').toUpperCase(),
+    sim: clampN(Number(k.sim) || 0, 0.01, 0.6),
+    blend: clampN(Number(k.blend) || 0, 0, 0.3),
+  };
+}
 async function exportOverlayComposite(ctx, { base, overlays = [], output, baseStart, baseEnd, onProgress }) {
   if (!overlays.length) throw new Error('No overlay clips to composite.');
   const info = await getInfo(ctx, base);
@@ -1843,7 +1853,11 @@ async function exportOverlayComposite(ctx, { base, overlays = [], output, baseSt
       still ? `scale=${w}:-2:flags=lanczos` : `scale=${w}:-2`,
       'setsar=1',
     ];
-    if (still || op < 1) chain.push('format=rgba');
+    // Green screen: ffmpeg's own chromakey, the rule the preview's canvas copies
+    // (veditor keyAlpha). Keyed before any fade-down so both apply.
+    const key = keyOf(o.key);
+    if (key) chain.push('format=yuva420p', `chromakey=color=0x${key.hex}:similarity=${key.sim.toFixed(3)}:blend=${key.blend.toFixed(3)}`);
+    if (still || op < 1 || key) chain.push('format=rgba');
     if (op < 1) chain.push(`colorchannelmixer=aa=${op.toFixed(3)}`);
     parts.push(`[${inIdx}:v]${chain.join(',')}[ov${idx}]`);
     const out = (idx === overlays.length - 1) ? 'outv' : `t${idx}`;
@@ -1888,6 +1902,78 @@ async function exportOverlayComposite(ctx, { base, overlays = [], output, baseSt
   return output;
 }
 
+/*
+ * TEXT THAT ARRIVES. CapCut's text has an "In" animation, and a title that
+ * simply blinks on reads as unfinished next to one that rises into place. Each
+ * is the same three numbers the preview draws from (veditor's textAnimState):
+ * how opaque, how far below its place, how large — on the same clock, so the
+ * file moves the way the preview did. Every animated text also fades out over
+ * its last quarter-second instead of vanishing.
+ */
+const TEXT_ANIMS = ['none', 'fade', 'rise', 'pop', 'zoom'];
+const textAnimOf = (a) => (TEXT_ANIMS.includes(a) ? a : 'none');
+/** How long the arrival and the leaving take for a text shown `len` seconds. */
+function textAnimTimes(len) {
+  const L = Math.max(0.05, Number(len) || 0);
+  return { inD: Math.min(0.35, L / 3), outD: Math.min(0.25, L / 4) };
+}
+/** The scale a text is drawn at, `p` (0..1) of the way through its arrival. */
+function textAnimScale(anim, p) {
+  const q = Math.min(1, Math.max(0, p));
+  if (anim === 'pop') return q < 0.7 ? 0.6 + 0.48 * (q / 0.7) : 1.08 - 0.08 * ((q - 0.7) / 0.3);
+  if (anim === 'zoom') return 1.35 - 0.35 * q;
+  return 1;
+}
+/** How far below its place a rising text starts, as a fraction of the frame height. */
+const TEXT_RISE = 0.06;
+/** The rate an animated text is drawn at: the video's own, within reason. */
+const textFps = (info) => Math.min(60, Math.max(24, Math.round(Number(info && info.fps) || 30)));
+
+/**
+ * The filter steps that lay ONE text picture (a full-frame transparent PNG at
+ * input `idx`) onto `base`, labelled `out`. A still text is the single overlay
+ * it always was. An animated one becomes a short stream of that same picture —
+ * the loop filter repeats the decoded frame, it is not read from disk again —
+ * that exists only for the text's own window, so it costs nothing outside it.
+ */
+function textOverlaySteps({ idx, base, out, im, W, H, fps = 30 }) {
+  const s = Math.max(0, Number(im.start) || 0);
+  const e = Math.max(s + 0.05, Number(im.end) || s + 1);
+  const f = (v) => Number(v).toFixed(3);
+  const anim = textAnimOf(im.anim);
+  const src = `[${idx}:v]scale=${W}:${H}:flags=lanczos,format=rgba`;
+  if (anim === 'none') {
+    // eof_action=repeat: a still image ends after one frame, and the overlay
+    // must keep showing it for the whole window.
+    return [`${src}[ov${idx}]`,
+      `[${base}][ov${idx}]overlay=0:0:eof_action=repeat:enable='between(t\\,${f(s)}\\,${f(e)})'[${out}]`];
+  }
+  const { inD, outD } = textAnimTimes(e - s);
+  const n = Math.max(1, Math.ceil((e - s) * fps));
+  const P = `min(1\\,max(0\\,(t-${f(s)})/${f(inD)}))`;
+  // settb first: a picture's own time base is 1/25 s, and timestamps rounded to
+  // it would put a 30 fps arrival's frames up to 20 ms off the preview's clock.
+  let chain = `${src},loop=loop=${n - 1}:size=1:start=0,settb=AVTB,setpts=N/${fps}/TB+${f(s)}/TB`
+    + `,fade=t=in:st=${f(s)}:d=${f(inD)}:alpha=1,fade=t=out:st=${f(e - outD)}:d=${f(outD)}:alpha=1`;
+  let x = '0', y = '0';
+  if (anim === 'pop' || anim === 'zoom') {
+    const K = anim === 'pop'
+      ? `if(lt(${P}\\,0.7)\\,0.6+0.48*${P}/0.7\\,1.08-0.08*(${P}-0.7)/0.3)`
+      : `(1.35-0.35*${P})`;
+    chain += `,scale=w='max(2\\,trunc(iw*${K}/2)*2)':h='max(2\\,trunc(ih*${K}/2)*2)':eval=frame`;
+    // Grown about the text's own centre, not the frame's: the point (cx, cy)
+    // of the picture stays where it is while everything else scales round it.
+    const cx = Math.min(1, Math.max(0, Number.isFinite(Number(im.cx)) ? Number(im.cx) : 0.5)) * W;
+    const cy = Math.min(1, Math.max(0, Number.isFinite(Number(im.cy)) ? Number(im.cy) : 0.5)) * H;
+    x = `'${f(cx)}*(1-w/W)'`; y = `'${f(cy)}*(1-h/H)'`;
+  } else if (anim === 'rise') {
+    y = `'${f(TEXT_RISE * H)}*pow(1-${P}\\,2)'`;
+  }
+  // eof_action=pass: the stream ends with the text's window, and from then on
+  // the picture is left alone.
+  return [`${chain}[ov${idx}]`, `[${base}][ov${idx}]overlay=x=${x}:y=${y}:eval=frame:eof_action=pass[${out}]`];
+}
+
 /**
  * Composite transparent PNG overlays (each already rendered at the picture's own
  * aspect ratio by the renderer) onto a video for their own time windows.
@@ -1911,15 +1997,11 @@ async function burnImageOverlays(ctx, { input, images = [], output, onProgress }
     const parts = [];
     let cur = '0:v';
     images.forEach((im, idx) => {
-      const s = Math.max(0, Number(im.start) || 0);
-      const e = Math.max(s + 0.05, Number(im.end) || s + 1);
-      // The PNG is authored at the export frame size; scale guards against a
-      // source whose real pixels differ (same ratio, so nothing is distorted).
-      parts.push(`[${idx + 1}:v]scale=${W}:${H}:flags=lanczos,format=rgba[ov${idx}]`);
+      // The PNG is authored at the export frame size; the scale in each step
+      // guards against a source whose real pixels differ (same ratio, so
+      // nothing is distorted).
       const out = (idx === images.length - 1) ? 'outv' : `t${idx}`;
-      // eof_action=repeat: a still image ends after one frame, and the overlay
-      // must keep showing it for the whole window.
-      parts.push(`[${cur}][ov${idx}]overlay=0:0:eof_action=repeat:enable='between(t\\,${s.toFixed(3)}\\,${e.toFixed(3)})'[${out}]`);
+      parts.push(...textOverlaySteps({ idx: idx + 1, base: cur, out, im, W, H, fps: textFps(info) }));
       cur = out;
     });
     parts.push(`[${cur}]format=${fmt}[vout]`);
@@ -2079,10 +2161,7 @@ async function burnCaptionFrames(ctx, { input, track, output, onProgress, images
      */
     let base = '0:v';
     pics.forEach((im, i) => {
-      const st = Math.max(0, Number(im.start) || 0);
-      const en = Math.max(st + 0.05, Number(im.end) || st + 1);
-      parts.push(`[${i + 2}:v]scale=${W}:${H}:flags=lanczos,format=rgba[tx${i}]`);
-      parts.push(`[${base}][tx${i}]overlay=0:0:eof_action=repeat:enable='between(t\,${st.toFixed(3)}\,${en.toFixed(3)})'[tb${i}]`);
+      parts.push(...textOverlaySteps({ idx: i + 2, base, out: `tb${i}`, im, W, H, fps: textFps(info) }));
       base = `tb${i}`;
     });
     parts.push(`[1:v]format=rgba,setpts=PTS-STARTPTS${scaled ? `,scale=${bw}:${bh}:flags=lanczos` : ''},fps=${fps}[ov]`);
@@ -2164,7 +2243,103 @@ async function shortSource(ctx, { input, startSec, endSec, pieces }) {
 }
 
 /** Export one highlight range as a trimmed, reframed short (trim + reshape in one pass). */
-async function exportShort(ctx, { input, startSec, endSec, preset = 'reel-9x16', quality, pieces, fill, denoise, cover, fadeIn, fadeOut, output, onProgress }) {
+/*
+ * KEYFRAMES — CapCut's zoom-and-move on a clip. Each keyframe says how far the
+ * finished frame is pushed in (z, 1 = not at all) and which point of it the
+ * push heads for (x, y, fractions of the frame); between two keyframes the
+ * values glide with an ease in and out, and outside a clip's keyframes the
+ * picture is left alone.
+ *
+ * It works on the FINISHED frame — after the crop to 9:16, the blur fill, the
+ * cover — so a punch-in is a punch-in on exactly what the preview shows, and
+ * the face-tracker's crop and a keyframed zoom simply stack.
+ *
+ * motion: [{ start, end, pts: [{ t, z, x, y }] }], all in OUTPUT seconds.
+ *
+ * Rendered as a scale that changes size every frame followed by a crop back to
+ * the frame: the window is (1 - 1/z) * x of the way across the frame, so x = 0.5
+ * pushes into the middle and x = 0 holds the left edge still.
+ */
+const MOTION_MAX_Z = 3;
+const MOTION_MAX_POINTS = 64;
+function cleanMotion(motion) {
+  const out = [];
+  let left = MOTION_MAX_POINTS;
+  for (const m of Array.isArray(motion) ? motion : []) {
+    const start = Number(m && m.start), end = Number(m && m.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue;
+    const pts = (Array.isArray(m.pts) ? m.pts : [])
+      .map((p) => ({
+        t: Number(p.t),
+        z: clampN(Number(p.z) || 1, 1, MOTION_MAX_Z),
+        x: clampN(Number.isFinite(Number(p.x)) ? Number(p.x) : 0.5, 0, 1),
+        y: clampN(Number.isFinite(Number(p.y)) ? Number(p.y) : 0.5, 0, 1),
+      }))
+      .filter((p) => Number.isFinite(p.t))
+      .sort((a, b) => a.t - b.t)
+      .filter((p, i, a) => i === 0 || p.t - a[i - 1].t > 1e-3)
+      .slice(0, Math.max(0, left));
+    if (!pts.length) continue;
+    // a clip whose keyframes never leave "no zoom" has nothing to draw
+    if (pts.every((p) => p.z <= 1.0005)) continue;
+    left -= pts.length;
+    out.push({ start, end, pts });
+  }
+  return out;
+}
+/** The value of `key` at the output clock, as an ffmpeg expression in t. */
+function motionExpr(motion, key, dflt) {
+  const f = (v) => Number(v).toFixed(4);
+  const clip = (pts) => {
+    let e = f(pts[pts.length - 1][key]);
+    for (let i = pts.length - 2; i >= 0; i--) {
+      const a = pts[i], b = pts[i + 1];
+      if (Math.abs(b[key] - a[key]) < 1e-6) { e = `if(lt(t\\,${f(b.t)})\\,${f(a[key])}\\,${e})`; continue; }
+      const p = `clip((t-${f(a.t)})/${f(Math.max(1e-3, b.t - a.t))}\\,0\\,1)`;
+      e = `if(lt(t\\,${f(b.t)})\\,${f(a[key])}+${f(b[key] - a[key])}*${p}*${p}*(3-2*${p})\\,${e})`;
+    }
+    return `if(lt(t\\,${f(pts[0].t)})\\,${f(pts[0][key])}\\,${e})`;
+  };
+  let e = f(dflt);
+  for (let i = motion.length - 1; i >= 0; i--) {
+    const m = motion[i];
+    e = `if(between(t\\,${f(m.start)}\\,${f(m.end)})\\,${clip(m.pts)}\\,${e})`;
+  }
+  return e;
+}
+/** Where a keyframed clip is at output time t — the same numbers as the filter. */
+function motionAt(motion, t) {
+  const m = cleanMotion(motion).find((x) => t >= x.start && t <= x.end);
+  if (!m) return { z: 1, x: 0.5, y: 0.5 };
+  const pts = m.pts;
+  if (t <= pts[0].t) return { z: pts[0].z, x: pts[0].x, y: pts[0].y };
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    if (t < b.t) {
+      const p = clampN((t - a.t) / Math.max(1e-3, b.t - a.t), 0, 1);
+      const e = p * p * (3 - 2 * p);
+      return { z: a.z + (b.z - a.z) * e, x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e };
+    }
+  }
+  const l = pts[pts.length - 1];
+  return { z: l.z, x: l.x, y: l.y };
+}
+/** The filter steps that push in and move, for a W×H frame; '' when there are none. */
+function motionChain(motion, W, H) {
+  const mo = cleanMotion(motion);
+  if (!mo.length || !(W > 0) || !(H > 0)) return '';
+  const Z = motionExpr(mo, 'z', 1), X = motionExpr(mo, 'x', 0.5), Y = motionExpr(mo, 'y', 0.5);
+  const sw = `(trunc(${W}*(${Z})/2)*2)`, sh = `(trunc(${H}*(${Z})/2)*2)`;
+  return `scale=w='${sw}':h='${sh}':eval=frame:flags=bicubic`
+    + `,crop=${W}:${H}:x='(${sw}-${W})*(${X})':y='(${sh}-${H})*(${Y})'`;
+}
+/** vfCore with the keyframed motion appended, at the frame's own size. */
+const withMotion = (vfCore, motion, W, H) => {
+  const c = motionChain(motion, W, H);
+  return c ? `${vfCore},${c}` : vfCore;
+};
+
+async function exportShort(ctx, { input, startSec, endSec, preset = 'reel-9x16', quality, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, output, onProgress }) {
   const { info, cut, inputArgs, dur } = await shortSource(ctx, { input, startSec, endSec, pieces });
   // `preset: 'source'` keeps the recording's own SHAPE. It is what "Export
   // video" uses: an edited full-length service is not a social clip, and
@@ -2174,7 +2349,9 @@ async function exportShort(ctx, { input, startSec, endSec, preset = 'reel-9x16',
   const vfBase = preset === 'source'
     ? (p ? `scale=${p.w}:${p.h}:flags=lanczos,setsar=1` : 'setsar=1')
     : fillChain(info.width, info.height, p.w, p.h, fill);
-  const vfCore = withCover(vfBase, info.width, info.height, cover);
+  // keyframes work on the finished frame, so they need its size
+  const fw = p ? p.w : Math.round(info.width / 2) * 2, fh = p ? p.h : Math.round(info.height / 2) * 2;
+  const vfCore = withMotion(withCover(vfBase, info.width, info.height, cover), motion, fw, fh);
   const af = combineAf(await denoiseFilter(ctx, { input, denoise, startSec, endSec }), fadeFilter(fadeIn, fadeOut, dur));
   await encodeWithFallback(ctx, { inputArgs, cut, vfCore, af, dur, hasAudio: info.hasAudio, output, onProgress,
     quality, fps: outputFps(info) });
@@ -2188,7 +2365,7 @@ async function exportShort(ctx, { input, startSec, endSec, preset = 'reel-9x16',
  * (0.5,0.5 = centered). Used when the user drags/zooms the crop guide instead of
  * relying on face-tracking.
  */
-async function exportShortFramed(ctx, { input, startSec, endSec, preset = 'reel-9x16', quality, zoom = 1, offsetX = 0.5, offsetY = 0.5, pieces, denoise, cover, fadeIn, fadeOut, output, onProgress }) {
+async function exportShortFramed(ctx, { input, startSec, endSec, preset = 'reel-9x16', quality, zoom = 1, offsetX = 0.5, offsetY = 0.5, pieces, denoise, cover, fadeIn, fadeOut, motion, output, onProgress }) {
   const p = presetSize(preset, quality);
   const { info, cut, inputArgs, dur } = await shortSource(ctx, { input, startSec, endSec, pieces });
   const targetAR = p.w / p.h, srcAR = info.width / info.height;
@@ -2205,7 +2382,7 @@ async function exportShortFramed(ctx, { input, startSec, endSec, preset = 'reel-
   const cx = clampN(Math.round(clampN(Number(offsetX), 0, 1) * info.width - cropW / 2), 0, maxX);
   const cy = clampN(Math.round(clampN(Number(offsetY), 0, 1) * info.height - cropH / 2), 0, maxY);
 
-  const vfCore = withCover(`crop=${cropW}:${cropH}:${cx}:${cy},scale=${p.w}:${p.h}:flags=lanczos,setsar=1`, info.width, info.height, cover);
+  const vfCore = withMotion(withCover(`crop=${cropW}:${cropH}:${cx}:${cy},scale=${p.w}:${p.h}:flags=lanczos,setsar=1`, info.width, info.height, cover), motion, p.w, p.h);
   const af = combineAf(await denoiseFilter(ctx, { input, denoise, startSec, endSec }), fadeFilter(fadeIn, fadeOut, dur));
   await encodeWithFallback(ctx, { inputArgs, cut, vfCore, af, dur, hasAudio: info.hasAudio, output, onProgress,
     quality, fps: outputFps(info) });
@@ -2784,7 +2961,9 @@ module.exports = {
   getInfo, INFO_SHAPE, trim, exportForPlatform, thumbnail,
   extractAudio, autoTrimSilence, merge, joinPieces, normalizePieces, addCaptions, exportShort, filmstrip, makeProxy, needsProxy, applyEdits,
   extractFrames, detectSceneCuts, exportShortReframed, exportShortFramed, attachThumbnail, waveform, stabilize, reverseClip, freezeFrame, hms, cutPlan,
-  exportOverlayComposite, burnImageOverlays, burnCaptionTrack, transparentPng, writeTrackFrames, burnCaptionFrames,
+  exportOverlayComposite, burnImageOverlays, burnCaptionTrack,
+  TEXT_ANIMS, textAnimOf, textAnimTimes, textAnimScale, TEXT_RISE, textOverlaySteps,
+  cleanMotion, motionExpr, motionAt, motionChain, MOTION_MAX_Z, keyOf, transparentPng, writeTrackFrames, burnCaptionFrames,
   cropFirstChain, fillChain,
   simplifyKeyframes, buildLerpExpr, isCleanEncode,
   detectSilences, mixMusic, appendClips, audioSample,

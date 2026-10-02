@@ -206,7 +206,9 @@
     "test:ndi-longrun": "electron test/ndi-longrun.test.js",
     "test:exportprogress": "electron test/export-progress.test.js",
     "test:shortsspeed": "electron test/shorts-speed.test.js",
-    "bundle:cloud": "node scripts/make-cloud-bundle.js"
+    "bundle:cloud": "node scripts/make-cloud-bundle.js",
+    "test:text-anim": "node test/text-anim.test.js",
+    "test:keyframes-chroma": "node test/keyframes-chroma.test.js"
   },
   "dependencies": {
     "ffmpeg-static": "^5.2.0",

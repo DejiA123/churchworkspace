@@ -351,6 +351,19 @@ window.CapLayout = (() => {
   /** Extra space between words, in frame pixels — 0 unless the look asks for it. */
   const wordGapPx = (L) => Math.max(0, num((L.cfg || {}).wordGap, 0)) * L.m.fontPx;
   const highlightOn = (cfg) => !!(cfg && cfg.wordHighlight && cfg.wordColor);
+  /*
+   * HOW the spoken word is picked out — CapCut's animated caption looks:
+   *   color    the word being said changes colour (the classic)
+   *   karaoke  every word already said stays changed, like a sing-along
+   *   reveal   words appear one at a time as they are spoken
+   *   box      the word being said sits on a coloured block
+   *   pop      the word being said grows and changes colour
+   * All of them are a function of the same one number — which word is being
+   * spoken — so the export redraws exactly when the preview does.
+   */
+  const WORD_MODES = ['color', 'karaoke', 'reveal', 'box', 'pop'];
+  const wordModeOf = (cfg) => (WORD_MODES.includes(cfg && cfg.wordMode) ? cfg.wordMode : 'color');
+  const POP_WORD = 1.18;
 
   /**
    * One line as elements. Without a highlight that is the single span it always
@@ -360,16 +373,44 @@ window.CapLayout = (() => {
   function lineHtml(L, text, from, hl) {
     const cfg = L.cfg || {};
     const gap = wordGapPx(L);
-    const marks = highlightOn(cfg) && hl != null && hl >= 0;
+    const lit = highlightOn(cfg);
+    const mode = wordModeOf(cfg);
+    const marks = lit && hl != null && hl >= 0;
+    // "Word by word" hides what has not been said yet — including everything
+    // before the first word, so it needs the per-word form even with no word lit.
+    const hides = lit && mode === 'reveal';
     // Nothing to pick out and no extra spacing asked for: one span, exactly as
     // every look that came before drew it.
-    if (!marks && !(gap > 0)) return '<span style="' + lineCss(L) + '">' + esc(text) + '</span>';
+    if (!marks && !hides && !(gap > 0)) return '<span style="' + lineCss(L) + '">' + esc(text) + '</span>';
     const toks = String(text).split(/\s+/).filter(Boolean);
     const boxed = L.m.style === 'box';
+    const at = (hl == null ? -1 : hl);
     const words = toks.map((w, i) => {
-      const on = marks && (from + i) === hl;
-      const extra = (i > 0 && gap > 0) ? 'margin-left:' + cssPx(gap) + ';' : '';
-      return '<span style="' + lineCss(L, on ? cfg.wordColor : null, boxed ? 'ink' : null) + extra + '">' + esc(w) + '</span>';
+      const k = from + i;
+      const now = marks && k === at;
+      // karaoke keeps every word already said in the second colour
+      const on = marks && (mode === 'karaoke' ? k <= at : now);
+      let extra = (i > 0 && gap > 0) ? 'margin-left:' + cssPx(gap) + ';' : '';
+      // Hidden, not removed: the line keeps its shape and nothing jumps as the
+      // words arrive.
+      if (hides && k > at) extra += 'visibility:hidden;';
+      let color = on ? cfg.wordColor : null;
+      if (now && mode === 'box') {
+        /*
+         * The spoken word on its own coloured block. The padding is paid back
+         * with negative margins of the same size, so the block grows INTO the
+         * gaps either side and not one word of the line moves as it travels.
+         */
+        const padX = L.m.fontPx * 0.12;
+        const ml = (i > 0 && gap > 0 ? gap : 0) - padX;
+        extra = 'background:' + col(cfg.wordColor, '#8b5cf6') + ';border-radius:' + cssPx(L.m.fontPx * 0.16)
+          + ';padding:0 ' + cssPx(padX) + ';margin-left:' + cssPx(ml) + ';margin-right:' + cssPx(-padX) + ';';
+        color = col(cfg.wordInk, '#ffffff');
+      } else if (now && mode === 'pop') {
+        // larger in place: a transform takes no room, so the line does not reflow
+        extra += 'transform:scale(' + POP_WORD + ');transform-origin:50% 60%;';
+      }
+      return '<span style="' + lineCss(L, color, boxed ? 'ink' : null) + extra + '">' + esc(w) + '</span>';
     }).join(' ');
     // The band belongs to the line; the colour belongs to the word.
     return boxed ? '<span style="' + lineCss(L) + '">' + words + '</span>' : words;
@@ -492,6 +533,6 @@ window.CapLayout = (() => {
     widthFrac, sizeFrac, metrics, metricsAt, blockHeight, anchor, layout, html, lineCss, lineHtml, typedLines,
     wrapLines, refWidth, forgetMeasurements,
     enterDuration, stateAt, maxScale,
-    wordTimes, activeWord, highlightOn,
+    wordTimes, activeWord, highlightOn, WORD_MODES, wordModeOf, POP_WORD,
   };
 })();

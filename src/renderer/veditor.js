@@ -847,6 +847,9 @@
       if (n.classList.contains('ve-seg-ov') !== ((s.lane || 0) >= 1)) return false;
       const lab = n.querySelector('.ve-seg-label');
       if (lab && !lab.textContent.includes(s.label)) return false;
+      // keyframe diamonds are placed along the block: a new one, or a trim that
+      // moves them, needs the full redraw
+      if ((n.dataset.kf || '') !== kfSig(s)) return false;
       // …and the 🔊 badge on added media, for the same reason: a stale badge
       // would tell the operator the opposite of what the export is about to do.
       if (isMedia(s) && !!n.querySelector('.ve-seg-snd')
@@ -957,10 +960,11 @@
       const tip = isMedia(s)
         ? ` title="${attr2(s.label)} — ${s.kind === 'image' ? 'a picture' : 'a second video'} on top of this one. Drag it sideways to move it, its edges to change how long it shows, and the pink box on the preview to place it in the frame."`
         : '';
-      return `<div class="ve-seg${seln}${ov}${med}${cutN ? ' ve-seg-joined' : ''}" data-id="${s.id}"${tip} style="left:${left}px;width:${width}px;${laneStyle(s.lane)}border-color:${s.color};${bg}">
+      return `<div class="ve-seg${seln}${ov}${med}${cutN ? ' ve-seg-joined' : ''}" data-id="${s.id}" data-kf="${attr2(kfSig(s))}"${tip} style="left:${left}px;width:${width}px;${laneStyle(s.lane)}border-color:${s.color};${bg}">
         <div class="ve-seg-h l" data-edge="l"></div>
         ${notches}
         <div class="ve-seg-label">${icon}${escape2(s.label)}${snd}${cutN ? ` <span class="ve-seg-joinbadge" title="${cutN} pause${cutN > 1 ? 's' : ''} removed — exports as one ${Math.round(keptDur(s))}s video">🔗 ${Math.round(keptDur(s))}s</span>` : ''}</div>
+        ${kfDotsHtml(s)}
         <div class="ve-seg-h r" data-edge="r"></div>
       </div>`;
     }).join('') + outroBlockHtml();
@@ -1190,6 +1194,8 @@
     }
     updateGapMask(t);
     updateTransitionPreview(t);
+    updateKfPreview(t);      // keyframed push-ins and moves
+    if (kfFor) syncKeyframePanel();
     updateCapOverlay(t);
     updateMediaLayer(t);   // added pictures / second videos appear and go on their own windows
     renderTextOverlays();
@@ -1334,9 +1340,42 @@
     const view = document.getElementById('view-video');
     if (!view || !view.classList.contains('active')) return;
     updateCapOverlay(p.currentTime || 0);
+    // …and everything else that moves between timeupdates: text arrivals,
+    // keyframed push-ins, green-screened media
+    frameTick(p.currentTime || 0);
     capRaf = requestAnimationFrame(capTick);
   }
   function startCapTick() { if (capRaf == null) capRaf = requestAnimationFrame(capTick); }
+  /** The per-frame work while playing. Each piece bails out cheaply when it has
+   *  nothing to do, so a plain video costs a few comparisons a frame. */
+  function frameTick(t) {
+    try { updateKfPreview(t); } catch (e) {}
+    try { animateTextBoxes(t); } catch (e) {}
+    try {
+      const layer = ve.refs.mediaLayer;
+      if (layer && layer.querySelector('canvas[data-key-for]')) updateMediaLayer(t);
+    } catch (e) {}
+  }
+  /** Text arrivals between redraws: a box that should now be showing (or gone)
+   *  redraws the layer; one already there just has its move updated. */
+  function animateTextBoxes(t) {
+    const layer = ve.refs.textLayer;
+    if (!layer || ve.textEditing || !ve.textOverlays.length) return;
+    const want = ve.textOverlays.filter((o) => t >= o.start && t <= o.end).map((o) => o.id).join(',');
+    const have = Array.from(layer.querySelectorAll('.ve-text-box')).map((b) => b.dataset.id).join(',');
+    if (want !== have) { renderTextOverlays(); return; }
+    const fr = outputFrameRect();
+    for (const box of layer.querySelectorAll('.ve-text-box')) {
+      const o = ve.textOverlays.find((x) => x.id === box.dataset.id);
+      if (!o || !o.anim || o.anim === 'none') continue;
+      const c = box.querySelector('.ve-text-content'); if (!c) continue;
+      const css = textAnimCss(o, t, fr.h);
+      const a = css ? textAnimState(o, t) : null;
+      c.style.opacity = a && a.opacity < 1 ? a.opacity.toFixed(3) : '';
+      c.style.transform = a && (a.dy || a.k !== 1) ? `translateY(${(a.dy * fr.h).toFixed(2)}px) scale(${a.k.toFixed(4)})` : '';
+      c.style.transformOrigin = a ? '50% 50%' : '';
+    }
+  }
   function stopCapTick() { if (capRaf != null) { cancelAnimationFrame(capRaf); capRaf = null; } }
 
   /**
@@ -1495,7 +1534,7 @@
   /** The <video>'s transform = the CapCut canvas position + any live-fx rotate/flip. */
   function setPlayerTransform() {
     const p = ve.refs.player; if (!p) return;
-    p.style.transform = [ve._canvasT || '', ve._fxT || ''].join(' ').trim();
+    p.style.transform = [ve._kfT || '', ve._canvasT || '', ve._fxT || ''].join(' ').trim();
   }
 
   /* ---------------- blurred background on the PREVIEW ----------------
@@ -3178,6 +3217,13 @@
   /** The 🔊/🔇 button only means anything while an added video is selected. */
   function updateOverlayTools() {
     updateCutOutButton();
+    const kb = $('#veChromaKey');
+    if (kb) {
+      const sk = ve.segments.find((x) => x.id === ve.sel);
+      const showK = !!(sk && isMedia(sk));
+      kb.classList.toggle('hidden', !showK);
+      kb.classList.toggle('on', showK && keyOn(sk));
+    }
     const b = $('#veOvSound'); if (!b) return;
     const s = ve.segments.find((x) => x.id === ve.sel);
     const show = !!(s && isMedia(s) && s.kind === 'video' && s.srcInfo && s.srcInfo.hasAudio);
@@ -3230,7 +3276,7 @@
         layer.appendChild(n);
       }
     }
-    Array.from(layer.children).forEach((n) => { if (!seen.has(n.dataset.mid)) n.remove(); });
+    Array.from(layer.children).forEach((n) => { if (!seen.has(n.dataset.mid || n.dataset.keyFor)) n.remove(); });
     updateMediaLayer(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
   }
 
@@ -3239,11 +3285,13 @@
     if (!layer.children.length) return;
     const playing = ve.refs.player && !ve.refs.player.paused;
     for (const n of Array.from(layer.children)) {
+      if (n.dataset.keyFor) continue;              // a key canvas — drawn with its source below
       const s = ve.segments.find((x) => String(x.id) === n.dataset.mid);
-      if (!s) { n.remove(); continue; }
+      if (!s) { if (n._keyCv) n._keyCv.remove(); n.remove(); continue; }
       const a = tlPos(s), b = a + (s.end - s.start);
       const on = t >= a && t < b;
       n.style.display = on ? 'block' : 'none';
+      if (n._keyCv) n._keyCv.style.display = on ? 'block' : 'none';
       if (!on) { if (n.tagName === 'VIDEO' && !n.paused) n.pause(); continue; }
       const r = overlayPreviewRect(s);   // the SAME box the pink guide draws
       n.style.left = Math.round(r.left) + 'px';
@@ -3256,6 +3304,8 @@
       // the preview did not, so a watermark dialled down to a third still looked
       // solid right up until the file came out.
       n.style.opacity = s.opacity != null ? String(clamp(s.opacity, 0.05, 1)) : '';
+      // green screen: drawn through the key, as the export will (see drawKeyed)
+      if (keyOn(s)) drawKeyed(n, s, r); else hideKeyed(n);
       if (n.tagName !== 'VIDEO') continue;
       const want = s.start + (t - a);
       if (Math.abs((n.currentTime || 0) - want) > 0.25) { try { n.currentTime = want; } catch (e) { /* not seekable yet */ } }
@@ -3323,6 +3373,9 @@
       // they have not said otherwise.
       s += 'background:' + bgFill(o) + ';padding:0.1em 0.35em;border-radius:0.14em;'
         + 'box-decoration-break:clone;-webkit-box-decoration-break:clone;';
+      // A name banner fits its words: the panel shrinks to the text and sits in
+      // the middle of the box, instead of running the box's whole width.
+      if (o.hug) s += 'display:table;width:auto;max-width:100%;margin:0 auto;';
     }
     return s;
   }
@@ -3379,7 +3432,7 @@
     layer.innerHTML = visible.map((o) => `
       <div class="ve-text-box${ve.textSel === o.id ? ' sel' : ''}" data-id="${o.id}" style="
         left:${(fr.left + o.x * fr.w).toFixed(2)}px; top:${(fr.top + o.y * fr.h).toFixed(2)}px; width:${(o.w * fr.w).toFixed(2)}px; transform:translate(-50%,-50%);">
-        <div class="ve-text-content" style="${textLookCss(o, textFontPx(o, fr.h))}pointer-events:auto;outline:none;">${escape2(o.text)}</div>
+        <div class="ve-text-content" style="${textLookCss(o, textFontPx(o, fr.h))}${textAnimCss(o, t, fr.h)}pointer-events:auto;outline:none;">${escape2(o.text)}</div>
         <button class="ve-text-del" data-del="${o.id}" title="Delete">✕</button>
         <div class="ve-text-resize" data-resize="${o.id}" title="Drag to resize"></div>
       </div>`).join('');
@@ -3445,6 +3498,753 @@
     renderTextOverlays(); renderTextTrack(); updateTextTools();
   }
 
+  /* ---------------- chroma key: green screen on an added video or picture ----
+   * The same sum ffmpeg's chromakey does (CCIR chroma of each pixel against the
+   * key colour, distance through `sim`, softened over `blend`), done on a small
+   * canvas over the preview, so what is see-through here is see-through in the
+   * file. The export runs the real filter (video.exportOverlayComposite).
+   */
+  const KEY_DEFAULT = { on: true, color: '#00b140', sim: 0.12, blend: 0.08 };
+  const keyOn = (s) => !!(s && s.key && s.key.on);
+  /* ffmpeg reads the KEY colour with full-range BT.601 sums and each PIXEL as
+   * the TV-range video it has been turned into — two different scales, and the
+   * preview has to use both or it keys a different amount than the file does
+   * (measured: white over a green key came out a third see-through in one and
+   * two-thirds in the other). */
+  const keyUVFull = (r, g, b) => [
+    128 + (-0.16874 * r - 0.33126 * g + 0.5 * b),
+    128 + (0.5 * r - 0.41869 * g - 0.08131 * b),
+  ];
+  const keyUV = (r, g, b) => [
+    128 + (-0.16874 * r - 0.33126 * g + 0.5 * b) * (224 / 255),
+    128 + (0.5 * r - 0.41869 * g - 0.08131 * b) * (224 / 255),
+  ];
+  const hexRgb = (h) => { const n = parseInt(String(h || '#00ff00').slice(1), 16) || 0; return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+  /** Alpha (0..1) a pixel keeps — ffmpeg chromakey's rule. */
+  function keyAlpha(r, g, b, kuv, sim, blend) {
+    const [u, v] = keyUV(r, g, b);
+    const du = u - kuv[0], dv = v - kuv[1];
+    const diff = Math.sqrt((du * du + dv * dv) / (255 * 255 * 2));
+    if (blend > 0.0001) return clamp((diff - sim) / blend, 0, 1);
+    return diff > sim ? 1 : 0;
+  }
+  /** Draw a keyed media element through its canvas (made on first use). */
+  function drawKeyed(n, s, r) {
+    // A paused overlay gets its new frame only once its OWN seek finishes —
+    // after this draw has already happened — so it redraws itself then.
+    if (!n._keyHook) {
+      n._keyHook = true;
+      const again = () => {
+        const s2 = ve.segments.find((x) => String(x.id) === n.dataset.mid);
+        if (s2 && keyOn(s2) && n.style.display !== 'none') drawKeyed(n, s2, { w: parseFloat(n.style.width) || r.w, h: parseFloat(n.style.height) || r.h });
+      };
+      ['seeked', 'loadeddata'].forEach((ev) => n.addEventListener(ev, again));
+      if (n.tagName === 'IMG') n.addEventListener('load', again);
+    }
+    let c = n._keyCv;
+    if (!c || !c.isConnected) {
+      c = document.createElement('canvas');
+      c.className = 've-media-el ve-media-key';
+      c.dataset.keyFor = n.dataset.mid;
+      n.parentNode.insertBefore(c, n.nextSibling);
+      n._keyCv = c;
+    }
+    c.style.display = 'block';
+    c.style.left = n.style.left; c.style.top = n.style.top;
+    c.style.width = n.style.width; c.style.height = n.style.height;
+    c.style.zIndex = n.style.zIndex; c.style.opacity = n.style.opacity;
+    // the source keeps playing (so it has frames to give) but is not seen
+    n.style.visibility = 'hidden';
+    const w = Math.max(2, Math.min(360, Math.round(r.w))), h = Math.max(2, Math.round((r.h / Math.max(1, r.w)) * w));
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    const g = c.getContext('2d', { willReadFrequently: true });
+    try {
+      g.clearRect(0, 0, w, h);
+      g.drawImage(n, 0, 0, w, h);
+      const img = g.getImageData(0, 0, w, h), d = img.data;
+      const k = s.key, kuv = keyUVFull(...hexRgb(k.color));
+      const sim = clamp(Number(k.sim) || 0, 0, 1), blend = clamp(Number(k.blend) || 0, 0, 1);
+      for (let i = 0; i < d.length; i += 4) {
+        if (!d[i + 3]) continue;
+        d[i + 3] = Math.round(d[i + 3] * keyAlpha(d[i], d[i + 1], d[i + 2], kuv, sim, blend));
+      }
+      g.putImageData(img, 0, 0);
+    } catch (e) { /* a frame not decoded yet — the next tick draws it */ }
+  }
+  function hideKeyed(n) {
+    if (n._keyCv) { n._keyCv.remove(); n._keyCv = null; }
+    if (n.style.visibility === 'hidden') n.style.visibility = '';
+  }
+
+  /* ---- the Chroma key panel ---- */
+  let keyFor = null;
+  const keySeg = () => ve.segments.find((s) => s.id === keyFor) || null;
+  function keyModal() {
+    let m = document.getElementById('veKeyModal');
+    if (m) return m;
+    m = document.createElement('div');
+    m.id = 'veKeyModal';
+    m.className = 'cap-modal ve-key-modal hidden';
+    m.innerHTML = `
+      <div class="cap-box ve-key-box">
+        <div class="cap-head"><strong>Chroma key</strong> <span class="muted small" data-key-clip></span><button type="button" class="ghost-btn small" data-key-close>✕</button></div>
+        <label class="ve-key-on"><input type="checkbox" data-key-on> Remove a colour (green screen)</label>
+        <div class="ve-key-swatches">
+          <button type="button" class="ve-key-sw" data-key-color="#00b140" style="--sw:#00b140" title="Green screen"><i></i>Green</button>
+          <button type="button" class="ve-key-sw" data-key-color="#0047bb" style="--sw:#0047bb" title="Blue screen"><i></i>Blue</button>
+          <button type="button" class="ve-key-sw" data-key-pick title="Take the colour from the picture's corners — where the screen is"><i class="pick"></i>From picture</button>
+          <label class="ve-key-sw" title="Any colour"><input type="color" data-key-custom value="#00b140"><span>Custom</span></label>
+        </div>
+        <div class="ve-kf-row"><label>Strength</label><input type="range" min="1" max="60" step="1" data-key-sim><span data-key-simv></span></div>
+        <div class="ve-kf-row"><label>Soft edge</label><input type="range" min="0" max="30" step="1" data-key-blend><span data-key-blendv></span></div>
+        <div class="ve-trans-foot"><span class="muted small">Raise Strength until the screen is gone; soften the edge if hair looks cut out.</span><button type="button" class="primary-btn" data-key-close>Done</button></div>
+      </div>`;
+    document.body.appendChild(m);
+    const pre = () => { if (!m._pre) m._pre = snapshotState(); };
+    const done = () => { if (m._pre) { commitDragHistory(m._pre); m._pre = null; } };
+    m.addEventListener('click', (e) => {
+      if (e.target === m || e.target.closest('[data-key-close]')) return closeChromaKey();
+      const sw = e.target.closest('[data-key-color]');
+      if (sw) return setChromaKey(keyFor, { on: true, color: sw.dataset.keyColor });
+      if (e.target.closest('[data-key-pick]')) return pickKeyColor(keyFor);
+    });
+    m.querySelector('[data-key-on]').addEventListener('change', (e) => setChromaKey(keyFor, { on: e.target.checked }));
+    m.querySelector('[data-key-custom]').addEventListener('change', (e) => setChromaKey(keyFor, { on: true, color: e.target.value }));
+    [['[data-key-sim]', 'sim'], ['[data-key-blend]', 'blend']].forEach(([sel, k]) => {
+      const r = m.querySelector(sel);
+      r.addEventListener('pointerdown', pre);
+      r.addEventListener('input', () => setChromaKey(keyFor, { [k]: +r.value / 100 }, true));
+      r.addEventListener('change', done);
+    });
+    return m;
+  }
+  /** The overlay the panel is for: the selected one, else one under the playhead. */
+  function keyTarget() {
+    const t = ve.refs.player ? ve.refs.player.currentTime || 0 : 0;
+    const sel = ve.segments.find((s) => s.id === ve.sel);
+    if (sel && isMedia(sel)) return sel;
+    return overlayClips().filter(isMedia).find((s) => t >= tlPos(s) && t < tlPos(s) + (s.end - s.start))
+      || overlayClips().filter(isMedia)[0] || null;
+  }
+  function openChromaKey(segId) {
+    const s = (segId && ve.segments.find((x) => x.id === segId)) || keyTarget();
+    if (!s || !isMedia(s)) {
+      window.__toast && window.__toast('Add a video or picture on top first (Overlay → Add media), then key out its green screen.', 'error');
+      return false;
+    }
+    keyFor = s.id;
+    if (ve.sel !== s.id) selectSeg(s.id);
+    // Opening it is asking for it: switch it on with a green screen to start from.
+    if (!s.key) setChromaKey(s.id, Object.assign({}, KEY_DEFAULT));
+    keyModal().classList.remove('hidden');
+    syncChromaKeyPanel();
+    return true;
+  }
+  function closeChromaKey() {
+    const m = document.getElementById('veKeyModal'); if (m) m.classList.add('hidden');
+    keyFor = null;
+  }
+  function syncChromaKeyPanel() {
+    const m = document.getElementById('veKeyModal'); const s = keySeg();
+    if (!m || !s) return;
+    const k = s.key || Object.assign({}, KEY_DEFAULT, { on: false });
+    m.querySelector('[data-key-clip]').textContent = `— ${s.label}`;
+    m.querySelector('[data-key-on]').checked = !!k.on;
+    m.querySelectorAll('[data-key-color]').forEach((b) => b.classList.toggle('on', !!k.on && b.dataset.keyColor.toLowerCase() === String(k.color).toLowerCase()));
+    const cu = m.querySelector('[data-key-custom]'); if (cu) cu.value = /^#[0-9a-f]{6}$/i.test(k.color) ? k.color : '#00b140';
+    const sim = m.querySelector('[data-key-sim]'), bl = m.querySelector('[data-key-blend]');
+    if (document.activeElement !== sim) sim.value = String(Math.round(k.sim * 100));
+    if (document.activeElement !== bl) bl.value = String(Math.round(k.blend * 100));
+    m.querySelector('[data-key-simv]').textContent = Math.round(k.sim * 100) + '';
+    m.querySelector('[data-key-blendv]').textContent = Math.round(k.blend * 100) + '';
+    m.classList.toggle('keyoff', !k.on);
+  }
+  /** Change the key on an overlay. One undo step unless `live` (a slider mid-drag). */
+  function setChromaKey(segId, patch, live) {
+    const s = ve.segments.find((x) => x.id === segId); if (!s) return null;
+    if (!live) pushHistory();
+    const k = Object.assign({}, KEY_DEFAULT, s.key || { on: false }, patch || {});
+    k.sim = clamp(Number(k.sim) || 0, 0.01, 0.6);
+    k.blend = clamp(Number(k.blend) || 0, 0, 0.3);
+    if (!/^#[0-9a-f]{6}$/i.test(k.color)) k.color = KEY_DEFAULT.color;
+    s.key = k;
+    updateMediaLayer(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
+    syncChromaKeyPanel(); renderSegments();
+    return Object.assign({}, k);
+  }
+  /** The screen's colour, read off the corners of the overlay's current frame. */
+  function pickKeyColor(segId) {
+    const s = ve.segments.find((x) => x.id === segId); if (!s) return null;
+    const n = ve.refs.mediaLayer && ve.refs.mediaLayer.querySelector(`[data-mid="${s.id}"]`);
+    if (!n) return null;
+    try {
+      const c = document.createElement('canvas'); c.width = 64; c.height = 64;
+      const g = c.getContext('2d', { willReadFrequently: true });
+      g.drawImage(n, 0, 0, 64, 64);
+      let r = 0, gg = 0, b = 0, cnt = 0;
+      for (const [x0, y0] of [[0, 0], [56, 0], [0, 56], [56, 56]]) {
+        const d = g.getImageData(x0, y0, 8, 8).data;
+        for (let i = 0; i < d.length; i += 4) { r += d[i]; gg += d[i + 1]; b += d[i + 2]; cnt++; }
+      }
+      const hx = (v) => Math.round(v / cnt).toString(16).padStart(2, '0');
+      return setChromaKey(segId, { on: true, color: `#${hx(r)}${hx(gg)}${hx(b)}` });
+    } catch (e) {
+      window.__toast && window.__toast('Could not read that picture yet — play it for a moment and try again.', 'error');
+      return null;
+    }
+  }
+
+  /* ---------------- keyframes: zoom and move over time ----------------
+   * CapCut's keyframes for the thing a sermon short needs most: pushing in on
+   * the preacher at the line that matters, easing back out, drifting across the
+   * frame. A keyframe on a clip holds { t: the moment (source seconds), z: how
+   * far in (1 = not at all), x, y: which point of the frame it heads for }; in
+   * between, the values glide with an ease in and out. It acts on the finished
+   * frame — after the crop to 9:16 — so it stacks with framing and face-tracking
+   * instead of fighting them. The export draws the same curve (video.motionChain).
+   */
+  const KF_NEAR = 0.06;          // a keyframe this close to the playhead is "here"
+  const KF_MAX_Z = 3;
+  const kfList = (s) => (s && Array.isArray(s.kf) ? s.kf : []);
+  const kfSorted = (s) => kfList(s).slice().sort((a, b) => a.t - b.t);
+  /** The clip's zoom and focus at timeline/source time t. */
+  function kfAt(s, t) {
+    const pts = kfSorted(s);
+    if (!pts.length) return { z: 1, x: 0.5, y: 0.5 };
+    if (t <= pts[0].t) return { z: pts[0].z, x: pts[0].x, y: pts[0].y };
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      if (t < b.t) {
+        const p = clamp((t - a.t) / Math.max(1e-3, b.t - a.t), 0, 1);
+        const e = p * p * (3 - 2 * p);
+        return { z: a.z + (b.z - a.z) * e, x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e };
+      }
+    }
+    const l = pts[pts.length - 1];
+    return { z: l.z, x: l.x, y: l.y };
+  }
+  /** Which clip's keyframes rule the picture at t: the selected one if it is
+   *  under the playhead, else the main-lane clip there. */
+  function kfClipAt(t) {
+    const on = (s) => (s.lane || 0) === 0 && t >= s.start && t < s.end;
+    const sel = ve.segments.find((s) => s.id === ve.sel);
+    if (sel && on(sel)) return sel;
+    return ve.segments.find((s) => on(s) && !s.ai) || ve.segments.find(on) || null;
+  }
+  /** The keyframe sitting at t on clip s, if there is one. */
+  const kfHere = (s, t) => kfList(s).find((k) => Math.abs(k.t - t) <= KF_NEAR) || null;
+  /** A stamp of everything the diamonds on a block are drawn from. */
+  const kfSig = (s) => kfList(s).map((k) => k.t.toFixed(2)).join(',') + '|' + s.start.toFixed(2) + '|' + s.end.toFixed(2);
+  function kfDotsHtml(s) {
+    if ((s.lane || 0) !== 0 || !kfList(s).length) return '';
+    const len = Math.max(1e-3, s.end - s.start);
+    return kfList(s).filter((k) => k.t >= s.start - 1e-3 && k.t <= s.end + 1e-3)
+      .map((k) => `<i class="ve-kf-dot" style="left:${(((k.t - s.start) / len) * 100).toFixed(3)}%" title="Keyframe at ${fmt(k.t)} — ${Math.round(k.z * 100)}%"></i>`).join('');
+  }
+
+  /** The preview's push-in: the same zoom about the same point the export uses. */
+  function updateKfPreview(t) {
+    const p = ve.refs.player; if (!p || !ve.video) return;
+    const s = kfClipAt(t);
+    const v = s && kfList(s).length ? kfAt(s, t) : null;
+    const fr = v && v.z > 1.0005 ? outputFrameRect() : null;
+    const key = fr ? [v.z, v.x, v.y, fr.left, fr.top, fr.w, fr.h, ve._canvasT || ''].map(String).join('|') : '';
+    if (key === ve._kfKey) return;
+    ve._kfKey = key;
+    if (!fr) { ve._kfT = ''; setPlayerTransform(); return; }
+    // The point of the frame the push heads for stays where it is; everything
+    // else grows away from it. (Window = (1 - 1/z)·x across, as in the export.)
+    const ax = fr.left + v.x * fr.w, ay = fr.top + v.y * fr.h;
+    const o = (getComputedStyle(p).transformOrigin || '').split(' ').map(parseFloat);
+    const ox = Number.isFinite(o[0]) ? o[0] : p.clientWidth / 2, oy = Number.isFinite(o[1]) ? o[1] : p.clientHeight / 2;
+    const dx = ax - ox, dy = ay - oy;
+    ve._kfT = `translate(${dx.toFixed(2)}px, ${dy.toFixed(2)}px) scale(${v.z.toFixed(4)}) translate(${(-dx).toFixed(2)}px, ${(-dy).toFixed(2)}px)`;
+    setPlayerTransform();
+  }
+
+  /**
+   * The keyframes of every clip in export `s`, on the export's own clock (gaps
+   * closed and transitions taken into account) — the shape video.motionChain
+   * draws. null when nothing moves.
+   */
+  function motionFor(s) {
+    if (!s) return null;
+    const clips = s.id === '__edited' ? mainClips() : [s];
+    const out = [];
+    for (const c of clips) {
+      const pts = kfSorted(c);
+      if (!pts.length || pts.every((k) => k.z <= 1.0005)) continue;
+      const a = Math.max(c.start, s.start), b = Math.min(c.end, s.end);
+      if (b <= a) continue;
+      const start = outTime(s, a, 'start'), end = outTime(s, b, 'end');
+      if (!(end > start)) continue;
+      out.push({
+        start, end,
+        pts: pts.map((k) => ({ t: outTime(s, clamp(k.t, a, b), 'start'), z: clamp(k.z, 1, KF_MAX_Z), x: clamp(k.x, 0, 1), y: clamp(k.y, 0, 1) })),
+      });
+    }
+    return out.length ? out : null;
+  }
+  /** The frozen copy's motion when an export is running behind the studio. */
+  const motionOf = (s) => (F(s) && 'motion' in F(s) ? F(s).motion : motionFor(s));
+
+  /** Split keyframes at t: each side keeps its own, plus the value at the cut,
+   *  so the move carries on seamlessly across it. */
+  function splitKf(left, right, t) {
+    const pts = kfSorted(left);
+    if (!pts.length) return;
+    const at = kfAt(left, t);
+    const mid = { t, z: at.z, x: at.x, y: at.y };
+    const l = pts.filter((k) => k.t < t - 1e-3), r = pts.filter((k) => k.t > t + 1e-3);
+    left.kf = l.length ? l.concat([Object.assign({}, mid)]) : [];
+    right.kf = r.length ? [Object.assign({}, mid)].concat(r.map((k) => Object.assign({}, k))) : [];
+    if (!left.kf.length) delete left.kf;
+    if (!right.kf.length) delete right.kf;
+  }
+
+  /* ---- the Keyframe panel ---- */
+  let kfFor = null;                 // the clip id the panel is editing
+  const kfClip = () => ve.segments.find((s) => s.id === kfFor) || null;
+  function kfModal() {
+    let m = document.getElementById('veKfModal');
+    if (m) return m;
+    m = document.createElement('div');
+    m.id = 'veKfModal';
+    m.className = 'cap-modal ve-kf-modal hidden';
+    m.innerHTML = `
+      <div class="cap-box ve-kf-box">
+        <div class="cap-head"><strong>Keyframes</strong> <span class="muted small" data-kf-clip></span><button type="button" class="ghost-btn small" data-kf-close>✕</button></div>
+        <div class="ve-kf-nav">
+          <button type="button" class="ghost-btn" data-kf-prev title="Previous keyframe">◀</button>
+          <button type="button" class="primary-btn ve-kf-add" data-kf-toggle>◆ Add keyframe</button>
+          <button type="button" class="ghost-btn" data-kf-next title="Next keyframe">▶</button>
+        </div>
+        <div class="ve-kf-row"><label>Zoom</label><input type="range" min="100" max="${KF_MAX_Z * 100}" step="1" data-kf="z"><span data-kf-v="z"></span></div>
+        <div class="ve-kf-row"><label>Left ↔ right</label><input type="range" min="0" max="100" step="1" data-kf="x"><span data-kf-v="x"></span></div>
+        <div class="ve-kf-row"><label>Up ↕ down</label><input type="range" min="0" max="100" step="1" data-kf="y"><span data-kf-v="y"></span></div>
+        <div class="ve-kf-presets">
+          <button type="button" class="ghost-btn small" data-kf-preset="punch" title="A quick push in at the playhead — for the line that matters">⚡ Punch in</button>
+          <button type="button" class="ghost-btn small" data-kf-preset="slowin" title="A slow push in across the whole clip">🔍 Slow zoom in</button>
+          <button type="button" class="ghost-btn small" data-kf-preset="slowout" title="Start close and ease back across the whole clip">🔎 Slow zoom out</button>
+          <button type="button" class="ghost-btn small" data-kf-preset="pan" title="Drift across the frame from left to right">↔ Pan</button>
+          <button type="button" class="ghost-btn small" data-kf-preset="clear" title="Take every keyframe off this clip">✕ Clear</button>
+        </div>
+        <div class="ve-kf-list" data-kf-list></div>
+        <div class="ve-trans-foot"><span class="muted small">Move the playhead, then slide — a keyframe is added where you are.</span><button type="button" class="primary-btn" data-kf-close>Done</button></div>
+      </div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click', (e) => {
+      if (e.target === m || e.target.closest('[data-kf-close]')) return closeKeyframes();
+      if (e.target.closest('[data-kf-toggle]')) return toggleKeyframeHere();
+      if (e.target.closest('[data-kf-prev]')) return jumpKeyframe(-1);
+      if (e.target.closest('[data-kf-next]')) return jumpKeyframe(1);
+      const pr = e.target.closest('[data-kf-preset]');
+      if (pr) return keyframePreset(kfFor, pr.dataset.kfPreset);
+      const chip = e.target.closest('[data-kf-t]');
+      if (chip) { seekTo(+chip.dataset.kfT); syncKeyframePanel(); }
+    });
+    // One undo step per gesture: the snapshot is taken when a slider is
+    // grabbed, and the values written as it moves.
+    m.querySelectorAll('[data-kf]').forEach((r) => {
+      r.addEventListener('pointerdown', () => { r._pre = snapshotState(); });
+      r.addEventListener('input', () => setKeyframeValue(r.dataset.kf, +r.value / 100, true));
+      r.addEventListener('change', () => { if (r._pre) { commitDragHistory(r._pre); r._pre = null; } });
+    });
+    return m;
+  }
+  function openKeyframes(segId) {
+    if (!ve.video) { window.__toast && window.__toast('Open a video first.', 'error'); return false; }
+    const t = ve.refs.player.currentTime || 0;
+    const s = (segId && ve.segments.find((x) => x.id === segId)) || kfClipAt(t);
+    if (!s || (s.lane || 0) !== 0) {
+      window.__toast && window.__toast('Put the playhead on a clip in the main row, then add keyframes to it.', 'error');
+      return false;
+    }
+    kfFor = s.id;
+    if (ve.sel !== s.id) selectSeg(s.id);
+    const m = kfModal();
+    m.classList.remove('hidden');
+    syncKeyframePanel();
+    return true;
+  }
+  function closeKeyframes() {
+    const m = document.getElementById('veKfModal');
+    if (m) m.classList.add('hidden');
+    kfFor = null;
+  }
+  /** Mirror the clip's value at the playhead onto the sliders. */
+  function syncKeyframePanel() {
+    const m = document.getElementById('veKfModal'); const s = kfClip();
+    if (!m || !s || m.classList.contains('hidden')) return;
+    const t = ve.refs.player.currentTime || 0;
+    const v = kfAt(s, t), here = kfHere(s, t);
+    m.querySelector('[data-kf-clip]').textContent = `— ${s.label}`;
+    const put = (k, val, txt) => { const r = m.querySelector(`[data-kf="${k}"]`); if (r && document.activeElement !== r) r.value = String(Math.round(val * 100)); m.querySelector(`[data-kf-v="${k}"]`).textContent = txt; };
+    put('z', v.z, Math.round(v.z * 100) + '%');
+    put('x', v.x, Math.round(v.x * 100) + '');
+    put('y', v.y, Math.round(v.y * 100) + '');
+    const tg = m.querySelector('[data-kf-toggle]');
+    tg.textContent = here ? '◇ Remove keyframe' : '◆ Add keyframe';
+    tg.classList.toggle('on', !!here);
+    const inClip = t >= s.start && t <= s.end;
+    tg.disabled = !inClip;
+    m.querySelector('[data-kf-list]').innerHTML = kfSorted(s).map((k) =>
+      `<button type="button" class="ve-kf-chip${here === k ? ' on' : ''}" data-kf-t="${k.t}">◆ ${fmt(k.t)} · ${Math.round(k.z * 100)}%</button>`).join('')
+      || '<span class="muted small">No keyframes on this clip yet.</span>';
+  }
+  /** Write one value at the playhead — onto the keyframe there, or a new one. */
+  function setKeyframeValue(key, val, live) {
+    const s = kfClip(); if (!s) return null;
+    const t = clamp(ve.refs.player.currentTime || 0, s.start, s.end);
+    if (!live) pushHistory();
+    let k = kfHere(s, t);
+    if (!k) {
+      const v = kfAt(s, t);
+      // The first keyframe on a clip also pins the clip's start at "no zoom",
+      // so the move has somewhere to come FROM — CapCut's two-keyframe rule.
+      if (!kfList(s).length && t - s.start > 0.3) s.kf = [{ t: s.start, z: 1, x: 0.5, y: 0.5 }];
+      k = { t, z: v.z, x: v.x, y: v.y };
+      s.kf = kfList(s).concat([k]);
+    }
+    if (key === 'z') k.z = clamp(val, 1, KF_MAX_Z);
+    else if (key === 'x' || key === 'y') k[key] = clamp(val, 0, 1);
+    s.kf.sort((a, b) => a.t - b.t);
+    ve._kfKey = null;
+    updateKfPreview(ve.refs.player.currentTime || 0);
+    syncKeyframePanel();
+    renderSegments();
+    return k;
+  }
+  function toggleKeyframeHere() {
+    const s = kfClip(); if (!s) return;
+    const t = ve.refs.player.currentTime || 0;
+    if (t < s.start || t > s.end) return;
+    const here = kfHere(s, t);
+    pushHistory();
+    if (here) {
+      s.kf = kfList(s).filter((k) => k !== here);
+      if (!s.kf.length) delete s.kf;
+    } else {
+      const v = kfAt(s, t);
+      s.kf = kfList(s).concat([{ t, z: v.z, x: v.x, y: v.y }]).sort((a, b) => a.t - b.t);
+    }
+    ve._kfKey = null;
+    updateKfPreview(t); syncKeyframePanel(); renderSegments();
+  }
+  function jumpKeyframe(dir) {
+    const s = kfClip(); if (!s) return;
+    const t = ve.refs.player.currentTime || 0;
+    const pts = kfSorted(s);
+    const k = dir > 0 ? pts.find((p) => p.t > t + KF_NEAR) : pts.slice().reverse().find((p) => p.t < t - KF_NEAR);
+    if (k) { seekTo(k.t); syncKeyframePanel(); }
+  }
+  /** One-tap moves. Each is ordinary keyframes, editable afterwards. */
+  function keyframePreset(segId, kind) {
+    const s = ve.segments.find((x) => x.id === segId); if (!s) return null;
+    const t = clamp(ve.refs.player.currentTime || 0, s.start, s.end);
+    const len = s.end - s.start;
+    pushHistory();
+    if (kind === 'clear') delete s.kf;
+    else if (kind === 'punch') {
+      // in over half a second at the playhead, hold — the classic emphasis cut
+      const a = clamp(t, s.start, Math.max(s.start, s.end - 0.6));
+      const keep = kfList(s).filter((k) => k.t < a - 0.05 || k.t > a + 0.65);
+      s.kf = keep.concat([{ t: a, z: 1, x: 0.5, y: 0.4 }, { t: a + Math.min(0.5, len / 2), z: 1.35, x: 0.5, y: 0.4 }]);
+    } else if (kind === 'slowin') s.kf = [{ t: s.start, z: 1, x: 0.5, y: 0.45 }, { t: s.end, z: 1.25, x: 0.5, y: 0.45 }];
+    else if (kind === 'slowout') s.kf = [{ t: s.start, z: 1.25, x: 0.5, y: 0.45 }, { t: s.end, z: 1, x: 0.5, y: 0.45 }];
+    else if (kind === 'pan') s.kf = [{ t: s.start, z: 1.25, x: 0, y: 0.5 }, { t: s.end, z: 1.25, x: 1, y: 0.5 }];
+    if (s.kf) s.kf.sort((a, b) => a.t - b.t);
+    ve._kfKey = null;
+    updateKfPreview(ve.refs.player.currentTime || 0); syncKeyframePanel(); renderSegments();
+    const names = { punch: 'Punch in', slowin: 'Slow zoom in', slowout: 'Slow zoom out', pan: 'Pan', clear: 'Keyframes cleared' };
+    window.__toast && window.__toast(kind === 'clear' ? 'Keyframes taken off this clip.' : `${names[kind]} added to “${s.label}” — play it to see the move.`, 'good');
+    return kfList(s).length;
+  }
+
+  /* ---------------- text animations + templates ----------------
+   * CapCut's text arrives: it fades, rises into place, pops. The same three
+   * numbers drive the preview here and the export in video.textOverlaySteps —
+   * how opaque, how far below its place (a fraction of the frame height), how
+   * large — on the same clock, so the file moves the way the preview did.
+   */
+  const TEXT_ANIMS = [
+    { id: 'none', name: 'None' },
+    { id: 'fade', name: 'Fade' },
+    { id: 'rise', name: 'Rise' },
+    { id: 'pop', name: 'Pop' },
+    { id: 'zoom', name: 'Zoom' },
+  ];
+  const TEXT_ANIM_IDS = TEXT_ANIMS.map((a) => a.id);
+  const TEXT_RISE = 0.06;
+  /** Same rule as video.textAnimTimes: short texts get short arrivals. */
+  function textAnimTimes(len) {
+    const L = Math.max(0.05, Number(len) || 0);
+    return { inD: Math.min(0.35, L / 3), outD: Math.min(0.25, L / 4) };
+  }
+  function textAnimScale(anim, p) {
+    const q = clamp(p, 0, 1);
+    if (anim === 'pop') return q < 0.7 ? 0.6 + 0.48 * (q / 0.7) : 1.08 - 0.08 * ((q - 0.7) / 0.3);
+    if (anim === 'zoom') return 1.35 - 0.35 * q;
+    return 1;
+  }
+  /** Where an animated text is at `t` (timeline seconds): {opacity, dy, k}. */
+  function textAnimState(o, t) {
+    const anim = TEXT_ANIM_IDS.includes(o && o.anim) ? o.anim : 'none';
+    if (anim === 'none') return { opacity: 1, dy: 0, k: 1 };
+    const { inD, outD } = textAnimTimes(o.end - o.start);
+    const p = clamp((t - o.start) / inD, 0, 1);
+    const opacity = Math.min(p, clamp((o.end - t) / outD, 0, 1));
+    return {
+      opacity,
+      dy: anim === 'rise' ? TEXT_RISE * (1 - p) * (1 - p) : 0,
+      k: textAnimScale(anim, p),
+    };
+  }
+  /** The animation as inline CSS on a text's words, for a frame `frameH` tall. */
+  function textAnimCss(o, t, frameH) {
+    // The text being worked on stands still while the video does: a selected
+    // title that keeps shrinking under the cursor cannot be placed.
+    if (ve.textSel === o.id && ve.refs.player && ve.refs.player.paused) return '';
+    const a = textAnimState(o, t);
+    if (a.opacity >= 1 && !a.dy && a.k === 1) return '';
+    return `opacity:${a.opacity.toFixed(3)};transform:translateY(${(a.dy * frameH).toFixed(2)}px) scale(${a.k.toFixed(4)});transform-origin:50% 50%;`;
+  }
+
+  /*
+   * TEMPLATES. CapCut's "text templates" are ready-made titles: a look, a place
+   * and an arrival in one tap, then you type your own words over the sample.
+   * Each is a set of ordinary text boxes — every one stays editable, movable and
+   * restyleable exactly like text added by hand, and exports the same way.
+   * Positions are fractions of the export frame, laid out for a 9:16 short and
+   * narrowed for a wide picture.
+   */
+  const TEXT_TEMPLATES = [
+    /* Each template is a STACK: its lines sit one under the other, `gap` apart
+     * (fractions of the frame height), centred on `y`. They are stacked by
+     * their real measured height, so a title that wraps onto two lines pushes
+     * the line under it down instead of landing on top of it. `hug` makes a
+     * backing panel fit the words, the way a name banner does. */
+    { id: 'title', name: 'Title card', y: 0.45, gap: 0.008, items: [
+      { text: 'SUNDAY SERVICE', w: 0.92, sizePct: 0.085, font: 'Bebas Neue', color: '#ffffff', outline: true, anim: 'pop' },
+      { text: 'Join us live at 10 AM', w: 0.84, sizePct: 0.034, font: 'Poppins', color: '#ffe14d', outline: true, anim: 'rise' },
+    ] },
+    { id: 'lower', name: 'Lower third', y: 0.76, gap: 0.006, items: [
+      { text: 'Speaker name', w: 0.8, sizePct: 0.04, font: 'Poppins', color: '#111111', outline: false, bg: true, bgColor: '#ffffff', hug: true, anim: 'rise' },
+      { text: 'Title or role', w: 0.7, sizePct: 0.026, font: 'Poppins', color: '#ffffff', outline: false, bg: true, bgColor: '#8b5cf6', hug: true, anim: 'rise' },
+    ] },
+    { id: 'handle', name: 'Social handle', y: 0.9, gap: 0, items: [
+      { text: '@yourchurch', w: 0.8, sizePct: 0.034, font: 'Poppins', color: '#ffffff', outline: false, bg: true, bgColor: '#8b5cf6', hug: true, anim: 'pop' },
+    ] },
+    { id: 'quote', name: 'Quote', y: 0.46, gap: 0.014, items: [
+      { text: '“Faith comes by hearing, and hearing by the word of God.”', w: 0.84, sizePct: 0.042, font: 'Playfair Display', color: '#ffffff', outline: true, anim: 'fade' },
+      { text: '— Romans 10:17', w: 0.7, sizePct: 0.028, font: 'Poppins', color: '#ffe14d', outline: true, anim: 'fade' },
+    ] },
+    { id: 'verse', name: 'Bible verse', y: 0.4, gap: 0.012, items: [
+      { text: 'JOHN 3:16', w: 0.6, sizePct: 0.03, font: 'Montserrat', color: '#ffffff', outline: false, bg: true, bgColor: '#c1121f', hug: true, anim: 'rise' },
+      { text: 'For God so loved the world…', w: 0.86, sizePct: 0.046, font: 'Montserrat', color: '#ffffff', outline: true, anim: 'rise' },
+    ] },
+    { id: 'hook', name: 'Hook', y: 0.14, gap: 0, items: [
+      { text: 'WAIT FOR IT…', w: 0.92, sizePct: 0.08, font: 'Anton', color: '#ffe14d', outline: true, anim: 'zoom' },
+    ] },
+    { id: 'follow', name: 'Follow', y: 0.86, gap: 0, items: [
+      { text: 'FOLLOW FOR MORE', w: 0.86, sizePct: 0.038, font: 'Montserrat', color: '#ffffff', outline: false, bg: true, bgColor: '#e11d48', hug: true, anim: 'pop' },
+    ] },
+    { id: 'event', name: 'Event', y: 0.4, gap: 0.01, items: [
+      { text: 'THIS SUNDAY', w: 0.92, sizePct: 0.08, font: 'Anton', color: '#ffe14d', outline: true, anim: 'pop' },
+      { text: 'Youth Conference · 10 AM', w: 0.9, sizePct: 0.032, font: 'Poppins', color: '#ffffff', outline: false, bg: true, bgColor: '#000000', hug: true, anim: 'rise' },
+    ] },
+    { id: 'series', name: 'Sermon series', y: 0.45, gap: 0.004, items: [
+      { text: 'SERMON SERIES', w: 0.8, sizePct: 0.026, font: 'Montserrat', color: '#b79cff', outline: false, anim: 'fade' },
+      { text: 'WALKING IN FAITH', w: 0.92, sizePct: 0.08, font: 'Bebas Neue', color: '#ffffff', outline: true, anim: 'rise' },
+      { text: 'Part 1', w: 0.6, sizePct: 0.045, font: 'Great Vibes', color: '#ffe14d', outline: false, anim: 'fade' },
+    ] },
+    { id: 'amen', name: 'Amen', y: 0.5, gap: 0, items: [
+      { text: 'AMEN!', w: 0.86, sizePct: 0.12, font: 'Luckiest Guy', color: '#ffffff', outline: true, anim: 'pop' },
+    ] },
+    { id: 'breaking', name: 'Headline', y: 0.15, gap: 0.01, items: [
+      { text: 'NEW MESSAGE', w: 0.7, sizePct: 0.028, font: 'Montserrat', color: '#111111', outline: false, bg: true, bgColor: '#ffe14d', hug: true, anim: 'rise' },
+      { text: 'God is not finished with you', w: 0.9, sizePct: 0.05, font: 'Archivo Black', color: '#ffffff', outline: true, anim: 'rise' },
+    ] },
+    { id: 'scripture', name: 'Script', y: 0.47, gap: 0, items: [
+      { text: 'Grace', w: 0.86, sizePct: 0.11, font: 'Great Vibes', color: '#ffffff', outline: false, anim: 'fade' },
+      { text: 'UPON GRACE', w: 0.8, sizePct: 0.04, font: 'Montserrat', color: '#ffe14d', outline: false, anim: 'fade' },
+    ] },
+  ];
+  /** A template's boxes as real overlays at the playhead, for this frame shape.
+   *  `y` is provisional — stackTemplate places them once they can be measured. */
+  function templateOverlays(tpl, t, frame) {
+    const wide = frame && frame.w > frame.h;
+    const len = 4;
+    const start = Math.max(0, Math.min(t, Math.max(0, dur() - 0.5)));
+    const end = Math.min(dur() || start + len, start + len);
+    return tpl.items.map((it) => ({
+      id: uid(), text: it.text, x: 0.5, y: tpl.y,
+      // a 9:16 layout on a wide picture: the same look, narrower and a touch smaller
+      w: wide ? Math.min(0.7, it.w * 0.62) : it.w, h: 0.12,
+      sizePct: wide ? it.sizePct * 0.9 : it.sizePct,
+      start, end: Math.max(start + 0.5, end),
+      font: it.font, color: it.color, bold: true,
+      outline: !!it.outline, outlineColor: '#000000',
+      bg: !!it.bg, bgColor: it.bgColor || undefined, hug: !!it.hug,
+      anim: it.anim || 'none', tpl: tpl.id,
+    }));
+  }
+  /** Stack a template's boxes by their real drawn height, centred on its `y`. */
+  function stackTemplate(made, tpl) {
+    const fr = outputFrameRect();
+    if (!fr || !fr.h || !ve.refs.textLayer) return;
+    const hs = made.map((o) => {
+      const el = ve.refs.textLayer.querySelector(`.ve-text-box[data-id="${o.id}"]`);
+      return el ? el.offsetHeight / fr.h : o.sizePct * 1.3;
+    });
+    const gap = tpl.gap || 0;
+    const total = hs.reduce((a, b) => a + b, 0) + gap * Math.max(0, made.length - 1);
+    let top = clamp(tpl.y - total / 2, 0.03, Math.max(0.03, 0.97 - total));
+    made.forEach((o, i) => { o.y = top + hs[i] / 2; top += hs[i] + gap; });
+  }
+  /** The template's typefaces, actually fetched — a line measured in a stand-in
+   *  font is stacked at the stand-in's height and lands on its neighbour once
+   *  the real one arrives. Never waits more than a moment. */
+  async function loadTemplateFonts(tpl) {
+    try { await loadCapFonts(); } catch (e) {}
+    if (!document.fonts || !document.fonts.load) return;
+    const fams = Array.from(new Set(tpl.items.map((it) => it.font)));
+    const all = Promise.all(fams.map((f) => {
+      const fam = (CAP_FONTS.find((x) => x.name === f) || {}).family || f;
+      return Promise.all([f, fam].map((n) => document.fonts.load(`800 40px '${String(n).replace(/'/g, '')}'`).catch(() => null)));
+    }));
+    await Promise.race([all, new Promise((r) => setTimeout(r, 1500))]);
+  }
+  async function addTextTemplate(id) {
+    if (!ve.video) { window.__toast && window.__toast('Open a video first.', 'error'); return null; }
+    const tpl = TEXT_TEMPLATES.find((x) => x.id === id);
+    if (!tpl) return null;
+    await loadTemplateFonts(tpl);
+    pushHistory();
+    const t = ve.refs.player.currentTime || 0;
+    const made = templateOverlays(tpl, t, outputFrameRect());
+    for (const o of made) { ve.textOverlays.push(o); }
+    ve.textSel = made[0].id;
+    renderTextOverlays(); renderTextTrack();
+    // stacked by their real height once drawn, then kept inside the frame
+    stackTemplate(made, tpl);
+    made.forEach((o) => clampTextIntoFrame(o));
+    renderTextOverlays();
+    closeTextTemplates();
+    // parked just after the arrival, so every line of it is there to be seen
+    // and tapped — press play from before it to watch it come in
+    try { ve.refs.player.currentTime = Math.min(made[0].end, made[0].start + 0.4); updatePlayhead(); } catch (e) {}
+    window.__toast && window.__toast(`“${tpl.name}” added — tap the words to type your own.`, 'good');
+    return made.map((o) => o.id);
+  }
+  /** A template drawn small, in its own fonts, for the gallery card. */
+  function templateCardHtml(tpl) {
+    const H = 192;   // the card's own height (.ve-tpl-demo), so sizes are true to scale
+    // the same stack, laid out by the browser: a flex column centred on y
+    return `<div class="ve-tpl-stack" style="top:${(tpl.y * 100).toFixed(1)}%;gap:${((tpl.gap || 0) * H).toFixed(1)}px;">`
+      + tpl.items.map((it) => {
+        const o = Object.assign({ bold: true }, it);
+        return `<div class="ve-tpl-item" style="width:${(it.w * 100).toFixed(0)}%;">`
+          + `<div style="${textLookCss(o, Math.max(6, it.sizePct * H))}">${escape2(it.text)}</div></div>`;
+      }).join('') + '</div>';
+  }
+  function textTplModal() {
+    let m = document.getElementById('veTextTplModal');
+    if (m) return m;
+    m = document.createElement('div');
+    m.id = 'veTextTplModal';
+    m.className = 'cap-modal hidden';
+    m.innerHTML = `
+      <div class="cap-box ve-tpl-box">
+        <div class="cap-head"><strong>Text templates</strong><button type="button" class="ghost-btn small" data-tpl-close>✕</button></div>
+        <div class="ve-tpl-grid">${TEXT_TEMPLATES.map((t) => `<button type="button" class="ve-tpl-card" data-tpl="${t.id}" title="${attr2(t.name)}"><span class="ve-tpl-demo">${templateCardHtml(t)}</span><span class="ve-tpl-name">${escape2(t.name)}</span></button>`).join('')}</div>
+      </div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click', (e) => {
+      if (e.target === m || e.target.closest('[data-tpl-close]')) return closeTextTemplates();
+      const c = e.target.closest('[data-tpl]');
+      if (c) addTextTemplate(c.dataset.tpl);
+    });
+    return m;
+  }
+  async function openTextTemplates() {
+    if (!ve.video) { window.__toast && window.__toast('Open a video first.', 'error'); return; }
+    // the cards are drawn in the real typefaces, which have to be loaded first
+    try { await loadCapFonts(); } catch (e) {}
+    const m = textTplModal();
+    m.classList.remove('hidden');
+  }
+  function closeTextTemplates() {
+    const m = document.getElementById('veTextTplModal');
+    if (m) m.classList.add('hidden');
+  }
+
+  /** The animation picker for the selected text: tiles that show each move. */
+  function textAnimModal() {
+    let m = document.getElementById('veTextAnimModal');
+    if (m) return m;
+    m = document.createElement('div');
+    m.id = 'veTextAnimModal';
+    m.className = 'cap-modal hidden';
+    m.innerHTML = `
+      <div class="cap-box ve-tanim-box">
+        <div class="cap-head"><strong>Text animation</strong><button type="button" class="ghost-btn small" data-tanim-close>✕</button></div>
+        <div class="ve-tanim-grid">${TEXT_ANIMS.map((a) => `<button type="button" class="ve-tanim-tile" data-tanim="${a.id}"><span class="ve-tanim-demo ta-${a.id}"><b>Aa</b></span><span class="ve-tanim-name">${a.name}</span></button>`).join('')}</div>
+        <div class="ve-trans-foot">
+          <button type="button" class="ghost-btn" data-tanim-all>Apply to all text</button>
+          <button type="button" class="primary-btn" data-tanim-close>Done</button>
+        </div>
+      </div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click', (e) => {
+      if (e.target === m || e.target.closest('[data-tanim-close]')) { m.classList.add('hidden'); return; }
+      const tile = e.target.closest('[data-tanim]');
+      if (tile) { setTextAnim(ve.textSel, tile.dataset.tanim); return; }
+      if (e.target.closest('[data-tanim-all]')) {
+        const o = selectedTextOverlay();
+        const a = (o && o.anim) || 'none';
+        if (!ve.textOverlays.length) return;
+        pushHistory();
+        ve.textOverlays.forEach((x) => { x.anim = a; });
+        renderTextOverlays(); renderTextTrack(); updateTextTools();
+        window.__toast && window.__toast(a === 'none' ? 'Animation taken off every text.' : `${TEXT_ANIMS.find((x) => x.id === a).name} on all ${ve.textOverlays.length} text${ve.textOverlays.length === 1 ? '' : 's'}.`, 'good');
+      }
+    });
+    return m;
+  }
+  function syncTextAnimPicker() {
+    const m = document.getElementById('veTextAnimModal');
+    const o = selectedTextOverlay();
+    if (!m) return;
+    m.querySelectorAll('[data-tanim]').forEach((b) => b.classList.toggle('on', !!o && (o.anim || 'none') === b.dataset.tanim));
+  }
+  function openTextAnimPicker() {
+    if (!selectedTextOverlay()) {
+      // nothing chosen yet: the one under the playhead, or the first there is
+      const t = ve.refs.player ? ve.refs.player.currentTime || 0 : 0;
+      const here = ve.textOverlays.find((o) => t >= o.start && t <= o.end) || ve.textOverlays[0];
+      if (!here) { window.__toast && window.__toast('Add some text first — then choose how it arrives.', 'error'); return; }
+      ve.textSel = here.id; renderTextOverlays(); renderTextTrack();
+    }
+    const m = textAnimModal();
+    syncTextAnimPicker();
+    m.classList.remove('hidden');
+  }
+  /** Set how a text arrives. One undo step; plays the arrival so it is seen. */
+  function setTextAnim(id, anim) {
+    const o = ve.textOverlays.find((x) => x.id === id);
+    if (!o) return null;
+    pushHistory();
+    o.anim = TEXT_ANIM_IDS.includes(anim) ? anim : 'none';
+    syncTextAnimPicker();
+    const sel = document.getElementById('vtAnim'); if (sel) sel.value = o.anim;
+    renderTextOverlays(); renderTextTrack();
+    if (o.anim !== 'none' && ve.refs.player) {
+      try { ve.refs.player.currentTime = Math.max(0, o.start - 0.3); const pr = ve.refs.player.play(); if (pr && pr.catch) pr.catch(() => {}); } catch (e) {}
+    }
+    return o.anim;
+  }
+
   /* ---- text-style toolbar (font / size / colour / bold) ---- */
   /** The export frame's height in preview pixels — what a text's size is a
    *  fraction OF, so the number the toolbar shows means the same thing at every
@@ -3472,6 +4272,7 @@
     const bgc = $('#vtBgColor');
     if (bgc) { bgc.value = /^#[0-9a-f]{6}$/i.test(o.bgColor || '') ? o.bgColor : '#000000'; bgc.disabled = !o.bg; }
     const ol = $('#vtOutline'); if (ol) ol.classList.toggle('on', !!o.outline);
+    const an = $('#vtAnim'); if (an) an.value = TEXT_ANIM_IDS.includes(o.anim) ? o.anim : 'none';
   }
   /** Change a style property on the selected text; updates the live node even mid-edit. */
   function applyTextProp(mutate) {
@@ -4012,6 +4813,7 @@
       // rasterised path exists to stop.
       outline: !!o.outline, outlineColor: o.outlineColor || '#000000',
       sizePct: o.sizePct,   // already a fraction of the frame, which is what the burn wants
+      anim: TEXT_ANIM_IDS.includes(o.anim) ? o.anim : 'none',
     }));
   }
   /* ------------------ WYSIWYG text: preview == export ------------------
@@ -4190,10 +4992,14 @@
       // through srcToOut, so text after a closed pause, a deleted stretch or a
       // transition still lands on the words it was placed against
       const start = outTime(s, o.start, 'start');
+      // …and where its middle is, which a pop or zoom grows around
+      const lay = overlayLayout(o, g, mode, outW, outH);
       out.push({
         png,
         start: Math.max(0, start),
         end: Math.max(start + 0.1, Math.min(outTime(s, s.end, 'end'), outTime(s, o.end, 'end'))),
+        anim: TEXT_ANIM_IDS.includes(o.anim) ? o.anim : 'none',
+        cx: lay.left / outW, cy: lay.top / outH,
       });
     }
     return out;
@@ -4724,12 +5530,13 @@
       // addSegment would have made a main-lane clip of THIS video instead, which
       // is not a copy of anything the operator can see.
       if ((s.lane || 0) >= 1) {
-        const copy = { ...s, id: uid(), tlStart: clamp(tlPos(s) + len, 0, Math.max(0, dur() - 0.2)) };
+        const copy = { ...s, id: uid(), tlStart: clamp(tlPos(s) + len, 0, Math.max(0, dur() - 0.2)), key: s.key ? Object.assign({}, s.key) : undefined };
         ve.segments.push(copy); selectSeg(copy.id);
         return;
       }
       const ns = Math.min(dur() - len, s.end);
-      addSegment(ns, Math.min(dur(), ns + len), s.label + ' copy', s.ai);
+      const copy = addSegment(ns, Math.min(dur(), ns + len), s.label + ' copy', s.ai);
+      if (copy && kfList(s).length) copy.kf = kfList(s).map((k) => Object.assign({}, k, { t: k.t - s.start + ns }));
     });
   }
   function doSplit(s, t) { return batchRender(() => doSplitInner(s, t)); }
@@ -4760,6 +5567,7 @@
     const right = addSegment(rightStart, origEnd, s.seed ? s.label : s.label + ' (2)', s.ai);
     right.seed = !!s.seed;
     if (rightCuts.length) right.cuts = rightCuts;
+    splitKf(s, right, t);
     selectSeg(right.id); renderSegments();
     window.__toast && window.__toast(s.seed
       ? '✂ Split — delete the part you don’t want, then 💾 Export video. (Splitting your video doesn’t make shorts — use ✂️ Long to short clips for that.)'
@@ -6755,7 +7563,7 @@
    * surviving piece — each pointing at the footage that belongs to it. Getting
    * this wrong does not look like a bug, it looks like the overlay drifting late.
    */
-  function overlayWindows(s, o) {
+  function overlayWindows(s, o, clock) {
     const ovStart = tlPos(o), ovEnd = ovStart + (o.end - o.start);
     const A = Math.max(ovStart, s.start), B = Math.min(ovEnd, s.end);
     if (B - A < 0.02) return [];
@@ -6764,7 +7572,9 @@
     for (const p of pieces) {
       const a = Math.max(A, p.start), b = Math.min(B, p.end);
       if (b - a < 0.02) continue;
-      const tl = hasCuts(s) ? srcToOut(s, a) : (a - s.start);
+      // 'out': straight onto the finished export's clock — closed gaps AND
+      // transitions taken out — for a composite laid on after the encode
+      const tl = clock === 'out' ? outTime(s, a, 'start') : (hasCuts(s) ? srcToOut(s, a) : (a - s.start));
       if (tl == null) continue;
       out.push({ tlStart: tl, srcStart: o.start + (a - ovStart), srcEnd: o.start + (b - ovStart) });
     }
@@ -6789,18 +7599,19 @@
    *              fractions are taken back through the preview's canvas transform
    *              onto the source, exactly as added text does.
    */
-  function overlayPayloadFor(s, mode) {
+  function overlayPayloadFor(s, mode, clock) {
     return overlaysIntersecting(s).flatMap((o) => {
       const place = mode === 'source' ? pipOnSource(o) : {
         x: o.pipX != null ? o.pipX : 0.6, y: o.pipY != null ? o.pipY : 0.05, wFrac: o.pipW != null ? o.pipW : 0.34,
       };
-      return overlayWindows(s, o).map((w) => Object.assign({
+      return overlayWindows(s, o, clock).map((w) => Object.assign({
         src: o.src || ve.video.path,
         still: o.kind === 'image',
         // A picture never has sound; a second video keeps its own unless silenced.
         mute: o.kind === 'image' ? true : !!o.mute,
         srcStart: w.srcStart, srcEnd: w.srcEnd, tlStart: w.tlStart,
         opacity: o.opacity != null ? o.opacity : 1,
+        key: keyOn(o) ? { color: o.key.color, sim: o.key.sim, blend: o.key.blend } : undefined,
       }, place));
     });
   }
@@ -6875,6 +7686,8 @@
       capModel: ve.capModel || undefined,
       music: clone(ve.music), outro: clone(ve.outro), outroAll: ve.outroAll,
       sounds: clone(ve.sounds || []),
+      // the keyframed push-ins, already on this export's own clock
+      motion: (() => { try { return motionFor(s); } catch (e) { return null; } })(),
       cover: clone(ve.cover),
       // already in the shape the compositor wants (null = plain crop)
       fill: (() => { try { return fillCfg(); } catch (e) { return null; } })(),
@@ -7063,7 +7876,7 @@
         : await window.__runJob(`🎯 Tracking the speaker in "${s.label}"…`, window.__newJobId(), () => computeReframeKeyframes(s, input, ss, ee, pieces), J(s, 'track'));
       const jobId = window.__newJobId();
       return burnOverlaysIntoShort(s, await window.__runJob(`Exporting "${s.label}" (face-tracked)${gaps}${clean}…`, jobId,
-        () => window.api.sermon.exportReframed({ input, startSec: ss, endSec: ee, preset, quality: qualityCfg(), keyframes, pieces, fill, denoise, cover: coverCfg(), fadeIn, fadeOut, label: s.label, jobId }), J(s, 'encode')));
+        () => window.api.sermon.exportReframed({ input, startSec: ss, endSec: ee, preset, quality: qualityCfg(), keyframes, pieces, fill, denoise, cover: coverCfg(), fadeIn, fadeOut, motion: motionOf(s), label: s.label, jobId }), J(s, 'encode')));
     }
     // A blurred/letterboxed fill shows the WHOLE picture, so a manual pan/zoom
     // crop would contradict it — the fill wins, same as it does over reframing.
@@ -7072,12 +7885,12 @@
     if (manualFraming) {
       const jobId = window.__newJobId();
       return burnOverlaysIntoShort(s, await window.__runJob(`Exporting "${s.label}" (custom framing)${gaps}${clean}…`, jobId,
-        () => window.api.sermon.exportFramed({ input, startSec: ss, endSec: ee, preset, quality: qualityCfg(), zoom: f.zoom, offsetX: f.offsetX, offsetY: f.offsetY, pieces, denoise, cover: coverCfg(), fadeIn, fadeOut, label: s.label, jobId }), J(s, 'encode')));
+        () => window.api.sermon.exportFramed({ input, startSec: ss, endSec: ee, preset, quality: qualityCfg(), zoom: f.zoom, offsetX: f.offsetX, offsetY: f.offsetY, pieces, denoise, cover: coverCfg(), fadeIn, fadeOut, motion: motionOf(s), label: s.label, jobId }), J(s, 'encode')));
     }
     const jobId = window.__newJobId();
     const how = fill ? (fill.mode === 'blur' ? ' (blurred background)' : ' (letterboxed)') : '';
     return burnOverlaysIntoShort(s, await window.__runJob(`Exporting "${s.label}"${how}${gaps}${clean}…`, jobId,
-      () => window.api.sermon.exportShort({ input, startSec: ss, endSec: ee, preset, quality: qualityCfg(), pieces, fill, denoise, cover: coverCfg(), fadeIn, fadeOut, label: s.label, jobId }), J(s, 'encode')));
+      () => window.api.sermon.exportShort({ input, startSec: ss, endSec: ee, preset, quality: qualityCfg(), pieces, fill, denoise, cover: coverCfg(), fadeIn, fadeOut, motion: motionOf(s), label: s.label, jobId }), J(s, 'encode')));
   }
 
   /**
@@ -7113,7 +7926,10 @@
      * built from the list of passes this export is going to make, and "are
      * captions happening" is one of the things that decides it.
      */
-    const withCaps = exportWantsCaps(s, capExportsOn()) && (await window.api.captions.available().catch(() => false));
+    // Lines already on the 💬 lane are burned as they are — that needs no speech
+    // engine on this machine (they may have come from the cloud ear, or been
+    // typed). Only captions still to be HEARD wait on one.
+    const withCaps = hasClipCaps(s) || (exportWantsCaps(s, capExportsOn()) && (await window.api.captions.available().catch(() => false)));
     if (window.__chainBegin) {
       window.__chainBegin(task, exportPlan(s, { track: reframeOn() && !!window.FaceTrack, captions: withCaps }));
     }
@@ -7399,7 +8215,7 @@
      * this path never tracks (it keeps the recording's own shape, so there is
      * no crop window to move).
      */
-    const planCaps = capExportsOn() && (await window.api.captions.available().catch(() => false));
+    const planCaps = capExportsOn() && (hasClipCaps(whole) || (await window.api.captions.available().catch(() => false)));
     if (window.__chainBegin) {
       window.__chainBegin(task, exportPlan(whole, { track: false, captions: planCaps, overlays: 'source' }));
     }
@@ -7420,7 +8236,11 @@
       // 'source': this export keeps the WHOLE picture, so the placement has to be
       // taken back out of the export frame the preview draws onto the recording
       // itself — the same conversion added text does for this path.
-      const overlays = overlaysFor(whole, 'source');
+      // Keyframes push in on the VIDEO, not on what sits on top of it (that is
+      // what the preview shows, and what CapCut does) — so with keyframes the
+      // overlays go on AFTER the encode, on the finished export's own clock.
+      const motion = motionFor(whole);
+      const overlays = motion ? [] : overlaysFor(whole, 'source');
       if (overlays.length) {
         const jid = window.__newJobId();
         const n = overlays.length;
@@ -7441,9 +8261,19 @@
         // apply — a noisy room is noisy, and a fade is wanted, whatever shape
         // the export is.
         denoise: denoiseCfg(), fadeIn: fadeInCfg(), fadeOut: fadeOutCfg(),
+        // keyframed push-ins on every clip, on the edited video's own clock
+        motion,
         label: (ve.video.path.split(/[\\/]/).pop() || 'video').replace(/\.[^.]+$/, '') + '-edited',
         jobId,
       }), J(whole, 'encode'));
+      if (motion) {
+        const post = overlayPayloadFor(whole, 'source', 'out');
+        if (post.length) {
+          const jid = window.__newJobId();
+          out = await window.__runJob(`📺 Laying ${post.length === 1 ? 'your overlay' : post.length + ' overlays'} onto the video…`, jid,
+            () => window.api.video.overlayComposite({ base: out, overlays: post, jobId: jid, deleteInput: true, outName: 'edited-overlay' }), J(whole, 'overlays'));
+        }
+      }
       const info = ve.video.info;
       const size = { w: info.width, h: info.height };
       const caps = planCaps;    // already asked, above, to build the plan
@@ -7589,7 +8419,7 @@
            * waiting on tracking and must be told so.
            */
           // One pass for both when both are wanted — see exportSegment.
-          const caps = exportWantsCaps(s, withCaps) && capEngineOk;
+          const caps = hasClipCaps(s) || (exportWantsCaps(s, withCaps) && capEngineOk);
           /*
            * The number on the chip is THIS short's, start to finish — so the
            * chain is rebuilt per short, and each one begins again at nothing.
@@ -8276,6 +9106,22 @@
      * the default single space runs them together. */
     { id: 'spoken', name: 'Spoken', style: 'outline', color: '#ffffff', outline: '#000000',
       outlineScale: 1, wordHighlight: true, wordColor: '#ffff00', wordGap: 0.1 },
+    /* CapCut's animated caption looks: the same whole line on screen, with the
+     * word being spoken picked out a different way (see CapLayout's word modes).
+     * `wordColor` is the colour that does the picking — the block behind the word
+     * for Box word — and `wordInk` the letters on that block. */
+    { id: 'boxword', name: 'Box word', style: 'outline', color: '#ffffff', outline: '#000000',
+      wordHighlight: true, wordMode: 'box', wordColor: '#8b5cf6', wordInk: '#ffffff', wordGap: 0.12 },
+    { id: 'limebox', name: 'Lime box', style: 'outline', color: '#ffffff', outline: '#000000',
+      wordHighlight: true, wordMode: 'box', wordColor: '#3ddc84', wordInk: '#000000', wordGap: 0.12 },
+    { id: 'karaoke', name: 'Karaoke', style: 'outline', color: '#ffffff', outline: '#000000',
+      wordHighlight: true, wordMode: 'karaoke', wordColor: '#ffe14d', wordGap: 0.06 },
+    { id: 'reveal', name: 'Word by word', style: 'outline', color: '#ffffff', outline: '#000000', outlineScale: 1.2,
+      wordHighlight: true, wordMode: 'reveal', wordColor: '#ffffff', wordGap: 0.06 },
+    { id: 'popword', name: 'Pop word', style: 'outline', color: '#ffffff', outline: '#000000', outlineScale: 1.2,
+      wordHighlight: true, wordMode: 'pop', wordColor: '#57ff9b', wordGap: 0.14 },
+    { id: 'goldband', name: 'Gold band', style: 'box', color: '#ffffff', outline: '#1d1238',
+      wordHighlight: true, wordMode: 'karaoke', wordColor: '#ffd54a' },
     { id: 'band', name: 'Band', style: 'box', color: '#ffffff', outline: '#000000' },
     { id: 'highlight', name: 'Highlight', style: 'box', color: '#000000', outline: '#ffe14d' },
     { id: 'royal', name: 'Royal', style: 'box', color: '#ffffff', outline: '#7b3ff2' },
@@ -8441,6 +9287,7 @@
     try { saved = localStorage.getItem(LIB_KEYS.capStyle); } catch (e) {}
     ve.capStyleId = capStyleDef(saved).id;
     const sel = $('#capStyleSel'); if (sel) sel.value = ve.capStyleId;
+    syncCapWordColor();
     restoreCapLook();
     renderCapStyleGrid();
   }
@@ -8511,6 +9358,9 @@
       wordHighlight: capWordHlOn(def),
       wordColor: (document.getElementById('capWordColor') || {}).value || def.wordColor || '#ffff00',
       wordGap: def.wordGap || 0,
+      // how the spoken word is picked out, and the letters on a Box word's block
+      wordMode: def.wordMode || 'color',
+      wordInk: def.wordInk || '#ffffff',
     };
   };
   /** Letter spacing as a fraction of the font size (0 when not set). */
@@ -8606,6 +9456,15 @@
         outline: def.outline || '#000000', style: def.style, outlineScale: def.outlineScale || 1,
       });
       const inline = capSpanCss(cfg, 19);
+      if (def.wordHighlight && def.wordMode) {
+        // An animated look is shown DOING it: the spoken word travels along the
+        // sample (see capSampleTick), drawn by the same code as the captions.
+        const wcfg = capSampleCfg(def, cfg);
+        return `<button type="button" class="cap-style-card${ve.capStyleId === def.id ? ' sel' : ''}" data-capstyle="${def.id}" title="${escape2(def.name)}">
+        <span class="cap-style-sample cap-style-live" data-wm="${def.id}" style="font-size:19px;font-weight:800;font-family:'${attr2(capFontFamily())}',system-ui,sans-serif;line-height:1.25;">${capSampleHtml(wcfg, 19, sample, 1)}</span>
+        <span class="cap-style-name">${escape2(def.name)}</span>
+      </button>`;
+      }
       return `<button type="button" class="cap-style-card${ve.capStyleId === def.id ? ' sel' : ''}" data-capstyle="${def.id}" title="${escape2(def.name)}">
         <span class="cap-style-sample" style="${inline}">${escape2(sample)}</span>
         <span class="cap-style-name">${escape2(def.name)}</span>
@@ -8617,13 +9476,54 @@
     }));
   }
 
+  /** A look's full settings for a sample, with its own word colours. */
+  function capSampleCfg(def, base) {
+    return Object.assign({}, base, {
+      wordHighlight: true, wordMode: def.wordMode, wordColor: def.wordColor || '#ffff00',
+      wordInk: def.wordInk || '#ffffff', wordGap: def.wordGap || 0,
+    });
+  }
+  /** One sample line drawn by CapLayout itself, with word `hl` being spoken. */
+  function capSampleHtml(cfg, px, text, hl) {
+    const L = { m: window.CapLayout.metricsAt(cfg, px, px * 40), cfg };
+    return window.CapLayout.lineHtml(L, text, 0, hl);
+  }
+  let _capSampleTimer = null, _capSampleStep = 0;
+  /** Walks the spoken word along every animated sample that is on screen, and
+   *  stops itself as soon as none is. */
+  function capSampleTick() {
+    if (_capSampleTimer) return;
+    _capSampleTimer = setInterval(() => {
+      const live = $$('[data-wm]').filter((el) => el.offsetParent !== null);
+      if (!live.length) { clearInterval(_capSampleTimer); _capSampleTimer = null; return; }
+      _capSampleStep = (_capSampleStep + 1) % 4;
+      const hl = _capSampleStep - 1;        // -1 (nothing said yet), 0, 1, 2
+      const base = capStyleCfg();
+      for (const el of live) {
+        const def = CAP_STYLES.find((d) => d.id === el.dataset.wm); if (!def) continue;
+        const cfg = Object.assign({}, base, {
+          color: def.color, outline: def.outline || '#000000', style: def.style, outlineScale: def.outlineScale || 1,
+        });
+        el.innerHTML = capSampleHtml(capSampleCfg(def, cfg), 19, 'THE QUICK BROWN', hl);
+      }
+    }, 520);
+  }
   function showCapStylePicker(on) {
     const p = document.getElementById('capStylePicker'); if (!p) return false;
     p.classList.toggle('hidden', !on);
+    if (on) capSampleTick();
     return on;
+  }
+  /** A look that brings its own word colour puts it on the swatch, so Box word
+   *  arrives purple rather than wearing whatever the last look left there. */
+  function syncCapWordColor() {
+    const def = capStyleDef();
+    const wc = document.getElementById('capWordColor');
+    if (wc && def.wordColor) wc.value = def.wordColor;
   }
   function setCapStyle(id) {
     ve.capStyleId = capStyleDef(id).id;
+    syncCapWordColor();
     const sel = document.getElementById('capStyleSel'); if (sel) sel.value = ve.capStyleId;
     try { localStorage.setItem(LIB_KEYS.capStyle, ve.capStyleId); } catch (e) {}
     renderCapStyleGrid();
@@ -11164,6 +12064,8 @@
     }
     const ovSndBtn = $('#veOvSound'); if (ovSndBtn) ovSndBtn.addEventListener('click', () => toggleOverlaySound());
     const cutBtn = $('#veCutOut'); if (cutBtn) cutBtn.addEventListener('click', () => cutOutOverlayBackground());
+    const keyBtn = $('#veChromaKey'); if (keyBtn) keyBtn.addEventListener('click', () => openChromaKey());
+    const kfBtn = $('#veKeyframes'); if (kfBtn) kfBtn.addEventListener('click', () => openKeyframes());
     if (window.CutOut && window.CutOut.wire) window.CutOut.wire();
     const studioBtn = $('#veStudioSound'); if (studioBtn) { studioBtn.addEventListener('click', toggleStudioSound); updateStudioSoundButton(); }
     const ovGuide = $('#veOverlayGuide'); if (ovGuide) ovGuide.addEventListener('mousedown', onOverlayGuideDown);
@@ -11209,6 +12111,7 @@
       if (!o.outlineColor) o.outlineColor = '#000000';
     }));
     const vtDelete = $('#vtDelete'); if (vtDelete) vtDelete.addEventListener('click', () => { if (ve.textSel) removeTextOverlay(ve.textSel); });
+    const vtAnim = $('#vtAnim'); if (vtAnim) vtAnim.addEventListener('change', () => { if (ve.textSel) setTextAnim(ve.textSel, vtAnim.value); });
     // Clicking anywhere on the preview OUTSIDE a text box deselects the text:
     // commits any in-progress edit, hides the style toolbar, drops the drag border.
     ve.refs.preview.addEventListener('mousedown', (e) => {
@@ -11513,6 +12416,7 @@
 
     // text-on-video overlays (burned into every exported clip automatically)
     $('#veAddText').addEventListener('click', addTextOverlay);
+    const tplBtn = $('#veTextTpl'); if (tplBtn) tplBtn.addEventListener('click', openTextTemplates);
 
     /* ---- media library: background music + outro clips ---- */
     const musicBtn = $('#veMusic'); if (musicBtn) musicBtn.addEventListener('click', () => openLibrary('music'));
@@ -11854,6 +12758,13 @@
       openTransitionPicker(best.seg.id);
       return true;
     },
+    /** The phone's Chroma key tool: the selected overlay, or one under the playhead. */
+    chromaKey() { return openChromaKey(); },
+    /** The phone's Keyframe tool: the clip under the playhead (or the selected one). */
+    keyframes() { return openKeyframes(); },
+    /** The phone's Text row: ready-made titles, and how a text arrives. */
+    textTemplates() { openTextTemplates(); },
+    textAnimation() { openTextAnimPicker(); },
     // test hooks (no real ffmpeg/player needed)
     __test: {
       // The batch pipeline, on its own: "Export all" hands it real tracking, a
@@ -11946,6 +12857,26 @@
         return outTime({ start: sp.start, end: sp.end, cuts: sp.cuts, xfades: sp.xfades }, t, edge);
       },
       setTransition(segId, type, dur) { setTransition(segId, type, dur); },
+      setChromaKey(id, patch) { return setChromaKey(id, patch); },
+      chromaKeyOf(id) { const x = ve.segments.find((v) => v.id === id); return x && x.key ? Object.assign({}, x.key) : null; },
+      openChromaKey(id) { return openChromaKey(id); },
+      pickKeyColor(id) { return pickKeyColor(id); },
+      keyAlpha(rgb, color, sim, blend) { return keyAlpha(rgb[0], rgb[1], rgb[2], keyUVFull(...hexRgb(color)), sim, blend); },
+      overlayExportPayload(mode) { const sp = editedSpan(); return sp ? overlayPayloadFor({ id: '__edited', start: sp.start, end: sp.end, cuts: sp.cuts, xfades: sp.xfades }, mode || 'frame') : null; },
+      keyframePreset(id, kind) { return keyframePreset(id, kind); },
+      setKeyframes(id, kf) { const x = ve.segments.find((v) => v.id === id); if (!x) return null; if (kf && kf.length) x.kf = kf.map((k) => Object.assign({}, k)); else delete x.kf; ve._kfKey = null; renderSegments(); return (x.kf || []).length; },
+      keyframesOf(id) { const x = ve.segments.find((v) => v.id === id); return x ? (x.kf || []).map((k) => Object.assign({}, k)) : null; },
+      kfAt(id, t) { const x = ve.segments.find((v) => v.id === id); return x ? kfAt(x, t) : null; },
+      motionForEdited() { const sp = editedSpan(); if (!sp) return null; return motionFor({ id: '__edited', start: sp.start, end: sp.end, cuts: sp.cuts, xfades: sp.xfades }); },
+      motionForClip(id) { const x = ve.segments.find((v) => v.id === id); return x ? motionFor(x) : null; },
+      playerTransform() { return ve.refs.player ? ve.refs.player.style.transform : null; },
+      openKeyframes(id) { return openKeyframes(id); },
+      setKeyframeValue(key, val) { const k = setKeyframeValue(key, val, false); return k ? Object.assign({}, k) : null; },
+      textTemplateIds() { return TEXT_TEMPLATES.map((t) => t.id); },
+      addTextTemplate(id) { return addTextTemplate(id); },
+      setTextAnim(id, anim) { return setTextAnim(id, anim); },
+      textAnimState(id, t) { const o = ve.textOverlays.find((x) => x.id === id); return o ? textAnimState(o, t) : null; },
+      textAnimOf(id) { const o = ve.textOverlays.find((x) => x.id === id); return o ? (o.anim || 'none') : null; },
       exportEditedButton() {
         const b = document.getElementById('veExportEdited');
         return b ? { text: b.textContent, title: b.title, disabled: b.disabled } : null;
