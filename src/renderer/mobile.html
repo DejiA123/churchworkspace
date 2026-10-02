@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#05070c" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Stage — Church Work Space</title>
+  <style>
+    /* A confidence monitor in a browser. Built for a phone on a music stand in
+       a dark room: huge type, near-black background, nothing that needs
+       precision tapping, and no scrolling while you're singing. */
+    :root { --bg:#05070c; --fg:#ffffff; --dim:#8b98b4; --accent:#ffd479; --line:#1a2231; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+      overscroll-behavior:none; }
+    body { display:flex; flex-direction:column; padding-top:env(safe-area-inset-top);
+      padding-bottom:env(safe-area-inset-bottom); }
+
+    .bar { display:flex; align-items:center; justify-content:space-between; gap:10px;
+      padding:10px 14px; border-bottom:1px solid var(--line); flex:0 0 auto; }
+    .group { font-size:12px; font-weight:800; letter-spacing:.18em; text-transform:uppercase; color:var(--dim); }
+    .clock { font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; color:#dbe3f2; }
+    .dot { width:8px; height:8px; border-radius:50%; background:#39415a; flex:0 0 auto; }
+    .dot.live { background:#e5534b; box-shadow:0 0 8px rgba(229,83,75,.9); }
+
+    main { flex:1; display:flex; flex-direction:column; min-height:0; }
+    .current { flex:1; display:flex; align-items:center; justify-content:center; text-align:center;
+      padding:16px 18px; min-height:0; }
+    .words { font-size:8vh; font-weight:700; line-height:1.22; white-space:pre-wrap; }
+    .words.s2 { font-size:6vh; } .words.s3 { font-size:4.6vh; } .words.s4 { font-size:3.6vh; }
+    .ref { margin-top:14px; font-size:2.6vh; color:var(--accent); font-weight:600; }
+    .blank { color:#39415a; font-size:3vh; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+
+    .next { flex:0 0 auto; border-top:1px solid var(--line); padding:10px 16px; min-height:64px; }
+    .next-l { font-size:11px; font-weight:800; letter-spacing:.2em; text-transform:uppercase; color:#5c6880; }
+    .next-b { font-size:2.4vh; color:#93a2bd; line-height:1.35; margin-top:3px;
+      display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+
+    .notes { border-top:1px solid var(--line); padding:10px 16px; color:#cbb26a; font-size:2vh; white-space:pre-wrap; }
+    .msg { background:#b3261e; color:#fff; padding:12px 16px; font-size:2.2vh; font-weight:700; }
+    .timers { display:flex; gap:10px; padding:8px 14px; border-top:1px solid var(--line); flex-wrap:wrap; }
+    .timer { font-variant-numeric:tabular-nums; font-weight:800; font-size:18px; color:var(--accent);
+      background:#101622; border:1px solid var(--line); border-radius:9px; padding:5px 11px; }
+    .timer small { display:block; font-size:9px; font-weight:700; letter-spacing:.14em;
+      text-transform:uppercase; color:var(--dim); }
+
+    /* chords over lyrics for musicians */
+    .chordline { position:relative; text-align:left; margin-bottom:1.4vh; }
+    .chordrow { position:relative; height:3vh; font-size:2.6vh; font-weight:800; color:var(--accent); }
+    .chordrow span { position:absolute; white-space:nowrap; }
+    .lyricrow { font-size:5vh; font-weight:700; line-height:1.2; }
+
+    /* remote: big targets, thumb-reachable, only shown when the studio allows it */
+    .remote { flex:0 0 auto; display:none; grid-template-columns:1fr 1fr 1fr; gap:8px; padding:10px 12px;
+      border-top:1px solid var(--line); }
+    body.can-control .remote { display:grid; }
+    .remote button { appearance:none; border:1px solid #27314a; background:#141a28; color:#dbe3f2;
+      border-radius:12px; padding:16px 8px; font-size:16px; font-weight:800; cursor:pointer; }
+    .remote button:active { background:#1e2740; }
+    .remote button.wide { grid-column:span 3; }
+    .remote button.red { border-color:#5a2320; background:#2a1412; color:#ff9b95; }
+
+    .setup { padding:22px; text-align:center; color:var(--dim); }
+    .setup input { width:100%; max-width:280px; padding:12px; font-size:17px; border-radius:10px;
+      border:1px solid var(--line); background:#0d1219; color:#fff; margin:12px 0; }
+    .setup button { padding:12px 22px; font-size:16px; font-weight:700; border-radius:10px;
+      border:none; background:#4f7cff; color:#fff; }
+    .off { opacity:.35; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <span class="dot" id="dot"></span>
+    <span class="group" id="group">Stage</span>
+    <span class="clock" id="clock">--:--</span>
+  </div>
+
+  <div id="setup" class="setup" hidden>
+    <p>This screen is passcode protected.</p>
+    <input id="key" type="text" inputmode="numeric" placeholder="Passcode" autocomplete="off" />
+    <br /><button id="go">Connect</button>
+    <p id="err" style="color:#ff9b95"></p>
+  </div>
+
+  <main id="main">
+    <div class="current"><div id="cur"><div class="blank">Connecting…</div></div></div>
+    <div class="timers" id="timers" hidden></div>
+    <div class="msg" id="msg" hidden></div>
+    <div class="notes" id="notes" hidden></div>
+    <div class="next"><div class="next-l">Next</div><div class="next-b" id="next">—</div></div>
+  </main>
+
+  <div class="remote" id="remote">
+    <button id="bPrev">◀ Prev</button>
+    <button id="bBlack" class="red">Black</button>
+    <button id="bNext">Next ▶</button>
+    <button id="bClear" class="wide">Clear slide</button>
+  </div>
+
+  <script>
+    (function () {
+      var $ = function (s) { return document.querySelector(s); };
+      var key = localStorage.getItem('mw-key') || '';
+      var es = null, state = null, canControl = false;
+
+      function q(path) { return path + (key ? (path.indexOf('?') < 0 ? '?' : '&') + 'key=' + encodeURIComponent(key) : ''); }
+      function esc(s) { return String(s == null ? '' : s).replace(/[&<>]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]; }); }
+
+      function connect() {
+        if (es) { try { es.close(); } catch (e) {} }
+        es = new EventSource(q('/events'));
+        es.onmessage = function (ev) {
+          try { state = JSON.parse(ev.data); } catch (e) { return; }
+          $('#setup').hidden = true; $('#main').hidden = false;
+          render();
+        };
+        // A phone that locks its screen kills the stream; reconnecting on error
+        // is what makes this survive a whole service in someone's pocket.
+        es.onerror = function () {
+          $('#dot').classList.remove('live');
+          setTimeout(function () { if (!document.hidden) connect(); }, 2500);
+        };
+      }
+
+      fetch('/api/info').then(function (r) { return r.json(); }).then(function (info) {
+        canControl = !!info.control;
+        document.body.classList.toggle('can-control', canControl);
+        if (info.needsKey && !key) { $('#setup').hidden = false; $('#main').hidden = true; }
+        else connect();
+      }).catch(function () { connect(); });
+
+      $('#go').addEventListener('click', function () {
+        key = $('#key').value.trim();
+        fetch('/api/state' + (key ? '?key=' + encodeURIComponent(key) : '')).then(function (r) {
+          if (r.status === 401) { $('#err').textContent = 'Wrong passcode.'; return; }
+          localStorage.setItem('mw-key', key); connect();
+        });
+      });
+
+      function render() {
+        if (!state) return;
+        $('#dot').classList.toggle('live', !state.blackout && !!state.slide);
+        $('#group').textContent = (state.slide && state.slide.group) || 'Stage';
+        document.body.classList.toggle('off', !!state.blackout);
+
+        var cur = $('#cur');
+        if (state.blackout) cur.innerHTML = '<div class="blank">Screen is black</div>';
+        else if (!state.slide) cur.innerHTML = '<div class="blank">Cleared</div>';
+        else {
+          var sl = state.slide;
+          var hasChords = sl.chords && sl.chords.some(function (r) { return r && r.length; });
+          if (hasChords) {
+            cur.innerHTML = '<div>' + sl.lines.map(function (l, i) {
+              var row = (sl.chords[i] || []).map(function (c) {
+                return '<span style="left:' + (c.at * 0.55).toFixed(2) + 'em">' + esc(c.chord) + '</span>';
+              }).join('');
+              return '<div class="chordline"><div class="chordrow">' + row + '</div>'
+                + '<div class="lyricrow">' + (esc(l) || '&nbsp;') + '</div></div>';
+            }).join('') + (sl.footer ? '<div class="ref">' + esc(sl.footer) + '</div>' : '') + '</div>';
+          } else {
+            var text = sl.lines.join('\n');
+            var cls = text.length > 240 ? 's4' : text.length > 140 ? 's3' : text.length > 70 ? 's2' : '';
+            cur.innerHTML = '<div><div class="words ' + cls + '">' + esc(text) + '</div>'
+              + (sl.footer ? '<div class="ref">' + esc(sl.footer) + '</div>' : '') + '</div>';
+          }
+        }
+
+        var n = state.next;
+        $('#next').textContent = n && n.lines.join(' ').trim()
+          ? (n.group ? n.group + ' — ' : '') + n.lines.join(' ') : '—';
+
+        var notes = (state.slide && state.slide.notes) || '';
+        $('#notes').hidden = !notes; $('#notes').textContent = notes;
+        var m = state.stageMessage || state.message || '';
+        $('#msg').hidden = !m; $('#msg').textContent = m;
+        renderTimers();
+      }
+
+      function timerText(t, now) {
+        if (t.mode === 'clock') return new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        var secs;
+        if (t.mode === 'countup') secs = Math.max(0, Math.floor(((t.running ? now : (t.stoppedAt || now)) - (t.startedAt || now)) / 1000));
+        else secs = Math.max(0, Math.ceil(((t.endsAt || now) - (t.running ? now : (t.stoppedAt || now))) / 1000));
+        var h = Math.floor(secs / 3600), mm = Math.floor((secs % 3600) / 60), ss = secs % 60;
+        return (h > 0 ? h + ':' + String(mm).padStart(2, '0') : String(mm)) + ':' + String(ss).padStart(2, '0');
+      }
+      function renderTimers() {
+        var box = $('#timers'), list = (state && state.timers) || [];
+        box.hidden = !list.length;
+        var now = Date.now();
+        box.innerHTML = list.map(function (t) {
+          return '<div class="timer"><small>' + esc(t.name || '') + '</small>' + timerText(t, now) + '</div>';
+        }).join('');
+      }
+      setInterval(function () {
+        $('#clock').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        renderTimers();
+      }, 500);
+
+      function cmd(name, arg) {
+        if (!canControl) return;
+        if (navigator.vibrate) navigator.vibrate(12);
+        fetch(q('/api/' + name + (arg ? '/' + encodeURIComponent(arg) : '')), { method: 'POST' }).catch(function () {});
+      }
+      $('#bNext').addEventListener('click', function () { cmd('next'); });
+      $('#bPrev').addEventListener('click', function () { cmd('prev'); });
+      $('#bBlack').addEventListener('click', function () { cmd('black'); });
+      $('#bClear').addEventListener('click', function () { cmd('clear', 'slide'); });
+
+      // Reconnect the moment the phone comes back from sleep.
+      document.addEventListener('visibilitychange', function () { if (!document.hidden) connect(); });
+    })();
+  </script>
+</body>
+</html>

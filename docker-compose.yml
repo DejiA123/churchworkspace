@@ -1,0 +1,61 @@
+# The Cloud Studio, with a real https address, in two containers.
+#
+#   1. put your domain in the two places marked below
+#   2. point that domain's DNS at this machine
+#   3. docker compose up -d
+#
+# Caddy is here for one reason: https is not decoration for this app. A PWA will
+# not install to a home screen over plain http, and a browser will not treat the
+# page as a secure context. Caddy gets and renews a certificate by itself, with
+# no configuration beyond the domain name.
+#
+# If you would rather not open a port at all, drop the caddy service and use the
+# app's own tunnel instead (Settings → Cloud Studio → "Give it a public
+# address"), which dials out to Cloudflare and needs nothing forwarded.
+
+services:
+  studio:
+    build: .
+    image: church-cloud-studio
+    restart: unless-stopped
+    environment:
+      # Comes from .env (scripts/cloud-setup.sh writes one). There is no
+      # default on purpose: a placeholder code on an address the whole
+      # internet can reach is worse than a container that refuses to start.
+      MW_CLOUD_CODE: "${MW_CLOUD_CODE:?put your access code in .env — run scripts/cloud-setup.sh, or: echo MW_CLOUD_CODE=your-code-here > .env}"
+      MW_CLOUD_PORT: "7390"
+      # Set to "off" to stop phones sending recordings up to the server.
+      MW_CLOUD_UPLOADS: "on"
+    volumes:
+      - studio-data:/data          # settings, sessions, library, speech models
+      - ./recordings:/media        # your service recordings, readable + writable
+    expose:
+      - "7390"
+    # Exports are CPU work. Give it what the machine can spare; two cores is the
+    # floor for anything the length of a service.
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 4G
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    command: >
+      caddy reverse-proxy
+      --from studio.example.org
+      --to studio:7390
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - studio
+
+volumes:
+  studio-data:
+  caddy-data:
+  caddy-config:

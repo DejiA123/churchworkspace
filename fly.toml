@@ -1,0 +1,61 @@
+# Fly.io — the Cloud Studio on a real host, with the church PC switched off.
+#
+#   fly auth login                     (your own free account — only you can make it)
+#   fly launch --no-deploy --copy-config
+#   fly volume create studio_data --size 100      # your recordings live here
+#   fly secrets set MW_CLOUD_CODE="your-access-code-here"
+#   fly deploy
+#
+# Fly gives every app an https://<name>.fly.dev address with a real certificate,
+# which is what the PWA needs to install to a home screen.
+#
+# A word about size: editing is CPU work. `shared-cpu-2x` will cut and caption a
+# service, but it is slower than the church PC — an hour of footage is an hour of
+# somebody's patience. Move to a `performance-4x` before a big Sunday and back
+# after, or keep long exports on the PC and use the server for the quick ones.
+
+app = "church-video-studio"          # change: this becomes <app>.fly.dev
+primary_region = "lhr"               # change to the region nearest the church
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  MW_CLOUD_PORT = "7390"
+  MW_CLOUD_HOST = "0.0.0.0"
+  MW_CLOUD_DATA = "/data"
+  MW_CLOUD_MEDIA = "/data/media"
+
+# Recordings and the church's library. Without this, everything uploaded is lost
+# the next time the machine restarts.
+[[mounts]]
+  source = "studio_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 7390
+  force_https = true
+  # An export runs for minutes with nothing on the socket, and the machine must
+  # not be stopped underneath it. Suspending on idle is fine; killing is not.
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    # One operator, long jobs. A high limit here would let a second request
+    # start another ffmpeg on a machine that is already flat out.
+    soft_limit = 20
+    hard_limit = 40
+
+[checks.up]
+  type = "http"
+  port = 7390
+  path = "/api/hello"
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "30s"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "4gb"

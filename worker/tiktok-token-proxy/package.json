@@ -1,0 +1,13 @@
+{
+  "name": "tiktok-token-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stateless Cloudflare Worker that holds the TikTok client secret and does the OAuth token exchange for Church Work Space (Path A).",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^3"
+  }
+}

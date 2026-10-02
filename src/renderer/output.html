@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' data: file: blob:; media-src 'self' file: blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' file: data:; script-src 'self'; connect-src 'self' file: data: blob:; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://player.vimeo.com;" />
+  <title>Output</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
+    body.stage { cursor: default; }
+    /* The audience screen is a real 1920x1080 stage that the layer engine paints
+       into; it is scaled to the physical screen by #screen's own size. */
+    #screen { position: fixed; inset: 0; background: #000; overflow: hidden; }
+    /* Everything is laid out on a real 1920x1080 stage and scaled to the glass,
+       so a 60px caption is 60px-of-1080 on a 720p projector AND on a 4K wall —
+       and the operator's little preview is the same layout, not an approximation. */
+    #stage { position: absolute; top: 0; left: 0; width: 1920px; height: 1080px;
+      transform-origin: 0 0; overflow: hidden; background: #000; }
+    #blackout { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none;
+      transition: opacity 260ms ease; z-index: 300; }
+    #blackout.on { opacity: 1; }
+
+    /* ---- downstream keying ----
+       FILL: the graphics on real transparency, for an NDI receiver or a
+       switcher that keys it over its own programme.
+       KEY: the same composite's ALPHA drawn as white-on-black luminance — a
+       genuine key channel, not an approximation, because the SVG filter reads
+       the composited alpha the browser already computed. Feed fill down one
+       cable and key down the other and an SDI keyer joins them back up.
+
+       The html element has to be in these rules, and that is not a detail: it
+       carries background:#000 above, and a background on the ROOT element is
+       what paints the page's canvas. Overriding only body left an opaque black
+       sheet behind a perfectly transparent composite — a "keyable" NDI feed
+       that arrived 100% solid and keyed nothing at all, which is how it
+       shipped. */
+    html.render-fill, body.render-fill, body.render-fill #screen, body.render-fill #stage { background: transparent !important; }
+    html.render-key, body.render-key { background: #000 !important; }
+    body.render-key #screen { background: transparent !important; filter: url(#alphaToLuma); }
+    body.render-key #stage { background: transparent !important; }
+
+    /* ---- stage display: a grid of blocks the operator arranged ---- */
+    #stageview { position: fixed; inset: 0; display: none; background: #05070c; color: #fff;
+      font-family: "Segoe UI", system-ui, sans-serif; gap: 0; }
+    body.stage #screen, body.stage #blackout { display: none; }
+    body.stage #stageview { display: grid; }
+    .sv-block { min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+    .sv-head { display: flex; align-items: center; justify-content: space-between; width: 100%;
+      padding: 1.6vh 2.2vw; border-bottom: 1px solid #1c2333; box-sizing: border-box; }
+    .sv-label { font-size: 2.1vh; font-weight: 800; letter-spacing: .22em; text-transform: uppercase; color: #6f7c96; }
+    .sv-clock { font-size: 4.4vh; font-weight: 700; font-variant-numeric: tabular-nums; color: #dbe3f2; }
+    .sv-timer { font-size: 2.2vh; color: #7f8ca6; margin-left: 1.4vw; font-variant-numeric: tabular-nums; }
+    .sv-current { flex: 1; padding: 2.4vh 2.4vw; display: flex; align-items: center; justify-content: center;
+      text-align: center; min-width: 0; }
+    .sv-text { font-size: 6.2vh; font-weight: 700; line-height: 1.25; white-space: pre-wrap; }
+    .sv-text.small { font-size: 4.4vh; }
+    .sv-text.tiny { font-size: 3.4vh; }
+    .sv-footer { margin-top: 2.4vh; font-size: 2.6vh; color: #ffd479; font-weight: 600; }
+    .sv-blank { color: #3c465c; font-size: 3.4vh; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+    .sv-next { flex: 1; padding: 2vh 1.8vw; border-left: 1px solid #1c2333; display: flex; flex-direction: column; gap: 1vh; }
+    .sv-next-label { font-size: 1.7vh; font-weight: 800; letter-spacing: .2em; text-transform: uppercase; color: #5c6880; }
+    .sv-next-body { font-size: 2.9vh; line-height: 1.35; color: #93a2bd; overflow: hidden; }
+    .sv-notes { border-top: 1px solid #1c2333; padding: 1.8vh 1.8vw; font-size: 2.2vh; color: #cbb26a;
+      white-space: pre-wrap; overflow: hidden; }
+    .sv-msg { background: #b3261e; color: #fff; padding: 1.6vh 2vw; font-size: 2.6vh; font-weight: 700; }
+    .sv-bigclock { flex: 1; display: grid; place-items: center; font-size: 12vh; font-weight: 800;
+      font-variant-numeric: tabular-nums; color: #dbe3f2; }
+    .sv-bigtimer { flex: 1; display: grid; place-items: center; font-size: 14vh; font-weight: 800;
+      font-variant-numeric: tabular-nums; color: #ffd479; }
+    /* chords over lyrics, for a musician's monitor */
+    .sv-chordlines { text-align: left; }
+    .sv-chordline { position: relative; margin-bottom: 1.1vh; }
+    .sv-chordrow { position: relative; height: 3vh; font-size: 2.7vh; font-weight: 800; color: #ffd479; }
+    .sv-lyricrow { font-size: 5vh; font-weight: 700; line-height: 1.2; }
+    .sv-mv { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 1vh; padding: 1.5vh;
+      align-content: start; overflow: hidden; }
+    .sv-mv-cell { position: relative; background: #000; border: 1px solid #1c2333; border-radius: 0.6vh;
+      font-size: 1.8vh; color: #6f7c96; aspect-ratio: 16/9; overflow: hidden; }
+    /* the .sr-stage inside is absolutely positioned and transform-scaled, so the
+       cell MUST be a positioned, clipping box or it inherits 1920px of width */
+    .sv-mv-pic { position: absolute; inset: 0; overflow: hidden; }
+    .sv-mv-name { position: absolute; left: 0; bottom: 0; padding: .3vh .8vh; background: rgba(0,0,0,.62);
+      color: #dbe3f2; font-size: 1.6vh; font-weight: 700; border-top-right-radius: .5vh; }
+  </style>
+</head>
+<body>
+  <div id="screen"><div id="stage"></div></div>
+  <div id="stageview"></div>
+  <div id="blackout"></div>
+
+  <!-- alpha -> luminance: out.rgb = in.a, out.a = 1. That IS the key channel. -->
+  <svg width="0" height="0" style="position:fixed;pointer-events:none" aria-hidden="true">
+    <filter id="alphaToLuma" color-interpolation-filters="sRGB">
+      <feColorMatrix type="matrix" values="0 0 0 1 0
+                                           0 0 0 1 0
+                                           0 0 0 1 0
+                                           0 0 0 0 1" />
+    </filter>
+  </svg>
+
+  <script src="slide-render.js"></script>
+  <script src="layers.js"></script>
+  <script src="output.js"></script>
+</body>
+</html>

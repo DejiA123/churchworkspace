@@ -1,0 +1,17 @@
+# The build context is copied to the daemon before anything runs, so the things
+# that would make that take ten minutes are named here. node_modules is rebuilt
+# inside the image from the lockfile; the speech models are hundreds of MB and
+# are downloaded once onto the /data volume; release/ is a Windows installer.
+node_modules
+release
+.git
+ios
+tiktok-submission
+bin/whisper
+bin/yt-dlp
+bin/rnnoise
+*.log
+*.png
+!src/cloud/web/icons/*.png
+openapi.json
+package-lock.json.bak

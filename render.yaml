@@ -1,0 +1,40 @@
+# Render.com — the Cloud Studio on a real host, with the church PC switched off.
+#
+#   1. push this repo to GitHub (private is fine)
+#   2. Render → New → Blueprint → pick the repo
+#   3. set MW_CLOUD_CODE when it asks
+#
+# Render gives an https://<name>.onrender.com address with a certificate, which
+# is what a PWA needs to install to a home screen.
+#
+# READ THIS BEFORE CHOOSING THE FREE PLAN: free instances have NO DISK and are
+# stopped when idle. Everything uploaded, every saved session and any speech
+# model downloaded would be thrown away — and a stopped instance cannot finish
+# an export. The Starter plan below is the smallest one that can actually keep
+# a church's work. Video editing is also CPU-bound: expect a service-length
+# export to take considerably longer here than on the church PC.
+
+services:
+  - type: web
+    name: church-video-studio
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter            # free has no disk and sleeps — see the note above
+    region: frankfurt        # change to the region nearest the church
+    healthCheckPath: /api/hello
+    autoDeploy: false
+    envVars:
+      - key: MW_CLOUD_PORT
+        value: "10000"       # Render routes to $PORT, which is 10000 here
+      - key: MW_CLOUD_HOST
+        value: 0.0.0.0
+      - key: MW_CLOUD_DATA
+        value: /data
+      - key: MW_CLOUD_MEDIA
+        value: /data/media
+      - key: MW_CLOUD_CODE
+        sync: false          # set it yourself in the dashboard; never in the repo
+    disk:
+      name: studio-data
+      mountPath: /data
+      sizeGB: 50             # your recordings and library live here

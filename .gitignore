@@ -1,0 +1,23 @@
+/node_modules/
+/release/
+dist/
+*.log
+build/icon.png
+.DS_Store
+Thumbs.db
+
+# The Cloud Studio access code, written by scripts/cloud-setup.sh.
+# It is a password for a public address — it must never be committed.
+.env
+.cloud-studio.env
+
+# Too big for GitHub (a file there may not exceed 100 MB). The two bundled
+# Whisper models come from huggingface.co/ggerganov/whisper.cpp — put
+# ggml-base.en.bin and ggml-tiny.en.bin in bin/whisper/ before building.
+bin/whisper/ggml-*.bin
+
+# Local working copies and scratch, never part of the app
+_base278/
+release-tmp/
+UsersdejiaAppData*/
+.claude/

@@ -1,0 +1,56 @@
+# THE FREE ROUTE — a public https address, no domain, no certificate, no card.
+#
+#   docker compose -f docker-compose.free.yml up -d --build
+#   docker compose -f docker-compose.free.yml logs tunnel | grep trycloudflare
+#
+# The studio does not get a domain, a certificate or an open port. Instead the
+# tunnel container dials OUT to Cloudflare and gets back an
+# https://<random>.trycloudflare.com address — the same trick the desktop app
+# uses, moved onto the server. That is what makes this cost nothing: a domain,
+# a static IP and a certificate are the parts you normally pay for, and none of
+# them are here.
+#
+# Two honest limitations, so nothing is a surprise later:
+#
+#   • the address is RANDOM and changes whenever the tunnel container restarts.
+#     Fine for "let me edit from the hotel"; not fine for a link you give the
+#     whole team. When you want a fixed one, make a free tunnel in a Cloudflare
+#     account, put its token in TUNNEL_TOKEN below, and point it at
+#     studio:7390 — same container, same cost, a name that stays put.
+#   • nothing is exposed on the host: there is no `ports:` section anywhere in
+#     this file on purpose. The only way in is the address plus the access code.
+
+services:
+  studio:
+    build: .
+    image: church-cloud-studio
+    restart: unless-stopped
+    environment:
+      # Comes from .env (scripts/cloud-setup.sh writes one). There is no
+      # default on purpose: a placeholder code on an address the whole
+      # internet can reach is worse than a container that refuses to start.
+      MW_CLOUD_CODE: "${MW_CLOUD_CODE:?put your access code in .env — run scripts/cloud-setup.sh, or: echo MW_CLOUD_CODE=your-code-here > .env}"
+      MW_CLOUD_PORT: "7390"
+      MW_CLOUD_UPLOADS: "on"
+    volumes:
+      - studio-data:/data          # settings, sessions, library, speech models
+      - studio-media:/media        # the recordings you send up
+    # Deliberately no `ports:` — the tunnel reaches it over the private network
+    # between these two containers, and the host stays shut.
+    expose:
+      - "7390"
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    depends_on:
+      - studio
+    # With no token this is a "quick tunnel": no account, no configuration, a
+    # random https name printed in the logs. Swap the command for the token form
+    # when you want a fixed address:
+    #   command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate --url http://studio:7390
+
+volumes:
+  studio-data:
+  studio-media:

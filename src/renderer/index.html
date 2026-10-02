@@ -1,0 +1,2106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' data: file: blob:; media-src 'self' file: blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' file: data:; script-src 'self' 'wasm-unsafe-eval' mwasset:; connect-src 'self' mwasset: file: data: blob:; worker-src 'self' blob:; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://player.vimeo.com;" />
+  <title>Church Work Space</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="live.css" />
+  <link rel="stylesheet" href="present.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-logo">✝</div>
+        <div>
+          <div class="brand-name" id="brandName">Church Work Space</div>
+          <div class="brand-sub">Church Media Team</div>
+        </div>
+      </div>
+      <nav class="nav">
+        <button class="nav-item active" data-view="dashboard" title="Dashboard"><span>🏠</span><span class="nav-label">Dashboard</span></button>
+        <button class="nav-item" data-view="present" title="Presentation"><span>📖</span><span class="nav-label">Presentation</span></button>
+        <button class="nav-item" data-view="video" title="Video Studio"><span>🎬</span><span class="nav-label">Video Studio</span></button>
+        <button class="nav-item" data-view="flyer" title="Flyer Maker"><span>🎨</span><span class="nav-label">Flyer Maker</span></button>
+        <button class="nav-item" data-view="live" title="Go Live"><span>🔴</span><span class="nav-label">Go Live</span></button>
+        <button class="nav-item" data-view="scheduler" title="Social Scheduler"><span>📅</span><span class="nav-label">Social Scheduler</span></button>
+        <button class="nav-item" data-view="settings" title="Settings"><span>⚙️</span><span class="nav-label">Settings</span></button>
+      </nav>
+      <div class="sidebar-foot">
+        <button id="openOutput" class="ghost-btn small" title="Open output folder"><span>📂</span><span class="nav-label"> Open output folder</span></button>
+        <!-- filled in from the packaged app's real version at startup -->
+        <div class="version">…</div>
+      </div>
+      <button id="sidebarToggle" class="sidebar-toggle" title="Collapse sidebar">◀</button>
+    </aside>
+
+    <!-- Main -->
+    <main class="content">
+      <!-- DASHBOARD -->
+      <section class="view active" id="view-dashboard">
+        <header class="view-head">
+          <h1>Welcome back 👋</h1>
+          <p class="muted">Your all-in-one studio for videos, flyers, and social posts.</p>
+        </header>
+        <div class="cards">
+          <div class="card action" data-goto="present">
+            <div class="card-icon">📖</div>
+            <h3>Put it on the Screen</h3>
+            <p>Bible verses, song words and slides — straight to the projector.</p>
+          </div>
+          <div class="card action" data-goto="video">
+            <div class="card-icon">🎬</div>
+            <h3>Cut a Video</h3>
+            <p>Trim, reshape for Reels/TikTok, auto-remove dead air, merge clips.</p>
+          </div>
+          <div class="card action" data-goto="flyer">
+            <div class="card-icon">🎨</div>
+            <h3>Design a Flyer</h3>
+            <p>Pick a template, fill in your event, export print + social ready.</p>
+          </div>
+          <div class="card action" data-goto="live">
+            <span id="dashLiveBadge" class="dash-live-badge hidden">LIVE</span>
+            <div class="card-icon">🔴</div>
+            <h3>Go Live</h3>
+            <p id="dashLiveDesc">Switch cameras, run titles, and stream or record your service.</p>
+          </div>
+          <div class="card action" data-goto="scheduler">
+            <div class="card-icon">📅</div>
+            <h3>Schedule a Post</h3>
+            <p>Plan posts for Instagram, TikTok &amp; Facebook with reminders.</p>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>📌 Upcoming posts</h2></div>
+          <div id="dashUpcoming" class="upcoming-list"><p class="muted">Loading…</p></div>
+        </div>
+      </section>
+
+      <!-- PRESENTATION STUDIO (ProPresenter-style) -->
+      <section class="view" id="view-present">
+        <!-- ── top toolbar ─────────────────────────────────────────────── -->
+        <!-- Icon over label, in groups, the way a show-control desk is laid
+             out: every button the same size so the operator's hand learns
+             where things are rather than reading each time. -->
+        <div class="pv-topbar">
+          <div class="pv-tb-left">
+            <!-- There was a Show / Edit pair here. Editing is a double-click on
+                 the slide you want to change, and the studio goes back to Show
+                 by itself the moment you finish — so the pair only ever offered
+                 a mode you could get stuck in mid-service. -->
+            <div class="pv-tb-group">
+              <button id="pvNewSong" title="New song / presentation"><span class="pv-ic">＋</span><span class="pv-lb">New</span></button>
+              <button id="pvPasteSongs" title="Paste the words of one song — or a whole event's worth — and get slides"><span class="pv-ic">📋</span><span class="pv-lb">Paste songs</span></button>
+              <!-- Names first, words later: the order a service is actually
+                   built in. Import takes a plain set list; Export writes the
+                   whole library back out as text that reads straight back in. -->
+              <button id="pvImportSongs" title="Import a set list — just the song names, grouped into sets. The words can come later."><span class="pv-ic">📥</span><span class="pv-lb">Import</span></button>
+              <button id="pvExportSongs" title="Save your songs out as a text file — a backup, or to move them to another computer"><span class="pv-ic">📤</span><span class="pv-lb">Export</span></button>
+              <button id="pvAddSlide" title="Add a blank slide"><span class="pv-ic">▤</span><span class="pv-lb">Slide</span></button>
+              <button id="pvAddImage" title="Add a picture or video as its own full-screen slide — notices, a sermon graphic, a giving QR code"><span class="pv-ic">🖼</span><span class="pv-lb">Picture</span></button>
+              <button id="pvReflow" title="Re-split the words into slides"><span class="pv-ic">⇄</span><span class="pv-lb">Reflow</span></button>
+              <button id="pvDelSlide" title="Delete the selected slide"><span class="pv-ic">🗑</span><span class="pv-lb">Delete</span></button>
+            </div>
+          </div>
+          <div class="pv-tb-right">
+            <div class="pv-tb-group">
+              <button id="pvTabBible" class="pv-tab-btn active" data-pvtab="bible" title="Bible"><span class="pv-ic">📖</span><span class="pv-lb">Bible</span></button>
+              <!-- The songs the church sings, kept between services: pick one
+                   and it drops into this Sunday with the words already in it. -->
+              <button id="pvTabSongs" class="pv-tab-btn" data-pvtab="songs" title="Songs Bank — the songs your church sings, ready to drop into any service"><span class="pv-ic">🎵</span><span class="pv-lb">Songs</span></button>
+              <button id="pvTabMedia" class="pv-tab-btn" data-pvtab="media" title="Backgrounds and media"><span class="pv-ic">🖼</span><span class="pv-lb">Media</span></button>
+              <button id="pvTabLook" class="pv-tab-btn" data-pvtab="look" title="Look — fonts and colours"><span class="pv-ic">🎨</span><span class="pv-lb">Look</span></button>
+              <!-- "Desk", not "Show": there is already a Show button three
+                   inches to the left (the mode switch), and two buttons with
+                   the same word on one toolbar reads as one broken button. -->
+              <button id="pvTabShow" class="pv-tab-btn" data-pvtab="show" title="The show desk — props, messages, timers, screens, audio"><span class="pv-ic">🎛</span><span class="pv-lb">Desk</span></button>
+            </div>
+            <span class="pv-tb-sep"></span>
+            <div class="pv-tb-group">
+              <button id="pvAudience" class="pv-out-btn" title="Send the picture to the projector"><span class="pv-ic">🖥</span><span class="pv-lb">Audience</span></button>
+              <button id="pvStage" class="pv-out-btn" title="Confidence monitor for whoever is up front"><span class="pv-ic">👤</span><span class="pv-lb">Stage</span></button>
+              <!-- More than one screen is normal in a church: the room projector,
+                   a lobby TV, an overflow room. Tick as many as you like. -->
+              <button id="pvScreens" class="pv-out-btn" title="Choose which screens show the congregation view — you can pick more than one"><span class="pv-ic">🖵</span><span class="pv-lb">Screens</span><span id="pvScreensCount" class="pv-out-count">0</span></button>
+            </div>
+            <select id="pvDisplay" title="Which screen the main projector output is on"></select>
+            <div id="pvScreenMenu" class="pv-screen-menu hidden"></div>
+          </div>
+        </div>
+
+        <!-- ── clear palette: one control per layer ──────────────────────── -->
+        <div class="pv-clearbar">
+          <div id="pvClearPalette" class="pv-clear-palette"></div>
+          <div class="pv-clearbar-right">
+            <button id="pvEasy" class="pv-clear" title="Easy View — big high-contrast words (~)">👓 Easy view</button>
+            <!-- Song setup for the band: arrangements, key, chord charts. Shown
+                 with the rest of the ⋯ More group, because none of it is touched
+                 once the service is running. -->
+            <details id="pvMusicDetails" class="pv-trans-details pv-music-details">
+              <summary title="Arrangements, key and chord charts">🎵 Music</summary>
+              <div class="pv-music-menu">
+                <span class="pv-music-key" id="pvSongKey"></span>
+                <button id="pvArrangeNew" title="An arrangement is a named play order — e.g. Verse 1, Chorus, Bridge, Chorus">🎼 New arrangement…</button>
+                <button id="pvChordUp" title="Transpose every chord in this song up one semitone">♯ Transpose up</button>
+                <button id="pvChordDown" title="Transpose every chord in this song down one semitone">♭ Transpose down</button>
+                <button id="pvImportChords" title="Import a ChordPro chart (.cho, .pro, .txt) as a new song">🎸 Import chord chart…</button>
+              </div>
+            </details>
+            <details class="pv-trans-details">
+              <summary title="Transition per layer">⇄ Transitions</summary>
+              <div id="pvTransRow" class="pv-trans-row"></div>
+            </details>
+          </div>
+        </div>
+
+        <div class="pv-main">
+          <!-- ── left rail: library + playlist ───────────────────────────── -->
+          <aside class="pv-rail">
+            <div class="pv-rail-sec">
+              <div class="pv-rail-head"><span>Library</span><button id="pvLibNew" class="pv-mini" title="New presentation">＋</button></div>
+              <input type="text" id="pvLibFilter" class="pv-filter" placeholder="Filter…" />
+              <div id="pvLibList" class="pv-list"></div>
+            </div>
+            <div class="pv-rail-sec">
+              <div class="pv-rail-head"><span>Playlists</span><button id="pvPlNew" class="pv-mini" title="New playlist">＋</button></div>
+              <div id="pvPlaylists" class="pv-list pv-list-sm"></div>
+              <div class="pv-rail-head pv-sub"><span id="pvPlName" title="Double-click to rename this playlist">Service</span><button id="pvPlAdd" class="pv-mini" title="Add the open presentation to this playlist">＋</button></div>
+              <div id="pvPlItems" class="pv-list"></div>
+            </div>
+          </aside>
+
+          <!-- ── centre: the slide grid ─────────────────────────────────── -->
+          <section class="pv-center">
+            <div class="pv-doc-head">
+              <span class="pv-doc-icon">📄</span>
+              <input type="text" id="pvDocName" class="pv-doc-name" placeholder="Untitled" />
+              <span id="pvDocMeta" class="muted small"></span>
+              <select id="pvArrange" class="pv-arrange" title="Arrangement — the play order for this song"></select>
+              <!-- The four unlabelled music glyphs that used to sit here (🎼＋ ♯ ♭ 🎸)
+                   now live under ⋯ More → 🎵 Music, with words on them. They are
+                   band setup, not things you press while a song is running. -->
+            </div>
+            <div class="pv-slides-wrap">
+              <div id="pvSlides" class="pv-slides"></div>
+              <!-- draw straight over what the room is seeing -->
+              <canvas id="pvDrawSurface" class="pv-draw-surface hidden"></canvas>
+            </div>
+            <div class="pv-bottom">
+              <div class="pv-bottom-right">
+                <span class="muted small">Size</span>
+                <input type="range" id="pvSize" min="120" max="360" step="10" value="200" />
+              </div>
+            </div>
+          </section>
+
+          <!-- ── right: live output + inspector ─────────────────────────── -->
+          <aside class="pv-side">
+            <div class="pv-out">
+              <div class="pv-out-row">
+                <span class="pv-live-dot" id="pvLiveDot"></span>
+                <span class="pv-out-label">Live</span>
+                <span id="pvOutState" class="muted small">No output</span>
+              </div>
+              <!-- Live and Next side by side, the way every switcher lays out
+                   preview and program. Stacked, they ate 270px of a 611px rail
+                   and left the Bible passage below it with nothing. -->
+              <div class="pv-screens">
+                <div class="pv-screen" id="pvLiveScreen"></div>
+                <div class="pv-screen pv-screen-sm" id="pvNextScreen">
+                  <span class="pv-screen-tag">Next</span>
+                </div>
+              </div>
+              <div class="pv-transport">
+                <button id="pvPrev" title="Previous slide (←)">◀</button>
+                <button id="pvGo" class="primary-btn small" title="Put the selected slide on the projector (Enter). If no output screen is open yet, this opens it.">Go Live</button>
+                <button id="pvNext" title="Next slide (→ / Space)">▶</button>
+                <button id="pvBlack" title="Black the screen (B)">⬛</button>
+              </div>
+              <!-- Playback for the video ON THE SCREEN. It lives here, under the
+                   monitors, because that is where the operator is looking when
+                   they want it — and it only appears when a video is actually
+                   up, so it is never one more button to read past. -->
+              <div class="pv-vidbar hidden" id="pvVidBar">
+                <button id="pvVidPlay" title="Pause / play the video on the screen">⏸ Pause</button>
+                <button id="pvVidLoop" class="on" title="Start it again when it reaches the end">🔁 Loop</button>
+                <span class="pv-vidbar-name" id="pvVidName"></span>
+              </div>
+            </div>
+
+            <!-- Bible -->
+            <div class="pv-pane" data-pvpane="bible">
+              <div class="pv-pane-head">
+                <select id="pvTranslation" title="Translation"></select>
+                <button id="pvBibleManage" class="pv-mini" title="Add / remove translations">⚙</button>
+              </div>
+              <!-- Book ▸ chapter ▸ verse, for anyone who would rather not type -->
+              <div class="pv-bible-pick">
+                <select id="pvBook" title="Book"></select>
+                <select id="pvChapter" title="Chapter" class="pv-num"></select>
+                <select id="pvVerse" title="First verse" class="pv-num"></select>
+                <span class="pv-dash">–</span>
+                <select id="pvVerseTo" title="Last verse" class="pv-num"></select>
+              </div>
+              <div class="pv-bible-search">
+                <input type="text" id="pvRef" placeholder="or type: John 3:16  ·  Psalm 23  ·  or search words…" />
+                <button id="pvRefGo" class="primary-btn small">Find</button>
+              </div>
+              <!-- 🎤 Listen: the preacher announces the passage and it goes up.
+                   The transcript is on show on purpose — when it does nothing,
+                   the operator can see what it heard instead of guessing. -->
+              <div class="pv-listen" id="pvListenBox">
+                <div class="pv-listen-head">
+                  <button id="pvListen" class="ghost-btn small" title="Listen to the speaker and put up the verses they call out. Say a reference (“John chapter three verse sixteen”), or “next verse”, “previous verse”, “go to verse twelve”, “clear the screen”.">🎤 Listen</button>
+                  <span class="pv-listen-meter" id="pvListenMeter" aria-hidden="true"><i></i></span>
+                  <span class="pv-listen-state muted small" id="pvListenState">off</span>
+                </div>
+                <div class="pv-listen-head pv-listen-mic">
+                  <label for="pvListenMic" class="muted small">Listen to</label>
+                  <select id="pvListenMic" title="Where the preaching is coming from. A PC's own microphone will not hear someone across a hall — pick the desk feed, the mic the preacher is on, or an NDI feed from the sound desk (Ableton's NDI Output VST, vMix Audio - Master)."></select>
+                </div>
+                <!-- WHO DOES THE LISTENING.
+                     The free cloud ear runs the full-size Whisper model, which
+                     no church PC can; this PC runs one of the two smallest
+                     models OpenAI shipped, because that is all that keeps up
+                     live. It is the single biggest difference this panel has. -->
+                <div class="pv-listen-head pv-listen-mic">
+                  <label for="pvListenEngine" class="muted small">Hearing</label>
+                  <select id="pvListenEngine" title="Who recognises the speech. The free cloud ear runs the full-size Whisper model on someone else's hardware — far more accurate than anything this PC can run, and quicker too. This PC works with no internet at all, using a much smaller model."></select>
+                </div>
+                <!-- The note goes on its OWN line. Beside the picker it squeezed
+                     the one control that has to stay readable, and wrapped to
+                     three lines in this rail to do it. -->
+                <div class="pv-listen-note muted small" id="pvListenModelNote"></div>
+                <!-- The cloud ear's setup. Shown only when a cloud engine is
+                     chosen, because a key box under an offline engine is just
+                     something else to be confused by. -->
+                <div class="pv-listen-cloud hidden" id="pvListenCloudBox">
+                  <div class="pv-listen-note muted small" id="pvListenCloudBlurb"></div>
+                  <!-- The key gets a row to itself. Sharing one with two buttons
+                       left about 150 px to paste a 56-character key into, in the
+                       narrowest column in the app. -->
+                  <div class="pv-listen-keyrow">
+                    <input type="password" id="pvListenCloudKey" placeholder="paste your key" autocomplete="off" spellcheck="false" />
+                  </div>
+                  <div class="pv-listen-keyrow">
+                    <button id="pvListenCloudGet" class="ghost-btn small" title="Open the sign-up page in your browser. It is free, needs no card, and takes about a minute.">🔑 Get a free key</button>
+                    <button id="pvListenCloudTest" class="primary-btn small" title="Send ten seconds of sound and time the round trip, using this key, from this building's internet.">Test</button>
+                  </div>
+                  <div class="pv-listen-keyrow hidden" id="pvListenCloudUrlRow">
+                    <input type="text" id="pvListenCloudUrl" placeholder="https://your-service/v1/audio/transcriptions" spellcheck="false" />
+                  </div>
+                  <select id="pvListenCloudModel" class="pv-listen-wide" title="Which model on that service does the listening."></select>
+                  <div class="pv-listen-note muted small" id="pvListenCloudNote"></div>
+                  <div class="pv-listen-note muted small pv-listen-privacy">🔒 Sends the sound it hears away to be recognised. Off until a key is pasted.</div>
+                </div>
+                <!-- The on-this-PC model. Automatic climbs to Small; Medium and
+                     Turbo are offered but never chosen on their own, because
+                     neither keeps up with a live service on a church PC.
+                     Not-yet-downloaded models are listed with their size, and
+                     picking one fetches it. -->
+                <div class="pv-listen-head pv-listen-mic hidden" id="pvListenModelRow">
+                  <label for="pvListenModel" class="muted small">Model</label>
+                  <select id="pvListenModel" title="How good the listening is on this PC. Bigger models hear more words correctly but take longer per phrase — and 🎤 Listen runs many times a minute, so a model that is too slow falls behind the preacher. Automatic picks the best one that can keep up."></select>
+                </div>
+                <!-- Only means anything to the on-this-PC engine: there is no
+                     model on this machine to keep loaded when the cloud ear is
+                     doing the listening. -->
+                <div class="pv-listen-head pv-listen-mic hidden" id="pvListenFastRow">
+                  <label class="cap-inline muted small" title="Keeps the speech model loaded in memory instead of starting it fresh for every phrase. Roughly halves the wait — about 0.6 s instead of 1.2 s from your last word. It checks the speech library on startup and quietly goes back to the ordinary way if anything is not exactly as expected.">
+                    <input type="checkbox" id="pvListenFast" /> Faster replies <span id="pvListenFastNote" class="muted"></span>
+                  </label>
+                </div>
+                <!-- The speaker quotes a verse without naming it, and it goes
+                     up on its own. Off by default: it is the one thing here
+                     that can put a verse on the wall nobody asked for. -->
+                <div class="pv-listen-head pv-listen-mic">
+                  <label class="cap-inline muted small" title="When the speaker quotes a verse without saying where it is from — “give, and it shall be given unto you” — find it and put it up. It looks through several translations at once, so it does not matter which one they learned it in. It stays quiet unless it is sure: a wrong verse on the wall is worse than none.">
+                    <input type="checkbox" id="pvListenQuote" /> Find quoted verses <span id="pvListenQuoteNote" class="muted"></span>
+                  </label>
+                </div>
+                <!-- The reading turns its own page. Off by default, like every
+                     other thing here that can move the screen on its own. -->
+                <div class="pv-listen-head pv-listen-mic">
+                  <label class="cap-inline muted small" title="While a verse is on the screen, listen to the speaker reading it. When they reach the LAST words of that verse, put the next one up automatically. It only moves when the reading really has reached the end — saying the first line, or talking about the verse, leaves the screen alone.">
+                    <input type="checkbox" id="pvListenFollow" /> Follow the reading <span id="pvListenFollowNote" class="muted"></span>
+                  </label>
+                </div>
+                <div class="pv-listen-log" id="pvListenLog" role="log" aria-live="polite"></div>
+              </div>
+              <div class="pv-bible-opts">
+                <label title="How many verses go on each slide">Verses
+                  <select id="pvVps"><option value="1" selected>1</option><option value="2">2</option><option value="3">3</option><option value="0">All</option></select>
+                </label>
+                <label class="pv-inline" title="Print the reference under the words"><input type="checkbox" id="pvShowRef" checked /> Reference</label>
+              </div>
+              <!-- The verse list IS the cue list: clicking a verse puts it on
+                   the screen without it ever becoming a slide in the Library. -->
+              <!-- Where the VERSE sits on the screen, and how big it is. It
+                   overrides the Look for scripture only, so a reading can be
+                   set high and large without moving the song lyrics. -->
+              <div class="pv-versefmt" role="group" aria-label="Where the verse sits on the screen">
+                <span class="pv-vf-label">Text</span>
+                <button data-vfvalign="top" title="Words at the top">⬆</button>
+                <button data-vfvalign="center" title="Words in the middle">⬍</button>
+                <button data-vfvalign="bottom" title="Words at the bottom">⬇</button>
+                <span class="pv-vf-sep"></span>
+                <button data-vfalign="left" title="Line up on the left">⬅</button>
+                <button data-vfalign="center" title="Centred">⬌</button>
+                <button data-vfalign="right" title="Line up on the right">➡</button>
+                <span class="pv-vf-sep"></span>
+                <button id="pvVfSmaller" title="Smaller words">A−</button>
+                <button id="pvVfBigger" title="Bigger words">A+</button>
+                <button id="pvVfReset" title="Back to whatever the Look says">↺</button>
+              </div>
+              <p class="pv-verse-hint hidden" id="pvVerseHint">Click a verse to put it on the screen · <b>←</b> <b>→</b> move through the passage</p>
+              <div id="pvBibleResults" class="pv-results"></div>
+              <div class="pv-pane-foot">
+                <button id="pvBibleAdd" class="primary-btn small" disabled>＋ Add as slides</button>
+                <button id="pvBibleLive" class="ghost-btn small" disabled>▶ Send live</button>
+              </div>
+            </div>
+
+            <!-- ── Songs Bank ────────────────────────────────────────────
+                 What the church sings, as opposed to what is in THIS service.
+                 The catalogue ships with the app; the words in it are the
+                 church's own, typed once and kept for good (see songbank.js —
+                 worship lyrics are what a CCLI licence covers, and the app has
+                 no business shipping its own copy of them). -->
+            <div class="pv-pane hidden" data-pvpane="songs">
+              <div class="pv-pane-head">
+                <span class="pv-sec-title">🎵 Songs Bank</span>
+                <button id="pvBankMerge" class="ghost-btn small" title="Put every song already in your Library into the bank, so you never retype them">📚 Add my library</button>
+                <button id="pvBankNew" class="primary-btn small" title="Put a new song into the bank">＋ New</button>
+              </div>
+              <div class="pv-bank-search">
+                <input type="text" id="pvBankFilter" placeholder="Search by title or writer…" />
+              </div>
+              <div id="pvBankChips" class="pv-bank-chips" role="group" aria-label="Filter the bank"></div>
+              <p class="pv-bank-hint" id="pvBankHint"></p>
+              <div id="pvBankList" class="pv-results pv-bank-list"></div>
+              <div class="pv-pane-foot">
+                <button id="pvBankAddOpen" class="ghost-btn small" title="Put the song open in the Library into the bank, with its words">＋ Bank the open song</button>
+              </div>
+            </div>
+
+            <!-- Media. THE OPERATOR'S OWN FILES COME FIRST, deliberately: a
+                 church that presses "＋ Add" needs to see the picture it just
+                 chose without scrolling past forty stock gradients, or adding
+                 one looks exactly like nothing happening. -->
+            <div class="pv-pane hidden" data-pvpane="media">
+              <div class="pv-pane-head"><span class="pv-sec-title">🖼 Your own pictures &amp; videos</span>
+                <button id="pvMediaAdd" class="primary-btn small">＋ Add</button>
+              </div>
+              <!-- WHERE a background goes, for your own pictures AND the
+                   ready-made ones below. "The Look" is what puts a picture
+                   behind Bible verses: scripture slides are made later and take
+                   the Look's background, so setting it once covers the whole
+                   service. -->
+              <div class="pv-bg-apply" role="group" aria-label="Where to put the background you click">
+                <button class="pv-seg on" data-bgapply="slide">This slide</button>
+                <button class="pv-seg" data-bgapply="all">All slides</button>
+                <button class="pv-seg" data-bgapply="look" title="Make it the Look's background — every slide using this Look, including Bible verses you add later, sits on it">Bible &amp; everything</button>
+              </div>
+              <p class="muted small pv-hint">Click a picture to use it as the background · <b>▤＋</b> makes it a <b>slide of its own</b>.</p>
+              <!-- Motion is a property of the BACKGROUND, not of a particular
+                   picture, so it applies to a church's own photo exactly as it
+                   does to the built-in scenes — a still image that drifts slowly
+                   is what "moving backgrounds" actually needs to mean when
+                   shipping video loops would cost hundreds of megabytes. -->
+              <label class="pv-motion-row">Motion
+                <select id="pvBgMotion" title="A slow, quiet move on whatever background is behind the words">
+                  <option value="">None (still)</option>
+                  <option value="drift">Drift</option>
+                  <option value="push">Slow push</option>
+                  <option value="sway">Sway</option>
+                  <option value="breathe">Breathe</option>
+                </select>
+              </label>
+              <div id="pvMediaGrid" class="pv-media-grid"></div>
+              <div class="pv-link-row">
+                <input type="text" id="pvLinkUrl" placeholder="Paste a YouTube or Vimeo link — it plays straight from the web…" />
+                <label class="pv-inline" title="Motion loops want to be silent; a bumper video does not"><input type="checkbox" id="pvLinkMute" /> Mute</label>
+                <button id="pvLinkAdd" class="pv-mini" title="Use this video as the background">▶</button>
+              </div>
+
+              <!-- The collection is moving footage now. Only the posters ship
+                   with the app; a clip is fetched the first time it is chosen
+                   and is then a local file like any other. -->
+              <div class="pv-pane-head"><span class="pv-sec-title">✨ Ready-made backgrounds</span></div>
+              <div id="pvBgCats" class="pv-bg-cats"></div>
+              <div id="pvBgGrid" class="pv-bg-grid"></div>
+              <p class="muted small pv-hint" id="pvBgNote"></p>
+
+              <div class="pv-pane-head"><span class="pv-sec-title">🎚 Video controls</span>
+                <button id="pvVidReset" class="pv-mini" title="Back to the untouched picture">Reset</button>
+              </div>
+              <p class="muted small pv-hint">Non-destructive — the file on disk is never changed.</p>
+              <div class="pv-bible-opts pv-vid">
+                <label>Bright <input type="range" id="pvVidBright" min="0.3" max="2" step="0.01" value="1" /></label>
+                <label>Contrast <input type="range" id="pvVidContrast" min="0.3" max="2" step="0.01" value="1" /></label>
+                <label>Sat <input type="range" id="pvVidSat" min="0" max="2" step="0.01" value="1" /></label>
+                <label>Hue <input type="range" id="pvVidHue" min="-180" max="180" step="1" value="0" /></label>
+                <label>Speed <input type="range" id="pvVidSpeed" min="0.25" max="2" step="0.05" value="1" /></label>
+              </div>
+              <div class="pv-bible-opts pv-vid">
+                <label>In <input type="number" id="pvVidIn" min="0" step="0.1" value="0" /></label>
+                <label>Out <input type="number" id="pvVidOut" min="0" step="0.1" value="0" /></label>
+                <label class="pv-inline"><input type="checkbox" id="pvVidPingPong" /> Ping-pong</label>
+              </div>
+              <p class="muted small pv-hint">Pause and Loop are up beside <b>Go Live</b> — they belong with the picture, not at the bottom of a list.</p>
+
+              <div class="pv-pane-head"><span class="pv-sec-title">🟩 Chroma key</span>
+                <label class="pv-inline"><input type="checkbox" id="pvKeyOn" /> On</label>
+              </div>
+              <div class="pv-bible-opts pv-vid">
+                <label>Colour <input type="color" id="pvKeyColor" value="#00b140" /></label>
+                <label>Similarity <input type="range" id="pvKeySim" min="0.01" max="0.5" step="0.005" value="0.16" /></label>
+                <label>Smooth <input type="range" id="pvKeySmooth" min="0" max="0.3" step="0.005" value="0.08" /></label>
+                <label>Spill <input type="range" id="pvKeySpill" min="0" max="1" step="0.02" value="0.5" /></label>
+              </div>
+
+              <div class="pv-pane-head"><span class="pv-sec-title">📍 Playback markers</span>
+                <button id="pvMarkAdd" class="pv-mini" title="Fire a macro at a moment in this clip">＋</button>
+              </div>
+              <p class="muted small pv-hint">Fire a macro or a slide at an exact moment inside the clip.</p>
+              <div id="pvMarkList" class="lib-list"></div>
+            </div>
+
+            <!-- Look -->
+            <div class="pv-pane hidden" data-pvpane="look">
+              <div class="pv-pane-head">
+                <select id="pvLookSel" title="Look"></select>
+                <button id="pvLookNew" class="pv-mini" title="Save as a new Look">＋</button>
+                <button id="pvLookDel" class="pv-mini" title="Delete this Look">🗑</button>
+              </div>
+              <div class="pv-look-body">
+                <label>Font <select id="lkFont"></select></label>
+                <label>Size <input type="range" id="lkSize" min="30" max="180" step="2" /><span id="lkSizeV" class="muted small"></span></label>
+                <label>Colour <input type="color" id="lkColor" /></label>
+                <label>Line spacing <input type="range" id="lkLine" min="0.9" max="2" step="0.05" /></label>
+                <!-- The margin the words keep off the edges. Align and valign
+                     were already reachable below; the padding never was, so
+                     text could be pushed to the top but not away from it. -->
+                <label>Margin <input type="range" id="lkPad" min="20" max="360" step="10" /><span id="lkPadV" class="muted small"></span></label>
+                <div class="pv-look-row">
+                  <button id="lkBold" class="pv-toggle" title="Bold">B</button>
+                  <button id="lkItalic" class="pv-toggle" title="Italic">I</button>
+                  <button id="lkCaps" class="pv-toggle" title="ALL CAPS">AA</button>
+                </div>
+                <div class="pv-look-row">
+                  <span class="muted small">Align</span>
+                  <button class="pv-toggle" data-lkalign="left">⬅</button>
+                  <button class="pv-toggle" data-lkalign="center">⬌</button>
+                  <button class="pv-toggle" data-lkalign="right">➡</button>
+                  <span class="muted small">Vertical</span>
+                  <button class="pv-toggle" data-lkvalign="top">⬆</button>
+                  <button class="pv-toggle" data-lkvalign="center">⬍</button>
+                  <button class="pv-toggle" data-lkvalign="bottom">⬇</button>
+                </div>
+                <label>Shadow <input type="range" id="lkShadow" min="0" max="1" step="0.05" /></label>
+                <label>Outline <input type="range" id="lkOutline" min="0" max="3" step="0.1" /></label>
+                <label>Background
+                  <select id="lkBgType">
+                    <option value="color">Solid colour</option>
+                    <option value="gradient">Gradient</option>
+                    <option value="image">Image</option>
+                    <option value="video">Video</option>
+                  </select>
+                </label>
+                <label id="lkBgColorRow">Colour <input type="color" id="lkBgColor" /></label>
+                <label id="lkBgPickRow" class="hidden">File <button id="lkBgPick" class="ghost-btn small">Choose…</button><span id="lkBgName" class="muted small"></span></label>
+                <label>Darken background <input type="range" id="lkDim" min="0" max="0.85" step="0.05" /></label>
+                <label class="pv-inline"><input type="checkbox" id="lkShowFooter" checked /> Show the reference line</label>
+                <div class="pv-look-preview" id="lkPreview"></div>
+              </div>
+            </div>
+
+            <!-- Show: props, messages, timers, announcements, extra outputs.
+                 Fourteen sections is a lot to meet at once, so the pane opens
+                 SIMPLE — the handful a service actually uses, three of them
+                 expanded — and "Everything" reveals the install-time technical
+                 ones (screen mapping, NDI, DMX, MIDI, the phone output). Each
+                 section collapses; what is open is remembered. See
+                 buildShowSections() in present.js. -->
+            <div class="pv-pane hidden" data-pvpane="show">
+              <div class="pv-show-modes" role="group" aria-label="How much of the show desk to show">
+                <button class="pv-seg on" data-showmode="simple" title="Just the things a service uses">Simple</button>
+                <button class="pv-seg" data-showmode="all" title="Also the technical set-up: extra screens, NDI, lighting, MIDI, phone output">Everything</button>
+              </div>
+              <div class="pv-show-body">
+                <div class="pv-show-sec" data-sec="props">
+                  <div class="pv-show-head"><span>🏷 Props</span>
+                    <span><button id="pvPropImg" class="pv-mini" title="Logo / image prop">＋🖼</button>
+                    <button id="pvPropText" class="pv-mini" title="Lower third">＋🔤</button></span>
+                  </div>
+                  <div id="pvPropList" class="lib-list"></div>
+                </div>
+
+                <div class="pv-show-sec" data-sec="messages">
+                  <div class="pv-show-head"><span>💬 Messages</span>
+                    <button id="pvMsgClear" class="pv-mini" title="Take the message off screen">✕</button>
+                  </div>
+                  <div class="pv-bible-opts">
+                    <label>Show for <select id="pvMsgSecs">
+                      <option value="0">Until I clear it</option><option value="10">10s</option>
+                      <option value="20" selected>20s</option><option value="30">30s</option><option value="60">1 min</option>
+                    </select></label>
+                    <label>At <select id="pvMsgPos">
+                      <option value="bottom" selected>Bottom</option><option value="top">Top</option><option value="center">Centre</option>
+                    </select></label>
+                  </div>
+                  <div id="pvMsgList" class="pv-results"></div>
+                </div>
+
+                <div class="pv-show-sec" data-sec="timers">
+                  <div class="pv-show-head"><span>⏱ Timers &amp; clocks</span>
+                    <span><button id="pvTimerDown" class="pv-mini" title="Countdown">＋⏳</button>
+                    <button id="pvTimerUp" class="pv-mini" title="Count up">＋⏱</button>
+                    <button id="pvTimerClock" class="pv-mini" title="Wall clock">＋🕐</button></span>
+                  </div>
+                  <div id="pvTimerList" class="lib-list"></div>
+                </div>
+
+                <div class="pv-show-sec" data-sec="announce">
+                  <div class="pv-show-head"><span>📢 Announcement</span>
+                    <button id="pvAnnounceOn" class="pv-mini" title="Stays up across slide changes">◉</button>
+                  </div>
+                  <textarea id="pvAnnounceText" class="pv-announce" rows="2" placeholder="Stays on screen across slide changes…"></textarea>
+                  <div class="pv-show-head"><span>👤 Stage message</span></div>
+                  <textarea id="pvStageMsg" class="pv-announce" rows="2" placeholder="Private note to the stage display only…"></textarea>
+                </div>
+
+                <div class="pv-show-sec" data-sec="audio">
+                  <div class="pv-show-head"><span>🎵 Audio</span>
+                    <span><button id="pvAudioAdd" class="pv-mini" title="Add a music bed, a stem or a sound effect">＋</button>
+                    <button id="pvAudioStop" class="pv-mini" title="Fade everything out">■</button></span>
+                  </div>
+                  <div class="pv-bible-opts">
+                    <label>Master <input type="range" id="pvAudioMaster" min="0" max="1" step="0.01" value="1" /></label>
+                    <span id="pvAudioMasterV" class="muted small">100%</span>
+                    <label class="pv-inline"><input type="checkbox" id="pvAudioBin" checked /> Auto-advance bin</label>
+                    <label class="pv-inline"><input type="checkbox" id="pvAudioShuffle" /> Shuffle</label>
+                  </div>
+                  <div id="pvAudioList" class="lib-list"></div>
+                  <div class="pv-show-head"><span>On this slide</span></div>
+                  <select id="pvSlideAudio" title="Fire this when the slide goes live"></select>
+                </div>
+
+                <div class="pv-show-sec" data-sec="stage" data-adv="1">
+                  <div class="pv-show-head"><span>👤 Stage layout</span></div>
+                  <select id="pvStageLayout" title="What the confidence monitors show"></select>
+                  <div id="pvStageBlocks" class="pv-stage-blocks"></div>
+                </div>
+
+                <div class="pv-show-sec" data-sec="outputs" data-adv="1">
+                  <div class="pv-show-head"><span>🖥 Extra outputs</span>
+                    <button id="pvOutAdd" class="pv-mini" title="Add another audience screen">＋</button>
+                  </div>
+                  <div id="pvOutList" class="lib-list"></div>
+                  <div id="pvMapEditor" class="pv-map hidden">
+                    <div class="pv-show-head"><span>📐 Screen mapping — <b id="pvMapName">—</b></span>
+                      <button id="pvMapClose" class="pv-mini" title="Done">✕</button>
+                    </div>
+                    <div class="pv-bible-opts">
+                      <label>Rotate <select id="pvMapRotate">
+                        <option value="0">0°</option><option value="90">90°</option>
+                        <option value="180">180°</option><option value="270">270°</option>
+                      </select></label>
+                      <label>Zoom <input type="number" id="pvMapScale" value="1" min="0.2" max="4" step="0.01" /></label>
+                    </div>
+                    <div class="pv-bible-opts">
+                      <label>X <input type="number" id="pvMapX" value="0" step="1" /></label>
+                      <label>Y <input type="number" id="pvMapY" value="0" step="1" /></label>
+                      <label>W <input type="number" id="pvMapW" value="0" min="0" step="1" title="0 = the whole screen" /></label>
+                      <label>H <input type="number" id="pvMapH" value="0" min="0" step="1" title="0 = the whole screen" /></label>
+                    </div>
+                    <div class="pv-show-head"><span>Edge blend (px)</span></div>
+                    <div class="pv-bible-opts">
+                      <label>L <input type="number" id="pvBlendL" value="0" min="0" step="1" /></label>
+                      <label>R <input type="number" id="pvBlendR" value="0" min="0" step="1" /></label>
+                      <label>T <input type="number" id="pvBlendT" value="0" min="0" step="1" /></label>
+                      <label>B <input type="number" id="pvBlendB" value="0" min="0" step="1" /></label>
+                      <label>γ <input type="number" id="pvBlendG" value="1" min="0.2" max="4" step="0.05" /></label>
+                    </div>
+                    <button id="pvMapReset" class="pv-mini">Reset this screen</button>
+                  </div>
+                </div>
+
+                <div class="pv-show-sec" data-sec="ndi" data-adv="1">
+                  <div class="pv-show-head"><span>📡 NDI output</span>
+                    <button id="pvNdiAdd" class="pv-mini" title="Publish a feed onto the network">＋</button>
+                  </div>
+                  <div class="pv-bible-opts">
+                    <label>Name <input type="text" id="pvNdiName" value="Lyrics" title="What vMix, OBS or the stream box will call this feed" /></label>
+                    <label>Size <select id="pvNdiSize">
+                      <option value="1920x1080" selected>1920×1080</option>
+                      <option value="1280x720">1280×720</option>
+                      <option value="960x540">960×540</option>
+                    </select></label>
+                  </div>
+                  <div class="pv-bible-opts">
+                    <label>FPS <select id="pvNdiFps">
+                      <option value="60">60</option>
+                      <option value="30" selected>30</option><option value="25">25</option>
+                      <option value="20">20</option><option value="15">15</option>
+                    </select></label>
+                    <label>Group <input type="text" id="pvNdiGroup" placeholder="(optional)" title="NDI groups, separated by commas. Leave blank unless your switcher filters by group." /></label>
+                  </div>
+                  <div class="pv-bible-opts">
+                    <label class="pv-inline"><input type="checkbox" id="pvNdiAlpha" /> Transparent (keyable fill)</label>
+                  </div>
+                  <span id="pvNdiState" class="muted small"></span>
+                  <div id="pvNdiList" class="lib-list"></div>
+                  <p class="muted small pv-ndi-help">Feeds come back on their own the next time the app opens, so a Sunday setup is done once.</p>
+                </div>
+
+                <div class="pv-show-sec" data-sec="macros" data-adv="1">
+                  <div class="pv-show-head"><span>⚡ Macros</span>
+                    <button id="pvMacroNew" class="pv-mini" title="Capture the desk's current state as a macro">＋</button>
+                  </div>
+                  <div id="pvMacroList" class="lib-list"></div>
+                </div>
+
+                <div class="pv-show-sec" data-sec="livein" data-adv="1">
+                  <div class="pv-show-head"><span>📷 Live input</span>
+                    <span><button id="pvInCam" class="pv-mini" title="Use a camera as the background">📷</button>
+                    <button id="pvInScreen" class="pv-mini" title="Mirror a screen or window">🖥</button>
+                    <button id="pvInOff" class="pv-mini" title="Back to the normal background">✕</button></span>
+                  </div>
+                  <span id="pvLiveInput" class="muted small"></span>
+                </div>
+
+                <div class="pv-show-sec" data-sec="draw">
+                  <div class="pv-show-head"><span>✏️ Draw on the screen</span>
+                    <span><button id="pvDraw" class="pv-mini" title="Annotate over the live output">✏️</button>
+                    <button id="pvDrawClear" class="pv-mini" title="Rub it out">🧽</button></span>
+                  </div>
+                  <div class="pv-bible-opts">
+                    <label>Colour <input type="color" id="pvDrawColor" value="#ff2d55" /></label>
+                    <label>Size <input type="range" id="pvDrawWidth" min="3" max="40" step="1" value="12" /></label>
+                  </div>
+                </div>
+
+                <div class="pv-show-sec" data-sec="web" data-adv="1">
+                  <div class="pv-show-head"><span>📱 Web output (phones)</span>
+                    <button id="pvWebToggle" class="pv-mini" title="Any phone on the wifi can open the stage view">▶ Start</button>
+                  </div>
+                  <div class="pv-bible-opts">
+                    <label>Port <input type="number" id="pvWebPort" value="7373" min="1024" max="65535" /></label>
+                    <label>Passcode <input type="text" id="pvWebPass" placeholder="none" /></label>
+                    <label class="pv-inline"><input type="checkbox" id="pvWebControl" checked /> Allow remote control</label>
+                  </div>
+                  <div id="pvWebState"></div>
+                </div>
+
+                <div class="pv-show-sec" data-sec="dmx" data-adv="1">
+                  <div class="pv-show-head"><span>💡 Lighting (Art-Net DMX)</span>
+                    <button id="pvDmxBlack" class="pv-mini" title="All channels to zero">■</button>
+                  </div>
+                  <div class="pv-bible-opts">
+                    <label class="pv-inline"><input type="checkbox" id="pvDmxOn" /> On</label>
+                    <label>To <input type="text" id="pvDmxHost" value="255.255.255.255" /></label>
+                  </div>
+                  <div class="pv-bible-opts">
+                    <input type="text" id="pvDmxCmd" placeholder="e.g. 1.20=255, 21=128" />
+                    <button id="pvDmxSend" class="pv-mini" title="Send now">▶</button>
+                  </div>
+                  <span id="pvDmxState" class="muted small"></span>
+                </div>
+
+                <div class="pv-show-sec" data-sec="midi" data-adv="1">
+                  <div class="pv-show-head"><span>🎹 MIDI</span>
+                    <button id="pvMidiLearn" class="pv-mini" title="Bind the next note you play">Learn</button>
+                  </div>
+                  <span id="pvMidiState" class="muted small"></span>
+                  <div id="pvMidiBinds" class="lib-list"></div>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- VIDEO STUDIO (CapCut-style timeline) -->
+      <!-- ===================== VIDEO STUDIO — the Pro timeline (v2.79) =====================
+           Chosen by the operator from four designs (design/video-studio-options):
+           a toolbar; then the SHORTS bin | SOURCE monitor (the whole recording, with
+           the box that goes in the short) | PROGRAM monitor (the short, exactly as it
+           exports) | INSPECTOR (tabs); then the timeline, with tools and a handle to
+           make it taller or shorter. Every control kept its id — only its place moved. -->
+      <section class="view ve-pro" id="view-video">
+        <div class="ve-topbar">
+          <div class="ve-file"><span class="ve-dot">🎬</span><span id="veName">No video loaded</span><span id="veStats" class="muted small"></span><span id="veSessionName" class="ve-session-chip muted small"></span></div>
+          <div class="ve-top-actions">
+            <div class="ve-tb-group" aria-label="Project">
+              <button id="veOpen">📂 Open</button>
+              <button id="veSaveSession" title="Save everything on this screen — your clips, cuts, captions, text, music and settings — under a name, so you can close the app and carry on later. Ctrl+S">💾 Save</button>
+              <button id="veSessions" title="Open a session you saved earlier and carry on editing exactly where you stopped.">🗂️ Sessions</button>
+              <button id="veBulk" title="Open MANY videos at once and put one picture — a logo, a lower third, a graphic — over all of them. Place it once on the preview and every video in the batch gets it in the same spot.">📦 Bulk</button>
+            </div>
+            <div class="ve-tb-group" aria-label="Add">
+              <button id="veAddText" title="Add text anywhere on the video — it's automatically included when you export clips">🔤 Text</button>
+              <button id="veMusic" title="Background music — pick a track from your library or YouTube, set the volume, and it plays under every clip you export">🎵 Music</button>
+              <button id="veClips" title="Your saved clips — outros, intros and stingers. Pick one and it's added to the end of every short you export.">🎬 Clips</button>
+            </div>
+            <div class="ve-tb-group" aria-label="Output">
+              <button id="veExportEdited" disabled title="Save the video you have edited on the timeline — trimmed, with any pauses you closed removed — as ONE file at its original size. Nothing to do with shorts.">💾 Export video</button>
+            </div>
+            <div class="ve-tb-group" aria-label="Elsewhere">
+              <button id="veCloud" title="Edit from anywhere in the world: open the studio in a browser on any phone, tablet or laptop. This PC keeps doing the encoding.">☁️ Cloud</button>
+              <button id="vePhone" title="Edit from your phone: this PC keeps doing the encoding, you drive it from a browser on the church wifi.">📱 Phone</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="ve-main">
+          <!-- ✨ THE SHORTS BIN: finding them, and the list of them. -->
+          <aside class="ve-bin" aria-label="Shorts">
+            <section id="veBulkBox" class="ve-bulk hidden">
+              <!-- Export All lives in the HEAD, beside the title, exactly where
+                   the Shorts panel keeps its own: the rail is only as tall as the
+                   preview beside it, so a button at the bottom of a batch of
+                   forty is a button nobody finds. -->
+              <div class="ve-side-head">
+                <h3>📦 Bulk <span id="veBulkCount" class="muted small"></span></h3>
+                <div class="ve-bulk-head-btns">
+                  <button id="veBulkExport" class="primary-btn small" disabled title="Write out every video in the batch with the picture burned in, at its own size and quality.">⬇️ Export all</button>
+                  <button id="veBulkClear" class="icon-btn" title="Empty the batch (the files themselves are untouched)">✕</button>
+                </div>
+              </div>
+              <p class="muted small ve-bulk-hint" id="veBulkHint">Pick a video below to see it — whatever you place on the picture goes on <b>every</b> video in the batch.</p>
+              <div class="ve-bulk-actions">
+                <button id="veBulkAddImage" class="primary-btn small" title="Put a logo, a lower third or any picture on top of EVERY video in the batch. Drag it on the preview to place it and drag its corner to size it — where you put it is where it lands on all of them.">🖼 Image over all…</button>
+                <button id="veBulkAddMore" class="ghost-btn small" title="Add more videos to the batch">＋ More videos…</button>
+              </div>
+              <div id="veBulkOverlays" class="ve-bulk-overlays"></div>
+              <div id="veBulkList" class="ve-bulk-list"></div>
+            </section>
+            <div class="ve-side-head">
+              <h3>✨ Shorts</h3>
+              <button id="veExportAll" class="primary-btn small" disabled>⬇️ Export all</button>
+            </div>
+            <div class="ve-find">
+              <button id="veFindHighlights" class="primary-btn" disabled>✂️ Long to short clips (AI)</button>
+              <!-- How the AI finds shorts. Folded under a line that says what it is set to,
+                   because in a column this narrow five open controls pushed the
+                   list of shorts itself out of sight. -->
+              <details class="ve-find-more" id="veFindMore">
+                <summary title="How the AI finds the shorts — length, how deeply it reads, who listens, who judges, and pauses"><span class="ve-find-sum" id="veFindSum">⚙ Settings</span></summary>
+                <div class="ve-find-opts">
+                  <select id="veShortLen" title="Target short length">
+                    <option value="auto" selected>✨ Auto (~1½ min)</option>
+                    <option value="30">~30s shorts</option>
+                    <option value="60">~1 min shorts</option>
+                    <option value="90">~1½ min shorts</option>
+                    <option value="120">~2 min shorts</option>
+                  </select>
+                  <label class="ve-deep" title="Deep mode reads the words for sentence-perfect, content-aware picks with viral scores. The FIRST run transcribes on your PC (takes a few minutes); after that the transcript is cached, so re-runs and other lengths are much faster."><input type="checkbox" id="veDeep" checked /> 🧠 Deep (best)</label>
+                  <select id="veAsrPicker" title="Which speech model reads the sermon when Deep is on. A bigger model hears more of the words right — and a mis-heard line is a mis-placed cut — but it is slower over an hour of audio. Downloaded once, then it works offline forever.">
+                    <option value="">👂 Auto</option>
+                  </select>
+                  <select id="veAiPicker" title="How the clips are chosen. Rules is the built-in engine — instant, no download. The AI reader downloads once (free, runs on this PC, works offline afterwards) and judges where each clip should end, which ones stand alone, and what to title them. It makes a Deep scan slower.">
+                    <option value="">⚡ Rules</option>
+                  </select>
+                  <label class="ve-deep ve-find-wide" title="After the AI picks the clips, listen through each one and take out the long pauses — the short plays tight, with no dead air. You can undo it with Ctrl+Z."><input type="checkbox" id="veRemovePauses" checked /> 🤫 Remove pauses
+                  <!-- HOW the pauses are found. By the words (Groq's free cloud Whisper
+                       says where the speech is, so a soft word is never cut and a
+                       noisy hall's pauses are still found) or by silence on this PC
+                       (works offline; a fixed loudness threshold). -->
+                  <select id="vePauseHow" class="ve-pause-how" title="How pauses are found. ☁️ By the words: Groq's free cloud Whisper hears where the speech is, so a quiet word is never cut and pauses in a noisy hall are still found (needs the free Groq key). 🔉 By silence: this PC listens for quiet below a fixed level — works offline, but misses pauses in a noisy room and can clip soft words.">
+                    <option value="cloud">☁️ by words</option>
+                    <option value="silence">🔉 by silence</option>
+                  </select></label>
+                </div>
+              </details>
+            </div>
+            <button id="veCapShorts" class="ve-cap-shorts" disabled title="Caption every short in this panel — and ONLY the shorts. Each clip is transcribed on its own (fast); the full uploaded video is never transcribed. The captions show on the preview and are burned in when you export.">💬 Auto-caption all shorts (AI)</button>
+            <div id="veClipList" class="ve-cliplist"><p class="muted small">Load a sermon, then click <b>✂️ Long to short clips</b> — the AI will drop clips onto the timeline. You can also drag on the timeline to make your own.</p></div>
+          </aside>
+
+          <div class="ve-monitors solo" id="veMonitors">
+            <div id="veResume" class="ve-resume hidden"></div>
+            <!-- SOURCE: the whole recording, with the box that goes in the short.
+                 Drag the box to frame the short yourself; scroll on it to zoom.
+                 It is a painting of the player's own frames — no second decoder. -->
+            <section class="ve-source" id="veSource" aria-label="Source monitor">
+              <div class="ve-mon-head"><b>SOURCE</b><span id="veSourceAr" class="muted small"></span><span class="ve-sp"></span><span id="veSourceTc" class="ve-mon-tc">00:00:00:00</span></div>
+              <div class="ve-source-stage" id="veSourceStage">
+                <canvas id="veSourceCanvas"></canvas>
+                <div id="veSourceRect" class="ve-src-rect hidden" title="This is what goes in the short. Drag it to frame it yourself · scroll to zoom · double-click to centre it again"><span class="ve-src-rect-tag" id="veSourceTag"></span></div>
+              </div>
+              <div class="ve-mon-foot"><span class="muted small" id="veSourceHint">Drag the box to choose what is in the short · scroll to zoom</span><span class="ve-sp"></span><span class="ve-jkl" title="J rewinds, K stops, L plays — press L or J again to go faster">J ◂ K ▸ L</span></div>
+            </section>
+            <!-- PROGRAM: the short as it exports — the frame, the captions, the text. -->
+            <section class="ve-left" aria-label="Program monitor">
+              <div class="ve-mon-head"><b>PROGRAM</b><select id="veAspect" class="ve-mon-select" title="The shape of the short — what the program monitor shows and what every export is"></select></div>
+              <div class="ve-preview" id="veDrop">
+                <video id="vePlayer" playsinline></video>
+                <div id="veGapMask" class="ve-gap-mask hidden"></div>
+                <div id="veCropMask" class="ve-crop-mask hidden">
+                  <div id="veCropFrame" class="ve-crop-frame">
+                    <button id="veCropReset" class="ve-crop-reset" title="Reset crop">↺</button>
+                  </div>
+                </div>
+                <!-- Added media (a second video / a picture) sits UNDER the text and
+                     caption layers, exactly as it does in the export: the compositor
+                     lays overlays on first, then text is burned on top of that. -->
+                <div id="veMediaLayer" class="ve-media-layer"></div>
+                <div id="veTextLayer" class="ve-text-layer"></div>
+                <div id="veOverlayGuide" class="ve-overlay-guide hidden">
+                  <span class="ve-ovg-label">📺 Overlay (PiP)</span>
+                  <div class="ve-ovg-resize" data-ovresize title="Drag to resize"></div>
+                </div>
+                <div id="veCapOverlay" class="ve-cap-overlay hidden"></div>
+                <div id="veTextTools" class="ve-text-tools hidden">
+                  <span class="vt-label">🔤 Text style</span>
+                  <select id="vtFont" title="Font">
+                    <option value="Arial">Arial</option>
+                    <option value="Anton">Anton</option>
+                    <option value="Bebas Neue">Bebas Neue</option>
+                    <option value="Poppins">Poppins</option>
+                    <option value="Bangers">Bangers</option>
+                  </select>
+                  <label class="vt-size-wrap" title="How big the words are, in pixels of the export frame as the preview draws it. Goes down to 1 for a small caption line and up to 300 for a title.">Size
+                    <input type="number" id="vtSize" min="1" max="300" step="0.5" />
+                  </label>
+                  <input type="color" id="vtColor" title="Text colour" />
+                  <button id="vtBold" title="Bold">B</button>
+                  <button id="vtOutline" title="Black outline around the letters — the thing that makes text readable over a bright shirt, a window or a busy stage. On by default for new text.">A</button>
+                  <button id="vtBg" title="A backing panel behind the text so it stands out">⬛</button>
+                  <!-- The panel's colour. It was black and only black, which is
+                       fine over a bright stage and useless for the white name
+                       banner every sermon short opens with. -->
+                  <input type="color" id="vtBgColor" title="Backing panel colour" value="#000000" />
+                  <button id="vtDelete" title="Delete this text">🗑</button>
+                </div>
+                <div class="ve-novid" id="veNoVid">
+                  <div class="dz-icon">⬆️</div>
+                  <p><strong>Open a sermon / video</strong> or drag &amp; drop it here</p>
+                  <button class="primary-btn" id="veOpen2">Browse…</button>
+                </div>
+                <button id="veFsExit" class="ve-fs-exit" title="Leave full screen (Esc)">✕ Exit full screen</button>
+              </div>
+            </section>
+            <div class="ve-transport">
+              <span id="veTime" class="ve-time">0:00 / 0:00</span>
+              <div class="ve-transport-center">
+                <button id="veBack5" class="ve-tr-btn" title="Back 5s (Shift+←)">⏮</button>
+                <button id="vePlay" class="ve-play">▶</button>
+                <button id="veFwd5" class="ve-tr-btn" title="Forward 5s (Shift+→)">⏭</button>
+              </div>
+              <div class="ve-transport-right">
+                <label class="ve-loop" title="Show captions on the preview"><input type="checkbox" id="veCapShow" checked /> CC</label>
+                <label class="ve-loop"><input type="checkbox" id="veLoopSel" /> Loop</label>
+                <button id="veBigger" class="ve-tr-btn" title="Bigger preview — give the picture more room and shrink the timeline (B)">⤢</button>
+                <button id="veFull" class="ve-tr-btn" title="Full screen — see the short exactly as it will export (F, Esc to leave)">⛶</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- THE INSPECTOR: everything about how the shorts look, sound and export,
+               in tabs, so nothing pushes the Shorts list down any more. -->
+          <aside class="ve-side ve-inspector" aria-label="Inspector">
+            <div class="ve-insp-tabs" role="tablist">
+              <button type="button" role="tab" id="veInspTabCaptions" data-insp="captions" class="on"><span class="ve-tab-ic" aria-hidden="true">💬</span><span class="ve-tab-tx">Captions</span></button>
+              <button type="button" role="tab" id="veInspTabReframe" data-insp="reframe"><span class="ve-tab-ic" aria-hidden="true">🎯</span><span class="ve-tab-tx">Reframe</span></button>
+              <button type="button" role="tab" id="veInspTabAudio" data-insp="audio"><span class="ve-tab-ic" aria-hidden="true">🔊</span><span class="ve-tab-tx">Audio</span></button>
+              <button type="button" role="tab" id="veInspTabLook" data-insp="look"><span class="ve-tab-ic" aria-hidden="true">🎨</span><span class="ve-tab-tx">Look</span></button>
+              <button type="button" role="tab" id="veInspTabExport" data-insp="export"><span class="ve-tab-ic" aria-hidden="true">⬇️</span><span class="ve-tab-tx">Export</span></button>
+            </div>
+            <div class="ve-insp-body">
+              <section class="ve-insp-panel" data-panel="captions" role="tabpanel" aria-labelledby="veInspTabCaptions">
+                <button id="veAutoCaptions" class="primary-btn ve-insp-wide" title="Open the captions editor beside the video — read, hear and fix the words, choose the look.">💬 Open the captions editor</button>
+                <label class="ve-cap-toggle" title="When exporting a short, automatically transcribe just that clip and burn captions onto it">
+                  <input type="checkbox" id="veCapExports" /> 💬 Auto-caption my shorts on export <span class="muted small">(only the short — fast)</span>
+                </label>
+                <div class="ve-fill">
+                  <label class="ve-fill-row" title="Which on-device speech model transcribes your captions. Bigger models are slower but mishear far less.">
+                    🗣️ Caption accuracy
+                    <select id="veCapModel">
+                      <option value="">Auto (best installed)</option>
+                    </select>
+                  </label>
+                  <div id="veCapModelRmWrap" class="ve-fill-opts hidden">
+                    <p class="muted small ve-fill-note">A bigger model catches more words but takes longer to transcribe.</p>
+                    <button id="veCapModelRm" class="ghost-btn small" title="Delete this downloaded model from your PC — frees disk space, and captions fall back to a faster installed model.">🗑️ Remove this model</button>
+                  </div>
+                </div>
+                <div class="ve-insp-btnrow">
+                  <button id="veCapStyle" class="hidden" title="Change caption font, size, colour &amp; position">🎨 Caption style</button>
+                  <button id="veClearCaps" class="hidden" title="Remove every caption from the timeline (Ctrl+Z puts them back)">🧹 Clear captions</button>
+                  <button id="veSaveCaps" class="hidden" title="Export the video with the captions on the timeline burned in (top quality)">💾 Save with captions</button>
+                </div>
+                <p class="muted small ve-insp-note">Each short's captions are on the Captions track below. Click a block to retype it, drag its edges to retime it.</p>
+              </section>
+              <section class="ve-insp-panel hidden" data-panel="reframe" role="tabpanel" aria-labelledby="veInspTabReframe">
+                <label class="ve-cap-toggle" title="AI follows the speaker's face so they stay visible & centered in the vertical crop">
+                  <input type="checkbox" id="veAutoReframe" checked /> 🎯 Auto-reframe — follow the speaker <span class="muted small">(on-device face tracking)</span>
+                </label>
+                <div class="ve-follow" id="veFollowRow">
+                  <div class="ve-follow-who" id="veFollowWho">
+                    <span class="ve-follow-auto muted small">Following whoever the AI thinks is speaking.</span>
+                  </div>
+                  <button id="veFollowPick" class="ghost-btn small" title="Point at the person to keep in the middle of every short. The tracker recognises them by what they are wearing, so it keeps following them through camera changes and close-ups.">👤 Choose who to follow…</button>
+                </div>
+                <div class="ve-fill ve-rf-ai" id="veRfAiRow">
+                  <label class="ve-fill-row" title="This PC always finds where every person is. The question it gets wrong on a busy platform is WHICH of them is preaching. The AI is shown one frame from each camera shot, with every person numbered, and says which one is speaking — the PC then follows that person.">
+                    🧠 Who's speaking?
+                    <select id="veRfAi">
+                      <option value="cloud" selected>☁️ Ask the AI</option>
+                      <option value="local">💻 This PC</option>
+                    </select>
+                  </label>
+                  <p class="muted small ve-insp-note" id="veRfAiState"></p>
+                  <div id="veRfAiKey" class="ve-rf-ai-key hidden">
+                    <input type="password" id="veRfAiKeyIn" placeholder="Paste the free Groq key (gsk_…)" autocomplete="off" spellcheck="false" />
+                    <button id="veRfAiKeySave" class="ghost-btn small">Save</button>
+                    <button id="veRfAiKeyGet" class="ghost-btn small" title="Opens console.groq.com in your browser — free, no card">Get a free key</button>
+                  </div>
+                </div>
+                <div class="ve-fill">
+                  <label class="ve-fill-row" title="What to do when the picture doesn't fill the short's shape — crop into it, or show all of it over a blurred copy of itself.">
+                    🖼️ Frame fill
+                    <select id="veFill">
+                      <option value="crop" selected>✂️ Crop to fill</option>
+                      <option value="blur">🌫️ Blur background — show the whole picture</option>
+                      <option value="bars">⬛ Black bars</option>
+                    </select>
+                  </label>
+                  <div id="veFillOpts" class="ve-fill-opts hidden">
+                    <label title="How heavy the blur behind the picture is">Blur
+                      <input type="range" id="veFillStrength" min="0" max="100" step="5" value="60" />
+                      <span id="veFillStrengthV" class="muted small">60%</span>
+                    </label>
+                    <label title="How much darker the blurred background is, so the real picture stands out">Darken
+                      <input type="range" id="veFillDim" min="0" max="60" step="2" value="18" />
+                      <span id="veFillDimV" class="muted small">18%</span>
+                    </label>
+                    <p class="muted small ve-fill-note">The background is made from <b>this picture's own colours</b>, so it blends instead of framing it. Auto-reframe switches off — nothing is being cropped.</p>
+                  </div>
+                </div>
+                <div class="ve-fill hidden">
+                  <label class="ve-cap-toggle" title="For a video that ARRIVED with subtitles burned into the picture. The words cannot be un-burned, but the strip they sit in can be covered — and your own captions go on top of it.">
+                    <input type="checkbox" id="veCover" /> 🚫 Hide captions already in the video <span class="muted small">(covers the strip they sit in)</span>
+                  </label>
+                  <div id="veCoverOpts" class="ve-fill-opts hidden">
+                    <label title="Blur is least noticeable on a busy stage. Smear rebuilds the area from its edges — invisible over a plain wall, blotchy over detail. A solid bar is the only one guaranteed to leave nothing readable.">How
+                      <select id="veCoverMode">
+                        <option value="blur" selected>🌫️ Blur it out</option>
+                        <option value="smear">🩹 Smear it away (plain backgrounds)</option>
+                        <option value="solid">⬛ Cover with a solid bar</option>
+                      </select>
+                    </label>
+                    <label title="Where the top of the covered strip sits, measured down the picture">Top
+                      <input type="range" id="veCoverY" min="0" max="95" step="1" value="80" />
+                      <span id="veCoverYV" class="muted small">80%</span>
+                    </label>
+                    <label title="How tall the covered strip is">Height
+                      <input type="range" id="veCoverH" min="3" max="60" step="1" value="18" />
+                      <span id="veCoverHV" class="muted small">18%</span>
+                    </label>
+                    <p class="muted small ve-fill-note">The yellow strip on the preview is exactly what gets covered. Drag the two sliders until it sits over the old words — keep it as small as you can, because everything inside it goes.</p>
+                  </div>
+                </div>
+              </section>
+              <section class="ve-insp-panel hidden" data-panel="audio" role="tabpanel" aria-labelledby="veInspTabAudio">
+                <button id="veStudioSound" title="Keep the speaker, lose the room. A voice-isolation model separates the human voice from everything else, so the hall, the hiss, the air conditioning and the rumble go and the preacher stays — then the voice is brought forward and levelled for broadcast, so it sounds recorded rather than filmed. Built for speech: over a live band, use the strength dropdown instead, which leaves music alone.">🎙️ Studio sound</button>
+                <div class="ve-fill">
+                  <label class="ve-cap-toggle" title="Take the room out from under the voice — air conditioning, fans, hiss, a band still playing. Applies to every clip you export.">
+                    <input type="checkbox" id="veDenoise" /> 🔇 Remove background noise <span class="muted small">(from the video's own audio)</span>
+                  </label>
+                  <div id="veDenoiseOpts" class="ve-fill-opts hidden">
+                    <label title="Gentle leaves some room tone but never touches the voice; Max takes the room out completely.">How strong
+                      <select id="veDenoiseLevel">
+                        <option value="light">🍃 Light</option>
+                        <option value="medium" selected>🌤️ Medium</option>
+                        <option value="strong">💪 Strong</option>
+                        <option value="max">🧨 Maximum</option>
+                        <option value="studio">🎙️ Studio voice (clean + level it)</option>
+                      </select>
+                    </label>
+                    <button id="veDenoiseTest" class="ghost-btn small" title="Clean 8 seconds from the playhead and play it back, so you can hear what this setting does before you export anything.">🎧 Hear the difference</button>
+                    <p class="muted small ve-fill-note">Stronger settings remove more room, but past <b>Strong</b> they also start to thin out “s” and “t” sounds — listen first.</p>
+                  </div>
+                </div>
+                <div class="ve-fill">
+                  <label class="ve-fill-row" title="Ease the clip's own audio in from silence and/or out to silence, instead of starting or ending abruptly.">
+                    🔊 Audio fade
+                  </label>
+                  <div class="ve-fill-opts">
+                    <label title="How many seconds the audio takes to rise from silence at the very start of the clip. 0 = no fade in.">Fade in
+                      <input type="range" id="veFadeIn" min="0" max="5" step="0.1" value="0" />
+                      <span id="veFadeInV" class="muted small">0.0s</span>
+                    </label>
+                    <label title="How many seconds the audio takes to ease down to silence at the very end of the clip. 0 = no fade out.">Fade out
+                      <input type="range" id="veFadeOut" min="0" max="5" step="0.1" value="0" />
+                      <span id="veFadeOutV" class="muted small">0.0s</span>
+                    </label>
+                  </div>
+                </div>
+              </section>
+              <section class="ve-insp-panel hidden" data-panel="look" role="tabpanel" aria-labelledby="veInspTabLook">
+                <button id="veEffects" title="Speed, colour, brightness, filters, music — shown LIVE on the preview before you export" class="ve-insp-wide">🎛️ Video quality — speed, colour, filters</button>
+                <div class="ve-tools">
+                  <h4>More tools</h4>
+                  <div class="ve-tool-btns">
+                    <button data-vtool="autotrim">🤫 Trim silence</button>
+                <button data-vtool="reshape">📐 Reshape</button>
+                <button data-vtool="extract">🔊 Extract audio</button>
+                <button data-vtool="merge">🔗 Merge clips…</button>
+                <button data-vtool="stabilize" title="De-shake handheld footage">🫳 Stabilize</button>
+                <button data-vtool="reverse" title="Reverse the selected clip (or whole video)">⏪ Reverse</button>
+                <button data-vtool="freeze" title="Hold the current frame for a few seconds">❄️ Freeze frame</button>
+                <button data-vtool="proxy" title="Force a smooth-editing proxy for this video">🧩 Force proxy</button>
+                  </div>
+                </div>
+              </section>
+              <section class="ve-insp-panel hidden" data-panel="export" role="tabpanel" aria-labelledby="veInspTabExport">
+                <!-- What every export will do, said in one line (kept up to date by syncExportPrefUi). -->
+                <label class="ve-fill-row ve-insp-row" title="How many pixels every export has.">📐 Export size
+                  <select id="veQuality" title="How many pixels every export has. 1080p is what social platforms want; 4K is for YouTube and for keeping a master copy. A recording smaller than the size you pick is stretched to fit it — the file really is that size, but the detail can only be what was filmed.">
+                  <option value="720p">📺 HD 720p</option>
+                  <option value="1080p" selected>🎬 Full HD 1080p</option>
+                  <option value="4k">🏆 4K UHD</option>
+                  <option value="source">📐 Same as the recording</option>
+                  </select>
+                </label>
+                <p class="ve-export-opts ve-insp-summary">🎚️ Every short exports as: <span id="veExportSummary" class="muted small">Crop to fill · noise off</span></p>
+                <label class="ve-deep" title="Send every export straight to the corner instead of holding the whole app behind a progress screen. You can carry on editing, presenting or going live while it finishes. Whatever it is saving is frozen the moment you press export, so nothing you change afterwards can get into that file. (You can also send any export to the background while it is running.)"><input type="checkbox" id="veBgExport" /> ⇥ Export in the background</label>
+                <p class="muted small ve-insp-note">Format and quality are at the top right. ⬇️ Export all is above the Shorts list; 💾 Export video saves the edited timeline as one file.</p>
+              </section>
+            </div>
+          </aside>
+        </div>
+
+        <!-- Drag to give the timeline more or less of the screen. -->
+        <div class="ve-tl-split" id="veTlSplit" role="separator" aria-orientation="horizontal" title="Drag to make the timeline taller or shorter (double-click to reset)"></div>
+        <div class="ve-tl-bar">
+          <div class="ve-tl-group ve-tl-tools" role="group" aria-label="Timeline tool">
+            <button id="veToolSelect" class="on" title="Select (V) — click a clip to select it, drag it to move it, drag its edges to trim">↖ Select</button>
+            <button id="veToolBlade" title="Blade (C) — click a clip on the timeline to cut it in two right there">✂ Blade</button>
+          </div>
+          <div class="ve-tl-group">
+            <button id="veUndo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>↶</button>
+            <button id="veRedo" title="Redo (Ctrl+Y)" aria-label="Redo" disabled>↷</button>
+            <span class="ve-tl-sep"></span>
+            <button id="veSplit" title="Split at playhead (S)">✂ Split</button>
+            <button id="veCloseGap" title="Close gap (G) — join the selected clip with the one next to it into ONE short, removing the pause between them. Press once per pause.">🔗 Close gap</button>
+            <button id="veOverlay" title="Move the selected clip to the Overlay lane (picture-in-picture)">📺 Overlay</button>
+            <button id="veAddMedia" title="Put a SECOND video or a picture on top of this one. It lands at the playhead on an Overlay row — drag it anywhere on the timeline, drag its edges for how long it shows, and drag the box on the preview to place it in the frame. Drop two files and they take separate rows so both show at once. You can also drop files straight onto the timeline.">➕ Add media</button>
+            <button id="veCutOut" class="hidden" title="Take the background out of the selected picture — a white or plain backdrop becomes transparent, so only the logo or the person is left on top of your video.">🪄 Cut out background</button>
+            <button id="veOvSound" class="hidden" title="Sound of the selected added video">🔊 Sound on</button>
+            <span class="ve-tl-sep"></span>
+            <button id="veAddClip" title="New clip at playhead">＋ Clip</button>
+            <button id="veDupClip" title="Duplicate (Ctrl+D)">⧉</button>
+            <button id="veDelClip" title="Delete selected (Del)">🗑</button>
+            <span class="ve-tl-sep"></span>
+            <button id="veSnap" class="on" title="Magnetic snapping — clips snap to the playhead &amp; other clips">🧲 Snap</button>
+            <span class="ve-tl-sep"></span>
+          </div>
+          <div class="ve-tl-group ve-tl-zoom">
+            <button id="veFollow" class="ve-zoom-btn on" title="Following the playhead — scroll the timeline to look around freely">🎯</button>
+            <button id="veZoomOut" class="ve-zoom-btn" title="Zoom out">➖</button>
+            <button id="veZoomFit" class="ve-zoom-btn" title="Fit the whole video">Fit</button>
+            <button id="veZoomIn" class="ve-zoom-btn" title="Zoom in">➕</button>
+            <input type="range" id="veZoom" min="0.15" max="150" step="0.05" value="4" />
+          </div>
+        </div>
+        <div class="ve-timeline" id="veTimeline">
+          <div class="ve-tl-labels">
+            <div class="ve-tl-label">🎬 Video</div>
+            <div class="ve-tl-label">🔤 Text</div>
+            <div class="ve-tl-label" id="veCapLabel">💬 Captions</div>
+            <div class="ve-tl-label">🔊 Audio</div>
+            <div class="ve-tl-label" id="veMusicLabel">🎵 Music</div>
+          </div>
+          <div class="ve-tl-scroll" id="veTlScroll">
+            <div class="ve-ruler" id="veRuler"></div>
+            <div class="ve-track" id="veTrack">
+              <div class="ve-filmstrip" id="veFilmstrip"></div>
+              <div class="ve-segments" id="veSegments"></div>
+              <div class="ve-selbox" id="veSelbox"></div>
+            </div>
+            <div class="ve-text-track" id="veTextTrack"></div>
+            <div class="ve-cap-track" id="veCapTrack"></div>
+            <div class="ve-audio-track" id="veAudioTrack"></div>
+            <div class="ve-music-track" id="veMusicTrack"></div>
+            <div class="ve-playhead" id="vePlayhead"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- FLYER EDITOR (Canva-style) -->
+      <section class="view" id="view-flyer">
+        <div class="ed-toolbar">
+          <div class="ed-tb-group">
+            <button id="edUndo" title="Undo (Ctrl+Z)">↶</button>
+            <button id="edRedo" title="Redo (Ctrl+Y)">↷</button>
+          </div>
+          <div class="ed-tb-group">
+            <select id="edSize" title="Canvas size"></select>
+            <select id="edPreset" class="hidden" title="Start from a preset"></select>
+          </div>
+          <div class="ed-tb-group ed-tb-zoom">
+            <button id="edZoomOut" title="Zoom out">➖</button>
+            <button id="edZoomFit" title="Fit to screen">Fit</button>
+            <button id="edZoomIn" title="Zoom in">➕</button>
+            <span id="edZoomPct" class="ed-tb-label">100%</span>
+          </div>
+          <div class="ed-tb-group ed-tb-right">
+            <button id="edNew">🗎 New</button>
+            <button id="edSchedule" class="ghost-btn">📅 Schedule</button>
+            <select id="edExportFmt" title="Export format">
+              <option value="png">PNG</option>
+              <option value="jpeg">JPG</option>
+              <option value="png2x">PNG 2×</option>
+            </select>
+            <button id="edExport" class="primary-btn">⬇️ Export</button>
+            <button id="edExportAll" class="ghost-btn hidden" title="Save every page as its own file, in order">⬇️ All pages</button>
+          </div>
+        </div>
+        <div id="edEmojiPop" class="ed-emoji-pop hidden"></div>
+        <div class="ed-main">
+          <nav class="ed-rail" id="edRail">
+            <button class="ed-rail-tab active" data-tab="magic" title="Type your event — AI designs the flyer">🪄<span>Magic</span></button>
+            <button class="ed-rail-tab" data-tab="templates" title="Start from a designed template">🗂️<span>Templates</span></button>
+            <button class="ed-rail-tab" data-tab="text" title="Add text">🔤<span>Text</span></button>
+            <button class="ed-rail-tab" data-tab="elements" title="Shapes, photos & emoji">⬡<span>Elements</span></button>
+            <button class="ed-rail-tab" data-tab="background" title="Canvas background">🖼️<span>BG</span></button>
+            <button class="ed-rail-tab" data-tab="layers" title="Layers">📚<span>Layers</span></button>
+          </nav>
+          <div class="ed-drawer" id="edDrawer"></div>
+          <div class="ed-stage-col">
+            <div class="ed-stage-wrap" id="edStageWrap">
+              <div class="ed-stage" id="edStage">
+                <div class="ed-canvas" id="edCanvas"></div>
+              </div>
+            </div>
+            <!-- Pages. A flyer is rarely one sheet: an event has a poster, a
+                 programme and a thank-you card, and they share a size and a
+                 palette. Each thumbnail is painted by the editor's own renderer,
+                 so it is a true miniature of the page. -->
+            <div class="ed-pages" id="edPages"></div>
+          </div>
+          <aside class="ed-inspector" id="edInspector"></aside>
+        </div>
+      </section>
+
+      <!-- GO LIVE — the broadcast desk.
+
+           Three bands, top to bottom: the COMMAND BAR (is anything going out,
+           and the two buttons that decide that), the STAGE (preview, the take
+           deck, and a deliberately larger program monitor), and the DECK
+           (sources on the left, audio on the right). Everything a service
+           actually needs mid-flight is on the surface; the set-up tools live one
+           click deep behind "More" so they cannot be pressed by mistake. -->
+      <section class="view" id="view-live">
+        <div class="vmx" id="vmx">
+
+          <!-- ░░ COMMAND BAR ░░ -->
+          <header class="vmx-cmd">
+            <div class="vmx-cmd-brand">
+              <div class="vmx-lamp" id="vmxLamp" title="Whether anything is leaving this computer right now">
+                <span class="vmx-lamp-dot"></span><span class="vmx-lamp-txt" id="vmxLampTxt">OFF AIR</span>
+              </div>
+              <div class="vmx-cmd-names">
+                <span class="vmx-cmd-name" id="vmxStName">Church Work Space</span>
+                <span class="vmx-cmd-sub" id="vmxStMsg"></span>
+              </div>
+            </div>
+
+            <!-- only the two facts that change what you do next live up here;
+                 the health numbers sit in the footer, out of the way -->
+            <div class="vmx-cmd-tele">
+              <span id="vmxStRec" class="vmx-chip rec hidden" title="How long this recording has been running"><i></i>REC <b id="vmxStRecTime">00:00:00</b></span>
+              <span id="vmxStStream" class="vmx-chip live hidden" title="How long you have been on air"><i></i>LIVE <b id="vmxStStreamTime">00:00:00</b> <span id="vmxStBitrate"></span></span>
+            </div>
+
+            <div class="vmx-cmd-acts">
+              <div class="vmx-pair">
+                <button id="vmxRecord" class="vmx-btn vmx-primary rec" title="Record the program output to an MP4 in your output folder"><span class="vmx-glyph">⏺</span>Record</button>
+                <button id="vmxRecordCfg" class="vmx-btn vmx-gear" title="Recording settings">⚙</button>
+              </div>
+              <div class="vmx-pair">
+                <button id="vmxStream" class="vmx-btn vmx-primary go" title="Stream the program output to Facebook/YouTube/RTMP"><span class="vmx-glyph">📡</span>Go Live</button>
+                <button id="vmxStreamCfg" class="vmx-btn vmx-gear" title="Streaming settings">⚙</button>
+              </div>
+              <span class="vmx-bsep"></span>
+              <button id="vmxExternal" class="vmx-btn" title="Show the program output in its own window (drag it to a projector or second screen)">🖥 Output</button>
+              <button id="vmxFullscreen" class="vmx-btn vmx-icon" title="Full-screen the program output">⛶</button>
+              <span class="vmx-bsep"></span>
+              <button id="vmxSettingsBtn" class="vmx-btn vmx-icon" title="Production settings">⚙</button>
+              <button id="vmxHelpBtn" class="vmx-btn vmx-icon vmx-help" title="How this board works">?</button>
+              <button id="vmxMore" class="vmx-btn" title="Presets and set-up tools">⋯ More</button>
+            </div>
+          </header>
+
+          <!-- set-up tools: needed before a service, never mid-song -->
+          <div class="vmx-drawer hidden" id="vmxDrawer">
+            <div class="vmx-drawer-grp">
+              <span class="vmx-drawer-lbl">Preset — the whole board, saved</span>
+              <div class="vmx-drawer-row">
+                <button id="vmxOpenPreset" class="vmx-btn">📂 Open</button>
+                <button id="vmxSavePreset" class="vmx-btn">💾 Save</button>
+                <button id="vmxLastPreset" class="vmx-btn">↩ Last</button>
+                <button id="vmxClosePreset" class="vmx-btn">✕ Close</button>
+              </div>
+            </div>
+            <div class="vmx-drawer-grp">
+              <span class="vmx-drawer-lbl">Extra recorders</span>
+              <div class="vmx-drawer-row">
+                <button id="vmxMultiCorder" class="vmx-btn" title="Record individual inputs to separate files">MultiCorder</button>
+                <button id="vmxPlayList" class="vmx-btn" title="Play a list of videos back-to-back">PlayList</button>
+              </div>
+            </div>
+            <div class="vmx-drawer-grp">
+              <span class="vmx-drawer-lbl">Board</span>
+              <div class="vmx-drawer-row">
+                <button id="vmxPauseInputs" class="vmx-btn" title="Freeze every playing video at once">⏸ Pause Inputs</button>
+                <button id="vmxBasic" class="vmx-btn" title="Hide the advanced controls for a simpler board">Basic</button>
+                <button id="vmxAddInputCfg" class="vmx-btn" title="Input options">＋ Input options</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ░░ STAGE ░░  preview | take deck | program (program gets the room) -->
+          <div class="vmx-mons">
+            <section class="vmx-mon pv">
+              <div class="vmx-mon-title pv" id="vmxPrvTitle">
+                <span class="vmx-mon-tag">PREVIEW</span>
+                <span class="vmx-mon-name" id="vmxPrvName">Preview</span>
+                <span class="vmx-mon-note">next up</span>
+              </div>
+              <div class="vmx-mon-body"><canvas id="vmxPrvCanvas" width="854" height="480"></canvas></div>
+            </section>
+
+            <div class="vmx-center">
+              <div class="vmx-deck-head">TAKE</div>
+              <button id="vmxCut" class="vmx-tbtn cut" title="Swap preview and program instantly (Enter)">CUT</button>
+              <div class="vmx-slots" id="vmxSlots"></div>
+              <div class="vmx-tbar-wrap">
+                <div class="vmx-tbar" id="vmxTbar" title="Drag down-to-up to mix by hand"><div class="vmx-tbar-handle" id="vmxTbarHandle"></div></div>
+                <div class="vmx-meters" title="Master output level"><canvas id="vmxMasterMeter" width="26" height="400"></canvas></div>
+              </div>
+              <button id="vmxQuickPlay" class="vmx-tbtn" title="Restart the previewed video and fade it to program">⚡ Quick Play</button>
+              <button id="vmxFTB" class="vmx-tbtn ftb" title="Fade the whole output to black (B)">FADE TO BLACK</button>
+            </div>
+
+            <section class="vmx-mon pgm">
+              <div class="vmx-mon-title pgm" id="vmxPgmTitle">
+                <span class="vmx-mon-tag">PROGRAM</span>
+                <span class="vmx-mon-name" id="vmxPgmName">Output</span>
+                <span class="vmx-mon-note">what everyone sees</span>
+                <span class="vmx-mon-gear" id="vmxPgmGear" title="Output settings">⚙</span>
+              </div>
+              <div class="vmx-mon-body"><canvas id="vmxPgmCanvas" width="1280" height="720"></canvas></div>
+            </section>
+          </div>
+
+          <!-- ░░ DECK ░░  sources on the left, the audio mixer docked right.
+               The mixer stays BELOW the monitors and never rises over them. -->
+          <div class="vmx-mid">
+            <div class="vmx-rail">
+              <div class="vmx-rail-head">
+                <span class="vmx-rail-title">SOURCES</span>
+                <span class="vmx-rail-count" id="vmxSrcCount">0</span>
+                <span class="vmx-rail-hint">Click a card to line it up in preview · press <b>Enter</b> to take it on air</span>
+                <button id="vmxAddInput" class="vmx-btn vmx-add" title="Bring in a camera, video, title, screen or NDI source">＋ Add Source</button>
+              </div>
+              <div class="vmx-inputs-wrap"><div class="vmx-inputs" id="vmxInputs"></div></div>
+            </div>
+            <aside id="vmxMixer" class="vmx-mixer">
+              <div class="vmx-mixer-head">
+                <span class="vmx-mixer-tab">🔊 Audio Mixer</span>
+                <button id="vmxMasterMute" class="vmx-btn vmx-icon" title="Master audio mute">🔊</button>
+                <input type="range" id="vmxMasterVol" min="0" max="1" step="0.01" value="1" title="Master volume" />
+              </div>
+              <div class="vmx-mixer-body">
+                <div class="vmx-mixer-rail" id="vmxMixerRailOut" title="Show / hide the output strips"><span>OUTPUTS</span></div>
+                <div class="vmx-mixer-strips" id="vmxMixerOut"></div>
+                <div class="vmx-mixer-rail" id="vmxMixerRailIn" title="Show / hide the input strips"><span>INPUTS</span></div>
+                <div class="vmx-mixer-strips" id="vmxMixerIn"></div>
+              </div>
+            </aside>
+          </div>
+
+          <!-- ░░ FOOTER ░░ the shortcuts a new operator will look for, and the
+               health numbers an experienced one glances at -->
+          <div class="vmx-status">
+            <span class="vmx-keys">
+              <b>1</b>–<b>9</b> preview a source
+              <span class="vmx-keysep"></span><b>Enter</b> cut
+              <span class="vmx-keysep"></span><b>Space</b> auto-transition
+              <span class="vmx-keysep"></span><b>B</b> fade to black
+            </span>
+            <span class="vmx-status-tele">
+              <span class="vmx-chip" title="Frames per second the switcher is drawing"><em>FPS</em><b id="vmxStFps">0</b></span>
+              <span class="vmx-chip" title="How long one frame takes to compose"><em>RENDER</em><b id="vmxStRender">0</b><em>ms</em></span>
+              <span class="vmx-chip" title="This app's share of the machine's CPU · the whole machine's CPU (what Task Manager's header shows)"><em>CPU</em><b id="vmxStCpu">0</b></span>
+            </span>
+            <span class="vmx-status-right" id="vmxStEngine"></span>
+          </div>
+
+          <!-- hidden media elements (cameras / videos / images live here) -->
+          <div class="vmx-holder" id="vmxHolder"></div>
+
+          <!-- pop-up menus + generic modal -->
+          <div id="vmxMenu" class="vmx-menu hidden"></div>
+          <div id="vmxModal" class="vmx-modal hidden"><div class="vmx-modal-box" id="vmxModalBox"></div></div>
+        </div>
+      </section>
+
+      <!-- SCHEDULER -->
+      <section class="view" id="view-scheduler">
+        <header class="view-head">
+          <h1>📅 Social Scheduler</h1>
+          <p class="muted">Link your accounts once — then schedule, and the app posts for you at the right time.</p>
+          <div id="schedAutoBanner" class="sched-banner off">⚡ <b>Connect an account</b> below and scheduled posts publish <b>by themselves</b> — photos, videos, Reels, and text.</div>
+        </header>
+        <div class="panel acct-panel">
+          <div class="panel-head"><h2>🔗 Connected accounts</h2><button class="primary-btn small" id="connectAccount">＋ Connect account</button></div>
+          <div id="acctStrip" class="acct-strip"></div>
+        </div>
+        <!-- POSTING WITH THE APP CLOSED. Everything above this is worthless on
+             a Sunday morning if somebody has to leave the studio open all night
+             for a 9am post. Windows/macOS runs the app for a second or two
+             every few minutes instead — see src/main/autopost.js. -->
+        <div class="panel autopost-panel" id="autopostPanel">
+          <div class="panel-head">
+            <h2>🕒 Backup: post when the app is closed</h2>
+            <span class="badge" id="autopostState">…</span>
+          </div>
+          <p class="muted small"><b>Most posts do not need this.</b> Facebook, YouTube, and any account connected the easy way are <b>booked with the platform</b> the moment you schedule them — those go out with this PC <b>switched off</b>, and each post says so with a 🔒. This setting is the safety net for the rest: a direct Instagram or TikTok account, or a post booked less than 10 minutes ahead. With it on you can <b>shut Church Work Space down</b> and Windows still wakes the app for a second every few minutes to publish those — no window ever appears — but this PC does have to be on and signed in.</p>
+          <div class="path-row autopost-row">
+            <label class="cap-inline"><input type="checkbox" id="autopostOn" /> <b>Keep posting when the app is closed</b></label>
+            <label>Check every
+              <select id="autopostEvery">
+                <option value="5">5 minutes</option>
+                <option value="10">10 minutes</option>
+                <option value="15">15 minutes</option>
+                <option value="30">30 minutes</option>
+                <option value="60">1 hour</option>
+              </select>
+            </label>
+            <button class="ghost-btn small" id="autopostTest" title="Starts the background poster for real — exactly as Windows will at 3am — and tells you what it did.">▶ Test it now</button>
+          </div>
+          <p class="muted small" id="autopostNote"></p>
+          <div id="autopostRuns" class="autopost-runs"></div>
+        </div>
+        <div class="sched-layout">
+          <div class="sched-form panel">
+            <div class="panel-head"><h2>New post</h2></div>
+            <label>Title<input type="text" id="sTitle" placeholder="e.g. Youth Night promo" /></label>
+            <label>Caption<textarea id="sCaption" rows="4" placeholder="Write your caption…"></textarea></label>
+            <button class="ghost-btn" id="sWriteForMe" title="Attach the video or picture first, then press this: the app listens to the clip and writes THREE options, one for each kind of platform. Click the one you want and it fills the fields above.">✨ Write the title &amp; caption for me</button>
+            <!-- Three options, the way an editor would hand them over: one per
+                 platform voice. Clicking one fills the Title and Caption above. -->
+            <div id="copyOptions" class="copy-options hidden"></div>
+            <div class="post-to">
+              <span class="muted small">Post to (publishes automatically):</span>
+              <div id="postToAccounts" class="acct-picks"><span class="muted small">No linked accounts yet — hit “＋ Connect account” above.</span></div>
+            </div>
+            <div class="platform-pick">
+              <span class="muted small">Also remind me for:</span>
+              <label class="pill"><input type="checkbox" value="instagram" /> Instagram</label>
+              <label class="pill"><input type="checkbox" value="tiktok" /> TikTok</label>
+              <label class="pill"><input type="checkbox" value="facebook" /> Facebook</label>
+              <label class="pill"><input type="checkbox" value="youtube" /> YouTube</label>
+            </div>
+            <label>Media file<button class="ghost-btn" id="pickPostMedia">Attach image/video…</button></label>
+            <button class="ghost-btn" id="pickPostBatch" title="Pick MANY videos or pictures at once. Each becomes its own post, and 🗓 Auto-schedule spreads them across the best days and times for you.">📦 Bulk upload (many files)…</button>
+            <div id="bulkBox" class="bulk-box hidden">
+              <div class="bulk-head"><b id="bulkCount">0 files</b><button class="icon-btn" id="bulkClear" title="Clear the batch">✕</button></div>
+              <div id="bulkList" class="bulk-list"></div>
+              <div class="bulk-row">
+                <button class="ghost-btn" id="bulkWriteAll" title="Listen to each video in turn and write its own title and caption from what is actually said in it. You can edit any of them afterwards.">✨ Write captions for all of them</button>
+              </div>
+              <div class="bulk-row">
+                <label>Post every
+                  <select id="bulkSpacing">
+                    <option value="3">3 hours</option>
+                    <option value="6" selected>6 hours</option>
+                    <option value="9">9 hours</option>
+                    <option value="12">12 hours</option>
+                  </select>
+                </label>
+                <button class="primary-btn" id="bulkSchedule" title="Work out the best days and times from now and schedule every file in the batch.">🗓 Auto-schedule them all</button>
+              </div>
+              <p class="muted small" id="bulkPlanNote">The app starts from now, keeps to daytime and evening hours, and puts an extra slot on Sunday morning.</p>
+            </div>
+            <div id="postMediaPreview" class="post-media-preview hidden"></div>
+            <div id="postMediaName" class="muted small"></div>
+            <div class="dt-row">
+              <label>Date<input type="date" id="sDate" /></label>
+              <label>Time<input type="time" id="sTime" /></label>
+            </div>
+            <button class="primary-btn" id="addPost">➕ Schedule post</button>
+          </div>
+          <div class="sched-list panel">
+            <div class="panel-head"><h2>Scheduled</h2><button class="ghost-btn small" id="refreshPosts">↻</button></div>
+            <div id="postList" class="post-list"></div>
+          </div>
+        </div>
+        <!-- Connect-account wizard -->
+        <div id="acctModal" class="acct-modal hidden"><div class="acct-modal-box" id="acctModalBox"></div></div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="view" id="view-settings">
+        <header class="view-head">
+          <h1>⚙️ Settings</h1>
+          <p class="muted">Set your brand, output folder, and (optional) AI keys.</p>
+        </header>
+        <div class="panel">
+          <div class="panel-head"><h2>Brand</h2></div>
+          <label>Church name<input type="text" id="setChurchName" /></label>
+          <div class="color-row">
+            <label>Primary color<input type="color" id="setPrimary" /></label>
+            <label>Accent color<input type="color" id="setAccent" /></label>
+          </div>
+        </div>
+        <!-- WHAT EVERY CAPTION NEEDS TO KNOW. Set once here and the writer uses
+             them on every clip: the event gets named in the words and both the
+             event and the speaker get their own hashtag. -->
+        <div class="panel">
+          <div class="panel-head"><h2>✨ Social captions</h2></div>
+          <p class="muted small">These two turn a caption that could be from anywhere into one that is worth posting. Leave them blank and the writer simply does not mention them.</p>
+          <label>Event or series name<input type="text" id="setEventName" placeholder="e.g. All Ireland Outpouring" title="Named in every caption, and used as a hashtag. This is the single biggest difference between a generic caption and one that plants a flag." /></label>
+          <label>Speakers<textarea id="setSpeakers" rows="3" placeholder="Bishop Francis Wale Oke&#10;Pastor John Ahern&#10;Bishop David Richman" title="One per line. The writer works out which of them is in each clip from the words that are actually spoken, and credits that one."></textarea></label>
+          <label class="cap-inline"><input type="checkbox" id="setAllowBait" /> Let it ask for engagement <span class="muted small">(“Drop an AMEN in the comments”). Off by default: it makes a church account read like a content farm.</span></label>
+
+          <!-- ►► WHO WRITES THEM ◄◄
+               The rules always work and always sound like rules. A model on this
+               PC is small enough to forget half the house style. A hosted 70B
+               model reads the whole clip and writes copy that can be posted as
+               it is — and on Groq's free tier it is the same key 🎤 Listen uses,
+               so for most churches this is one tick box, not a new account. -->
+          <div class="cw-box">
+            <div class="cw-head">
+              <b>✨ Who writes them</b>
+              <span id="cwStatus" class="muted small">—</span>
+            </div>
+            <p class="muted small" id="cwBlurb">The free cloud writer reads the whole clip and writes three finished options in about two seconds. Without it, the built-in rules write them: always postable, never surprising.</p>
+            <label class="cap-inline">Writer
+              <select id="cwEngine" title="Who turns what the clip says into a title and a caption. The cloud writer is a 70-billion-parameter model on free hosting; ‘This PC’ is the small local model, if one is installed; ‘Built-in rules’ never touches the internet."></select>
+            </label>
+            <div id="cwSetup" class="hidden">
+              <label>Key <input type="password" id="cwKey" placeholder="gsk_…" autocomplete="off" spellcheck="false" /></label>
+              <label class="cap-inline">Model <select id="cwModel" title="The first one is tried first. If a service retires a model, the next is used automatically, so the button does not stop working one Tuesday."></select></label>
+              <label id="cwUrlRow" class="hidden">Address <input type="text" id="cwUrl" placeholder="https://…/v1/chat/completions" spellcheck="false" /></label>
+              <div class="cw-acts">
+                <button class="ghost-btn small" id="cwTest">Test it</button>
+                <a id="cwGetKey" href="#" class="muted small">Get a free key</a>
+                <span id="cwTestResult" class="muted small"></span>
+              </div>
+              <p class="muted small" id="cwShared"></p>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Output folder</h2></div>
+          <div class="path-row"><code id="setOutputDir">—</code><button class="ghost-btn small" id="changeOutput">Change…</button></div>
+        </div>
+        <div class="panel" id="cloudPanel">
+          <div class="panel-head"><h2>☁️ Cloud Studio — edit from anywhere in the world</h2></div>
+          <p class="muted small">Phone Studio is this PC on the church wifi. <b>Cloud Studio is this PC from anywhere</b>: open a web address on any phone, tablet or laptop and you get the <b>whole Video Studio</b> — the same buttons, the same AI clips, the same captions — while this PC does the encoding. Add it to your phone's home screen and it opens like an app. Nothing to install on the phone, and nothing to open on your router.</p>
+          <div class="path-row">
+            <label class="cap-inline"><input type="checkbox" id="cloudOn" /> <b>Cloud Studio is on</b></label>
+            <span id="cloudStatus" class="muted small">Off</span>
+          </div>
+          <div id="cloudDetails" class="hidden">
+            <div class="phone-connect">
+              <div class="phone-step"><span class="phone-num">1</span><div>Open this address on the phone:<div class="phone-url" id="cloudUrl">—</div><span class="muted small" id="cloudUrlAlt"></span></div></div>
+              <div class="phone-step"><span class="phone-num">2</span><div>Type this access code:<div class="phone-pin" id="cloudCode">————</div><span class="muted small">Words, not a PIN — this one faces the whole internet.</span></div></div>
+              <div class="phone-step"><span class="phone-num">3</span><div>In the phone's browser menu, choose <b>Add to Home Screen</b>.<span class="muted small"> It then opens full screen, like an app.</span></div></div>
+            </div>
+            <div class="path-row">
+              <label>Port <input type="number" id="cloudPort" min="1024" max="65535" step="1" value="7390" style="width:100px" /></label>
+              <label class="cap-inline"><input type="checkbox" id="cloudUpload" checked /> Let phones send videos to this PC</label>
+              <button class="ghost-btn small" id="cloudNewCode">🔄 New code</button>
+            </div>
+            <div class="cloud-tunnel">
+              <div class="path-row">
+                <label class="cap-inline"><input type="checkbox" id="cloudTunnelOn" /> <b>Give it a public address</b> <span class="muted small">(so it works away from the church wifi)</span></label>
+                <span id="cloudTunnelStatus" class="muted small"></span>
+              </div>
+              <p class="muted small">This PC dials out to Cloudflare and gets back an <b>https://…</b> address that works from anywhere. Your router is not opened and nothing here is exposed — the only way in is the address plus the code above. The first time, a free helper (~50 MB) downloads.</p>
+              <p class="muted small">The free address is random and <b>changes each time it starts</b>. For an address that stays the same — <i>studio.yourchurch.org</i> — make a free tunnel in your Cloudflare account and paste its token here.</p>
+              <label>Cloudflare tunnel token <span class="muted small">(optional, for a fixed address)</span><input type="password" id="cloudTunnelToken" placeholder="leave empty for a free random address" /></label>
+            </div>
+            <p class="muted small" id="cloudSignedIn"></p>
+            <p class="muted small">Go Live and Presentation are not in the cloud: they drive cameras, projectors and NDI on the church network, which a browser somewhere else cannot reach.</p>
+          </div>
+        </div>
+        <div class="panel" id="phonePanel">
+          <div class="panel-head"><h2>📱 Phone Studio — edit from your phone</h2></div>
+          <p class="muted small">Turn this on and any phone on the same wifi can open the Video Studio in its browser: pick a sermon, scrub it, run <b>Long to short clips</b>, fix the captions and export — while <b>this PC</b> does all the encoding at full speed. Finished shorts download straight to the phone. This PC has to stay on and awake.</p>
+          <div class="path-row">
+            <label class="cap-inline"><input type="checkbox" id="phoneOn" /> <b>Phone Studio is on</b></label>
+            <span id="phoneStatus" class="muted small">Off</span>
+          </div>
+          <div id="phoneDetails" class="hidden">
+            <div class="phone-connect">
+              <div class="phone-step"><span class="phone-num">1</span><div>On your phone's browser, go to:<div class="phone-url" id="phoneUrl">—</div><span class="muted small" id="phoneUrlsAlt"></span></div></div>
+              <div class="phone-step"><span class="phone-num">2</span><div>Type this pairing PIN:<div class="phone-pin" id="phonePin">——————</div></div></div>
+            </div>
+            <div class="path-row">
+              <label>Port <input type="number" id="phonePort" min="1024" max="65535" step="1" value="7380" style="width:100px" /></label>
+              <label class="cap-inline"><input type="checkbox" id="phoneUpload" checked /> Let phones send videos to this PC</label>
+              <button class="ghost-btn small" id="phoneNewPin">🔄 New PIN</button>
+            </div>
+            <p class="muted small" id="phonePaired"></p>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Social accounts</h2></div>
+          <p class="muted small">Auto-posting accounts are linked in <b>📅 Social Scheduler → ＋ Connect account</b>. The names below are only used on flyers and captions.</p>
+          <label>Instagram username<input type="text" id="setIg" placeholder="@ourchurch" /></label>
+          <label>TikTok username<input type="text" id="setTt" placeholder="@ourchurch" /></label>
+          <label>Facebook Page<input type="text" id="setFb" placeholder="Our Church" /></label>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>📘 Meta — Facebook &amp; Instagram (for “Connect account”)</h2></div>
+          <p class="muted small">One-time setup so the app can link your Facebook &amp; Instagram: at <b>developers.facebook.com/apps</b> create ONE free app (<i>Other → Business</i>), add the <b>Facebook Login</b> product and in its Settings turn ON <b>Client OAuth login</b> + <b>Embedded browser OAuth login</b> (leave redirect URIs empty, save + verify). Then paste the app's <b>App ID</b> + <b>App Secret</b> (App settings → Basic) here. Development mode is enough for Pages you admin. The full walkthrough is in <b>Social Scheduler → ＋ Connect account</b>.</p>
+          <label>Meta App ID<input type="text" id="setFbAppId" placeholder="e.g. 1089…" /></label>
+          <label>Meta App Secret <span class="muted small">(recommended)</span><input type="password" id="setFbAppSecret" placeholder="optional but keeps the link from expiring" /></label>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>▶️ YouTube — advanced (your own Google app)</h2></div>
+          <p class="muted small">⚡ <b>Easiest way:</b> skip all this and use the free <b>Zernio API key</b> from the TikTok section above — the same key connects YouTube too (just sign into YouTube once, no Google Cloud Console). Only fill this in if you want the app to upload straight to Google instead.</p>
+          <p class="muted small">Advanced setup so the app can upload directly to your channel: at <b>console.cloud.google.com</b> enable the <b>YouTube Data API v3</b>, then create an <b>OAuth client ID</b> (type: <i>Desktop app</i>) and paste it here.</p>
+          <label>Google Client ID<input type="text" id="setYtClientId" placeholder="e.g. 1234…apps.googleusercontent.com" /></label>
+          <label>Google Client Secret<input type="password" id="setYtClientSecret" placeholder="GOCSPX-…" /></label>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>🎵 TikTok — easy connect, free &amp; unlimited (recommended)</h2></div>
+          <p class="muted small">The 1-minute way: sign up free at <b>zernio.com</b> (no card), create an API key under <b>Settings → API keys</b>, paste it here, then hit “＋ Connect account”. Public posting works right away — no TikTok developer portal, no audit wait, and <b>no monthly post limit</b>. Heads-up: videos upload via Zernio's servers.</p>
+          <label>Zernio API key<input type="password" id="setZoApiKey" placeholder="paste it here" /></label>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>⚙️ Advanced: manual Facebook token</h2></div>
+          <p class="muted small">Prefer not to use “Connect account”? Paste a Page ID + Page access token (needs <code>pages_manage_posts</code>) and scheduled Facebook posts publish by themselves — photos, videos, and text.</p>
+          <label>Page ID<input type="text" id="setFbPageId" placeholder="e.g. 1234567890" /></label>
+          <label>Page access token<input type="password" id="setFbToken" placeholder="EAAB…" /></label>
+          <div class="path-row">
+            <button class="ghost-btn small" id="testFb">🔌 Test connection</button>
+            <span id="testFbResult" class="muted small"></span>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>AI keys (optional)</h2></div>
+          <p class="muted small">Not needed for anything in the app today — every AI feature (shorts, captions, face tracking) runs free on your own PC. These are here for future optional extras.</p>
+          <label>Claude API key<input type="password" id="setAnthropic" placeholder="sk-ant-…" /></label>
+          <label>Image generation key<input type="password" id="setImage" placeholder="optional" /></label>
+        </div>
+        <button class="primary-btn" id="saveSettings">💾 Save settings</button>
+      </section>
+    </main>
+  </div>
+
+  <!-- Video quality panel — docks on the RIGHT so the live preview stays visible while you adjust -->
+  <div id="fxModal" class="fx-side hidden">
+    <div class="cap-box">
+      <div class="cap-head"><h2>🎛️ Video quality</h2><button id="fxClose" class="icon-btn">✕</button></div>
+      <p class="fx-live-note">👁 Changes show <b>live on the preview</b> as you drag — nothing is saved until you export.</p>
+      <div class="fx-body">
+        <div class="fx-row"><label>Speed</label>
+          <div class="fx-speed-row">
+            <input type="number" id="fxSpeed" min="0.1" max="100" step="0.1" value="1" />
+            <span class="muted small">× (0.1–100)</span>
+            <div class="fx-speed-presets">
+              <button type="button" data-speed="0.25">0.25×</button>
+              <button type="button" data-speed="0.5">0.5×</button>
+              <button type="button" data-speed="1">1×</button>
+              <button type="button" data-speed="2">2×</button>
+              <button type="button" data-speed="4">4×</button>
+              <button type="button" data-speed="10">10×</button>
+            </div>
+          </div>
+        </div>
+        <div class="fx-row"><label>Volume</label><input type="range" id="fxVol" min="0" max="2" step="0.05" value="1"><span id="fxVolV" class="muted small">100%</span></div>
+        <div class="fx-row"><label>Look / filter</label><select id="fxLook"><option value="">None</option><option value="vivid">Vivid</option><option value="warm">Warm</option><option value="cool">Cool</option><option value="bw">Black &amp; White</option><option value="vintage">Vintage</option></select></div>
+        <div class="fx-row"><label>Brightness</label><input type="range" id="fxBri" min="-0.3" max="0.3" step="0.02" value="0"></div>
+        <div class="fx-row"><label>Contrast</label><input type="range" id="fxCon" min="0.5" max="1.8" step="0.05" value="1"></div>
+        <div class="fx-row"><label>Saturation</label><input type="range" id="fxSat" min="0" max="2.5" step="0.05" value="1"></div>
+        <div class="fx-row"><label>Sharpness</label><input type="range" id="fxSharp" min="0" max="2" step="0.1" value="0"><span id="fxSharpV" class="muted small">Off</span></div>
+        <div class="fx-row"><label>Fade in (s)</label><input type="number" id="fxFadeIn" min="0" max="10" step="0.5" value="0"></div>
+        <div class="fx-row"><label>Fade out (s)</label><input type="number" id="fxFadeOut" min="0" max="10" step="0.5" value="0"></div>
+        <div class="fx-row"><label>Rotate</label><select id="fxRot"><option value="0">0°</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select></div>
+        <div class="fx-row"><label>Flip</label><label class="cap-inline"><input type="checkbox" id="fxFlipH"> Horizontal</label><label class="cap-inline"><input type="checkbox" id="fxFlipV"> Vertical</label></div>
+        <div class="fx-row"><label>Background music</label><button id="fxMusic" class="ghost-btn small">Choose music…</button><span id="fxMusicName" class="muted small"></span></div>
+        <div class="fx-row"><label>Music volume</label><input type="range" id="fxMusicVol" min="0" max="1" step="0.05" value="0.3"></div>
+      </div>
+      <div class="cap-foot"><span class="muted small">Exports the whole loaded video with these settings.</span>
+        <div class="cap-foot-btns"><button id="fxCancel" class="ghost-btn">Cancel</button><button id="fxApply" class="primary-btn">✨ Apply &amp; export</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SVG sharpen filter used for the LIVE Video-quality preview (CSS has no
+       sharpen; the export uses ffmpeg's unsharp). kernelMatrix is updated live. -->
+  <svg id="fxSvgDefs" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
+    <filter id="fxSharpen" x="0" y="0" width="100%" height="100%">
+      <feConvolveMatrix id="fxSharpKernel" order="3" preserveAlpha="true" kernelMatrix="0 0 0 0 1 0 0 0 0" />
+    </filter>
+  </svg>
+
+  <!-- BIBLE TRANSLATIONS — download for offline use, import your own -->
+  <div id="bibModal" class="cap-modal hidden">
+    <div class="lib-box">
+      <div class="cap-head">
+        <h2>📖 Bible translations</h2>
+        <button id="bibClose" class="icon-btn">✕</button>
+      </div>
+      <div class="lib-actions">
+        <input type="text" id="bibFilter" placeholder="Search translations or languages…  (NIV, NLT, ESV…)" />
+        <button id="bibImport" class="ghost-btn small" title="Load a Bible module you already have as a file">📂 Import a file</button>
+        <button id="bibRefresh" class="ghost-btn small" title="Re-fetch the list of available translations">↻</button>
+      </div>
+      <p class="lib-note">⬇️ Download a translation once and it works <b>offline forever</b> — no wifi needed on a Sunday.
+        <b>NIV, NLT, ESV, NKJV, NASB, AMP and The Message</b> are all here, alongside 100+ others in 30 languages.</p>
+      <div id="bibList" class="lib-list pv-bib-list"></div>
+      <div class="cap-foot">
+        <span class="muted small" id="bibCount"></span>
+        <div class="cap-foot-btns"><button id="bibDone" class="primary-btn">Done</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MEDIA LIBRARY — background music (mine + YouTube) and saved clips (outros) -->
+  <div id="libModal" class="cap-modal hidden">
+    <div class="lib-box">
+      <div class="cap-head">
+        <h2 id="libTitle">🎵 Music &amp; clips</h2>
+        <button id="libClose" class="icon-btn">✕</button>
+      </div>
+      <div class="lib-tabs">
+        <button class="lib-tab active" data-libtab="music">🎵 My music</button>
+        <button class="lib-tab" data-libtab="youtube">▶️ YouTube</button>
+        <button class="lib-tab" data-libtab="clips">🎬 My clips</button>
+      </div>
+
+      <!-- ---- MY MUSIC ---- -->
+      <div class="lib-pane" data-libpane="music">
+        <div class="lib-actions">
+          <button id="libAddMusic" class="primary-btn small">➕ Add music from my PC</button>
+          <span class="muted small">MP3, WAV, M4A, AAC, OGG, FLAC — saved here for every project.</span>
+        </div>
+        <div id="libMusicList" class="lib-list"></div>
+      </div>
+
+      <!-- ---- YOUTUBE ---- -->
+      <div class="lib-pane hidden" data-libpane="youtube">
+        <div id="libYtSetup" class="lib-setup hidden">
+          <p><b>Use a YouTube video as your background music.</b></p>
+          <p class="muted small">This needs a small free helper (yt-dlp, about 17 MB). Click below and the app downloads and sets it up for you — once, then it just works.</p>
+          <button id="libYtInstall" class="primary-btn small">⬇️ Enable YouTube</button>
+        </div>
+        <div id="libYtMain" class="hidden">
+          <div class="lib-actions">
+            <input type="text" id="libYtQuery" placeholder="Search YouTube, or paste a video link…" />
+            <button id="libYtSearch" class="primary-btn small">🔍 Search</button>
+          </div>
+          <label class="lib-free-toggle" title="Steers the search to tracks whose title or channel declares them no-copyright / royalty-free (NCS-style channels), so your shorts don't get copyright strikes.">
+            <input type="checkbox" id="libYtNoCopyright" checked /> 🛡️ Copyright-free only <span class="muted small">(safe for YouTube, Facebook &amp; Instagram)</span>
+          </label>
+          <div class="lib-chips">
+            <span class="muted small">Quick picks:</span>
+            <button class="lib-chip" data-ytchip="worship instrumental">🙏 Worship</button>
+            <button class="lib-chip" data-ytchip="soft piano background">🎹 Soft piano</button>
+            <button class="lib-chip" data-ytchip="cinematic emotional background">🎬 Cinematic</button>
+            <button class="lib-chip" data-ytchip="uplifting gospel background">✨ Uplifting</button>
+          </div>
+          <p class="lib-note">⚖️ With 🛡️ on, results are steered to tracks that declare themselves copyright-free. Still glance at the video's description for the artist's credit rules before publishing.</p>
+          <div id="libYtList" class="lib-list"></div>
+        </div>
+      </div>
+
+      <!-- ---- MY CLIPS ---- -->
+      <div class="lib-pane hidden" data-libpane="clips">
+        <div class="lib-actions">
+          <button id="libAddClip" class="primary-btn small">➕ Add a clip from my PC</button>
+          <span class="muted small">Outros, intros, logo stings — pick one and it goes on the end of every short.</span>
+        </div>
+        <div id="libClipList" class="lib-grid"></div>
+      </div>
+
+      <!-- ---- chosen music: live controls ---- -->
+      <div id="libMusicBar" class="lib-chosen hidden">
+        <div class="lib-chosen-head">
+          <span class="lib-chosen-name">🎵 <b id="libChosenName">—</b></span>
+          <button id="libMusicRemove" class="ghost-btn small">🔇 Remove music</button>
+        </div>
+        <div class="lib-chosen-rows">
+          <label class="lib-slider">Volume <input type="range" id="libMusicVol" min="0" max="1" step="0.01" value="0.25" /><span id="libMusicVolV" class="muted small">25%</span></label>
+          <label class="lib-slider">Fade in <input type="number" id="libMusicFadeIn" min="0" max="10" step="0.5" value="1" /><span class="muted small">s</span></label>
+          <label class="lib-slider">Fade out <input type="number" id="libMusicFadeOut" min="0" max="10" step="0.5" value="1.5" /><span class="muted small">s</span></label>
+          <label class="cap-inline" title="Turns the music down by itself while someone is speaking, and back up in the gaps."><input type="checkbox" id="libMusicDuck" checked /> 🎚️ Duck under speech</label>
+          <label class="cap-inline" title="Every short starts the song from its beginning. Turn off to use whatever part of the song sits under that clip on the timeline."><input type="checkbox" id="libMusicBed" checked /> 🔁 Start the song at the top of every short</label>
+        </div>
+      </div>
+
+      <!-- ---- chosen outro ---- -->
+      <div id="libOutroBar" class="lib-chosen hidden">
+        <div class="lib-chosen-head">
+          <span class="lib-chosen-name">🎬 Outro: <b id="libOutroName">—</b></span>
+          <button id="libOutroRemove" class="ghost-btn small">✕ Remove outro</button>
+        </div>
+        <label class="cap-inline"><input type="checkbox" id="libOutroAll" checked /> Add this outro to the end of <b>every short</b> I export</label>
+      </div>
+
+      <div class="cap-foot">
+        <span class="muted small" id="libHint">Pick a track and it plays under every clip you export.</span>
+        <div class="cap-foot-btns"><button id="libDone" class="primary-btn">Done</button></div>
+      </div>
+    </div>
+  </div>
+  <!-- preview player for library music (also drives the live preview under the video) -->
+  <audio id="veMusicAudio" preload="auto"></audio>
+
+  <!-- THE PICTURE PEOPLE SEE BEFORE THEY PRESS PLAY. Left alone, every platform
+       picks its own thumbnail and usually lands on a blink. This is how the
+       operator chooses it instead. -->
+  <div id="thumbModal" class="cap-modal hidden">
+    <div class="cap-box thumb-box">
+      <div class="cap-head">
+        <h2>🖼️ Thumbnail for this short</h2>
+        <button id="thumbClose" class="icon-btn">✕</button>
+      </div>
+      <div class="thumb-body">
+        <p class="muted small">Scrub to the moment you want people to see. It is saved with the short as a picture, and carried inside the file as its cover.</p>
+        <div class="thumb-stage"><img id="thumbShot" alt="" /></div>
+        <input type="range" id="thumbAt" min="0" max="1000" step="1" value="200" />
+        <div class="thumb-when muted small" id="thumbWhen">—</div>
+        <div class="thumb-actions">
+          <button id="thumbUse" class="primary-btn small">Use this frame</button>
+          <button id="thumbFile" class="ghost-btn small" title="Use a picture you made yourself — a designed cover, a title card. It is fitted to the short's shape.">🖼 Use a picture instead…</button>
+          <button id="thumbClear" class="ghost-btn small" title="Go back to letting the platform pick">↺ No thumbnail</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SAVED SESSIONS: pick up where you left off. -->
+  <div id="sessModal" class="cap-modal hidden">
+    <div class="cap-box sess-box">
+      <div class="cap-head">
+        <h2>🗂️ Your editing sessions</h2>
+        <button id="sessClose" class="icon-btn">✕</button>
+      </div>
+      <div class="sess-body">
+        <p class="muted small" id="sessCurrent"></p>
+        <div id="sessList" class="sess-list"></div>
+        <div class="sess-actions">
+          <button id="sessSaveNew" class="primary-btn small" title="Save what is on screen now as a NEW session, leaving the one you opened untouched">💾 Save this as a new session</button>
+          <span class="muted small">Sessions remember your work, not your video — the recording stays where it is on disk.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- WHO TO FOLLOW picker: a frame from the clip with everybody in it cut out
+       and offered as a card. Clicking one locks the tracker to that person. -->
+  <div id="followModal" class="cap-modal hidden">
+    <div class="cap-box follow-box">
+      <div class="cap-head">
+        <h2>👤 Who should the shorts follow?</h2>
+        <button id="followClose" class="icon-btn">✕</button>
+      </div>
+      <div class="follow-body">
+        <p class="muted small" id="followHint">Click the person to keep in the middle of the frame.</p>
+        <div class="follow-stage"><img id="followShot" alt="" /><div id="followBoxes" class="follow-boxes"></div></div>
+        <div id="followCards" class="follow-cards"></div>
+        <div class="follow-actions">
+          <button id="followAnother" class="ghost-btn small" title="Nobody useful in this moment? Look at a different one.">🔀 A different moment</button>
+          <button id="followClear" class="ghost-btn small" title="Go back to letting the AI decide who is speaking">↺ Let the AI decide</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Auto-captions editor modal -->
+  <div id="capModal" class="cap-modal hidden">
+    <div class="cap-box">
+      <div class="cap-head">
+        <h2 id="capTitle">💬 Auto-captions</h2>
+        <button id="capClose" class="icon-btn">✕</button>
+      </div>
+      <!-- What the captions are set to, in one row; the settings themselves fold
+           away under it so the words get the height. Open by default while there
+           are no captions yet — the look is chosen BEFORE listening. -->
+      <div class="cap-sum-row" id="capSumRow">
+        <span class="cap-sum-chips" id="capSumChips"></span>
+        <button type="button" id="capSumToggle" class="ghost-btn cap-sum-toggle" aria-expanded="true">🎨 Style &amp; settings ▴</button>
+      </div>
+      <div class="cap-controls">
+        <label>Font <select id="capFont"></select></label>
+        <label>Size <select id="capSize"><option value="s">S</option><option value="m" selected>M</option><option value="l">L</option><option value="xl">XL</option></select></label>
+        <label>Words/line <select id="capWords"><option value="1">1</option><option value="2">2</option><option value="3" selected>3</option><option value="4">4</option><option value="auto">Auto</option></select></label>
+        <label>Case <select id="capCase"><option value="none">Normal</option><option value="upper" selected>ALL CAPS</option><option value="title">Title</option><option value="lower">lower</option></select></label>
+        <label>Position <select id="capPos"><option value="bottom" selected>Bottom</option><option value="center">Center</option><option value="top">Top</option></select></label>
+        <label title="How wide the words may run before they wrap. Narrower means more lines. You can also just drag the caption's left or right edge on the preview.">Width
+          <input type="range" id="capWidth" min="18" max="100" step="1" value="86" />
+          <span id="capWidthV" class="muted small">86%</span>
+        </label>
+        <label>Colour <input type="color" id="capColor" value="#ffffff"></label>
+        <!-- STYLE AND ACCURACY ARE DROPDOWNS, not panels.
+             They were a visual grid and a list of model cards below the words,
+             and on anything but a tall window they had nowhere to go: they were
+             squeezed until their own headings overlapped each other and the
+             buttons. A control that cannot be seen is not a control, so both
+             became one-line pickers that sit here with the rest of the caption
+             settings and can never take space from the words. The chosen look
+             is shown as a live sample beside its picker, which is what the grid
+             was really for. -->
+        <label title="How each line arrives on screen.">Transition <select id="capTrans"></select></label>
+        <label>Style <select id="capStyleSel"></select></label>
+        <button type="button" id="capStyleSample" class="cap-style-sample-chip" title="This is how your captions will look — click to see all the looks">Aa</button>
+        <label title="A bigger listening model hears more of the words right, and takes longer to run. Downloaded once, then it works offline forever.">Hearing
+          <select id="capModelSel"></select>
+        </label>
+        <span class="muted small" id="capCount"></span>
+        <!-- TYPOGRAPHY, FOLDED AWAY UNTIL IT IS WANTED. The four size steps are
+             1.3x apart and the letters are whatever the typeface makes them —
+             fine, until a look is being matched to something, and then the
+             answer is between two steps and a per cent narrower.
+             It lives INSIDE this block on purpose: the block is capped and
+             scrolls, so opening this cannot grow the window and push the Save
+             button off the bottom of a laptop screen. -->
+        <button type="button" id="capFine" class="ghost-btn cap-fine-btn" title="Caption size and letter spacing to the decimal, for matching another look exactly.">⚙</button>
+        <span id="capFineWrap" class="cap-fine hidden">
+          <label title="Exact caption height, as a percentage of the picture's height. Leave blank to use the S/M/L/XL step.">Exact size
+            <input type="number" id="capSizePct" min="1" max="30" step="0.1" placeholder="—" style="width:4.5em" />%
+          </label>
+          <label title="Space between the letters, as a percentage of the caption's height. Negative tightens the line; 0 leaves the typeface alone.">Letter spacing
+            <input type="number" id="capTracking" min="-15" max="30" step="0.5" value="0" style="width:4.5em" />%
+          </label>
+        </span>
+      </div>
+      <!-- The looks, wearing themselves. A row of live samples the operator can
+           read at a glance beats a dropdown of names plus a click to find out
+           what they mean; the full gallery is still one click away. -->
+      <!-- The look, and the two things that MODIFY the look, on one row.
+           "Follow the voice" and the typography live here rather than up in the
+           settings because that row has to fit on a 1280x720 laptop with the
+           Save button still on screen, and every control added to it pushed
+           something off the bottom. -->
+      <div class="cap-strip-row">
+        <span class="cap-strip-label">Look</span>
+        <div id="capStyleStrip" class="cap-style-strip"></div>
+        <label class="cap-strip-opt" title="Colour the word as it is spoken, so the line lights up in time with the voice.">
+          <input type="checkbox" id="capWordHl"> Follow the voice
+        </label>
+        <label id="capWordColorRow" class="cap-strip-opt hidden" title="The colour the word being spoken turns.">
+          <input type="color" id="capWordColor" value="#ffff00">
+        </label>
+        <button type="button" id="capStyleMore" class="ghost-btn cap-strip-more" title="See every look, larger">All looks…</button>
+      </div>
+      <!-- THE WORD BOOK. The row sits directly above the words because that is
+           where the wrong ones are: fix one, and the same fix goes through every
+           other line here and into every video after this one. -->
+      <div class="cap-fix-row">
+        <button type="button" id="capWordBook" class="ghost-btn cap-wb-btn"
+          title="The words your captions keep getting wrong, and what they should say. Anything you correct in the list below is added here automatically.">📕 Word Book</button>
+        <button type="button" id="capFixNow" class="ghost-btn cap-wb-btn"
+          title="Run the Word Book over the lines below right now — for captions that were made before you taught it a word.">🪄 Fix these words now</button>
+        <!-- ✍ THE PROOF-READER. Mistakes are underlined in the lines below as
+             you go (like a spell-checker); this is the one button that fixes
+             every one of them, and the one that asks the AI to read the lot. -->
+        <span class="cap-fix-sep" aria-hidden="true"></span>
+        <button type="button" id="capGrammarFix" class="ghost-btn cap-wb-btn cap-g-all"
+          title="Fix every underlined mistake in the lines below in one go — missing apostrophes, wrong sound-alike words, a/an, repeated words, names. Ctrl+Z puts them all back.">✍ No mistakes</button>
+        <button type="button" id="capGrammarAi" class="ghost-btn cap-wb-btn cap-g-ai"
+          title="Ask the AI to proof-read these lines — it catches words the speech recognition misheard (“begotten sun” → “begotten Son”). It only suggests: you choose what to keep.">✨ AI check</button>
+        <label class="cap-g-autolab" title="Have the AI proof-read new captions as soon as they are made — its suggestions wait under each line for you to accept. Uses the same free Groq key as the captions."><input type="checkbox" id="capGrammarAuto" checked /> auto</label>
+        <select id="capGrammarMode" class="cap-g-mode" title="How much the AI may change">
+          <option value="exact" title="Fix mishearings, spelling and names — keep the speaker's own words">Exact words</option>
+          <option value="tidy" title="Also tidy clear grammar slips, keeping the speaker's voice">Tidy grammar</option>
+        </select>
+      </div>
+      <!-- ▶ LISTEN WHILE YOU FIX. The words are only half of proof-reading
+           captions; the other half is hearing what was said. Every line also has
+           its own ▶, and the line being spoken lights up as it plays. -->
+      <div id="capPlayer" class="cap-player">
+        <button type="button" id="capPlayBack" class="cap-pl-btn" title="Back 3 seconds">↺ 3s</button>
+        <button type="button" id="capPlay" class="cap-pl-play" title="Play / pause — Ctrl+Space works even while you are typing">▶</button>
+        <button type="button" id="capPlayLine" class="cap-pl-btn" title="Hear the line you are on again — Ctrl+Shift+Space">⟲ Line</button>
+        <span id="capPlayTime" class="cap-pl-time">0:00 / 0:00</span>
+        <input type="range" id="capPlayScrub" class="cap-pl-scrub" min="0" max="1000" step="1" value="0" title="Drag to move through the clip" />
+        <select id="capPlayRate" class="cap-pl-rate" title="Playback speed — slower makes a fast speaker easier to check">
+          <option value="0.5">0.5×</option>
+          <option value="0.75">0.75×</option>
+          <option value="1" selected>1×</option>
+          <option value="1.25">1.25×</option>
+          <option value="1.5">1.5×</option>
+        </select>
+        <label class="cap-pl-opt" title="Play the same line over and over until you move to another one"><input type="checkbox" id="capPlayLoop" /> 🔁 Loop line</label>
+        <label class="cap-pl-opt" title="Stop the sound while you type, so you do not miss what comes next. Ctrl+Space carries on from just before where it stopped."><input type="checkbox" id="capPlayTypePause" checked /> ⌨ Pause while typing</label>
+      </div>
+      <div id="capList" class="cap-list"></div>
+      <div id="capWordBookPanel" class="cap-wb-panel hidden">
+        <div class="cap-wb-head">
+          <span>📕 Word Book</span>
+          <span class="muted small">Correct a word once and the captions stop getting it wrong — in this video and in every video after it.</span>
+          <button type="button" id="capWbClose" class="icon-btn">✕</button>
+        </div>
+        <div class="cap-wb-opts">
+          <!-- The words after the box live in ONE span: a label is a flex row, and
+               loose text between elements would each become a column of its own. -->
+          <label class="cap-wb-check"><input type="checkbox" id="capWbOn" checked /><span>Fix these words automatically</span></label>
+          <label class="cap-wb-check"><input type="checkbox" id="capWbSound" checked /><span>Also fix words that <b>sound</b> the same
+            <span class="muted small">— EZEKIAL, EZEKEEL and EZIKIEL all become Ezekiel</span></span></label>
+        </div>
+        <div class="cap-wb-add">
+          <input id="capWbFrom" class="cap-wb-in" placeholder="what the captions say" />
+          <span class="cap-wb-arrow">→</span>
+          <input id="capWbTo" class="cap-wb-in" placeholder="what it should say" />
+          <button type="button" id="capWbAdd" class="primary-btn cap-wb-go">Add</button>
+        </div>
+        <div class="cap-wb-add">
+          <input id="capWbTerm" class="cap-wb-in wide" placeholder="a name it never spells right — a pastor, your church, a town" />
+          <button type="button" id="capWbAddTerm" class="ghost-btn cap-wb-go">＋ Add name</button>
+        </div>
+        <div id="capWbList" class="cap-wb-list"></div>
+        <div class="cap-wb-foot">
+          <span id="capWbCount" class="muted small"></span>
+          <button type="button" id="capWbTidy" class="ghost-btn"
+            title="Remove the rules that depend on the sentence they were in — one everyday word swapped for another, and any pair that undoes itself. Names, phrases and anything you typed in are kept.">🧹 Tidy up</button>
+          <button type="button" id="capWbApply" class="ghost-btn">🪄 Fix the captions I have open</button>
+        </div>
+      </div>
+      <!-- Choosing a look BY SIGHT, without letting the gallery near the layout.
+           The cards live in an overlay that floats over the whole window, so
+           they get all the room they want and can never squeeze the words or
+           the buttons — which is what happened when the same grid was a section
+           in the flow. The dropdown above stays for changing looks quickly. -->
+      <div id="capStylePicker" class="cap-style-picker hidden">
+        <div class="cap-style-picker-head">
+          <span>🎨 Pick a look</span>
+          <span class="muted small">The preview on your video updates straight away.</span>
+          <button type="button" id="capStylePickerClose" class="icon-btn">✕</button>
+        </div>
+        <div id="capStyleGrid" class="cap-style-grid"></div>
+      </div>
+      <div class="cap-foot">
+        <!-- What just happened (the Word Book's fixes, which ear heard the words,
+             what the AI suggests) lives down here in place of the hint: in the
+             toolbar row it wrapped that row onto a second line, and on a 1280x720
+             laptop that was the line that pushed the Save button off the bottom. -->
+        <span class="cap-foot-msg"><span class="muted small cap-foot-hint">✏️ Fix any wrong words above, then burn them onto the video.</span><span id="capFixNote" class="cap-fix-note muted small"></span></span>
+        <div class="cap-foot-btns">
+          <button id="capCancel" class="ghost-btn">Cancel</button>
+          <button id="capPreview" class="ghost-btn">👁 Preview on video</button>
+          <button id="capBurn" class="primary-btn" title="Saves a new video file with these captions permanently included in the picture, like subtitles baked in.">💾 Save video with captions</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CUT-OUT EDITOR — how much background goes, plus erase/restore brushes -->
+  <div id="cutModal" class="cut-modal hidden">
+    <div class="cut-box">
+      <div class="cut-head">
+        <h2>🪄 Cut out the background</h2>
+        <button id="cutClose" class="icon-btn">✕</button>
+      </div>
+      <div class="cut-body">
+        <div class="cut-stage"><canvas id="cutCanvas"></canvas>
+          <div id="cutBusy" class="cut-busy hidden">Working…</div>
+        </div>
+        <div class="cut-side">
+          <div class="cut-group">
+            <label class="cut-row">How much goes
+              <span id="cutStrengthVal" class="cut-val">50%</span>
+            </label>
+            <input type="range" id="cutStrength" min="5" max="95" step="5" value="50"
+              title="Slide left to keep more of the picture, right to take more of the background. Anything you have painted by hand is kept." />
+            <select id="cutMode" title="How it decides what is background.">
+              <option value="auto">Automatic</option>
+              <option value="ai">Cut around a person</option>
+              <option value="colour">Match the backdrop colour</option>
+            </select>
+            <p id="cutMethod" class="muted small"></p>
+          </div>
+          <div class="cut-group">
+            <span class="cut-label">Fix it by hand</span>
+            <div class="cut-tools">
+              <button id="cutErase" class="cut-tool on" title="Rub out anything the automatic pass left behind.">🧽 Erase</button>
+              <button id="cutKeep" class="cut-tool" title="Paint back anything it took by mistake — an arm, a hand, a bit of hair.">🖌 Bring back</button>
+            </div>
+            <label class="cut-row">Brush <span id="cutBrushVal" class="cut-val">60px</span></label>
+            <input type="range" id="cutBrush" min="8" max="220" step="2" value="60" />
+            <label class="cut-check"><input type="checkbox" id="cutSoft" checked /> Soft edge</label>
+            <div class="cut-tools">
+              <button id="cutUndo" class="ghost-btn small" disabled>↶ Undo</button>
+              <button id="cutReset" class="ghost-btn small" title="Throw away every brush stroke and go back to the automatic result.">↺ Start over</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="cut-foot">
+        <span class="muted small">The checkerboard is what will be see-through on your video.</span>
+        <div class="cut-foot-btns">
+          <button id="cutRestore" class="ghost-btn hidden" title="Throw the cut-out away and go back to the picture with its background.">↩ Put the background back</button>
+          <button id="cutCancel" class="ghost-btn">Cancel</button>
+          <button id="cutApply" class="primary-btn">✅ Use this</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast + progress overlay -->
+  <div id="toast" class="toast hidden"></div>
+  <!-- Exports that were sent to the background. One chip each: what it is, what
+       it is doing right now, how far through, and a way to stop it. -->
+  <div id="bgDock" class="bg-dock hidden"></div>
+  <div id="overlay" class="overlay hidden">
+    <div class="overlay-box">
+      <div class="spinner"></div>
+      <div id="overlayBatch" class="overlay-batch hidden"></div>
+      <div id="overlayMsg">Working…</div>
+      <div class="progress"><div id="progressBar" class="progress-bar"></div></div>
+      <div id="overlayPct" class="overlay-pct">0%</div>
+      <div class="overlay-acts">
+        <!-- Only ever shown for work that can genuinely be walked away from —
+             an export chain. Everything else stays modal. -->
+        <button id="overlayBackground" class="overlay-bg hidden" title="Carry on with the rest of the app while this finishes. It keeps the timeline exactly as it is right now, so nothing you edit from here can change the file it is writing.">⇥ Run in the background</button>
+        <button id="overlayCancel" class="overlay-cancel hidden" title="Stop this job">✕ Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="facetrack.js"></script>
+  <script src="slide-render.js"></script>
+  <script src="layers.js"></script>
+  <script src="chordpro.js"></script>
+  <script src="backgrounds.js"></script>
+  <script src="bgvideos.js"></script>
+  <script src="readalong.js"></script>
+  <script src="ndi-listen.js"></script>
+  <script src="voiceear.js"></script>
+  <script src="present.js"></script>
+  <script src="caplayout.js"></script>
+  <script src="wordbook.js"></script>
+  <script src="capgrammar.js"></script>
+  <script src="icons.js"></script>
+  <script src="veditor.js"></script>
+  <script src="flyertpl.js"></script>
+  <script src="flyerai.js"></script>
+  <script src="cutout.js"></script>
+  <script src="editor.js"></script>
+  <script src="vendor/mp4-muxer.js"></script>
+  <script src="h264-filler.js"></script>
+  <script src="capture-engine.js"></script>
+  <script src="ndi-video.js"></script>
+  <script src="audio-resampler.js"></script>
+  <script src="vset.js"></script>
+  <script src="live.js"></script>
+  <script src="tasks.js"></script>
+  <script src="rasterize.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

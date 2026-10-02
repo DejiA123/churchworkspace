@@ -1,0 +1,21 @@
+# Cloudflare Worker config for the TikTok token proxy (Path A).
+#
+# Deploy:
+#   npm install -g wrangler          # one time
+#   wrangler login                   # opens your browser
+#   wrangler secret put TIKTOK_CLIENT_KEY      # paste your TikTok app Client key
+#   wrangler secret put TIKTOK_CLIENT_SECRET   # paste your TikTok app Client secret
+#   wrangler deploy
+#
+# Optional abuse guard — set the same value here and in the app's
+# tkProxyToken setting so only your app may call the Worker:
+#   wrangler secret put APP_TOKEN
+
+name = "tiktok-token-proxy"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+# Free tier covers 100,000 requests/day — a church uses a handful. No paid plan
+# needed. Uncomment to pin to a route on your own domain instead of the
+# *.workers.dev subdomain:
+# routes = [{ pattern = "tiktok.example.org/token", zone_name = "example.org" }]

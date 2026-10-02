@@ -1,0 +1,29 @@
+{
+  "name": "Church Work Space — Video Studio",
+  "short_name": "Video Studio",
+  "description": "The church's Video Studio: cut a service into shorts, caption it, reframe the speaker and export — from any phone, anywhere.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#0b0d12",
+  "theme_color": "#0d1117",
+  "categories": ["productivity", "video", "photo"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Open a recording",
+      "short_name": "Open",
+      "description": "Pick a service recording on the studio machine, or send one from this phone",
+      "url": "/?open=1",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "prefer_related_applications": false
+}

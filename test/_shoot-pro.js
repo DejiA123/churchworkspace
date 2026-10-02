@@ -1,0 +1,76 @@
+// Throwaway: boot the studio on a real clip and photograph the Pro layout.
+const { app, BrowserWindow, ipcMain } = require('electron');
+const path = require('path');
+const os = require('os');
+const fs = require('fs');
+const { execFileSync } = require('child_process');
+const ROOT = path.join(__dirname, '..');
+const video = require(path.join(ROOT, 'src/main/video'));
+const captioner = require(path.join(ROOT, 'src/main/captioner'));
+const OUT = process.argv[2] || path.join(os.tmpdir(), 'mw-pro-shots');
+const WORK = path.join(os.tmpdir(), 'mw-pro-work');
+fs.rmSync(WORK, { recursive: true, force: true }); fs.mkdirSync(WORK, { recursive: true }); fs.mkdirSync(OUT, { recursive: true });
+app.setPath('userData', path.join(WORK, 'profile'));
+const CLIP = process.env.MW_CLIP || path.join(WORK, 'sermon40.mp4');
+if (!process.env.MW_CLIP) {
+  execFileSync(require('ffmpeg-static'), ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=1280x720:r=30:d=40',
+    '-f', 'lavfi', '-i', 'sine=frequency=220:sample_rate=48000:duration=40', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', '-y', CLIP]);
+}
+const ok = (data) => ({ ok: true, data });
+const wrap = (fn) => async (e, a) => { try { return ok(await fn(e, a)); } catch (err) { return { ok: false, error: err.message }; } };
+const ctx = () => ({ ffmpeg: require('ffmpeg-static'), ffprobe: require('ffprobe-static').path });
+ipcMain.handle('settings:get', () => ok({ brand: {}, accounts: {}, apiKeys: {}, live: {} }));
+ipcMain.handle('settings:update', (e, p) => ok(p));
+ipcMain.handle('paths:get', () => ok({ outputDir: WORK, userData: WORK, ffmpeg: '', ffprobe: '', fontsDir: captioner.fontsDir() }));
+ipcMain.handle('video:presets', () => ok(video.PRESETS));
+for (const ch of ['scheduler:list', 'accounts:list', 'fonts:data', 'photos:list', 'bible:installed', 'bible:catalogue', 'present:outputs', 'live:screenSources', 'bgvideo:installed']) ipcMain.handle(ch, () => ok([]));
+ipcMain.handle('captions:fonts', () => ok(['Arial', 'Anton']));
+ipcMain.handle('captions:available', () => ok(true));
+ipcMain.handle('captions:engineInfo', () => ok({ available: true }));
+ipcMain.handle('captions:models', () => ok([{ id: 'small.en', name: 'Small — much more accurate', sizeMB: 466, installed: true, inUse: true }]));
+ipcMain.handle('captions:cloud', () => ok({ ready: true, provider: 'groq', providerName: 'Groq', model: 'whisper-large-v3-turbo', free: true }));
+ipcMain.handle('library:list', () => ok({ music: [], clips: [] }));
+ipcMain.handle('youtube:status', () => ok({ available: false }));
+ipcMain.handle('live:destinations', () => ok({ destinations: {}, qualities: {}, qualityGroups: [] }));
+ipcMain.handle('present:library', () => ok({ presentations: [], playlists: [], themes: [] }));
+ipcMain.handle('video:info', wrap((e, { input }) => video.getInfo(ctx(), input)));
+ipcMain.handle('video:thumbnail', wrap(async (e, { input, timeSec }) => { const o = path.join(WORK, 't-' + Date.now() + '.png'); await video.thumbnail(ctx(), { input, timeSec, output: o }); return o; }));
+ipcMain.handle('video:filmstrip', wrap(async (e, { input, count }) => { const o = path.join(WORK, 's-' + Date.now() + '.png'); await video.filmstrip(ctx(), { input, count: count || 16, output: o }); return o; }));
+ipcMain.handle('video:waveform', wrap(async (e, { input }) => { const o = path.join(WORK, 'w-' + Date.now() + '.png'); await video.waveform(ctx(), { input, output: o }); return o; }));
+ipcMain.handle('fs:readImageDataUrl', wrap((e, { path: p }) => 'data:image/png;base64,' + fs.readFileSync(p).toString('base64')));
+app.disableHardwareAcceleration();
+app.on('window-all-closed', () => {});
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+app.whenReady().then(async () => {
+  const win = new BrowserWindow({ width: 1600, height: 950, show: true, webPreferences: { preload: path.join(ROOT, 'src/main/preload.js'), contextIsolation: true, sandbox: false, backgroundThrottling: false } });
+  win.webContents.on('console-message', (_e, lvl, msg) => { if (lvl >= 3) console.log('  [renderer] ' + msg); });
+  await win.loadFile(path.join(ROOT, 'src/renderer/index.html'));
+  await sleep(1400);
+  const js = (code) => win.webContents.executeJavaScript(`(async () => { try { return await (async () => { ${code} })(); } catch (e) { return { __error: String(e && e.stack || e) }; } })()`);
+  const T = 'window.VideoEditor.__test';
+  await js(`document.querySelector('[data-view="video"]').click(); await new Promise(r => setTimeout(r, 400)); return 1;`);
+  const shot = async (name) => { await sleep(700); const img = await win.webContents.capturePage(); fs.writeFileSync(path.join(OUT, name + '.png'), img.toPNG()); };
+  await shot('0-empty');
+  await js(`await ${T}.loadReal(${JSON.stringify(CLIP)}); return 1;`);
+  for (let i = 0; i < 40; i++) { await sleep(300); if (await js(`const p = document.getElementById('vePlayer'); return !!(p && p.readyState >= 2);`)) break; }
+  await js(`${T}.applyClips([{ start: 5, end: 25, label: 'Grace is free' }, { start: 27, end: 38, label: 'His mercy is new' }]);
+    ${T}.seedCaps([{ start: 6, end: 8, text: 'GRACE IS FREE' }, { start: 9, end: 11, text: 'BUT IT IS NOT CHEEP' }, { start: 12, end: 14, text: 'IT COST HIM EVERYTHING' }, { start: 15, end: 17, text: 'THEIR IS NO OTHER NAME' }]);
+    document.getElementById('vePlayer').currentTime = 9.5; return 1;`);
+  await sleep(800);
+  const dims = await js(`const q = (s) => { const e = document.querySelector(s); if (!e) return null; const r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; };
+    return { view: q('#view-video'), top: q('.ve-topbar'), bin: q('.ve-bin'), mon: q('#veMonitors'), src: q('#veSource'), prog: q('.ve-left'), drop: q('#veDrop'), tr: q('.ve-transport'), insp: q('.ve-side'), split: q('#veTlSplit'), tlbar: q('.ve-tl-bar'), tl: q('#veTimeline'), rect: q('#veSourceRect'), canvas: q('#veSourceCanvas'), frame: q('#veCropFrame'), solo: document.getElementById('veMonitors').className };`);
+  console.log('DIMS 1600x950', JSON.stringify(dims));
+  await shot('1-pro-1600');
+  win.setContentSize(1100, 640); await sleep(900);
+  console.log('DIMS 1280x760', JSON.stringify(await js(`const q = (s) => { const e = document.querySelector(s); if (!e) return null; const r = e.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; }; return { bin: q('.ve-bin'), src: q('#veSource'), prog: q('.ve-left'), insp: q('.ve-side'), tl: q('#veTimeline'), mon: document.getElementById('veMonitors').className };`)));
+  await shot('2-pro-1280');
+  win.setSize(1920, 1040); await sleep(600);
+  await shot('3-pro-1920');
+  await js(`${T}.clickClipCaption(${T}.segments()[0].id); return 1;`);
+  await sleep(800);
+  console.log('BESIDE', JSON.stringify(await js(`return ${T}.capBeside ? ${T}.capBeside() : null;`)));
+  await shot('4-captions-beside');
+  await js(`${T}.closeCapModal(); document.querySelector('.ve-insp-tabs [data-insp="reframe"]').click(); return 1;`);
+  await shot('5-inspector-reframe');
+  win.destroy(); app.exit(0);
+});

@@ -1,0 +1,592 @@
+'use strict';
+/*
+ * ✍ THE CAPTION GRAMMAR CHECKER — "a Grammarly kind of thing in the captions
+ *   window, to correct grammatical errors per line or overall".
+ *
+ * WHAT A CAPTION'S "GRAMMAR" ACTUALLY IS
+ *
+ * A burned-in caption is not prose. Full stops, commas, question marks and
+ * quotes are stripped before anything is drawn (cleanCapText / captioner.
+ * cleanCaptionText: "punctuation earns nothing on a caption"), lines are three
+ * or four words long, and the words are what the preacher SAID. So the checks
+ * that matter here are word-level, and every one of them is a mistake a viewer
+ * would actually see:
+ *
+ *   • missing apostrophes          DONT → DON'T, IM → I'M, THATS → THAT'S
+ *   • the wrong sound-alike word   YOUR GOING → YOU'RE GOING, MORE THEN → MORE THAN,
+ *                                  ITS A → IT'S A, COULD OF → COULD HAVE
+ *   • a / an                       A AMAZING → AN AMAZING, AN BLESSING → A BLESSING
+ *   • a stuttered word             THE THE → THE, I I → I
+ *   • what speech recognition does to a sermon
+ *                                  HOLY GOAT → HOLY GHOST, LET US PREY → LET US PRAY,
+ *                                  BEGOTTEN SUN → BEGOTTEN SON, ALTER CALL → ALTAR CALL
+ *   • names that must be capitals  god → God, jesus → Jesus, ephesians → Ephesians,
+ *                                  i → I   (only when the captions are in Normal case —
+ *                                  in ALL CAPS there is nothing to fix, and in lower
+ *                                  case the small letters are the look, not a mistake)
+ *
+ * WHAT IT DELIBERATELY DOES NOT DO
+ *
+ * It never adds punctuation (it would be stripped at the burn anyway), never
+ * re-phrases, and never "corrects" an everyday word where the sentence could
+ * legitimately be either: "their" and "there" are only touched inside a pattern
+ * that cannot be right ("THEIR IS", "THERE GOING"). A suggestion that might be
+ * wrong is worse than no suggestion, because a proof-reader who learns to
+ * click Fix without reading is a proof-reader who publishes the mistake.
+ *
+ * CONTEXT CROSSES LINES. At one word a line — what a short's captions often
+ * are — "HOLY" and "GOAT" are two separate lines, so every rule is run over
+ * the line WITH the tail of the line before it and the head of the line after
+ * it, and only the edits that land on this line are reported for it.
+ *
+ * THE AI HALF lives in the main process (it needs the network), but its guard
+ * lives here: vetAiLine() refuses any suggestion that rewrote the line rather
+ * than corrected it, and puts the answer back into the caption's own case. The
+ * same file runs in the studio (window.CapGrammar) and in the main process
+ * (require), so the rule the operator sees and the rule the AI is held to
+ * cannot drift apart.
+ *
+ * Nothing here touches the DOM, the disk or the network.
+ */
+(function (factory) {
+  const WB = (typeof window !== 'undefined' && window.WordBook)
+    || (typeof require === 'function' ? require('./wordbook.js') : null);
+  const api = factory(WB);
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  if (typeof window !== 'undefined') window.CapGrammar = api;
+}(function (WB) {
+  /* ------------------------------------------------------------------ *
+   * Words and case
+   * ------------------------------------------------------------------ */
+  const keyOf = (s) => String(s == null ? '' : s).replace(/[’ʼ´`]/g, "'").toLowerCase();
+  const letters = (s) => String(s || '').replace(/[^A-Za-z]/g, '');
+  const isShout = (s) => { const l = letters(s); return l.length >= 2 && l === l.toUpperCase(); };
+
+  function splitAffix(t) {
+    if (WB && WB.splitAffix) return WB.splitAffix(t);
+    const s = String(t == null ? '' : t);
+    const m = /^([^\p{L}\p{N}]*)([\s\S]*?)([^\p{L}\p{N}]*)$/u.exec(s) || [s, '', s, ''];
+    return { pre: m[1] || '', core: m[2] || '', post: m[3] || '' };
+  }
+
+  /** The tokens of a line, with where each one sits in the original text. */
+  function tokenize(text) {
+    const s = String(text == null ? '' : text);
+    const out = [];
+    const re = /\S+/g;
+    let m;
+    while ((m = re.exec(s))) {
+      const a = splitAffix(m[0]);
+      out.push({ raw: m[0], start: m.index, end: m.index + m[0].length, pre: a.pre, core: a.core, post: a.post, key: keyOf(a.core) });
+    }
+    return out;
+  }
+
+  /**
+   * Which case the line is written in. ALL CAPS is the app's default caption
+   * case and is read off the line itself (an imported or retyped line may not
+   * match the dropdown); lower and Title are the dropdown's say-so, because a
+   * lower-case line in Normal mode is just a sentence that needs its capitals.
+   */
+  function lineStyle(text, caseMode) {
+    if (isShout(text)) return 'upper';
+    if (caseMode === 'upper' && !/[a-z]/.test(String(text || ''))) return 'upper';
+    if (caseMode === 'lower') return 'lower';
+    if (caseMode === 'title') return 'title';
+    return 'none';
+  }
+  const capFirst = (w) => w.charAt(0).toUpperCase() + w.slice(1);
+  const titleWord = (w) => String(w).split(/(\s+)/).map((p) => (/\S/.test(p) ? capFirst(p.toLowerCase()) : p)).join('');
+
+  /** A canonical replacement, dressed in the line's case. */
+  function dress(canon, sampleCore, style) {
+    const c = String(canon == null ? '' : canon);
+    if (!c) return '';
+    if (style === 'upper') return c.toUpperCase();
+    if (style === 'lower') return c.toLowerCase();
+    if (style === 'title') return titleWord(c);
+    // Normal: the replacement's own capitals win (God, I'm); otherwise a
+    // capitalised original keeps its capital.
+    if (/[A-Z]/.test(c)) return c;
+    if (/^[A-Z]/.test(String(sampleCore || ''))) return capFirst(c);
+    return c;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * The word lists
+   * ------------------------------------------------------------------ */
+
+  /* Missing apostrophes. Only spellings that are not themselves words: "well",
+   * "were", "ill", "wed", "shed", "lets", "its" and "id" are all real words and
+   * are handled in context, or not at all. */
+  const CONTRACTIONS = {
+    dont: "don't", doesnt: "doesn't", didnt: "didn't", cant: "can't", couldnt: "couldn't",
+    wouldnt: "wouldn't", shouldnt: "shouldn't", wasnt: "wasn't", werent: "weren't", isnt: "isn't",
+    arent: "aren't", havent: "haven't", hasnt: "hasn't", hadnt: "hadn't", wont: "won't", aint: "ain't",
+    mustnt: "mustn't", neednt: "needn't", im: "I'm", ive: "I've", youre: "you're", youve: "you've",
+    youll: "you'll", youd: "you'd", theyre: "they're", theyve: "they've", theyll: "they'll", theyd: "they'd",
+    weve: "we've", hes: "he's", shes: "she's", thats: "that's", whats: "what's", wheres: "where's",
+    theres: "there's", heres: "here's", whos: "who's", itll: "it'll", itd: "it'd", shouldve: "should've",
+    couldve: "could've", wouldve: "would've", mustve: "must've", mightve: "might've", yall: "y'all",
+    cmon: "c'mon", oclock: "o'clock",
+  };
+  /* The pronoun I, and its contractions, when written small. */
+  const PRONOUN_I = { i: 'I', "i'm": "I'm", "i've": "I've", "i'll": "I'll", "i'd": "I'd" };
+
+  /*
+   * Names that are always names. The Bible's books, people and places come from
+   * the Word Book's own vocabulary (one list, two jobs) — but only the part of
+   * it that is NAMES: the rest of that list is church words like "tabernacle"
+   * and "rabbi", which are ordinary nouns and must stay small.
+   */
+  const PROPER = new Map();
+  const addProper = (s) => String(s).split(/\s+/).filter(Boolean).forEach((w) => PROPER.set(w.toLowerCase(), w));
+  if (WB && Array.isArray(WB.SEED_TERMS)) {
+    const cut = WB.SEED_TERMS.indexOf('Alleluia');
+    addProper((cut > 0 ? WB.SEED_TERMS.slice(0, cut) : []).join(' '));
+  }
+  addProper('Jesus Christ Bible Satan Christian Christians Christianity Messiah Christmas Easter Pentecost '
+    + 'Monday Tuesday Wednesday Thursday Friday Saturday Sunday January February April June July September October November December '
+    + 'Nigeria Nigerian Nigerians Ghana Ghanaian Ghanaians Africa African Africans America American Americans England English London '
+    + 'Lagos Abuja Britain British Europe European Canada Israel Israelite Israelites Jew Jews Jewish Gentile Gentiles '
+    + 'John Luke Paul Mary Ruth James Jude Joel Amos Silas Moses Elijah Abraham David Isaiah Jeremiah Ezekiel');
+  // Book names that are also everyday words: a capital only before a number.
+  ['proverbs', 'exodus', 'revelation', 'genesis'].forEach((w) => PROPER.delete(w));
+  const BOOK_BEFORE_NUMBER = {
+    mark: 'Mark', job: 'Job', acts: 'Acts', kings: 'Kings', judges: 'Judges', numbers: 'Numbers',
+    exodus: 'Exodus', proverbs: 'Proverbs', psalm: 'Psalm', psalms: 'Psalm', revelation: 'Revelation',
+    revelations: 'Revelation', chronicles: 'Chronicles', genesis: 'Genesis', lamentations: 'Lamentations',
+  };
+  const isNumberish = (k) => /^\d/.test(k || '') || /^(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|chapter)$/.test(k || '');
+
+  /* A word that is doubled because the speaker stumbled, not because the
+   * sentence says it twice. "That that", "had had", "holy holy holy" and
+   * "far far away" are all real English, so only these are ever offered. */
+  const STUTTER = new Set(('the a an i we you he she they it and but to of in is was are were my our your this for with '
+    + "as at be will can do if or me us them him her his its i'm we're you're they're there their has have not on from by "
+    + 'when what who because').split(' '));
+
+  /* Comparatives, after which "then" is always "than". */
+  const COMPARATIVE = new Set(('more less better worse greater bigger rather other smaller higher stronger older younger '
+    + 'faster further farther larger fewer sooner easier harder richer poorer deeper wiser sweeter longer shorter louder').split(' '));
+
+  /* What can follow "its" only if it is really "it's". */
+  const AFTER_ITS = new Set(('a an the not going gonna been so very all about like just me you him her us them '
+    + 'okay ok true good great finished done over because what how when who where real written getting coming '
+    + 'never always still already there here').split(' '));
+  /* What can follow "your" only if it is really "you're". */
+  const AFTER_YOUR = new Set('going gonna not welcome the a an very really always never still already trying'.split(' '));
+
+  /* ------------------------------------------------------------------ *
+   * The rules. Each one looks at the joined context — the tail of the line
+   * before, this line, the head of the line after — and proposes edits to
+   * single tokens: { at, to, kind, why, caseOnly }. `to: ''` deletes the word.
+   * ------------------------------------------------------------------ */
+  const K = (C, i) => (C[i] ? C[i].key : '');
+
+  /* Fixed phrases that speech recognition produces in a sermon and that are
+   * never right as written. Same number of words in and out, so a phrase split
+   * across two caption lines can still be fixed one word per line. */
+  const PHRASES = [
+    ['holy goat', 'Holy Ghost', 'misheard'],
+    ['holy ghost', 'Holy Ghost', 'name of God', true],
+    ['holy spirit', 'Holy Spirit', 'name of God', true],
+    ['let us prey', 'let us pray', 'pray, not prey'],
+    ["let's prey", "let's pray", 'pray, not prey'],
+    ['lets prey', "let's pray", 'pray, not prey'],
+    ['we prey', 'we pray', 'pray, not prey'],
+    ['i prey', 'I pray', 'pray, not prey'],
+    ['prey for', 'pray for', 'pray, not prey'],
+    ['prey that', 'pray that', 'pray, not prey'],
+    ['prays the lord', 'praise the Lord', 'praise, not prays'],
+    ['prays god', 'praise God', 'praise, not prays'],
+    ['prays be', 'praise be', 'praise, not prays'],
+    ['alter call', 'altar call', 'altar, not alter'],
+    ['the alter', 'the altar', 'altar, not alter'],
+    ['begotten sun', 'begotten Son', 'Son, not sun'],
+    ['son of god', 'Son of God', 'name of Jesus', true],
+    ['piece be with you', 'peace be with you', 'peace, not piece'],
+    ['prince of piece', 'Prince of Peace', 'peace, not piece'],
+    ['piece of god', 'peace of God', 'peace, not piece'],
+    ['perfect piece', 'perfect peace', 'peace, not piece'],
+    ['sole winning', 'soul winning', 'soul, not sole'],
+    ['sole winners', 'soul winners', 'soul, not sole'],
+    ['oh my sole', 'oh my soul', 'soul, not sole'],
+    ['o my sole', 'O my soul', 'soul, not sole'],
+    ['false profits', 'false prophets', 'prophets, not profits'],
+    ['false profit', 'false prophet', 'prophet, not profit'],
+    ['profit of god', 'prophet of God', 'prophet, not profit'],
+    ['profits of god', 'prophets of God', 'prophets, not profits'],
+    ['the lords prayer', "the Lord's Prayer", 'missing apostrophe'],
+    ["the lord's prayer", "the Lord's Prayer", 'name of the prayer', true],
+    ['lords supper', "Lord's Supper", 'missing apostrophe'],
+    ['jesus name', "Jesus' name", 'missing apostrophe'],
+    ['your welcome', "you're welcome", "you're = you are"],
+    ['could of', 'could have', '"could have", not "could of"'],
+    ['would of', 'would have', '"would have", not "would of"'],
+    ['should of', 'should have', '"should have", not "should of"'],
+    ['must of', 'must have', '"must have", not "must of"'],
+    ['might of', 'might have', '"might have", not "might of"'],
+    ['to much', 'too much', 'too = very'],
+    ['to many', 'too many', 'too = very'],
+    ['there going', "they're going", "they're = they are"],
+    ['there gonna', "they're gonna", "they're = they are"],
+    ['their is', 'there is', 'there is, not their is'],
+    ['their are', 'there are', 'there are, not their are'],
+    ['their was', 'there was', 'there was, not their was'],
+    ['their were', 'there were', 'there were, not their were'],
+    ["it's own", 'its own', 'its own (no apostrophe)'],
+    ['suppose to', 'supposed to', 'supposed to'],
+    ['every since', 'ever since', 'ever since'],
+  ].map(([from, to, why, caseOnly]) => ({ from: from.split(' '), to: to.split(' '), why, caseOnly: !!caseOnly }));
+  const GODS_WHAT = new Set(('word love grace glory presence power kingdom people children house plan promise promises '
+    + 'favour favor mercy spirit son name hand heart time way voice will goodness faithfulness blessing blessings').split(' '));
+  const PROPHET_NAMES = new Set('isaiah jeremiah elijah elisha ezekiel daniel jonah samuel nathan moses hosea joel amos micah habakkuk malachi zechariah'.split(' '));
+
+  function runRules(C) {
+    const edits = [];
+    const add = (at, to, kind, why, caseOnly, group) => edits.push({ at, to, kind, why, caseOnly: !!caseOnly, group: group == null ? 'r' + at + kind : group });
+
+    // Phrases first, so their edits take precedence over the single-word rules.
+    for (let i = 0; i < C.length; i++) {
+      for (const p of PHRASES) {
+        if (i + p.from.length > C.length) continue;
+        let hit = true;
+        for (let j = 0; j < p.from.length; j++) if (C[i + j].key !== p.from[j]) { hit = false; break; }
+        if (!hit) continue;
+        const grp = 'p' + i + p.from.join('_');
+        for (let j = 0; j < p.from.length; j++) {
+          const caseOnly = p.caseOnly || keyOf(p.to[j]) === C[i + j].key;
+          add(i + j, p.to[j], caseOnly ? 'case' : 'word', p.why, caseOnly, grp);
+        }
+      }
+    }
+
+    for (let i = 0; i < C.length; i++) {
+      const k = C[i].key;
+      if (!k) continue;
+      const prev = K(C, i - 1), next = K(C, i + 1);
+
+      // missing apostrophes
+      if (Object.prototype.hasOwnProperty.call(CONTRACTIONS, k) && CONTRACTIONS[k]) {
+        add(i, CONTRACTIONS[k], 'apostrophe', 'missing apostrophe');
+      }
+      // "its" that is really "it's"
+      if (k === 'its' && AFTER_ITS.has(next)) add(i, "it's", 'word', "it's = it is");
+      // "your" that is really "you're"
+      if (k === 'your' && AFTER_YOUR.has(next)) add(i, "you're", 'word', "you're = you are");
+      // than / then
+      if (k === 'then' && COMPARATIVE.has(prev)) add(i, 'than', 'word', 'than, after a comparison');
+      // lose / loose
+      if (k === 'loose' && /^(will|to|not|never|gonna|can|could|might|don't|dont|shall|would|cannot)$/.test(prev)) add(i, 'lose', 'word', 'lose, not loose');
+      // used to
+      if (k === 'use' && next === 'to' && /^(i|we|you|they|he|she|it|who)$/.test(prev) && /^(be|go|have|say|think|do|come|sing|pray|know|live|work|tell)$/.test(K(C, i + 2))) add(i, 'used', 'word', '"used to"');
+      // alot
+      if (k === 'alot') add(i, 'a lot', 'word', '"a lot" is two words');
+      // God's + noun
+      if (k === 'gods' && GODS_WHAT.has(next) && prev !== 'the' && prev !== 'false' && prev !== 'other') add(i, "God's", 'apostrophe', "God's (belonging to God)");
+      // "the profit isaiah"
+      if ((k === 'profit') && PROPHET_NAMES.has(next)) add(i, 'prophet', 'word', 'prophet, not profit');
+
+      // a / an
+      if ((k === 'a' || k === 'an') && next && /^[a-z]/.test(next) && !/^(plan|grade|option|type|class|vitamin|letter|point|part|section|exhibit)$/.test(prev)) {
+        const v = soundsVowel(next);
+        if (v === true && k === 'a') add(i, 'an', 'word', '"an" before a vowel sound');
+        if (v === false && k === 'an') add(i, 'a', 'word', '"a" before a consonant sound');
+      }
+
+      // the stammer
+      if (prev && k === prev && STUTTER.has(k)) add(i, '', 'repeat', 'word said twice');
+
+      // capitals
+      if (PRONOUN_I[k]) add(i, PRONOUN_I[k], 'case', '"I" is always a capital', true);
+      if (k === 'god' || k === "god's") {
+        if (!/^(a|false|another|foreign|strange|pagan|other|any|no|every|little)$/.test(prev)) add(i, k === 'god' ? 'God' : "God's", 'case', 'God is a name', true);
+      }
+      if ((k === 'lord' || k === "lord's") && (/^(the|our|my|o|oh|dear|risen|sovereign|mighty|almighty|praise|thank|bless)$/.test(prev) || /^(jesus|god|almighty|christ)$/.test(next))) {
+        add(i, k === 'lord' ? 'Lord' : "Lord's", 'case', 'Lord is a name here', true);
+      }
+      if (PROPER.has(k)) add(i, PROPER.get(k), 'case', 'a name', true);
+      if (BOOK_BEFORE_NUMBER[k] && isNumberish(next)) {
+        add(i, BOOK_BEFORE_NUMBER[k], k === 'psalms' ? 'word' : 'case', k === 'psalms' ? 'one psalm: "Psalm 23"' : 'a book of the Bible', k !== 'psalms');
+      }
+    }
+    return edits;
+  }
+
+  /**
+   * Does this word start with a vowel SOUND? true / false, or null when the
+   * spelling cannot say (digits, acronyms).
+   */
+  function soundsVowel(w) {
+    const k = keyOf(w).replace(/[^a-z']/g, '');
+    if (!k) return null;
+    if (/^(hour|honest|honou?r|heir|herb)/.test(k)) return true;
+    if (/^(uni|use|usu|uti|ute|ura|ure|uro|eu|ewe|one|once|ubiq|uk)/.test(k)) return false;
+    return /^[aeiou]/.test(k);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Checking
+   * ------------------------------------------------------------------ */
+  const TAIL = 3;
+
+  /**
+   * Everything wrong with one line, and the line with all of it fixed.
+   *
+   *   { text, fixed, issues: [{ start, end, from, to, kind, why, id }] }
+   *
+   * `start`/`end` are character offsets into `text`, for underlining.
+   * opts: { caseMode, prev, next }  — prev/next are the neighbouring lines' text.
+   */
+  function checkLine(text, opts) {
+    const o = opts || {};
+    const src = String(text == null ? '' : text);
+    const style = lineStyle(src, o.caseMode);
+    const toks = tokenize(src);
+    const before = tokenize(o.prev || '').slice(-TAIL).map((t) => Object.assign(t, { inLine: false }));
+    const after = tokenize(o.next || '').slice(0, TAIL).map((t) => Object.assign(t, { inLine: false }));
+    const C = before.concat(toks.map((t, li) => Object.assign({}, t, { inLine: true, li })), after);
+    const raw = runRules(C);
+
+    // One edit per token: the first rule to claim it (phrases run first).
+    const byTok = new Map();
+    for (const e of raw) {
+      const t = C[e.at];
+      if (!t || !t.inLine || byTok.has(t.li)) continue;
+      if (e.caseOnly && (style === 'upper' || style === 'lower' || style === 'title')) continue;
+      const dressed = e.to === '' ? '' : dress(e.to, t.core, style);
+      if (dressed === t.core) continue;             // already right
+      byTok.set(t.li, Object.assign({}, e, { dressed }));
+    }
+
+    // Group consecutive edits from the same rule into one issue ("Holy Ghost").
+    const issues = [];
+    const lis = [...byTok.keys()].sort((a, b) => a - b);
+    for (const li of lis) {
+      const e = byTok.get(li);
+      const last = issues[issues.length - 1];
+      if (last && last.group === e.group && last.b === li) {
+        last.b = li + 1;
+        last.edits.push({ li, dressed: e.dressed });
+        if (!e.caseOnly) { last.kind = e.kind; last.why = e.why; }
+        continue;
+      }
+      issues.push({ a: li, b: li + 1, group: e.group, kind: e.kind, why: e.why, edits: [{ li, dressed: e.dressed }] });
+    }
+
+    const out = issues.map((g) => {
+      const span = toks.slice(g.a, g.b);
+      const fromText = src.slice(span[0].start, span[span.length - 1].end);
+      const toWords = span.map((t, j) => {
+        const ed = g.edits.find((x) => x.li === g.a + j);
+        if (!ed) return t.raw;
+        if (ed.dressed === '') return '';
+        return t.pre + ed.dressed + t.post;
+      }).filter((w) => w !== '');
+      // A deletion eats the space before it too, so "THE THE" → "THE" and not "THE ".
+      let start = span[0].start;
+      const end = span[span.length - 1].end;
+      if (!toWords.length && g.a > 0) start = toks[g.a - 1].end;
+      return {
+        start, end, from: fromText, to: toWords.join(' '), kind: g.kind, why: g.why,
+        id: keyOf(fromText) + '→' + keyOf(toWords.join(' ')),
+      };
+    });
+
+    let fixed = src;
+    for (let i = out.length - 1; i >= 0; i--) fixed = fixed.slice(0, out[i].start) + out[i].to + fixed.slice(out[i].end);
+    fixed = tidySpaces(fixed);
+    if (tidySpaces(src) !== src && !out.length) {
+      out.push({ start: 0, end: src.length, from: src, to: tidySpaces(src), kind: 'space', why: 'extra spaces', id: 'space' });
+    }
+    return { text: src, fixed, issues: out, style };
+  }
+
+  const tidySpaces = (s) => String(s).replace(/\s+/g, ' ').replace(/\s+([!])/g, '$1').trim();
+
+  /** Every line, each checked against its neighbours. `ignored(i, issue)` may veto. */
+  function checkLines(lines, opts) {
+    const L = (lines || []).map((x) => String(x == null ? '' : x));
+    return L.map((t, i) => checkLine(t, Object.assign({}, opts, { prev: L[i - 1] || '', next: L[i + 1] || '' })));
+  }
+
+  /** Apply ONE issue to the text it was found in. */
+  function applyIssue(text, issue) {
+    const s = String(text == null ? '' : text);
+    if (!issue) return s;
+    return tidySpaces(s.slice(0, issue.start) + issue.to + s.slice(issue.end));
+  }
+
+  /* ------------------------------------------------------------------ *
+   * The AI half: the brief, the parser, and the guard.
+   * ------------------------------------------------------------------ */
+
+  /**
+   * The same strip the burn does — a caption has no full stops, commas,
+   * question marks or quotes. Must stay identical to cleanCapText in
+   * veditor.js and cleanCaptionText in captioner.js.
+   */
+  function stripCaptionPunct(t) {
+    return String(t)
+      .replace(/[’ʼ]/g, "'")
+      .replace(/["“”„‟«»‹›″＂‘]/g, '')
+      .replace(/[?？¿]/g, '')
+      .replace(/[…⋯]/g, ' ')
+      .replace(/[.,。．，、]/g, (m, i, s) => (/\d/.test(s[i - 1] || '') && /\d/.test(s[i + 1] || '') ? m : ''))
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  const wordsOf = (s) => String(s || '').split(/\s+/).map((w) => keyOf(w).replace(/[^a-z0-9']/g, '')).filter(Boolean);
+  function lcs(a, b) {
+    const n = a.length, m = b.length;
+    let prev = new Array(m + 1).fill(0);
+    for (let i = 1; i <= n; i++) {
+      const cur = new Array(m + 1).fill(0);
+      for (let j = 1; j <= m; j++) cur[j] = a[i - 1] === b[j - 1] ? prev[j - 1] + 1 : Math.max(prev[j], cur[j - 1]);
+      prev = cur;
+    }
+    return prev[m];
+  }
+
+  /**
+   * Word-level diff of two lines, for showing a suggestion: which words stay,
+   * which go, which arrive. [{ text, op: 'same' | 'del' | 'add' }]
+   */
+  function diffWords(a, b) {
+    const A = String(a || '').split(/\s+/).filter(Boolean), B = String(b || '').split(/\s+/).filter(Boolean);
+    const n = A.length, m = B.length;
+    const dp = [];
+    for (let i = 0; i <= n; i++) dp.push(new Array(m + 1).fill(0));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    const out = [];
+    let i = 0, j = 0;
+    while (i < n || j < m) {
+      if (i < n && j < m && A[i] === B[j]) { out.push({ text: B[j], op: 'same' }); i++; j++; }
+      else if (j < m && (i >= n || dp[i][j + 1] >= dp[i + 1][j])) { out.push({ text: B[j], op: 'add' }); j++; }
+      else { out.push({ text: A[i], op: 'del' }); i++; }
+    }
+    return out;
+  }
+
+  /**
+   * Is the AI's version of a line a CORRECTION of it, or a rewrite? Returns the
+   * line to offer (in the caption's own case) or null.
+   *
+   * The model is asked for corrections and told not to rephrase; this is where
+   * that is enforced, because a model told not to do something is a model that
+   * sometimes does it. A caption is what the preacher said, and a "better"
+   * sentence they did not say is a wrong caption however well it reads.
+   *
+   * mode 'exact' (default) — at most half the words may change, min 2.
+   * mode 'tidy'            — a little more room, for real grammar slips.
+   */
+  function vetAiLine(orig, suggested, opts) {
+    const o = opts || {};
+    const src = String(orig == null ? '' : orig);
+    let t = stripCaptionPunct(String(suggested == null ? '' : suggested)).replace(/[^\p{L}\p{N}'’\- !&%$£#@]/gu, ' ').replace(/\s+/g, ' ').trim();
+    if (!t) return { ok: false, reason: 'empty' };
+    const a = wordsOf(src), b = wordsOf(t);
+    if (!b.length) return { ok: false, reason: 'empty' };
+    const same = lcs(a, b);
+    const changed = (a.length - same) + (b.length - same);
+    const tidy = o.mode === 'tidy';
+    const limit = tidy ? Math.max(3, Math.ceil(a.length * 0.6)) : Math.max(2, Math.ceil(a.length * 0.5));
+    if (changed > limit) return { ok: false, reason: 'rewrote the line' };
+    if (Math.abs(b.length - a.length) > (tidy ? 3 : 2)) return { ok: false, reason: 'changed the length' };
+    const style = lineStyle(src, o.caseMode);
+    if (style === 'upper') t = t.toUpperCase();
+    else if (style === 'lower') t = t.toLowerCase();
+    else if (style === 'title') t = titleWord(t);
+    if (tidySpaces(t) === tidySpaces(src)) return { ok: false, reason: 'no change' };
+    return { ok: true, text: tidySpaces(t) };
+  }
+
+  /**
+   * The brief. `batch` is [{ n, text, context }] — n is the number the model
+   * refers to; context lines are shown for meaning but must not be returned.
+   */
+  function buildAiPrompt(batch, opts) {
+    const o = opts || {};
+    const tidy = o.mode === 'tidy';
+    const system = [
+      'You proofread the burned-in captions of a church sermon video. The captions were made by speech recognition,',
+      'so they contain the mistakes speech recognition makes. Each caption line is a few words of what the speaker said.',
+      '',
+      'Fix ONLY these:',
+      '- words the speech recognition misheard — use the lines around it to work out what was really said',
+      "  (e.g. 'holy goat' -> 'Holy Ghost', 'only begotten sun' -> 'only begotten Son', 'let us prey' -> 'let us pray')",
+      '- spelling mistakes and missing apostrophes (dont -> don\'t)',
+      "- the wrong sound-alike word (there/their/they're, your/you're, its/it's, to/too, then/than, a/an)",
+      '- a word accidentally repeated (the the -> the)',
+      '- capitals for names: God, Jesus, Holy Spirit, books of the Bible, people and places',
+      tidy
+        ? '- clear grammar slips, keeping the speaker\'s own words and voice as far as possible'
+        : '- nothing else: keep the speaker\'s exact words even when their spoken grammar is informal',
+      '',
+      'Never rephrase, never make it sound better, never add or remove meaning, never add punctuation',
+      '(captions have no full stops, commas or question marks), never join or split lines.',
+      'Lines may be written in ALL CAPS; answer in normal sentence case — the app puts the caps back.',
+      'If you are not sure a line is wrong, leave it alone.',
+      '',
+      'Reply with JSON only, in this exact shape, listing ONLY the lines you changed:',
+      '{"fixes":[{"n":12,"text":"the corrected line","why":"3 to 6 words"}]}',
+      'If nothing needs fixing reply {"fixes":[]}.',
+    ].join('\n');
+    const rows = (batch || []).map((r) => (r.context ? `(${r.n}) ${r.text}   <- context only, do not return` : `${r.n} | ${r.text}`));
+    const prompt = 'Caption lines (number | text):\n' + rows.join('\n');
+    return { system, prompt };
+  }
+
+  /** Pull the first balanced JSON value out of an answer (models wrap it in prose). */
+  function firstJson(text) {
+    const s = String(text || '');
+    for (let start = 0; start < s.length; start++) {
+      const open = s[start];
+      if (open !== '{' && open !== '[') continue;
+      const close = open === '{' ? '}' : ']';
+      let depth = 0, inStr = false, esc = false;
+      for (let i = start; i < s.length; i++) {
+        const ch = s[i];
+        if (esc) { esc = false; continue; }
+        if (ch === '\\') { esc = true; continue; }
+        if (ch === '"') { inStr = !inStr; continue; }
+        if (inStr) continue;
+        if (ch === open) depth++;
+        else if (ch === close) {
+          depth--;
+          if (depth === 0) { try { return JSON.parse(s.slice(start, i + 1)); } catch (e) { break; } }
+        }
+      }
+    }
+    return null;
+  }
+
+  /** The model's answer → [{ n, text, why }] for numbers that were really asked about. */
+  function parseAiFixes(answer, batch) {
+    const j = firstJson(answer);
+    const list = Array.isArray(j) ? j : (j && Array.isArray(j.fixes) ? j.fixes : null);
+    if (!list) return null;
+    const asked = new Map((batch || []).filter((r) => !r.context).map((r) => [Number(r.n), r]));
+    const out = [];
+    const seen = new Set();
+    for (const f of list) {
+      if (!f || typeof f !== 'object') continue;
+      const n = Number(f.n != null ? f.n : (f.line != null ? f.line : f.i));
+      if (!asked.has(n) || seen.has(n)) continue;
+      const text = typeof f.text === 'string' ? f.text : (typeof f.fixed === 'string' ? f.fixed : null);
+      if (text == null) continue;
+      seen.add(n);
+      out.push({ n, text, why: String(f.why || f.reason || '').slice(0, 80) });
+    }
+    return out;
+  }
+
+  return {
+    tokenize, lineStyle, dress, soundsVowel,
+    checkLine, checkLines, applyIssue, tidySpaces,
+    stripCaptionPunct, diffWords, vetAiLine, buildAiPrompt, parseAiFixes, firstJson,
+    CONTRACTIONS, PHRASES, STUTTER, PROPER,
+  };
+}));

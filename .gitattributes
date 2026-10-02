@@ -1,0 +1,9 @@
+# Model and binary files must stay byte-for-byte as shipped
+*.rnnn -text
+*.bin binary
+*.gguf binary
+*.task binary
+*.tflite binary
+*.wasm binary
+*.dll binary
+*.exe binary

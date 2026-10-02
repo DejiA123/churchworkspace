@@ -1,0 +1,373 @@
+/*
+ * THE CLOUD SKIN.
+ *
+ * styles.css is the desk: it was drawn for a 1280px window, a mouse and a
+ * sidebar, and it has not one media query in it. This file changes none of that
+ * — it sits on top and answers two questions the desk never had to:
+ *
+ *   • where does the sidebar's job go, when there is no sidebar? (the cloud bar)
+ *   • what does the desk look like on a phone held in one hand?
+ *
+ * The phone layout does NOT hide anything. Everything the desktop shows is
+ * still on the page, in the order a thumb wants it: the picture, the tools that
+ * act on it, the timeline, then the settings column. A control that has been
+ * "tidied away for mobile" is a control somebody cannot reach at half past ten
+ * on a Saturday night, and the whole point of this was that nothing is missing.
+ */
+
+/* ------------------------------------------------------------- the frame */
+
+body.mw-cloud { overflow: hidden; }
+
+body.mw-cloud #app {
+  display: block;
+  height: 100vh;
+  height: 100dvh;                 /* a phone's address bar is not a wall */
+  padding-top: 46px;              /* the cloud bar */
+}
+body.mw-cloud .content {
+  height: 100%;
+  padding: 16px 18px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+body.mw-cloud .view { height: 100%; }
+
+/* ----------------------------------------------------------- the cloud bar */
+
+.cloud-bar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 46px;
+  z-index: 240;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 12px;
+  padding-top: env(safe-area-inset-top);
+  height: calc(46px + env(safe-area-inset-top));
+  background: rgba(12, 15, 22, .92);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
+
+.cloud-brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cloud-logo {
+  width: 26px; height: 26px; flex: none;
+  display: grid; place-items: center;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--primary), var(--accent-2));
+  font-size: 14px;
+}
+.cloud-name { font-weight: 700; font-size: 14px; white-space: nowrap; }
+.cloud-where {
+  font-size: 11.5px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cloud-bar-actions { display: flex; align-items: center; gap: 8px; }
+
+.cloud-chip {
+  position: relative;
+  background: var(--bg-3);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cloud-chip:hover { border-color: var(--primary); }
+.cloud-badge {
+  display: inline-grid; place-items: center;
+  min-width: 17px; height: 17px; padding: 0 4px; margin-left: 4px;
+  border-radius: 9px; background: var(--good); color: #06240f;
+  font-size: 10.5px; font-weight: 800;
+}
+.cloud-badge.hidden { display: none; }
+.cloud-link { font-size: 11px; color: var(--good); transition: color .2s; }
+.cloud-link.bad { color: var(--danger); }
+
+/* ------------------------------------------------------------ the sign-in */
+
+.cloud-gate {
+  position: fixed; inset: 0; z-index: 400;
+  display: grid; place-items: center;
+  padding: 22px;
+  background: radial-gradient(900px 500px at 50% -10%, rgba(79,124,255,.16), transparent 60%), var(--bg);
+}
+.cloud-gate.gone { display: none; }
+.cloud-gate-box {
+  width: 360px; max-width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  padding: 26px 22px 20px;
+  text-align: center;
+}
+.cloud-gate-logo {
+  width: 52px; height: 52px; margin: 0 auto 12px;
+  display: grid; place-items: center;
+  border-radius: 15px;
+  background: linear-gradient(135deg, var(--primary), var(--accent-2));
+  font-size: 26px;
+}
+.cloud-gate-box h1 { margin: 0 0 4px; font-size: 21px; }
+.cloud-gate-sub { margin: 0 0 20px; color: var(--muted); font-size: 13px; }
+.cloud-gate-label {
+  display: block; text-align: left;
+  font-size: 12px; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .6px; margin-bottom: 6px;
+}
+#cloudPass {
+  width: 100%;
+  background: var(--bg-3); color: var(--text);
+  border: 1px solid var(--border); border-radius: 11px;
+  padding: 13px 14px;
+  font-size: 16px;                 /* 16px or iOS zooms the page on focus */
+  letter-spacing: .4px;
+  text-align: center;
+}
+#cloudPass:focus { outline: none; border-color: var(--primary); }
+.cloud-gate-remember {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  margin: 13px 0 16px; font-size: 12.5px; color: var(--muted);
+}
+.cloud-gate-go { width: 100%; padding: 13px; font-size: 15px; border-radius: 11px; }
+.cloud-gate-msg { min-height: 18px; margin-top: 12px; font-size: 12.5px; color: var(--muted); }
+.cloud-gate-msg.bad { color: var(--danger); }
+.cloud-gate-foot { margin-top: 14px; font-size: 11px; color: var(--muted); opacity: .7; }
+
+/* ------------------------------------------------------------ file lists */
+
+.cloud-files-box { width: 560px; }
+.cloud-files-bar { display: flex; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border-soft); }
+.cloud-files-list { overflow-y: auto; padding: 8px 10px 14px; flex: 1; min-height: 120px; }
+.cloud-files-group { margin-bottom: 10px; }
+.cloud-files-head {
+  font-size: 11px; font-weight: 800; letter-spacing: .8px; text-transform: uppercase;
+  color: var(--muted); padding: 8px 6px 6px;
+}
+.cloud-file {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; text-align: left;
+  background: var(--bg-3); color: var(--text);
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 11px 12px; margin-bottom: 6px;
+  font-size: 13px; cursor: pointer;
+}
+.cloud-file:hover { border-color: var(--primary); }
+.cloud-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.cloud-file-meta { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.cloud-file-go { color: var(--primary); font-weight: 700; font-size: 12px; }
+.cloud-files-empty { padding: 20px 8px; text-align: center; }
+
+.cloud-upload-bar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--border-soft); }
+.cloud-upload-bar.hidden { display: none; }
+.cloud-upload-name { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.cloud-upload-bar .progress { flex: 1; height: 6px; background: var(--bg-3); border-radius: 4px; overflow: hidden; }
+.cloud-upload-bar .progress-bar { height: 100%; background: var(--primary); transition: width .2s; }
+
+.cloud-help-box { width: 520px; }
+.cloud-help-body { padding: 8px 18px 18px; overflow-y: auto; font-size: 13.5px; line-height: 1.55; }
+.cloud-help-body p { margin: 0 0 12px; }
+
+/* ------------------------------------------------------------- touch bar */
+
+.cloud-touchbar {
+  position: fixed;
+  left: 50%; transform: translateX(-50%);
+  bottom: calc(10px + env(safe-area-inset-bottom));
+  z-index: 230;
+  display: flex; gap: 4px;
+  padding: 5px;
+  border-radius: 14px;
+  background: rgba(20, 24, 34, .95);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(8px);
+}
+.cloud-touchbar.hidden { display: none; }
+.cloud-touchbar button {
+  min-width: 42px; height: 40px;
+  background: transparent; color: var(--text);
+  border: 0; border-radius: 10px;
+  font-size: 17px; cursor: pointer;
+}
+.cloud-touchbar button:active { background: var(--bg-3); }
+.cloud-ct-play { color: var(--primary) !important; font-size: 19px !important; }
+
+/* ===================================================================== */
+/*  THE PHONE                                                            */
+/* ===================================================================== */
+
+@media (max-width: 900px) {
+  body.mw-cloud .content { padding: 10px 10px 92px; }
+
+  /*
+   * The desk is a two-column layout inside a wrapper. On a phone the wrapper
+   * itself is what gets in the way, so both it and the left column stop being
+   * boxes (`display: contents`) and their children become direct children of
+   * the view — which lets them be put in thumb order, and lets the picture stay
+   * on screen while the timeline scrolls under it.
+   */
+  body.mw-cloud #view-video { display: flex; flex-direction: column; height: auto; min-height: 100%; }
+  /* The desk's Pro layout (v2.79) has more wrappers — the monitors and the
+     program column — and its rules name #view-video, so these do too, or the
+     desk's grid would win over the phone's single column. */
+  body.mw-cloud #view-video .ve-main,
+  body.mw-cloud #view-video .ve-monitors,
+  body.mw-cloud #view-video .ve-left { display: contents; }
+  /* No room for a second monitor on a phone: the program monitor IS the picture. */
+  body.mw-cloud #view-video .ve-source,
+  body.mw-cloud #view-video .ve-mon-head,
+  body.mw-cloud #view-video .ve-tl-split { display: none; }
+
+  body.mw-cloud .ve-topbar { order: 1; }
+  body.mw-cloud #veResume { order: 2; position: static; }
+  body.mw-cloud .ve-preview { order: 3; }
+  body.mw-cloud .ve-transport { order: 4; }
+  body.mw-cloud .ve-tl-bar { order: 5; }
+  body.mw-cloud .ve-timeline { order: 6; }
+  body.mw-cloud .ve-bin { order: 7; margin-top: 10px; }
+  body.mw-cloud .ve-side { order: 8; }
+
+  /* The picture stays put while everything else scrolls past it. */
+  body.mw-cloud #view-video .ve-preview {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    flex: none;
+    height: 38vh;
+    min-height: 200px;
+    border-radius: 12px;
+    margin-bottom: 8px;
+  }
+
+  /* One long strip of the studio's own buttons, scrolled sideways. Nothing is
+     dropped: the desk's row becomes a rail. */
+  body.mw-cloud .ve-topbar {
+    display: block;
+    padding: 0 0 8px;
+    margin: 0 0 8px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  body.mw-cloud .ve-file {
+    display: flex; gap: 6px; align-items: center;
+    padding: 2px 2px 8px;
+    font-size: 12.5px;
+    overflow: hidden;
+  }
+  body.mw-cloud .ve-file #veName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  body.mw-cloud .ve-top-actions,
+  body.mw-cloud .ve-transport,
+  body.mw-cloud .ve-tl-bar,
+  body.mw-cloud .ve-tools .ve-tool-btns {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: 7px;
+    padding-bottom: 6px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  body.mw-cloud .ve-top-actions::-webkit-scrollbar,
+  body.mw-cloud .ve-tl-bar::-webkit-scrollbar { display: none; }
+  body.mw-cloud .ve-tl-bar { justify-content: flex-start; margin: 6px 0; padding: 0 0 6px; border: 0; }
+  body.mw-cloud .ve-tl-group { display: flex; gap: 7px; flex: none; align-items: center; }
+
+  /* The toolbar's groups line up along the one rail. */
+  body.mw-cloud .ve-tb-group { flex: none; display: flex; gap: 7px; padding-left: 0; border-left: 0; }
+
+  /* Every tap target big enough to hit while standing up. */
+  body.mw-cloud .ve-top-actions button,
+  body.mw-cloud .ve-top-actions select,
+  body.mw-cloud .ve-top-actions label,
+  body.mw-cloud .ve-tl-bar button {
+    flex: none;
+    min-height: 38px;
+    font-size: 12.5px;
+    white-space: nowrap;
+  }
+  body.mw-cloud .ve-top-actions select { max-width: 46vw; }
+
+  /* The transport is a row of controls, not a spread — on a narrow screen its
+     space-between pushes Loop and fullscreen off the edge. */
+  body.mw-cloud .ve-transport { justify-content: flex-start; align-items: center; }
+  body.mw-cloud .ve-transport > * { flex: none; }
+
+  /* The timeline: tall enough that a finger can tell the rows apart, with the
+     row names narrowed — 136px of "🎬 Video" out of 375 is a third of the
+     screen spent on labels that never change. */
+  body.mw-cloud #view-video .ve-timeline { min-height: 220px; height: auto; overflow-y: visible; }
+  body.mw-cloud #view-video .ve-tl-labels { width: 74px; min-width: 74px; flex: none; }
+  body.mw-cloud .ve-tl-label { font-size: 11px; padding-left: 6px; }
+  body.mw-cloud .ve-tl-scroll { touch-action: pan-x pan-y; }
+  body.mw-cloud .ve-ruler { height: 26px; }
+  body.mw-cloud .ve-seg-h { width: 16px; }         /* fatter trim handles */
+  body.mw-cloud .ve-cap-edge { width: 14px; }
+
+  /* The settings column becomes the bottom of the page — all of it. */
+  body.mw-cloud #view-video .ve-bin { overflow: visible; }
+  body.mw-cloud #view-video .ve-side { overflow: visible; }
+  body.mw-cloud #view-video .ve-insp-body { overflow: visible; }
+  body.mw-cloud .ve-side {
+    width: auto;
+    max-width: none;
+    min-width: 0;
+    margin-top: 10px;
+    border-radius: 12px;
+  }
+  body.mw-cloud .ve-cliplist { max-height: none; }
+
+  /* Modals become sheets that come up from the bottom, like everything else on
+     a phone does. */
+  body.mw-cloud .cap-modal { place-items: end center; }
+  /* Every modal box the studio opens, by its own class name: the caption editor
+     and its relatives, the media library, and the cut-out painter. Named rather
+     than matched by shape, because a rule like ".cap-modal > div" would also
+     catch the ones that are deliberately small. */
+  body.mw-cloud .cap-box,
+  body.mw-cloud .lib-box,
+  body.mw-cloud .cut-box {
+    width: 100%;
+    max-width: 100%;
+    max-height: 88vh;
+    border-radius: 16px 16px 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  body.mw-cloud .cut-box { height: 88vh; }
+  body.mw-cloud .fx-side { align-items: flex-end; }
+  body.mw-cloud .fx-side .cap-box { width: 100%; height: auto; max-height: 88vh; border-radius: 16px 16px 0 0; }
+
+  /* 16px stops iOS zooming the whole page when a field takes focus. */
+  body.mw-cloud input[type="text"],
+  body.mw-cloud input[type="number"],
+  body.mw-cloud input[type="search"],
+  body.mw-cloud textarea,
+  body.mw-cloud select { font-size: 16px; }
+
+  body.mw-cloud .overlay-box { width: 84vw; }
+  body.mw-cloud .toast { left: 10px; right: 10px; bottom: calc(66px + env(safe-area-inset-bottom)); max-width: none; }
+
+  .cloud-name { display: none; }
+  .cloud-where { display: none; }
+  .cloud-files-box, .cloud-help-box { width: 100%; }
+}
+
+/* A phone on its side: the picture gets smaller so the timeline is usable. */
+@media (max-width: 900px) and (orientation: landscape) {
+  body.mw-cloud #view-video .ve-preview { height: 46vh; }
+}
+
+/* ------------------------------------------------------- installed as an app */
+
+@media (display-mode: standalone) {
+  /* No address bar to lose the connection dot behind. */
+  .cloud-bar { padding-top: max(env(safe-area-inset-top), 8px); }
+}

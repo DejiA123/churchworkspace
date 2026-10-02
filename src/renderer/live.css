@@ -1,0 +1,1016 @@
+/* ============================================================================
+   🔴 GO LIVE — "the broadcast desk".
+
+   A production surface is read at a glance by somebody who is also watching a
+   room, so this board is built around ONE question — is anything going out? —
+   and answers it three ways before you have finished looking: a lamp in the top
+   left, a red bezel round the program monitor, and red on the two buttons that
+   caused it. Everything else is deliberately quiet.
+
+   The colour code is the broadcast standard, not decoration, and nothing else
+   may borrow these two colours:
+       GREEN = PREVIEW  — lined up, not out yet
+       RED   = PROGRAM  — on air; the congregation is seeing this
+   Cyan is for controls that are merely engaged (External, PlayList, Pause), so
+   "engaged" can never be mistaken for "on air". Amber is for warnings.
+
+   Layout: COMMAND BAR (state + the two decisions) · STAGE (preview | take deck |
+   a program monitor with a third more width, because that is the one being
+   watched) · DECK (sources left, audio right) · a footer of shortcuts.
+   ========================================================================== */
+
+/* The switcher takes over the whole content area, edge to edge.
+   A COLUMN, not a block: the on-air warning strips are inserted above the desk,
+   and under `display:block` they pushed a 100%-height desk straight off the
+   bottom of the window — which took the Streaming Settings buttons with it,
+   exactly when a warning strip is telling the operator to go and press one. */
+#view-live.active { display: flex; flex-direction: column; margin: -34px -40px; height: 100vh; overflow: hidden; }
+#view-live.active > .vmx-shed-banner, #view-live.active > .vmx-fit-banner { flex: none; }
+#view-live.active > .vmx { flex: 1 1 auto; min-height: 0; }
+
+.vmx {
+  /* surfaces — near-black, faintly blue so it sits behind a picture without
+     tinting it, and flat: gradients are reserved for things that have STATE */
+  --vmx-bg: #090b10;
+  --vmx-bg-deep: #05070a;
+  --vmx-panel: #11141c;
+  --vmx-panel-hi: #171b25;
+  --vmx-raise: #1f2431;
+  --vmx-border: #05070a;
+  --vmx-line: #29303f;
+  --vmx-line-soft: #1c212c;
+  --vmx-edge: rgba(255, 255, 255, 0.05);
+
+  --vmx-text: #e8ecf4;
+  --vmx-text-dim: #9aa4b8;
+  --vmx-text-mute: #6d7688;
+
+  /* PREVIEW — green */
+  --vmx-pv: #2fd36f;
+  --vmx-pv-hi: #64e79a;
+  --vmx-pv-lo: #146238;
+  --vmx-pv-glow: rgba(47, 211, 111, .30);
+
+  /* PROGRAM / ON AIR — red, and nothing else is ever red */
+  --vmx-pgm: #ff4438;
+  --vmx-pgm-hi: #ff8078;
+  --vmx-pgm-lo: #8d1d16;
+  --vmx-pgm-glow: rgba(255, 68, 56, .34);
+
+  /* engaged-but-not-on-air, and warnings */
+  --vmx-cyan: #33b6d8;
+  --vmx-cyan-lo: #14586c;
+  --vmx-amber: #f0b429;
+
+  /* legacy token names still used by the modals / Input Select / mixer below */
+  --vmx-gold: var(--vmx-amber);
+  --vmx-gold-hi: #ffd36b;
+  --vmx-gold-lo: #8a6212;
+  --vmx-orange: var(--vmx-amber);
+  --vmx-orange-lo: #8a6212;
+  --vmx-azure: var(--vmx-cyan);
+  --vmx-azure-hi: #5fd0ec;
+  --vmx-azure-lo: var(--vmx-cyan-lo);
+  --vmx-green: var(--vmx-pv);
+  --vmx-green-lo: var(--vmx-pv-lo);
+  --vmx-blue: var(--vmx-cyan);
+  --vmx-red: var(--vmx-pgm);
+  --vmx-red-lo: var(--vmx-pgm-lo);
+  --vmx-beige: #cfd6e4;
+  --vmx-beige-dim: rgba(207, 214, 228, 0.12);
+
+  --vmx-r: 12px;
+  --vmx-r-sm: 8px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(1200px 520px at 78% -18%, rgba(255, 68, 56, 0.055), transparent 64%),
+    radial-gradient(900px 420px at 8% 112%, rgba(47, 211, 111, 0.045), transparent 62%),
+    var(--vmx-bg);
+  color: var(--vmx-text);
+  font-size: 12px;
+  user-select: none;
+  position: relative;
+}
+
+/* thin, unobtrusive scrollbars everywhere inside the console */
+.vmx ::-webkit-scrollbar { width: 9px; height: 9px; }
+.vmx ::-webkit-scrollbar-track { background: transparent; }
+.vmx ::-webkit-scrollbar-thumb { background: var(--vmx-raise); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
+.vmx ::-webkit-scrollbar-thumb:hover { background: var(--vmx-line); background-clip: padding-box; }
+
+@keyframes vmxBlink { 50% { filter: brightness(1.75); } }
+@keyframes vmxPulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+
+/* ------------------------------- buttons -------------------------------- */
+.vmx .vmx-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  background: var(--vmx-panel-hi);
+  border: 1px solid var(--vmx-line);
+  box-shadow: inset 0 1px 0 var(--vmx-edge);
+  color: var(--vmx-text-dim);
+  font-size: 12px; font-weight: 600; letter-spacing: .01em;
+  height: 32px; padding: 0 14px;
+  cursor: pointer; border-radius: var(--vmx-r-sm);
+  line-height: 1; white-space: nowrap;
+  transition: background .13s ease, color .13s ease, border-color .13s ease, box-shadow .13s ease, transform .1s ease;
+}
+.vmx .vmx-btn:hover { background: var(--vmx-raise); color: var(--vmx-text); border-color: #3a4356; }
+.vmx .vmx-btn:active { transform: translateY(1px); background: var(--vmx-panel); }
+/* engaged — External / PlayList / Pause Inputs. Never red: engaged is not on air. */
+.vmx .vmx-btn.on {
+  background: linear-gradient(180deg, rgba(51, 182, 216, .22), rgba(51, 182, 216, .10));
+  border-color: var(--vmx-cyan); color: #d7f4fd;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), 0 0 0 1px rgba(51, 182, 216, .18);
+}
+/* the recorders and the stream: this IS on air, so this IS red */
+.vmx .vmx-btn.on.blink {
+  background: linear-gradient(180deg, var(--vmx-pgm), var(--vmx-pgm-lo));
+  border-color: var(--vmx-pgm); color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22), 0 0 18px var(--vmx-pgm-glow);
+  animation: vmxBlink 1.1s steps(2, start) infinite;
+}
+.vmx .vmx-gear { padding: 0; width: 32px; }
+.vmx .vmx-icon { padding: 0; width: 32px; font-size: 13px; }
+.vmx .vmx-help { font-weight: 800; }
+.vmx .vmx-wide { min-width: 78px; }
+
+/* the two buttons that decide whether anything leaves this computer */
+.vmx .vmx-primary {
+  height: 36px; padding: 0 16px; font-size: 12.5px; font-weight: 700;
+  color: var(--vmx-text);
+  background: linear-gradient(180deg, var(--vmx-raise), var(--vmx-panel-hi));
+  letter-spacing: .015em;
+}
+.vmx .vmx-primary .vmx-glyph { font-size: 13px; opacity: .85; }
+.vmx .vmx-primary.rec:hover { border-color: var(--vmx-pgm); color: #fff; box-shadow: 0 0 0 1px rgba(255, 68, 56, .22); }
+.vmx .vmx-primary.go:hover { border-color: var(--vmx-pgm); color: #fff; box-shadow: 0 0 0 1px rgba(255, 68, 56, .22); }
+.vmx .vmx-primary.on .vmx-glyph { opacity: 1; }
+.vmx-pair { display: flex; align-items: stretch; }
+.vmx-pair .vmx-primary { border-radius: var(--vmx-r-sm) 0 0 var(--vmx-r-sm); border-right-width: 0; }
+.vmx-pair .vmx-gear { height: 36px; border-radius: 0 var(--vmx-r-sm) var(--vmx-r-sm) 0; }
+.vmx-bsep { width: 1px; align-self: stretch; margin: 6px 5px; background: var(--vmx-line); }
+
+/* ----------------------------- command bar ------------------------------ */
+.vmx-cmd {
+  flex: none; height: 58px;
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 14px;
+  background: linear-gradient(180deg, #12161f, #0c0f16);
+  border-bottom: 1px solid var(--vmx-border);
+  box-shadow: 0 1px 0 var(--vmx-beige-dim), 0 10px 26px rgba(0, 0, 0, .45);
+  position: relative; z-index: 30;
+}
+.vmx-cmd-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.vmx-cmd-names { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.vmx-cmd-name { font-size: 13px; font-weight: 700; color: var(--vmx-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vmx-cmd-sub {
+  font-size: 11px; color: var(--vmx-amber); min-height: 13px;
+  max-width: 42ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.vmx-cmd-sub:empty::before { content: 'Standing by'; color: var(--vmx-text-mute); }
+
+/* the lamp — the first thing anyone looks at */
+.vmx-lamp {
+  flex: none; display: flex; align-items: center; gap: 9px;
+  height: 36px; padding: 0 15px 0 13px; border-radius: 999px;
+  background: var(--vmx-panel); border: 1px solid var(--vmx-line);
+  transition: background .2s ease, border-color .2s ease;
+}
+.vmx-lamp-dot { width: 10px; height: 10px; border-radius: 50%; background: #39414f; flex: none; }
+.vmx-lamp-txt { font-size: 11px; font-weight: 800; letter-spacing: .16em; color: var(--vmx-text-mute); }
+.vmx-lamp.rec { background: linear-gradient(180deg, rgba(240, 180, 41, .16), rgba(240, 180, 41, .06)); border-color: rgba(240, 180, 41, .5); }
+.vmx-lamp.rec .vmx-lamp-dot { background: var(--vmx-amber); box-shadow: 0 0 10px rgba(240, 180, 41, .8); animation: vmxPulse 1.6s ease-in-out infinite; }
+.vmx-lamp.rec .vmx-lamp-txt { color: #ffdf9e; }
+.vmx-lamp.on { background: linear-gradient(180deg, rgba(255, 68, 56, .26), rgba(255, 68, 56, .08)); border-color: var(--vmx-pgm); }
+.vmx-lamp.on .vmx-lamp-dot { background: var(--vmx-pgm); box-shadow: 0 0 12px var(--vmx-pgm); animation: vmxPulse 1.2s ease-in-out infinite; }
+.vmx-lamp.on .vmx-lamp-txt { color: #ffd9d5; }
+
+/* telemetry chips */
+.vmx-cmd-tele { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.vmx-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px;
+  border-radius: var(--vmx-r-sm); background: var(--vmx-panel); border: 1px solid var(--vmx-line-soft);
+  font-size: 11px; color: var(--vmx-text-mute); white-space: nowrap;
+}
+.vmx-chip.hidden { display: none; }
+.vmx-chip em { font-style: normal; font-size: 9.5px; font-weight: 700; letter-spacing: .1em; }
+.vmx-chip b { color: var(--vmx-text); font-weight: 700; font-variant-numeric: tabular-nums; }
+.vmx-chip i { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.vmx-chip.rec { border-color: rgba(240, 180, 41, .45); background: rgba(240, 180, 41, .09); color: #ffdf9e; font-weight: 700; }
+.vmx-chip.rec i { background: var(--vmx-amber); box-shadow: 0 0 7px rgba(240, 180, 41, .9); animation: vmxPulse 1.6s ease-in-out infinite; }
+.vmx-chip.live { border-color: var(--vmx-pgm); background: rgba(255, 68, 56, .12); color: #ffd9d5; font-weight: 700; }
+.vmx-chip.live i { background: var(--vmx-pgm); box-shadow: 0 0 7px var(--vmx-pgm); animation: vmxPulse 1.2s ease-in-out infinite; }
+.vmx-chip.live b, .vmx-chip.rec b { color: inherit; }
+
+.vmx-cmd-acts { display: flex; align-items: center; gap: 6px; }
+
+/* ------------------------- set-up tools drawer -------------------------- */
+.vmx-drawer {
+  position: absolute; top: 58px; right: 12px; z-index: 65;
+  display: flex; flex-direction: column; gap: 12px; padding: 14px;
+  background: var(--vmx-panel-hi); border: 1px solid var(--vmx-line); border-radius: var(--vmx-r);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, .7), inset 0 1px 0 var(--vmx-edge);
+}
+.vmx-drawer.hidden { display: none; }
+.vmx-drawer-grp { display: flex; flex-direction: column; gap: 7px; }
+.vmx-drawer-lbl { font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--vmx-text-mute); }
+.vmx-drawer-row { display: flex; gap: 6px; }
+
+/* ================================ STAGE ================================== */
+.vmx-mons {
+  flex: 1 1 auto; min-height: 0;
+  display: grid; grid-template-columns: 1fr 156px 1.34fr; gap: 10px;
+  padding: 10px 12px 8px;
+}
+.vmx-mon {
+  min-width: 0; min-height: 0; display: flex; flex-direction: column;
+  background: #000; border-radius: var(--vmx-r); overflow: hidden;
+  border: 1px solid var(--vmx-line);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .55);
+  transition: box-shadow .2s ease, border-color .2s ease;
+}
+/* the bezel is the state: green edge = lined up, red edge = on air */
+.vmx-mon.pv  { border-color: rgba(47, 211, 111, .42); box-shadow: 0 0 0 1px rgba(47, 211, 111, .12), 0 14px 40px rgba(0, 0, 0, .55); }
+.vmx-mon.pgm { border-color: rgba(255, 68, 56, .5); box-shadow: 0 0 0 1px rgba(255, 68, 56, .16), 0 0 34px rgba(255, 68, 56, .10), 0 14px 40px rgba(0, 0, 0, .55); }
+.vmx.on-air .vmx-mon.pgm { border-color: var(--vmx-pgm); box-shadow: 0 0 0 2px var(--vmx-pgm-glow), 0 0 44px rgba(255, 68, 56, .22), 0 14px 40px rgba(0, 0, 0, .55); }
+
+.vmx-mon-title {
+  flex: none; height: 30px; display: flex; align-items: center; gap: 9px;
+  padding: 0 11px; font-size: 12px; color: var(--vmx-text);
+  background: var(--vmx-panel-hi); border-bottom: 1px solid var(--vmx-border);
+}
+.vmx-mon-tag {
+  flex: none; font-size: 10px; font-weight: 800; letter-spacing: .15em;
+  padding: 3px 8px; border-radius: 5px; line-height: 1;
+}
+.vmx-mon-title.pv  .vmx-mon-tag { background: var(--vmx-pv); color: #05230f; }
+.vmx-mon-title.pgm .vmx-mon-tag { background: var(--vmx-pgm); color: #2b0300; box-shadow: 0 0 14px var(--vmx-pgm-glow); }
+.vmx-mon-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.vmx-mon-note { flex: none; font-size: 10.5px; color: var(--vmx-text-mute); }
+.vmx-mon-gear { margin-left: auto; cursor: pointer; color: var(--vmx-text-mute); transition: color .12s ease, transform .12s ease; }
+.vmx-mon-gear:hover { color: var(--vmx-text); transform: rotate(35deg); }
+.vmx-mon-body { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; background: #000; }
+.vmx-mon-body canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+
+/* --------------------------- the take deck ------------------------------ */
+.vmx-center {
+  min-height: 0; display: flex; flex-direction: column; gap: 7px;
+  padding: 8px; border-radius: var(--vmx-r);
+  background: linear-gradient(180deg, var(--vmx-panel), #0d1017);
+  border: 1px solid var(--vmx-line-soft);
+  box-shadow: inset 0 1px 0 var(--vmx-edge);
+}
+.vmx-deck-head {
+  flex: none; text-align: center; font-size: 9.5px; font-weight: 800;
+  letter-spacing: .22em; color: var(--vmx-text-mute); padding-bottom: 1px;
+}
+.vmx-tbtn {
+  flex: none;
+  background: var(--vmx-panel-hi); border: 1px solid var(--vmx-line);
+  box-shadow: inset 0 1px 0 var(--vmx-edge);
+  color: var(--vmx-text-dim); font-size: 11.5px; font-weight: 700;
+  height: 32px; cursor: pointer; border-radius: var(--vmx-r-sm);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px;
+  transition: background .12s ease, color .12s ease, border-color .12s ease, box-shadow .12s ease, transform .1s ease;
+}
+.vmx-tbtn:hover { background: var(--vmx-raise); color: var(--vmx-text); border-color: #3a4356; }
+.vmx-tbtn:active { transform: translateY(1px); }
+/* CUT is the one control that changes what the room sees instantly */
+.vmx-tbtn.cut {
+  height: 44px; font-size: 15px; font-weight: 800; letter-spacing: .16em;
+  color: #fff;
+  background: linear-gradient(180deg, #43101097, #2a0a0a);
+  border-color: rgba(255, 68, 56, .55);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .1), 0 0 0 1px rgba(255, 68, 56, .1);
+}
+.vmx-tbtn.cut:hover {
+  background: linear-gradient(180deg, var(--vmx-pgm), var(--vmx-pgm-lo));
+  border-color: var(--vmx-pgm); box-shadow: 0 0 22px var(--vmx-pgm-glow);
+}
+.vmx-tbtn.ftb { font-size: 10px; letter-spacing: .08em; }
+.vmx-tbtn.on {
+  background: linear-gradient(180deg, var(--vmx-pgm), var(--vmx-pgm-lo)); color: #fff;
+  border-color: var(--vmx-pgm);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .2), 0 0 16px var(--vmx-pgm-glow);
+  animation: vmxBlink 1.1s steps(2, start) infinite;
+}
+.vmx-slots { flex: none; display: flex; flex-direction: column; gap: 5px; }
+.vmx-slot { display: flex; }
+.vmx-slot .vmx-slot-go { flex: 1; min-width: 0; border-right: none; border-radius: var(--vmx-r-sm) 0 0 var(--vmx-r-sm); height: 28px; font-size: 11px; font-weight: 600; }
+.vmx-slot .vmx-slot-arrow {
+  width: 20px; flex: none; cursor: pointer; border-radius: 0 var(--vmx-r-sm) var(--vmx-r-sm) 0;
+  background: var(--vmx-panel-hi); border: 1px solid var(--vmx-line);
+  box-shadow: inset 0 1px 0 var(--vmx-edge);
+  color: var(--vmx-text-mute); font-size: 9px; padding: 0;
+  transition: color .1s ease, background .12s ease;
+}
+.vmx-slot .vmx-slot-arrow:hover { color: var(--vmx-text); background: var(--vmx-raise); }
+
+/* T-bar + master meter, side by side — the two things you watch while mixing */
+.vmx-tbar-wrap { flex: 1 1 auto; min-height: 74px; display: flex; gap: 8px; justify-content: center; padding: 4px 0 2px; }
+.vmx-tbar {
+  position: relative; width: 40px;
+  background: linear-gradient(180deg, #05070a, #10141c);
+  border: 1px solid var(--vmx-line); border-radius: var(--vmx-r-sm); cursor: ns-resize;
+  box-shadow: inset 0 2px 10px rgba(0, 0, 0, .8);
+}
+/* the throw is read bottom-to-top: green where preview still is, red where it
+   has become program, so the handle's position alone says how far over you are */
+.vmx-tbar::before {
+  content: ''; position: absolute; left: 3px; right: 3px; top: 3px; bottom: 3px;
+  border-radius: 5px;
+  background: linear-gradient(180deg, rgba(255, 68, 56, .28) 0%, rgba(255, 68, 56, .06) 42%, rgba(47, 211, 111, .06) 58%, rgba(47, 211, 111, .26) 100%);
+}
+.vmx-tbar-handle {
+  position: absolute; left: -5px; right: -5px; height: 18px; bottom: 0;
+  background: linear-gradient(180deg, #e9edf4 0 6px, #97a0b3 6px 9px, #cfd6e4 9px 100%);
+  border: 1px solid #05070a; border-radius: 5px;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, .8);
+}
+.vmx-meters { flex: none; display: flex; align-items: stretch; }
+.vmx-meters canvas {
+  height: 100%; width: 26px; border-radius: 5px;
+  border: 1px solid var(--vmx-line); background: #05070a;
+}
+
+/* ================================ DECK =================================== */
+/* sources on the left, the audio mixer docked right — both BELOW the monitors,
+   which always keep their space (a mixer that covers program is a liability) */
+/* Height is fixed, and chosen so a 208px card's picture lands on 16:9 with two
+   control rows underneath — the shelf fits the cards instead of the cards
+   rattling around inside it. It also keeps the meter canvases (which resize to
+   their own rendered height every frame) from feeding back into layout. */
+.vmx-mid { flex: none; height: 236px; display: flex; gap: 10px; padding: 0 12px 8px; min-height: 0; }
+
+.vmx-rail {
+  flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column;
+  background: linear-gradient(180deg, var(--vmx-panel), #0c0f16);
+  border: 1px solid var(--vmx-line-soft); border-radius: var(--vmx-r);
+  box-shadow: inset 0 1px 0 var(--vmx-edge);
+}
+.vmx-rail-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 9px 12px 7px; }
+.vmx-rail-title { font-size: 10px; font-weight: 800; letter-spacing: .2em; color: var(--vmx-text-dim); }
+.vmx-rail-count {
+  min-width: 20px; height: 18px; padding: 0 6px; border-radius: 9px;
+  background: var(--vmx-raise); color: var(--vmx-text-dim);
+  font-size: 10.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;
+}
+.vmx-rail-hint { font-size: 11px; color: var(--vmx-text-mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vmx-rail-hint b { color: var(--vmx-text-dim); font-weight: 700; }
+.vmx .vmx-add {
+  margin-left: auto; flex: none;
+  background: linear-gradient(180deg, rgba(47, 211, 111, .18), rgba(47, 211, 111, .07));
+  border-color: rgba(47, 211, 111, .5); color: #bff4d5; font-weight: 700;
+}
+.vmx .vmx-add:hover { background: linear-gradient(180deg, rgba(47, 211, 111, .3), rgba(47, 211, 111, .12)); border-color: var(--vmx-pv); color: #fff; }
+
+.vmx-inputs-wrap { flex: 1 1 auto; min-height: 0; padding: 0 12px 11px; overflow-x: auto; overflow-y: hidden; }
+.vmx-inputs { display: flex; align-items: stretch; gap: 9px; height: 100%; }
+
+/* ---- a source card ---- */
+.vmx-input {
+  position: relative; width: 208px; flex: none;
+  background: var(--vmx-panel-hi); border: 1px solid var(--vmx-line-soft);
+  border-radius: 10px; overflow: hidden;
+  display: flex; flex-direction: column;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .45);
+  transition: box-shadow .16s ease, transform .12s ease, border-color .16s ease;
+  cursor: pointer;
+}
+.vmx-input:hover { transform: translateY(-2px); border-color: #3a4356; }
+.vmx-input.sel-pv  { border-color: var(--vmx-pv); box-shadow: 0 0 0 2px var(--vmx-pv-glow), 0 10px 24px rgba(0, 0, 0, .55); }
+.vmx-input.sel-pgm { border-color: var(--vmx-pgm); box-shadow: 0 0 0 2px var(--vmx-pgm-glow), 0 10px 24px rgba(0, 0, 0, .55); }
+
+.vmx-in-shell { position: relative; flex: 1 1 auto; min-height: 0; background: #000; }
+/* The bitmap is resized to this box every frame (see drawThumbs), so the canvas
+   fills it exactly and the ONLY letterboxing is the honest one drawInputTo adds
+   when the source's own shape differs. */
+.vmx-in-thumb { width: 100%; height: 100%; display: block; background: #000; }
+.vmx-in-meter { position: absolute; right: 0; top: 0; bottom: 0; width: 5px; height: auto; }
+.vmx-in-num {
+  position: absolute; left: 7px; top: 7px; z-index: 2;
+  min-width: 19px; height: 19px; padding: 0 5px; border-radius: 5px;
+  background: rgba(5, 7, 10, .72); backdrop-filter: blur(3px);
+  color: var(--vmx-text); font-size: 11px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+}
+.vmx-input.sel-pv  .vmx-in-num { background: var(--vmx-pv); color: #05230f; }
+.vmx-input.sel-pgm .vmx-in-num { background: var(--vmx-pgm); color: #2b0300; }
+.vmx-in-state {
+  position: absolute; right: 9px; top: 7px; z-index: 2;
+  padding: 3px 7px; border-radius: 5px; line-height: 1;
+  font-size: 9.5px; font-weight: 800; letter-spacing: .12em;
+  display: none;
+}
+.vmx-input.sel-pv  .vmx-in-state { display: block; background: var(--vmx-pv); color: #05230f; }
+.vmx-input.sel-pgm .vmx-in-state { display: block; background: var(--vmx-pgm); color: #2b0300; box-shadow: 0 0 12px var(--vmx-pgm-glow); }
+/* the name rides ON the picture — the card is small, the picture is the point */
+.vmx-in-title {
+  position: absolute; left: 0; right: 5px; bottom: 0; z-index: 2;
+  padding: 14px 8px 5px;
+  background: linear-gradient(180deg, transparent, rgba(5, 7, 10, .88));
+  font-size: 11.5px; font-weight: 700; color: var(--vmx-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.vmx-in-row { flex: none; display: flex; background: var(--vmx-panel); border-top: 1px solid var(--vmx-border); }
+.vmx-in-row button {
+  flex: 1; min-width: 0; height: 24px;
+  background: none; border: none; border-right: 1px solid var(--vmx-border);
+  color: var(--vmx-text-mute); font-size: 10px; font-weight: 600; padding: 0 2px; cursor: pointer;
+  white-space: nowrap; overflow: hidden;
+  transition: background .1s ease, color .1s ease;
+}
+.vmx-in-row button:last-child { border-right: none; }
+.vmx-in-row button:hover { background: var(--vmx-raise); color: var(--vmx-text); }
+.vmx-in-row button.take { color: #ffb3ad; font-weight: 800; letter-spacing: .08em; flex: 1.5; }
+.vmx-in-row button.take:hover { background: var(--vmx-pgm); color: #fff; }
+.vmx-in-row button.on { background: rgba(51, 182, 216, .2); color: #d7f4fd; font-weight: 700; box-shadow: inset 0 -2px 0 var(--vmx-cyan); }
+.vmx-in-row button.ov-on { background: rgba(51, 182, 216, .2); color: #d7f4fd; font-weight: 700; box-shadow: inset 0 -2px 0 var(--vmx-cyan); }
+.vmx-in-row button[data-act="close"]:hover { background: var(--vmx-pgm); color: #fff; }
+.vmx-in-row .vmx-in-lbl {
+  flex: 1 1 auto; min-width: 0; align-self: center; padding: 0 8px;
+  font-size: 8.5px; font-weight: 800; letter-spacing: .12em; color: var(--vmx-text-mute);
+  border-right: 1px solid var(--vmx-border); height: 24px; line-height: 24px;
+  white-space: nowrap; overflow: hidden;
+}
+.vmx-in-row.adv button { flex: 0 0 30px; }
+.vmx-in-slideno { flex: 0 0 auto; padding: 0 6px; font-size: 10px; color: var(--vmx-text-mute); align-self: center; }
+
+/* audio-only inputs render as slim vertical tabs (soundboard-style) */
+.vmx-input.audio-only { width: 42px; }
+.vmx-input.audio-only .vmx-in-vlabel {
+  flex: 1; writing-mode: vertical-rl; transform: rotate(180deg);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600; color: var(--vmx-text-dim); cursor: default;
+  padding: 6px 0; overflow: hidden; white-space: nowrap;
+}
+.vmx-input.audio-only .vmx-in-meter { top: 4px; bottom: 76px; right: 3px; }
+.vmx-input.audio-only .vmx-in-row button { font-size: 10px; padding: 0; }
+
+/* add-a-source tile, at the end of the rail where the eye finishes */
+.vmx-in-add {
+  width: 132px; flex: none; align-self: stretch;
+  background: transparent; border: 1.5px dashed var(--vmx-line);
+  border-radius: 10px; color: var(--vmx-text-mute); cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  font-size: 11px; font-weight: 600;
+  transition: border-color .14s ease, color .14s ease, background .14s ease;
+}
+.vmx-in-add span { font-size: 21px; line-height: 1; }
+.vmx-in-add:hover { border-color: var(--vmx-pv); color: #bff4d5; background: rgba(47, 211, 111, .06); }
+
+/* nothing loaded yet — say what to do, rather than showing an empty shelf */
+.vmx-rail-empty {
+  flex: 1 1 auto; display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
+  gap: 4px; padding: 0 4px 0 6px; max-width: 460px;
+}
+.vmx-rail-empty b { font-size: 13px; color: var(--vmx-text); }
+.vmx-rail-empty span { font-size: 11.5px; color: var(--vmx-text-mute); line-height: 1.5; }
+
+/* ------------------------------- footer --------------------------------- */
+.vmx-status {
+  flex: none; height: 30px;
+  display: flex; align-items: center; gap: 14px;
+  background: var(--vmx-bg-deep); border-top: 1px solid var(--vmx-border);
+  padding: 0 14px; font-size: 11px; color: var(--vmx-text-mute);
+}
+.vmx-keys { display: flex; align-items: center; gap: 7px; }
+.vmx-keys b {
+  display: inline-block; min-width: 17px; padding: 2px 5px; margin: 0 1px;
+  background: var(--vmx-panel-hi); border: 1px solid var(--vmx-line); border-bottom-width: 2px;
+  border-radius: 4px; color: var(--vmx-text-dim); font-size: 10px; font-weight: 700; text-align: center;
+}
+.vmx-keysep { width: 1px; height: 12px; background: var(--vmx-line); margin: 0 4px; }
+.vmx-status-tele { margin-left: auto; display: flex; align-items: center; gap: 5px; }
+.vmx-status-tele .vmx-chip { height: 21px; padding: 0 8px; background: transparent; border-color: var(--vmx-line-soft); }
+.vmx-status-right { color: var(--vmx-text-mute); padding-left: 4px; }
+.vmx-status-right b { color: var(--vmx-text-dim); font-weight: 600; }
+
+/* hidden media holder — elements must stay "renderable" for drawImage */
+.vmx-holder { position: absolute; width: 2px; height: 2px; overflow: hidden; opacity: 0; pointer-events: none; left: 0; top: 0; }
+
+/* narrower windows: the deck gives up its hint text before anything shrinks */
+@media (max-width: 1360px) {
+  .vmx-rail-hint { display: none; }
+  .vmx-mons { grid-template-columns: 1fr 138px 1.25fr; }
+}
+@media (max-width: 1180px) {
+  .vmx-keys { display: none; }
+}
+
+
+/* ------------------------------ pop-up menu ----------------------------- */
+.vmx-menu {
+  position: absolute; z-index: 60; min-width: 200px;
+  background: var(--vmx-panel-hi); border: 1px solid var(--vmx-line); border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.65), inset 0 1px 0 var(--vmx-edge);
+  display: flex; flex-direction: column; padding: 4px; overflow: hidden;
+}
+.vmx-menu button {
+  background: none; border: none; color: var(--vmx-text); text-align: left;
+  font-size: 12px; padding: 7px 10px; cursor: pointer; border-radius: var(--vmx-r-sm);
+}
+.vmx-menu button:hover { background: linear-gradient(#4a82dd, #3564b8); color: #fff; }
+.vmx-menu .vmx-menu-head { font-size: 10px; color: #8b8f99; text-transform: uppercase; letter-spacing: .6px; padding: 5px 10px 2px; }
+.vmx-menu .vmx-menu-sep { height: 1px; background: rgba(255, 255, 255, 0.08); margin: 3px 6px; }
+.vmx-menu label { display: flex; align-items: center; gap: 8px; padding: 5px 10px; font-size: 12px; }
+
+/* -------------------------------- modal --------------------------------- */
+.vmx-modal {
+  position: absolute; inset: 0; z-index: 70;
+  background: rgba(3, 5, 9, 0.6);
+  backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center;
+}
+.vmx-modal.hidden { display: none; }
+.vmx-modal-box {
+  width: min(560px, 92%); max-height: 84%; overflow-y: auto;
+  background: linear-gradient(var(--vmx-panel-hi), var(--vmx-panel));
+  border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.75);
+  padding: 0 0 12px;
+}
+.vmx-modal-box h3 {
+  margin: 0 0 10px; padding: 8px 12px; font-size: 13px; color: #fff;
+  background: linear-gradient(var(--vmx-line), var(--vmx-panel-hi)); border-bottom: 1px solid var(--vmx-border);
+  border-radius: 8px 8px 0 0;
+  box-shadow: inset 0 1px 0 var(--vmx-edge);
+  display: flex; align-items: center;
+}
+.vmx-modal-box h3 .vmx-modal-x { margin-left: auto; cursor: pointer; color: var(--vmx-text-mute); font-weight: 400; transition: color .1s ease; }
+.vmx-modal-box h3 .vmx-modal-x:hover { color: #fff; }
+.vmx-modal-box .vmx-form { display: flex; flex-direction: column; gap: 8px; padding: 0 14px; }
+.vmx-modal-box label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--vmx-text-dim); }
+.vmx-modal-box label.vmx-inline { flex-direction: row; align-items: center; gap: 8px; color: var(--vmx-text-dim); font-size: 12px; }
+.vmx-modal-box input[type="text"], .vmx-modal-box input[type="password"], .vmx-modal-box input[type="number"], .vmx-modal-box select, .vmx-modal-box textarea {
+  background: var(--vmx-panel); border: 1px solid var(--vmx-raise); border-radius: var(--vmx-r-sm);
+  color: var(--vmx-text); font-size: 12px; padding: 6px 8px; outline: none;
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+.vmx-modal-box input:focus, .vmx-modal-box select:focus, .vmx-modal-box textarea:focus {
+  border-color: var(--vmx-blue); box-shadow: 0 0 6px rgba(77, 151, 255, 0.35);
+}
+.vmx-modal-box input[type="color"] { width: 46px; height: 26px; padding: 0; border: 1px solid var(--vmx-raise); border-radius: var(--vmx-r-sm); background: var(--vmx-panel); }
+/* ---- Clap sync ---- live level + movement, so the operator can see it is
+   actually listening before they clap (and see that their clap registered). */
+.vmx-modal-box .vmx-clap-meters { padding: 8px 14px 0; display: flex; flex-direction: column; gap: 6px; }
+.vmx-modal-box .vmx-clap-meters.hidden { display: none; }
+.vmx-modal-box .vmx-clap-row { display: grid; grid-template-columns: 74px 1fr; align-items: center; gap: 8px; font-size: 11px; color: var(--vmx-text-dim); }
+.vmx-modal-box .vmx-clap-bar { height: 10px; background: var(--vmx-panel); border: 1px solid var(--vmx-raise); border-radius: var(--vmx-r-sm); overflow: hidden; }
+.vmx-modal-box .vmx-clap-bar > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #2f9e44, #ffd43b 70%, var(--vmx-red)); transition: width .06s linear; }
+.vmx-modal-box .vmx-clap-hint { font-size: 11px; color: var(--vmx-text-mute); margin: 2px 0 0; }
+
+/* ---- Colour Adjust (Input settings) ----
+   Laid out as two columns like vMix's own panel, so an operator who knows that
+   dialog finds every control exactly where they expect it. The channel labels
+   are tinted their own colour for the same reason. */
+.vmx-modal-box .vmx-colour { margin: 10px 14px 0; border: 1px solid var(--vmx-raise); border-radius: 5px; background: #16181d; }
+.vmx-modal-box .vmx-colour > summary {
+  cursor: pointer; padding: 8px 10px; font-size: 12px; color: var(--vmx-text); user-select: none;
+  list-style: none; display: flex; align-items: center; gap: 8px;
+}
+.vmx-modal-box .vmx-colour > summary::-webkit-details-marker { display: none; }
+.vmx-modal-box .vmx-colour > summary::before { content: '▸'; color: #7d828d; font-size: 10px; }
+.vmx-modal-box .vmx-colour[open] > summary::before { content: '▾'; }
+.vmx-modal-box .vmx-col-on {
+  font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  background: var(--vmx-blue, var(--vmx-azure)); color: #fff; border-radius: var(--vmx-r-sm); padding: 1px 5px;
+}
+.vmx-modal-box .vmx-col-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; padding: 4px 10px 10px; }
+.vmx-modal-box .vmx-col-side { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.vmx-modal-box .vmx-col-row { display: grid; grid-template-columns: 84px 52px 1fr; align-items: center; gap: 8px; }
+.vmx-modal-box .vmx-col-lbl { font-size: 11px; text-align: right; color: var(--vmx-text-dim); }
+.vmx-modal-box .vmx-col-lbl.colour-r { color: var(--vmx-red); }
+.vmx-modal-box .vmx-col-lbl.colour-g { color: #3fb950; }
+.vmx-modal-box .vmx-col-lbl.colour-b { color: #5b8bf5; }
+.vmx-modal-box .vmx-col-lbl.colour-s { color: #d264c9; }
+.vmx-modal-box .vmx-col-num { width: 52px; padding: 4px 5px !important; font-size: 11px !important; }
+.vmx-modal-box .vmx-col-sld { width: 100%; min-width: 0; accent-color: var(--vmx-blue, var(--vmx-azure)); }
+.vmx-modal-box .vmx-col-btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.vmx-modal-box .vmx-col-btns .vmx-btn { flex: 1 1 auto; font-size: 11px; padding: 5px 8px; }
+@media (max-width: 720px) { .vmx-modal-box .vmx-col-grid { grid-template-columns: 1fr; } }
+
+.vmx-modal-box .vmx-form-btns { display: flex; gap: 6px; justify-content: flex-end; padding: 12px 14px 0; }
+.vmx-modal-box .vmx-note { font-size: 11px; color: var(--vmx-text-mute); padding: 0 14px; margin: 6px 0 0; line-height: 1.5; }
+.vmx-modal-box .vmx-list { display: flex; flex-direction: column; gap: 4px; padding: 0 14px; }
+.vmx-modal-box .vmx-list-item {
+  display: flex; align-items: center; gap: 8px; background: var(--vmx-panel); border: 1px solid var(--vmx-line); border-radius: var(--vmx-r-sm); padding: 6px 8px; font-size: 12px;
+}
+.vmx-modal-box .vmx-screen-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 14px; }
+.vmx-modal-box .vmx-screen-tile { background: var(--vmx-panel); border: 1px solid var(--vmx-line); border-radius: var(--vmx-r-sm); cursor: pointer; padding: 4px; text-align: center; transition: border-color .12s ease; }
+.vmx-modal-box .vmx-screen-tile:hover { border-color: var(--vmx-blue); }
+.vmx-modal-box .vmx-screen-tile img { width: 100%; height: 84px; object-fit: contain; background: #000; border-radius: 2px; }
+.vmx-modal-box .vmx-screen-tile div { font-size: 10px; color: var(--vmx-text-dim); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vmx-modal-box .vmx-help-body { padding: 0 14px; font-size: 12px; line-height: 1.65; color: var(--vmx-text-dim); }
+.vmx-modal-box .vmx-help-body b { color: #fff; }
+.vmx-modal-box .vmx-help-body .pv-chip, .vmx-modal-box .vmx-help-body .pgm-chip {
+  display: inline-block; padding: 0 6px; font-weight: 700; color: #fff; border-radius: var(--vmx-r-sm);
+}
+.vmx-modal-box .vmx-help-body .pv-chip { background: var(--vmx-orange-lo); }
+.vmx-modal-box .vmx-help-body .pgm-chip { background: var(--vmx-green-lo); }
+
+/* --------------------- Input Select (vMix-style) dialog ------------------ */
+.vmx-modal-box.vmx-inputsel {
+  width: min(960px, 94%); height: min(640px, 86%);
+  display: flex; flex-direction: column; padding: 0; overflow: hidden;
+}
+.vmx-is-head {
+  display: flex; align-items: center; gap: 8px; padding: 9px 12px; font-size: 13px; color: #fff;
+  background: linear-gradient(var(--vmx-line), var(--vmx-panel-hi)); border-bottom: 1px solid var(--vmx-border); flex: 0 0 auto;
+  box-shadow: inset 0 1px 0 var(--vmx-edge);
+}
+.vmx-is-head .vmx-modal-x { margin-left: auto; cursor: pointer; color: var(--vmx-text-mute); font-weight: 400; }
+.vmx-is-head .vmx-modal-x:hover { color: #fff; }
+.vmx-is-body { flex: 1; display: flex; min-height: 0; overflow: hidden; }
+.vmx-is-side {
+  flex: 0 0 230px; background: var(--vmx-bg); border-right: 1px solid var(--vmx-border);
+  overflow-y: auto; display: flex; flex-direction: column; padding: 4px 0;
+}
+.vmx-is-cat {
+  display: flex; align-items: center; gap: 10px; padding: 8px 14px; width: 100%;
+  background: none; border: none; color: var(--vmx-text-dim); font-size: 12px; text-align: left; cursor: pointer;
+  transition: background .1s ease;
+}
+.vmx-is-cat:hover { background: #1e2027; }
+.vmx-is-cat.sel { background: linear-gradient(90deg, #1c8a44, #157a39); color: #fff; box-shadow: inset 2px 0 0 #4fe288; }
+.vmx-is-cat-ic { flex: 0 0 18px; text-align: center; font-size: 14px; }
+.vmx-is-main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: #191a20; }
+.vmx-is-hint { flex: 0 0 auto; background: var(--vmx-panel); color: var(--vmx-text-dim); font-size: 11px; padding: 8px 14px; }
+.vmx-is-content { flex: 1; padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.vmx-is-content .vmx-form { padding: 0; }
+.vmx-is-browse-row { display: flex; gap: 8px; flex: 0 0 auto; }
+.vmx-is-browse-row input[type="text"] {
+  flex: 1; background: var(--vmx-panel); border: 1px solid var(--vmx-raise); border-radius: var(--vmx-r-sm); color: var(--vmx-text); font-size: 12px; padding: 6px 8px; outline: none;
+}
+.vmx-is-preview {
+  flex: 1; min-height: 200px; background: #000; border: 1px solid var(--vmx-line); border-radius: var(--vmx-r-sm);
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.vmx-is-preview video, .vmx-is-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.vmx-is-preview-empty { color: #555; font-size: 12px; }
+.vmx-is-empty {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; color: var(--vmx-text-mute); text-align: center; padding: 20px;
+}
+.vmx-is-empty-ic { font-size: 32px; }
+.vmx-is-empty-note { font-size: 11px; color: #666; max-width: 380px; }
+.vmx-is-photo-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px; overflow-y: auto; align-content: start;
+}
+.vmx-is-photo-tile { background: var(--vmx-panel); border: 2px solid var(--vmx-line); border-radius: var(--vmx-r-sm); cursor: pointer; padding: 2px; transition: border-color .12s ease; }
+.vmx-is-photo-tile:hover { border-color: var(--vmx-blue); }
+.vmx-is-photo-tile.sel { border-color: var(--vmx-green); box-shadow: 0 0 10px rgba(31, 174, 77, 0.35); }
+.vmx-is-photo-tile img { width: 100%; height: 80px; object-fit: cover; display: block; background: #000; border-radius: 2px; }
+.vmx-is-photo-tile div { font-size: 10px; color: var(--vmx-text-dim); padding: 2px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vmx-is-fieldrow { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.vmx-is-fieldrow label { flex: 0 0 auto; flex-direction: row; font-size: 12px; font-weight: 700; color: var(--vmx-text-dim); }
+.vmx-is-fieldrow select { flex: 1; min-width: 0; }
+/* Camera panel: vMix-style label/field rows (Camera, Resolution, Frame Rate…) */
+.vmx-is-camrows { display: grid; grid-template-columns: 96px minmax(0, 420px); gap: 7px 10px; align-items: center; flex: 0 0 auto; }
+.vmx-is-camrows label { text-align: right; font-size: 12px; font-weight: 700; color: var(--vmx-text-dim); }
+.vmx-is-camrows select { min-width: 0; width: 100%; }
+.vmx-is-camactual { flex: 0 0 auto; font-size: 11px; color: #6fbf73; }
+.vmx-is-camwarn { flex: 0 0 auto; font-size: 11px; color: #e8b04b; line-height: 1.35; max-width: 520px; }
+.vmx-is-devlist { display: flex; flex-direction: column; gap: 4px; flex: 0 0 auto; max-height: 160px; overflow-y: auto; }
+.vmx-is-dev {
+  display: flex; align-items: center; gap: 8px; background: var(--vmx-panel); border: 1px solid var(--vmx-line); border-radius: var(--vmx-r-sm);
+  padding: 7px 10px; font-size: 12px; cursor: pointer;
+  transition: border-color .12s ease, background .12s ease;
+}
+.vmx-is-dev:hover { border-color: var(--vmx-blue); }
+.vmx-is-dev.sel { border-color: var(--vmx-green); background: #12301c; box-shadow: 0 0 8px rgba(31, 174, 77, 0.25); }
+.vmx-is-title-preview { flex: 1; min-height: 180px; background: #000; border: 1px solid var(--vmx-line); border-radius: var(--vmx-r-sm); position: relative; overflow: hidden; }
+.vmx-is-title-bar {
+  position: absolute; left: 0; right: 12%; bottom: 10%; padding: 10px 16px;
+  background: linear-gradient(90deg, rgba(12, 14, 20, 0.92), rgba(12, 14, 20, 0));
+  display: flex; flex-direction: column; gap: 2px; font-size: 15px;
+}
+.vmx-is-title-bar.full { inset: 0; right: 0; bottom: 0; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.75); font-size: 22px; text-align: center; }
+.vmx-is-title-bar span { font-size: 11px; opacity: .8; font-weight: 400; }
+
+/* NDI / Desktop Capture — dual sub-tabs (matches real vMix) */
+.vmx-is-ndi-tabs { display: flex; gap: 6px; flex: 0 0 auto; }
+.vmx-is-ndi-tab {
+  background: var(--vmx-panel); color: var(--vmx-text-dim); border: 1px solid var(--vmx-raise); border-bottom: none;
+  border-radius: 5px 5px 0 0; padding: 7px 16px; font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: background .12s ease, color .12s ease;
+}
+.vmx-is-ndi-tab:hover { color: #fff; }
+.vmx-is-ndi-tab.sel { background: var(--vmx-green); color: #fff; border-color: var(--vmx-green); }
+.vmx-is-ndi-head { display: flex; align-items: baseline; gap: 12px; flex: 0 0 auto; padding: 2px 0; border-bottom: 1px solid var(--vmx-panel-hi); }
+.vmx-is-ndi-logo { font-size: 30px; font-weight: 800; letter-spacing: 1px; color: var(--vmx-text); }
+.vmx-is-ndi-logo sup { font-size: 11px; font-weight: 600; color: var(--vmx-text-mute); }
+.vmx-is-ndi-host { font-size: 12px; color: var(--vmx-text-mute); }
+.vmx-is-ndi-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px; overflow-y: auto; align-content: start; flex: 1; min-height: 0;
+}
+.vmx-is-ndi-tile {
+  background: #14161b; border: 2px solid var(--vmx-line); border-radius: 6px; cursor: pointer; padding: 4px;
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+.vmx-is-ndi-tile:hover { border-color: var(--vmx-blue); }
+.vmx-is-ndi-tile.sel { border-color: var(--vmx-green); box-shadow: 0 0 12px rgba(31, 174, 77, 0.4); }
+.vmx-is-ndi-thumb {
+  height: 90px; background: #000; border-radius: var(--vmx-r-sm); display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.vmx-is-ndi-thumb canvas { width: 100%; height: 100%; object-fit: contain; }
+.vmx-is-ndi-glyph { font-size: 20px; font-weight: 800; letter-spacing: 1px; color: #2f6fd6; opacity: .75; }
+.vmx-is-ndi-name { font-size: 12px; color: var(--vmx-text); padding: 5px 4px 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.vmx-is-ndi-machine { font-size: 10px; color: var(--vmx-text-mute); padding: 0 4px 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vmx-is-ndi-opts { display: flex; gap: 20px; flex: 0 0 auto; padding: 6px 2px 0; border-top: 1px solid var(--vmx-panel-hi); }
+.vmx-is-ndi-opts label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--vmx-text-dim); cursor: pointer; }
+.vmx-is-ndi-opts input[type="checkbox"] { accent-color: var(--vmx-green); }
+.vmx-is-ndi-scan { animation: vmxNdiPulse 1.1s ease-in-out infinite; }
+@keyframes vmxNdiPulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+.vmx-is-foot {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+  border-top: 1px solid var(--vmx-border); background: var(--vmx-panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.vmx-is-foot-note { flex: 1; font-size: 11px; color: var(--vmx-text-mute); }
+.vmx-is-foot #vmxIsOk[disabled] { opacity: .4; cursor: not-allowed; }
+
+/* ------------- Streaming Settings (vMix-style multi-destination) --------- */
+.vmx-modal-box.vmx-streamsettings { width: min(520px, 92%); }
+.vmx-ss-tabs { display: flex; gap: 6px; padding: 0 14px 4px; }
+.vmx-ss-tab {
+  width: 42px; height: 32px;
+  background: linear-gradient(#25272e, var(--vmx-panel)); border: 1px solid var(--vmx-line); border-radius: 5px;
+  box-shadow: inset 0 1px 0 var(--vmx-edge);
+  color: var(--vmx-text-dim); font-size: 13px; font-weight: 700; cursor: pointer;
+  transition: border-color .12s ease, background .12s ease, box-shadow .12s ease;
+}
+.vmx-ss-tab:hover { border-color: var(--vmx-blue); box-shadow: inset 0 1px 0 var(--vmx-edge), 0 0 8px rgba(77, 151, 255, 0.3); }
+.vmx-ss-tab.sel {
+  background: linear-gradient(var(--vmx-azure-hi), var(--vmx-azure-lo)); color: #fff; border-color: #0c6b2b;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 0 10px rgba(31, 174, 77, 0.4);
+}
+.vmx-ss-tab.live { position: relative; }
+.vmx-ss-tab.live::after {
+  content: ''; position: absolute; top: 3px; right: 3px; width: 7px; height: 7px;
+  border-radius: 50%; background: var(--vmx-red);
+  box-shadow: 0 0 6px rgba(224, 64, 56, 0.9);
+  animation: vmxBlink 1s steps(2, start) infinite;
+}
+
+/* The one line that says what this destination is doing, above everything else.
+   It used to be a sentence of grey prose between four other paragraphs of grey
+   prose — the hardest thing in the dialog to find, and the only thing an
+   operator opens it for mid-service. */
+.vmx-ss-status {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 4px 14px 10px; padding: 7px 10px;
+  border: 1px solid var(--vmx-line); border-left-width: 3px; border-radius: 5px;
+  background: #16181d; font-size: 11px; color: var(--vmx-text-dim);
+}
+.vmx-ss-status b { color: var(--vmx-text); font-size: 12px; }
+.vmx-ss-lamp { width: 9px; height: 9px; border-radius: 50%; background: #4a4f5a; flex: none; }
+.vmx-ss-state { font-weight: 700; letter-spacing: .04em; text-transform: uppercase; font-size: 10px; }
+.vmx-ss-detail { margin-left: auto; color: var(--vmx-text-mute); }
+.vmx-ss-status.live { border-left-color: var(--vmx-red); }
+.vmx-ss-status.live .vmx-ss-lamp { background: var(--vmx-red); box-shadow: 0 0 7px rgba(224, 64, 56, .9); animation: vmxBlink 1s steps(2, start) infinite; }
+.vmx-ss-status.live .vmx-ss-state { color: var(--vmx-red); }
+.vmx-ss-status.warn { border-left-color: var(--vmx-gold); }
+.vmx-ss-status.warn .vmx-ss-lamp { background: var(--vmx-gold); box-shadow: 0 0 7px rgba(255, 176, 32, .8); }
+.vmx-ss-status.warn .vmx-ss-state { color: var(--vmx-gold-hi); }
+
+/* Everything that is only worth KNOWING, behind one fold — so it can never
+   push the button somebody came here to press off the bottom of the box. */
+.vmx-ss-more { margin: 10px 14px 0; border-top: 1px solid var(--vmx-line); padding-top: 6px; }
+.vmx-ss-more > summary {
+  cursor: pointer; list-style: none; font-size: 11px; color: var(--vmx-text-mute);
+  display: flex; align-items: center; gap: 6px; padding: 2px 0;
+}
+.vmx-ss-more > summary::-webkit-details-marker { display: none; }
+.vmx-ss-more > summary::before { content: '▸'; font-size: 10px; }
+.vmx-ss-more[open] > summary::before { content: '▾'; }
+.vmx-ss-more > summary:hover { color: var(--vmx-text-dim); }
+.vmx-ss-more .vmx-note { padding: 0; }
+
+/* The buttons stay reachable however long the dialog gets — they were below the
+   fold of a 560px box that scrolled to 684px, which during a service means
+   scrolling to find "Start". */
+.vmx-modal-box.vmx-streamsettings .vmx-form-btns {
+  flex-wrap: wrap; justify-content: flex-start;
+  position: sticky; bottom: -12px; margin-top: 12px; padding: 10px 14px;
+  background: var(--vmx-panel); border-top: 1px solid var(--vmx-line);
+  /* a short fade above it, so scrolled content does not appear to be cut off
+     by a hard edge halfway through a sentence */
+  box-shadow: 0 -10px 10px -6px var(--vmx-panel);
+}
+
+/* Basic mode: hide the advanced rows for a simpler board */
+.vmx.basic .vmx-slots .vmx-slot:nth-child(n+3),
+.vmx.basic .vmx-in-row.adv,
+.vmx.basic #vmxMultiCorder, .vmx.basic #vmxPlayList,
+.vmx.basic #vmxAddInputCfg { display: none; }
+
+/* ============ Audio Mixer (always visible, docked beside the sources) ======= */
+
+.vmx-mixer {
+  /* FIXED height: the meter canvases resize themselves to their rendered
+     height every frame, so an auto-height mixer would grow without bound
+     (canvas → layout → canvas). A definite height keeps the whole deck row
+     stable and the monitors above always keep their space. */
+  flex: none; height: 100%;
+  display: flex; flex-direction: column;
+  background: linear-gradient(180deg, var(--vmx-panel), #0c0f16);
+  border: 1px solid var(--vmx-line-soft); border-radius: var(--vmx-r);
+  box-shadow: inset 0 1px 0 var(--vmx-edge);
+}
+.vmx-mixer-head { display: flex; align-items: center; padding: 9px 10px 7px; gap: 8px; }
+.vmx-mixer-tab {
+  color: var(--vmx-text-dim); font-weight: 800; font-size: 10px;
+  letter-spacing: .16em; text-transform: uppercase;
+}
+.vmx-mixer-head #vmxMasterMute { margin-left: auto; height: 26px; width: 28px; }
+.vmx-mixer-head #vmxMasterVol { width: 78px; accent-color: var(--vmx-pv); }
+.vmx-mixer-body { flex: 1; display: flex; align-items: stretch; gap: 6px; padding: 0 10px 11px; min-height: 0; overflow-x: auto; }
+.vmx-mixer-rail {
+  flex: 0 0 20px; background: var(--vmx-panel-hi); border-radius: 6px;
+  border: 1px solid var(--vmx-line-soft);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  transition: background .12s ease, opacity .12s ease;
+}
+.vmx-mixer-rail:hover { background: var(--vmx-raise); }
+.vmx-mixer-rail.collapsed { opacity: 0.5; }
+.vmx-mixer-rail span {
+  writing-mode: vertical-rl; transform: rotate(180deg);
+  color: var(--vmx-text-mute); font-weight: 700; font-size: 9.5px; letter-spacing: 2px;
+}
+.vmx-mixer-strips { display: flex; gap: 5px; min-width: 0; min-height: 0; }
+.vmx-mixer-strips.hidden { display: none; }
+.vmx-mixer-empty { align-self: center; color: var(--vmx-text-mute); font-size: 11px; padding: 0 10px; max-width: 130px; text-align: center; }
+
+.vmx-strip {
+  flex: 0 0 92px; display: flex; flex-direction: column;
+  background: var(--vmx-bg-deep); border: 1px solid var(--vmx-line-soft); border-radius: 8px;
+  overflow: hidden;
+}
+.vmx-strip.master { border-color: var(--vmx-line); }
+.vmx-strip-title {
+  background: var(--vmx-panel-hi); color: var(--vmx-text-dim);
+  font-size: 11px; font-weight: 600; text-align: center; padding: 4px 6px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  border-bottom: 1px solid var(--vmx-border);
+}
+.vmx-strip-title.master { background: var(--vmx-raise); color: var(--vmx-text); font-weight: 800; letter-spacing: .06em; }
+.vmx-strip-body { flex: 1; display: flex; align-items: stretch; justify-content: center; gap: 5px; padding: 6px 5px; min-height: 0; }
+.vmx-strip-btns { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; justify-content: flex-start; padding-top: 4px; }
+.vmx-strip-btns button {
+  width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--vmx-line-soft);
+  background: var(--vmx-panel-hi); color: var(--vmx-text-mute); font-size: 11px; cursor: pointer;
+  box-shadow: inset 0 1px 0 var(--vmx-edge);
+  display: flex; align-items: center; justify-content: center; padding: 0;
+  transition: background .12s ease, color .12s ease, border-color .12s ease;
+}
+.vmx-strip-btns button:hover { color: var(--vmx-text); background: var(--vmx-raise); border-color: #3a4356; }
+.vmx-strip-btns button.on { background: rgba(47, 211, 111, .2); border-color: var(--vmx-pv); color: #bff4d5; }
+.vmx-strip-btns button.solo-on { background: rgba(240, 180, 41, .2); border-color: var(--vmx-amber); color: #ffdf9e; }
+
+.vmx-strip-fader {
+  flex: 0 0 30px; display: flex; align-items: stretch; justify-content: center; padding: 2px 0; position: relative;
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 10px, var(--vmx-line) 10px 12px) center / 18px calc(100% - 14px) no-repeat,
+    linear-gradient(to right, transparent 0 13px, var(--vmx-border) 13px 17px, transparent 17px 100%) center / 30px 100% no-repeat;
+}
+.vmx-vfader {
+  writing-mode: vertical-lr; direction: rtl;
+  width: 30px; height: 100%; margin: 0; cursor: pointer;
+  -webkit-appearance: none; appearance: none; background: transparent;
+}
+.vmx-vfader::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 24px; height: 13px;
+  background: linear-gradient(var(--vmx-text) 0 4px, #7d818c 4px 6px, var(--vmx-text) 6px 100%);
+  border: 1px solid var(--vmx-border); border-radius: 2px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+}
+.vmx-strip-meter { flex: 0 0 16px; width: 16px; align-self: stretch; background: var(--vmx-bg-deep); border: 1px solid var(--vmx-border); border-radius: var(--vmx-r-sm); }
+/* Limiter gain reduction, beside the master level it protects. */
+.vmx-strip-gr { flex: 0 0 8px; width: 8px; align-self: stretch; background: var(--vmx-bg-deep); border: 1px solid var(--vmx-border); border-radius: var(--vmx-r-sm); }
+
+/* ---- limiter panel ---- */
+.vmx-lim-onoff { font-size: 13px; padding: 2px 14px 4px; }
+.vmx-lim-styles { display: grid; grid-template-columns: 1fr; gap: 6px; padding: 8px 14px 2px; }
+.vmx-lim-style {
+  display: block; text-align: left; padding: 8px 10px; border-radius: 6px; cursor: pointer;
+  background: #1b1d24; border: 1px solid var(--vmx-border); color: #c9ccd3;
+}
+.vmx-lim-style:hover { border-color: var(--vmx-azure); }
+.vmx-lim-style.on { background: linear-gradient(#2b4a8f, #21365f); border-color: var(--vmx-azure); color: #fff; }
+.vmx-lim-style b { display: block; font-size: 12.5px; }
+.vmx-lim-style span { display: block; font-size: 11px; opacity: 0.8; margin-top: 2px; line-height: 1.4; }
+.vmx-lim-live { padding: 6px 14px 2px; }
+.vmx-lim-bar { display: flex; align-items: center; gap: 8px; margin: 5px 0; font-size: 11px; color: var(--vmx-text-mute); }
+.vmx-lim-bar span { flex: 0 0 96px; }
+.vmx-lim-bar b { flex: 0 0 62px; text-align: right; color: #e6e8ec; font-variant-numeric: tabular-nums; }
+.vmx-lim-track { flex: 1 1 auto; height: 9px; background: var(--vmx-bg-deep); border: 1px solid var(--vmx-border); border-radius: var(--vmx-r-sm); overflow: hidden; }
+.vmx-lim-track i { display: block; height: 100%; width: 0; background: #2fbf2f; transition: width 80ms linear; }
+.vmx-lim-track.gr i { background: #4f9cff; }
+
+.vmx-strip-foot {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 4px 4px 5px; border-top: 1px solid var(--vmx-line-soft); min-height: 22px;
+}
+.vmx-strip-hp { font-size: 13px; }
+.vmx-strip-pct { font-size: 10px; color: var(--vmx-text-mute); }
+.vmx-knob {
+  --knob-rot: 135deg;
+  width: 26px; height: 26px; border-radius: 50%; cursor: ns-resize; position: relative;
+  background: radial-gradient(circle at 35% 30%, var(--vmx-line), var(--vmx-panel-hi) 70%);
+  border: 1px solid var(--vmx-border); box-shadow: inset 0 1px 0 var(--vmx-edge), 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+.vmx-knob-line {
+  position: absolute; left: 50%; top: 50%; width: 2px; height: 10px;
+  background: var(--vmx-text); border-radius: 1px;
+  transform-origin: 50% 0;
+  transform: translateX(-50%) rotate(calc(var(--knob-rot) + 180deg));
+}
+
+/* ------------------------------ VIRTUAL SET ------------------------------
+   The set is framed by eye, so the picture gets the room and the controls sit
+   beside it — the same shape as the camera page, which is the page operators
+   will have used just before this one. */
+.vmx-vs-wrap { display: flex; gap: 14px; align-items: flex-start; min-height: 0; }
+.vmx-vs-stage { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.vmx-vs-stage canvas {
+  width: 100%; height: auto; aspect-ratio: 16 / 9; background: #000;
+  border: 1px solid #333; border-radius: var(--vmx-r-sm); cursor: grab; display: block;
+}
+.vmx-vs-stage canvas:active { cursor: grabbing; }
+.vmx-vs-shots { display: flex; gap: 6px; }
+.vmx-vs-shot { flex: 1 1 0; }
+.vmx-vs-shot.sel { background: #2d6cdf; border-color: #4a86f7; color: #fff; }
+.vmx-vs-tip { margin: 0; font-size: 11px; line-height: 1.5; }
+.vmx-vs-side { flex: 0 0 300px; max-width: 300px; }
+.vmx-vs-side .vmx-form { gap: 10px; }
+.vmx-vs-side input[type="range"] { width: 100%; }
+.vmx-vs-keyhdr { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.vmx-vs-keyhdr .vmx-inline { display: flex; align-items: center; gap: 6px; margin: 0; }
+.vmx-btn-sm { padding: 3px 8px; font-size: 11px; }
+/* Notes that carry a verdict, not just information. */
+.vmx-modal-box .vmx-warn-note { color: var(--vmx-gold-hi); background: rgba(255, 160, 40, 0.09); border-left: 3px solid var(--vmx-gold); padding: 8px 12px; margin: 8px 14px 0; border-radius: 0 5px 5px 0; }
+.vmx-modal-box .vmx-ok-note { color: #9fe0a0; }
+.vmx-btn-inline { display: inline-block; margin: 6px 0 0; padding: 4px 9px; font-size: 11px; }
+
+/* ---------- "your upload will not carry this" ----------
+   The banner is deliberately the loudest thing in the switcher and it does NOT
+   auto-dismiss: it is only on screen while a destination is genuinely losing
+   picture, and during a service the operator is watching the room, not the
+   desk. A toast that has already faded is how a platform judders for forty
+   minutes without anyone at the desk seeing a word about it. */
+.vmx-shed-banner {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 0 0 6px; padding: 9px 14px; border-radius: 7px;
+  background: linear-gradient(135deg, rgba(229, 83, 75, .28), rgba(245, 166, 35, .16));
+  border: 1px solid rgba(245, 166, 35, .7);
+  animation: vmx-shed-pulse 2.6s ease-in-out infinite;
+}
+.vmx-shed-icon { font-size: 20px; flex: none; line-height: 1; }
+.vmx-shed-text { flex: 1; font-size: 12.5px; line-height: 1.55; color: #ffe0b0; min-width: 0; }
+.vmx-shed-text b { color: #fff; }
+.vmx-shed-banner .vmx-shed-fix {
+  flex: none; margin: 0; padding: 7px 13px; font-size: 12px; font-weight: 700;
+  color: #1b1205; border: 0; border-radius: 6px; cursor: pointer;
+  background: linear-gradient(135deg, #f5a623, #ffce7a);
+}
+.vmx-shed-banner .vmx-shed-fix:hover { background: linear-gradient(135deg, #ffb733, #ffdb9a); }
+@keyframes vmx-shed-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(245, 166, 35, .3); }
+  50% { box-shadow: 0 0 0 1px rgba(245, 166, 35, .85), 0 0 16px rgba(245, 166, 35, .35); }
+}
+@media (prefers-reduced-motion: reduce) { .vmx-shed-banner { animation: none; } }
+/* Auto-fit: the app has lowered the picture to fit the line. Deliberately
+   calmer than the shed banner — nothing is wrong, something is being handled. */
+.vmx-fit-banner {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 0 0 6px; padding: 9px 14px; border-radius: 7px;
+  background: linear-gradient(135deg, rgba(74, 144, 226, .22), rgba(80, 200, 160, .12));
+  border: 1px solid rgba(74, 144, 226, .55);
+}
+.vmx-fit-banner .vmx-shed-text { color: #cfe6ff; }
+
+/* WHY, one click away.
+   These strips sit above the program and preview monitors, so every line they
+   take is a line the operator does not get to watch the service in. What is
+   happening and what to do about it stay on the line; the reasoning folds
+   underneath it, and unfolding it is the operator's decision, not the app's. */
+.vmx-why-btn {
+  background: none; border: 0; padding: 0 0 0 4px; cursor: pointer; font: inherit;
+  font-size: 11px; color: inherit; opacity: .7; text-decoration: underline dotted;
+}
+.vmx-why-btn:hover { opacity: 1; }
+.vmx-why-btn::after { content: ' ▸'; font-size: 9px; text-decoration: none; }
+.vmx-why-btn.open::after { content: ' ▾'; }
+.vmx-alert-why {
+  flex-basis: 100%; order: 3; margin: 4px 0 0;
+  font-size: 11.5px; line-height: 1.5; opacity: .88;
+}
+.vmx-alert-why.hidden { display: none; }
+

@@ -1,0 +1,2068 @@
+:root {
+  --bg: #0b0d12;
+  --bg-2: #12151d;
+  --bg-3: #1b1f2b;
+  --panel: #13161f;
+  --panel-2: #171b26;
+  --border: #242a38;
+  --border-soft: #1e2431;
+  --text: #eef1f7;
+  --muted: #8a93a8;
+  --primary: #4f7cff;
+  --primary-2: #6f93ff;
+  --accent: #ffb02e;
+  --accent-2: #ff7a59;
+  --good: #34c759;
+  --danger: #ff5a52;
+  --radius: 14px;
+  --radius-sm: 10px;
+  --shadow: 0 12px 40px rgba(0,0,0,.45);
+  --shadow-sm: 0 4px 16px rgba(0,0,0,.3);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  overflow: hidden;
+}
+#app { display: flex; height: 100vh; }
+
+/* Sidebar */
+.sidebar {
+  width: 248px; min-width: 248px;
+  background: linear-gradient(180deg, #14171f 0%, #0f1219 100%);
+  border-right: 1px solid var(--border-soft);
+  display: flex; flex-direction: column;
+  padding: 22px 16px;
+  position: relative;
+  transition: width .16s ease, min-width .16s ease, padding .16s ease;
+}
+.brand { display: flex; gap: 12px; align-items: center; padding: 6px 8px 20px; }
+/* The text block must be allowed to shrink. Without min-width:0 a flex item
+   refuses to go below its content width, so a long church name pushed itself
+   straight out of the sidebar and over the page. */
+.brand > div:last-child { min-width: 0; flex: 1 1 auto; }.brand-logo {
+  width: 40px; height: 40px; border-radius: 10px;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  display: grid; place-items: center; font-size: 22px; color: #fff;
+  flex: 0 0 auto;
+}
+/* Long names wrap to at most two lines and then ellipsis — the full name is on
+   the element's title, so hovering still shows all of it. */
+.brand-name {
+  font-weight: 700; font-size: 15px; line-height: 1.25;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow: hidden; overflow-wrap: anywhere;
+}
+.brand-sub { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.nav-item {
+  display: flex; align-items: center; gap: 13px;
+  background: none; border: none; color: var(--muted);
+  padding: 13px 14px; border-radius: 11px; cursor: pointer;
+  font-size: 14.5px; text-align: left; transition: all .15s; margin-bottom: 2px;
+}
+.nav-item > span:first-child { font-size: 17px; flex: 0 0 auto; }
+.nav-label { white-space: nowrap; overflow: hidden; }
+.nav-item:hover { background: var(--bg-3); color: var(--text); }
+.nav-item.active { background: linear-gradient(135deg, var(--primary), var(--primary-2)); color: #fff; box-shadow: 0 2px 12px rgba(31,111,235,.35); }
+.sidebar-foot { display: flex; flex-direction: column; gap: 8px; }
+.sidebar-foot .ghost-btn { display: flex; align-items: center; gap: 8px; }
+.version { color: var(--muted); font-size: 11px; text-align: center; white-space: nowrap; }
+
+.sidebar-toggle {
+  position: absolute; top: 26px; right: -12px;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--bg-3); border: 1px solid var(--border);
+  color: var(--muted); font-size: 11px; cursor: pointer;
+  display: grid; place-items: center; z-index: 5;
+}
+.sidebar-toggle:hover { color: var(--text); border-color: var(--primary); }
+
+/* Collapsed: icon rail only */
+.sidebar.collapsed { width: 76px; min-width: 76px; padding-left: 10px; padding-right: 10px; }
+.sidebar.collapsed .brand { padding-left: 0; padding-right: 0; justify-content: center; }
+.sidebar.collapsed .brand > div:last-child { display: none; }
+.sidebar.collapsed .nav-item { justify-content: center; padding: 13px 8px; }
+.sidebar.collapsed .nav-label { display: none; }
+.sidebar.collapsed .sidebar-foot .nav-label { display: none; }
+.sidebar.collapsed .sidebar-foot .ghost-btn { justify-content: center; }
+.sidebar.collapsed .version { display: none; }
+.sidebar.collapsed .sidebar-toggle { transform: rotate(180deg); }
+
+/* Content */
+.content { flex: 1; overflow-y: auto; padding: 34px 40px; background: radial-gradient(1200px 600px at 70% -10%, rgba(79,124,255,.06), transparent 60%); }
+.view { display: none; animation: fade .2s ease; }
+.view.active { display: block; }
+@keyframes fade { from { opacity: 0; transform: translateY(6px);} to {opacity:1;transform:none;} }
+.view-head h1 { margin: 0 0 4px; font-size: 24px; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.hidden { display: none !important; }
+
+/* Cards */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin: 22px 0; }
+.card {
+  background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--border-soft);
+  border-radius: var(--radius); padding: 24px; box-shadow: var(--shadow-sm);
+  position: relative;
+}
+.card.action { cursor: pointer; transition: transform .18s, border-color .18s, box-shadow .18s; }
+.card.action:hover { transform: translateY(-4px); border-color: var(--primary); box-shadow: 0 14px 34px rgba(79,124,255,.22); }
+.card-icon { font-size: 34px; margin-bottom: 12px; }
+.card h3 { margin: 0 0 6px; }
+.card p { margin: 0; color: var(--muted); font-size: 13px; }
+.dash-live-badge {
+  position: absolute; top: 16px; right: 16px;
+  background: var(--danger); color: #fff; font-size: 10px; font-weight: 700;
+  padding: 3px 9px; border-radius: 20px; letter-spacing: .04em;
+  animation: dashLivePulse 1.4s ease-in-out infinite;
+}
+@keyframes dashLivePulse { 50% { opacity: .55; } }
+
+/* Panels */
+.panel {
+  background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--border-soft);
+  border-radius: var(--radius); padding: 22px; margin-bottom: 20px; box-shadow: var(--shadow-sm);
+}
+.panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.panel-head h2 { margin: 0; font-size: 16px; }
+
+/* Buttons */
+.primary-btn, .ghost-btn {
+  border-radius: 9px; padding: 10px 16px; cursor: pointer;
+  font-size: 13px; font-weight: 600; border: 1px solid transparent;
+  transition: all .15s;
+}
+.primary-btn { background: linear-gradient(135deg, var(--primary), var(--primary-2)); color: #fff; box-shadow: 0 2px 10px rgba(31,111,235,.3); }
+.primary-btn:hover { filter: brightness(1.12); box-shadow: 0 3px 14px rgba(31,111,235,.45); }
+.primary-btn:disabled { opacity: .5; cursor: not-allowed; }
+.ghost-btn { background: var(--bg-3); color: var(--text); border-color: var(--border); }
+.ghost-btn:hover { border-color: var(--primary); }
+.ghost-btn.small, .primary-btn.small { padding: 6px 10px; font-size: 12px; }
+
+/* Forms */
+label { display: block; margin-bottom: 12px; font-size: 13px; color: var(--muted); }
+input, select, textarea {
+  width: 100%; margin-top: 5px; padding: 10px 12px;
+  background: var(--bg); border: 1px solid var(--border);
+  color: var(--text); border-radius: 9px; font-size: 13px;
+  font-family: inherit; transition: border-color .15s, box-shadow .15s;
+}
+input:focus, select:focus, textarea:focus { box-shadow: 0 0 0 3px rgba(79,124,255,.18); }
+input[type=color] { padding: 3px; height: 38px; cursor: pointer; }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--primary); }
+.color-row { display: flex; gap: 12px; }
+.color-row label { flex: 1; }
+.check { display: flex; align-items: center; gap: 8px; }
+.check input { width: auto; margin: 0; }
+.btn-row { display: flex; gap: 10px; margin-top: 8px; }
+.dt-row { display: flex; gap: 12px; }
+.dt-row label { flex: 1; }
+
+/* Dropzone */
+.dropzone {
+  border: 2px dashed var(--border); border-radius: var(--radius);
+  padding: 50px; text-align: center; margin-top: 18px;
+  transition: all .15s; background: var(--bg-2);
+}
+.dropzone.drag { border-color: var(--primary); background: var(--bg-3); }
+.dz-icon { font-size: 40px; }
+.dz-inner p { color: var(--muted); }
+
+/* Media bar */
+.media-bar { display: flex; gap: 16px; margin: 18px 0; align-items: center;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
+.thumb { width: 180px; height: 101px; object-fit: cover; border-radius: 8px; background: #000; }
+.media-name { font-weight: 600; margin-bottom: 4px; word-break: break-all; }
+.media-stats { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+
+/* Tool grid */
+.tool-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.tool { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+.tool.highlight { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.tool h3 { margin: 0 0 4px; font-size: 15px; }
+.tool .primary-btn { width: 100%; margin-top: 6px; }
+.chip-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.chip { background: var(--bg-3); border: 1px solid var(--border); border-radius: 20px;
+  padding: 4px 10px; font-size: 11px; display: flex; align-items: center; gap: 6px; }
+
+/* Flyer */
+.flyer-layout { display: grid; grid-template-columns: 340px 1fr; gap: 24px; }
+.flyer-form { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
+.flyer-preview-wrap {
+  display: grid; place-items: center; background: var(--bg-2);
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; min-height: 520px; overflow: hidden;
+}
+.flyer-preview-scaler { transform-origin: center; }
+.flyer-canvas { box-shadow: var(--shadow); overflow: hidden; }
+
+/* Scheduler */
+.sched-layout { display: grid; grid-template-columns: 380px 1fr; gap: 20px; }
+.platform-pick { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; background: var(--bg-3);
+  border: 1px solid var(--border); border-radius: 20px; padding: 6px 12px; margin: 0; color: var(--text); cursor: pointer; }
+.pill input { width: auto; margin: 0; }
+.post-list, .upcoming-list { display: flex; flex-direction: column; gap: 10px; }
+.post {
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; padding: 14px;
+  display: flex; justify-content: space-between; gap: 12px;
+}
+.post-main { flex: 1; min-width: 0; }
+.post-title { font-weight: 600; }
+.post-when { color: var(--accent); font-size: 12px; margin: 3px 0; }
+.post-caption { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.post-badges { display: flex; gap: 5px; margin-top: 6px; }
+.badge { font-size: 10px; padding: 2px 7px; border-radius: 12px; background: var(--bg-3); color: var(--muted); }
+.badge.due { background: var(--accent); color: #1a1a1a; font-weight: 700; }
+.badge.posted { background: var(--good); color: #fff; }
+.post-actions { display: flex; flex-direction: column; gap: 6px; }
+.path-row { display: flex; align-items: center; gap: 12px; }
+.path-row code { background: var(--bg); padding: 8px 12px; border-radius: 8px; flex: 1; font-size: 12px; word-break: break-all; }
+
+/* Toast + overlay */
+.toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  background: var(--bg-3); border: 1px solid var(--border); color: var(--text);
+  padding: 12px 20px; border-radius: 10px; box-shadow: var(--shadow); z-index: 100;
+  max-width: 70%; animation: fade .2s;
+}
+.toast.good { border-color: var(--good); }
+.toast.error { border-color: var(--danger); }
+.overlay {
+  position: fixed; inset: 0; background: rgba(8,10,15,.78);
+  display: grid; place-items: center; z-index: 200;
+}
+.overlay-box { text-align: center; background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 30px 40px; min-width: 320px; }
+.spinner {
+  width: 38px; height: 38px; border: 3px solid var(--border);
+  border-top-color: var(--primary); border-radius: 50%;
+  margin: 0 auto 16px; animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.progress { height: 7px; background: var(--bg); border-radius: 5px; margin-top: 16px; overflow: hidden; }
+.progress-bar { height: 100%; width: 0%; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: width .3s; }
+.overlay-batch { font-size: 12px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+  color: var(--accent); margin-bottom: 6px; }
+/* Stop a long job (deep analysis, transcription, export) */
+.overlay-cancel {
+  margin: 18px auto 0; display: block; width: auto; padding: 7px 18px;
+  background: transparent; color: var(--muted); border: 1px solid var(--border);
+  border-radius: 999px; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: all .15s;
+}
+.overlay-cancel:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); background: rgba(255,90,82,.08); }
+.overlay-cancel:disabled { opacity: .6; cursor: default; }
+.overlay-cancel.hidden { display: none; }
+/* The two ways out of a long job: walk away from it, or stop it. */
+.overlay-pct { margin-top: 8px; font-size: 13px; font-weight: 700; color: var(--primary-2);
+  font-variant-numeric: tabular-nums; }
+.overlay-acts { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 18px; }
+.overlay-acts .overlay-cancel { margin: 0; }
+.overlay-bg {
+  padding: 7px 18px; background: transparent; color: var(--primary-2);
+  border: 1px solid var(--primary); border-radius: 999px;
+  font-size: 12.5px; font-weight: 700; cursor: pointer; transition: all .15s;
+}
+.overlay-bg:hover { background: rgba(79,124,255,.14); color: #fff; }
+.overlay-bg.hidden { display: none; }
+
+/* ---------------- background jobs dock ----------------
+ * Bottom-right so it never sits under the toast (bottom-centre) and never over
+ * the timeline's own controls. Below the overlay's z-index: a job that is still
+ * modal owns the screen, and its chip must not float on top of it. */
+.bg-dock {
+  position: fixed; right: 18px; bottom: 18px; z-index: 150;
+  width: 320px; max-height: 60vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 8px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px;
+}
+.bg-dock.hidden { display: none; }
+.bgd-head { font-size: 11.5px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: var(--muted); }
+.bgj { background: var(--bg-2); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 10px 11px; }
+.bgj.done { border-color: rgba(52,199,89,.45); }
+.bgj.fail { border-color: rgba(255,90,82,.45); }
+.bgj-top { display: flex; align-items: center; gap: 7px; }
+.bgj-ic { font-size: 13px; flex: none; }
+.bgj-title { flex: 1; min-width: 0; font-weight: 650; font-size: 12.5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bgj-batch { flex: none; font-size: 10.5px; font-weight: 700; color: var(--accent); letter-spacing: .6px; }
+/* How far through the step it is. Tabular figures so the chip does not twitch
+   sideways every time the number changes width. */
+.bgj-pct { flex: none; font-size: 11px; font-weight: 700; color: var(--primary-2);
+  font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
+.bgj-x { flex: none; background: none; border: 0; color: var(--muted); cursor: pointer;
+  font-size: 12px; padding: 2px 4px; border-radius: 5px; }
+.bgj-x:hover:not(:disabled) { color: var(--danger); background: rgba(255,90,82,.1); }
+.bgj-x:disabled { opacity: .5; cursor: default; }
+.bgj-step { font-size: 11.5px; color: var(--muted); margin-top: 4px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.bgj .progress { height: 5px; margin-top: 8px; }
+.bgj-open { margin-top: 8px; width: 100%; padding: 5px 8px; font-size: 11.5px; font-weight: 600;
+  background: transparent; color: var(--text); border: 1px solid var(--border);
+  border-radius: 7px; cursor: pointer; }
+.bgj-open:hover { border-color: var(--primary); color: var(--primary-2); }
+
+/* ===================== VIDEO STUDIO (CapCut-style) ===================== */
+#view-video.active { display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 64px); overflow-y: auto; overflow-x: hidden; }
+.ve-topbar { display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--border-soft); border-radius: 12px; padding: 10px 16px; box-shadow: var(--shadow-sm); }
+.ve-file { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.ve-file #veName { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
+.ve-top-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ve-deep { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12px; color: var(--text); background: var(--bg-3); border: 1px solid var(--border); border-radius: 9px; padding: 8px 11px; cursor: pointer; }
+.ve-deep input { width: auto; margin: 0; accent-color: var(--accent); }
+.ve-deep select.ve-pause-how { width: auto; margin: 0 0 0 2px; padding: 2px 4px; font-size: 11px; max-width: 108px; }
+/* The AI clip reader is chosen here, but it judges what was SAID — so with Deep
+   switched off it has nothing to read. Ring it amber rather than let the operator
+   sit through a scan that quietly ignored the setting they just chose. */
+#veAiPicker.warn { border-color: var(--warn, #d9822b); box-shadow: 0 0 0 1px var(--warn, #d9822b) inset; }
+/* Backstop for the two model pickers: their widest OPTION sets the closed width,
+   and a "⬇ 1.5 GB" entry would otherwise widen the control enough to push this
+   eleven-control row onto a second line. The full wording lives in the tooltip. */
+#veAsrPicker, #veAiPicker { max-width: 150px; }
+/* The AI searches whatever footage is left on the timeline. When that is no
+   longer the whole recording the button says so, and is ringed, so nobody has to
+   guess whether their trim was taken into account. */
+#veFindHighlights.ve-trimmed { box-shadow: 0 0 0 2px var(--accent) inset; }
+.ve-top-actions button, .ve-top-actions select { background: var(--bg-3); color: var(--text); border: 1px solid var(--border);
+  border-radius: 9px; padding: 9px 13px; font-size: 13px; cursor: pointer; font-weight: 600; width: auto; margin: 0; transition: border-color .15s; }
+.ve-top-actions button:hover, .ve-top-actions select:hover { border-color: var(--primary); }
+.ve-top-actions button.primary-btn { background: linear-gradient(135deg, var(--primary), var(--primary-2)); border-color: transparent; color: #fff; }
+.ve-top-actions button.primary-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* On a short window the preview gives up height before the timeline does — the
+   lanes are what you're editing, and the preview is still perfectly usable at
+   this size. (It only ever hits this floor when the window can't fit both.) */
+.ve-main { flex: 1; display: flex; gap: 14px; min-height: 232px; }
+.ve-left { flex: 1; display: flex; flex-direction: column; min-width: 0; gap: 10px; }
+.ve-preview { flex: 1; position: relative; background: #000; border: 1px solid var(--border-soft); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow-sm); }
+.ve-preview.drag { border-color: var(--primary); }
+
+/* BIGGER PREVIEW (⤢): hand the timeline's height to the picture. The lanes stay
+   usable — one video row plus the ruler — and everything is still live, so you
+   can keep editing while you watch the short at close to full size. */
+#view-video.ve-big .ve-timeline { height: 148px; }
+#view-video.ve-big .ve-main { min-height: 360px; }
+#view-video.ve-big #veBigger { border-color: var(--primary); color: var(--primary); }
+
+/* FULL SCREEN (⛶): the preview element itself goes fullscreen, so the crop matte,
+   caption overlay and text layer — all children of it — come along and you are
+   looking at exactly the framing that will export. */
+.ve-preview:fullscreen { border-radius: 0; border: 0; width: 100vw; height: 100vh; }
+.ve-preview:fullscreen .ve-novid { font-size: 20px; }
+/* a way back out that doesn't need you to know about Esc */
+.ve-fs-exit { position: absolute; top: 14px; right: 14px; z-index: 12; display: none;
+  width: auto; margin: 0; padding: 8px 14px; border-radius: 10px; cursor: pointer; font-weight: 700;
+  background: rgba(0,0,0,.62); color: #fff; border: 1px solid rgba(255,255,255,.35); backdrop-filter: blur(4px); }
+.ve-preview:fullscreen .ve-fs-exit { display: block; }
+.ve-fs-exit:hover { background: rgba(0,0,0,.85); border-color: #fff; }
+#vePlayer { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; background: #000; }
+.ve-novid { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--muted); }
+
+/* live caption overlay on the preview */
+/* The caption layer IS the export frame — sized in JS to canvasFrameRect() — so
+   the words can never sit outside the shape the video is being exported at.
+   The layer stays click-through; only the words themselves are grabbable. */
+/* The live caption. Everything about how it LOOKS — size, width, wrapping,
+   colour, outline, band, position — is written as inline styles by
+   caplayout.js, the same module the export rasterises from. Nothing here may
+   set a font size, a width or a line height: a rule that did would apply to the
+   preview and not to the file, which is precisely the drift this replaced. */
+/* Clipped to the export frame: a zoom-in arrival that overshoots the picture is
+   cut off in the exported file, so it must be cut off here too. */
+.ve-cap-overlay { position: absolute; overflow: hidden; pointer-events: none; z-index: 6; }
+.ve-cap-block { pointer-events: auto; cursor: move; user-select: none; }
+.ve-cap-block:hover { outline: 1px dashed rgba(255,255,255,.45); outline-offset: 4px; }
+/* Grab handles on the caption's left/right edges: drag to set how wide the
+   words run before they wrap (narrower = more lines). Deliberately wide enough
+   to hit on a small preview without covering the words. */
+.ve-cap-edge { position: absolute; width: 12px; margin-left: -6px; min-height: 18px; pointer-events: auto;
+  cursor: ew-resize; z-index: 2; border-radius: 6px; background: transparent; transition: background .12s; }
+.ve-cap-edge::before { content: ''; position: absolute; left: 5px; top: 6%; width: 2px; height: 88%;
+  background: rgba(255,255,255,.55); border-radius: 2px; opacity: 0; transition: opacity .12s; }
+.ve-cap-overlay:hover .ve-cap-edge::before { opacity: .8; }
+.ve-cap-edge:hover { background: rgba(79,124,255,.28); }
+.ve-cap-edge:hover::before { opacity: 1; background: #fff; }
+
+/* Blank preview while the playhead is over a timeline GAP (or all clips deleted) —
+   like a real editor: no clip under the playhead = nothing to show. Sits above the
+   <video> but below the crop mask / text layer; click-through. */
+.ve-gap-mask { position: absolute; inset: 0; background: #000; z-index: 3; pointer-events: none; }
+
+/* CapCut-style output frame on the preview: everything OUTSIDE the chosen export
+   ratio (e.g. 9:16) is matted to SOLID BLACK, so you see exactly the vertical
+   video on a black canvas — just like the exported short. */
+.ve-crop-mask { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+/* CapCut canvas: the frame is FIXED at the export ratio — you grab and move the
+   VIDEO underneath it (drag to pan, scroll to zoom). */
+.ve-crop-frame { position: absolute; box-shadow: 0 0 0 9999px #000; border: 1px solid rgba(255,255,255,.35); border-radius: 2px; cursor: grab; pointer-events: auto; }
+.ve-crop-frame:active { cursor: grabbing; }
+.ve-crop-frame-static { cursor: grab; } /* still grabbable — dragging takes manual control */
+/* rule-of-thirds grid while you compose the shot (CapCut-style) */
+.ve-crop-frame::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .15s;
+  background-image:
+    linear-gradient(rgba(255,255,255,.28), rgba(255,255,255,.28)),
+    linear-gradient(rgba(255,255,255,.28), rgba(255,255,255,.28)),
+    linear-gradient(rgba(255,255,255,.28), rgba(255,255,255,.28)),
+    linear-gradient(rgba(255,255,255,.28), rgba(255,255,255,.28));
+  background-repeat: no-repeat;
+  background-size: 1px 100%, 1px 100%, 100% 1px, 100% 1px;
+  background-position: 33.33% 0, 66.66% 0, 0 33.33%, 0 66.66%;
+}
+.ve-crop-frame:hover::before, .ve-crop-frame:active::before { opacity: 1; }
+.ve-crop-frame-static::before { opacity: 0 !important; }
+/* tells the user the VIDEO itself is movable (their most-asked question) */
+.ve-crop-frame::after { content: '✋ Drag to move the video · scroll to zoom'; position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%);
+  font-size: 10.5px; font-weight: 600; color: rgba(255,255,255,.85); background: rgba(0,0,0,.6); padding: 3px 10px; border-radius: 9px;
+  white-space: nowrap; max-width: 92%; overflow: hidden; text-overflow: ellipsis; opacity: 0; transition: opacity .15s; pointer-events: none; }
+.ve-crop-frame:hover::after { opacity: 1; }
+.ve-crop-frame-static::after { content: '🎯 Auto-reframe is following the speaker — drag to take control'; }
+.ve-crop-reset { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; border-radius: 50%; background: rgba(0,0,0,.6); color: #fff; border: 1px solid rgba(255,255,255,.5); cursor: pointer; font-size: 13px; }
+.ve-crop-reset:hover { background: var(--primary); }
+
+/* draggable picture-in-picture position guide on the preview (for the selected overlay clip) */
+.ve-overlay-guide { position: absolute; z-index: 8; border: 2px solid #ff7ad9; border-radius: 4px; background: rgba(255,122,217,.14); cursor: move; box-shadow: 0 0 0 9999px rgba(0,0,0,.02); }
+.ve-overlay-guide.hidden { display: none; }
+.ve-ovg-label { position: absolute; top: -18px; left: 0; font-size: 10px; font-weight: 800; color: #ff7ad9; white-space: nowrap; text-shadow: 0 1px 2px #000; }
+.ve-ovg-resize { position: absolute; right: -7px; bottom: -7px; width: 15px; height: 15px; background: #ff7ad9; border: 2px solid #fff; border-radius: 50%; cursor: nwse-resize; }
+
+/* Added media on the preview — the actual second video / picture inside the PiP
+   box, so placing an overlay is WYSIWYG instead of positioning an empty frame.
+   Click-through: the pink guide above it is what you grab. */
+/* z-index 2 puts it above the picture but UNDER the black matte (z 4) and the
+   gap mask (z 3) — so an overlay dragged outside the export frame is hidden by
+   the matte, exactly as it will be missing from the exported short. */
+.ve-media-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+.ve-media-el { position: absolute; display: none; object-fit: contain; background: transparent; border-radius: 2px; box-shadow: 0 6px 22px rgba(0,0,0,.55); }
+/* added-media clips on the overlay lane: a picture reads teal, a second video violet */
+.ve-seg-img { border-style: solid !important; border-color: #0aa2c0 !important; box-shadow: 0 2px 10px rgba(10,162,192,.45); }
+.ve-seg-vid { border-style: solid !important; border-color: #a371f7 !important; box-shadow: 0 2px 10px rgba(163,113,247,.45); }
+.ve-seg-snd { font-size: 10px; margin-left: 3px; }
+/* dropping a file onto the timeline puts it on top of the video, at that time */
+.ve-tl-drag { outline: 2px dashed #a371f7; outline-offset: -3px; border-radius: 8px; background: rgba(163,113,247,.07); }
+
+/* draggable "add text anywhere" overlay layer on the preview.
+   The layer itself is click-through (pointer-events:none) so it never blocks the
+   Browse button / preview underneath — only the actual text boxes are interactive. */
+.ve-text-layer { position: absolute; inset: 0; z-index: 7; pointer-events: none; }
+/* NOTE: white-space:pre-wrap lives on .ve-text-content, NOT the box — on the box
+   it turns the template's newlines into phantom empty lines that stretch the
+   dashed border way past the text. */
+/* NO padding and NO border: both are fixed pixels, and fixed pixels are a big
+   share of a small preview's text box and a tiny share of a full-screen one —
+   so the same text wrapped differently in each. The drag box is an OUTLINE,
+   which is drawn outside the element and costs no layout. */
+.ve-text-box { position: absolute; cursor: move; padding: 0; white-space: normal; user-select: none;
+  outline: 1.5px dashed transparent; outline-offset: 3px; box-sizing: border-box; pointer-events: auto; }
+.ve-text-content { white-space: pre-wrap; word-break: break-word; }
+.ve-text-box:hover, .ve-text-box.sel { outline-color: #ff7ad9; }
+.ve-text-box .ve-text-resize { position: absolute; right: -6px; bottom: -6px; width: 14px; height: 14px; background: #ff7ad9; border: 2px solid #fff; border-radius: 50%; cursor: nwse-resize; display: none; }
+.ve-text-box.sel .ve-text-resize { display: block; }
+.ve-text-box .ve-text-del { position: absolute; right: -6px; top: -6px; width: 16px; height: 16px; background: var(--danger); color: #fff; border: 2px solid #fff; border-radius: 50%; cursor: pointer; display: none; font-size: 10px; line-height: 12px; text-align: center; padding: 0; }
+.ve-text-box.sel .ve-text-del { display: block; }
+/* While editing, the caret + typing must work — override the box's user-select:none. */
+.ve-text-content[contenteditable="true"] { user-select: text; -webkit-user-select: text; cursor: text; pointer-events: auto; }
+
+/* text-style toolbar — FLOATS over the top of the preview when a text overlay is
+   selected (absolute, so it never resizes the preview / shifts the layout). */
+.ve-text-tools { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 9;
+  display: flex; align-items: center; gap: 10px; background: rgba(14,17,24,.92); border: 1px solid #ff7ad9; border-radius: 12px; padding: 7px 14px; box-shadow: 0 4px 18px rgba(0,0,0,.5); white-space: nowrap; }
+.ve-text-tools .vt-label { font-size: 12px; font-weight: 800; color: #ff7ad9; white-space: nowrap; }
+.ve-text-tools select { width: auto; margin: 0; padding: 5px 8px; font-size: 12.5px; }
+.ve-text-tools .vt-size-wrap { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--muted); font-size: 12px; }
+.ve-text-tools input[type=number] { width: 64px; margin: 0; padding: 5px 6px; font-size: 12.5px; }
+.ve-text-tools input[type=color] { width: 34px; height: 30px; padding: 2px; margin: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-3); cursor: pointer; }
+.ve-text-tools button { background: var(--bg-3); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 5px 11px; font-size: 13px; font-weight: 800; cursor: pointer; }
+.ve-text-tools button:hover { border-color: #ff7ad9; }
+.ve-text-tools #vtBold.on, .ve-text-tools #vtBg.on, .ve-text-tools #vtOutline.on { border-color: #ff7ad9; background: rgba(255,122,217,.18); color: #fff; }
+/* The outline button wears the thing it does: a white A with a black edge,
+   which says more than any label would in the width available. */
+.ve-text-tools #vtOutline { color: #fff; -webkit-text-stroke: 2px #000; paint-order: stroke fill; font-size: 15px; font-weight: 900; padding: 4px 12px; }
+.ve-text-tools #vtOutline.on { color: #fff; }
+
+.ve-transport { display: flex; align-items: center; gap: 14px; background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--border-soft); border-radius: 12px; padding: 10px 18px; }
+.ve-time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; min-width: 118px; }
+.ve-transport-center { display: flex; align-items: center; gap: 10px; margin: 0 auto; }
+.ve-transport-right { display: flex; align-items: center; gap: 14px; min-width: 118px; justify-content: flex-end; }
+.ve-play { width: 46px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, var(--primary), var(--primary-2)); color: #fff; border: none; cursor: pointer; font-size: 15px; box-shadow: 0 3px 14px rgba(79,124,255,.4); transition: filter .15s; }
+.ve-play:hover { filter: brightness(1.15); }
+.ve-tr-btn { width: 36px; height: 32px; border-radius: 9px; background: var(--bg-3); border: 1px solid var(--border); color: var(--text); cursor: pointer; font-size: 12px; }
+.ve-tr-btn:hover { border-color: var(--primary); }
+.ve-loop { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--muted); font-size: 12px; cursor: pointer; }
+.ve-loop input { width: auto; margin: 0; accent-color: var(--primary); }
+.ve-spacer { flex: 1; }
+
+.ve-side { width: 340px; min-width: 340px; background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--border-soft); border-radius: var(--radius); padding: 20px; overflow-y: auto; display: flex; flex-direction: column; box-shadow: var(--shadow-sm); }
+.ve-side-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.ve-side-head h3 { margin: 0; font-size: 16px; }
+/* ---- 📦 Bulk: many videos, one graphic over all of them ----
+   Sits above Shorts and only exists while a batch does, so the panel people
+   look at every day keeps the top of the rail the rest of the time. */
+.ve-bulk.drag { border-color: var(--primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 35%, transparent); }
+.ve-bulk { border: 1px solid var(--border); background: var(--bg-2); border-radius: 12px; padding: 12px; margin-bottom: 16px; }
+.ve-bulk .ve-side-head { margin-bottom: 6px; }
+.ve-bulk-hint { margin: 0 0 8px; line-height: 1.3; font-size: 11.5px; }
+/* A scrolling column of the queued videos. Capped so a batch of forty cannot
+   push Export All off the bottom of the rail — that button has to stay reachable. */
+/* Capped tight on purpose: ⬇️ Export all is the button this panel exists for,
+   and a batch of forty must not push it off the bottom of the rail. */
+.ve-bulk-list { display: flex; flex-direction: column; gap: 5px; max-height: 148px; overflow-y: auto; margin-bottom: 9px; }
+.ve-bulk-item { display: flex; align-items: center; gap: 8px; padding: 4px 5px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--panel); cursor: pointer; text-align: left; width: 100%; transition: border-color .12s, background .12s; }
+.ve-bulk-item:hover { border-color: var(--primary); }
+.ve-bulk-item.sel { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 14%, var(--panel)); }
+.ve-bulk-thumb { width: 44px; height: 25px; flex: 0 0 44px; border-radius: 5px; background: #000 center/cover no-repeat; }
+.ve-bulk-name { flex: 1; min-width: 0; font-size: 12px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ve-bulk-meta { font-size: 11px; opacity: .65; }
+.ve-bulk-drop { flex: 0 0 auto; }
+.ve-bulk-actions { display: flex; gap: 8px; margin-bottom: 9px; }
+.ve-bulk-actions button { flex: 1; }
+.ve-bulk-overlays { display: flex; flex-direction: column; gap: 6px; margin-bottom: 9px; }
+.ve-bulk-ovl { display: flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 6px 8px; border: 1px solid var(--border);
+  border-radius: 9px; background: var(--panel); }
+.ve-bulk-ovl img { width: 34px; height: 24px; object-fit: contain; background: repeating-conic-gradient(#3a3f4a 0% 25%, #2b2f38 0% 50%) 50%/8px 8px; border-radius: 4px; }
+.ve-bulk-ovl-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.3; }
+.ve-bulk-op { flex: 0 0 62px; display: flex; align-items: center; }
+.ve-bulk-op input[type=range] { width: 62px; }
+.ve-bulk-head-btns { display: flex; align-items: center; gap: 6px; }
+.ve-bulk-list { margin-bottom: 0; }
+
+.ve-cliplist { display: flex; flex-direction: column; gap: 9px; }
+/* Two-row clip card: the name row gets the FULL panel width; actions live on
+   their own row underneath (so long AI titles are never squashed). */
+.ve-clip { display: flex; flex-direction: column; gap: 7px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 11px; padding: 10px; transition: border-color .15s, transform .12s; }
+.ve-clip:hover { border-color: var(--primary); transform: translateX(2px); }
+.ve-clip.sel { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary) inset; }
+.ve-clip-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ve-clip-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+.ve-clip-main { flex: 1; min-width: 0; }
+.ve-clip-name { background: transparent; border: none; color: var(--text); font-weight: 600; font-size: 13px; padding: 2px 0; margin: 0; width: 100%; text-overflow: ellipsis; }
+.ve-clip-name:focus { outline: none; border-bottom: 1px solid var(--primary); box-shadow: none; }
+.ve-clip-time { margin-top: 3px; }
+.ve-clip-btns { display: flex; gap: 6px; }
+.ve-clip-btns .icon-btn { flex: 1; width: auto; height: 28px; }
+.ve-tools { margin-top: 18px; border-top: 1px solid var(--border-soft); padding-top: 14px; }
+.ve-tools h4 { margin: 0 0 10px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+.ve-tool-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ve-tool-btns button { background: var(--bg-3); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 11px 8px; font-size: 12.5px; font-weight: 600; cursor: pointer; text-align: center; transition: border-color .15s, transform .12s; }
+.ve-tool-btns button:hover { border-color: var(--primary); transform: translateY(-1px); }
+
+/* timeline toolbar (CapCut-style row above the track) */
+.ve-tl-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--border-soft); border-radius: 12px 12px 0 0; border-bottom: none; padding: 8px 14px; }
+.ve-tl-group { display: flex; align-items: center; gap: 6px; }
+.ve-tl-bar button { background: var(--bg-3); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 7px 11px; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: border-color .15s; }
+.ve-tl-bar button:hover { border-color: var(--primary); }
+.ve-tl-bar button:disabled { opacity: .4; cursor: not-allowed; }
+.ve-tl-bar button:disabled:hover { border-color: var(--border); }
+.ve-tl-sep { width: 1px; height: 20px; background: var(--border); margin: 0 6px; }
+.ve-tl-zoom input[type=range] { width: 130px; margin: 0; padding: 0; accent-color: var(--primary); background: transparent; border: none; }
+.ve-zoom-btn { min-width: 30px; padding: 6px 8px !important; font-weight: 700; }
+/* magnetic-snap + follow-playhead toggles: light up when ON */
+#veSnap.on, #veFollow.on { border-color: var(--primary); color: #fff; background: linear-gradient(180deg, rgba(79,124,255,.28), rgba(79,124,255,.14)); box-shadow: 0 0 0 1px var(--primary) inset; }
+/* …and read as clearly OFF, so "why isn't it scrolling with the video?" answers itself */
+#veFollow:not(.on) { opacity: .55; }
+
+/* Height budget (must stay in sync with the lane heights below, or the bottom
+   lane gets clipped): 8 pad + 24 ruler + 4+108 video + 6+30 text + 6+38 captions
+   + 6+56 audio + 8 pad = 294, plus the 9px horizontal scrollbar = 303. */
+.ve-timeline { flex: 0 0 auto; height: 342px; background: var(--panel); border: 1px solid var(--border-soft); border-radius: 0 0 12px 12px; overflow: hidden; position: relative; display: flex; }
+/* labels line up 1:1 with the lanes: same 36px start, same 6px gaps, same heights */
+.ve-tl-labels { flex: 0 0 74px; display: flex; flex-direction: column; padding: 36px 8px 0; gap: 6px; border-right: 1px solid var(--border-soft); background: var(--bg-2); }
+.ve-tl-label { height: 108px; display: flex; align-items: center; font-size: 11px; color: var(--muted); font-weight: 600; }
+.ve-tl-label:nth-child(2) { height: 30px; }
+.ve-tl-label:nth-child(3) { height: 38px; }
+.ve-tl-label:nth-child(4) { height: 56px; }
+.ve-tl-label:nth-child(5) { height: 32px; }
+.ve-tl-scroll { flex: 1; overflow-x: auto; overflow-y: hidden; padding: 8px 12px; position: relative; }
+.ve-tl-scroll::-webkit-scrollbar { height: 9px; }
+.ve-ruler { position: relative; height: 24px; cursor: pointer; border-bottom: 1px solid var(--border-soft); }
+.ve-tick { position: absolute; top: 0; height: 100%; border-left: 1px solid var(--border); }
+.ve-tick span { position: absolute; top: 3px; left: 5px; font-size: 10px; color: var(--muted); white-space: nowrap; }
+/* Dark, EMPTY track — clips are opaque film blocks painted on top, so any space
+   with no clip reads as a real gap you can drag a clip into (for overlays). */
+.ve-track { position: relative; height: 108px; margin-top: 4px; background:
+  repeating-linear-gradient(45deg, #0c1017 0 10px, #0f141d 10px 20px);
+  border-radius: 8px; overflow: hidden; }
+.ve-filmstrip { display: none; } /* no continuous strip — the film lives inside each clip block now */
+.ve-segments { position: absolute; inset: 0; }
+.ve-seg { position: absolute; top: 0; height: 100%; border: 2px solid; border-radius: 8px; box-sizing: border-box; cursor: move; overflow: hidden; transition: box-shadow .12s; background-color: var(--bg-2); box-shadow: 0 2px 8px rgba(0,0,0,.45); }
+.ve-seg:hover { box-shadow: 0 0 12px rgba(79,124,255,.5); }
+.ve-seg.sel { box-shadow: 0 0 0 2px var(--text) inset, 0 0 14px rgba(79,124,255,.55); }
+.ve-seg-label { position: absolute; top: 6px; left: 6px; max-width: calc(100% - 16px); font-size: 11px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; background: rgba(8,10,16,.55); padding: 2px 7px; border-radius: 6px; }
+/* subtle top sheen gives clips a little depth (CapCut-like) */
+.ve-seg::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,0) 42%); }
+/* overlay-lane clip (picture-in-picture) — pink accent so it reads as a 2nd lane */
+.ve-seg-ov { border-style: dashed !important; border-color: #ff7ad9 !important; box-shadow: 0 2px 10px rgba(255,122,217,.4); }
+/* A pause removed with "Close gap": the clip is ONE short, and this is the slice
+   that won't be in the export. Hatched + dark so it reads as "stitched out", and
+   it sits ABOVE the clip's ::after sheen so the notch stays unmistakable. */
+.ve-seg-cut { position: absolute; top: 0; height: 100%; z-index: 2; box-sizing: border-box;
+  background: repeating-linear-gradient(45deg, rgba(6,8,12,.94) 0 5px, rgba(30,12,14,.94) 5px 10px);
+  border-left: 2px solid #ff4d4f; border-right: 2px solid #ff4d4f;
+  display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: help; }
+.ve-seg-cut span { font-size: 11px; line-height: 1; color: #ff7a7c; text-shadow: 0 1px 2px rgba(0,0,0,.8); }
+.ve-seg-joined { border-style: solid; }
+/* how long this short actually exports as, once the pauses are gone */
+.ve-seg-joinbadge { background: rgba(46,160,67,.92); color: #fff; font-weight: 800; font-size: 10px;
+  padding: 1px 6px; border-radius: 9px; margin-left: 4px; }
+/* faint lane hints inside the video track (Overlay on top, Main on bottom) */
+.ve-lane-hint { position: absolute; left: 8px; font-size: 10px; font-weight: 700; letter-spacing: .3px; color: rgba(255,255,255,.28); pointer-events: none; z-index: 0; text-transform: uppercase; }
+.ve-lane-hint-ov { top: 6px; } .ve-lane-hint-main { top: 56px; }
+.ve-seg-h { position: absolute; top: 0; width: 10px; height: 100%; cursor: ew-resize; }
+.ve-seg-h.l { left: 0; } .ve-seg-h.r { right: 0; }
+.ve-seg-h.l::after, .ve-seg-h.r::after { content: ''; position: absolute; top: 50%; transform: translateY(-50%); width: 3px; height: 26px; border-radius: 2px; background: rgba(255,255,255,.75); left: 3px; }
+/* playhead spans ALL rows (video + text + audio), not just the video track */
+.ve-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #ff4d4f; pointer-events: none; z-index: 5; }
+.ve-playhead::before { content: ''; position: absolute; top: 0; left: -4px; border: 5px solid transparent; border-top-color: #ff4d4f; }
+.ve-selbox { position: absolute; top: 0; height: 100%; background: rgba(79,124,235,.25); border: 1px solid var(--primary); display: none; pointer-events: none; }
+
+.ve-text-track { position: relative; height: 30px; margin-top: 6px; background: var(--bg); border-radius: 6px; overflow: visible; }
+.ve-text-clip { position: absolute; top: 2px; height: 26px; border: 2px solid #ff7ad9; background: rgba(255,122,217,.22); border-radius: 6px; cursor: move; box-sizing: border-box; display: flex; align-items: center; padding: 0 8px; font-size: 11px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; }
+.ve-text-clip:hover, .ve-text-clip.sel { box-shadow: 0 0 10px rgba(255,122,217,.6); }
+.ve-tc-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+/* drag-to-extend handles on the text block (like the video clips' trim handles) */
+.ve-text-clip .ve-tc-h { position: absolute; top: 0; width: 9px; height: 100%; cursor: ew-resize; }
+.ve-text-clip .ve-tc-h.l { left: 0; } .ve-text-clip .ve-tc-h.r { right: 0; }
+.ve-text-clip .ve-tc-h::after { content: ''; position: absolute; top: 50%; transform: translateY(-50%); width: 3px; height: 12px; border-radius: 2px; background: rgba(255,255,255,.9); left: 3px; }
+
+/* Captions track (CapCut-style): each spoken line is a SOLID block showing its
+   actual words — click it to retype, drag it to move, drag its edges to re-time.
+   Solid amber fill + white text (not a translucent tint) so the words stay
+   readable at a glance, the way CapCut shows them. */
+.ve-cap-track { position: relative; height: 38px; margin-top: 6px; background: var(--bg); border-radius: 6px; overflow: visible; }
+.ve-cap-clip { position: absolute; top: 3px; height: 32px; border: 1px solid #ffb066; background: #e0801f; border-radius: 5px; cursor: text; box-sizing: border-box;
+  display: flex; align-items: center; padding: 0 10px; font-size: 12.5px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden;
+  text-shadow: 0 1px 2px rgba(0,0,0,.35); box-shadow: 0 1px 3px rgba(0,0,0,.35); }
+.ve-cap-clip.tiny { padding: 0 2px; font-size: 11px; border-radius: 3px; } /* zoomed out — words still win the space */
+/* Zoomed so far out that a line would be half a pixel: show WHERE the captions
+   are rather than fifteen hundred slivers nobody can read. Click to zoom in. */
+.ve-cap-run { position: absolute; top: 3px; height: 32px; box-sizing: border-box; cursor: zoom-in;
+  background: repeating-linear-gradient(90deg, #e0801f 0 6px, #c96f18 6px 10px);
+  border: 1px solid #ffb066; border-radius: 5px; opacity: .92;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+  font-size: 11.5px; font-weight: 700; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.45); }
+.ve-cap-run:hover { opacity: 1; border-color: #fff; }
+/* this line sits inside a pause that was removed — it won't be in the export */
+.ve-cap-clip.cut { background: #2b2f38; border-color: #4a505c; color: #7d8694; text-decoration: line-through; box-shadow: none; }
+.ve-cap-clip.cut:hover { background: #333844; }
+.ve-cap-clip:hover { background: #ef8f2b; }
+.ve-cap-clip.sel { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.85) inset, 0 0 12px rgba(224,128,31,.7); }
+/* The lane draws each line in the caption's OWN typeface (set per-block from the
+   chosen font). Two reasons: the block shows you the look you'll get, and the
+   condensed faces these captions actually use — Bebas Neue, Anton — fit far more
+   of an ALL CAPS phrase into a short block than the UI sans did, so you can still
+   read the words instead of an ellipsis. letter-spacing keeps caps legible small. */
+.ve-cc-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none;
+  letter-spacing: .02em; }
+/* while typing, the block pops out to a readable width and above its neighbours,
+   so even a half-second line is something you can actually see and edit */
+.ve-cap-clip.editing { min-width: 260px; overflow: visible; z-index: 8; cursor: text; background: #12161f; border: 2px solid #ffb066; }
+.ve-cap-clip.editing .ve-cc-label { pointer-events: auto; }
+.ve-cc-label[contenteditable="true"] { overflow: visible; text-overflow: clip; cursor: text; user-select: text; -webkit-user-select: text; outline: none; background: transparent; border-radius: 3px; padding: 0 2px; }
+.ve-cap-clip .ve-cc-h { position: absolute; top: 0; width: 9px; height: 100%; cursor: ew-resize; opacity: 0; transition: opacity .12s; }
+.ve-cap-clip:hover .ve-cc-h, .ve-cap-clip.sel .ve-cc-h { opacity: 1; }
+.ve-cap-clip .ve-cc-h.l { left: 0; } .ve-cap-clip .ve-cc-h.r { right: 0; }
+.ve-cap-clip .ve-cc-h::after { content: ''; position: absolute; top: 50%; transform: translateY(-50%); width: 3px; height: 14px; border-radius: 2px; background: rgba(255,255,255,.95); left: 3px; }
+.ve-cap-empty { position: absolute; left: 10px; top: 0; height: 100%; display: flex; align-items: center; font-size: 10.5px; color: var(--muted); pointer-events: none; white-space: nowrap; }
+
+/* Dark hatched EMPTY audio track (like the video track) — the waveform lives
+   INSIDE each audio clip, so gaps between moved/split clips read as real silence. */
+.ve-audio-track { position: relative; height: 56px; margin-top: 6px; background:
+  repeating-linear-gradient(45deg, #0c1017 0 10px, #0f141d 10px 20px);
+  border-radius: 6px; overflow: hidden; display: flex; align-items: center; cursor: pointer; }
+.ve-audio-track .muted { padding-left: 10px; }
+.ve-audio-segments { position: absolute; inset: 0; }
+.ve-audio-seg { position: absolute; top: 0; height: 100%; border: 2px solid; border-radius: 6px; box-sizing: border-box; background: var(--bg); cursor: move; overflow: hidden; }
+.ve-audio-seg:hover { filter: brightness(1.25); }
+.ve-audio-seg.sel { box-shadow: 0 0 0 2px var(--text) inset; }
+/* trim handles on audio clips (like the video clips') */
+.ve-audio-seg .ve-audio-h { position: absolute; top: 0; width: 9px; height: 100%; cursor: ew-resize; }
+.ve-audio-seg .ve-audio-h.l { left: 0; } .ve-audio-seg .ve-audio-h.r { right: 0; }
+.ve-audio-seg .ve-audio-h::after { content: ''; position: absolute; top: 50%; transform: translateY(-50%); width: 3px; height: 18px; border-radius: 2px; background: rgba(255,255,255,.75); left: 3px; }
+/* ---- 🎵 background-music lane ---- */
+.ve-music-track { position: relative; height: 32px; margin-top: 6px; border-radius: 6px; overflow: hidden;
+  background: repeating-linear-gradient(45deg, #0c1017 0 10px, #0f141d 10px 20px); display: flex; align-items: center; }
+.ve-lane-empty { padding-left: 10px; font-size: 10.5px; white-space: nowrap; }
+.ve-music-seg { position: absolute; top: 3px; height: calc(100% - 6px); border-radius: 7px; box-sizing: border-box;
+  border: 2px solid #a371f7; background: linear-gradient(180deg, rgba(163,113,247,.34), rgba(163,113,247,.16));
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 9px;
+  cursor: grab; overflow: hidden; user-select: none; }
+.ve-music-seg:hover { filter: brightness(1.2); }
+.ve-music-seg:active { cursor: grabbing; }
+/* A bed isn't "placed" anywhere — it plays under every short — so it reads as a repeat, not a block. */
+.ve-music-seg.bed { border-style: dashed;
+  background: repeating-linear-gradient(90deg, rgba(163,113,247,.28) 0 14px, rgba(163,113,247,.14) 14px 28px); }
+.ve-music-label { font-size: 11.5px; font-weight: 700; color: #e7dcff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ve-music-vol { font-size: 10.5px; font-weight: 700; color: #cbb6ff; flex: 0 0 auto; }
+/* the outro marker parked after the footage */
+.ve-seg-outro { border: 2px dashed var(--accent) !important; background: linear-gradient(180deg, rgba(255,176,46,.24), rgba(255,176,46,.1)) !important;
+  cursor: pointer; }
+.ve-seg-outro .ve-seg-label { color: #ffdca6; }
+
+/* Caption-the-shorts-only button: full width so it reads as the panel's action,
+   not another toggle. */
+.ve-cap-shorts { display: block; width: 100%; margin: 0 0 10px; padding: 9px 11px; font-weight: 700; font-size: 12.5px;
+  background: linear-gradient(135deg, rgba(63,185,80,.18), rgba(46,160,67,.08)); border: 1px solid rgba(63,185,80,.45);
+  border-radius: 9px; color: var(--text); cursor: pointer; }
+.ve-cap-shorts:hover:not(:disabled) { border-color: #3fb950; background: rgba(63,185,80,.22); }
+.ve-cap-shorts:disabled { opacity: .5; cursor: default; }
+.ve-cap-shorts.done { border-color: #3fb950; }
+.ve-cap-toggle { display: flex; align-items: center; gap: 7px; margin: 0 0 12px; padding: 9px 11px; background: var(--bg-2);
+  border: 1px dashed var(--border); border-radius: 9px; color: var(--text); font-size: 12px; cursor: pointer; }
+.ve-cap-toggle:hover { border-color: var(--accent); }
+.ve-cap-toggle input { width: auto; margin: 0; accent-color: var(--accent); }
+/* Frame fill (background blur) + background-noise removal. Both are set once
+   for a church's room and camera, so they fold away behind one row and never
+   push the Shorts list — the thing people are actually looking at — down. */
+.ve-export-opts { margin: 0 0 12px; }
+.ve-export-opts > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px;
+  padding: 9px 11px; background: var(--bg-2); border: 1px dashed var(--border); border-radius: 9px;
+  color: var(--text); font-size: 12px; }
+.ve-export-opts > summary::-webkit-details-marker { display: none; }
+.ve-export-opts > summary::after { content: '▸'; margin-left: auto; color: var(--muted); transition: transform .12s; }
+.ve-export-opts[open] > summary::after { transform: rotate(90deg); }
+.ve-export-opts > summary:hover { border-color: var(--accent); }
+.ve-export-opts[open] > summary { margin-bottom: 9px; }
+.ve-export-opts #veExportSummary { margin-left: 2px; }
+.ve-fill { margin: 0 0 12px; }
+.ve-export-opts .ve-fill:last-of-type { margin-bottom: 0; }
+.ve-fill .ve-cap-toggle { margin: 0; }
+.ve-fill-row { display: flex; align-items: center; gap: 8px; padding: 9px 11px; background: var(--bg-2);
+  border: 1px dashed var(--border); border-radius: 9px; color: var(--text); font-size: 12px; cursor: pointer;
+  white-space: nowrap; }
+.ve-fill-row:hover { border-color: var(--accent); }
+/* min-width:0 lets the select shrink instead of forcing the label to wrap */
+.ve-fill-row select { flex: 1; width: auto; min-width: 0; margin: 0; padding: 5px 7px; font-size: 11.5px; }
+.ve-fill-opts { display: flex; flex-direction: column; gap: 8px; margin: 7px 0 0; padding: 10px 11px;
+  background: var(--bg-2); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 0 9px 9px 0; }
+.ve-fill-opts label { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--muted); font-size: 11.5px; }
+.ve-fill-opts input[type=range] { flex: 1; margin: 0; accent-color: var(--accent); }
+.ve-fill-opts select { width: auto; flex: 1; margin: 0; padding: 5px 7px; font-size: 11.5px; }
+.ve-fill-opts button { width: 100%; margin: 0; }
+.ve-fill-note { margin: 0; line-height: 1.45; }
+/* The blurred backdrop behind the preview picture when Frame fill = blur. It is
+   drawn from the video itself at 1/8 size and blurred up, exactly like the
+   export does it, so the preview and the file agree.
+
+   #vePlayer is a full-bleed element with a BLACK background and object-fit:
+   contain — so on its own it would paint solid black straight over this. While
+   blur fill is on the player goes transparent and sits one layer up, which is
+   the only way the backdrop is ever visible. */
+.ve-blur-bg { position: absolute; pointer-events: none; z-index: 1; opacity: 0; transition: opacity .15s;
+  filter: blur(14px) saturate(1.15) brightness(.82); transform: scale(1.12); }
+.ve-blur-bg.on { opacity: 1; }
+.ve-preview.blurfill #vePlayer { background: transparent; z-index: 2; }
+
+.ve-clip-thumb { width: 58px; height: 34px; object-fit: cover; border-radius: 6px; flex: 0 0 auto; background: #000; }
+.ve-top-pick { background: linear-gradient(90deg, #f5a623, #e5534b); color: #1a1a1a; font-weight: 800; font-size: 10px;
+  padding: 1px 7px; border-radius: 10px; vertical-align: 1px; }
+/* OpusClip-style viral-potential score badge (0-100) on each AI clip card */
+.ve-score { min-width: 34px; height: 34px; padding: 0 4px; border-radius: 9px; display: grid; place-items: center;
+  font-weight: 800; font-size: 13px; flex: 0 0 auto; color: #fff; cursor: help; }
+.ve-score.hot { background: linear-gradient(135deg, #ff5a52, #f5a623); color: #14100a; box-shadow: 0 2px 10px rgba(255,90,82,.4); }
+.ve-score.warm { background: linear-gradient(135deg, #f5a623, #ffd23e); color: #14100a; }
+.ve-score.cool { background: linear-gradient(135deg, var(--primary), var(--primary-2)); }
+/* "−3.0s" on a clip card: pauses removed, so the card shows the real export length */
+.ve-clip-joined { background: rgba(46,160,67,.9); color: #fff; font-weight: 800; font-size: 10px;
+  padding: 1px 6px; border-radius: 9px; cursor: help; }
+/* "💬 CC" on a clip card: this short is captioned (Auto-caption all shorts) */
+.ve-clip-capped { background: rgba(31,111,235,.85); color: #fff; font-weight: 800; font-size: 10px;
+  padding: 1px 6px; border-radius: 9px; cursor: help; }
+/* WHY the AI picked this clip (hook / declarations / crowd reaction …) */
+.ve-clip-why { color: var(--accent); font-size: 10.5px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Caption editor modal */
+.cap-modal { position: fixed; inset: 0; background: rgba(8,10,15,.75); display: grid; place-items: center; z-index: 250; }
+.cap-box { position: relative; width: 680px; max-width: 92vw; max-height: 90vh; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; }
+.cap-head { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; border-bottom: 1px solid var(--border); }
+.cap-head h2 { margin: 0; font-size: 17px; }
+/* The settings take the room they need and NOT A ROW MORE. `flex: 0 0 auto`
+   meant every control added here pushed the whole window down, and on a 1280x720
+   laptop the Save button went off the bottom — one new row of settings was
+   enough. Capped and scrollable, the settings can grow without ever costing the
+   words their space or the operator their button. */
+.cap-controls {
+  /* Does NOT shrink — a settings row squeezed to make room for something
+     below it just scrolls, and the operator loses Transition, Style and
+     Hearing with no sign they are there. It is CAPPED instead, so it can
+     never push the Save button off the bottom either. */
+  flex: 0 0 auto; min-height: 0; max-height: 34vh; overflow-y: auto;
+  /* overflow-x MUST be stated. Setting only overflow-y makes the other axis
+     compute to `auto` as well, and the settings row then scrolls sideways
+     instead of wrapping — which clipped the word "Font" to "ont". */
+  overflow-x: hidden; display: flex; flex-wrap: wrap; align-items: center; padding: 12px 18px; gap: 10px 14px; }
+.cap-fine { display: flex; flex: 0 0 auto; align-items: center; gap: 10px 14px; }
+.cap-fine label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.cap-strip-opt { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+/* The swatch moved off the settings row, and its size rule did not follow —
+   an unsized colour input collapses to a sliver a few pixels wide. */
+.cap-strip-opt input[type=color] { width: 34px; height: 26px; padding: 2px; margin: 0; flex: 0 0 auto; }
+.cap-fine-btn { flex: 0 0 auto; padding: 5px 9px; font-size: 13px; }
+.cap-controls label { margin: 0; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.cap-controls select { width: auto; margin: 0; padding: 6px 8px; }
+.cap-controls input[type=color] { width: 40px; height: 30px; padding: 2px; margin: 0; }
+.cap-inline input { width: auto; margin: 0; }
+/* The caption text is the point of this window, so it gets the space and it
+   never disappears: it may shrink when a panel below is opened, but not past
+   a readable few lines, and it scrolls inside itself. */
+/* 120, not 150. The words still get every spare pixel and still never drop
+   below a readable few lines — but on a 1280x720 laptop with the settings
+   fully open, a 150px floor was 9px more than the window had, and what
+   went off the bottom was the Save button. The words can give up a line
+   more readily than the operator can give up the button. */
+.cap-list { flex: 1 1 auto; min-height: 120px; overflow-y: auto; padding: 8px 18px; display: flex; flex-direction: column; gap: 6px; }
+.cap-row { display: flex; align-items: center; gap: 10px; }
+.cap-time { flex: 0 0 44px; text-align: right; font-variant-numeric: tabular-nums; }
+.cap-empty { padding: 14px 4px; text-align: center; }
+
+/* The captions window before there are any captions — the settings above are
+   live, and this is the button that goes and listens. */
+.cap-empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 26px 18px; text-align: center; min-height: 220px; }
+.cap-empty-ic { font-size: 40px; line-height: 1; opacity: .85; }
+.cap-empty-title { margin: 0; font-size: 17px; font-weight: 700; }
+.cap-empty-sub { margin: 0; max-width: 46ch; line-height: 1.5; }
+.cap-empty-note { margin: 0; }
+.cap-generate { margin-top: 4px; padding: 11px 22px; border: 0; border-radius: 10px; cursor: pointer;
+  font-size: 15px; font-weight: 700; color: #fff;
+  background: linear-gradient(135deg, #1f6feb, #6f42c1);
+  box-shadow: 0 6px 18px rgba(31, 111, 235, .35); transition: transform .12s ease, box-shadow .12s ease; }
+.cap-generate:hover { transform: translateY(-1px); box-shadow: 0 9px 24px rgba(31, 111, 235, .45); }
+.cap-generate:active { transform: translateY(0); }
+.cap-text { flex: 1; margin: 0; padding: 7px 10px; }
+/* The buttons are never allowed to shrink or be pushed out: an open panel that
+   hides "Save this short with captions" is the same bug as one that hides the
+   words. */
+.cap-foot { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-top: 1px solid var(--border); }
+.cap-foot-btns { display: flex; gap: 10px; }
+
+/* ---- the two folding panels under the caption text ----
+   An open panel is allowed to SHRINK (flex-shrink 1 + min-height 0) so that on
+   a short window the space comes out of the panel, which scrolls, rather than
+   out of the buttons, which would simply vanish off the bottom. */
+/* ---- the chosen caption look, worn by a sample beside its picker ----
+   This replaces a grid of style cards and a list of model cards that used to
+   sit below the caption text. Flex let them shrink to nothing on a normal
+   window, at which point their own headings overflowed their boxes and painted
+   over each other and the buttons — a control nobody could see or press. Two
+   dropdowns in the settings row cannot do that to a layout. */
+
+/* The row of caption looks inside the captions window: each chip is drawn in
+   the look it sells, so a style is chosen by eye rather than by name. */
+.cap-strip-row { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px; }
+.cap-strip-label { font-size: 11px; font-weight: 700; color: var(--muted); flex: 0 0 auto; }
+.cap-strip-more { flex: 0 0 auto; font-size: 11px; padding: 4px 9px; }
+.cap-style-strip { display: flex; gap: 6px; overflow-x: auto; padding: 3px 1px; flex: 1 1 auto; scrollbar-width: thin; }
+.cap-style-chip { flex: 0 0 auto; border: 2px solid transparent; border-radius: 8px; background: #0d1117;
+  padding: 5px 7px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.cap-style-chip:hover { border-color: var(--border); }
+.cap-style-chip.sel { border-color: var(--primary); background: rgba(79,124,255,.12); }
+.cap-style-chip .cs-sample { font-size: 15px; line-height: 1.15; white-space: nowrap; }
+.cap-style-chip .cs-name { font-size: 9px; color: var(--muted); white-space: nowrap; }
+/* Each font names itself in its own typeface — the point of the picker. */
+#capFont option { font-size: 15px; padding: 2px 4px; }
+.cap-style-sample-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: auto; min-width: 38px; height: 28px; margin: 0; padding: 0 9px; border-radius: 5px;
+  font-family: Anton, "Segoe UI", sans-serif; font-size: 15px; line-height: 1; cursor: pointer;
+  border: 1px solid var(--border); background: #101319;
+}
+.cap-style-sample-chip:hover { border-color: var(--primary); }
+/* The gallery floats OVER the window instead of taking height from it. */
+.cap-style-picker {
+  position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column;
+  background: rgba(10, 12, 18, 0.97); backdrop-filter: blur(2px);
+}
+.cap-style-picker.hidden { display: none; }
+.cap-style-picker-head {
+  flex: 0 0 auto; display: flex; align-items: baseline; gap: 10px; padding: 14px 18px;
+  border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 700;
+}
+.cap-style-picker-head .icon-btn { margin-left: auto; }
+.cap-style-grid {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 12px 18px 16px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 9px; align-content: start;
+}
+.cap-style-card {
+  width: 100%; margin: 0; padding: 0; cursor: pointer; overflow: hidden;
+  background: #101319; border: 2px solid var(--border); border-radius: 11px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 7px; min-height: 84px; transition: border-color .12s, transform .12s;
+}
+.cap-style-card:hover { border-color: var(--primary); transform: translateY(-1px); }
+.cap-style-card.sel { border-color: var(--text); box-shadow: 0 0 0 1px var(--text) inset; }
+.cap-style-sample { display: inline-block; max-width: 92%; font-size: 15px; line-height: 1.25;
+  font-family: Anton, "Segoe UI", sans-serif; letter-spacing: .4px; text-align: center; overflow-wrap: anywhere; }
+.cap-style-name { font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
+.cap-style-card.sel .cap-style-name { color: var(--text); }
+
+/* ---- the Word Book: the words this church's captions keep getting wrong ---- *
+ * The row lives above the transcript because that is where the wrong words are;
+ * the panel itself is an overlay for the same reason the style gallery is one —
+ * it must never be able to squeeze the words or the buttons out of the window. */
+.cap-fix-row { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
+.cap-wb-btn { flex: 0 0 auto; font-size: 11px; padding: 4px 10px; }
+.cap-fix-note { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cap-foot-msg { flex: 1 1 auto; min-width: 0; display: block; }
+.cap-foot-msg .cap-fix-note { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; white-space: normal; line-height: 1.35; }
+.cap-foot-msg .cap-fix-note:empty { display: none; }
+.cap-foot-msg:has(.cap-fix-note:not(:empty)) .cap-foot-hint { display: none; }
+.cap-fix-note.good { color: #3fb950; }
+
+/* ---- ✍ the proof-reader's buttons, on the Word Book's row ---- */
+.cap-fix-row { flex-wrap: wrap; row-gap: 6px; gap: 6px; }
+.cap-fix-sep { flex: 0 0 1px; align-self: stretch; background: var(--border); margin: 2px 2px; }
+.cap-g-all.has { border-color: #d29922; color: #e3b341; }
+.cap-g-all.has:hover { background: rgba(210, 153, 34, .12); }
+.cap-g-ai.busy { opacity: .7; pointer-events: none; }
+.cap-g-mode { flex: 0 0 auto; width: auto; margin: 0; padding: 3px 6px; font-size: 11px; }
+.cap-g-autolab { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; margin: 0; font-size: 11px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.cap-g-autolab input { width: auto; margin: 0; }
+
+/* ---- ▶ the listening bar ---- */
+.cap-player { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px;
+  padding: 5px 18px; margin: 0; background: var(--bg-2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.cap-pl-btn { flex: 0 0 auto; width: auto; margin: 0; padding: 5px 9px; font-size: 11.5px; border-radius: 8px;
+  background: var(--bg-3); color: var(--text); border: 1px solid var(--border); cursor: pointer; white-space: nowrap; }
+.cap-pl-btn:hover { border-color: var(--primary); }
+.cap-pl-play { flex: 0 0 auto; width: 38px; height: 32px; margin: 0; padding: 0; border-radius: 50%; border: 0; cursor: pointer;
+  font-size: 14px; color: #fff; background: linear-gradient(135deg, #1f6feb, #6f42c1); box-shadow: 0 3px 10px rgba(31, 111, 235, .35); }
+.cap-pl-play:hover { filter: brightness(1.12); }
+.cap-pl-time { flex: 0 0 auto; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 78px; }
+.cap-pl-scrub { flex: 1 1 90px; min-width: 70px; margin: 0; accent-color: var(--primary); }
+.cap-pl-rate { flex: 0 0 auto; width: auto; margin: 0; padding: 4px 6px; font-size: 11.5px; }
+.cap-pl-opt { flex: 0 0 auto; display: flex; align-items: center; gap: 5px; margin: 0; font-size: 11.5px; color: var(--muted); white-space: nowrap; cursor: pointer; }
+.cap-pl-opt input[type=checkbox] { width: auto; margin: 0; }
+
+/* ---- each line: ▶, time, the words (with their underlines), and the proof-reader's badge ---- */
+.cap-row { flex-wrap: wrap; row-gap: 4px; border-radius: 8px; padding: 1px 2px; transition: background .12s ease; }
+.cap-row.now { background: rgba(79, 124, 255, .13); box-shadow: inset 3px 0 0 var(--primary); }
+.cap-row.now .cap-time { color: var(--text); font-weight: 700; }
+.cap-row-play { flex: 0 0 auto; width: 26px; height: 26px; margin: 0; padding: 0; border-radius: 50%; cursor: pointer;
+  font-size: 10px; line-height: 1; color: var(--text); background: var(--bg-3); border: 1px solid var(--border); }
+.cap-row-play:hover, .cap-row.now .cap-row-play { border-color: var(--primary); color: #fff; background: rgba(79, 124, 255, .35); }
+.cap-field { position: relative; flex: 1 1 0; min-width: 0; display: flex; }
+.cap-field .cap-text { flex: 1 1 auto; min-width: 0; }
+/* The underlines are drawn on a see-through copy of the words laid exactly over
+   the box — the same font, padding and border — so a mark sits under the very
+   letters it means. pointer-events: none: the box underneath is still the box
+   being typed in. */
+.cap-hl { position: absolute; inset: 0; pointer-events: none; overflow: hidden; white-space: pre; color: transparent;
+  border: 1px solid transparent; font: inherit; }
+.cap-hl mark { color: transparent; background: transparent; border-radius: 2px;
+  text-decoration: underline wavy #f85149; text-decoration-skip-ink: none; text-underline-offset: 4px; text-decoration-thickness: 1.5px; }
+.cap-hl mark.g-case, .cap-hl mark.g-space { text-decoration-color: #58a6ff; }
+.cap-hl mark.g-ai { text-decoration-color: #bc8cff; }
+.cap-g-badge { flex: 0 0 auto; width: auto; margin: 0; padding: 4px 8px; font-size: 11px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+  color: #ffb4ab; background: rgba(248, 81, 73, .12); border: 1px solid rgba(248, 81, 73, .45); }
+.cap-g-badge.ai { color: #d2b4ff; background: rgba(188, 140, 255, .12); border-color: rgba(188, 140, 255, .5); }
+.cap-g-badge:hover { filter: brightness(1.2); }
+.cap-ai-line { flex: 0 0 auto; width: 26px; height: 26px; margin: 0; padding: 0; border-radius: 7px; cursor: pointer; font-size: 12px;
+  background: transparent; border: 1px solid transparent; opacity: .35; }
+.cap-row:hover .cap-ai-line, .cap-row:focus-within .cap-ai-line { opacity: 1; border-color: var(--border); }
+.cap-ai-line.busy { opacity: 1; animation: capPulse 1s ease-in-out infinite; }
+@keyframes capPulse { 50% { opacity: .35; } }
+/* the suggestion card, opened under its line */
+/* 100% of the row LESS the indent that lines it up under the words — a 100%
+   basis plus a 72px margin overflowed the row and hid the Ignore button. */
+.cap-sugg { flex: 0 0 auto; width: calc(100% - 72px); box-sizing: border-box; margin: 0 0 4px 72px; padding: 4px 6px; border-radius: 8px; background: var(--bg-2);
+  border: 1px solid var(--border); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 11.5px; }
+.cap-sugg-chip { flex: 0 1 auto; width: auto; margin: 0; padding: 2px 7px; border-radius: 6px; cursor: pointer; font-size: 11.5px; line-height: 1.4;
+  background: var(--bg-3); color: var(--text); border: 1px solid var(--border); text-align: left; }
+.cap-sugg-chip:hover { border-color: #3fb950; }
+.cap-sugg-chip del, .cap-sugg-line del { color: #ff7b72; text-decoration: line-through; }
+.cap-sugg-chip ins, .cap-sugg-line ins { color: #3fb950; text-decoration: none; font-weight: 700; }
+.cap-sugg-why { color: var(--muted); font-size: 11px; }
+.cap-sugg-line { flex: 1 1 100%; font-size: 12px; line-height: 1.4; }
+.cap-sugg-line .tag { font-size: 10px; font-weight: 800; letter-spacing: .5px; color: #bc8cff; margin-right: 6px; }
+.cap-sugg-acts { display: flex; gap: 6px; margin-left: auto; }
+.cap-sugg-acts button { width: auto; margin: 0; padding: 2px 9px; font-size: 11px; line-height: 1.4; }
+
+/* ---- ◧ beside the video ---- */
+.cap-dock-btn { flex: 0 0 auto; margin-left: auto; margin-right: 8px; font-size: 11.5px; padding: 5px 10px; }
+.cap-modal.docked { background: transparent; pointer-events: none; place-items: stretch end; }
+/* A SHORT SCREEN (a 1366x768 church laptop, less the taskbar) is where the
+   listening bar cost the Save button its place. The words keep their 120px; the
+   room comes out of padding and the settings block, which scrolls anyway. */
+@media (max-height: 760px) {
+  .cap-head { padding: 9px 18px; }
+  .cap-controls { max-height: 22vh; padding: 8px 18px; }
+  .cap-list { gap: 4px; }
+  .cap-field .cap-text { padding-top: 5px; padding-bottom: 5px; }
+  .cap-sugg { padding: 2px 6px; margin-bottom: 2px; }
+  .cap-player { padding: 3px 18px; }
+  .cap-pl-play { width: 32px; height: 26px; font-size: 12px; }
+  .cap-pl-btn { padding: 3px 8px; }
+  .cap-foot { padding: 9px 18px; }
+}
+.cap-modal.docked .cap-box { pointer-events: auto; width: min(560px, 46vw); max-width: none; height: 100vh; max-height: none;
+  border-radius: 0; border-top: none; border-bottom: none; border-right: none; box-shadow: -18px 0 48px rgba(0, 0, 0, .55);
+  animation: fxSlide .18s ease; }
+
+.cap-wb-panel {
+  position: absolute; inset: 0; z-index: 6; display: flex; flex-direction: column;
+  background: rgba(10, 12, 18, 0.97); backdrop-filter: blur(2px);
+}
+.cap-wb-panel.hidden { display: none; }
+.cap-wb-head {
+  flex: 0 0 auto; display: flex; align-items: baseline; gap: 10px; padding: 14px 18px;
+  border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 700;
+}
+.cap-wb-head > span:first-child { flex: 0 0 auto; white-space: nowrap; }
+.cap-wb-head > span:nth-child(2) { flex: 1 1 auto; min-width: 0; font-weight: 400; }
+.cap-wb-head .icon-btn { margin-left: auto; }
+/* The app styles every <input> as a full-width text box (see the base rules near
+ * the top of this file). A checkbox in a flex row must opt out of that, or it
+ * stretches and pushes everything beside it across the panel. */
+.cap-wb-panel input[type="checkbox"] { flex: 0 0 auto; width: auto; margin: 0; padding: 0; }
+.cap-wb-opts { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 8px 22px; padding: 10px 18px 4px; }
+.cap-wb-check { display: flex; align-items: center; gap: 7px; font-size: 12px; margin: 0; color: var(--text); }
+.cap-wb-check > span { flex: 1 1 auto; }
+.cap-wb-add { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 6px 18px; }
+.cap-wb-in {
+  flex: 1 1 0; min-width: 0; background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: 8px; color: var(--text); padding: 7px 10px; font-size: 12.5px;
+  margin: 0;                     /* the base input rule adds a top margin */
+}
+.cap-wb-in.wide { flex: 2 1 0; }
+.cap-wb-arrow { flex: 0 0 auto; color: var(--muted); font-size: 13px; }
+.cap-wb-go { flex: 0 0 auto; font-size: 12px; padding: 7px 14px; }
+.cap-wb-list {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px 18px 14px;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.cap-wb-row {
+  display: flex; align-items: center; gap: 9px; padding: 7px 10px; font-size: 12.5px;
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: 9px;
+}
+.cap-wb-row.off { opacity: .62; }
+.cap-wb-from { flex: 0 1 auto; min-width: 0; color: #ff7b72; text-decoration: line-through;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cap-wb-to { flex: 0 1 auto; min-width: 0; color: #3fb950; font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cap-wb-name { color: var(--text); font-weight: 700; }
+.cap-wb-tag {
+  margin-left: auto; flex: 0 0 auto; font-size: 10px; text-transform: uppercase;
+  letter-spacing: .6px; color: var(--muted);
+}
+.cap-wb-row .icon-btn { flex: 0 0 auto; }
+.cap-wb-sec { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .8px; margin: 12px 0 2px; }
+.cap-wb-empty { padding: 18px 4px; color: var(--muted); font-size: 12.5px; line-height: 1.55; }
+.cap-wb-foot {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 11px 18px;
+  border-top: 1px solid var(--border);
+}
+/* Only the FIRST button is pushed right; the rest sit beside it rather than
+ * each claiming the remaining space. */
+.cap-wb-foot .ghost-btn { flex: 0 0 auto; }
+.cap-wb-foot .ghost-btn:first-of-type { margin-left: auto; }
+
+/* ---- which listening model captions use (bigger = hears more words right) ---- */
+.cap-model-list { display: flex; flex-direction: column; gap: 7px; }
+.cap-model { display: flex; align-items: center; gap: 10px; padding: 9px 11px; background: var(--bg-2);
+  border: 1px solid var(--border); border-radius: 9px; font-size: 12px; }
+.cap-model.inuse { border-color: #3fb950; background: rgba(63,185,80,.08); }
+.cap-model-name { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.cap-model-name b { font-size: 12.5px; }
+.cap-model button { width: auto; margin: 0; padding: 6px 12px; font-size: 11.5px; }
+.cap-model-tag { font-size: 10px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 9px; background: rgba(63,185,80,.9); color: #06210e; }
+/* Every installed model is a row you press. The global button style centres its
+   children and stretches them, so the layout is restated here rather than
+   inherited. */
+.cap-model-row { display: flex; align-items: stretch; gap: 7px; }
+.cap-model-row .cap-model-pick { flex: 1; }
+button.cap-model-pick { width: 100%; margin: 0; text-align: left; cursor: pointer; color: var(--text); }
+button.cap-model-pick:hover { border-color: var(--primary); }
+button.cap-model-pick .cap-model-name { align-items: flex-start; text-align: left; }
+.cap-model-rm { width: auto; margin: 0; padding: 0 11px; font-size: 13px; }
+
+/* ---- MEDIA LIBRARY (music + clips) ---- */
+.lib-box { width: 760px; max-width: 94vw; max-height: 88vh; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 14px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; }
+.lib-tabs { display: flex; gap: 4px; padding: 10px 18px 0; border-bottom: 1px solid var(--border); }
+.lib-tab { width: auto; margin: 0; padding: 9px 15px; background: transparent; color: var(--muted); border: none;
+  border-bottom: 2px solid transparent; border-radius: 8px 8px 0 0; font-size: 13px; font-weight: 600; cursor: pointer; }
+.lib-tab:hover { color: var(--text); background: var(--bg-2); }
+.lib-tab.active { color: var(--text); border-bottom-color: var(--primary); }
+.lib-pane { flex: 1; min-height: 220px; overflow-y: auto; padding: 14px 18px; }
+.lib-pane.hidden { display: none; }
+.lib-actions { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.lib-actions input[type=text] { flex: 1; min-width: 200px; margin: 0; padding: 8px 11px; }
+.lib-note { margin: 0 0 12px; font-size: 11.5px; color: var(--muted); background: var(--bg-2);
+  border: 1px dashed var(--border); border-radius: 8px; padding: 8px 11px; }
+/* 🛡️ Copyright-free search: the default-on toggle, quick-pick chips, result badge */
+.lib-free-toggle { display: flex; align-items: center; gap: 7px; margin: 0 0 10px; padding: 8px 11px; font-size: 12px;
+  background: rgba(63,185,80,.08); border: 1px solid rgba(63,185,80,.35); border-radius: 8px; color: var(--text); cursor: pointer; }
+.lib-free-toggle input { width: auto; margin: 0; accent-color: #3fb950; }
+.lib-chips { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin: 0 0 10px; }
+.lib-chip { width: auto; margin: 0; padding: 5px 11px; font-size: 12px; background: var(--bg-3); color: var(--text);
+  border: 1px solid var(--border); border-radius: 999px; cursor: pointer; }
+.lib-chip:hover { border-color: var(--primary); background: rgba(79,124,255,.12); }
+.lib-free-badge { color: #3fb950; font-weight: 700; }
+.lib-empty { padding: 26px 8px; text-align: center; }
+.lib-list { display: flex; flex-direction: column; gap: 7px; }
+.lib-row { display: flex; align-items: center; gap: 11px; padding: 9px 11px; background: var(--bg-2);
+  border: 1px solid var(--border); border-radius: 10px; }
+.lib-row.sel { border-color: var(--primary); background: rgba(79,124,255,.1); }
+.lib-row-icon { font-size: 17px; flex: 0 0 auto; }
+.lib-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.lib-row-main b { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-mini { width: auto; margin: 0; flex: 0 0 auto; padding: 5px 9px; background: var(--bg-3); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; font-size: 12px; cursor: pointer; }
+.lib-mini:hover { border-color: var(--primary); }
+.lib-mini.danger:hover { border-color: var(--danger); color: var(--danger); }
+.lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px; }
+.lib-card { background: var(--bg-2); border: 2px solid var(--border); border-radius: 11px; overflow: hidden; }
+.lib-card.sel { border-color: var(--accent); }
+.lib-card-thumb { position: relative; aspect-ratio: 16/9; background: #000; display: grid; place-items: center; font-size: 30px; }
+.lib-card-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lib-card-dur { position: absolute; right: 6px; bottom: 6px; background: rgba(0,0,0,.75); color: #fff;
+  font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 6px; }
+.lib-card-badge { position: absolute; left: 6px; top: 6px; background: var(--accent); color: #1a1a1a;
+  font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 8px; }
+.lib-card-name { padding: 8px 9px 0; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lib-card-btns { display: flex; align-items: center; gap: 6px; padding: 8px 9px 9px; }
+.lib-card-btns .primary-btn { flex: 1; }
+.lib-setup { text-align: center; padding: 34px 24px; }
+.lib-setup p { margin: 0 0 10px; }
+.lib-setup .primary-btn { width: auto; margin: 8px auto 0; }
+/* the live controls for whatever is currently chosen */
+.lib-chosen { border-top: 1px solid var(--border); background: var(--bg-2); padding: 12px 18px; }
+.lib-chosen.hidden { display: none; }
+.lib-chosen-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.lib-chosen-name { font-size: 13px; }
+.lib-chosen-rows { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+.lib-slider { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12px; color: var(--muted); }
+.lib-slider input[type=range] { width: 150px; margin: 0; accent-color: var(--accent); }
+.lib-slider input[type=number] { width: 66px; margin: 0; padding: 5px 7px; }
+.lib-chosen .cap-inline { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 12px; color: var(--muted); cursor: pointer; }
+/* the topbar buttons light up while music / an outro is set */
+#veMusic.on, #veClips.on { border-color: var(--accent); color: var(--accent); background: rgba(255,176,46,.1); }
+.fx-body { padding: 12px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.fx-row { display: flex; align-items: center; gap: 12px; }
+.fx-row > label:first-child { flex: 0 0 130px; color: var(--muted); font-size: 13px; margin: 0; }
+.fx-row select, .fx-row input[type=number] { width: auto; margin: 0; }
+.fx-row input[type=range] { flex: 1; margin: 0; }
+.fx-speed-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; flex: 1; }
+.fx-speed-row input[type=number] { width: 90px; }
+.fx-speed-presets { display: flex; gap: 5px; flex-wrap: wrap; }
+.fx-speed-presets button { background: var(--bg-3); color: var(--text); border: 1px solid var(--border); border-radius: 7px; padding: 5px 9px; font-size: 11.5px; cursor: pointer; }
+.fx-speed-presets button:hover { border-color: var(--primary); }
+
+/* "Video quality" panel — docks on the RIGHT edge (CapCut properties panel) so the
+   preview stays fully visible and the changes show LIVE while you adjust. */
+.fx-side { position: fixed; top: 0; right: 0; bottom: 0; z-index: 250; display: flex; justify-content: flex-end; pointer-events: none; }
+.fx-side .cap-box { pointer-events: auto; width: 390px; max-width: 92vw; height: 100%; max-height: none; border-radius: 0;
+  border-top: none; border-bottom: none; border-right: none; box-shadow: -18px 0 48px rgba(0,0,0,.55); animation: fxSlide .18s ease; }
+@keyframes fxSlide { from { transform: translateX(30px); opacity: 0; } to { transform: none; opacity: 1; } }
+.fx-live-note { margin: 10px 18px 0; padding: 8px 12px; background: rgba(79,124,255,.12); border: 1px solid rgba(79,124,255,.4);
+  border-radius: 9px; color: var(--text); font-size: 12px; }
+
+/* ===================== FLYER EDITOR ===================== */
+#view-flyer.active { display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 56px); }
+.ed-toolbar {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px;
+}
+.ed-tb-group { display: flex; gap: 6px; align-items: center; padding-right: 10px; border-right: 1px solid var(--border); }
+.ed-tb-group:last-child { border-right: none; }
+.ed-tb-right { margin-left: auto; padding-right: 0; }
+.ed-tb-label { color: var(--muted); font-size: 12px; }
+.ed-toolbar button {
+  background: var(--bg-3); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 11px; font-size: 12.5px; cursor: pointer; font-weight: 600; white-space: nowrap;
+}
+.ed-toolbar button:hover { border-color: var(--primary); }
+.ed-toolbar button.primary-btn { background: var(--primary); color: #fff; border-color: var(--primary); }
+.ed-toolbar button.primary-btn:hover { background: var(--primary-2); }
+.ed-toolbar select { width: auto; margin: 0; padding: 7px 9px; font-size: 12.5px; }
+
+.ed-emoji-pop { position: absolute; z-index: 300; top: 108px; left: 40px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 10px; box-shadow: var(--shadow); display: grid; grid-template-columns: repeat(9, 1fr); gap: 4px; max-width: 360px; }
+.ed-emoji { background: var(--bg-3); border: 1px solid var(--border); border-radius: 8px; font-size: 20px; width: 34px; height: 34px; cursor: pointer; padding: 0; }
+.ed-emoji:hover { border-color: var(--primary); transform: scale(1.1); }
+.ed-main { flex: 1; display: flex; gap: 14px; min-height: 0; }
+/* The canvas and its page rail are one column, so the rail sits under the
+   sheet rather than beside the tools. */
+.ed-stage-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.ed-stage-wrap {
+  flex: 1; min-height: 0; overflow: auto; display: flex; align-items: center; justify-content: center;
+  background: repeating-conic-gradient(#1a1d27 0% 25%, #161922 0% 50%) 50% / 28px 28px;
+  border: 1px solid var(--border); border-radius: 12px; padding: 24px;
+}
+.ed-stage { margin: auto; position: relative; }
+.ed-canvas { position: relative; background: #fff; box-shadow: var(--shadow); overflow: hidden; user-select: none; }
+.ed-el { user-select: none; }
+.ed-el.sel { cursor: move; }
+.ed-h:hover { background: var(--accent) !important; }
+
+.ed-inspector { width: 290px; min-width: 290px; overflow-y: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+.ed-inspector h3 { margin: 0 0 12px; font-size: 15px; }
+.ins-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; gap: 8px; }
+.ins-head h3 { margin: 0; }
+.ins-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.icon-btn { background: var(--bg-3); border: 1px solid var(--border); color: var(--text); border-radius: 7px; width: 30px; height: 30px; cursor: pointer; font-size: 13px; padding: 0; }
+.icon-btn:hover { border-color: var(--primary); }
+.icon-btn.danger:hover { border-color: var(--danger); }
+.ins-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.ins-row label { margin: 0; flex: 0 0 96px; color: var(--muted); font-size: 12px; }
+.ins-row input, .ins-row select, .ins-row textarea { margin: 0; flex: 1; }
+.ins-row input[type=color] { flex: 0 0 44px; height: 32px; padding: 2px; }
+.ins-row input[type=checkbox] { flex: 0 0 auto; width: auto; }
+.ins-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-top: 10px; border-top: 1px solid var(--border); padding-top: 12px; }
+.ins-grid .ins-row { margin-bottom: 4px; }
+.ins-grid .ins-row label { flex: 0 0 24px; }
+.ins-imgbtns { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.ins-imgbtns button { flex: 1 1 45%; }
+.ins-imgbtns .primary-btn { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #1a1a1a; border: none; }
+
+/* ---- Canva-style left rail + drawer ---- */
+.ed-rail { display: flex; flex-direction: column; gap: 4px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 8px 6px; width: 66px; min-width: 66px; overflow-y: auto; }
+.ed-rail-tab { background: transparent; border: 1px solid transparent; color: var(--muted); border-radius: 10px; padding: 9px 2px; cursor: pointer; font-size: 18px; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.ed-rail-tab span { font-size: 10px; font-weight: 600; }
+.ed-rail-tab:hover { background: var(--bg-3); color: var(--text); }
+.ed-rail-tab.active { background: linear-gradient(135deg, rgba(79,124,255,.22), rgba(79,124,255,.08)); border-color: var(--primary); color: var(--text); }
+
+.ed-drawer { width: 232px; min-width: 232px; overflow-y: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
+.ed-drawer h3 { margin: 0 0 8px; font-size: 14.5px; }
+.ed-drawer h4 { margin: 12px 0 6px; }
+.ed-drawer textarea { width: 100%; margin: 8px 0 10px; font-size: 12.5px; line-height: 1.45; }
+.ed-drawer .primary-btn { margin-bottom: 8px; }
+#magicMeta { margin: 4px 0 10px; line-height: 1.5; }
+
+.ed-cards { display: flex; flex-direction: column; gap: 12px; margin-top: 10px; }
+.ed-card { cursor: pointer; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); background: var(--bg-3); transition: transform .12s ease, border-color .12s ease; }
+.ed-card:hover { border-color: var(--primary); transform: translateY(-2px); }
+.ed-thumb { position: relative; overflow: hidden; margin: 0 auto; background: #0a0c12; }
+.ed-card-label { padding: 6px 9px; font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.ed-card-wrap { display: flex; flex-direction: column; gap: 5px; }
+.ed-pal-row { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 2px; }
+.ed-pal-dot { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--border); cursor: pointer; padding: 0; }
+.ed-pal-dot:hover, .ed-pal-dot.on { border-color: #fff; transform: scale(1.12); }
+
+.ed-big-btn { display: block; width: 100%; text-align: center; background: var(--bg-3); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 12px 8px; margin-bottom: 8px; cursor: pointer; }
+.ed-big-btn:hover { border-color: var(--primary); }
+.ed-font-list { display: flex; flex-direction: column; gap: 6px; }
+.ed-font-btn { background: var(--bg-3); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; font-size: 17px; cursor: pointer; text-align: left; }
+.ed-font-btn:hover { border-color: var(--primary); }
+
+.ed-shape-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.ed-shape-grid button { background: var(--bg-3); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 12px 4px; font-size: 20px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.ed-shape-grid button span { font-size: 10px; color: var(--muted); font-weight: 600; }
+.ed-shape-grid button:hover { border-color: var(--primary); }
+.ed-emoji-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
+.ed-sticker-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.ed-sticker { background: var(--bg-3); border: 1px solid var(--border); border-radius: 10px; padding: 6px; cursor: pointer; height: 48px; display: flex; align-items: center; justify-content: center; }
+.ed-sticker img { max-width: 100%; max-height: 100%; }
+.ed-sticker:hover { border-color: var(--primary); transform: scale(1.06); }
+.ed-photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-height: 264px; overflow-y: auto; padding-right: 2px; }
+.ed-photo { background: var(--bg-3); border: 1px solid var(--border); border-radius: 8px; padding: 0; cursor: pointer; height: 54px; overflow: hidden; }
+.ed-photo img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 7px; }
+.ed-photo:hover { border-color: var(--primary); transform: scale(1.05); }
+.ins-order { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 2px 0 10px; }
+.ins-order button { padding: 6px 2px; font-size: 11px; white-space: nowrap; }
+
+.ed-layers { display: flex; flex-direction: column; gap: 4px; }
+.ed-layer { display: flex; align-items: center; gap: 6px; background: var(--bg-3); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; cursor: pointer; font-size: 12px; }
+.ed-layer:hover { border-color: var(--primary); }
+.ed-layer.sel { border-color: var(--primary); background: rgba(79,124,255,.14); }
+.ed-layer.isHidden { opacity: .45; }
+.ed-layer-ico { flex: 0 0 auto; }
+.ed-layer-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ed-layer button { background: transparent; border: none; color: var(--muted); cursor: pointer; padding: 2px 3px; font-size: 12px; border-radius: 5px; }
+.ed-layer button:hover { background: var(--bg-2); color: var(--text); }
+.ed-layer-bg { margin-top: 8px; opacity: .8; }
+
+.ins-align { display: flex; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
+.ins-align button { background: var(--bg-3); border: 1px solid var(--border); color: var(--text); border-radius: 7px; width: 32px; height: 30px; cursor: pointer; font-size: 14px; padding: 0; }
+.ins-align button:hover, .ins-align button.on { border-color: var(--primary); }
+.ins-filters { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.ins-filters button { background: var(--bg-3); border: 1px solid var(--border); color: var(--text); border-radius: 7px; padding: 4px 8px; font-size: 11px; cursor: pointer; }
+.ins-filters button:hover { border-color: var(--primary); }
+.ins-sec { margin: 14px 0 8px; padding-top: 10px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; }
+.ins-colorwrap { display: flex; align-items: center; gap: 4px; flex: 1; justify-content: flex-end; }
+.ins-colorwrap input[type=color] { flex: 0 0 44px; height: 32px; padding: 2px; }
+.ins-eye { background: var(--bg-3); border: 1px solid var(--border); color: var(--text); border-radius: 7px; width: 30px; height: 30px; cursor: pointer; font-size: 13px; padding: 0; }
+.ins-eye:hover { border-color: var(--primary); }
+.icon-btn.on { border-color: var(--accent); }
+.ed-tb-zoom button { min-width: 34px; }
+
+::-webkit-scrollbar { width: 10px; }
+::-webkit-scrollbar-thumb { background: var(--bg-3); border-radius: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ===================== GO LIVE studio ===================== */
+.live-layout { display: grid; grid-template-columns: 1fr 340px; gap: 20px; height: calc(100vh - 48px); }
+.live-stage { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.live-stage-head { display: flex; align-items: center; justify-content: space-between; }
+.live-badge { display: inline-flex; align-items: center; gap: 7px; font-weight: 800; font-size: 12px;
+  letter-spacing: .08em; padding: 5px 12px; border-radius: 20px; background: var(--bg-2); border: 1px solid var(--border); }
+.live-badge .live-dot { width: 9px; height: 9px; border-radius: 50%; background: #555; }
+.live-badge.on { background: #e5484d; border-color: #e5484d; color: #fff; }
+.live-badge.on .live-dot { background: #fff; animation: livepulse 1.2s infinite; }
+@keyframes livepulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
+.live-stats { display: flex; gap: 14px; }
+.live-preview-wrap { position: relative; flex: 1; min-height: 0; background: #000; border-radius: 12px; overflow: hidden;
+  display: grid; place-items: center; }
+.live-preview-wrap video { width: 100%; height: 100%; object-fit: contain; }
+.live-nocam { position: absolute; inset: 0; display: grid; place-content: center; gap: 10px; text-align: center;
+  background: var(--bg-2); }
+.live-lower-third { position: absolute; left: 0; bottom: 9%; max-width: 70%; padding: 10px 22px 10px 14px;
+  background: linear-gradient(90deg, rgba(12,14,20,.92), rgba(12,14,20,0)); border-left: 5px solid #e5484d;
+  color: #fff; font-weight: 700; font-size: 18px; pointer-events: none; }
+.live-meter-row { display: flex; align-items: center; gap: 10px; }
+.live-meter { flex: 1; height: 8px; background: var(--bg-3); border-radius: 4px; overflow: hidden; }
+.live-meter > div { height: 100%; width: 0%; background: #30a46c; transition: width .06s linear; }
+.live-controls { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+.live-overlay-row { display: flex; align-items: center; gap: 8px; }
+.live-overlay-row input { width: auto; margin: 0; accent-color: #e5484d; }
+.live-actions { display: flex; gap: 8px; margin-top: 10px; }
+.live-actions .live-go { background: linear-gradient(135deg, #e5484d, #ff7a59); border: none; color: #fff; flex: 1; }
+.live-actions #liveEnd { flex: 1; border-color: #e5484d; color: #e5484d; }
+#liveMsg { margin-top: 8px; min-height: 18px; }
+
+/* Scheduler auto-post additions */
+.sched-banner { margin-top: 10px; padding: 9px 13px; border-radius: 10px; font-size: 12.5px;
+  border: 1px solid var(--border); background: var(--bg-2); color: var(--muted); }
+.sched-banner.on { border-color: var(--good); color: var(--text); background: rgba(48,164,108,.12); }
+.badge.failed { background: #e5484d; color: #fff; }
+.badge.auto { background: rgba(48,164,108,.25); color: #7fd7a8; border: 1px solid #30a46c; }
+.post-error { margin-top: 5px; font-size: 11.5px; color: #ff8a8e; }
+
+/* ---- Who will actually publish this post (booked vs needs-this-PC) ---- */
+.post-handoff { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; }
+.post-handoff span { line-height: 1.45; }
+.ho-safe { color: #7fd7a8; }
+.ho-wait { color: var(--muted); }
+.ho-local { color: var(--accent); }
+.link-btn { background: none; border: 0; padding: 0 0 0 2px; color: var(--primary);
+  font: inherit; font-weight: 700; cursor: pointer; text-decoration: underline; }
+.link-btn:hover { filter: brightness(1.25); }
+.link-btn:disabled { opacity: .5; cursor: default; }
+
+/* ---- Posting while the app is closed (Scheduler) ---- */
+.autopost-panel { margin-bottom: 20px; }
+.autopost-row { flex-wrap: wrap; gap: 16px; margin: 12px 0 6px; align-items: center; }
+.autopost-row label { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px; margin: 0; }
+.autopost-row select { width: auto; min-width: 120px; margin: 0; }
+.autopost-runs { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+.ap-runs-head { margin-bottom: 4px; }
+.ap-run { font-size: 11.5px; color: var(--muted); padding: 2px 0; }
+.ap-run.good { color: var(--text); }
+.ap-run.bad { color: #ff8a8e; }
+.ap-when { display: inline-block; min-width: 155px; opacity: .75; }
+
+/* ---- Linked social accounts (Scheduler) ---- */
+.acct-panel { margin-bottom: 20px; }
+.acct-strip { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; min-height: 34px; }
+.acct-chip { display: inline-flex; align-items: center; gap: 7px; background: var(--bg-2);
+  border: 1px solid var(--border); border-radius: 24px; padding: 5px 10px 5px 6px; cursor: pointer; }
+.acct-chip:hover { border-color: var(--primary); }
+.acct-chip.checking { opacity: .55; }
+.acct-ava { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; display: inline-grid;
+  place-items: center; background: var(--bg-3); font-size: 13px; flex: none; }
+.acct-ava-fallback { color: var(--text); font-weight: 700; }
+.acct-plat { font-size: 12px; margin-left: -16px; margin-top: 16px; text-shadow: 0 0 3px #000; }
+.acct-name { font-size: 13px; font-weight: 600; }
+.acct-x { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px;
+  padding: 2px 6px; border-radius: 50%; line-height: 1; }
+.acct-x:hover { color: #fff; background: #e5484d; }
+.post-to { margin: 10px 0 4px; }
+.acct-picks { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 7px; }
+.acct-pick { padding: 4px 10px 4px 5px; }
+.acct-pick .acct-ava { width: 20px; height: 20px; font-size: 11px; }
+
+/* Attached-media thumbnail on the New post form */
+.post-media-preview { margin: 8px 0 2px; }
+.post-media-preview img, .post-media-preview video {
+  display: block; width: 100%; max-height: 200px; object-fit: contain;
+  background: #000; border: 1px solid var(--border); border-radius: 10px; }
+
+/* Connect-account wizard */
+.acct-modal { position: fixed; inset: 0; background: rgba(5, 7, 10, .72); display: grid;
+  place-items: center; z-index: 90; }
+.acct-modal.hidden { display: none; }
+.acct-modal-box { width: min(560px, 92vw); max-height: 86vh; overflow: auto; background: var(--panel);
+  border: 1px solid var(--border); border-radius: 14px; padding: 20px; box-shadow: 0 18px 60px rgba(0,0,0,.6); }
+.acct-modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.acct-modal-head h2 { margin: 0; font-size: 17px; }
+.acct-modal-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+.acct-steps { margin: 8px 0 14px 18px; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.acct-openrow { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; }
+.acct-pagelist { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow: auto; }
+.acct-pagerow { display: flex; align-items: center; gap: 10px; background: var(--bg-2);
+  border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; cursor: pointer; }
+.acct-pagerow input { width: auto; margin: 0; }
+.acct-pagerow:hover { border-color: var(--primary); }
+.acct-pagerow-ig { margin-left: 26px; }
+.acct-pagerow .acct-ava { width: 34px; height: 34px; }
+.acct-wait { text-align: center; padding: 18px 0; }
+.acct-wait .spinner { width: 34px; height: 34px; border: 3px solid var(--bg-3);
+  border-top-color: var(--primary); border-radius: 50%; margin: 0 auto 12px; animation: acctspin .9s linear infinite; }
+@keyframes acctspin { to { transform: rotate(360deg); } }
+.badge.acct-result { cursor: pointer; }
+.acct-choose { width: 100%; text-align: left; font: inherit; color: var(--text); }
+.acct-choose:active { transform: scale(.99); }
+
+/* ===================== Phone Studio panel (Settings) =====================
+ * Two facts do the whole job: the address to type and the PIN. They are set
+ * big, monospaced and selectable, because someone is reading them off this
+ * screen while holding a phone. */
+#phonePanel.flash { animation: phoneflash 1.4s ease; }
+@keyframes phoneflash {
+  0%, 100% { box-shadow: none; }
+  25%, 60% { box-shadow: 0 0 0 2px var(--primary), 0 0 24px rgba(109, 40, 217, .45); }
+}
+.phone-connect { display: flex; flex-wrap: wrap; gap: 22px; margin: 14px 0 6px; }
+.phone-step { display: flex; align-items: flex-start; gap: 11px; font-size: 13.5px; }
+.phone-num {
+  flex: none; width: 25px; height: 25px; border-radius: 50%;
+  background: var(--primary); color: #fff; font-weight: 800; font-size: 13px;
+  display: flex; align-items: center; justify-content: center;
+}
+.phone-url, .phone-pin {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 21px; font-weight: 700; letter-spacing: .02em;
+  color: var(--accent); margin-top: 4px; user-select: all; cursor: text;
+}
+.phone-pin { letter-spacing: .16em; }
+
+/* The Cloud Studio panel reuses the phone panel's three-step layout — it is
+   the same question (what do I type on the phone) — and adds one box for the
+   decision that is genuinely different: whether this PC gets a public door. */
+.cloud-tunnel {
+  margin: 14px 0 6px; padding: 12px 14px;
+  border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
+  background: var(--bg-2);
+}
+.cloud-tunnel > p { margin: 6px 0; }
+.cloud-tunnel label { display: block; margin-top: 8px; }
+#cloudUrl { font-size: 18px; word-break: break-all; }
+
+
+/* ============================== FLYER PAGES ==============================
+   A strip of true miniatures under the canvas — the page you are on is lit,
+   every other one is a click away, and each carries its own tools on hover. */
+.ed-pages {
+  flex: 0 0 auto; display: flex; align-items: flex-end; gap: 10px;
+  padding: 10px 12px; overflow-x: auto; overflow-y: hidden;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+}
+.ed-pages:empty { display: none; }
+.ed-page {
+  position: relative; flex: 0 0 auto; padding: 0; cursor: pointer;
+  background: none; border: 0; display: flex; flex-direction: column; align-items: center; gap: 4px;
+}
+.ed-page-thumb {
+  display: block; position: relative; overflow: hidden;
+  background: #fff; border-radius: 7px;
+  border: 2px solid var(--border-soft);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .35);
+  transition: border-color .12s ease, transform .12s ease, box-shadow .12s ease;
+}
+.ed-page:hover .ed-page-thumb { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0, 0, 0, .45); }
+.ed-page.sel .ed-page-thumb { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79, 124, 255, .22); }
+/* The miniature is the real page, scaled — same renderer, same result. */
+.ed-page-scale { position: absolute; top: 0; left: 0; transform-origin: 0 0; display: block; overflow: hidden; }
+.ed-page-no { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ed-page.sel .ed-page-no { color: var(--text); font-weight: 700; }
+.ed-page-tools {
+  position: absolute; left: 0; right: 0; top: 0; display: flex; justify-content: center; gap: 2px;
+  padding: 3px 0; opacity: 0; transition: opacity .12s ease;
+  background: linear-gradient(rgba(0, 0, 0, .72), transparent); border-radius: 7px 7px 0 0;
+}
+.ed-page:hover .ed-page-tools { opacity: 1; }
+.ed-page-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 17px; height: 17px; font-size: 10px; line-height: 1; border-radius: 4px;
+  background: rgba(255, 255, 255, .14); color: #fff;
+}
+.ed-page-btn:hover { background: var(--primary); }
+.ed-page-add {
+  flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  width: 74px; min-height: 74px; align-self: center; cursor: pointer;
+  font-size: 18px; color: var(--muted);
+  background: transparent; border: 2px dashed var(--border); border-radius: 7px;
+  transition: border-color .12s ease, color .12s ease, background .12s ease;
+}
+.ed-page-add span { font-size: 11px; }
+.ed-page-add:hover { border-color: var(--primary); color: var(--text); background: rgba(79, 124, 255, .08); }
+
+/* Bulk upload: the batch waiting to be auto-scheduled. */
+.bulk-box { border: 1px solid var(--border); border-radius: 10px; padding: 10px; margin: 8px 0; background: var(--bg-2); }
+.bulk-box.hidden { display: none; }
+.bulk-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.bulk-list { max-height: 190px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.bulk-item { display: flex; align-items: center; gap: 8px; font-size: 11.5px; padding: 4px 6px; border-radius: 6px; background: var(--bg); }
+.bulk-item .bi-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bulk-item .bi-when { color: var(--accent); font-weight: 700; white-space: nowrap; font-size: 11px; }
+.bulk-item .bi-kind { flex: 0 0 auto; }
+.bulk-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* Each file in the batch gets its OWN title and caption — a batch of ten
+   shorts is ten different sermons, and one shared caption would be wrong nine
+   times. The card is editable in place. */
+.bulk-item { display: block; padding: 7px 8px; }
+.bulk-item .bi-top { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.bulk-item .bi-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.bulk-item .bi-when { color: var(--accent); font-weight: 700; white-space: nowrap; font-size: 11px; }
+.bulk-item .bi-write { flex: 0 0 auto; font-size: 11px; padding: 2px 7px; }
+.bulk-item .bi-drop { flex: 0 0 auto; }
+.bulk-item input.bi-title { width: 100%; margin-bottom: 4px; font-size: 12px; padding: 5px 7px; }
+.bulk-item textarea.bi-cap { width: 100%; font-size: 11.5px; padding: 5px 7px; resize: vertical; min-height: 46px; }
+.bulk-item .bi-state { font-size: 10.5px; color: var(--muted); margin-top: 3px; }
+.bulk-item .bi-state.heard { color: #3fb950; }
+/* Written by the rules rather than by the AI — postable, but not what was asked
+   for, and it must not look the same as the real thing. */
+.bulk-item .bi-state.warn { color: var(--accent); }
+.bulk-list { max-height: 340px; }
+
+/* The cut-out editor. The stage is deliberately the biggest thing in the box:
+   judging a cut-out is entirely a matter of looking at it. */
+.cut-modal { position: fixed; inset: 0; z-index: 70; background: rgba(4,6,10,.72); display: flex; align-items: center; justify-content: center; }
+.cut-modal.hidden { display: none; }
+.cut-box { width: min(1100px, 94vw); height: min(760px, 92vh); background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: 14px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 24px 70px rgba(0,0,0,.6); }
+.cut-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.cut-head h2 { margin: 0; font-size: 16px; }
+.cut-body { flex: 1; display: flex; min-height: 0; }
+.cut-stage { flex: 1; min-width: 0; position: relative; display: grid; place-items: center; padding: 10px; background: #0b0e14; }
+.cut-stage canvas { max-width: 100%; max-height: 100%; border-radius: 6px; touch-action: none; }
+.cut-busy { position: absolute; inset: auto; padding: 8px 14px; border-radius: 8px; background: rgba(8,10,16,.9);
+  border: 1px solid var(--border); font-size: 12.5px; }
+.cut-busy.hidden { display: none; }
+.cut-side { width: 258px; flex: 0 0 258px; border-left: 1px solid var(--border); padding: 12px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 16px; }
+.cut-group { display: flex; flex-direction: column; gap: 7px; }
+.cut-label { font-size: 11px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase; color: var(--muted); }
+.cut-row { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; font-weight: 600; }
+.cut-val { color: var(--accent); font-weight: 800; font-size: 12px; }
+.cut-tools { display: flex; gap: 6px; }
+.cut-tool { flex: 1; padding: 9px 6px; border-radius: 9px; border: 1px solid var(--border); background: var(--bg);
+  color: var(--text); font-size: 12px; font-weight: 700; cursor: pointer; }
+.cut-tool:hover { border-color: var(--muted); }
+.cut-tool.on { border-color: var(--primary); background: rgba(79,124,255,.16); }
+/* The checkbox and its words stay together on one line — column layout was
+   stretching them to the full sidebar width and wrapping the label. */
+.cut-check { display: flex; align-items: center; justify-content: flex-start; gap: 7px;
+  font-size: 12px; color: var(--muted); white-space: nowrap; }
+.cut-check input { flex: 0 0 auto; margin: 0; }
+.cut-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 16px; border-top: 1px solid var(--border); }
+.cut-foot-btns { display: flex; gap: 8px; }
+
+/* ---- WHO TO FOLLOW -------------------------------------------------------
+   The auto-reframe tracker guesses who the clip is about. On a church platform
+   it can guess wrong, so this is the one control that settles it: the chosen
+   person is shown as a chip under the toggle, so it is never a mystery who the
+   next export is going to follow. */
+.ve-follow { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin: 2px 0 8px; }
+.ve-follow-who { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ve-follow-face { width: 30px; height: 40px; object-fit: cover; border-radius: 6px; border: 2px solid var(--accent); flex: 0 0 auto; }
+.ve-follow-name { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ve-follow-clear { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 13px; padding: 2px 4px; }
+/* 🧠 who is the speaker — the AI referee (cloudsee.js) or this PC alone */
+.ve-rf-ai { display: flex; flex-direction: column; gap: 6px; }
+.ve-rf-ai .ve-insp-note { margin: 0; }
+/* the label wraps rather than squeezing the choice to "Ask the…" */
+.ve-rf-ai .ve-fill-row select { flex: 0 0 auto; min-width: 116px; max-width: 60%; }
+.ve-rf-ai .ve-insp-note.warn { color: #e3b341; }
+.ve-rf-ai .ve-insp-note.good { color: #3fb950; }
+.ve-rf-ai-key { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.ve-rf-ai-key input { flex: 1 1 140px; min-width: 0; padding: 6px 8px; font-size: 12px; background: var(--bg-3); color: var(--text);
+  border: 1px solid var(--border); border-radius: 7px; }
+.ve-rf-ai-key.hidden { display: none; }
+.ve-follow-clear:hover { color: var(--danger, #e5484d); }
+
+.follow-box { width: 760px; }
+.follow-body { padding: 14px 18px 18px; overflow-y: auto; }
+/* The frame and its clickable people share one positioned box so the overlay
+   rectangles land exactly on the faces however the picture is scaled. */
+.follow-stage { position: relative; display: inline-block; max-width: 100%; border-radius: 10px; overflow: hidden; background: #000; }
+.follow-stage img { display: block; max-width: 100%; height: auto; }
+.follow-boxes { position: absolute; inset: 0; }
+.follow-hit { position: absolute; border: 2px solid rgba(255,255,255,.65); border-radius: 6px; cursor: pointer; transition: border-color .12s, box-shadow .12s; }
+.follow-hit:hover, .follow-hit.on { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(90,160,255,.35); }
+.follow-cards { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.follow-card { border: 2px solid var(--border); background: var(--panel-2, rgba(255,255,255,.04)); border-radius: 10px;
+  padding: 6px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; width: 92px; }
+.follow-card:hover, .follow-card.on { border-color: var(--accent); }
+.follow-card img { width: 76px; height: 100px; object-fit: cover; border-radius: 6px; background: #000; }
+.follow-card span { font-size: 11px; color: var(--muted); }
+.follow-actions { display: flex; gap: 8px; margin-top: 14px; }
+.follow-empty { padding: 16px 2px; }
+
+/* ---- SAVED SESSIONS ------------------------------------------------------
+   Editing a service takes more than one sitting. The chip beside the file name
+   is the whole status line: what this session is called, and a dot when there
+   are changes that have not been saved under that name (they are never lost —
+   the studio keeps writing them to its own slot — but the operator should be
+   able to see the difference at a glance). */
+.ve-session-chip { margin-left: 10px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; white-space: nowrap; }
+.ve-session-chip:empty { display: none; }
+
+/* "Carry on where you left off?" — offered above the preview, never forced. */
+.ve-resume { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  margin: 0 0 10px; padding: 10px 14px; border: 1px solid var(--accent); border-radius: 10px;
+  background: linear-gradient(90deg, rgba(90,160,255,.14), rgba(90,160,255,.04)); }
+.ve-resume-txt { min-width: 0; }
+.ve-resume-btns { display: flex; gap: 8px; flex: 0 0 auto; }
+
+.sess-box { width: 720px; }
+.sess-body { padding: 14px 18px 18px; overflow-y: auto; }
+.sess-list { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 4px; }
+.sess-card { display: flex; align-items: center; gap: 12px; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2, rgba(255,255,255,.03)); }
+.sess-card.missing { opacity: .65; border-style: dashed; }
+.sess-shot { flex: 0 0 auto; width: 86px; height: 50px; border-radius: 6px; overflow: hidden; background: #000;
+  display: grid; place-items: center; font-size: 22px; }
+.sess-shot img { width: 100%; height: 100%; object-fit: cover; }
+.sess-main { flex: 1 1 auto; min-width: 0; }
+.sess-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sess-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sess-btns { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
+.sess-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+.sess-empty { padding: 18px 2px; }
+
+/* The strip that will be covered on export, drawn over the preview so the
+   operator is adjusting the real thing rather than guessing at percentages. */
+.ve-cover-strip { position: absolute; left: 0; right: 0; pointer-events: none; z-index: 6;
+  border-top: 2px dashed #ffe066; border-bottom: 2px dashed #ffe066;
+  background: repeating-linear-gradient(135deg, rgba(255,224,102,.20) 0 10px, rgba(255,224,102,.08) 10px 20px); }
+.ve-cover-strip::after { content: 'covered on export'; position: absolute; right: 6px; top: 3px;
+  font-size: 10px; letter-spacing: .04em; color: #ffe066; text-shadow: 0 1px 2px #000; }
+
+/* ---- THREE WRITTEN OPTIONS -----------------------------------------------
+   An editor hands over a choice, not a single take. Each card is the finished
+   thing: the voice it is written in, the platforms it suits, the title and the
+   caption exactly as they would be posted. Clicking one fills the fields. */
+.copy-options { display: flex; flex-direction: column; gap: 10px; margin: 10px 0 4px; }
+.copy-opt { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; cursor: pointer;
+  background: var(--panel-2, rgba(255,255,255,.03)); transition: border-color .12s, transform .06s; }
+.copy-opt:hover { border-color: var(--accent); }
+.copy-opt:active { transform: scale(.995); }
+.copy-opt.on { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(90,160,255,.25); }
+.copy-opt-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.copy-opt-label { font-weight: 700; font-size: 12.5px; }
+.copy-opt-title { font-size: 13.5px; font-weight: 600; margin: 2px 0 4px; }
+.copy-opt-body { font-size: 12px; line-height: 1.45; white-space: pre-wrap; color: var(--muted); }
+.copy-opt-use { margin-top: 6px; }
+
+/* ---- who writes the captions (Settings → ✨ Social captions) ---- */
+.cw-box { margin-top: 14px; padding: 12px 14px; background: var(--bg-2);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.cw-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.cw-box label { margin-top: 8px; }
+.cw-box select, .cw-box input { max-width: 100%; }
+.cw-acts { display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+.cw-acts a { color: var(--primary-2); text-decoration: none; }
+.cw-acts a:hover { text-decoration: underline; }
+#cwShared { margin: 8px 0 0; }
+#cwStatus { white-space: nowrap; }
+
+/* ---- THUMBNAIL PICKER ----------------------------------------------------
+   One frame decides whether anybody presses play, so it is chosen by looking
+   at it: scrub, see it full size, take it. */
+.thumb-box { width: 640px; }
+.thumb-body { padding: 14px 18px 18px; }
+.thumb-stage { background: #000; border-radius: 10px; overflow: hidden; display: grid; place-items: center;
+  min-height: 220px; max-height: 46vh; margin: 10px 0; }
+.thumb-stage img { max-width: 100%; max-height: 46vh; display: block; }
+.thumb-body input[type=range] { width: 100%; }
+.thumb-when { text-align: center; margin-top: 2px; }
+.thumb-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+/* the marker on a clip card that says this short has a chosen cover */
+.ve-clip-thumbset { color: var(--accent); }
+
+/* =====================================================================
+   VIDEO STUDIO — THE PRO TIMELINE (v2.79)
+   Chosen by the operator from four designs (design/video-studio-options):
+   toolbar · [Shorts bin | Source monitor | Program monitor | Inspector] ·
+   resizable timeline. The program monitor IS the old preview (#veDrop) —
+   the export frame, captions and text — so nothing about WYSIWYG changed;
+   the source monitor is a painting of the same player's frames.
+   ===================================================================== */
+#view-video.ve-pro.active { gap: 8px; container-type: inline-size; container-name: vestudio; }
+#view-video.ve-pro .ve-topbar { padding: 6px 10px; gap: 12px; border-radius: 10px; flex: 0 0 auto; }
+#view-video.ve-pro .ve-file #veName { max-width: 220px; }
+#view-video.ve-pro .ve-top-actions { gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.ve-tb-group { display: flex; align-items: center; gap: 5px; padding-left: 10px; border-left: 1px solid var(--border-soft); }
+.ve-tb-group:first-child { padding-left: 0; border-left: 0; }
+#view-video.ve-pro .ve-top-actions button, #view-video.ve-pro .ve-top-actions select { padding: 6px 10px; font-size: 12.5px; border-radius: 8px; }
+#view-video.ve-pro #veAspect { max-width: 150px; }
+#view-video.ve-pro #veQuality { max-width: 160px; }
+
+/* the four columns */
+#view-video.ve-pro .ve-main { --bin-w: 272px; --insp-w: 300px; flex: 1 1 auto; min-height: 250px; display: grid;
+  grid-template-columns: var(--bin-w) minmax(0, 1fr) var(--insp-w); gap: 8px; }
+#view-video.ve-pro .ve-bin, #view-video.ve-pro .ve-side, .ve-pro .ve-source, #view-video.ve-pro .ve-left {
+  background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--border-soft); border-radius: 12px; box-shadow: var(--shadow-sm); }
+
+/* ✨ the shorts bin */
+.ve-bin { display: flex; flex-direction: column; gap: 9px; min-height: 0; min-width: 0; overflow-y: auto; padding: 12px; }
+.ve-bin .ve-side-head { margin-bottom: 0; }
+.ve-bin .ve-bulk { margin-bottom: 4px; }
+.ve-find { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-2); }
+.ve-find #veFindHighlights { width: 100%; margin: 0; padding: 9px 10px; font-size: 13px; }
+.ve-find-opts { display: flex; flex-wrap: wrap; gap: 5px; }
+.ve-find-opts select { flex: 1 1 calc(50% - 5px); width: auto; min-width: 0; max-width: none; margin: 0; padding: 5px 6px; font-size: 11.5px;
+  background: var(--bg-3); color: var(--text); border: 1px solid var(--border); border-radius: 7px; }
+.ve-find-opts .ve-deep { flex: 1 1 auto; padding: 5px 8px; font-size: 11.5px; border-radius: 7px; }
+.ve-bin .ve-cap-shorts { margin: 0; }
+
+/* the two monitors, and the transport under both */
+.ve-monitors { --prog-w: 300px; position: relative; min-width: 0; min-height: 0; display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--prog-w); grid-template-rows: minmax(0, 1fr) auto; gap: 8px; }
+.ve-monitors.solo { grid-template-columns: minmax(0, 1fr); }
+.ve-monitors.solo .ve-source { display: none; }
+.ve-monitors > .ve-resume { position: absolute; z-index: 40; top: 8px; left: 8px; right: 8px; }
+.ve-mon-head { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 11px; letter-spacing: .08em;
+  color: var(--muted); border-bottom: 1px solid var(--border-soft); min-width: 0; }
+.ve-mon-head b { color: var(--text); font-weight: 800; }
+.ve-mon-foot { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-top: 1px solid var(--border-soft); min-width: 0; }
+.ve-mon-foot .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ve-mon-tc, .ve-jkl { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 11.5px; letter-spacing: 0; white-space: nowrap; }
+.ve-mon-tc { color: var(--text); }
+.ve-jkl { color: var(--muted); }
+.ve-sp { flex: 1; }
+
+.ve-source { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.ve-source-stage { position: relative; flex: 1 1 auto; min-height: 0; background: #000; overflow: hidden; cursor: crosshair; }
+#veSourceCanvas { position: absolute; display: block; background: #05070b; }
+.ve-src-rect { position: absolute; box-sizing: border-box; border: 2px solid #fff; border-radius: 2px; cursor: move;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,.5), 0 0 0 1px rgba(0,0,0,.6) inset; }
+.ve-src-rect.auto { border-color: var(--accent); cursor: grab; }
+.ve-src-rect.whole { box-shadow: none; border-style: dashed; cursor: default; }
+.ve-src-rect-tag { position: absolute; left: 4px; top: 4px; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10px; font-weight: 700; color: #fff; background: rgba(0,0,0,.62); padding: 1px 6px; border-radius: 5px; pointer-events: none; }
+
+#view-video.ve-pro .ve-left { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; gap: 0; min-width: 0; min-height: 0; overflow: hidden; }
+/* named with the view's id, or `#view-video.ve-pro .ve-left` above outranks it and
+   the program monitor lands in an implicit second column, squeezed to the right */
+#view-video.ve-pro .ve-monitors.solo .ve-left { grid-column: 1; }
+#view-video.ve-pro .ve-preview { flex: 1 1 auto; min-height: 0; border: 0; border-radius: 0; box-shadow: none; }
+#view-video.ve-pro .ve-transport { grid-column: 1 / -1; grid-row: 2; padding: 6px 14px; border-radius: 10px; }
+#view-video.ve-pro .ve-play { width: 40px; height: 34px; }
+
+/* 🔧 the inspector */
+#view-video.ve-pro .ve-side { width: auto; min-width: 0; padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+.ve-insp-tabs { flex: 0 0 auto; display: flex; gap: 2px; padding: 6px 6px 0; border-bottom: 1px solid var(--border-soft); overflow-x: auto; scrollbar-width: none; }
+.ve-insp-tabs button { flex: 1 0 auto; width: auto; margin: 0 0 -1px; padding: 6px 7px; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0;
+  background: transparent; color: var(--muted); font-size: 11.5px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.ve-insp-tabs button:hover { color: var(--text); }
+.ve-insp-tabs button.on { color: var(--text); background: var(--bg-2); border-color: var(--border-soft); }
+.ve-insp-tabs button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.ve-insp-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 12px; background: var(--bg-2); }
+.ve-insp-panel { display: flex; flex-direction: column; gap: 10px; }
+.ve-insp-panel.hidden { display: none; }
+.ve-insp-panel .ve-fill, .ve-insp-panel .ve-cap-toggle, .ve-insp-panel .ve-follow { margin: 0; }
+.ve-insp-wide { width: 100%; margin: 0; }
+.ve-insp-panel > button:not(.primary-btn) { width: 100%; margin: 0; background: var(--bg-3); color: var(--text); border: 1px solid var(--border);
+  border-radius: 10px; padding: 9px 10px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.ve-insp-panel > button:not(.primary-btn):hover { border-color: var(--primary); }
+.ve-insp-panel > #veStudioSound.on { border-color: #3fb950; background: rgba(63,185,80,.14); }
+.ve-insp-note { margin: 0; line-height: 1.45; }
+.ve-insp-summary { margin: 0; font-size: 12.5px; line-height: 1.45; }
+.ve-insp-panel .ve-tools { margin-top: 2px; padding-top: 10px; }
+.ve-insp-panel .ve-tool-btns button { padding: 9px 6px; font-size: 12px; }
+
+/* the timeline: a handle to resize it, tools, and lanes that scroll when it is short */
+.ve-tl-split { flex: 0 0 6px; margin: -4px 0; position: relative; cursor: row-resize; z-index: 5; }
+.ve-tl-split::after { content: ""; position: absolute; left: 50%; top: 1px; width: 54px; height: 4px; transform: translateX(-50%);
+  border-radius: 4px; background: var(--border); transition: background .12s; }
+.ve-tl-split:hover::after, .ve-tl-split.drag::after { background: var(--primary); }
+#view-video.ve-pro .ve-tl-bar { flex: 0 0 auto; padding: 6px 12px; flex-wrap: wrap; row-gap: 6px; }
+#view-video.ve-pro .ve-tl-bar button { padding: 6px 9px; font-size: 12px; }
+#veToolSelect.on { border-color: var(--primary); color: #fff; background: linear-gradient(180deg, rgba(79,124,255,.28), rgba(79,124,255,.14)); box-shadow: 0 0 0 1px var(--primary) inset; }
+#veToolBlade.on { border-color: #ff5a52; color: #fff; background: linear-gradient(180deg, rgba(255,90,82,.3), rgba(255,90,82,.14)); box-shadow: 0 0 0 1px #ff5a52 inset; }
+#view-video.ve-pro .ve-timeline { --tl-h: 342px; height: var(--tl-h); flex: 0 0 auto; overflow-y: auto; align-items: flex-start; }
+#view-video.ve-pro .ve-tl-labels, #view-video.ve-pro .ve-tl-scroll { min-height: 100%; }
+#view-video.ve-pro.ve-big .ve-timeline { height: 148px; }
+/* ✂ Blade: the cursor says it, and a red line shows exactly where the cut lands */
+#view-video.ve-blade .ve-track, #view-video.ve-blade .ve-seg, #view-video.ve-blade .ve-audio-track, #view-video.ve-blade .ve-audio-seg { cursor: crosshair; }
+.ve-blade-guide { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed #ff5a52; pointer-events: none; z-index: 30; display: none; }
+#view-video.ve-blade .ve-blade-guide.on { display: block; }
+
+/* narrower windows: slimmer side columns, then the program monitor on its own */
+@container vestudio (max-width: 1320px) {
+  #view-video.ve-pro .ve-main { --bin-w: 232px; --insp-w: 272px; }
+}
+@container vestudio (max-width: 1080px) {
+  .ve-monitors { grid-template-columns: minmax(0, 1fr) !important; }
+  .ve-monitors .ve-source { display: none; }
+  #view-video.ve-pro .ve-left { grid-column: 1; }
+  #view-video.ve-pro .ve-main { --bin-w: 220px; --insp-w: 250px; }
+}
+@container vestudio (max-width: 760px) {
+  #view-video.ve-pro .ve-main { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; }
+  #view-video.ve-pro .ve-monitors { order: 1; min-height: 60vh; }
+  #view-video.ve-pro .ve-bin { order: 2; }
+  #view-video.ve-pro .ve-side { order: 3; max-height: 70vh; }
+}
+
+/* =====================================================================
+   💬 CAPTIONS BESIDE THE VIDEO (v2.79) — the captions editor takes the
+   studio over: the program monitor, large, on the left with the listening
+   bar under it; the words on the right. The studio rearranges itself
+   (.ve-capmode) rather than anything being drawn twice.
+   ===================================================================== */
+#view-video.ve-pro.ve-capmode { padding-right: calc(min(600px, 46vw) + 10px); }
+#view-video.ve-capmode .ve-topbar, #view-video.ve-capmode .ve-bin, #view-video.ve-capmode .ve-side,
+#view-video.ve-capmode .ve-tl-split, #view-video.ve-capmode .ve-tl-bar, #view-video.ve-capmode .ve-timeline,
+#view-video.ve-capmode .ve-transport, #view-video.ve-capmode .ve-source { display: none !important; }
+#view-video.ve-capmode .ve-main { grid-template-columns: minmax(0, 1fr) !important; flex: 1 1 auto; }
+#view-video.ve-capmode .ve-monitors { grid-template-columns: minmax(0, 1fr) !important; grid-template-rows: minmax(0, 1fr) auto; }
+#view-video.ve-capmode .ve-left { grid-column: 1 !important; }
+#view-video.ve-capmode .ve-monitors > .cap-player { grid-column: 1; grid-row: 2; border: 1px solid var(--border-soft); border-radius: 12px; justify-content: center; padding: 8px 14px; }
+.cap-modal.beside { background: transparent; pointer-events: none; place-items: stretch end; }
+.cap-modal.beside .cap-box { pointer-events: auto; width: min(600px, 46vw); max-width: none; height: 100vh; max-height: none; border-radius: 0;
+  border-top: none; border-bottom: none; border-right: none; box-shadow: -18px 0 48px rgba(0,0,0,.55); animation: fxSlide .18s ease; }
+/* the settings fold away under one row of what they are set to */
+.cap-sum-row { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 18px; border-bottom: 1px solid var(--border); }
+.cap-sum-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600;
+  background: var(--bg-3); border: 1px solid var(--border); color: var(--text); white-space: nowrap; }
+.cap-sum-chip.look { font-family: Anton, "Segoe UI", sans-serif; letter-spacing: .03em; font-weight: 400; }
+.cap-sum-toggle { margin-left: auto; width: auto; font-size: 11.5px; padding: 4px 10px; }
+.cap-box.folded .cap-controls, .cap-box.folded .cap-strip-row { display: none; }
+/* beside the video, the video IS the preview */
+.cap-modal.beside #capPreview { display: none; }
+.cap-modal.beside .cap-foot-btns button { white-space: nowrap; }
+
+/* ---- Pro layout, second pass: everything on one line where it can be ---- */
+#view-video.ve-pro .ve-topbar { flex-wrap: nowrap; }
+#view-video.ve-pro .ve-file { flex: 1 1 auto; min-width: 0; }
+#view-video.ve-pro .ve-file #veStats { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; min-width: 0; }
+#view-video.ve-pro .ve-file .ve-session-chip { white-space: nowrap; }
+#view-video.ve-pro .ve-top-actions { flex: 0 0 auto; flex-wrap: nowrap; }
+@container vestudio (max-width: 1250px) {
+  #view-video.ve-pro .ve-file #veStats, #view-video.ve-pro .ve-file .ve-session-chip { display: none; }
+}
+/* the format picker, in the program monitor's own header */
+.ve-mon-select { flex: 1 1 auto; min-width: 0; width: auto; max-width: 100%; margin: 0; padding: 2px 6px; font-size: 11.5px; font-weight: 600;
+  letter-spacing: 0; background: var(--bg-3); color: var(--text); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+.ve-mon-select:hover { border-color: var(--primary); }
+/* the timeline bar: one row on a normal window; a button never breaks its own label */
+#view-video.ve-pro .ve-tl-bar button { white-space: nowrap; }
+#view-video.ve-pro .ve-tl-group { flex-wrap: wrap; row-gap: 6px; }
+#veUndo, #veRedo { min-width: 34px; font-size: 15px !important; padding: 4px 8px !important; }
+#view-video.ve-pro .ve-tl-zoom input[type=range] { width: 96px; }
+/* the inspector's tabs: icon above a word, so all five fit */
+.ve-insp-tabs button { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 5px 2px 4px; font-size: 10.5px; }
+.ve-tab-ic { font-size: 15px; line-height: 1.1; }
+.ve-tab-tx { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.ve-insp-btnrow { display: flex; flex-wrap: wrap; gap: 6px; }
+.ve-insp-btnrow:not(:has(button:not(.hidden))) { display: none; }
+.ve-insp-btnrow button { flex: 1 1 auto; width: auto; margin: 0; padding: 7px 9px; font-size: 12px; font-weight: 600; border-radius: 9px;
+  background: var(--bg-3); color: var(--text); border: 1px solid var(--border); cursor: pointer; white-space: nowrap; }
+.ve-insp-btnrow button:hover { border-color: var(--primary); }
+.ve-insp-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; font-size: 12.5px; }
+.ve-insp-row select { width: auto; max-width: 62%; margin: 0; padding: 6px 8px; font-size: 12px; }
+/* the shorts finder: Remove pauses gets a row of its own */
+.ve-find-opts .ve-find-wide { flex: 1 1 100%; justify-content: space-between; }
+.ve-find #veFindHighlights { font-size: 12.5px; padding: 8px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ve-find-more > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted);
+  padding: 3px 4px; border-radius: 6px; }
+.ve-find-more > summary::-webkit-details-marker { display: none; }
+.ve-find-more > summary::after { content: "▾"; margin-left: auto; }
+.ve-find-more[open] > summary::after { content: "▴"; }
+.ve-find-more > summary:hover { color: var(--text); background: var(--bg-3); }
+.ve-find-sum { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ve-find-more[open] > .ve-find-opts { margin-top: 6px; }
+#view-video.ve-pro .ve-main { --insp-w: 292px; }
+.ve-tab-tx { font-size: 10px; }
+.ve-insp-tabs button { padding: 5px 1px 4px; }
+
+/* =====================================================================
+   THE STUDIO SKIN (v2.79) — "more pristine, the best".
+   One graphite palette, one blue accent, hairline borders instead of
+   gradients and dashes, one radius per kind of thing, and line icons
+   (src/renderer/icons.js) instead of colour emoji. Scoped to the Video
+   Studio and its captions window, so no other studio changes.
+   ===================================================================== */
+#view-video.ve-pro, #capModal {
+  --g0: #07080b;      /* behind pictures */
+  --g1: #0f1116;      /* panels */
+  --g2: #14171e;      /* fields, cards */
+  --g3: #1a1e27;      /* controls */
+  --g4: #232834;      /* controls, hovered */
+  --hl: #252b37;      /* hairline */
+  --hl2: #343c4c;     /* hairline, hovered */
+  --tx1: #eceff5;
+  --tx2: #a6aec0;
+  --tx3: #6d7689;
+  --acc: #4f7cff;
+  --acc2: #6c93ff;
+  --acc-soft: rgba(79, 124, 255, .15);
+  --acc-line: rgba(79, 124, 255, .55);
+  --red: #ff5a52;
+  --grn: #34c36b;
+  --amb: #f0ad3c;
+}
+
+/* ---- the icons ---- */
+.mi { display: inline-block; flex: none; position: relative; width: 1.15em; height: 1.15em; vertical-align: -.22em;
+  background-color: currentColor; -webkit-mask: var(--mi) center / contain no-repeat; mask: var(--mi) center / contain no-repeat; }
+.mi.mi-l { margin-right: .45em; }
+.mi-t { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+
+/* ---- surfaces: flat, hairline-edged ---- */
+#view-video.ve-pro .ve-topbar, #view-video.ve-pro .ve-bin, #view-video.ve-pro .ve-side, #view-video.ve-pro .ve-source,
+#view-video.ve-pro .ve-left, #view-video.ve-pro .ve-transport, #view-video.ve-pro .ve-tl-bar, #view-video.ve-pro .ve-timeline {
+  background: var(--g1); border: 1px solid var(--hl); box-shadow: none; }
+#view-video.ve-pro .ve-tl-bar { border-radius: 10px; }
+#view-video.ve-pro .ve-timeline { border-radius: 12px; }
+#view-video.ve-pro .ve-source-stage, #view-video.ve-pro .ve-preview { background: var(--g0); }
+#view-video.ve-pro, #capModal { accent-color: var(--acc); }
+#view-video.ve-pro ::-webkit-scrollbar { width: 9px; height: 9px; }
+#view-video.ve-pro ::-webkit-scrollbar-thumb { background: #2a303d; border-radius: 9px; border: 2px solid var(--g1); }
+#view-video.ve-pro ::-webkit-scrollbar-thumb:hover { background: #3a4253; }
+#view-video.ve-pro ::-webkit-scrollbar-track { background: transparent; }
+
+/* ---- controls: one shape ---- */
+#view-video.ve-pro .ve-top-actions button, #view-video.ve-pro .ve-insp-panel > button:not(.primary-btn),
+#view-video.ve-pro .ve-insp-btnrow button, #view-video.ve-pro .ve-tool-btns button, #view-video.ve-pro .ghost-btn,
+#capModal .ghost-btn, #capModal .cap-pl-btn {
+  display: inline-flex; align-items: center; justify-content: center; height: 32px; padding: 0 11px; margin: 0;
+  background: var(--g3); color: var(--tx1); border: 1px solid var(--hl); border-radius: 8px; box-shadow: none;
+  font-size: 12.5px; font-weight: 600; letter-spacing: .005em; transform: none; transition: background .12s, border-color .12s, color .12s; }
+#view-video.ve-pro .ve-top-actions button:hover:not(:disabled), #view-video.ve-pro .ve-insp-panel > button:not(.primary-btn):hover,
+#view-video.ve-pro .ve-insp-btnrow button:hover, #view-video.ve-pro .ve-tool-btns button:hover, #view-video.ve-pro .ghost-btn:hover,
+#capModal .ghost-btn:hover, #capModal .cap-pl-btn:hover { background: var(--g4); border-color: var(--hl2); transform: none; }
+#view-video.ve-pro .ve-top-actions button:disabled { opacity: .45; }
+#view-video.ve-pro .ve-top-actions button.on, #view-video.ve-pro #veMusic.on, #view-video.ve-pro #veClips.on { border-color: var(--acc-line); background: var(--acc-soft); }
+#view-video.ve-pro .ve-tool-btns button { height: auto; min-height: 34px; padding: 7px 6px; font-size: 12px; white-space: normal; }
+#view-video.ve-pro .primary-btn, #capModal .primary-btn, #capModal .cap-generate {
+  background: var(--acc); color: #fff; border: 1px solid transparent; filter: none;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .16) inset, 0 6px 18px rgba(79, 124, 255, .22); }
+#view-video.ve-pro .primary-btn:hover:not(:disabled), #capModal .primary-btn:hover, #capModal .cap-generate:hover { background: var(--acc2); filter: none; }
+#view-video.ve-pro select, #capModal select { background-color: var(--g3); color: var(--tx1); border: 1px solid var(--hl); border-radius: 8px; }
+#view-video.ve-pro select:hover, #capModal select:hover { border-color: var(--hl2); }
+#view-video.ve-pro select:focus, #capModal select:focus, #capModal .cap-text:focus { outline: none; border-color: var(--acc); box-shadow: 0 0 0 3px var(--acc-soft); }
+#view-video.ve-pro button:focus-visible, #capModal button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+
+/* ---- the toolbar ---- */
+#view-video.ve-pro .ve-file .mi { color: var(--acc2); }
+#view-video.ve-pro .ve-file #veName { color: var(--tx1); font-weight: 650; }
+#view-video.ve-pro .ve-file #veStats, #view-video.ve-pro .ve-session-chip { color: var(--tx3); }
+#view-video.ve-pro .ve-tb-group { border-left-color: var(--hl); }
+#view-video.ve-pro #veExportEdited:not(:disabled) { border-color: var(--acc-line); color: #fff; background: var(--acc-soft); }
+
+/* ---- the bin ---- */
+#view-video.ve-pro .ve-bin .ve-side-head h3 { display: flex; align-items: center; font-size: 13.5px; letter-spacing: .01em; color: var(--tx1); }
+#view-video.ve-pro .ve-bin .ve-side-head h3 .mi { color: var(--amb); }
+#view-video.ve-pro .ve-find { background: var(--g2); border-color: var(--hl); }
+#view-video.ve-pro .ve-cap-shorts { background: rgba(52, 195, 107, .1); border: 1px solid rgba(52, 195, 107, .42); color: #8fe3ad;
+  border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+#view-video.ve-pro .ve-cap-shorts:hover:not(:disabled) { background: rgba(52, 195, 107, .18); border-color: rgba(52, 195, 107, .7); }
+#view-video.ve-pro .ve-clip { background: var(--g2); border: 1px solid var(--hl); border-radius: 10px; transition: border-color .12s, background .12s; }
+#view-video.ve-pro .ve-clip:hover { border-color: var(--hl2); transform: none; }
+#view-video.ve-pro .ve-clip.sel { border-color: var(--acc); box-shadow: 0 0 0 1px var(--acc) inset; background: #141a28; }
+#view-video.ve-pro .ve-clip-btns .icon-btn { display: inline-flex; align-items: center; justify-content: center; height: 28px;
+  background: transparent; border: 1px solid var(--hl); border-radius: 7px; color: var(--tx2); font-size: 13px; }
+#view-video.ve-pro .ve-clip-btns .icon-btn:hover { background: var(--g3); color: var(--tx1); border-color: var(--hl2); }
+#view-video.ve-pro .ve-clip-btns .icon-btn.on { color: var(--acc2); border-color: var(--acc-line); background: var(--acc-soft); }
+#view-video.ve-pro .ve-clip-btns .icon-btn.danger:hover { color: var(--red); border-color: rgba(255, 90, 82, .55); }
+#view-video.ve-pro .ve-clip-btns .mi { margin: 0; }
+
+/* ---- monitors ---- */
+#view-video.ve-pro .ve-mon-head { background: var(--g1); border-bottom-color: var(--hl); color: var(--tx3); font-size: 10.5px; letter-spacing: .12em; }
+#view-video.ve-pro .ve-mon-head b { color: var(--tx2); font-weight: 700; }
+#view-video.ve-pro .ve-mon-tc { background: var(--g0); border: 1px solid var(--hl); border-radius: 6px; padding: 1px 7px; color: #e8edf7; letter-spacing: .02em; }
+#view-video.ve-pro .ve-mon-foot { border-top-color: var(--hl); }
+#view-video.ve-pro .ve-mon-foot .muted { color: var(--tx3); }
+#view-video.ve-pro .ve-mon-select { letter-spacing: 0; text-transform: none; }
+#view-video.ve-pro .ve-transport { background: var(--g1); }
+#view-video.ve-pro .ve-time { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; color: var(--tx2); }
+#view-video.ve-pro .ve-tr-btn { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 32px;
+  background: transparent; border: 1px solid transparent; border-radius: 8px; color: var(--tx2); font-size: 14px; }
+#view-video.ve-pro .ve-tr-btn:hover { background: var(--g3); border-color: var(--hl); color: var(--tx1); }
+#view-video.ve-pro .ve-tr-btn.on { color: var(--acc2); border-color: var(--acc-line); background: var(--acc-soft); }
+#view-video.ve-pro .ve-tr-btn .mi, #view-video.ve-pro .ve-play .mi { margin: 0; }
+#view-video.ve-pro .ve-play { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 50%;
+  background: var(--acc); font-size: 15px; box-shadow: 0 1px 0 rgba(255, 255, 255, .18) inset, 0 6px 18px rgba(79, 124, 255, .35); }
+#view-video.ve-pro .ve-play:hover { background: var(--acc2); filter: none; }
+#view-video.ve-pro .ve-loop { color: var(--tx2); }
+
+/* ---- the inspector ---- */
+#view-video.ve-pro .ve-insp-tabs { background: var(--g1); padding: 2px 6px 0; border-bottom-color: var(--hl); gap: 0; }
+#view-video.ve-pro .ve-insp-tabs button { color: var(--tx3); background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+  margin: 0 0 -1px; padding: 7px 1px 6px; transition: color .12s, border-color .12s; }
+#view-video.ve-pro .ve-insp-tabs button:hover { color: var(--tx1); }
+#view-video.ve-pro .ve-insp-tabs button.on { color: var(--tx1); background: transparent; border-bottom-color: var(--acc); }
+#view-video.ve-pro .ve-insp-tabs .ve-tab-ic { font-size: 17px; line-height: 1; height: 18px; }
+#view-video.ve-pro .ve-insp-tabs .ve-tab-ic .mi { width: 17px; height: 17px; margin: 0; vertical-align: top; }
+#view-video.ve-pro .ve-insp-tabs button.on .ve-tab-ic .mi { color: var(--acc2); }
+#view-video.ve-pro .ve-insp-body { background: var(--g1); }
+#view-video.ve-pro .ve-insp-panel .ve-fill-row, #view-video.ve-pro .ve-insp-panel .ve-cap-toggle, #view-video.ve-pro .ve-insp-panel .ve-follow,
+#view-video.ve-pro .ve-insp-panel .ve-fill-opts {
+  background: var(--g2); border: 1px solid var(--hl); border-radius: 10px; color: var(--tx1); }
+#view-video.ve-pro .ve-insp-panel .ve-fill-row:hover, #view-video.ve-pro .ve-insp-panel .ve-cap-toggle:hover { border-color: var(--hl2); }
+#view-video.ve-pro .ve-insp-note, #view-video.ve-pro .ve-insp-summary .muted { color: var(--tx3); }
+#view-video.ve-pro .ve-tools { border-top-color: var(--hl); }
+#view-video.ve-pro .ve-tools h4 { color: var(--tx3); font-size: 10.5px; letter-spacing: .12em; }
+#view-video.ve-pro .ve-insp-panel > #veStudioSound.on { border-color: rgba(52, 195, 107, .6); background: rgba(52, 195, 107, .12); color: #9be8b8; }
+
+/* ---- the timeline ---- */
+#view-video.ve-pro .ve-tl-bar button { display: inline-flex; align-items: center; justify-content: center; height: 30px; padding: 0 9px;
+  background: transparent; border: 1px solid transparent; border-radius: 7px; color: var(--tx2); font-size: 12px; font-weight: 600; box-shadow: none; }
+#view-video.ve-pro .ve-tl-bar button:hover:not(:disabled) { background: var(--g3); border-color: var(--hl); color: var(--tx1); }
+#view-video.ve-pro .ve-tl-bar button:disabled { opacity: .35; }
+#view-video.ve-pro .ve-tl-sep { background: var(--hl); height: 18px; margin: 0 4px; }
+#view-video.ve-pro .ve-tl-tools { background: var(--g2); border: 1px solid var(--hl); border-radius: 9px; padding: 2px; gap: 2px; }
+#view-video.ve-pro .ve-tl-tools button { height: 26px; }
+#view-video.ve-pro #veToolSelect.on { background: var(--acc-soft); border-color: var(--acc-line); color: #fff; box-shadow: none; }
+#view-video.ve-pro #veToolBlade.on { background: rgba(255, 90, 82, .16); border-color: rgba(255, 90, 82, .6); color: #fff; box-shadow: none; }
+#view-video.ve-pro #veSnap.on, #view-video.ve-pro #veFollow.on { background: var(--acc-soft); border-color: var(--acc-line); color: #dfe7ff; box-shadow: none; }
+#view-video.ve-pro #veUndo .mi, #view-video.ve-pro #veRedo .mi, #view-video.ve-pro .ve-zoom-btn .mi { margin: 0; }
+/* A FIXED width, never sized by its words. "CAPTIONS" in this type needs 74px,
+ * more than the 74px column, and a flex item may not shrink below its words —
+ * so the column grew, and every time the caption label was rewritten (icon
+ * gone until the observer put it back) it shrank again for a moment. The
+ * track beside it moved 16px each time, and a trim measured in that moment
+ * landed 4–5 s off. min-width:0 means a long label wraps, it never pushes. */
+#view-video.ve-pro .ve-tl-labels { flex: 0 0 94px; min-width: 0; background: var(--g1); border-right-color: var(--hl); }
+#view-video.ve-pro .ve-tl-label { color: var(--tx3); font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+#view-video.ve-pro .ve-tl-label .mi { color: var(--tx2); }
+#view-video.ve-pro .ve-tl-split::after { background: var(--hl2); }
+
+/* ---- the captions window ---- */
+#capModal .cap-box { background: var(--g1); border-color: var(--hl); }
+#capModal .cap-head { border-bottom-color: var(--hl); }
+#capModal .cap-head h2 { display: flex; align-items: center; font-size: 15px; letter-spacing: .005em; }
+#capModal .cap-head h2 .mi { color: var(--acc2); }
+#capModal .cap-head .icon-btn { display: inline-flex; align-items: center; justify-content: center; background: transparent; border-color: transparent; color: var(--tx2); }
+#capModal .cap-head .icon-btn:hover { background: var(--g3); border-color: var(--hl); color: var(--tx1); }
+#capModal .cap-head .icon-btn .mi { margin: 0; }
+#capModal .cap-sum-row, #capModal .cap-foot { border-color: var(--hl); }
+#capModal .cap-sum-chip { background: var(--g2); border-color: var(--hl); color: var(--tx2); }
+#capModal .cap-sum-chip.look { color: var(--tx1); }
+#capModal .cap-wb-btn { height: 28px; padding: 0 10px; font-size: 11.5px; }
+#capModal .cap-g-all.has { border-color: rgba(240, 173, 60, .55); color: #f6c46a; background: rgba(240, 173, 60, .08); }
+#capModal .cap-fix-sep { background: var(--hl); }
+#capModal .cap-player, .ve-monitors > .cap-player { background: var(--g1); border-color: var(--hl); }
+#capModal .cap-pl-btn, .cap-player .cap-pl-btn { height: 30px; padding: 0 10px; background: transparent; border-color: transparent; color: var(--tx2); }
+#capModal .cap-pl-btn:hover, .cap-player .cap-pl-btn:hover { background: var(--g3); border-color: var(--hl); color: var(--tx1); }
+.cap-player .cap-pl-play { display: inline-flex; align-items: center; justify-content: center; background: var(--acc);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .18) inset, 0 6px 18px rgba(79, 124, 255, .32); }
+.cap-player .cap-pl-play .mi { margin: 0; }
+.cap-player .cap-pl-time { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; color: var(--tx2); }
+#capModal .cap-text { background: var(--g2); border: 1px solid var(--hl); border-radius: 8px; color: var(--tx1); }
+#capModal .cap-row-play { display: inline-flex; align-items: center; justify-content: center; background: transparent; border-color: var(--hl); color: var(--tx2); }
+#capModal .cap-row-play .mi { width: 11px; height: 11px; margin: 0; }
+#capModal .cap-row-play:hover, #capModal .cap-row.now .cap-row-play { background: var(--acc); border-color: var(--acc); color: #fff; }
+#capModal .cap-row.now { background: rgba(79, 124, 255, .1); box-shadow: inset 2px 0 0 var(--acc); }
+#capModal .cap-time { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 11.5px; color: var(--tx3); }
+#capModal .cap-row.now .cap-time { color: var(--tx1); }
+#capModal .cap-ai-line { color: var(--tx3); }
+#capModal .cap-ai-line .mi, #capModal .cap-g-badge .mi { margin-right: .3em; }
+#capModal .cap-sugg { background: var(--g2); border-color: var(--hl); }
+#capModal .cap-sugg-chip { background: var(--g3); border-color: var(--hl); }

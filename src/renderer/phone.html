@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+<meta name="theme-color" content="#0f1117" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Phone Studio" />
+<title>Phone Studio — Church Work Space</title>
+<link rel="stylesheet" href="phone.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════ pairing ═══════════════════════ -->
+<section id="scrPair" class="screen pair-screen active">
+  <div class="pair-card">
+    <div class="pair-logo">🎬</div>
+    <h1>Phone Studio</h1>
+    <p class="muted">The Video Studio on your PC, driven from this phone. Your PC does the encoding; you do the editing.</p>
+    <div id="pairHost" class="pair-host muted small"></div>
+    <label class="pin-label">Pairing PIN <span class="muted small">— shown in the app on your PC</span></label>
+    <input id="pinInput" class="pin-input" type="tel" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="000000" autocomplete="one-time-code" />
+    <button id="pairBtn" class="primary">Pair this phone</button>
+    <div id="pairMsg" class="pair-msg"></div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ library ═══════════════════════ -->
+<section id="scrLibrary" class="screen">
+  <header class="head">
+    <h1>Videos</h1>
+    <button id="libRefresh" class="ghost icon" title="Refresh">⟳</button>
+  </header>
+  <div class="pad">
+    <label for="uploadInput" class="upload-tile">
+      <span class="upload-icon">⬆️</span>
+      <span class="upload-text"><b>Send a video from this phone</b><br /><span class="muted small">From your camera roll to the PC over wifi</span></span>
+    </label>
+    <input id="uploadInput" type="file" accept="video/*" hidden />
+    <div id="uploadBar" class="upload-bar hidden"><div id="uploadFill" class="upload-fill"></div><span id="uploadTxt" class="upload-txt"></span></div>
+  </div>
+  <div id="libList" class="pad"></div>
+</section>
+
+<!-- ═══════════════════════ editor ═══════════════════════ -->
+<section id="scrEdit" class="screen">
+  <header class="head">
+    <h1 id="edName">No video</h1>
+    <button id="edChange" class="ghost small">Change</button>
+  </header>
+
+  <div id="edEmpty" class="empty">
+    <p>Pick a video on the <b>Videos</b> tab — or send one from this phone.</p>
+    <button id="edGoLib" class="primary">Choose a video</button>
+  </div>
+
+  <div id="edBody" class="hidden">
+    <div class="player-wrap">
+      <video id="player" playsinline webkit-playsinline preload="metadata"></video>
+      <div id="playerNote" class="player-note hidden"></div>
+      <button id="bigPlay" class="big-play">▶</button>
+    </div>
+
+    <div class="transport">
+      <button id="btnBack10" class="ghost icon" title="Back 10s">⏪</button>
+      <button id="btnPlay" class="ghost icon play" title="Play">▶</button>
+      <button id="btnFwd10" class="ghost icon" title="Forward 10s">⏩</button>
+      <span id="tCur" class="tc">0:00</span><span class="tc muted">/</span><span id="tDur" class="tc muted">0:00</span>
+      <span class="spacer"></span>
+      <button id="btnLoopRange" class="ghost icon" title="Play just the selected range">🔁</button>
+    </div>
+
+    <!-- scrub + trim: one strip, two handles, a playhead -->
+    <div class="strip-wrap">
+      <div id="strip" class="strip">
+        <div id="stripImg" class="strip-img"></div>
+        <div id="dimL" class="strip-dim"></div>
+        <div id="dimR" class="strip-dim"></div>
+        <div id="handL" class="handle" data-side="l"></div>
+        <div id="handR" class="handle" data-side="r"></div>
+        <div id="playhead" class="playhead"></div>
+      </div>
+      <div class="strip-legend">
+        <span id="rangeLabel" class="muted small">Whole video</span>
+        <button id="btnResetRange" class="ghost tiny">Reset</button>
+      </div>
+    </div>
+
+    <div class="pad">
+      <div class="opt-grid">
+        <label class="opt">Clip length
+          <select id="optLen">
+            <option value="auto" selected>✨ Auto (~1½ min)</option>
+            <option value="30">~30s</option>
+            <option value="60">~1 min</option>
+            <option value="90">~1½ min</option>
+            <option value="120">~2 min</option>
+          </select>
+        </label>
+        <label class="opt">Shape
+          <select id="optAspect"></select>
+        </label>
+      </div>
+      <div class="chip-row">
+        <label class="chip"><input type="checkbox" id="optDeep" checked /> 🧠 Deep (best)</label>
+        <label class="chip"><input type="checkbox" id="optPauses" checked /> 🤫 Remove pauses</label>
+        <label class="chip"><input type="checkbox" id="optReframe" checked /> 🎯 Follow the speaker</label>
+      </div>
+
+      <button id="btnText" class="ghost big">🔤 Text on the video</button>
+      <button id="btnFind" class="primary big">✂️ Long to short clips (AI)</button>
+      <button id="btnExportTrim" class="ghost big">💾 Export just this trim</button>
+
+      <details class="tools">
+        <summary>More tools</summary>
+        <div class="tool-grid">
+          <button data-tool="captions">💬 Caption the whole video</button>
+          <button data-tool="audio">🎧 Extract the audio</button>
+          <button data-tool="autotrim">🤫 Auto-remove silences</button>
+          <button data-tool="stabilize">🎚 Stabilise</button>
+          <button data-tool="proxy">⚡ Rebuild phone preview</button>
+          <button data-tool="reshape">📐 Reshape for social</button>
+        </div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ shorts ═══════════════════════ -->
+<section id="scrShorts" class="screen">
+  <header class="head">
+    <h1>Shorts</h1>
+    <button id="btnExportAll" class="primary small" disabled>Export all</button>
+  </header>
+  <div id="shortsEmpty" class="empty">
+    <p>No clips yet. Open a video and tap <b>Long to short clips (AI)</b>.</p>
+  </div>
+  <div id="shortsList" class="pad"></div>
+</section>
+
+<!-- ═══════════════════════ finished ═══════════════════════ -->
+<section id="scrDone" class="screen">
+  <header class="head">
+    <h1>Finished</h1>
+    <button id="doneRefresh" class="ghost icon" title="Refresh">⟳</button>
+  </header>
+  <div id="doneList" class="pad"></div>
+</section>
+
+<!-- ═══════════════════════ settings ═══════════════════════ -->
+<section id="scrSet" class="screen">
+  <header class="head"><h1>Settings</h1></header>
+  <div class="pad">
+    <div class="card">
+      <h2>Connected to</h2>
+      <div id="setHost" class="muted small">—</div>
+      <div id="setEngine" class="muted small"></div>
+    </div>
+
+    <div class="card">
+      <h2>How shorts are framed</h2>
+      <label class="row"><span>Fill the frame</span>
+        <select id="setFill">
+          <option value="crop" selected>Crop in (no bars)</option>
+          <option value="blur">Blurred background</option>
+          <option value="bars">Black bars</option>
+        </select>
+      </label>
+      <label class="row"><span>Clean up room noise</span>
+        <select id="setDenoise">
+          <option value="">Off</option>
+          <option value="light">Light</option>
+          <option value="medium">Medium</option>
+          <option value="strong">Strong</option>
+          <option value="max">Maximum</option>
+          <option value="studio">🎙️ Studio voice (clean + level it)</option>
+        </select>
+      </label>
+      <label class="row"><span>Fade in (s)</span><input id="setFadeIn" type="number" min="0" max="5" step="0.5" value="0" /></label>
+      <label class="row"><span>Fade out (s)</span><input id="setFadeOut" type="number" min="0" max="5" step="0.5" value="0" /></label>
+    </div>
+
+    <div class="card">
+      <h2>Captions on export</h2>
+      <label class="row"><span>Caption every short</span><input id="setCapAuto" type="checkbox" /></label>
+      <label class="row"><span>Look</span><select id="setCapStyle"></select></label>
+      <label class="row"><span>Font</span><select id="setCapFont"></select></label>
+      <label class="row"><span>How lines arrive</span><select id="setCapTrans">
+        <option value="none">None</option><option value="fade">Fade</option>
+        <option value="pop" selected>Pop</option><option value="bounce">Bounce</option>
+        <option value="slideup">Slide up</option><option value="zoom">Zoom out</option>
+        <option value="typewriter">Typewriter</option></select></label>
+      <label class="row"><span>Size</span><select id="setCapSize">
+        <option value="s">Small</option><option value="m" selected>Medium</option>
+        <option value="l">Large</option><option value="xl">Extra large</option></select></label>
+      <label class="row"><span>Position</span><select id="setCapPos">
+        <option value="bottom" selected>Bottom</option><option value="center">Middle</option><option value="top">Top</option></select></label>
+      <label class="row"><span>Words per line</span><select id="setCapWords">
+        <option value="auto">Auto</option><option value="1">1</option><option value="2">2</option>
+        <option value="3" selected>3</option><option value="4">4</option></select></label>
+      <label class="row"><span>Case</span><select id="setCapCase">
+        <option value="upper" selected>UPPERCASE</option><option value="none">As spoken</option>
+        <option value="title">Title Case</option><option value="lower">lowercase</option></select></label>
+    </div>
+
+    <div class="card">
+      <h2>Music &amp; outro</h2>
+      <label class="row"><span>Music bed</span><select id="setMusic"><option value="">None</option></select></label>
+      <label class="row"><span>Music volume</span><input id="setMusicVol" type="range" min="0" max="1" step="0.05" value="0.25" /></label>
+      <label class="row"><span>Outro clip</span><select id="setOutro"><option value="">None</option></select></label>
+    </div>
+
+    <div class="card">
+      <h2>This phone</h2>
+      <button id="btnUnpair" class="ghost">Unpair this phone</button>
+      <p class="muted small">Phone Studio only works while the PC is switched on and on the same network.</p>
+      <div id="setVer" class="muted small"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════ tab bar ═══════════════════════ -->
+<nav id="tabs" class="hidden">
+  <button data-tab="Library"><span>📁</span><span>Videos</span></button>
+  <button data-tab="Edit" class="active"><span>✂️</span><span>Edit</span></button>
+  <button data-tab="Shorts"><span>✨</span><span>Shorts</span><i id="shortsBadge" class="badge hidden">0</i></button>
+  <button data-tab="Done"><span>⬇️</span><span>Finished</span></button>
+  <button data-tab="Set"><span>⚙️</span><span>Settings</span></button>
+</nav>
+
+<!-- ═══════════════════════ overlays ═══════════════════════ -->
+<div id="overlay" class="overlay hidden">
+  <div class="ov-box">
+    <div id="ovLabel" class="ov-label">Working…</div>
+    <div class="ov-bar"><div id="ovFill" class="ov-fill"></div></div>
+    <div id="ovPct" class="ov-pct">0%</div>
+    <button id="ovCancel" class="ghost">Cancel</button>
+  </div>
+</div>
+
+<div id="sheet" class="sheet hidden">
+  <div class="sheet-box">
+    <div class="sheet-head"><h2 id="sheetTitle">…</h2><button id="sheetClose" class="ghost icon">✕</button></div>
+    <div id="sheetBody" class="sheet-body"></div>
+    <div id="sheetFoot" class="sheet-foot"></div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script src="facetrack.js"></script>
+<script src="phone.js"></script>
+</body>
+</html>

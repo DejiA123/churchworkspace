@@ -1,0 +1,1055 @@
+/* ===================== PRESENTATION STUDIO (ProPresenter-style) =====================
+   Three columns: library/playlist rail, the slide grid, and the live output +
+   inspector. Darker than the rest of the app on purpose — this screen gets used
+   in a dim booth at the back of a hall, and a bright UI blinds the operator. */
+
+/* Neutral greys, not navy. A show-control surface should recede completely —
+   any colour in the chrome competes with the slide thumbnails, which are the
+   only thing on this screen the operator is actually reading. Colour is spent
+   only where it carries meaning: the group bars and the live indicator. */
+#view-present {
+  --pv-bg:      #1e1e1e;   /* the window */
+  --pv-panel:   #262626;   /* rails and panels */
+  --pv-raised:  #2f2f2f;   /* buttons, headers */
+  --pv-hover:   #3a3a3a;
+  --pv-line:    #141414;   /* separators — darker than the panel, not lighter */
+  --pv-edge:    #454545;
+  --pv-text:    #d8d8d8;
+  --pv-dim:     #8a8a8a;
+  --pv-sel:     #2d6cdf;
+}
+#view-present.active {
+  display: flex; flex-direction: column; gap: 0;
+  height: calc(100vh - 64px); overflow: hidden;
+  background: var(--pv-bg);
+}
+
+/* ---------- top toolbar ---------- */
+.pv-topbar {
+  flex: 0 0 auto; display: flex; align-items: stretch; justify-content: space-between; gap: 10px;
+  padding: 0 8px; background: var(--pv-panel);
+  border-bottom: 1px solid var(--pv-line);
+}
+.pv-tb-left, .pv-tb-right { display: flex; align-items: stretch; gap: 10px; flex-wrap: nowrap; }
+.pv-tb-group { display: flex; align-items: stretch; gap: 2px; }
+/* One size for every command button — icon over label, 54px wide unless the
+   word itself is longer, so the row stays a regular grid the hand can learn
+   without clipping "Audience" to fit it. */
+.pv-topbar button {
+  width: auto; min-width: 54px; margin: 0; padding: 5px 7px 4px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  background: transparent; color: var(--pv-text); border: 1px solid transparent; border-radius: 4px;
+  font-size: 10px; font-weight: 500; line-height: 1;
+}
+.pv-topbar button .pv-ic { font-size: 15px; line-height: 1; }
+.pv-topbar button .pv-lb { font-size: 10px; letter-spacing: .01em; white-space: nowrap; }
+.pv-topbar button:hover { background: var(--pv-hover); border-color: transparent; color: #fff; }
+.pv-topbar select {
+  width: auto; margin: 6px 0; padding: 4px 8px; font-size: 11.5px; font-weight: 500; cursor: pointer;
+  background: var(--pv-raised); color: var(--pv-text); border: 1px solid var(--pv-edge); border-radius: 4px;
+  max-width: 190px; align-self: center;
+}
+.pv-topbar select:hover { border-color: var(--pv-sel); color: #fff; }
+/* Selected state is a filled block, not a glow — it reads at a glance in a
+   dim booth and does not draw the eye the way a gradient does. */
+.pv-tab-btn.active { background: var(--pv-raised); color: #fff; border-color: var(--pv-edge); }
+.pv-tb-sep { width: 1px; align-self: center; height: 28px; background: var(--pv-line); margin: 0 2px; }
+/* an output that is actually live has to be unmistakable from across a room */
+.pv-out-btn.on {
+  background: linear-gradient(135deg, #b3261e, #e5534b); border-color: transparent; color: #fff;
+  box-shadow: 0 0 0 1px rgba(229,83,75,.5), 0 3px 14px rgba(229,83,75,.35);
+}
+/* how many screens the congregation view is on, on the button itself */
+.pv-out-count {
+  position: absolute; top: 2px; right: 2px;
+  min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px;
+  background: var(--pv-sel, #4f7cff); color: #fff;
+  font-size: 9.5px; font-weight: 800; line-height: 15px; text-align: center;
+}
+.pv-out-count.hidden { display: none; }
+#pvScreens { position: relative; }
+/* A projector that is plugged in but mirrored never reaches the screen list, so
+   the button has to carry the news. Amber, and pulsing slowly enough to catch
+   the eye in a dim booth without becoming another thing to ignore. */
+.pv-out-btn.warn {
+  border-color: rgba(245, 166, 35, .75); color: #ffce7a;
+  animation: pv-screen-warn 2.4s ease-in-out infinite;
+}
+@keyframes pv-screen-warn {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(245,166,35,.35); }
+  50% { box-shadow: 0 0 0 1px rgba(245,166,35,.9), 0 0 12px rgba(245,166,35,.45); }
+}
+@media (prefers-reduced-motion: reduce) { .pv-out-btn.warn { animation: none; box-shadow: 0 0 0 1px rgba(245,166,35,.8); } }
+
+/* ---------- import preview: a tick list, not a summary ---------- */
+.pv-imp-list { max-height: 260px; overflow-y: auto; padding: 6px; margin-top: 2px;
+  background: var(--pv-bg); border: 1px solid var(--pv-edge); border-radius: 8px; }
+.pv-imp-head { display: flex; flex-direction: column; gap: 2px; padding: 2px 4px 8px; }
+.pv-imp-none { color: var(--pv-dim); font-size: 12px; margin: 0; padding: 6px; }
+.pv-imp-set { margin: 8px 0 3px; padding: 3px 8px; border-radius: 4px;
+  background: var(--pv-raised); color: var(--pv-text); border-left: 3px solid var(--pv-sel);
+  font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.pv-imp-set:first-child { margin-top: 0; }
+.pv-imp-row { display: flex; align-items: center; gap: 9px; padding: 4px 8px; border-radius: 5px;
+  margin: 0; font-size: 12.5px; color: var(--pv-text); cursor: pointer; }
+.pv-imp-row:hover { background: var(--pv-hover); }
+.pv-imp-row input { width: 14px; height: 14px; margin: 0; flex: none; accent-color: var(--pv-sel); }
+.pv-imp-row.off span { text-decoration: line-through; color: var(--pv-dim); }
+.pv-imp-note { margin-left: auto; font-size: 10px; font-style: normal; color: var(--pv-dim); }
+
+/* ---------- export: which file do you want? ---------- */
+.pv-exp-picks { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 2px; }
+.pv-exp-pick {
+  width: 100%; margin: 0; padding: 11px 13px; cursor: pointer; text-align: left;
+  display: flex; flex-direction: column; gap: 3px;
+  background: var(--pv-raised); color: var(--pv-text);
+  border: 1px solid var(--pv-edge); border-radius: 8px;
+}
+.pv-exp-pick:hover:not([disabled]) { border-color: var(--pv-sel); background: var(--pv-hover); }
+.pv-exp-pick[disabled] { opacity: .45; cursor: not-allowed; }
+.pv-exp-pick b { font-size: 13px; }
+
+/* ---------- set headings in the running order ---------- */
+.pv-plset {
+  margin: 8px 0 3px; padding: 3px 8px; border-radius: 4px;
+  background: var(--pv-raised); color: var(--pv-text);
+  font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
+  border-left: 3px solid var(--pv-sel);
+}
+.pv-plset:first-child { margin-top: 0; }
+/* a song whose words have not been typed yet */
+.pv-item.nolyrics .pv-item-name { color: var(--pv-dim); font-style: italic; }
+.pv-item-todo {
+  margin-left: auto; flex: none; font-size: 9px; font-weight: 700; letter-spacing: .3px;
+  text-transform: uppercase; color: var(--pv-sel); border: 1px solid currentColor;
+  border-radius: 3px; padding: 0 4px; line-height: 13px; opacity: .85;
+}
+
+/* ---------- rename / delete, on the row, on hover ----------
+ * Both actions existed only as a double-click and a right-click, which is to
+ * say they were invisible. These appear when the pointer is on the row, sit at
+ * the right where actions belong, and never steal the row's own click. */
+.pv-acts { margin-left: auto; flex: 0 0 auto; display: flex; align-items: center; gap: 2px; }
+.pv-act {
+  opacity: 0; font-size: 11px; line-height: 1; padding: 2px 3px; border-radius: 3px;
+  cursor: pointer; transition: opacity .1s, background .1s;
+}
+.pv-item:hover .pv-act, .pv-item:focus-within .pv-act { opacity: .72; }
+.pv-act:hover { opacity: 1; background: rgba(255,255,255,.16); }
+.pv-act-del:hover { background: rgba(229,83,75,.35); }
+/* the count and the "no words" pill give way to the actions on hover, so a
+ * long name never has to fight them for the same few pixels */
+.pv-item:hover .pv-item-n, .pv-item:hover .pv-item-todo { display: none; }
+
+/* ---------- "this song has no words yet" ---------- */
+.pv-nolyrics {
+  display: flex; flex-direction: column; gap: 8px; align-items: stretch;
+  max-width: 640px; margin: 22px auto; padding: 18px 20px;
+  background: var(--pv-panel); border: 1px solid var(--pv-edge); border-radius: 10px;
+}
+.pv-nolyrics b { font-size: 14px; color: var(--pv-text); }
+.pv-nolyrics textarea {
+  width: 100%; min-height: 190px; resize: vertical; margin: 4px 0 0; padding: 10px 12px;
+  background: var(--pv-bg); color: var(--pv-text);
+  border: 1px solid var(--pv-edge); border-radius: 6px;
+  font-family: inherit; font-size: 13px; line-height: 1.55;
+}
+.pv-nolyrics textarea:focus { border-color: var(--pv-sel); outline: none; }
+.pv-nolyrics-row { display: flex; align-items: center; gap: 12px; justify-content: space-between; }
+.pv-nolyrics-row label { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 12px; color: var(--pv-dim); }
+.pv-nolyrics-row input[type="number"] { width: 62px; margin: 0; }
+.pv-imp-file {
+  width: auto; margin: 0; padding: 5px 11px; cursor: pointer; font-size: 11.5px; font-weight: 600;
+  background: var(--pv-raised); color: var(--pv-text); border: 1px solid var(--pv-edge); border-radius: 5px;
+}
+.pv-imp-file:hover { border-color: var(--pv-sel); color: #fff; }
+.pv-paste-opts .pv-imp-pl { width: 150px; margin: 0 0 0 6px; }
+
+/* ---------- the Songs Bank ----------
+   A list an operator scans on a Saturday night, so the TITLE is the only thing
+   at full weight; writer, year and theme sit under it in one quiet line, and
+   the ＋ that puts a song into Sunday is the only coloured thing on the row. */
+/* The pane is a column flex, so everything above the list has to refuse to be
+   squeezed — without `flex: none` the chip strip collapses to a sliver and the
+   filters become unclickable the moment the list is long. */
+.pv-bank-search { padding: 6px 8px 0; flex: none; }
+.pv-bank-search input {
+  width: 100%; margin: 0; padding: 6px 9px; font-size: 12px;
+  background: var(--pv-raised); color: var(--pv-text);
+  border: 1px solid var(--pv-edge); border-radius: 5px;
+}
+/* Fourteen filters in a 340px rail is four rows of chips before a single song
+   is visible, which is a filing cabinet rather than a song list. The chips get
+   their own scroller, two rows deep: enough to see the shape of the bank, and
+   the list below keeps the height it needs to be usable. */
+.pv-bank-chips {
+  display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 8px 4px;
+  /* Tall enough that the whole filter set is visible at this rail width, and
+     capped only so a very short window cannot leave the song list with no
+     room. A half-clipped row of chips reads as a bug, not as a scroll hint. */
+  flex: none; max-height: 124px; overflow-y: auto; align-content: flex-start;
+}
+.pv-chip {
+  width: auto; min-width: 0; margin: 0; padding: 2px 7px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-weight: 600; line-height: 1.5; white-space: nowrap;
+  background: var(--pv-raised); color: var(--pv-muted, #9aa4b8);
+  border: 1px solid var(--pv-edge); border-radius: 999px;
+}
+.pv-chip span { font-size: 9.5px; font-weight: 800; opacity: .7; }
+.pv-chip:hover { color: #fff; border-color: var(--pv-sel); }
+.pv-chip.on { background: var(--pv-sel, #4f7cff); border-color: transparent; color: #fff; }
+.pv-chip.on span { opacity: .85; }
+.pv-bank-hint { font-size: 11px; line-height: 1.55; color: var(--pv-muted, #9aa4b8); margin: 2px 10px 6px; flex: none; }
+.pv-bank-list { padding: 0 6px 6px; flex: 1; min-height: 0; overflow-y: auto; }
+.pv-bank-row {
+  display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 6px;
+  cursor: pointer; border: 1px solid transparent; position: relative;
+}
+.pv-bank-row:hover { background: var(--pv-raised); border-color: var(--pv-edge); }
+/* Already in this service — the one thing worth spotting from across the room */
+.pv-bank-row.on { background: rgba(79, 124, 255, .12); border-color: rgba(79, 124, 255, .45); }
+.pv-bank-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.pv-bank-main b {
+  font-size: 12.5px; color: var(--pv-text); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pv-bank-main .muted { font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-bank-tag {
+  flex: none; font-size: 9.5px; font-weight: 700; letter-spacing: .02em;
+  padding: 2px 6px; border-radius: 999px; white-space: nowrap;
+}
+.pv-bank-tag.ok { background: rgba(63, 185, 80, .18); color: #7ee787; }
+.pv-bank-tag.todo { background: rgba(245, 166, 35, .15); color: #e0aa5a; }
+/* Hover-only, like the Library and playlist rows: the row is for reading. */
+.pv-bank-acts { display: none; gap: 2px; flex: none; }
+.pv-bank-row:hover .pv-bank-acts { display: flex; }
+.pv-bank-row:hover .pv-bank-tag { display: none; }
+.pv-pane .pv-bank-add {
+  flex: none; width: 26px; min-width: 0; height: 26px; margin: 0; padding: 0; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700; line-height: 1;
+  background: var(--pv-raised); color: var(--pv-text);
+  border: 1px solid var(--pv-edge); border-radius: 5px;
+}
+.pv-pane .pv-bank-add:hover { background: var(--pv-sel, #4f7cff); border-color: transparent; color: #fff; }
+.pv-bank-row.on .pv-bank-add { background: transparent; border-color: transparent; color: #7ee787; }
+/* the ＋ New / ✏️ dialog */
+.pv-bank-edit .pv-bank-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; margin: 0 0 8px; }
+.pv-bank-edit .pv-bank-fields label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--pv-muted, #9aa4b8); }
+.pv-bank-edit .pv-bank-fields input {
+  margin: 0; padding: 6px 8px; font-size: 12.5px;
+  background: var(--pv-raised); color: var(--pv-text); border: 1px solid var(--pv-edge); border-radius: 5px;
+}
+.pv-bank-edit .pv-bk-words { min-height: 220px; }
+
+/* ---------- which screens show the congregation view ---------- */
+.pv-screen-menu {
+  position: absolute; z-index: 90; top: 76px; right: 12px; width: 340px;
+  background: var(--pv-panel); border: 1px solid var(--pv-edge); border-radius: 10px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, .6);
+  padding: 10px; display: flex; flex-direction: column; gap: 4px;
+}
+.pv-screen-menu.hidden { display: none; }
+.pv-screen-head {
+  font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--pv-muted, #9aa4b8); padding: 2px 4px 6px;
+}
+.pv-screen-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 9px; border-radius: 7px;
+  cursor: pointer; border: 1px solid transparent; background: var(--pv-raised);
+}
+.pv-screen-row:hover { border-color: var(--pv-sel, #4f7cff); }
+.pv-screen-row.on { background: linear-gradient(135deg, rgba(179,38,30,.28), rgba(229,83,75,.16)); border-color: rgba(229,83,75,.6); }
+.pv-screen-row input { accent-color: #e5534b; width: 15px; height: 15px; flex: none; }
+.pv-screen-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pv-screen-main b { font-size: 12px; color: var(--pv-text); }
+.pv-screen-note { font-size: 11px; color: var(--pv-muted, #9aa4b8); margin: 6px 2px 0; line-height: 1.5; }
+/* "Your projector is plugged in, but Windows is copying this screen onto it."
+   This sits ABOVE the screen list because it explains why the list is short. */
+.pv-screen-warn {
+  display: flex; flex-direction: column; gap: 6px;
+  margin: 0 0 8px; padding: 10px 11px; border-radius: 8px;
+  background: linear-gradient(135deg, rgba(245,166,35,.18), rgba(245,166,35,.07));
+  border: 1px solid rgba(245,166,35,.55);
+}
+.pv-screen-warn b { font-size: 12px; color: #ffce7a; line-height: 1.4; }
+.pv-screen-warn span { font-size: 11px; color: var(--pv-text); opacity: .85; line-height: 1.55; }
+/* The picker hangs off .pv-topbar, so `.pv-topbar button` — flat, transparent,
+   10px, built for icon-over-label toolbar keys — outranks a lone class and
+   quietly turned the one button that matters here back into toolbar furniture.
+   Two classes outrank one class plus an element, so this is the specificity
+   that makes it a button again. */
+.pv-screen-menu .pv-screen-fix {
+  display: block; width: auto; min-width: 0; align-self: flex-start;
+  margin: 2px 0 0; padding: 8px 15px; cursor: pointer;
+  font-size: 12.5px; font-weight: 800; line-height: 1.2; color: #1b1205;
+  border: 0; border-radius: 6px;
+  background: linear-gradient(135deg, #f5a623, #ffce7a);
+  box-shadow: 0 2px 10px rgba(245, 166, 35, .35);
+}
+.pv-screen-menu .pv-screen-fix:hover { background: linear-gradient(135deg, #ffb733, #ffdb9a); color: #1b1205; }
+.pv-screen-menu .pv-screen-fix:disabled { opacity: .6; cursor: default; box-shadow: none; }
+
+/* ---------- clear palette ----------
+   The most-used strip in the room. Each layer clears on its own and goes RED
+   while cleared, so the operator can always see WHY the screen doesn't match
+   the slide they're looking at. */
+.pv-clearbar {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 10px; justify-content: space-between;
+  padding: 5px 10px; background: var(--pv-bg); border-bottom: 1px solid var(--pv-line);
+}
+.pv-clear-palette { display: flex; gap: 4px; flex-wrap: wrap; }
+.pv-clearbar-right { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.pv-clear {
+  width: auto; margin: 0; display: flex; align-items: center; gap: 5px; cursor: pointer;
+  padding: 4px 10px; font-size: 11px; font-weight: 600;
+  background: var(--pv-raised); color: var(--pv-text); border: 1px solid var(--pv-edge); border-radius: 4px;
+}
+.pv-clear:hover { background: var(--pv-hover); border-color: var(--pv-edge); color: #fff; }
+.pv-clear.on {
+  background: #b3261e; border-color: #e5534b; color: #fff;
+  box-shadow: 0 0 0 1px rgba(229,83,75,.45), 0 2px 10px rgba(229,83,75,.35);
+}
+.pv-clear-ico { font-size: 12px; }
+.pv-clear-all { font-weight: 800; }
+.pv-trans-details { position: relative; }
+.pv-trans-details > summary {
+  list-style: none; cursor: pointer; padding: 5px 11px; font-size: 11.5px; font-weight: 700;
+  background: #161b27; color: #9daac2; border: 1px solid #242c3e; border-radius: 7px;
+}
+.pv-trans-details > summary::-webkit-details-marker { display: none; }
+.pv-trans-details[open] > summary { border-color: var(--primary); color: #fff; }
+.pv-trans-row {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 40;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; width: 420px;
+  padding: 10px 12px; background: #12161f; border: 1px solid #2a3450; border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+.pv-trans-row label { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 11.5px; color: var(--muted); }
+.pv-trans-row select { flex: 1; width: auto; margin: 0; padding: 4px 6px; font-size: 11.5px; }
+
+/* ---- 🎵 Music: the song-setup popover in the ⋯ More group ---- */
+.pv-music-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 40;
+  display: flex; flex-direction: column; gap: 4px; width: 240px;
+  padding: 10px; background: #12161f; border: 1px solid #2a3450; border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+.pv-music-key {
+  display: block; padding: 0 2px 6px; margin-bottom: 3px;
+  border-bottom: 1px solid #242c3e;
+  font-size: 11px; font-weight: 700; color: #9daac2;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pv-music-menu button {
+  width: 100%; margin: 0; padding: 7px 10px; text-align: left;
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  background: var(--pv-raised); color: var(--pv-text);
+  border: 1px solid var(--pv-edge); border-radius: 7px;
+}
+.pv-music-menu button:hover { background: var(--pv-hover); color: #fff; border-color: var(--pv-sel); }
+
+.pv-arrange { width: auto; max-width: 190px; margin: 0 0 0 auto; padding: 4px 8px; font-size: 11.5px; }
+
+/* ---------- layout ---------- */
+.pv-main { flex: 1; display: flex; min-height: 0; }
+
+/* ---------- left rail ---------- */
+.pv-rail {
+  flex: 0 0 208px; display: flex; flex-direction: column; min-height: 0;
+  background: var(--pv-panel); border-right: 1px solid var(--pv-line);
+}
+.pv-rail-sec { display: flex; flex-direction: column; min-height: 0; flex: 1; padding-bottom: 6px; }
+.pv-rail-sec + .pv-rail-sec { border-top: 1px solid var(--pv-line); }
+.pv-rail-head {
+  flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 10px 4px; font-size: 10px; font-weight: 700; letter-spacing: .13em;
+  text-transform: uppercase; color: var(--pv-dim);
+}
+.pv-rail-head.pv-sub { border-top: 1px solid var(--pv-line); margin-top: 4px; color: var(--pv-dim); letter-spacing: .1em; }
+.pv-mini {
+  width: auto; margin: 0; padding: 2px 7px; font-size: 12px; line-height: 1.3; cursor: pointer;
+  background: var(--pv-raised); color: var(--pv-text); border: 1px solid var(--pv-edge); border-radius: 3px;
+}
+.pv-mini:hover { background: var(--pv-hover); color: #fff; }
+.pv-filter { margin: 0 10px 6px; padding: 5px 8px; font-size: 12px; width: calc(100% - 20px); }
+.pv-list { flex: 1; overflow-y: auto; padding: 0 4px 4px; display: flex; flex-direction: column; gap: 1px; }
+.pv-list-sm { flex: 0 0 auto; max-height: 118px; }
+.pv-item {
+  width: 100%; margin: 0; display: flex; align-items: center; gap: 8px; text-align: left;
+  padding: 4px 8px; background: transparent; color: var(--pv-text); border: 1px solid transparent;
+  border-radius: 3px; font-size: 12px; cursor: pointer;
+}
+.pv-item:hover { background: var(--pv-hover); color: #fff; }
+.pv-item.sel { background: var(--pv-sel); border-color: transparent; color: #fff; }
+.pv-item-sm { padding: 3px 8px; font-size: 11.5px; }
+.pv-item-icon { flex: 0 0 auto; opacity: .85; font-size: 12px; }
+.pv-item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-item-n { flex: 0 0 auto; font-size: 10px; color: var(--pv-dim); }
+.pv-empty { padding: 14px 12px; text-align: center; line-height: 1.5; }
+
+/* ---------- centre: slide grid ---------- */
+.pv-center { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--pv-bg); }
+.pv-doc-head {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+  padding: 5px 10px; border-bottom: 1px solid var(--pv-line); background: var(--pv-panel);
+}
+.pv-doc-icon { font-size: 14px; opacity: .8; }
+.pv-doc-name {
+  width: auto; min-width: 160px; max-width: 340px; margin: 0; padding: 5px 9px;
+  background: transparent; border: 1px solid transparent; border-radius: 7px;
+  font-size: 13px; font-weight: 600; color: #f0f0f0;
+}
+.pv-doc-name:hover { border-color: var(--pv-edge); }
+.pv-doc-name:focus { background: var(--pv-raised); border-color: var(--pv-sel); outline: none; }
+
+.pv-slides-wrap { flex: 1; position: relative; min-height: 0; display: flex; }
+.pv-slides {
+  flex: 1; overflow-y: auto; padding: 0 0 10px; display: flex; flex-direction: column;
+  align-items: stretch; gap: 0;
+}
+/* ---- group sections: a coloured bar spanning the row, then its slides ---- */
+.pv-group-sec { display: flex; flex-direction: column; }
+.pv-group-bar {
+  display: flex; align-items: center; gap: 8px; padding: 3px 10px;
+  background: var(--gc); color: #fff; font-size: 11px; font-weight: 600;
+  border-top: 1px solid rgba(0,0,0,.35);
+}
+.pv-group-bar-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-group-bar-n {
+  flex: 0 0 auto; font-variant-numeric: tabular-nums; opacity: .85;
+  background: rgba(0,0,0,.28); border-radius: 8px; padding: 0 7px; font-size: 10px;
+}
+.pv-group-slides {
+  display: flex; flex-wrap: wrap; align-content: flex-start; gap: 8px; padding: 8px 10px 10px;
+}
+/* Draw straight over the live output. The canvas is a 16:9 surface sized to the
+   grid area; strokes are pushed to the mask layer, so they land on the wall. */
+.pv-draw-surface {
+  position: absolute; inset: 0; z-index: 5; cursor: crosshair;
+  background: rgba(6,9,15,.35); border: 2px dashed #e5534b; border-radius: 8px;
+}
+.pv-draw-surface.hidden { display: none; }
+.pv-slide {
+  border-radius: 3px; overflow: hidden; cursor: pointer; background: #000;
+  border: 2px solid transparent; transition: border-color .1s;
+}
+.pv-slide:hover { border-color: var(--pv-edge); }
+.pv-slide.sel { border-color: var(--pv-sel); }
+/* the slide that is ON THE WALL right now — red, like every switcher ever made */
+.pv-slide.live { border-color: #e5534b; box-shadow: 0 0 0 1px rgba(229,83,75,.55); }
+.pv-slide-tag {
+  display: flex; align-items: center; gap: 6px; padding: 2px 6px;
+  font-size: 10px; font-weight: 600; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.5);
+}
+.pv-slide-no { opacity: .8; font-variant-numeric: tabular-nums; }
+.pv-slide-group { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/*
+ * Every thumbnail is a full 1920x1080 .sr-stage scaled down, so a 160-slide
+ * deck is 160 of them — and the browser laid out ALL of them every time the
+ * Presentation page came back to the front, even though about twelve fit on
+ * screen. Measured with Go Live and the Video Studio also loaded, a page flip
+ * cost 35 ms at 10 slides and 93 ms at 160: pure work on pictures nobody can
+ * see.
+ *
+ * content-visibility skips layout and paint for the ones that are off screen.
+ * It is safe for the CARD's geometry because this box is sized extrinsically —
+ * width from the card, height from an inline style — so nothing moves and the
+ * scrollbar does not jump. (The size is not taken from the contents, which is
+ * what contain-intrinsic-size would otherwise be needed for.)
+ */
+.pv-slide-thumb {
+  position: relative; width: 100%; background: #000; overflow: hidden;
+  content-visibility: auto;
+}
+.pv-slide .pv-slide-tag { border-top: 1px solid rgba(0,0,0,.4); }
+.pv-slide-edit {
+  position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; resize: none;
+  background: rgba(6,9,15,.94); color: #fff; border: 2px solid var(--primary); border-radius: 0;
+  padding: 8px 9px; font-size: 13px; line-height: 1.4; font-family: inherit; z-index: 3;
+}
+.pv-slide-edit:focus { outline: none; }
+
+.pv-bottom {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 12px; justify-content: flex-end;
+  padding: 5px 10px; border-top: 1px solid var(--pv-line); background: var(--pv-panel);
+}
+.pv-bottom-right { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.pv-bottom-right input[type=range] { width: 130px; margin: 0; accent-color: var(--primary); }
+
+/* ---------- right: live output + inspector ---------- */
+.pv-side {
+  /* 26px wider than it was: it buys a readable Live monitor AND a wider verse
+     column, and the slide grid beside it never noticed. */
+  flex: 0 0 356px; width: 356px; display: flex; flex-direction: column;
+  min-height: 0; min-width: 0; overflow: hidden;
+  background: #0d1017; border-left: 1px solid #1c2231;
+}
+.pv-out { flex: 0 0 auto; padding: 10px 12px; border-bottom: 1px solid #1c2231; }
+.pv-out-row { display: flex; align-items: center; gap: 8px; margin: 0 0 5px; }
+.pv-out-label { font-size: 10.5px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; color: #c3ccdd; }
+.pv-out-label.pv-dim { color: #5d6883; }
+.pv-live-dot { width: 9px; height: 9px; border-radius: 50%; background: #39415a; flex: 0 0 auto; }
+.pv-live-dot.on { background: #e5534b; box-shadow: 0 0 8px rgba(229,83,75,.9); }
+.pv-live-dot.warn { background: var(--accent); box-shadow: 0 0 8px rgba(255,176,46,.8); }
+.pv-screen {
+  position: relative; width: 100%; aspect-ratio: 16/9; background: #000;
+  border: 1px solid #222a3c; border-radius: 7px; overflow: hidden;
+}
+/* Live beside Next. Every pixel these two give up is a pixel of scripture the
+   operator can actually read in the panel underneath. */
+.pv-screens { display: flex; align-items: flex-start; gap: 6px; }
+.pv-screens .pv-screen { width: auto; min-width: 0; }
+#pvLiveScreen { flex: 2.2 1 0; }
+#pvNextScreen { flex: 1 1 0; opacity: .82; }
+.pv-screen-tag {
+  position: absolute; left: 3px; bottom: 2px; z-index: 3; pointer-events: none;
+  font-size: 8.5px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase;
+  color: #93a0ba; text-shadow: 0 1px 3px #000;
+}
+.pv-transport { display: flex; align-items: center; gap: 6px; margin-top: 9px; }
+.pv-transport button {
+  flex: 1; width: auto; margin: 0; padding: 7px 6px; font-size: 13px; cursor: pointer;
+  background: #1b2030; color: #cfd6e6; border: 1px solid #283047; border-radius: 8px;
+}
+.pv-transport button:hover { border-color: var(--primary); color: #fff; }
+.pv-transport .primary-btn { flex: 1.6; }
+.pv-transport button.on { background: #e5534b; border-color: transparent; color: #fff; }
+
+/* The video bar: only there when a video is on the screen. */
+.pv-vidbar { display: flex; align-items: center; gap: 6px; margin-top: 7px; }
+.pv-vidbar.hidden { display: none; }
+.pv-vidbar button {
+  flex: 0 0 auto; width: auto; margin: 0; padding: 4px 9px; font-size: 11px; font-weight: 700; cursor: pointer;
+  background: #1b2030; color: #b9c3d6; border: 1px solid #283047; border-radius: 7px;
+}
+.pv-vidbar button:hover { border-color: var(--primary); color: #fff; }
+.pv-vidbar button.on { background: #1d3350; border-color: #3f6ea8; color: #dce9ff; }
+.pv-vidbar #pvVidPlay.on { background: #4a2f10; border-color: #8a5a1e; color: #ffd9a1; }
+.pv-vidbar-name {
+  flex: 1 1 auto; min-width: 0; font-size: 10.5px; color: #6f7c96;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right;
+}
+
+.pv-pane { flex: 1 1 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.pv-pane.hidden { display: none; }
+.pv-pane-head { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; padding: 10px 12px 6px; }
+.pv-pane-head select { flex: 1; width: auto; margin: 0; padding: 6px 8px; font-size: 12px; }
+.pv-pane-foot { flex: 0 0 auto; display: flex; gap: 7px; padding: 9px 12px; border-top: 1px solid #1c2231; }
+/* Add / Send live must stay under the operator's thumb even when the passage
+   is long enough to scroll the panel. */
+.pv-pane[data-pvpane="bible"] .pv-pane-foot { position: sticky; bottom: 0; background: #0d1017; z-index: 2; }
+.pv-pane-foot button { flex: 1; }
+.pv-hint { padding: 0 12px 8px; line-height: 1.5; }
+
+/* Bible */
+/* Book ▸ chapter ▸ verse. The book name needs the room; the numbers do not, so
+   they are held to a fixed share and the row never wraps on a narrow panel. */
+.pv-bible-pick { display: flex; align-items: center; gap: 5px; padding: 0 12px 6px; }
+.pv-bible-pick select { margin: 0; padding: 6px 4px 6px 7px; font-size: 12.5px; min-width: 0; }
+#pvBook { flex: 1 1 auto; }
+.pv-bible-pick .pv-num { flex: 0 0 auto; width: 4.6em; }
+.pv-bible-pick #pvVerse { width: 6.7em; }
+.pv-bible-pick .pv-dash { flex: 0 0 auto; color: var(--muted); font-size: 12px; }
+.pv-bible-pick.whole .pv-dash, .pv-bible-pick.whole #pvVerseTo { display: none; }
+.pv-bible-search { display: flex; gap: 6px; padding: 0 12px 7px; }
+.pv-bible-search input { flex: 1; margin: 0; padding: 7px 9px; font-size: 12.5px; }
+.pv-bible-search button { flex: 0 0 auto; }
+/* One row, not two: at 330px wide these wrapped, and the second line came
+   straight out of the passage below. */
+.pv-bible-opts {
+  display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;
+  padding: 0 12px 7px; font-size: 11px; color: var(--muted); white-space: nowrap;
+}
+.pv-bible-opts label { display: flex; align-items: center; gap: 6px; margin: 0; }
+.pv-bible-opts select { width: auto; margin: 0; padding: 3px 6px; font-size: 11.5px; }
+.pv-inline input { width: auto; margin: 0; }
+/*
+ * THE PASSAGE IS THE POINT OF THIS PANEL.
+ *
+ * It used to be `flex: 1 1 0; min-height: 60px` — whatever was left after the
+ * two monitors, the pickers, the search box, the options and the buttons had
+ * taken theirs, which on a laptop was a verse and a half. A real minimum means
+ * the passage keeps its room and the PANEL scrolls instead, so the operator
+ * reads scripture rather than a letterbox.
+ */
+.pv-results { flex: 1 1 auto; min-height: 150px; overflow-y: auto; padding: 0 12px 10px; display: flex; flex-direction: column; gap: 5px; }
+.pv-pane[data-pvpane="bible"] { overflow-y: auto; }
+/* Every verse is a button that puts itself on the screen. The global button
+   style centres its children and adds margins, so it is reset here the way the
+   background tiles reset it. */
+/*
+ * ►► NOT content-visibility, AND THAT WAS MEASURED. ◄◄
+ *
+ * The slide thumbnails above gain a great deal from it, so the same treatment
+ * was tried on these rows: a chapter is one row per verse and Psalm 119 has
+ * 176 of them. It made the studio DRAMATICALLY worse — cueing a slide went from
+ * a p95 of 45 ms to 915 ms, and the median renderer frame from 8 ms to 220.
+ *
+ * The reason is markLiveVerses(): every cue re-marks all the rows and then
+ * calls scrollIntoView on the live one, which forces the browser to resolve the
+ * skipped subtrees again, every time. A thumbnail is laid out once and looked
+ * at; a verse row is re-measured on every move of the screen, and that is the
+ * case content-visibility is worst at.
+ */
+.pv-verse {
+  display: flex; gap: 8px; align-items: flex-start; justify-content: flex-start;
+  width: 100%; margin: 0; padding: 6px 8px; text-align: left; cursor: pointer;
+  background: #12161f; border: 1px solid #1e2534; border-radius: 7px;
+  font-size: 12.5px; line-height: 1.45;
+  transition: border-color .12s ease, background .12s ease;
+}
+.pv-verse:hover { border-color: var(--primary); background: #161d2b; }
+.pv-verse:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+/* What is on the wall right now — the operator must be able to find it without
+   looking away from the passage. */
+.pv-verse.live { border-color: #e5534b; background: #241519; box-shadow: inset 3px 0 0 #e5534b; }
+.pv-verse.live .pv-verse-text { color: #f2f6ff; }
+.pv-verse-no { flex: 0 0 auto; color: var(--accent); font-weight: 800; font-size: 11px; padding-top: 1px; }
+.pv-verse-text { color: #cbd4e4; }
+/* Where the verse sits on the screen — one row of small, obvious switches. */
+.pv-versefmt { display: flex; align-items: center; gap: 3px; padding: 0 12px 6px; }
+.pv-versefmt button {
+  flex: 0 0 auto; width: auto; margin: 0; padding: 3px 6px; min-width: 26px;
+  font-size: 11px; line-height: 1.1; cursor: pointer;
+  background: #12161f; color: #97a3ba; border: 1px solid #1e2534; border-radius: 6px;
+}
+.pv-versefmt button:hover { border-color: var(--primary); color: #fff; }
+.pv-versefmt button.on { background: #1d3350; border-color: #3f6ea8; color: #dce9ff; }
+.pv-vf-label { font-size: 10.5px; color: #66708a; margin-right: 3px; }
+.pv-vf-sep { width: 5px; }
+.pv-verse-hint { margin: 0; padding: 0 12px 5px; font-size: 10px; line-height: 1.35; color: #66708a; }
+
+/* ── 🎤 Listen ────────────────────────────────────────────────────────────
+   The meter and the transcript are not decoration: the first question an
+   operator asks is "is it hearing me?", and a moving bar plus the words it
+   just wrote down answers it without anyone having to test on the congregation. */
+.pv-listen { padding: 0 12px 6px; }
+.pv-listen-head { display: flex; align-items: center; gap: 8px; }
+.pv-listen-head button.on { background: #7b2d2d; border-color: #a33; color: #ffe9e9; }
+.pv-listen-meter { flex: 1 1 auto; height: 6px; border-radius: 3px; background: #1b2030; overflow: hidden; }
+.pv-listen-meter i { display: block; height: 100%; width: 0%; background: #3f6fd8; transition: width 90ms linear; }
+.pv-listen-meter.speaking i { background: #43b96b; }
+.pv-listen-state { flex: 0 0 auto; min-width: 74px; text-align: right; }
+.pv-listen-mic { margin-top: 5px; gap: 6px; }
+.pv-listen-mic label { flex: 0 0 auto; }
+.pv-listen-mic select { flex: 1 1 auto; min-width: 0; }
+/* The cloud ear's setup. Set in a box of its own because it is the one part of
+   this panel that reaches outside the building, and it should look like it. */
+.pv-listen-cloud {
+  margin-top: 6px; padding: 7px 8px; border-radius: 7px;
+  background: #121a26; border: 1px solid #1e2b3d;
+}
+.pv-listen-cloud p { margin: 0 0 6px; line-height: 1.4; }
+/* A note under the control it belongs to, not beside it. In this rail — about
+   420 px, and narrower once the LIVE preview is next to it — a note sharing a
+   row with a <select> wrapped to three lines AND squeezed the select to where
+   its own text was cut off. One line each, full width, reads in a glance. */
+.pv-listen-note { margin: 3px 0 0; line-height: 1.35; }
+.pv-listen-note:empty { display: none; }
+.pv-listen-wide { width: 100%; }
+.pv-listen-keyrow { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+.pv-listen-keyrow input { flex: 1 1 auto; min-width: 0; }
+.pv-listen-keyrow button { flex: 1 1 auto; }
+.pv-listen-keyrow button.primary-btn { flex: 0 0 auto; min-width: 58px; }
+.pv-listen-cloud .pv-listen-mic { margin-top: 0; }
+.pv-listen-privacy { margin-top: 6px; color: #5f6a80; }
+.pv-listen-cloud-note.good { color: #8ff0b4; }
+.pv-listen-cloud-note.bad { color: #f0b3a8; }
+/* What the free allowance has left, as a bar the operator can read at a glance
+   rather than four numbers they would have to think about mid-service. */
+.pv-listen-fuel { flex: 1 1 auto; height: 4px; border-radius: 2px; background: #1b2030; overflow: hidden; min-width: 40px; }
+.pv-listen-fuel i { display: block; height: 100%; background: #43b96b; transition: width 400ms linear; }
+.pv-listen-fuel.low i { background: #c79a3a; }
+
+.pv-listen-log { margin-top: 6px; max-height: 108px; overflow-y: auto; display: flex; flex-direction: column-reverse; gap: 3px; }
+.pv-listen-log:empty { display: none; }
+.pv-listen-line { font-size: 11px; line-height: 1.35; color: #7d879e; padding: 3px 6px; border-radius: 4px; background: #161b28; }
+.pv-listen-line b { color: #cbd6ea; font-weight: 600; }
+.pv-listen-line.did { color: #cfe6d8; background: #1b2f24; border-left: 2px solid #43b96b; }
+.pv-listen-line.did b { color: #8ff0b4; }
+.pv-listen-line.warn { color: #f0d9a8; background: #2f2718; border-left: 2px solid #c79a3a; }
+
+.pv-verse-hint b { color: #8fa2c4; font-weight: 700; }
+.pv-hit {
+  width: 100%; margin: 0; display: flex; flex-direction: column; gap: 2px; text-align: left;
+  padding: 6px 8px; background: #12161f; color: #cbd4e4; border: 1px solid #1e2534;
+  border-radius: 7px; cursor: pointer; font-size: 12px; line-height: 1.4;
+}
+.pv-hit:hover { border-color: var(--primary); }
+.pv-hit-ref { font-weight: 800; color: var(--accent); font-size: 11px; }
+.pv-hit-text { color: #9daac2; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+/* Media */
+.pv-media-grid { flex: 1; overflow-y: auto; padding: 0 12px 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-content: start; }
+/* The Media panel now leads with the operator's OWN files, so the panel itself
+   is what scrolls; the personal grid keeps a couple of rows on screen and the
+   ready-made set takes whatever is left below it. */
+.pv-pane[data-pvpane="media"] { overflow-y: auto; }
+.pv-pane[data-pvpane="media"] .pv-media-grid { flex: 0 0 auto; max-height: 264px; }
+.pv-pane[data-pvpane="media"] .pv-bg-cats,
+.pv-pane[data-pvpane="media"] .pv-bg-grid,
+.pv-pane[data-pvpane="media"] .pv-bg-apply { flex: 0 0 auto; }
+/* Nothing added yet — say what the button does rather than showing a void. */
+.pv-media-grid .pv-empty { grid-column: 1 / -1; margin: 2px 0 0; }
+.pv-media { width: 100%; margin: 0; padding: 0; background: transparent; border: none; cursor: pointer; text-align: left; }
+.pv-media-thumb {
+  position: relative; display: block; width: 100%; aspect-ratio: 16/9; border-radius: 7px;
+  background: #12161f center/cover no-repeat; border: 2px solid #222a3c;
+}
+.pv-media:hover .pv-media-thumb { border-color: var(--primary); }
+.pv-media-badge { position: absolute; right: 5px; bottom: 4px; font-size: 10px; color: #fff; background: rgba(0,0,0,.65); padding: 0 5px; border-radius: 5px; }
+.pv-media-name { display: block; margin-top: 3px; font-size: 10.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Each tile carries its two other verbs — make it a slide, take it off the
+   list — rather than hiding them behind a right-click nobody discovers. */
+.pv-media-cell { position: relative; }
+.pv-media-slide, .pv-media-rm {
+  position: absolute; top: 4px; margin: 0; padding: 1px 5px; font-size: 10px; line-height: 1.5;
+  background: rgba(8, 10, 16, 0.82); color: #cbd4e4; border: 1px solid #2b3448; border-radius: 5px;
+  cursor: pointer; opacity: 0; transition: opacity 120ms;
+}
+.pv-media-slide { left: 4px; }
+.pv-media-rm { right: 4px; }
+.pv-media-cell:hover .pv-media-slide, .pv-media-cell:hover .pv-media-rm,
+.pv-media-slide:focus, .pv-media-rm:focus { opacity: 1; }
+.pv-media-slide:hover { background: var(--primary); color: #fff; border-color: transparent; }
+.pv-media-rm:hover { background: #b3352f; color: #fff; border-color: transparent; }
+
+/* Look */
+.pv-look-body { flex: 1; overflow-y: auto; padding: 0 12px 12px; display: flex; flex-direction: column; gap: 9px; }
+.pv-look-body label { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 11.5px; color: var(--muted); }
+.pv-look-body label input[type=range] { flex: 1; margin: 0; accent-color: var(--primary); }
+.pv-look-body label input[type=color] { width: 40px; height: 26px; padding: 2px; margin: 0; }
+.pv-look-body select { width: auto; flex: 1; margin: 0; padding: 5px 7px; font-size: 12px; }
+.pv-look-row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.pv-toggle {
+  width: auto; margin: 0; padding: 4px 9px; font-size: 12px; font-weight: 700; cursor: pointer;
+  background: #171c28; color: #98a5be; border: 1px solid #252d40; border-radius: 6px; min-width: 32px;
+}
+.pv-toggle:hover { border-color: var(--primary); color: #fff; }
+.pv-toggle.on { background: var(--primary); border-color: transparent; color: #fff; }
+.pv-look-preview {
+  position: relative; width: 100%; aspect-ratio: 16/9; background: #000;
+  border: 1px solid #222a3c; border-radius: 7px; overflow: hidden; margin-top: 2px;
+}
+
+/* ---------- Show tab: props, messages, timers, announcements, outputs ---------- */
+.pv-show-body { flex: 1; overflow-y: auto; padding: 0 12px 12px; display: flex; flex-direction: column; gap: 12px; }
+.pv-show-sec { display: flex; flex-direction: column; gap: 6px; }
+.pv-show-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 10.5px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase;
+  color: #6b7793; padding-top: 4px; border-top: 1px solid #1a2130;
+}
+.pv-show-sec:first-child .pv-show-head { border-top: none; }
+.pv-show-head .pv-mini.on { background: var(--accent); border-color: transparent; color: #1a1a1a; }
+
+/* ---- Simple / Everything, and folding sections ---- */
+.pv-show-modes { display: flex; gap: 0; padding: 8px 12px 4px; }
+.pv-show-modes .pv-seg { flex: 1; }
+.pv-sec-title-btn { cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 5px; }
+.pv-sec-title-btn:hover { color: #9fb0d0; }
+.pv-sec-chev { display: inline-block; font-size: 9px; transition: transform 120ms; opacity: .8; }
+.pv-show-sec.collapsed .pv-sec-chev { transform: rotate(-90deg); }
+.pv-show-sec.collapsed .pv-sec-body { display: none; }
+/* A collapsed section's own buttons would fire actions the operator cannot see
+   the result of, so they go away with the body. */
+.pv-show-sec.collapsed .pv-show-head > :not(.pv-sec-title-btn) { display: none; }
+.pv-sec-body { display: flex; flex-direction: column; gap: 6px; }
+.pv-sec-hidden { display: none; }
+.pv-announce {
+  width: 100%; margin: 0; padding: 7px 9px; resize: vertical; font-family: inherit;
+  font-size: 12px; line-height: 1.4; background: #12161f; color: #cbd4e4;
+  border: 1px solid #1e2534; border-radius: 7px;
+}
+.pv-show-sec .lib-list { max-height: 190px; overflow-y: auto; }
+.pv-show-sec .pv-results { max-height: 170px; }
+.pv-outlook { width: auto; max-width: 106px; margin: 0; padding: 3px 5px; font-size: 11px; }
+/* the address people type into their phone — must be readable across a room */
+.pv-weburl {
+  font-family: ui-monospace, Consolas, monospace; font-size: 14px; font-weight: 700;
+  color: var(--accent); background: #101622; border: 1px solid #2a3450;
+  border-radius: 7px; padding: 7px 10px; margin: 5px 0; user-select: all; text-align: center;
+}
+/* Which blocks the chosen stage layout puts on a confidence monitor. Read-only
+   at a glance — the operator picks a layout, not individual boxes, mid-service. */
+.pv-stage-blocks { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.pv-chip {
+  font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 999px;
+  background: #141a26; color: #59627a; border: 1px solid #1e2534;
+}
+.pv-chip.on { background: #16233c; color: #9dc0ff; border-color: #2c4675; }
+
+/* Screen mapping: a rotated projector, an LED wall that is only part of the
+   output, two projectors blended into one wide picture. */
+.pv-map { margin-top: 8px; padding: 8px; border: 1px solid #223052; border-radius: 8px; background: #0e131d; }
+.pv-map .pv-show-head { margin: 0 0 6px; }
+.pv-map .pv-bible-opts { gap: 6px 8px; }
+.pv-map .pv-bible-opts input[type=number] { width: 58px; }
+.pv-show-sec .lib-mini.on { background: #16233c; color: #9dc0ff; border-color: #2c4675; }
+#pvNdiState.warn { color: var(--warn, #e5a13b); }
+
+/* ---- ready-made backgrounds ----
+   Each tile paints the REAL background with a real line of lyrics over it, so
+   the choice is made on what the congregation will actually see rather than on
+   a name like "Royal". Two columns keeps each tile wide enough for that line
+   to be legible in a 330px side panel. */
+/* flex:none — the media pane is a column flex container, and without it this
+   row is shrunk to a 2px sliver instead of showing the three choices */
+.pv-bg-apply {
+  display: flex; flex: 0 0 auto; gap: 0; margin: 6px 0 8px;
+  border: 1px solid #22293a; border-radius: 8px; overflow: hidden;
+}
+.pv-seg {
+  flex: 1 1 0; min-height: 26px; padding: 5px 4px; font-size: 11px; font-weight: 700; cursor: pointer;
+  background: #10141d; color: #7c8798; border: 0; border-right: 1px solid #22293a;
+}
+.pv-seg:last-child { border-right: 0; }
+.pv-seg:hover { background: #151b27; color: #b6c2d6; }
+.pv-seg.on { background: var(--primary); color: #fff; }
+.pv-bg-cats { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.pv-bg-cats .pv-chip { cursor: pointer; }
+.pv-bg-cats .pv-chip:hover { border-color: #2c4675; color: #9dc0ff; }
+.pv-bg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pv-bg {
+  display: flex; flex-direction: column; gap: 4px; padding: 0; cursor: pointer;
+  background: none; border: 0; text-align: left;
+  /* the app's global button style centres its children, which shrink-wraps the
+     thumbnail to its own content instead of letting it fill the grid column */
+  align-items: stretch; justify-content: flex-start; min-width: 0;
+}
+.pv-bg-thumb {
+  position: relative; display: grid; place-items: center; aspect-ratio: 16 / 9;
+  border-radius: 7px; border: 1px solid #1e2534; overflow: hidden;
+  background-color: #000; background-size: cover; background-position: center;
+  transition: border-color .12s ease, transform .12s ease;
+}
+.pv-bg:hover .pv-bg-thumb { border-color: var(--primary); transform: translateY(-1px); }
+.pv-bg:focus-visible .pv-bg-thumb { outline: 2px solid var(--primary); outline-offset: 1px; }
+.pv-bg-sample { font-size: 10.5px; font-weight: 700; letter-spacing: .01em; pointer-events: none; }
+.pv-bg-name { font-size: 10.5px; font-weight: 600; color: #8a94a8; padding-left: 1px; }
+.pv-bg-sun { color: #e5b95a; }
+
+/* ---------- motion backgrounds ----------
+   The badge answers the only question a tile cannot: is this already on the
+   machine, or is clicking it going to cost a download on church wifi? */
+.pv-bg-badge {
+  position: absolute; top: 4px; right: 4px; pointer-events: none;
+  font-size: 9px; font-weight: 800; letter-spacing: .02em;
+  padding: 2px 5px; border-radius: 5px;
+  background: rgba(6, 10, 18, .82); color: #cfe0ff; border: 1px solid #2a3550;
+}
+.pv-bg-vid.have .pv-bg-badge { color: #7ee2a8; border-color: #245c3c; }
+.pv-bg-play {
+  position: absolute; left: 4px; top: 4px; pointer-events: none;
+  font-size: 8.5px; line-height: 1; padding: 3px 4px 3px 5px; border-radius: 4px;
+  background: rgba(6, 10, 18, .7); color: #e8eefc;
+}
+.pv-bg-vid .pv-bg-name::after { content: ' · motion'; color: #5f6b83; font-weight: 500; }
+
+/* Paste a YouTube/Vimeo link — the field has to be wide enough to see the id. */
+.pv-link-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0 4px; }
+.pv-link-row input[type=text] { flex: 1 1 100%; margin: 0; padding: 5px 8px; font-size: 11.5px; }
+.pv-link-row label { font-size: 11px; }
+.pv-link-row .pv-mini { margin-left: auto; }
+.pv-sec-title { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #6f7c96; }
+.pv-vid label { font-size: 11px; }
+.pv-vid input[type=range] { width: 78px; accent-color: var(--primary); }
+.pv-vid input[type=number] { width: 62px; }
+.pv-audvol { width: 66px; margin: 0; accent-color: var(--primary); }
+#pvDmxCmd { flex: 1; margin: 0; padding: 3px 6px; font-size: 11.5px; font-family: ui-monospace, Consolas, monospace; }
+
+.pv-show-sec .pv-bible-opts input[type=number] { width: 74px; margin: 0; padding: 3px 6px; font-size: 11.5px; }
+.pv-show-sec .pv-bible-opts input[type=text] { width: 88px; margin: 0; padding: 3px 6px; font-size: 11.5px; }
+.pv-show-sec .pv-bible-opts input[type=color] { width: 34px; height: 22px; padding: 1px; margin: 0; }
+.pv-show-sec .pv-bible-opts input[type=range] { width: 84px; margin: 0; accent-color: var(--primary); }
+
+/* Bible manager list gets a bit more room than the music one */
+.pv-bib-list { max-height: 46vh; overflow-y: auto; }
+
+/* In Edit mode the grid is the focus, so dim the "this is live" red a little
+   and make the selection ring the loud one instead. */
+.pv-editing .pv-slide.live { box-shadow: none; }
+.pv-editing .pv-slide.sel { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary) inset; }
+
+/* ---- Bible manager: filter chips and the honest note about licensed texts ---- */
+.bib-tabs { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 9px; }
+.bib-licensed {
+  margin: 12px 0 4px; padding: 11px 13px; border-radius: 9px;
+  background: #12161f; border: 1px solid #222a3c;
+}
+.bib-licensed b { font-size: 12.5px; }
+.bib-licensed p { margin: 6px 0; line-height: 1.5; }
+.bib-licensed ul { margin: 6px 0 0; padding-left: 18px; line-height: 1.6; }
+.pv-motion-row { display: flex; align-items: center; gap: 8px; margin: 0; padding: 0 12px 8px; font-size: 11.5px; color: var(--muted); }
+.pv-motion-row select { width: auto; flex: 1; margin: 0; padding: 4px 7px; font-size: 11.5px; }
+
+/* ---------- ask(): the in-app replacement for window.prompt ----------
+   Lives on <body>, OUTSIDE #view-present, so it cannot inherit the --pv-*
+   palette declared on that section — the colours here are spelled out. */
+.pv-ask-back {
+  position: fixed; inset: 0; z-index: 9000;
+  background: rgba(4,6,10,.62);
+  display: grid; place-items: center;
+}
+.pv-ask {
+  width: min(440px, calc(100vw - 40px));
+  background: #262626; color: #e8e8e8;
+  border: 1px solid #454545; border-radius: 12px;
+  padding: 18px 18px 14px;
+  box-shadow: 0 18px 60px rgba(0,0,0,.6);
+}
+.pv-ask-msg { margin: 0 0 12px; font-size: 13.5px; line-height: 1.5; }
+.pv-ask-input {
+  width: 100%; margin: 0; padding: 9px 11px; font-size: 14px;
+  background: #1b1b1b; color: #fff;
+  border: 1px solid #2d6cdf; border-radius: 8px;
+}
+.pv-ask-input:focus { outline: none; box-shadow: 0 0 0 3px rgba(45,108,223,.25); }
+.pv-ask-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.pv-ask-btns button {
+  width: auto; margin: 0; padding: 7px 15px; font-size: 13px; font-weight: 600;
+  border-radius: 8px; cursor: pointer; border: 1px solid #454545;
+  background: #333; color: #e8e8e8;
+}
+.pv-ask-btns .pv-ask-ok { background: #2d6cdf; border-color: #2d6cdf; color: #fff; }
+.pv-ask-btns button:hover { filter: brightness(1.15); }
+
+/* ---------- inline rename (group bars, playlists, playlist items) ---------- */
+.pv-rename {
+  width: 100%; min-width: 60px; margin: 0; padding: 1px 5px;
+  font: inherit; color: #fff; background: rgba(0,0,0,.55);
+  border: 1px solid rgba(255,255,255,.65); border-radius: 4px;
+}
+.pv-rename:focus { outline: none; }
+
+/* ---- Paste songs: one box, a live preview, and no surprises ---------------
+   Wider than the plain ask() box because the operator is looking at LYRICS in
+   it — a 440px column wraps every line of every verse and makes it impossible
+   to see whether the blank lines fell where they meant them to. */
+.pv-ask.pv-paste { width: min(760px, calc(100vw - 40px)); }
+.pv-paste-text {
+  width: 100%; height: 40vh; min-height: 220px; resize: vertical;
+  padding: 10px 12px; font-size: 13px; line-height: 1.45;
+  font-family: "Consolas", "Menlo", monospace;
+  background: #1b1b1b; color: #fff;
+  border: 1px solid #2d6cdf; border-radius: 8px;
+}
+.pv-paste-opts {
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+  margin: 10px 0 8px; font-size: 12.5px; color: #cfcfcf;
+}
+.pv-paste-opts input[type="number"] {
+  width: 58px; margin-left: 6px; padding: 4px 6px;
+  background: #1b1b1b; color: #fff; border: 1px solid #454545; border-radius: 6px;
+}
+.pv-paste-preview {
+  max-height: 22vh; overflow: auto; padding: 9px 11px;
+  background: #1b1b1b; border: 1px solid #333; border-radius: 8px;
+  line-height: 1.55;
+}
+
+/* ============================ THE SLIDE EDITOR ============================
+   Opened by the ✏️ on a slide. The words on the left under a live 16:9 preview
+   painted by the real renderer, the type controls on the right — so what is
+   being adjusted IS what the congregation will see, at every step. */
+.pv-sled-back {
+  position: fixed; inset: 0; z-index: 260;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(4, 6, 11, .72); backdrop-filter: blur(4px);
+  animation: pvSledIn .14s ease-out;
+}
+@keyframes pvSledIn { from { opacity: 0 } to { opacity: 1 } }
+.pv-sled {
+  width: min(1120px, calc(100vw - 44px)); max-height: calc(100vh - 44px);
+  display: flex; flex-direction: column;
+  background: linear-gradient(180deg, #171b26, #11141d);
+  border: 1px solid #2a3142; border-radius: 16px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, .6);
+  overflow: hidden;
+}
+.pv-sled-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 13px 16px; border-bottom: 1px solid #232a39;
+  background: linear-gradient(90deg, rgba(79, 124, 255, .14), transparent);
+}
+.pv-sled-title { font-size: 15.5px; font-weight: 700; }
+.pv-sled-head-btns { display: flex; align-items: center; gap: 8px; }
+.pv-sled-reset, .pv-sled-x, .pv-sled-cancel, .pv-sled-done, .pv-sled-apply-all {
+  padding: 7px 13px; border-radius: 9px; cursor: pointer; font-size: 12.5px; font-weight: 600;
+  background: #1c2130; color: #dfe4ef; border: 1px solid #2e3648;
+  transition: background .12s ease, border-color .12s ease, transform .1s ease;
+}
+.pv-sled-reset:hover, .pv-sled-x:hover, .pv-sled-cancel:hover, .pv-sled-apply-all:hover {
+  background: #242b3d; border-color: #3d4761;
+}
+.pv-sled-x { padding: 6px 11px; }
+.pv-sled-done {
+  background: linear-gradient(135deg, #4f7cff, #7a5cff); border-color: transparent; color: #fff;
+  box-shadow: 0 5px 16px rgba(79, 124, 255, .35);
+}
+.pv-sled-done:hover { transform: translateY(-1px); }
+
+.pv-sled-body { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(260px, .85fr); gap: 0; overflow: hidden; }
+.pv-sled-left { padding: 15px 16px; display: flex; flex-direction: column; gap: 9px; min-width: 0; overflow: auto; }
+.pv-sled-right {
+  padding: 15px 16px; display: flex; flex-direction: column; gap: 13px;
+  border-left: 1px solid #232a39; background: rgba(255, 255, 255, .015); overflow: auto;
+}
+.pv-sled-lab { font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em; color: #8a93a8; font-weight: 700; }
+.pv-sled-text {
+  width: 100%; min-height: 128px; resize: vertical; padding: 12px 13px;
+  font-size: 15px; line-height: 1.5; font-family: "Segoe UI", system-ui, sans-serif;
+  background: #0e1119; color: #fff; border: 1px solid #2d3549; border-radius: 10px;
+}
+.pv-sled-text:focus { outline: none; border-color: #4f7cff; box-shadow: 0 0 0 3px rgba(79, 124, 255, .18); }
+.pv-sled-hint { margin: 0; }
+.pv-sled-preview-wrap { display: flex; flex-direction: column; gap: 6px; }
+/* The .sr-stage trap: the renderer lays out on a fixed 1920x1080 and scales it
+   with a transform, so its host MUST be position:relative and clip. */
+.pv-sled-preview {
+  position: relative; overflow: hidden; aspect-ratio: 16 / 9; width: 100%;
+  background: #000; border: 1px solid #2a3142; border-radius: 10px;
+}
+
+.pv-sled-group { display: flex; flex-direction: column; gap: 8px; }
+.pv-sled-gname { font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em; color: #ffb02e; font-weight: 700; }
+.pv-sled-group label { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #cfd6e6; }
+.pv-sled-group select {
+  flex: 1; min-width: 0; padding: 6px 8px; font-size: 12.5px;
+  background: #0e1119; color: #fff; border: 1px solid #2d3549; border-radius: 8px;
+}
+.pv-sled-group input[type="range"] { flex: 1; min-width: 0; accent-color: #4f7cff; }
+.pv-sled-group input[type="color"] {
+  width: 40px; height: 26px; padding: 0; border: 1px solid #2d3549; border-radius: 6px; background: #0e1119; cursor: pointer;
+}
+.pv-sled-group output { min-width: 46px; text-align: right; font-variant-numeric: tabular-nums; color: #8a93a8; font-size: 12px; }
+.pv-sled-toggles { display: flex; gap: 6px; }
+.pv-sled-toggles button {
+  flex: 1; padding: 6px 0; font-size: 13px; cursor: pointer;
+  background: #0e1119; color: #cfd6e6; border: 1px solid #2d3549; border-radius: 8px;
+}
+.pv-sled-toggles button.on { background: #4f7cff; border-color: #4f7cff; color: #fff; }
+
+.pv-sled-foot {
+  display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+  border-top: 1px solid #232a39; background: rgba(0, 0, 0, .22);
+}
+.pv-sled-live { flex: 1; }
+.pv-sled-foot-btns { display: flex; gap: 8px; }
+
+/* The ✏️ that makes editing discoverable — quiet until the slide is hovered. */
+.pv-slide-thumb { position: relative; }
+.pv-slide-edit-btn {
+  position: absolute; top: 5px; right: 5px; z-index: 4;
+  width: 26px; height: 26px; padding: 0; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; cursor: pointer; opacity: 0;
+  background: rgba(10, 13, 20, .82); color: #fff;
+  border: 1px solid rgba(255, 255, 255, .22); border-radius: 7px;
+  transition: opacity .12s ease, transform .12s ease, background .12s ease;
+}
+.pv-slide:hover .pv-slide-edit-btn, .pv-slide.sel .pv-slide-edit-btn { opacity: 1; }
+.pv-slide-edit-btn:hover { background: #4f7cff; border-color: #4f7cff; transform: scale(1.08); }
+.pv-slide-edit-btn:focus-visible { opacity: 1; outline: 2px solid #4f7cff; }
