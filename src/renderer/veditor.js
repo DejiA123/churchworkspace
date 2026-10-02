@@ -247,8 +247,25 @@
   function setupPreview(origPath, info) {
     const player = ve.refs.player, nov = $('#veNoVid');
     const codecUnplayable = /hevc|h265|hev1|hvc1|prores|mpeg2|vc1|wmv/i.test(info.vcodec || '');
-    if (codecUnplayable) { showPreparing(nov, player, info.vcodec); makeProxyBg(origPath); }
-    else { player.src = fileUrl(origPath); player.load(); nov.style.display = 'none'; player.style.display = 'block'; }
+    // HEVC is what every iPhone records, and Safari — and Chrome on hardware
+    // that decodes it — plays it as it is. Asking the browser first means a
+    // phone shows the sermon at once instead of waiting on a server to
+    // re-encode an hour of it; if it says yes and then cannot, the player's
+    // error handler (in init) falls back to the proxy, so a wrong "yes" costs a
+    // moment, not the preview.
+    const hevc = /hevc|h265|hev1|hvc1/i.test(info.vcodec || '');
+    const playsHevc = hevc && !!(player.canPlayType('video/mp4; codecs="hvc1.1.6.L93.B0"') || player.canPlayType('video/mp4; codecs="hev1.1.6.L93.B0"'));
+    if (codecUnplayable && !playsHevc) { showPreparing(nov, player, info.vcodec); makeProxyBg(origPath); return; }
+    player.src = fileUrl(origPath); player.load(); nov.style.display = 'none'; player.style.display = 'block';
+    if (playsHevc) {
+      const fallBack = () => {
+        if (!ve.video || ve.video.path !== origPath || ve.video.proxy || ve.video.proxying) return;
+        showPreparing(nov, player, info.vcodec); makeProxyBg(origPath);
+      };
+      // A decoder that "supports" HEVC but not this profile (10-bit HDR, say)
+      // can sit at a black frame without ever raising an error.
+      player.addEventListener('loadeddata', () => { if (!player.videoWidth) fallBack(); }, { once: true });
+    }
   }
   function showPreparing(nov, player, codec) {
     player.style.display = 'none'; nov.style.display = 'flex';
