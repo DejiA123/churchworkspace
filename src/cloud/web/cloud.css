@@ -341,11 +341,14 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
     background: var(--ph-accent); color: var(--ph-accent-ink);
   }
 
+  /* The quality pill and Export are a pair: one height, one corner, one type
+     size, centred on the same line. (The pill is a <label>, and the desk gives
+     every label a 12px bottom margin — which lifted it 6px above Export.) */
   body.mw-cloud .cloud-q {
     display: flex; align-items: center; position: relative;
-    height: 34px; padding: 0 26px 0 12px;
+    height: 34px; margin: 0; padding: 0 26px 0 12px;
     background: var(--ph-panel-2); border-radius: 10px;
-    color: var(--ph-text); font-size: 13px; font-weight: 700;
+    color: var(--ph-text); font-size: 14px; font-weight: 700; line-height: 1;
   }
   body.mw-cloud .cloud-q::after {
     content: ''; position: absolute; right: 11px; top: 50%; margin-top: -2px;
@@ -356,12 +359,12 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
     opacity: 0; font-size: 16px; cursor: pointer;
   }
   body.mw-cloud .cloud-export {
-    display: block;
-    height: 34px; padding: 0 17px;
+    display: flex; align-items: center; justify-content: center;
+    height: 34px; margin: 0 0 0 2px; padding: 0 16px;
     background: var(--ph-accent-fill); color: var(--ph-accent-ink);
-    box-shadow: var(--ph-accent-glow), inset 0 1px 0 rgba(255,255,255,.22);
+    box-shadow: 0 2px 12px rgba(139, 92, 246, .38);
     border: 0; border-radius: 10px;
-    font-size: 14px; font-weight: 800; letter-spacing: .2px;
+    font-size: 14px; font-weight: 700; line-height: 1; letter-spacing: .1px;
     cursor: pointer;
   }
   body.mw-cloud .cloud-export:active { filter: brightness(.88); }
