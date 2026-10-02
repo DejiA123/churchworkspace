@@ -1179,17 +1179,40 @@ function normalizePieces(pieces, durationSec) {
     const a = Math.max(0, Math.min(D, Number(p.start) || 0));
     const b = Math.max(0, Math.min(D, Number(p.end) || 0));
     if (b - a < 0.08) continue; // ~2 frames — below this there is nothing to keep
-    out.push({ start: a, end: b });
+    const t = transitionOf(p.trans);
+    out.push(t ? { start: a, end: b, trans: t } : { start: a, end: b });
   }
   out.sort((x, y) => x.start - y.start);
-  // merge pieces that touch/overlap so the concat filter never sees a duplicate frame
+  // merge pieces that touch/overlap so the concat filter never sees a duplicate
+  // frame — unless the later one STARTS a transition: that join is the point
   const merged = [];
   for (const p of out) {
     const last = merged[merged.length - 1];
-    if (last && p.start <= last.end + 0.001) last.end = Math.max(last.end, p.end);
-    else merged.push({ start: p.start, end: p.end });
+    if (last && !p.trans && p.start <= last.end + 0.001) last.end = Math.max(last.end, p.end);
+    else merged.push(Object.assign({}, p));
   }
+  if (merged.length) delete merged[0].trans;   // nothing comes before the first piece
   return merged;
+}
+
+/*
+ * TRANSITIONS BETWEEN CLIPS — CapCut's square between two clips.
+ *
+ * Each is one of ffmpeg's xfade transitions; the sound crosses over with
+ * acrossfade for the same length. A transition OVERLAPS the end of one clip with
+ * the start of the next, so the finished video is shorter by its length — the
+ * studio re-times text, captions and music the same way (srcToOut, veditor.js).
+ */
+const TRANSITIONS = {
+  fade: 'fade', dissolve: 'dissolve', fadeblack: 'fadeblack', fadewhite: 'fadewhite',
+  slideleft: 'slideleft', slideright: 'slideright', slideup: 'slideup', slidedown: 'slidedown',
+  wipeleft: 'wipeleft', wiperight: 'wiperight', zoomin: 'zoomin', circleopen: 'circleopen',
+  hblur: 'hblur', pixelize: 'pixelize', smoothleft: 'smoothleft', radial: 'radial',
+};
+function transitionOf(t) {
+  if (!t || !TRANSITIONS[t.type]) return null;
+  const dur = Math.max(0.1, Math.min(3, Number(t.dur) || 0.5));
+  return { type: t.type, dur };
 }
 
 /**
@@ -1216,7 +1239,7 @@ function normalizePieces(pieces, durationSec) {
  * `chain` ends in labels `[cutv]` (+ `[cuta]` when the source has audio) that the
  * caller feeds into its own scale/crop.
  */
-function cutPlan(pieces, { durationSec, hasAudio } = {}) {
+function cutPlan(pieces, { durationSec, hasAudio, fps: fpsIn } = {}) {
   const ps = normalizePieces(pieces, durationSec);
   if (!ps.length) return null;
   const base = ps[0].start;
@@ -1232,9 +1255,45 @@ function cutPlan(pieces, { durationSec, hasAudio } = {}) {
     chain += `[0:v]trim=start=${s}:end=${e},setpts=PTS-STARTPTS[cv${i}];`;
     if (hasAudio) chain += `[0:a]atrim=start=${s}:end=${e},asetpts=PTS-STARTPTS[ca${i}];`;
   });
-  chain += ps.map((p, i) => (hasAudio ? `[cv${i}][ca${i}]` : `[cv${i}]`)).join('')
-        + `concat=n=${ps.length}:v=1:a=${hasAudio ? 1 : 0}[cutv]` + (hasAudio ? '[cuta]' : '');
-  return { inputArgs, chain, v: 'cutv', a: hasAudio ? 'cuta' : null, dur, span, base, pieces: ps };
+  if (!ps.some((p) => p.trans)) {
+    chain += ps.map((p, i) => (hasAudio ? `[cv${i}][ca${i}]` : `[cv${i}]`)).join('')
+          + `concat=n=${ps.length}:v=1:a=${hasAudio ? 1 : 0}[cutv]` + (hasAudio ? '[cuta]' : '');
+    return { inputArgs, chain, v: 'cutv', a: hasAudio ? 'cuta' : null, dur, span, base, pieces: ps };
+  }
+  /*
+   * With transitions the pieces are joined one at a time, left to right: a join
+   * that has one is an xfade (+ acrossfade), a join that does not is a plain
+   * concat of the two. xfade wants both sides on one frame clock, so each piece
+   * is put on the same constant rate first (a phone's variable-rate recording
+   * would otherwise misplace the crossover).
+   */
+  const fps = Math.max(1, Math.round(Number(fpsIn) || 30));
+  chain = '';
+  ps.forEach((p, i) => {
+    const s = (p.start - base).toFixed(3), e = (p.end - base).toFixed(3);
+    chain += `[0:v]trim=start=${s}:end=${e},setpts=PTS-STARTPTS,fps=${fps},settb=AVTB,format=yuv420p[cv${i}];`;
+    if (hasAudio) chain += `[0:a]atrim=start=${s}:end=${e},asetpts=PTS-STARTPTS,aresample=48000[ca${i}];`;
+  });
+  let v = 'cv0', a = hasAudio ? 'ca0' : null, outDur = ps[0].end - ps[0].start;
+  for (let i = 1; i < ps.length; i++) {
+    const len = ps[i].end - ps[i].start;
+    const t = ps[i].trans;
+    const nv = `jv${i}`, na = `ja${i}`;
+    if (t) {
+      // never longer than half of either side: a crossover needs both clips
+      const d = Math.max(0.05, Math.min(t.dur, outDur / 2, len / 2));
+      const off = Math.max(0, outDur - d);
+      chain += `[${v}][cv${i}]xfade=transition=${TRANSITIONS[t.type]}:duration=${d.toFixed(3)}:offset=${off.toFixed(3)}[${nv}];`;
+      if (hasAudio) chain += `[${a}][ca${i}]acrossfade=d=${d.toFixed(3)}:c1=tri:c2=tri[${na}];`;
+      outDur = outDur + len - d;
+    } else {
+      chain += hasAudio ? `[${v}][${a}][cv${i}][ca${i}]concat=n=2:v=1:a=1[${nv}][${na}];` : `[${v}][cv${i}]concat=n=2:v=1:a=0[${nv}];`;
+      outDur += len;
+    }
+    v = nv; if (hasAudio) a = na;
+  }
+  chain += `[${v}]null[cutv]` + (hasAudio ? `;[${a}]anull[cuta]` : '');
+  return { inputArgs, chain, v: 'cutv', a: hasAudio ? 'cuta' : null, dur: outDur, span, base, pieces: ps };
 }
 
 /**
@@ -2644,7 +2703,7 @@ const INFO_SHAPE = require('crypto').createHash('sha1').update(probeInfo.toStrin
 
 module.exports = {
   PRESETS, QUALITY, DEFAULT_QUALITY, qualityDef, presetSize, sourceSize, upscaleFactor, outputFps,
-  setExportPrefs, getExportPrefs, RATE_CRF, FPS_CHOICES,
+  setExportPrefs, getExportPrefs, RATE_CRF, FPS_CHOICES, TRANSITIONS, transitionOf,
   getInfo, INFO_SHAPE, trim, exportForPlatform, thumbnail,
   extractAudio, autoTrimSilence, merge, joinPieces, normalizePieces, addCaptions, exportShort, filmstrip, makeProxy, needsProxy, applyEdits,
   extractFrames, detectSceneCuts, exportShortReframed, exportShortFramed, attachThumbnail, waveform, stabilize, reverseClip, freezeFrame, hms, cutPlan,

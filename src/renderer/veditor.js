@@ -528,6 +528,15 @@
    * Returns null when t was removed, so callers can drop what fell in a pause.
    */
   function srcToOut(s, t) {
+    const v = srcToOutRaw(s, t);
+    if (v == null || !s.xfades) return v;
+    // a transition overlaps the clips either side of it, so everything after a
+    // join happens that much EARLIER in the export (see editedSpan)
+    let o = v;
+    for (const x of s.xfades) if (t >= x.at) o -= x.d;
+    return Math.max(0, o);
+  }
+  function srcToOutRaw(s, t) {
     if (t < s.start || t > s.end) return null;
     let out = 0, cur = s.start;
     for (const c of cutsOf(s)) {
@@ -539,6 +548,23 @@
     }
     return out + (t - cur);
   }
+  /**
+   * Where a moment of the timeline lands in the export, for something that has
+   * to appear even if it starts or ends inside a removed stretch (added text):
+   * a start inside one moves to where the footage resumes, an end to where it
+   * stopped. Without cuts or transitions this is exactly t − s.start, as it
+   * always was.
+   */
+  function outTime(s, t, edge) {
+    const tt = Math.max(s.start, Math.min(s.end, t));
+    const v = srcToOut(s, tt);
+    if (v != null) return v;
+    const c = cutsOf(s).find((x) => tt >= x.start && tt < x.end);
+    if (!c) return Math.max(0, tt - s.start);
+    return srcToOut(s, edge === 'end' ? Math.max(s.start, c.start - 0.001) : Math.min(s.end, c.end)) || 0;
+  }
+  /** Does this export run on a different clock from its source range? */
+  const reTimed = (s) => hasCuts(s) || !!(s && s.xfades && s.xfades.length);
   /** Any main-lane clip with pauses removed? (drives the preview skip.) */
   const hasCuts = (s) => cutsOf(s).length > 0;
 
@@ -628,7 +654,7 @@
       const d = ve._renderDepth; ve._renderDepth = null;
       if (d >= RENDER_DEPTH.full) renderSegments();
       else if (d >= RENDER_DEPTH.lanes) renderLanes();
-      else renderSegBlocks();
+      else { renderSegBlocks(); renderJoins(); }
     });
   }
   const renderLanesSoon = () => renderSoon('lanes');
@@ -644,7 +670,7 @@
     const d = ve._renderDepth; ve._renderDepth = null;
     if (d >= RENDER_DEPTH.full) renderSegments();
     else if (d >= RENDER_DEPTH.lanes) renderLanes();
-    else renderSegBlocks();
+    else { renderSegBlocks(); renderJoins(); }
   }
 
   /**
@@ -662,6 +688,7 @@
     // Zoom and pan only move the clips — patch them in place when nothing about
     // them has actually changed (see rescaleSegBlocks).
     if (!rescaleSegBlocks()) renderSegBlocks();
+    renderJoins();
     renderTextTrack();
     renderCapTrack();
     renderAudioSegments();
@@ -1157,6 +1184,7 @@
       if (x < sc.scrollLeft + 20 || x > sc.scrollLeft + sc.clientWidth - 60) setScrollLeft(sc, Math.max(0, x - 80));
     }
     updateGapMask(t);
+    updateTransitionPreview(t);
     updateCapOverlay(t);
     updateMediaLayer(t);   // added pictures / second videos appear and go on their own windows
     renderTextOverlays();
@@ -4152,10 +4180,13 @@
     for (const o of ovs) {
       const body = `<div style="${page}">${textOverlayHtml(o, g, mode, outW, outH)}</div>`;
       const png = await window.rasterizeFlyer(css, body, outW, outH, { transparent: true });
+      // through srcToOut, so text after a closed pause, a deleted stretch or a
+      // transition still lands on the words it was placed against
+      const start = outTime(s, o.start, 'start');
       out.push({
         png,
-        start: Math.max(0, o.start - s.start),
-        end: Math.min(s.end - s.start, Math.max(0.1, o.end - s.start)),
+        start: Math.max(0, start),
+        end: Math.max(start + 0.1, Math.min(outTime(s, s.end, 'end'), outTime(s, o.end, 'end'))),
       });
     }
     return out;
@@ -7103,16 +7134,238 @@
    */
   /** The kept source ranges of the edited timeline, in order. */
   function editedPieces() {
-    return ve.segments
-      .filter((s) => (s.lane || 0) === 0 && !s.ai)
-      .sort((a, b) => a.start - b.start)
-      .flatMap((s) => keptPieces(s));
+    const main = mainClips();
+    return main.flatMap((s, i) => keptPieces(s).map((p, j) => {
+      const q = { start: p.start, end: p.end };
+      // a transition belongs to the join INTO this clip, so it rides on the
+      // clip's first piece (the first clip has nothing before it)
+      if (i > 0 && j === 0 && s.trans && s.trans.type) q.trans = { type: s.trans.type, dur: s.trans.dur };
+      return q;
+    }));
   }
+  /** The main-lane clips the edited video is made of, in order. */
+  function mainClips() {
+    return ve.segments.filter((s) => (s.lane || 0) === 0 && !s.ai).sort((a, b) => a.start - b.start);
+  }
+  /*
+   * How long each transition really is once joined — the same clamp the export
+   * makes (cutPlan, video.js): never more than half of either side.
+   */
+  function transitionOverlaps(pieces) {
+    const out = [];
+    let acc = 0;
+    pieces.forEach((p, i) => {
+      const len = p.end - p.start;
+      if (i === 0) { acc = len; return; }
+      if (p.trans) {
+        const d = Math.max(0.05, Math.min(Number(p.trans.dur) || 0.5, acc / 2, len / 2));
+        out.push({ at: p.start, d });
+        acc += len - d;
+      } else acc += len;
+    });
+    return out;
+  }
+  /* ======================= TRANSITIONS BETWEEN CLIPS =======================
+   *
+   * CapCut's white square between two clips on the main track: tap it, pick
+   * how one clip becomes the next. Stored on the LATER clip (s.trans), so it
+   * moves, splits and undoes with that clip; rendered by the export with
+   * ffmpeg's xfade (cutPlan, video.js); and the export's clock — text,
+   * captions — follows it through srcToOut.
+   */
+  const TRANSITIONS = [
+    { id: '', name: 'None' },
+    { id: 'fade', name: 'Dissolve' },
+    { id: 'fadeblack', name: 'Black fade' },
+    { id: 'fadewhite', name: 'White flash' },
+    { id: 'slideleft', name: 'Slide left' },
+    { id: 'slideright', name: 'Slide right' },
+    { id: 'slideup', name: 'Slide up' },
+    { id: 'slidedown', name: 'Slide down' },
+    { id: 'wipeleft', name: 'Wipe' },
+    { id: 'zoomin', name: 'Pull in' },
+    { id: 'circleopen', name: 'Circle' },
+    { id: 'radial', name: 'Clock' },
+    { id: 'hblur', name: 'Blur' },
+    { id: 'pixelize', name: 'Pixelate' },
+    { id: 'smoothleft', name: 'Smooth' },
+    { id: 'dissolve', name: 'Grain' },
+  ];
+  const TRANSITION_NAME = Object.fromEntries(TRANSITIONS.map((t) => [t.id, t.name]));
+  const DEFAULT_TRANS_DUR = 0.5;
+
+  /** Each join on the main track: the clip before it and the clip after it. */
+  function mainJoins() {
+    const m = mainClips();
+    const out = [];
+    for (let i = 1; i < m.length; i++) out.push({ prev: m[i - 1], seg: m[i] });
+    return out;
+  }
+
+  /** The squares, on their own layer over the main track. */
+  function renderJoins() {
+    const track = ve.refs.track;
+    if (!track) return;
+    let layer = track.querySelector('.ve-joins');
+    if (!layer) {
+      layer = document.createElement('div');
+      layer.className = 've-joins';
+      track.appendChild(layer);
+      // the track starts drawing a new clip on mousedown — not from a square
+      layer.addEventListener('mousedown', (e) => { if (e.target.closest('.ve-join')) e.stopPropagation(); });
+      layer.addEventListener('click', (e) => {
+        const b = e.target.closest('.ve-join');
+        if (b) { e.stopPropagation(); openTransitionPicker(b.dataset.join); }
+      });
+    }
+    if (!ve.video) { layer.innerHTML = ''; return; }
+    const top = laneTop(0) + LANE.mainH / 2;
+    layer.innerHTML = mainJoins().map(({ seg }) => {
+      const t = seg.trans && seg.trans.type ? seg.trans : null;
+      const tip = t ? `${TRANSITION_NAME[t.type] || 'Transition'} (${(+t.dur).toFixed(1)}s) — tap to change` : 'Add a transition between these two clips';
+      return `<button type="button" class="ve-join${t ? ' on' : ''}" data-join="${seg.id}" style="left:${seg.start * ve.pxPerSec}px;top:${top}px" title="${tip}" aria-label="${tip}">${t ? '<span class="ve-join-ic on"></span>' : '<span class="ve-join-ic"></span>'}</button>`;
+    }).join('');
+  }
+
+  let transFor = null;   // the clip whose join the picker is editing
+  function transModal() {
+    let m = document.getElementById('veTransModal');
+    if (m) return m;
+    m = document.createElement('div');
+    m.id = 'veTransModal';
+    m.className = 'cap-modal hidden';
+    m.innerHTML = `
+      <div class="cap-box ve-trans-box">
+        <div class="cap-head"><strong>Transition</strong><button type="button" class="ghost-btn small" data-tr-close>✕</button></div>
+        <div class="ve-trans-grid">${TRANSITIONS.map((t) => `<button type="button" class="ve-trans-tile" data-tr="${t.id}"><span class="ve-trans-demo tr-${t.id || 'none'}"><i></i><b></b></span><span class="ve-trans-name">${t.name}</span></button>`).join('')}</div>
+        <label class="ve-trans-dur">Duration <input type="range" min="0.2" max="2" step="0.1" value="${DEFAULT_TRANS_DUR}" data-tr-dur> <span data-tr-durv>${DEFAULT_TRANS_DUR.toFixed(1)}s</span></label>
+        <div class="ve-trans-foot">
+          <button type="button" class="ghost-btn" data-tr-all>Apply to all joins</button>
+          <button type="button" class="primary-btn" data-tr-close>Done</button>
+        </div>
+      </div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click', (e) => {
+      if (e.target === m || e.target.closest('[data-tr-close]')) return closeTransitionPicker();
+      const tile = e.target.closest('[data-tr]');
+      if (tile) return setTransition(transFor, tile.dataset.tr, null);
+      if (e.target.closest('[data-tr-all]')) return applyTransitionToAll();
+    });
+    const range = m.querySelector('[data-tr-dur]');
+    range.addEventListener('input', () => { m.querySelector('[data-tr-durv]').textContent = (+range.value).toFixed(1) + 's'; });
+    range.addEventListener('change', () => {
+      const s = ve.segments.find((x) => x.id === transFor);
+      if (s && s.trans && s.trans.type) setTransition(transFor, s.trans.type, +range.value);
+    });
+    return m;
+  }
+  function openTransitionPicker(segId) {
+    const s = ve.segments.find((x) => x.id === segId);
+    if (!s) return;
+    transFor = segId;
+    const m = transModal();
+    syncTransitionPicker();
+    m.classList.remove('hidden');
+    if (window.MWIcons) window.MWIcons.iconizeTree(m);
+  }
+  function closeTransitionPicker() {
+    const m = document.getElementById('veTransModal');
+    if (m) m.classList.add('hidden');
+    transFor = null;
+  }
+  function syncTransitionPicker() {
+    const m = document.getElementById('veTransModal');
+    const s = ve.segments.find((x) => x.id === transFor);
+    if (!m || !s) return;
+    const cur = (s.trans && s.trans.type) || '';
+    m.querySelectorAll('[data-tr]').forEach((b) => b.classList.toggle('on', b.dataset.tr === cur));
+    const d = s.trans && s.trans.dur ? +s.trans.dur : DEFAULT_TRANS_DUR;
+    m.querySelector('[data-tr-dur]').value = String(d);
+    m.querySelector('[data-tr-durv]').textContent = d.toFixed(1) + 's';
+  }
+  /** Set (or clear, with type '') the transition into this clip. One undo step. */
+  function setTransition(segId, type, durIn) {
+    const s = ve.segments.find((x) => x.id === segId);
+    if (!s) return;
+    const m = document.getElementById('veTransModal');
+    const dur = durIn != null ? durIn : (s.trans && s.trans.dur) || (m ? +m.querySelector('[data-tr-dur]').value : DEFAULT_TRANS_DUR);
+    pushHistory();
+    if (type && TRANSITION_NAME[type]) s.trans = { type, dur: Math.max(0.2, Math.min(2, dur)) };
+    else delete s.trans;
+    syncTransitionPicker();
+    renderSegments();
+    if (type) previewTransitionAt(s);
+  }
+  function applyTransitionToAll() {
+    const src = ve.segments.find((x) => x.id === transFor);
+    const t = src && src.trans && src.trans.type ? src.trans : null;
+    const joins = mainJoins();
+    if (!joins.length) return;
+    pushHistory();
+    for (const { seg } of joins) {
+      if (t) seg.trans = { type: t.type, dur: t.dur }; else delete seg.trans;
+    }
+    renderSegments();
+    window.__toast && window.__toast(t ? `${TRANSITION_NAME[t.type]} on all ${joins.length} join${joins.length === 1 ? '' : 's'}.` : 'Transitions removed from every join.', 'good');
+  }
+  /** Play the moment around a join so the choice can be seen. */
+  function previewTransitionAt(s) {
+    const p = ve.refs.player;
+    if (!p || !s) return;
+    try { p.currentTime = Math.max(0, s.start - 1.2); p.play(); } catch (e) {}
+  }
+
+  /*
+   * The preview plays the recording itself, one picture at a time, so a true
+   * crossover cannot be drawn on it — but the picture is shaped the way the
+   * transition goes as the playhead crosses the join (dimmed for a fade, slid
+   * for a slide, pushed in for a pull-in), so what was chosen is visible
+   * before anything is exported. The export is the real thing.
+   */
+  function updateTransitionPreview(t) {
+    const p = ve.refs.player;
+    if (!p) return;
+    let style = '';
+    for (const { prev, seg } of mainJoins()) {
+      const tr = seg.trans;
+      if (!tr || !tr.type) continue;
+      const half = Math.max(0.1, (+tr.dur || DEFAULT_TRANS_DUR) / 2);
+      // the crossover sits across the join: the last of one clip, the first of the next
+      const inA = t >= prev.end - half && t < prev.end, inB = t >= seg.start && t < seg.start + half;
+      if (!inA && !inB) continue;
+      const k = inA ? 1 - (prev.end - t) / half : 1 - (t - seg.start) / half;   // 0 → 1 at the join
+      const dir = inA ? 1 : -1;
+      switch (tr.type) {
+        case 'fadeblack': style = `filter:brightness(${(1 - k).toFixed(3)})`; break;
+        case 'fadewhite': style = `filter:brightness(${(1 + 3 * k).toFixed(3)})`; break;
+        case 'slideleft': style = `transform:translateX(${(-dir * k * 30).toFixed(1)}%)`; break;
+        case 'slideright': style = `transform:translateX(${(dir * k * 30).toFixed(1)}%)`; break;
+        case 'slideup': style = `transform:translateY(${(-dir * k * 30).toFixed(1)}%)`; break;
+        case 'slidedown': style = `transform:translateY(${(dir * k * 30).toFixed(1)}%)`; break;
+        case 'zoomin': style = `transform:scale(${(1 + 0.35 * k).toFixed(3)})`; break;
+        case 'hblur': style = `filter:blur(${(8 * k).toFixed(1)}px)`; break;
+        case 'pixelize': style = `filter:blur(${(4 * k).toFixed(1)}px) contrast(${(1 + k).toFixed(2)})`; break;
+        default: style = `opacity:${(1 - 0.75 * k).toFixed(3)}`;
+      }
+      break;
+    }
+    if (p.dataset.trStyle !== style) {
+      p.dataset.trStyle = style;
+      p.style.removeProperty('filter'); p.style.removeProperty('transform'); p.style.removeProperty('opacity');
+      if (style) { const [k, v] = style.split(':'); p.style.setProperty(k, v); }
+    }
+  }
+
   function editedSpan() {
     const p = editedPieces();
     if (!p.length) return null;
-    return { start: p[0].start, end: p[p.length - 1].end, pieces: p,
-             kept: p.reduce((a, x) => a + (x.end - x.start), 0) };
+    const xfades = transitionOverlaps(p);
+    // the stretches between the pieces: deleted clips, closed pauses
+    const cuts = [];
+    for (let i = 1; i < p.length; i++) if (p[i].start > p[i - 1].end + 0.001) cuts.push({ start: p[i - 1].end, end: p[i].start });
+    const raw = p.reduce((a, x) => a + (x.end - x.start), 0);
+    return { start: p[0].start, end: p[p.length - 1].end, pieces: p, cuts, xfades,
+             kept: raw - xfades.reduce((a, x) => a + x.d, 0) };
   }
   async function exportEditedVideo() {
     if (!ve.video) return window.__toast && window.__toast('Open a video first.', 'error');
@@ -7121,7 +7374,9 @@
     const jobId = window.__newJobId();
     // A synthetic segment so the text / music / outro steps work exactly as they
     // do for a short. `seed` keeps it out of the clip list if anything renders.
-    const whole = { id: '__edited', start: span.start, end: span.end, label: 'edited', seed: true };
+    // …and the gaps and transitions, so text and captions are re-timed onto the
+    // export's own clock (srcToOut) instead of drifting after each join
+    const whole = { id: '__edited', start: span.start, end: span.end, label: 'edited', seed: true, cuts: span.cuts, xfades: span.xfades };
     // The longest export in the app — a whole service — and therefore the one
     // that most needs to be walkable-away-from.
     const task = startTask(`Saving your edited video (${fmt(span.kept)})`);
@@ -7160,7 +7415,7 @@
         input = await window.__runJob(`📺 Laying ${n === 1 ? 'your overlay' : n + ' overlays'} onto the video…`, jid,
           () => window.api.video.overlayComposite({ base: ve.video.path, baseStart: span.start, baseEnd: span.end, overlays, toTemp: true, jobId: jid }), J(whole, 'overlays'));
         ss = 0; ee = span.end - span.start;
-        if (pieces) pieces = pieces.map((p) => ({ start: p.start - span.start, end: p.end - span.start }));
+        if (pieces) pieces = pieces.map((p) => Object.assign({}, p, { start: p.start - span.start, end: p.end - span.start }));
       }
       const removed = (span.end - span.start) - span.kept;
       const label = removed > 1
@@ -9879,7 +10134,7 @@
       const rel = capLinesIn(s)
         .map((e) => ({ start: Math.max(0, e.start - s.start), end: Math.min(s.end, e.end) - s.start, text: e.text }))
         .filter((e) => e.text && e.text.trim());
-      const timed = hasCuts(s) ? remapCapEventsThroughCuts(s, rel) : rel;
+      const timed = reTimed(s) ? remapCapEventsThroughCuts(s, rel) : rel;
       if (timed.length) {
         return burnCapsInto({
           input: shortPath, events: timed, label: s.label, deleteInput: true,
@@ -9898,7 +10153,7 @@
     // the exported short itself — it already has the pauses taken out, which makes
     // the word timings right by construction (same audio, no mapping to get wrong).
     const model = (F(s) ? F(s).capModel : capModelCfg());
-    const src = hasCuts(s)
+    const src = reTimed(s)
       ? { input: shortPath, model, jobId: j1 }
       : { input: ve.video.path, startSec: s.start, endSec: s.end, model, jobId: j1 };
     const res = await window.__runJob(`🎧 Captioning "${s.label}" (clip only)…`, j1,
@@ -11267,6 +11522,22 @@
       try { syncMusicPreview(); } catch (e) {}
     },
     fit() { if (ve.video) { renderRuler(); renderSegments(); updatePlayhead(); updateCropMask(); } },
+    /**
+     * The phone's Transition tool: the join nearest the playhead (or the one
+     * into the selected clip). Says so when there is no join to put one on.
+     */
+    transitionAtPlayhead() {
+      const joins = mainJoins();
+      if (!joins.length) {
+        window.__toast && window.__toast('Split the video first (Edit → Split) — a transition goes between two clips.', 'error');
+        return false;
+      }
+      const t = ve.refs.player ? (ve.refs.player.currentTime || 0) : 0;
+      const sel = joins.find((j) => j.seg.id === ve.sel);
+      const best = sel || joins.slice().sort((a, b) => Math.abs(a.seg.start - t) - Math.abs(b.seg.start - t))[0];
+      openTransitionPicker(best.seg.id);
+      return true;
+    },
     // test hooks (no real ffmpeg/player needed)
     __test: {
       // The batch pipeline, on its own: "Export all" hands it real tracking, a
@@ -11353,6 +11624,12 @@
       exportAllDisabled() { const b = document.getElementById('veExportAll'); return !b || b.disabled; },
       isSeed(id) { const s = ve.segments.find((x) => x.id === id); return s ? !!s.seed : null; },
       editedSpan() { return editedSpan(); },
+      // where a timeline moment lands in the edited export (cuts and transitions)
+      editedOutTime(t, edge) {
+        const sp = editedSpan(); if (!sp) return null;
+        return outTime({ start: sp.start, end: sp.end, cuts: sp.cuts, xfades: sp.xfades }, t, edge);
+      },
+      setTransition(segId, type, dur) { setTransition(segId, type, dur); },
       exportEditedButton() {
         const b = document.getElementById('veExportEdited');
         return b ? { text: b.textContent, title: b.title, disabled: b.disabled } : null;

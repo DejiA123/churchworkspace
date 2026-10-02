@@ -1042,6 +1042,7 @@ let _hideTimer = null;
     fullscreen: '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/>',
     overlay: '<rect width="12" height="12" x="9" y="9" rx="2"/><path d="M15 9V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h4"/>',
     rotate: '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
+    transition: '<rect width="8" height="14" x="2" y="5" rx="1.5"/><rect width="8" height="14" x="14" y="5" rx="1.5"/><path d="m11 9 2 3-2 3"/>',
     sliders: '<line x1="4" x2="20" y1="7" y2="7"/><line x1="4" x2="20" y1="17" y2="17"/><circle cx="9" cy="7" r="2.4" fill="#fff"/><circle cx="15" cy="17" r="2.4" fill="#fff"/>',
   };
   const fineUri = (body) => 'url("data:image/svg+xml,' + encodeURIComponent(
@@ -1080,6 +1081,7 @@ let _hideTimer = null;
     ],
     edit: [
       { icon: 'scissors', label: 'Split', press: '#veSplit' },
+      { icon: 'transition', label: 'Transition', call: 'transitionAtPlayhead' },
       { icon: 'zap', label: 'Speed', fx: '#fxSpeed' },
       { icon: 'volume', label: 'Volume', fx: '#fxVol' },
       { icon: 'trash', label: 'Delete', press: '#veDelClip' },
@@ -1333,6 +1335,7 @@ let _hideTimer = null;
     function act(t) {
       if (t.row) return showRow(t.row);
       if (t.fx) return openFx(t.fx);
+      if (t.call) { const ed = window.VideoEditor; if (ed && typeof ed[t.call] === 'function') ed[t.call](); return; }
       if (t.sheet) return openSheet(t.sheet, t);
       if (t.press) { const el = $(t.press); if (el && !el.disabled) el.click(); return; }
       if (t.blade) {
