@@ -822,6 +822,8 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
     font-size: 13px; line-height: 1.4;
   }
   body.mw-cloud.mw-sheet .toast { bottom: calc(var(--ph-sheet) + var(--ph-tr) + 30px); }
+  /* a panel is up from the bottom: messages go to the top, off its controls */
+  body.mw-cloud:has(.cap-modal:not(.hidden)) .toast { top: calc(var(--ph-top) + 8px); bottom: auto; }
 
   .cloud-files-box, .cloud-help-box { width: 100%; }
 }

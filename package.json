@@ -195,6 +195,7 @@
     "test:cloud": "node test/cloud-studio.test.js",
     "test:envelope-stream": "node test/envelope-stream.test.js",
     "test:export-dials": "node test/export-dials.test.js",
+    "test:transitions": "node test/transitions.test.js",
     "cloud": "node src/cloud/server.js",
     "build:cloudicons": "node scripts/build-cloud-icons.js",
     "test:cloud-desk": "electron test/cloud-desk.test.js",
