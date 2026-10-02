@@ -222,6 +222,7 @@
       if (!ve._restoring) { ve.sessionId = null; ve.sessionName = null; ve.sessionThumb = null; ve.sessionDirty = false; }
       updateSessionChip();
       const resumeBar = $('#veResume'); if (resumeBar) resumeBar.classList.add('hidden');
+      resumePromptQuiet(false);
 
       window.__hideOverlay && window.__hideOverlay();
       renderRuler(); renderSegments(); updatePlayhead(); updateCropMask();
@@ -6389,6 +6390,15 @@
    * zone with the choice. Ignoring it and opening a fresh video is exactly as
    * easy as it was before.
    */
+  /** A file name as a person would say it: no extension, no camera/upload
+   *  timestamp in front ("20261002134418-Teaching…" → "Teaching…"). */
+  function prettyVideoName(file) {
+    const base = String(file || '').replace(/\.[a-z0-9]{2,5}$/i, '');
+    const tidy = base.replace(/^(?:\d{8,14}|IMG|VID|MVI|DSC|PXL)[-_ ]*(?:\d{6,}[-_ ]*)?/i, '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return tidy || base || 'Your video';
+  }
+  const FILM_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/></svg>';
+
   async function offerResume() {
     if (ve.video || ve._resumeOffered) return;
     ve._resumeOffered = true;
@@ -6399,23 +6409,62 @@
     const shorts = Array.isArray(tl.segments) ? tl.segments.filter((s) => s && s.ai).length : 0;
     const bar = $('#veResume');
     if (!bar) return;
-    bar.innerHTML = `<span class="ve-resume-txt">↩️ <b>Carry on where you left off?</b>
-        ${escape2(saved.video.path.split(/[\\/]/).pop())}
-        <span class="muted small">· ${shorts} short${shorts === 1 ? '' : 's'} · ${escape2(whenWords(saved.savedAt))}</span></span>
-      <span class="ve-resume-btns">
-        <button id="veResumeYes" class="primary-btn small">Carry on</button>
-        <button id="veResumeNo" class="ghost-btn small">Start fresh</button>
-      </span>`;
+    const file = saved.video.path.split(/[\\/]/).pop();
+    const durSec = Number(saved.video.durationSec) || 0;
+    const meta = [shorts ? `${shorts} short${shorts === 1 ? '' : 's'}` : null, `Edited ${whenWords(saved.savedAt)}`].filter(Boolean).join(' · ');
+    bar.innerHTML = `
+      <div class="ve-resume-card">
+        <div class="ve-resume-thumb">${FILM_SVG}<img alt="" hidden>${durSec ? `<span class="ve-resume-dur">${clockText(durSec)}</span>` : ''}</div>
+        <div class="ve-resume-info">
+          <div class="ve-resume-kicker">Continue editing</div>
+          <div class="ve-resume-name" title="${attr2(file)}">${escape2(prettyVideoName(file))}</div>
+          <div class="ve-resume-meta">${escape2(meta)}</div>
+        </div>
+      </div>
+      <div class="ve-resume-btns">
+        <button id="veResumeNo" class="ghost-btn" type="button">Start fresh</button>
+        <button id="veResumeYes" class="primary-btn" type="button">Continue</button>
+      </div>`;
     bar.classList.remove('hidden');
+    resumePromptQuiet(true);
+    const done = () => { bar.classList.add('hidden'); resumePromptQuiet(false); };
+    // a real frame of the video, when the studio can make one
+    (async () => {
+      try {
+        const at = durSec ? Math.min(30, Math.max(1, durSec * 0.1)) : 2;
+        const png = await window.api.video.thumbnail(saved.video.path, at);
+        const img = bar.querySelector('.ve-resume-thumb img');
+        if (!png || !img) return;
+        img.onload = () => { img.hidden = false; };
+        img.src = fileUrl(png);
+      } catch (e) { /* the film icon stays */ }
+    })();
     $('#veResumeYes').addEventListener('click', async () => {
-      bar.classList.add('hidden');
+      done();
       await applySession(saved);
-      window.__toast && window.__toast('↩️ Everything is back — clips, captions and all. Give it a name with 💾 Save session.', 'good', 7000);
+      window.__toast && window.__toast('Everything is back — clips, captions and all. Give it a name with Save.', 'good', 6000);
     });
     $('#veResumeNo').addEventListener('click', () => {
-      bar.classList.add('hidden');
+      done();
       window.api.sessions.autosaveClear().catch(() => {});
     });
+  }
+  /** While the card is up it IS the main thing on screen: the empty-studio
+   *  prompt below it steps back to a quiet "Open another video". */
+  function resumePromptQuiet(on) {
+    const nv = $('#veNoVid'), open2 = $('#veOpen2');
+    if (nv) nv.classList.toggle('with-resume', !!on);
+    if (open2) {
+      open2.textContent = on ? 'Open another video' : 'Browse…';
+      open2.classList.toggle('ghost-btn', !!on);
+      open2.classList.toggle('primary-btn', !on);
+    }
+  }
+  /** A running time the way a video app shows it: 4:05, 55:12, 1:02:13. */
+  function clockText(sec) {
+    const t = Math.max(0, Math.round(sec || 0));
+    const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), x = t % 60;
+    return h ? `${h}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}` : `${m}:${String(x).padStart(2, '0')}`;
   }
 
   /* =========================== WHO TO FOLLOW ==============================
