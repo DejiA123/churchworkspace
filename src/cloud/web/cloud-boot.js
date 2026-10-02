@@ -41,6 +41,13 @@
  *     leaves scrolling alone everywhere else.
  */
 
+// The overlay's pending hide. Top level, NOT inside the closure below: tasks.js
+// schedules it (`_hideTimer = setTimeout(hideOverlay, 250)`) when a job ends, as
+// it does against renderer.js's top-level `let` on the desktop. Scripts share the
+// page's top-level scope, but not a closure's — declared inside, the assignment
+// threw "_hideTimer is not defined" at the end of every successful job.
+let _hideTimer = null;
+
 (function () {
   /* ------------------------------------------------------------ constants */
 
@@ -338,7 +345,6 @@
   let _jobCounter = 0;
   const newJobId = () => 'job_' + (++_jobCounter) + '_' + Date.now();
 
-  let _hideTimer = null;
   function showOverlay(msg) {
     clearTimeout(_hideTimer); _hideTimer = null;
     const m = $('#overlayMsg'); if (m) m.textContent = msg || 'Working…';
