@@ -34,6 +34,13 @@ services:
         value: /data/media
       - key: MW_CLOUD_CODE
         sync: false          # set it yourself in the dashboard; never in the repo
+      # A free Groq key (console.groq.com). With it the sermon scan, the
+      # captions and "remove pauses" are heard by Whisper Large in the cloud —
+      # more accurate than any model this server could run, and it takes the
+      # biggest memory user off a small instance entirely. Optional; never in
+      # the repo.
+      - key: GROQ_API_KEY
+        sync: false
     disk:
       name: studio-data
       mountPath: /data

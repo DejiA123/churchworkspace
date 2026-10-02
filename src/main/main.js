@@ -105,6 +105,7 @@ const bgvideos = require('./bgvideos');
 const presenter = require('./presenter');
 const voicelisten = require('./voicelisten');
 const cloudspeech = require('./cloudspeech');
+const machine = require('./machine');
 const pauses = require('./pauses');
 // The other half of "listen to the clip, then write about it" — the hosted
 // model that writes the social copy. See src/main/cloudwrite.js.
@@ -827,7 +828,19 @@ ipcMain.handle('youtube:import', wrap(async (e, { url, title, jobId }) =>
 
 ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLen, maxClips, autoLen, deep, ai, aiModel, asrModel, startSec, endSec, ranges, jobId }) => {
   const ctx = getCtx();
-  const contentAware = deep !== false && captioner.isAvailable();
+  const installedAsr = captioner.models().filter((m) => m.installed).map((m) => m.id);
+  /*
+   * WHERE THE WORDS CAN COME FROM ON THIS MACHINE. A speech model that does not
+   * fit in memory is never started (captioner.fitModel) — on a small server
+   * that was a crash, not a slow scan. So a deep scan needs either a model that
+   * fits or the free cloud ear; with neither, it is the quick scan, and the
+   * result says why.
+   */
+  // (Tiny counts even when it is not installed yet: transcribe fetches it)
+  const localFits = installedAsr.some((id) => machine.fitsWhisper(id)) || machine.fitsWhisper('tiny.en');
+  const cloudCanHear = cloudspeech.fileReady();
+  const wantedDeep = deep !== false && captioner.isAvailable();
+  const contentAware = wantedDeep && (localFits || cloudCanHear);
   // Return SENTENCE-level segments with clip-relative timing so the highlighter can
   // snap each clip to complete-sentence boundaries (perfect human-like start/finish),
   // with FAST greedy decoding (~2x quicker, same keywords/punctuation/timing), and
@@ -846,10 +859,17 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
   // captioner.pickScanModel for why automatic still stops at Small. The cache key
   // carries the model id, so switching models never mixes two sets of words for
   // the same video — it does mean a switch pays for a fresh transcription.
-  const installedAsr = captioner.models().filter((m) => m.installed).map((m) => m.id);
-  const asr = captioner.pickScanModel(installedAsr, asrModel);
-  const cpus = require('os').cpus().length;
-  const concurrency = Math.max(1, Math.min(3, Math.floor(cpus / 4)));
+  let asr = captioner.pickScanModel(installedAsr, asrModel);
+  // …and the one it will really be heard with, so the cache key tells the truth
+  if (!machine.fitsWhisper(asr)) {
+    const rank = (id) => (captioner.MODELS.find((m) => m.id === id) || { rank: -1 }).rank;
+    const fit = installedAsr.filter((id) => machine.fitsWhisper(id)).sort((x, y) => rank(y) - rank(x))[0];
+    asr = fit || 'tiny.en';
+  }
+  // the CPUs and memory this process really has, not the host's (see machine.js)
+  const cpus = machine.cpus();
+  const asrFitsTimes = Math.max(1, Math.floor((machine.memoryMB() - machine.HEADROOM_MB) / machine.whisperNeedMB(asr)));
+  const concurrency = Math.max(1, Math.min(3, Math.floor(cpus / 4), asrFitsTimes));
   const threads = Math.max(2, Math.min(8, Math.floor(cpus / concurrency)));
   // Transcript spans are CACHED on disk per video (path+size+mtime): re-running
   // the analysis — same length, another length, or after a restart — reuses every
@@ -877,8 +897,10 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
    * used up — is heard on this PC instead, and once the allowance has said no,
    * the rest of the scan does not keep asking.
    */
-  const useCloudEar = contentAware && cloudspeech.fileReady()
-    && (asrModel === 'cloud' || (aiModel === 'cloud' && !asrModel));
+  const useCloudEar = contentAware && cloudCanHear
+    && (asrModel === 'cloud' || (aiModel === 'cloud' && !asrModel)
+      // a machine that cannot hold the model it would use: the cloud hears it
+      || !localFits || (!asrModel && !machine.fitsWhisper(asr)));
   const ear = { cloud: 0, pc: 0, why: '', model: '' };
   const cloudCache = useCloudEar ? new TransCache(cacheDir, input, `cloud:${cloudspeech.state().model || 'whisper'}|segment|v1`) : null;
   // …and the word timings from the same answers, for ✂️ Remove pauses (see below)
@@ -929,6 +951,10 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
     onProgress: onProgress(e, jobId),
   });
   if (res && res.meta) {
+    if (wantedDeep && !contentAware) {
+      res.meta.lowMemory = `This server has ${machine.memoryMB()} MB of memory — too little to read the words, so these were found by the sound alone. `
+        + 'Add a free Groq key to the server (GROQ_API_KEY) for the full Deep scan.';
+    }
     res.meta.asrModel = !contentAware ? null : useCloudEar && ear.cloud ? 'cloud:' + (ear.model || 'whisper-large-v3-turbo') : asr;
     res.meta.ear = useCloudEar ? ear : null;
     /*
@@ -1089,6 +1115,9 @@ ipcMain.handle('captions:transcribe', wrap(async (e, { input, startSec, endSec, 
 const CLOUD_CAPTIONS = 'cloud';
 function wantsCloudCaptions(model, fast) {
   if (model === CLOUD_CAPTIONS) return true;
+  // a PC model this machine cannot hold, with the cloud there to hear it
+  // instead (a small server — see machine.js)
+  if (model && !fast && !machine.fitsWhisper(model) && cloudspeech.fileReady()) return true;
   if (fast || model) return false;          // an explicit PC model, or a scan
   return cloudspeech.fileReady();
 }
@@ -1440,10 +1469,19 @@ function cloudWriteCfg() {
   const s = store.get('settings') || {};
   return Object.assign({}, CLOUD_WRITE_DEFAULTS, (s.social || {}).cloud);
 }
+/*
+ * A Groq key given to a SERVER rather than typed into Settings. The Cloud
+ * Studio never opens Settings (it holds the church's keys and tokens, and the
+ * page is allowed nowhere near it), so on Render, Fly or a VPS the key is an
+ * environment variable — set in the host's dashboard, never in the repo. It
+ * fills the same box a pasted key would, and a key saved in Settings wins.
+ */
+const envGroqKey = () => String(process.env.GROQ_API_KEY || process.env.MW_GROQ_KEY || '').trim();
 function loadCloudWrite() {
   const listenCloud = ((store.get('settings') || {}).listen || {}).cloud || {};
   try { cloudwrite.shareKey(listenCloud.provider || 'groq', listenCloud.key || ''); } catch (e) {}
   const c = cloudWriteCfg();
+  if (!c.key && (c.provider || 'groq') === 'groq' && envGroqKey()) c.key = envGroqKey();
   // …and the other way round: a Groq key pasted for the writer is a Groq key
   // the captions can transcribe with (see cloudspeech.shareKey).
   try { cloudspeech.shareKey(c.provider || 'groq', c.key || ''); } catch (e) {}

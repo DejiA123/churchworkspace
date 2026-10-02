@@ -2,6 +2,7 @@
 const fs = require('fs');
 const { spawn } = require('child_process');
 const jobs = require('./jobs');
+const machine = require('./machine');
 
 /**
  * Resolves bundled ffmpeg/ffprobe binaries, handling Electron's asar packing.
@@ -37,7 +38,40 @@ function resolveFfprobe(override) {
  * Spawn ffmpeg with the given args. Parses stderr for progress (time=...)
  * and reports a percentage when totalDurationSec is known.
  */
+/*
+ * AN EXPORT THAT FITS IN A SMALL SERVER.
+ *
+ * Measured on a 9:16 1080p short cut from a 1080p sermon: ffmpeg alone peaked
+ * at 631 MB — more than a whole 512 MB instance — because inside a container
+ * it sees the HOST's cores, starts a decoder thread and an encoder thread per
+ * core, each holding frames, and x264's 'medium' looks 40 frames ahead at full
+ * size. Same export, on a small machine (machine.small()):
+ *
+ *   encoder threads capped                   485 MB
+ *   + decoder on one thread                  440 MB
+ *   + x264 looking 10 frames ahead           240 MB   (same speed)
+ *
+ * The look-ahead is what x264 uses to place its bits, so a short is a little
+ * larger for the same quality, never worse-looking. On a desktop nothing here
+ * applies (machine.ffmpegThreads() is 0 there) and every command runs as written.
+ */
+function capThreads(args) {
+  const n = machine.ffmpegThreads();
+  if (!n || args.includes('-threads')) return args;
+  const enc = args.findIndex((a, i) => (a === '-c:v' || a === '-vcodec') && /^lib(x264|x265|vpx)/.test(String(args[i + 1] || '')));
+  if (enc < 0) return args;
+  const x264 = /^libx264/.test(String(args[enc + 1]));
+  const out = [];
+  // each input decoded on one thread (an input option: it goes before its -i)
+  for (const a of args.slice(0, -1)) { if (a === '-i') out.push('-threads', '1'); out.push(a); }
+  out.push('-threads', String(n));
+  if (x264 && !args.includes('-rc-lookahead') && !args.includes('-x264-params')) out.push('-rc-lookahead', '10');
+  out.push(args[args.length - 1]);
+  return out;
+}
+
 function runFfmpeg(ffmpegPath, args, { onProgress, totalDurationSec, signal, cwd } = {}) {
+  args = capThreads(args);
   return new Promise((resolve, reject) => {
     const proc = jobs.track(spawn(ffmpegPath, args, { windowsHide: true, cwd }));
     let stderr = '';
@@ -100,4 +134,4 @@ function probe(ffprobePath, input) {
   });
 }
 
-module.exports = { resolveFfmpeg, resolveFfprobe, runFfmpeg, runFfmpegCollect, probe };
+module.exports = { resolveFfmpeg, resolveFfprobe, runFfmpeg, runFfmpegCollect, probe, capThreads };

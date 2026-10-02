@@ -6,6 +6,7 @@ const { spawn } = require('child_process');
 const ff = require('./ffmpeg');
 const video = require('./video');
 const jobs = require('./jobs');
+const machine = require('./machine');
 const wordbook = require('./wordbook');
 
 /*
@@ -72,8 +73,12 @@ function whisperPaths() {
  * these is installed and highest-ranked is what captions use.
  */
 const MODELS = [
-  { id: 'tiny.en', file: 'ggml-tiny.en.bin', name: 'Tiny (fastest, roughest)', sizeMB: 78, rank: 0, bundled: true },
-  { id: 'base.en', file: 'ggml-base.en.bin', name: 'Base (ships with the app)', sizeMB: 148, rank: 1, bundled: true },
+  // Bundled with the desktop app; a SERVER image carries no models, so these
+  // two can be fetched as well — Tiny is the one a 512 MB server can hold.
+  { id: 'tiny.en', file: 'ggml-tiny.en.bin', name: 'Tiny (fastest, roughest)', sizeMB: 78, rank: 0, bundled: true,
+    url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin' },
+  { id: 'base.en', file: 'ggml-base.en.bin', name: 'Base (ships with the app)', sizeMB: 148, rank: 1, bundled: true,
+    url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin' },
   { id: 'small.en', file: 'ggml-small.en.bin', name: 'Small — much more accurate', sizeMB: 466, rank: 2,
     url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin' },
   { id: 'medium.en', file: 'ggml-medium.en.bin', name: 'Medium — very accurate, slow', sizeMB: 1533, rank: 3,
@@ -111,6 +116,24 @@ function modelPath(m) {
   for (const p of cands) { try { if (fs.existsSync(p) && fs.statSync(p).size > 1e6) return p; } catch (e) {} }
   return null;
 }
+/*
+ * A MODEL THIS MACHINE CAN HOLD. whisper is the biggest thing the studio
+ * runs: Small needs about 850 MB and Base about 390. On a desktop that is
+ * nothing; on a 512 MB server, starting one gets the whole studio killed for
+ * memory mid-job — the operator saw a 502 and lost the job they were waiting
+ * on. So a model that does not fit steps down to the best installed one that
+ * does, and when none does, the caller gets a sentence saying so instead of a
+ * crash.
+ */
+function fitModel(chosenPath) {
+  const m = MODELS.find((x) => chosenPath && path.basename(chosenPath) === x.file);
+  if (!m || machine.fitsWhisper(m.id)) return { path: chosenPath };
+  const down = MODELS.filter((x) => x.rank < m.rank && machine.fitsWhisper(x.id) && modelPath(x))
+    .sort((x, y) => y.rank - x.rank)[0];
+  if (down) return { path: modelPath(down), steppedFrom: m.id, id: down.id };
+  return { path: null, need: m };
+}
+
 /** Every model, with where it is and whether it's the one captions will use. */
 function models() {
   const best = bestModel();
@@ -609,11 +632,36 @@ function wordsFromTokens(json) {
  */
 async function transcribe(ctx, { input, startSec, endSec, model: modelKind, granularity = 'word', fast, threads: threadsOpt, denoise, onProgress }) {
   const { cli } = whisperPaths();
-  const model = modelFor(modelKind);
-  if (!isAvailable() || !fs.existsSync(model)) {
+  const wanted = modelFor(modelKind);
+  const engineMissing = () => {
     const i = engineInfo();
-    throw new Error([i.reason, i.howTo].filter(Boolean).join(' ') || 'The speech engine/model is missing. Please reinstall the app.');
+    return new Error([i.reason, i.howTo].filter(Boolean).join(' ') || 'The speech engine/model is missing. Please reinstall the app.');
+  };
+  if (!isAvailable()) throw engineMissing();
+  // a model this machine can hold — see fitModel
+  let fit = fs.existsSync(wanted) ? fitModel(wanted) : { path: null, need: MODELS.find((x) => x.id === 'base.en') };
+  /*
+   * SOMETHING ALWAYS FITS. When nothing installed does — a server image has no
+   * models at all, and the one the operator chose can be too big for it — Tiny
+   * is fetched once (78 MB) and used. Rough, but words, not a crash.
+   */
+  const tiny = MODELS.find((x) => x.id === 'tiny.en');
+  if (!fit.path && machine.fitsWhisper(tiny.id) && !modelPath(tiny) && MODELS_DIR) {
+    try {
+      if (onProgress) onProgress(1);
+      await downloadModel(tiny.id, {});
+      fit = { path: modelPath(tiny), id: tiny.id };
+    } catch (e) { /* the message below says what to do */ }
+  } else if (!fit.path && modelPath(tiny) && machine.fitsWhisper(tiny.id)) {
+    fit = { path: modelPath(tiny), id: tiny.id };
   }
+  if (!fit.path && !fit.need) throw engineMissing();
+  if (!fit.path) {
+    throw new Error(`This server has ${machine.memoryMB()} MB of memory, and the ${fit.need.name.replace(/\s*[—(].*$/, '')} speech model needs about `
+      + `${machine.whisperNeedMB(fit.need.id)} MB — starting it would crash the studio. Add a free Groq key to the server as GROQ_API_KEY `
+      + 'so speech is heard in the cloud instead, or download the Tiny model, or give the server more memory.');
+  }
+  const model = fit.path;
   const info = await video.getInfo(ctx, input);
   const stamp = Date.now() + '-' + Math.random().toString(36).slice(2, 7);
   const wav = path.join(os.tmpdir(), `mw-asr-${stamp}.wav`);
@@ -629,7 +677,7 @@ async function transcribe(ctx, { input, startSec, endSec, model: modelKind, gran
   await ff.runFfmpeg(ctx.ffmpeg, [...inArgs, '-vn', '-af', asrAudioFilter({ denoise, floorDb }), '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', '-y', wav],
     { onProgress: (p) => onProgress && onProgress(Math.round(p * 0.1)), totalDurationSec: total });
 
-  const threads = String(Math.max(2, Math.min(8, threadsOpt || os.cpus().length)));
+  const threads = String(Math.max(2, Math.min(8, threadsOpt || machine.cpus())));
   // fast: greedy decode, no temperature-fallback retries — ~2x faster, keeps the
   // keywords/punctuation/timing that highlight SCANNING needs (measured on the
   // real sermon: 45s -> 21.5s per 90s window, same sentences). Captions that get
@@ -1236,5 +1284,5 @@ module.exports = {
   CAP_TRANSITIONS, capTransition, capEnterTag, capTypewriterLines,
   assSizeFactor, assSizeFor, faceMetrics,
   cliCandidates, findCli, ensureExecutable, dtwFor,
-  MODELS, models, bestModel, modelFor, pickScanModel, SCAN_AUTO, downloadModel, removeModel, asrAudioFilter, wordsFromTokens,
+  MODELS, models, bestModel, modelFor, fitModel, pickScanModel, SCAN_AUTO, downloadModel, removeModel, asrAudioFilter, wordsFromTokens,
 };
