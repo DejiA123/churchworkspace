@@ -208,7 +208,8 @@
     "test:shortsspeed": "electron test/shorts-speed.test.js",
     "bundle:cloud": "node scripts/make-cloud-bundle.js",
     "test:text-anim": "node test/text-anim.test.js",
-    "test:keyframes-chroma": "node test/keyframes-chroma.test.js"
+    "test:keyframes-chroma": "node test/keyframes-chroma.test.js",
+    "test:open-memory": "node test/open-memory.test.js"
   },
   "dependencies": {
     "ffmpeg-static": "^5.2.0",

@@ -59,12 +59,17 @@ function capThreads(args) {
   const n = machine.ffmpegThreads();
   if (!n || args.includes('-threads')) return args;
   const enc = args.findIndex((a, i) => (a === '-c:v' || a === '-vcodec') && /^lib(x264|x265|vpx)/.test(String(args[i + 1] || '')));
-  if (enc < 0) return args;
-  const x264 = /^libx264/.test(String(args[enc + 1]));
+  const x264 = enc >= 0 && /^libx264/.test(String(args[enc + 1]));
   const out = [];
-  // each input decoded on one thread (an input option: it goes before its -i)
+  /*
+   * Each input decoded on one thread (an input option: it goes before its -i).
+   * This is for EVERY command, not only the ones that encode: a decoder's
+   * frame pool grows with its threads, and the decode-only jobs — filmstrip
+   * frames, thumbnails, the waveform — are what run the moment a video opens.
+   * A 4K HEVC frame grab measured 284 MB on default threads and 168 MB on one.
+   */
   for (const a of args.slice(0, -1)) { if (a === '-i') out.push('-threads', '1'); out.push(a); }
-  out.push('-threads', String(n));
+  if (enc >= 0) out.push('-threads', String(n));
   if (x264 && !args.includes('-rc-lookahead') && !args.includes('-x264-params')) out.push('-rc-lookahead', '10');
   out.push(args[args.length - 1]);
   return out;
