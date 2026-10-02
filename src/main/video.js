@@ -1231,13 +1231,30 @@ async function joinPieces(ctx, { input, pieces, output, onProgress }) {
  * for the preview player. The original full-quality file is still used for the
  * timeline, AI analysis and final export.
  */
+/*
+ * A PREVIEW, not an export. This used to go through encodeWithFallback — the
+ * export path, with its voice-isolation pass, a GPU attempt and x264 'medium' —
+ * which on a server with no GPU and half a CPU turned an hour of iPhone HEVC
+ * into hours of encoding, long enough to run out of memory or out of the host's
+ * request time, and the phone was left with "Preview unavailable" and nothing
+ * to play. Nobody watches this file but the operator scrubbing a timeline: it
+ * is encoded ultrafast at 720p, with a keyframe every second so a phone can
+ * seek in it, and the original is still what every export is cut from.
+ */
 async function makeProxy(ctx, { input, output, onProgress }) {
   const info = await getInfo(ctx, input);
   const long = Math.max(info.width, info.height) || 1280;
   const f = long > 1280 ? 1280 / long : 1;
   const w = Math.max(2, Math.round(info.width * f / 2) * 2);
   const h = Math.max(2, Math.round(info.height * f / 2) * 2);
-  await encodeWithFallback(ctx, { inputArgs: ['-i', input], vfCore: `scale=${w}:${h}`, dur: info.durationSec, hasAudio: info.hasAudio, output, onProgress });
+  const fps = Number(info.fps) > 0 ? Math.min(30, Number(info.fps)) : 30;
+  const args = ['-i', input, '-map', '0:v:0', '-map', '0:a:0?',
+    '-vf', `scale=${w}:${h},format=yuv420p`, '-r', String(fps),
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'fastdecode', '-crf', '26',
+    '-g', String(Math.round(fps)), '-keyint_min', String(Math.round(fps)),
+    ...(info.hasAudio ? ['-c:a', 'aac', '-b:a', '128k', '-ac', '2'] : ['-an']),
+    '-movflags', '+faststart', '-y', output];
+  await ff.runFfmpeg(ctx.ffmpeg, args, { onProgress, totalDurationSec: info.durationSec });
   return output;
 }
 
