@@ -33,6 +33,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const RENDERER_DIR = path.join(__dirname, '..', 'renderer');
 const INDEX = path.join(RENDERER_DIR, 'index.html');
@@ -120,6 +121,26 @@ function bodyOf(html) {
 /* ---------------------------------------------------------------- the page */
 
 /**
+ * The cache key every shell URL carries (`?v=…`), and so the service worker's
+ * cache name. The version ALONE is not enough: a fix shipped without a version
+ * bump kept the same key, and phones went on running last build's
+ * cloud-boot.js out of their cache with the fix sitting on the server. So the
+ * key is the version plus a hash of the files the shell is made of — change a
+ * byte in any of them and every phone fetches the new one.
+ */
+let _assetKey = null;
+function assetKey(version) {
+  if (_assetKey && _assetKey.version === version) return _assetKey.key;
+  const h = crypto.createHash('sha1');
+  const files = [INDEX, ...[...RENDERER_SCRIPTS, ...RENDERER_STYLES].map((f) => path.join(RENDERER_DIR, f)),
+    ...['cloud-boot.js', 'cloud.css', 'sw.js'].map((f) => path.join(__dirname, 'web', f))];
+  for (const f of files) { try { h.update(fs.readFileSync(f)); } catch (e) {} }
+  const key = version + '-' + h.digest('hex').slice(0, 10);
+  _assetKey = { version, key };
+  return key;
+}
+
+/**
  * Build the cloud page.
  *
  * @param {object} opts
@@ -130,6 +151,7 @@ function bodyOf(html) {
  */
 function build(opts = {}) {
   const version = opts.version || '0';
+  const key = assetKey(version);
   const raw = fs.readFileSync(INDEX, 'utf-8');
 
   let body = bodyOf(raw);
@@ -142,8 +164,8 @@ function build(opts = {}) {
     `<section$1class="view active"$2id="${KEEP_VIEW}"`,
   );
 
-  const styles = RENDERER_STYLES.map((f) => `  <link rel="stylesheet" href="/r/${f}?v=${version}" />`).join('\n');
-  const scripts = RENDERER_SCRIPTS.map((f) => `  <script src="/r/${f}?v=${version}"></script>`).join('\n');
+  const styles = RENDERER_STYLES.map((f) => `  <link rel="stylesheet" href="/r/${f}?v=${key}" />`).join('\n');
+  const scripts = RENDERER_SCRIPTS.map((f) => `  <script src="/r/${f}?v=${key}"></script>`).join('\n');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -163,7 +185,7 @@ function build(opts = {}) {
   <link rel="icon" href="/icons/icon-192.png" />
   <title>Video Studio — Church Work Space</title>
 ${styles}
-  <link rel="stylesheet" href="/cloud.css?v=${version}" />
+  <link rel="stylesheet" href="/cloud.css?v=${key}" />
 </head>
 <body class="mw-cloud">
   <!-- The cloud bar replaces the desktop sidebar: who you are connected to,
@@ -249,7 +271,7 @@ ${body}
        script, and weakening it for one bootstrap line would weaken it for every
        injection this page will ever meet. cloud-boot.js starts itself on
        DOMContentLoaded, by which time everything below has loaded. -->
-  <script src="/cloud-boot.js?v=${version}"></script>
+  <script src="/cloud-boot.js?v=${key}"></script>
 ${scripts}
 </body>
 </html>

@@ -167,6 +167,15 @@ let _hideTimer = null;
     setLink(true);
     if (res.status === 401) { signedOut(); throw new Error('Signed out.'); }
     const ct = res.headers.get('content-type') || '';
+    // Anything but our own answer is the HOST talking, not the studio: a 502
+    // page because the server restarted (out of memory, most often) or is
+    // still deploying. Parsing it as JSON gave "<!DOCTYPE … is not valid JSON"
+    // on Chrome and "The string did not match the expected pattern" on Safari.
+    if (ct.indexOf('x-mw-rpc') < 0 && ct.indexOf('json') < 0) {
+      throw new Error('The studio server did not answer (HTTP ' + res.status + '). It may have restarted — '
+        + 'often because it ran out of memory on a long video. Wait a minute and try again; if it keeps '
+        + 'happening, give the server more memory.');
+    }
     const env = ct.indexOf('x-mw-rpc') >= 0 ? unpack(await res.arrayBuffer()) : await res.json();
     if (env && env.ok) return env.data;
     const err = new Error((env && env.error) || ('Unknown error in ' + channel));
