@@ -201,6 +201,31 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
 .cloud-touchbar button:active { background: var(--bg-3); }
 .cloud-ct-play { color: var(--primary) !important; font-size: 19px !important; }
 
+/* ------------------------------------------------------------ the purple */
+
+/*
+ * The Cloud Studio is purple — the ✝ mark's colour — where the desk is blue.
+ * The desk's accents are variables, so they are re-pointed here rather than
+ * restyled one by one: every primary button, slider, tick box, selected tab
+ * and highlight follows. The desktop app (which never loads this file) keeps
+ * its own blue.
+ */
+body.mw-cloud { --primary: #8b5cf6; --primary-2: #a78bfa; }
+body.mw-cloud #view-video.ve-pro, body.mw-cloud #capModal {
+  --acc: #8b5cf6; --acc2: #a78bfa;
+  --acc-soft: rgba(139, 92, 246, .16); --acc-line: rgba(167, 139, 250, .6);
+}
+body.mw-cloud #view-video.ve-pro .primary-btn, body.mw-cloud #capModal .primary-btn, body.mw-cloud #capModal .cap-generate,
+body.mw-cloud .cloud-gate-go, body.mw-cloud .cloud-files-bar .primary-btn {
+  background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%); border-color: transparent; color: #fff;
+  box-shadow: 0 1px 0 rgba(255,255,255,.18) inset, 0 6px 18px rgba(124, 58, 237, .32);
+}
+body.mw-cloud #view-video.ve-pro .primary-btn:hover:not(:disabled), body.mw-cloud #capModal .primary-btn:hover { filter: brightness(1.08); }
+body.mw-cloud #view-video.ve-pro .ve-play { box-shadow: 0 6px 18px rgba(124, 58, 237, .35); }
+body.mw-cloud input[type="range"], body.mw-cloud input[type="checkbox"], body.mw-cloud input[type="radio"] { accent-color: #8b5cf6; }
+body.mw-cloud .cloud-gate { background: radial-gradient(900px 500px at 50% -10%, rgba(139, 92, 246, .22), transparent 60%), var(--bg); }
+body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rgba(139, 92, 246, .25); }
+
 /* ===================================================================== */
 /*  THE PHONE — an editor laid out like the apps people already know     */
 /* ===================================================================== */
@@ -236,9 +261,14 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
     --ph-line: #2a2b32;
     --ph-text: #f5f6f8;
     --ph-muted: #9b9ea8;
-    --ph-accent: #22d3ee;
-    --ph-accent-ink: #00262c;
-    --ph-ai: linear-gradient(135deg, #7c5cff, #22d3ee);
+    /* the studio's purple: a fill for buttons and badges, a lighter one for
+       icons and text lit on black, and the AI gradient */
+    --ph-accent: #8b5cf6;
+    --ph-accent-fill: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%);
+    --ph-accent-glow: 0 4px 18px rgba(139, 92, 246, .45);
+    --ph-accent-text: #b79cff;
+    --ph-accent-ink: #fff;
+    --ph-ai: linear-gradient(135deg, #e879f9 0%, #8b5cf6 55%, #6366f1 100%);
     --ph-top: calc(52px + env(safe-area-inset-top));
     --ph-tr: 42px;
     --ph-tl: clamp(140px, 26dvh, 232px);
@@ -327,8 +357,9 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
   }
   body.mw-cloud .cloud-export {
     display: block;
-    height: 34px; padding: 0 16px;
-    background: var(--ph-accent); color: var(--ph-accent-ink);
+    height: 34px; padding: 0 17px;
+    background: var(--ph-accent-fill); color: var(--ph-accent-ink);
+    box-shadow: var(--ph-accent-glow), inset 0 1px 0 rgba(255,255,255,.22);
     border: 0; border-radius: 10px;
     font-size: 14px; font-weight: 800; letter-spacing: .2px;
     cursor: pointer;
@@ -564,7 +595,7 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
   .cloud-tool .mi { width: 23px; height: 23px; margin: 0; }
   .cloud-tool:active { background: var(--ph-panel-2); }
   .cloud-tool:disabled { color: #4a4c55; }
-  .cloud-tool.on { color: var(--ph-accent); }
+  .cloud-tool.on { color: var(--ph-accent-text); }
   .cloud-tool.cloud-tool-hidden { display: none; }
   .cloud-tool-ai {
     position: absolute; top: 1px; left: calc(50% + 4px);
@@ -648,11 +679,13 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
   /* "Export all" sits in the sheet's own header, by its title (a button
      there presses the desk's one, which is folded away with its heading). */
   body.mw-cloud #view-video.ve-pro .ve-bin .ve-side-head { display: none; }
-  .cloud-sheet-act { display: none; }
+  /* (named with its parent: ".cloud-sheet-head button" would otherwise show it
+     in every sheet, unstyled) */
+  .cloud-sheet-head .cloud-sheet-act { display: none; }
   body.mw-cloud.mw-sheet-shorts .cloud-sheet-head .cloud-sheet-act {
     display: inline-flex; align-items: center; gap: 6px;
     width: auto; height: 34px; padding: 0 12px;
-    background: var(--ph-accent); color: var(--ph-accent-ink);
+    background: var(--ph-accent-fill); color: var(--ph-accent-ink);
     font-size: 13px; font-weight: 800;
   }
   body.mw-cloud.mw-sheet-shorts .cloud-sheet-head .cloud-sheet-act .mi { width: 17px; height: 17px; }
@@ -669,6 +702,10 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
   }
   body.mw-cloud #view-video.ve-pro #veFindHighlights:disabled { opacity: .45; }
   body.mw-cloud #view-video.ve-pro #veCapShorts { width: 100%; min-height: 44px; border-radius: 12px; font-weight: 800; }
+  body.mw-cloud #view-video.ve-pro #veCapShorts {
+    background: rgba(139, 92, 246, .12); border: 1.5px solid rgba(167, 139, 250, .5); color: #dccdff;
+  }
+  body.mw-cloud #view-video.ve-pro #veCapShorts:disabled { opacity: .45; }
   body.mw-cloud #view-video.ve-pro .ve-cliplist { max-height: none; overflow: visible; gap: 10px; }
   body.mw-cloud #view-video.ve-pro .ve-clip {
     background: var(--ph-panel-2); border: 1.5px solid transparent; border-radius: 14px;
@@ -711,11 +748,12 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
     width: 100%; min-height: 56px; margin: 0 0 10px;
     display: flex; align-items: center; gap: 12px; padding: 0 16px;
     border: 0; border-radius: 14px;
-    background: var(--ph-accent); color: var(--ph-accent-ink);
+    background: var(--ph-accent-fill); color: var(--ph-accent-ink);
+    box-shadow: var(--ph-accent-glow);
     font-size: 15.5px; font-weight: 800; text-align: left;
     cursor: pointer;
   }
-  .cloud-xp-main.alt { background: var(--ph-panel-2); color: var(--ph-text); }
+  .cloud-xp-main.alt { background: var(--ph-panel-2); color: var(--ph-text); box-shadow: none; }
   .cloud-xp-main .mi { width: 22px; height: 22px; margin: 0; }
   .cloud-xp-main small { display: block; font-size: 11.5px; font-weight: 600; opacity: .75; margin-top: 2px; }
   .cloud-xp-main:disabled { opacity: .4; }
@@ -732,13 +770,13 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
   .cloud-xp-row input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--ph-accent); }
   .cloud-xp-link {
     display: block; width: 100%; margin-top: 12px; padding: 12px;
-    background: transparent; border: 0; color: var(--ph-accent);
+    background: transparent; border: 0; color: var(--ph-accent-text);
     font-size: 14px; font-weight: 700; text-align: center;
   }
 
   /* a control the dock just opened the effects panel at */
   body.mw-cloud .cloud-flash { animation: cloudFlash 1.4s ease-out; border-radius: 10px; }
-  @keyframes cloudFlash { 0%, 40% { box-shadow: 0 0 0 2px var(--ph-accent); background: rgba(34,211,238,.12); } 100% { box-shadow: 0 0 0 2px transparent; background: transparent; } }
+  @keyframes cloudFlash { 0%, 40% { box-shadow: 0 0 0 2px var(--ph-accent); background: rgba(139,92,246,.16); } 100% { box-shadow: 0 0 0 2px transparent; background: transparent; } }
   body.mw-cloud .fx-side { z-index: 300; }
 
   /* --------------------------------------------- the studio's own modals */
