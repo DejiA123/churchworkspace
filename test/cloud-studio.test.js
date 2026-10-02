@@ -30,6 +30,10 @@
  *                      broken connection
  *   [G] the PWA      — manifest, icons, and a service worker that will never
  *                      cache the studio's work
+ *   [H] the scheduler— the phone's Social Scheduler: a Zernio key goes IN and
+ *                      never comes back out, the accounts arrive without their
+ *                      keys, a post's media is held to the same folders as
+ *                      everything else, and the page is told which build it is
  *
  *   npm run test:cloud
  */
@@ -433,6 +437,38 @@ async function run() {
   r = await request('GET', '/ai/blaze_face_short_range.tflite');
   log(r.status === 200 && r.buf.length > 10000,
     'MediaPipe assets are served so auto-reframe runs in the phone', r.buf.length + ' bytes');
+
+  /* ───────────── [H] the Social Scheduler, from a phone ───────────── */
+  console.log('\n=== [H] the Social Scheduler, from a phone ===');
+  r = await request('GET', '/api/hello');
+  log(r.json && r.json.build === page.assetKey(version) && r.json.social === true,
+    'the page is told the build it is made from (an installed phone app compares it to offer a refresh)', r.json && r.json.build);
+  let acc = await rpcOk('social:accounts');
+  log(acc && Array.isArray(acc.accounts) && acc.keys && acc.keys.zo === false, 'the phone sees the accounts and whether a key is set', JSON.stringify(acc.keys));
+  const SECRET = 'zo_live_' + 'k3y' + Date.now();
+  const set = await rpcOk('social:setKeys', { zoApiKey: SECRET });
+  log(set && set.zo === true && !JSON.stringify(set).includes(SECRET), 'a Zernio key can be set from the phone, and the answer is only "it is set"');
+  const back = await rpc('social:accounts');
+  log(back.status === 200 && !JSON.stringify(back.body).includes(SECRET), 'and it never comes back out');
+  r = await rpc('settings:get', {});
+  log(r.status === 403, 'the settings file is still refused');
+  r = await rpc('social:setKeys', { zoApiKey: 'two words' });
+  log(r.status === 200 && r.body && r.body.ok === false, 'something that is not a key is refused', r.body && r.body.error);
+  r = await rpc('scheduler:add', { post: { title: 'x', mediaPaths: [outside], scheduledAt: new Date(Date.now() + 86400000).toISOString() } });
+  log(r.status === 403, "a post cannot carry a file from outside the media folders", outside);
+  r = await rpc('social:suggestCopy', { mediaPath: outside, listen: false });
+  log(r.status === 403, 'nor can the caption writer be pointed outside them');
+  const when = new Date(Date.now() + 2 * 86400000).toISOString();
+  const post = await rpcOk('scheduler:add', { post: { title: 'Faith over fear', caption: 'Sunday #faith', mediaPaths: [edited], accountIds: [], platforms: ['tiktok'], scheduledAt: when } });
+  const listed = await rpcOk('scheduler:list');
+  log(post && post.id && listed.some((x) => x.id === post.id && x.scheduledAt === when), 'a post made on the phone is in the schedule');
+  await rpcOk('scheduler:remove', { id: post.id });
+  log(!(await rpcOk('scheduler:list')).some((x) => x.id === post.id), 'and can be deleted from it');
+  for (const ch of ['accounts:list', 'accounts:connectZo', 'scheduler:publish', 'social:cloudSet']) {
+    const g = await rpc(ch, {});
+    log(g.status === 403, `"${ch}" (the desk's own) is still refused`, 'status ' + g.status);
+  }
+  await rpcOk('social:setKeys', { zoApiKey: '' });
 
   /* ───────────── teardown ───────────── */
   cloud.stop();

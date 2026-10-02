@@ -7814,6 +7814,9 @@
    * task layer; every one of these degrades to exactly the behaviour it has
    * always had (a modal, a toast, Explorer) rather than breaking. */
   const bgExportOn = () => { const c = $('#veBgExport'); return !!(c && c.checked); };
+  // Where this page shows background exports: the corner on the desk, the
+  // progress pill at the top on a phone (the Cloud Studio's shell says so).
+  const bgPlace = () => (typeof window.__bgPlace === 'function' && window.__bgPlace()) || 'the corner';
   function startTask(title) {
     if (!window.__newTask) return null;
     const bg = bgExportOn();
@@ -7839,7 +7842,7 @@
       if (note) window.__toast && window.__toast(note, 'good', 7000);
       return file;
     }
-    window.__toast && window.__toast(`${note} It is waiting in the corner with a button to show the file.`, 'good', 8000);
+    window.__toast && window.__toast(`${note} It is waiting in ${bgPlace()} with a button to show the file.`, 'good', 8000);
     return file;
   }
   /** It broke, or the operator stopped it. A modal job has already said so. */
@@ -8492,6 +8495,7 @@
           if (caps) out = await autoCaptionExport(s, out, text);
           else out = await burnTextIntoShort(s, out, null, text);
           out = await finishExport(s, out); // background music, then the outro
+          if (window.__taskAddFile) window.__taskAddFile(task, out);
           done++;
           // Let this one be seen to finish before the next resets the number.
           if (window.__chainDone) await window.__chainDone(task);
@@ -12197,7 +12201,7 @@
     if (bgBox) bgBox.addEventListener('change', () => {
       try { localStorage.setItem('mwBgExport', bgBox.checked ? '1' : '0'); } catch (e) {}
       if (bgBox.checked) {
-        window.__toast && window.__toast('⇥ Exports now go straight to the corner. Carry on working while they finish — '
+        window.__toast && window.__toast(`⇥ Exports now go straight to ${bgPlace()}. Carry on working while they finish — `
           + 'each one saves the timeline exactly as it was when you pressed export.', 'good', 8000);
       }
     });
@@ -12807,6 +12811,29 @@
       openTransitionPicker(best.seg.id);
       return true;
     },
+    /** The outro that goes on the end of every short (CapCut's "ending"). */
+    /** Write the rolling autosave NOW (before the page reloads for an update). */
+    async flushSession() {
+      if (!ve.video) return false;
+      if (ve._sessionTimer) clearTimeout(ve._sessionTimer);
+      await writeAutosave();
+      return true;
+    },
+    /** Is a video open? (The home screen says "continue" rather than "open".) */
+    hasVideo() { return !!ve.video; },
+    outroInfo() {
+      const o = ve.outro;
+      return o ? { name: o.name, durationSec: o.durationSec || 0, on: ve.outroAll !== false, thumb: o.thumb ? fileUrl(o.thumb) : null } : null;
+    },
+    /** Switch the outro on or off for every short; with none chosen yet, open the library to choose one. */
+    setOutroOn(on) {
+      if (!ve.outro) { openLibrary('clips'); return false; }
+      ve.outroAll = !!on;
+      saveOutroPref(); renderOutroBar(); renderSegments(); updateMusicButton();
+      window.__toast && window.__toast(on ? `“${ve.outro.name}” ends every short` : 'Shorts export without the outro', on ? 'good' : '');
+      return ve.outroAll;
+    },
+    chooseOutro() { openLibrary('clips'); },
     /** The phone's Chroma key tool: the selected overlay, or one under the playhead. */
     chromaKey() { return openChromaKey(); },
     /** The phone's Keyframe tool: the clip under the playhead (or the selected one). */

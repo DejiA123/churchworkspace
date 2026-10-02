@@ -19,10 +19,10 @@
 const path = require('path');
 
 /** Which argument names carry a filesystem path. */
-const PATH_KEYS = new Set(['input', 'base', 'path', 'musicPath', 'src', 'dir', 'file', 'dest', 'imagePath']);
+const PATH_KEYS = new Set(['input', 'base', 'path', 'musicPath', 'src', 'dir', 'file', 'dest', 'imagePath', 'mediaPath']);
 
 /** Arrays whose ENTRIES may themselves be bare path strings. */
-const PATH_ARRAYS = new Set(['inputs', 'clips']);
+const PATH_ARRAYS = new Set(['inputs', 'clips', 'mediaPaths']);
 
 /** Is `p` inside `root`? Resolved, and case-insensitively on Windows. */
 function within(p, root) {

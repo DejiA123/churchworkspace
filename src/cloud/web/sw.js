@@ -36,6 +36,7 @@ const SHELL = [
   '/',
   '/cloud.css?v=' + VERSION,
   '/cloud-boot.js?v=' + VERSION,
+  '/cloud-social.js?v=' + VERSION,
   '/r/styles.css?v=' + VERSION,
   '/r/facetrack.js?v=' + VERSION,
   '/r/caplayout.js?v=' + VERSION,
@@ -67,7 +68,7 @@ self.addEventListener('activate', (e) => {
   })());
 });
 
-const isShell = (p) => p === '/' || p === '/cloud.css' || p === '/cloud-boot.js'
+const isShell = (p) => p === '/' || p === '/cloud.css' || p === '/cloud-boot.js' || p === '/cloud-social.js'
   || p === '/manifest.webmanifest' || p.startsWith('/r/') || p.startsWith('/icons/');
 
 self.addEventListener('fetch', (e) => {
