@@ -202,148 +202,560 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
 .cloud-ct-play { color: var(--primary) !important; font-size: 19px !important; }
 
 /* ===================================================================== */
-/*  THE PHONE                                                            */
+/*  THE PHONE — an editor laid out like the apps people already know     */
 /* ===================================================================== */
 
+/*
+ * The phone used to get the desk, stacked into one long page: picture,
+ * toolbar, timeline, settings, scrolled past with a thumb. It worked, and it
+ * read like a website. This is laid out the way CapCut, VN and InShot are —
+ * because that is what everyone who makes shorts on a phone already knows:
+ *
+ *   ┌ top bar ── files · saved ············· quality · EXPORT ┐
+ *   │                    the picture, as big as it can be      │
+ *   │ 0:07 / 1:24 ·········· ▶ ·············· CC ↶ ↷ ⛶       │
+ *   │ the timeline — film, text, captions, sound, music        │
+ *   └ the tool dock — AI Shorts · Captions · Edit · Text … ────┘
+ *
+ * Nothing is taken away. The desk's buttons are all still on the page (the
+ * studio's own code drives them, and its tests look for them); the dock and
+ * the sheets press those very buttons, and the settings column and the shorts
+ * list come up as sheets over the timeline instead of sitting under it, so the
+ * picture stays on screen while you work. See installPhoneEditor in
+ * cloud-boot.js for the other half.
+ */
+
+.cloud-dock, .cloud-sheet-head, .cloud-export-sheet,
+.cloud-q, .cloud-export, .cloud-tr-extra { display: none; }
+
 @media (max-width: 900px) {
-  body.mw-cloud .content { padding: 10px 10px 92px; }
+  body.mw-cloud {
+    --ph-bg: #000;
+    --ph-panel: #141519;
+    --ph-panel-2: #1d1e24;
+    --ph-line: #2a2b32;
+    --ph-text: #f5f6f8;
+    --ph-muted: #9b9ea8;
+    --ph-accent: #22d3ee;
+    --ph-accent-ink: #00262c;
+    --ph-ai: linear-gradient(135deg, #7c5cff, #22d3ee);
+    --ph-top: calc(52px + env(safe-area-inset-top));
+    --ph-tr: 42px;
+    --ph-tl: clamp(140px, 26dvh, 232px);
+    --ph-dock: calc(68px + env(safe-area-inset-bottom));
+    --ph-sheet: calc(var(--ph-tl) + var(--ph-dock));
+    background: var(--ph-bg);
+    /* Apple's own face on an iPhone (what CapCut uses there), Roboto on Android. */
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Roboto, "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  body.mw-cloud button, body.mw-cloud select, body.mw-cloud input, body.mw-cloud textarea { font-family: inherit; }
+  body.mw-cloud.mw-sheet-tall { --ph-sheet: min(78dvh, calc(100dvh - var(--ph-top) - 120px)); }
+  body.mw-cloud input, body.mw-cloud textarea, body.mw-cloud [contenteditable] { -webkit-user-select: text; user-select: text; }
 
-  /*
-   * The desk is a two-column layout inside a wrapper. On a phone the wrapper
-   * itself is what gets in the way, so both it and the left column stop being
-   * boxes (`display: contents`) and their children become direct children of
-   * the view — which lets them be put in thumb order, and lets the picture stay
-   * on screen while the timeline scrolls under it.
-   */
-  body.mw-cloud #view-video { display: flex; flex-direction: column; height: auto; min-height: 100%; }
-  /* The desk's Pro layout (v2.79) has more wrappers — the monitors and the
-     program column — and its rules name #view-video, so these do too, or the
-     desk's grid would win over the phone's single column. */
-  body.mw-cloud #view-video .ve-main,
-  body.mw-cloud #view-video .ve-monitors,
-  body.mw-cloud #view-video .ve-left { display: contents; }
-  /* No room for a second monitor on a phone: the program monitor IS the picture. */
-  body.mw-cloud #view-video .ve-source,
-  body.mw-cloud #view-video .ve-mon-head,
-  body.mw-cloud #view-video .ve-tl-split { display: none; }
+  /* ---------------------------------------------------------- the frame */
 
-  body.mw-cloud .ve-topbar { order: 1; }
-  body.mw-cloud #veResume { order: 2; position: static; }
-  body.mw-cloud .ve-preview { order: 3; }
-  body.mw-cloud .ve-transport { order: 4; }
-  body.mw-cloud .ve-tl-bar { order: 5; }
-  body.mw-cloud .ve-timeline { order: 6; }
-  body.mw-cloud .ve-bin { order: 7; margin-top: 10px; }
-  body.mw-cloud .ve-side { order: 8; }
+  body.mw-cloud #app { padding-top: var(--ph-top); }
+  body.mw-cloud .content { padding: 0; overflow: hidden; background: var(--ph-bg); }
+  body.mw-cloud #view-video.ve-pro {
+    display: flex; flex-direction: column;
+    height: 100%; min-height: 0;
+    padding-bottom: var(--ph-dock);
+    background: var(--ph-bg);
+  }
+  body.mw-cloud #view-video.ve-pro .ve-main,
+  body.mw-cloud #view-video.ve-pro .ve-monitors,
+  body.mw-cloud #view-video.ve-pro .ve-left { display: contents; }
+  body.mw-cloud #view-video.ve-pro .ve-source,
+  body.mw-cloud #view-video.ve-pro .ve-mon-head,
+  body.mw-cloud #view-video.ve-pro .ve-tl-split,
+  body.mw-cloud #view-video.ve-pro .ve-topbar,
+  body.mw-cloud #view-video.ve-pro .ve-tl-bar,
+  body.mw-cloud #view-video.ve-pro .ve-tl-labels { display: none; }
+  body.mw-cloud .cloud-touchbar { display: none !important; }
 
-  /* The picture stays put while everything else scrolls past it. */
-  body.mw-cloud #view-video .ve-preview {
-    position: sticky;
-    top: 0;
-    z-index: 30;
-    flex: none;
-    height: 38vh;
-    min-height: 200px;
-    border-radius: 12px;
-    margin-bottom: 8px;
+  /* ------------------------------------------------------------ top bar */
+
+  body.mw-cloud .cloud-bar {
+    height: var(--ph-top);
+    padding: env(safe-area-inset-top) 10px 0;
+    gap: 6px;
+    background: var(--ph-bg);
+    border-bottom: 0;
+    backdrop-filter: none;
+  }
+  body.mw-cloud .cloud-brand { display: none; }
+  body.mw-cloud .cloud-bar-actions { display: contents; }
+  body.mw-cloud #cloudFiles { order: 1; }
+  body.mw-cloud #cloudDownloads { order: 2; }
+  body.mw-cloud #cloudLink { order: 3; margin-right: auto; font-size: 9px; }
+  body.mw-cloud #cloudHelp { display: none; }
+  body.mw-cloud .cloud-q { order: 10; }
+  body.mw-cloud .cloud-export { order: 11; }
+
+  body.mw-cloud .cloud-chip {
+    width: 40px; height: 40px; padding: 0;
+    display: grid; place-items: center;
+    background: transparent; border: 0; border-radius: 12px;
+    color: var(--ph-text); font-size: 0;
+  }
+  body.mw-cloud .cloud-chip:active { background: var(--ph-panel-2); }
+  body.mw-cloud .cloud-chip .mi { width: 22px; height: 22px; margin: 0; }
+  body.mw-cloud .cloud-chip .cloud-chip-tx { display: none; }
+  body.mw-cloud .cloud-badge {
+    position: absolute; top: 3px; right: 1px; margin: 0;
+    min-width: 16px; height: 16px; font-size: 10px;
+    background: var(--ph-accent); color: var(--ph-accent-ink);
   }
 
-  /* One long strip of the studio's own buttons, scrolled sideways. Nothing is
-     dropped: the desk's row becomes a rail. */
-  body.mw-cloud .ve-topbar {
+  body.mw-cloud .cloud-q {
+    display: flex; align-items: center; position: relative;
+    height: 34px; padding: 0 26px 0 12px;
+    background: var(--ph-panel-2); border-radius: 10px;
+    color: var(--ph-text); font-size: 13px; font-weight: 700;
+  }
+  body.mw-cloud .cloud-q::after {
+    content: ''; position: absolute; right: 11px; top: 50%; margin-top: -2px;
+    border: 4px solid transparent; border-top-color: currentColor;
+  }
+  body.mw-cloud .cloud-q select {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    opacity: 0; font-size: 16px; cursor: pointer;
+  }
+  body.mw-cloud .cloud-export {
     display: block;
-    padding: 0 0 8px;
-    margin: 0 0 8px;
-    border-bottom: 1px solid var(--border-soft);
+    height: 34px; padding: 0 16px;
+    background: var(--ph-accent); color: var(--ph-accent-ink);
+    border: 0; border-radius: 10px;
+    font-size: 14px; font-weight: 800; letter-spacing: .2px;
+    cursor: pointer;
   }
-  body.mw-cloud .ve-file {
-    display: flex; gap: 6px; align-items: center;
-    padding: 2px 2px 8px;
-    font-size: 12.5px;
-    overflow: hidden;
-  }
-  body.mw-cloud .ve-file #veName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  body.mw-cloud .ve-top-actions,
-  body.mw-cloud .ve-transport,
-  body.mw-cloud .ve-tl-bar,
-  body.mw-cloud .ve-tools .ve-tool-btns {
-    display: flex;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overflow-y: hidden;
-    gap: 7px;
-    padding-bottom: 6px;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
-  }
-  body.mw-cloud .ve-top-actions::-webkit-scrollbar,
-  body.mw-cloud .ve-tl-bar::-webkit-scrollbar { display: none; }
-  body.mw-cloud .ve-tl-bar { justify-content: flex-start; margin: 6px 0; padding: 0 0 6px; border: 0; }
-  body.mw-cloud .ve-tl-group { display: flex; gap: 7px; flex: none; align-items: center; }
+  body.mw-cloud .cloud-export:active { filter: brightness(.88); }
 
-  /* The toolbar's groups line up along the one rail. */
-  body.mw-cloud .ve-tb-group { flex: none; display: flex; gap: 7px; padding-left: 0; border-left: 0; }
+  /* ------------------------------------------------------------ picture */
 
-  /* Every tap target big enough to hit while standing up. */
-  body.mw-cloud .ve-top-actions button,
-  body.mw-cloud .ve-top-actions select,
-  body.mw-cloud .ve-top-actions label,
-  body.mw-cloud .ve-tl-bar button {
-    flex: none;
-    min-height: 38px;
-    font-size: 12.5px;
+  body.mw-cloud #view-video.ve-pro .ve-preview {
+    order: 3;
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 140px;
+    height: auto;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: var(--ph-bg);
+  }
+  /* The text style bar: a strip along the bottom of the picture, scrolled
+     sideways, instead of a centred box wider than the phone. */
+  body.mw-cloud #view-video.ve-pro .ve-text-tools {
+    top: auto; bottom: 0; left: 0; right: 0; transform: none;
+    display: flex; flex-wrap: nowrap; align-items: center; gap: 8px;
+    max-width: none; border-radius: 0;
+    padding: 8px 10px;
+    overflow-x: auto; scrollbar-width: none;
+    background: rgba(12,13,16,.94);
+    border: 0; border-top: 1px solid var(--ph-line);
+  }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools::-webkit-scrollbar { display: none; }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools > * { flex: none; }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools.hidden { display: none; }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools select,
+  body.mw-cloud #view-video.ve-pro .ve-text-tools input[type=number] { font-size: 16px; height: 36px; }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools button { height: 36px; min-width: 40px; }
+  body.mw-cloud #view-video.ve-pro #veResume {
+    position: fixed; z-index: 60;
+    top: calc(var(--ph-top) + 8px); left: 10px; right: 10px;
+    border-radius: 12px;
+  }
+  body.mw-cloud #view-video.ve-pro .ve-novid { color: var(--ph-muted); }
+
+  /* ---------------------------------------------------------- transport */
+
+  /* CapCut's row: full screen on the left, play in the middle, captions,
+     undo and redo on the right — and the time on its own small line above
+     the timeline it belongs to. The desk's two wrappers step aside
+     (display: contents) so each control can take its own place on the grid. */
+  body.mw-cloud #view-video.ve-pro .ve-transport {
+    order: 4;
+    flex: 0 0 auto;
+    display: grid;
+    /* three slots each side of play, so play sits at the true centre */
+    grid-template-columns: repeat(3, 40px) 1fr 52px 1fr repeat(3, 40px);
+    grid-template-rows: var(--ph-tr) 18px;
+    grid-template-areas:
+      "full . . . play . cc undo redo"
+      "time time time time time time time time time";
+    align-items: center;
+    column-gap: 2px;
+    margin: 0;
+    padding: 0 6px;
+    background: var(--ph-bg);
+    border: 0;
+    border-radius: 0;
+    overflow: visible;
+  }
+  body.mw-cloud #view-video.ve-pro .ve-transport-center,
+  body.mw-cloud #view-video.ve-pro .ve-transport-right,
+  body.mw-cloud #view-video.ve-pro .cloud-tr-extra { display: contents; }
+  body.mw-cloud #view-video.ve-pro #veBack5,
+  body.mw-cloud #view-video.ve-pro #veFwd5,
+  body.mw-cloud #view-video.ve-pro #veBigger,
+  body.mw-cloud #view-video.ve-pro .ve-transport label.ve-loop:has(#veLoopSel) { display: none; }
+
+  body.mw-cloud #view-video.ve-pro #veFull { grid-area: full; }
+  body.mw-cloud #view-video.ve-pro #vePlay { grid-area: play; }
+  body.mw-cloud #view-video.ve-pro .ve-transport label.ve-loop:has(#veCapShow) { grid-area: cc; }
+  body.mw-cloud #view-video.ve-pro .cloud-tr-extra [data-press="#veUndo"] { grid-area: undo; }
+  body.mw-cloud #view-video.ve-pro .cloud-tr-extra [data-press="#veRedo"] { grid-area: redo; }
+
+  body.mw-cloud #view-video.ve-pro .ve-transport .ve-time {
+    grid-area: time;
+    align-self: end;
+    min-width: 0;
+    padding: 0 8px 2px;
+    font-family: inherit;
+    font-size: 11px; font-weight: 600;
+    color: #c4c6cc;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: .2px;
     white-space: nowrap;
   }
-  body.mw-cloud .ve-top-actions select { max-width: 46vw; }
-
-  /* The transport is a row of controls, not a spread — on a narrow screen its
-     space-between pushes Loop and fullscreen off the edge. */
-  body.mw-cloud .ve-transport { justify-content: flex-start; align-items: center; }
-  body.mw-cloud .ve-transport > * { flex: none; }
-
-  /* The timeline: tall enough that a finger can tell the rows apart, with the
-     row names narrowed — 136px of "🎬 Video" out of 375 is a third of the
-     screen spent on labels that never change. */
-  body.mw-cloud #view-video .ve-timeline { min-height: 220px; height: auto; overflow-y: visible; }
-  body.mw-cloud #view-video .ve-tl-labels { width: 74px; min-width: 74px; flex: none; }
-  body.mw-cloud .ve-tl-label { font-size: 11px; padding-left: 6px; }
-  body.mw-cloud .ve-tl-scroll { touch-action: pan-x pan-y; }
-  body.mw-cloud .ve-ruler { height: 26px; }
-  body.mw-cloud .ve-seg-h { width: 16px; }         /* fatter trim handles */
-  body.mw-cloud .ve-cap-edge { width: 14px; }
-
-  /* The settings column becomes the bottom of the page — all of it. */
-  body.mw-cloud #view-video .ve-bin { overflow: visible; }
-  body.mw-cloud #view-video .ve-side { overflow: visible; }
-  body.mw-cloud #view-video .ve-insp-body { overflow: visible; }
-  body.mw-cloud .ve-side {
-    width: auto;
-    max-width: none;
-    min-width: 0;
-    margin-top: 10px;
-    border-radius: 12px;
+  body.mw-cloud #view-video.ve-pro #vePlay {
+    justify-self: center;
+    width: 48px; height: 44px;
+    background: transparent; border: 0; border-radius: 12px; box-shadow: none;
+    color: var(--ph-text); font-size: 22px;
   }
-  body.mw-cloud .ve-cliplist { max-height: none; }
+  body.mw-cloud #view-video.ve-pro #vePlay:active { background: var(--ph-panel-2); }
+  body.mw-cloud #view-video.ve-pro #vePlay .mi { width: 25px; height: 25px; margin: 0; }
+  body.mw-cloud #view-video.ve-pro #veFull,
+  body.mw-cloud #view-video.ve-pro .cloud-tr-extra button {
+    width: 38px; height: 38px; padding: 0;
+    display: grid; place-items: center;
+    background: transparent; border: 0; border-radius: 10px;
+    color: var(--ph-text); font-size: 17px;
+  }
+  body.mw-cloud #view-video.ve-pro .cloud-tr-extra button:disabled { color: #4a4c55; }
+  body.mw-cloud #view-video.ve-pro .cloud-tr-extra .mi,
+  body.mw-cloud #view-video.ve-pro #veFull .mi { width: 20px; height: 20px; margin: 0; }
+  /* Captions on/off: a small "CC" badge, lit when they show on the picture. */
+  body.mw-cloud #view-video.ve-pro .ve-transport label.ve-loop:has(#veCapShow) {
+    position: relative;
+    justify-self: center;
+    height: 22px; margin: 0; padding: 0 5px;
+    display: inline-flex; align-items: center;
+    border-radius: 5px;
+    border: 1.6px solid #5a5c64;
+    color: #5a5c64;
+    font-size: 10px; font-weight: 900; letter-spacing: .4px;
+  }
+  body.mw-cloud #view-video.ve-pro .ve-transport label.ve-loop input { position: absolute; opacity: 0; pointer-events: none; }
+  body.mw-cloud #view-video.ve-pro .ve-transport label.ve-loop:has(input:checked) { color: var(--ph-text); border-color: var(--ph-text); }
 
-  /* Modals become sheets that come up from the bottom, like everything else on
-     a phone does. */
-  body.mw-cloud .cap-modal { place-items: end center; }
-  /* Every modal box the studio opens, by its own class name: the caption editor
-     and its relatives, the media library, and the cut-out painter. Named rather
-     than matched by shape, because a rule like ".cap-modal > div" would also
-     catch the ones that are deliberately small. */
+  /* ----------------------------------------------------------- timeline */
+
+  body.mw-cloud #view-video.ve-pro .ve-timeline {
+    order: 6;
+    flex: 0 0 var(--ph-tl);
+    height: auto; min-height: 0;
+    margin: 0;
+    border: 0; border-top: 1px solid var(--ph-line); border-radius: 0;
+    background: #0a0a0c;
+    overflow-x: hidden; overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  body.mw-cloud #view-video.ve-pro .ve-tl-scroll {
+    padding: 2px 10px 12px;
+    overflow-y: visible;
+    touch-action: pan-x pan-y;
+    scrollbar-width: none;
+  }
+  body.mw-cloud #view-video.ve-pro .ve-tl-scroll::-webkit-scrollbar { display: none; }
+  body.mw-cloud #view-video.ve-pro .ve-ruler { height: 22px; border-bottom-color: transparent; }
+  body.mw-cloud #view-video.ve-pro .ve-tick { border-left-color: #2b2c33; }
+  body.mw-cloud #view-video.ve-pro .ve-tick span { top: 4px; font-size: 9.5px; color: #8b8e98; }
+  body.mw-cloud #view-video.ve-pro .ve-track { background: #121317; border-radius: 6px; }
+  body.mw-cloud #view-video.ve-pro .ve-seg { border-width: 2px; border-radius: 6px; }
+  body.mw-cloud #view-video.ve-pro .ve-seg.sel { border-color: #fff !important; box-shadow: 0 0 0 1px #fff inset; }
+  body.mw-cloud #view-video.ve-pro .ve-seg-label { font-size: 10.5px; top: 4px; left: 5px; }
+  body.mw-cloud #view-video.ve-pro .ve-seg-h { width: 18px; }
+  body.mw-cloud #view-video.ve-pro .ve-seg-h.l::after, body.mw-cloud #view-video.ve-pro .ve-seg-h.r::after { left: 6px; height: 22px; background: #fff; }
+  body.mw-cloud #view-video.ve-pro .ve-text-track { height: 26px; margin-top: 5px; background: #121317; }
+  body.mw-cloud #view-video.ve-pro .ve-cap-track { height: 32px; margin-top: 5px; background: #121317; }
+  body.mw-cloud #view-video.ve-pro .ve-cap-clip, body.mw-cloud #view-video.ve-pro .ve-cap-run { top: 2px; height: 28px; border-radius: 5px; }
+  body.mw-cloud #view-video.ve-pro .ve-cap-edge { width: 14px; }
+  body.mw-cloud #view-video.ve-pro .ve-audio-track { height: 36px; margin-top: 5px; background: #121317; }
+  body.mw-cloud #view-video.ve-pro .ve-music-track { height: 28px; margin-top: 5px; background: #121317; }
+  /*
+   * Only the rows with something in them, as CapCut shows it. The overlay
+   * row is folded away until a clip is on it (the studio always keeps one
+   * empty overlay row to drop onto — on a phone "To overlay" in the Overlay
+   * tools does that job); text, captions and music appear once they exist.
+   */
+  body.mw-cloud #view-video.ve-pro .ve-track:not(:has(.ve-seg-ov)) {
+    margin-top: -39px;                       /* 4px gap − the 43px empty row */
+    clip-path: inset(43px 0 0 0);
+  }
+  body.mw-cloud #view-video.ve-pro .ve-lane-hint { display: none; }
+  body.mw-cloud #view-video.ve-pro .ve-text-track:empty,
+  body.mw-cloud #view-video.ve-pro .ve-cap-track:not(:has(.ve-cap-clip, .ve-cap-run)),
+  body.mw-cloud #view-video.ve-pro .ve-music-track:not(:has(.ve-music-seg)) { display: none; }
+  body.mw-cloud #view-video.ve-pro .ve-seg-label { background: rgba(0,0,0,.45); font-weight: 700; }
+
+  /* CapCut's white ＋ at the end of the video row: add a video or a picture. */
+  .cloud-tl-add { display: none; }
+  body.mw-cloud #view-video.ve-pro .cloud-tl-add {
+    display: grid; place-items: center;
+    position: absolute; z-index: 6;
+    right: 7px; top: 37px;
+    width: 34px; height: 34px; padding: 0;
+    background: #fff; color: #000;
+    border: 0; border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.6);
+  }
+  body.mw-cloud #view-video.ve-pro .cloud-tl-add .mi { width: 20px; height: 20px; margin: 0; }
+  body.mw-cloud #view-video.ve-pro .ve-timeline:has(.ve-seg-ov) .cloud-tl-add { top: 80px; }
+  /* the ＋ has a column of its own, so it never sits over a clip's white
+     right-hand edge (the studio fits the video to the scroller's width) */
+  body.mw-cloud #view-video.ve-pro .ve-tl-scroll { margin-right: 48px; }
+
+  body.mw-cloud #view-video.ve-pro .ve-playhead { width: 2px; background: #fff; box-shadow: 0 0 6px rgba(0,0,0,.7); }
+  body.mw-cloud #view-video.ve-pro .ve-playhead::before { left: -5px; border-width: 6px; border-top-color: #fff; }
+
+  /* --------------------------------------------------------------- dock */
+
+  body.mw-cloud .cloud-dock {
+    display: block;
+    position: fixed; left: 0; right: 0; bottom: 0;
+    z-index: 200;
+    height: var(--ph-dock);
+    padding-bottom: env(safe-area-inset-bottom);
+    background: var(--ph-bg);
+    border-top: 1px solid var(--ph-line);
+  }
+  .cloud-dock-row {
+    display: none;
+    height: 68px;
+    align-items: center;
+    overflow-x: auto; overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 4px;
+  }
+  .cloud-dock-row::-webkit-scrollbar { display: none; }
+  .cloud-dock-row.on { display: flex; }
+  .cloud-tool {
+    position: relative;
+    flex: 0 0 auto;
+    min-width: 64px; height: 60px;
+    padding: 6px 6px 0;
+    display: flex; flex-direction: column; align-items: center; gap: 5px;
+    background: transparent; border: 0; border-radius: 12px;
+    color: #e4e5e9;
+    font-weight: 500; font-size: 10.5px; line-height: 1.15; font-family: inherit;
+    letter-spacing: .1px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .cloud-tool .mi { width: 23px; height: 23px; margin: 0; }
+  .cloud-tool:active { background: var(--ph-panel-2); }
+  .cloud-tool:disabled { color: #4a4c55; }
+  .cloud-tool.on { color: var(--ph-accent); }
+  .cloud-tool.cloud-tool-hidden { display: none; }
+  .cloud-tool-ai {
+    position: absolute; top: 1px; left: calc(50% + 4px);
+    padding: 1px 5px; border-radius: 6px;
+    background: var(--ph-ai); color: #fff;
+    font-size: 8.5px; font-weight: 900; letter-spacing: .3px;
+  }
+  .cloud-tool-count {
+    position: absolute; top: 1px; left: calc(50% + 6px);
+    min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
+    display: grid; place-items: center;
+    background: var(--ph-accent); color: var(--ph-accent-ink);
+    font-size: 10px; font-weight: 900;
+  }
+  .cloud-tool-back {
+    min-width: 46px; margin-right: 4px;
+    border-right: 1px solid var(--ph-line); border-radius: 0;
+  }
+  .cloud-tool-back .mi { width: 26px; height: 26px; }
+  .cloud-tool-ratio b { font-size: 13px; font-weight: 800; height: 24px; display: grid; place-items: center; }
+
+  /* ------------------------------------------------------------- sheets */
+
+  /* A sheet takes the timeline and the dock's place and leaves the picture
+     and the play button where they are — tap a short, watch it, tap another. */
+  body.mw-cloud #view-video.ve-pro .ve-bin,
+  body.mw-cloud #view-video.ve-pro .ve-side { display: none; }
+
+  body.mw-cloud.mw-sheet-shorts #view-video .ve-bin,
+  body.mw-cloud.mw-sheet-insp #view-video .ve-side,
+  body.mw-cloud.mw-sheet-export .cloud-export-sheet {
+    display: block;
+    position: fixed; left: 0; right: 0; bottom: 0;
+    z-index: 210;
+    height: var(--ph-sheet);
+    width: auto; max-width: none; min-width: 0;
+    margin: 0;
+    padding: 50px 12px calc(14px + env(safe-area-inset-bottom));
+    overflow-y: auto; overflow-x: hidden;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    background: var(--ph-panel);
+    border: 0; border-radius: 18px 18px 0 0;
+    box-shadow: 0 -12px 40px rgba(0,0,0,.6);
+    animation: cloudSheetUp .2s ease-out;
+  }
+  @keyframes cloudSheetUp { from { transform: translateY(24px); opacity: .4; } to { transform: none; opacity: 1; } }
+
+  body.mw-cloud.mw-sheet .cloud-sheet-head {
+    display: flex; align-items: center; gap: 8px;
+    position: fixed; left: 0; right: 0; z-index: 215;
+    bottom: calc(var(--ph-sheet) - 48px);
+    height: 48px;
+    padding: 0 8px 0 16px;
+    background: var(--ph-panel);
+    border-radius: 18px 18px 0 0;
+    animation: cloudSheetUp .2s ease-out;
+  }
+  .cloud-sheet-head::before {
+    content: ''; position: absolute; top: 6px; left: 50%; margin-left: -18px;
+    width: 36px; height: 4px; border-radius: 2px; background: #3a3b43;
+  }
+  .cloud-sheet-title { flex: 1; font-size: 15px; font-weight: 800; color: var(--ph-text); }
+  .cloud-sheet-head button {
+    width: 38px; height: 38px; padding: 0;
+    display: grid; place-items: center;
+    background: transparent; border: 0; border-radius: 10px;
+    color: var(--ph-text);
+  }
+  .cloud-sheet-head button .mi { width: 22px; height: 22px; margin: 0; }
+  .cloud-sheet-head .cloud-sheet-done { background: var(--ph-panel-2); }
+
+  /* The shorts list, in the sheet. Once the AI has made shorts they come
+     first — the reason for opening the sheet — with "caption them all" over
+     them and the AI's own button, to look again, after them. */
+  body.mw-cloud.mw-sheet-shorts #view-video.ve-pro .ve-bin { display: flex; flex-direction: column; gap: 10px; }
+  body.mw-cloud #view-video.ve-pro .ve-bin:has(#veClipList .ve-clip) #veCapShorts { order: -2; }
+  body.mw-cloud #view-video.ve-pro .ve-bin:has(#veClipList .ve-clip) #veClipList { order: -1; }
+  body.mw-cloud #view-video.ve-pro .ve-bin:has(#veClipList .ve-clip) .ve-find { order: 2; }
+  body.mw-cloud #view-video.ve-pro .ve-bin:has(#veClipList .ve-clip) #veBulkBox { order: -3; }
+  /* "Export all" sits in the sheet's own header, by its title (a button
+     there presses the desk's one, which is folded away with its heading). */
+  body.mw-cloud #view-video.ve-pro .ve-bin .ve-side-head { display: none; }
+  .cloud-sheet-act { display: none; }
+  body.mw-cloud.mw-sheet-shorts .cloud-sheet-head .cloud-sheet-act {
+    display: inline-flex; align-items: center; gap: 6px;
+    width: auto; height: 34px; padding: 0 12px;
+    background: var(--ph-accent); color: var(--ph-accent-ink);
+    font-size: 13px; font-weight: 800;
+  }
+  body.mw-cloud.mw-sheet-shorts .cloud-sheet-head .cloud-sheet-act .mi { width: 17px; height: 17px; }
+  body.mw-cloud.mw-sheet-shorts .cloud-sheet-head .cloud-sheet-act:disabled,
+  body.mw-cloud.mw-sheet-shorts .cloud-sheet-head .cloud-sheet-act.cloud-tool-hidden { display: none; }
+  body.mw-cloud #view-video.ve-pro .ve-bin .ve-side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 10px; }
+  body.mw-cloud #view-video.ve-pro .ve-bin .ve-side-head h3 { display: none; }
+  body.mw-cloud #view-video.ve-pro .ve-bin .ve-side-head #veExportAll { margin-left: auto; }
+  body.mw-cloud #view-video.ve-pro .ve-find { gap: 10px; }
+  body.mw-cloud #view-video.ve-pro #veFindHighlights {
+    width: 100%; min-height: 48px; border-radius: 14px;
+    background: var(--ph-ai); border: 0; color: #fff;
+    font-size: 15px; font-weight: 800;
+  }
+  body.mw-cloud #view-video.ve-pro #veFindHighlights:disabled { opacity: .45; }
+  body.mw-cloud #view-video.ve-pro #veCapShorts { width: 100%; min-height: 44px; border-radius: 12px; font-weight: 800; }
+  body.mw-cloud #view-video.ve-pro .ve-cliplist { max-height: none; overflow: visible; gap: 10px; }
+  body.mw-cloud #view-video.ve-pro .ve-clip {
+    background: var(--ph-panel-2); border: 1.5px solid transparent; border-radius: 14px;
+    padding: 10px 10px 8px;
+  }
+  body.mw-cloud #view-video.ve-pro .ve-clip:hover { transform: none; }
+  body.mw-cloud #view-video.ve-pro .ve-clip.sel { border-color: var(--ph-accent); box-shadow: none; }
+  body.mw-cloud #view-video.ve-pro .ve-clip-thumb { width: 44px; height: 78px; border-radius: 8px; }
+  body.mw-cloud #view-video.ve-pro .ve-clip-name { font-size: 14.5px; font-weight: 800; }
+  body.mw-cloud #view-video.ve-pro .ve-clip-btns { gap: 6px; }
+  body.mw-cloud #view-video.ve-pro .ve-clip-btns .icon-btn { height: 40px; border-radius: 10px; background: #26272e; border: 0; color: var(--ph-text); }
+
+  /* The settings column, in the sheet: its tabs become a segmented control. */
+  body.mw-cloud #view-video.ve-pro .ve-side .ve-insp-tabs {
+    position: sticky; top: -50px; z-index: 3;
+    display: flex; gap: 4px;
+    margin: -50px -12px 12px; padding: 50px 12px 8px;
+    background: var(--ph-panel);
+    border: 0;
+    overflow-x: auto; scrollbar-width: none;
+  }
+  body.mw-cloud #view-video.ve-pro .ve-side .ve-insp-tabs::-webkit-scrollbar { display: none; }
+  body.mw-cloud #view-video.ve-pro .ve-side .ve-insp-tabs button {
+    flex: 1 0 auto;
+    display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 6px;
+    height: 36px; padding: 0 12px;
+    border-radius: 10px; border: 0;
+    background: var(--ph-panel-2); color: var(--ph-muted);
+    font-size: 12.5px; font-weight: 700;
+  }
+  body.mw-cloud #view-video.ve-pro .ve-side .ve-insp-tabs button.on { background: var(--ph-text); color: #000; }
+  body.mw-cloud #view-video.ve-pro .ve-side .ve-insp-tabs button::after { display: none; }
+  body.mw-cloud #view-video.ve-pro .ve-side .ve-insp-body { overflow: visible; padding: 0; }
+  body.mw-cloud #view-video.ve-pro .ve-side .primary-btn.ve-insp-wide,
+  body.mw-cloud #view-video.ve-pro #veAutoCaptions { min-height: 48px; border-radius: 14px; font-size: 15px; font-weight: 800; }
+
+  /* The export sheet. */
+  .cloud-export-sheet { color: var(--ph-text); }
+  .cloud-xp-main {
+    width: 100%; min-height: 56px; margin: 0 0 10px;
+    display: flex; align-items: center; gap: 12px; padding: 0 16px;
+    border: 0; border-radius: 14px;
+    background: var(--ph-accent); color: var(--ph-accent-ink);
+    font-size: 15.5px; font-weight: 800; text-align: left;
+    cursor: pointer;
+  }
+  .cloud-xp-main.alt { background: var(--ph-panel-2); color: var(--ph-text); }
+  .cloud-xp-main .mi { width: 22px; height: 22px; margin: 0; }
+  .cloud-xp-main small { display: block; font-size: 11.5px; font-weight: 600; opacity: .75; margin-top: 2px; }
+  .cloud-xp-main:disabled { opacity: .4; }
+  .cloud-xp-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    min-height: 50px; padding: 0 4px;
+    border-bottom: 1px solid var(--ph-line);
+    font-size: 14px; font-weight: 600;
+  }
+  .cloud-xp-row select {
+    background: var(--ph-panel-2); color: var(--ph-text);
+    border: 0; border-radius: 10px; padding: 8px 10px; font-size: 16px;
+  }
+  .cloud-xp-row input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--ph-accent); }
+  .cloud-xp-link {
+    display: block; width: 100%; margin-top: 12px; padding: 12px;
+    background: transparent; border: 0; color: var(--ph-accent);
+    font-size: 14px; font-weight: 700; text-align: center;
+  }
+
+  /* a control the dock just opened the effects panel at */
+  body.mw-cloud .cloud-flash { animation: cloudFlash 1.4s ease-out; border-radius: 10px; }
+  @keyframes cloudFlash { 0%, 40% { box-shadow: 0 0 0 2px var(--ph-accent); background: rgba(34,211,238,.12); } 100% { box-shadow: 0 0 0 2px transparent; background: transparent; } }
+  body.mw-cloud .fx-side { z-index: 300; }
+
+  /* --------------------------------------------- the studio's own modals */
+
+  body.mw-cloud .cap-modal { place-items: end center; z-index: 300; }
   body.mw-cloud .cap-box,
   body.mw-cloud .lib-box,
   body.mw-cloud .cut-box {
     width: 100%;
     max-width: 100%;
     max-height: 88vh;
-    border-radius: 16px 16px 0 0;
+    border-radius: 18px 18px 0 0;
     padding-bottom: env(safe-area-inset-bottom);
   }
   body.mw-cloud .cut-box { height: 88vh; }
   body.mw-cloud .fx-side { align-items: flex-end; }
-  body.mw-cloud .fx-side .cap-box { width: 100%; height: auto; max-height: 88vh; border-radius: 16px 16px 0 0; }
+  body.mw-cloud .fx-side .cap-box { width: 100%; height: auto; max-height: 88vh; border-radius: 18px 18px 0 0; }
 
   /* 16px stops iOS zooming the whole page when a field takes focus. */
   body.mw-cloud input[type="text"],
@@ -353,16 +765,31 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
   body.mw-cloud select { font-size: 16px; }
 
   body.mw-cloud .overlay-box { width: 84vw; }
-  body.mw-cloud .toast { left: 10px; right: 10px; bottom: calc(66px + env(safe-area-inset-bottom)); max-width: none; }
+  /* Messages float over the bottom of the PICTURE, as CapCut's do — never over
+     the timeline — and a finger goes straight through them: one sitting on a
+     clip's edge for four seconds was a clip that could not be trimmed. */
+  body.mw-cloud .toast {
+    left: 14px; right: 14px; max-width: none;
+    transform: none;
+    z-index: 400;
+    pointer-events: none;
+    bottom: calc(var(--ph-dock) + var(--ph-tl) + var(--ph-tr) + 30px);
+    padding: 10px 14px;
+    border-radius: 14px;
+    background: rgba(28,29,34,.94);
+    backdrop-filter: blur(8px);
+    font-size: 13px; line-height: 1.4;
+  }
+  body.mw-cloud.mw-sheet .toast { bottom: calc(var(--ph-sheet) + var(--ph-tr) + 30px); }
 
-  .cloud-name { display: none; }
-  .cloud-where { display: none; }
   .cloud-files-box, .cloud-help-box { width: 100%; }
 }
 
-/* A phone on its side: the picture gets smaller so the timeline is usable. */
+/* A phone on its side: less timeline, so the picture keeps some height. */
 @media (max-width: 900px) and (orientation: landscape) {
-  body.mw-cloud #view-video .ve-preview { height: 46vh; }
+  body.mw-cloud { --ph-tl: 34dvh; --ph-tr: 40px; --ph-dock: calc(60px + env(safe-area-inset-bottom)); }
+  .cloud-dock-row { height: 60px; }
+  .cloud-tool { height: 54px; gap: 3px; }
 }
 
 /* ------------------------------------------------------- installed as an app */
