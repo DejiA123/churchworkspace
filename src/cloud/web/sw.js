@@ -132,10 +132,13 @@ self.addEventListener('fetch', (e) => {
   }
 
   // Everything else in the shell: answer from the cache at once, and quietly
-  // refresh it for next time.
+  // refresh it for next time. The match is EXACT, `?v=` included: the page asks
+  // for the build it was made with, and ignoring the query handed a freshly
+  // deployed page last build's cloud-boot.js — the fix on the server, the bug
+  // on the phone.
   e.respondWith((async () => {
     const cache = await caches.open(SHELL_CACHE);
-    const hit = await cache.match(req, { ignoreSearch: true });
+    const hit = await cache.match(req);
     const network = fetch(req).then((res) => {
       if (res && res.ok) cache.put(req, res.clone()).catch(() => {});
       return res;
