@@ -844,3 +844,17 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
   /* No address bar to lose the connection dot behind. */
   .cloud-bar { padding-top: max(env(safe-area-inset-top), 8px); }
 }
+
+/* ---- phone: the Continue-editing card and the empty studio ---- */
+@media (max-width: 900px) {
+  body.mw-cloud #view-video.ve-pro .ve-monitors > .ve-resume { top: 10px; left: 10px; right: 10px; width: auto; transform: none; padding: 12px; gap: 12px; border-radius: 18px; }
+  body.mw-cloud #view-video.ve-pro .ve-resume-card { flex: 1 1 100%; }
+  body.mw-cloud #view-video.ve-pro .ve-resume-thumb { width: 96px; height: 56px; }
+  body.mw-cloud #view-video.ve-pro .ve-resume-btns { flex: 1 1 100%; }
+  body.mw-cloud #view-video.ve-pro .ve-resume-btns button { flex: 1; height: 44px; border-radius: 13px; font-size: 15px; }
+  body.mw-cloud #view-video.ve-pro .ve-novid { gap: 8px; padding: 0 24px; }
+  body.mw-cloud #view-video.ve-pro .ve-novid .nv-desk { display: none; }
+  body.mw-cloud #view-video.ve-pro .ve-novid .nv-phone { display: inline; }
+  body.mw-cloud #view-video.ve-pro .ve-novid #veOpen2 { min-width: 160px; height: 44px; border-radius: 13px; margin-top: 6px; }
+  body.mw-cloud #view-video.ve-pro .ve-novid.with-resume #veOpen2 { margin-top: 0; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); color: #e9e6f0; box-shadow: none; }
+}
