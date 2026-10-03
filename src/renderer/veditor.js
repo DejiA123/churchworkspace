@@ -13165,7 +13165,7 @@
      * director's words on the text lane — every one an ordinary text box, so it
      * can be retyped, restyled, moved or deleted like any other.
      */
-    async applyMontage({ output, music, musicVolume, texts } = {}) {
+    async applyMontage({ output, music, musicVolume, texts, style, captions } = {}) {
       if (!output) return false;
       await loadVideo(output);
       if (!ve.video) return false;
@@ -13183,23 +13183,55 @@
       const info = (ve.video && ve.video.info) || {};
       const ar = info.width && info.height ? info.width / info.height : 9 / 16;
       const fit = (text, lines, lo, hi) => clamp((lines * 0.86 * ar) / (Math.max(6, String(text).length) * 0.6), lo, hi);
+      /*
+       * The words get a LOOK that matches the montage's style — the same fonts
+       * and arrivals as the studio's own templates: a hype edit's hook punches
+       * in big and yellow, a worship one fades in serif, the story lines rise
+       * in on a band, the call to action pops on a purple pill. All of it is
+       * ordinary text boxes afterwards, to retype or restyle.
+       */
+      const LOOKS = {
+        hype: { hook: { font: 'Anton', color: '#ffe14d', anim: 'pop' }, beat: { font: 'Montserrat', color: '#ffffff', anim: 'rise', bg: true, bgColor: '#000000', hug: true, outline: false } },
+        worship: { hook: { font: 'Playfair Display', color: '#ffffff', anim: 'fade' }, beat: { font: 'Poppins', color: '#ffffff', anim: 'fade' } },
+        emotional: { hook: { font: 'Playfair Display', color: '#ffffff', anim: 'fade' }, beat: { font: 'Poppins', color: '#ffe9b0', anim: 'fade' } },
+        cinematic: { hook: { font: 'Bebas Neue', color: '#ffffff', anim: 'rise' }, beat: { font: 'Montserrat', color: '#ffffff', anim: 'rise' } },
+        fun: { hook: { font: 'Luckiest Guy', color: '#ffffff', anim: 'pop' }, beat: { font: 'Poppins', color: '#111111', anim: 'pop', bg: true, bgColor: '#ffe14d', hug: true, outline: false } },
+      };
+      const look = LOOKS[style] || LOOKS.hype;
+      const ctaLook = { font: 'Montserrat', color: '#ffffff', anim: 'pop', bg: true, bgColor: '#8b5cf6', hug: true, outline: false };
+      const made = [];
       for (const t of (texts || [])) {
         if (!t || !t.text) continue;
         const hook = t.role === 'hook', cta = t.role === 'cta';
-        const sizePct = hook ? fit(t.text, 2, 0.035, 0.075) : fit(t.text, 2, 0.03, 0.058);
+        const L = hook ? look.hook : cta ? ctaLook : look.beat;
+        const big = hook && /Anton|Bebas|Luckiest/.test(L.font);
+        const sizePct = hook ? fit(t.text, 2, 0.035, big ? 0.085 : 0.075) : fit(t.text, 2, 0.03, 0.058);
         const ov = {
-          id: uid(), text: String(t.text),
+          id: uid(), text: hook && big ? String(t.text).toUpperCase() : String(t.text),
           x: 0.5, y: hook ? 0.2 : cta ? 0.5 : 0.74, w: 0.86, h: Math.min(0.3, sizePct * 2.6),
           start: clamp(Number(t.start) || 0, 0, Math.max(0, D - 0.3)),
           end: clamp(Number(t.end) || 0, 0.3, D),
-          color: hook ? '#ffffff' : cta ? '#ffe14d' : '#ffffff', sizePct, font: 'Poppins', bold: true,
-          outline: true, outlineColor: '#000000',
+          color: L.color, sizePct, font: L.font, bold: true,
+          outline: L.outline !== false, outlineColor: '#000000',
+          bg: !!L.bg, bgColor: L.bgColor || undefined, hug: !!L.hug, anim: L.anim || 'none',
         };
         if (ov.end <= ov.start + 0.2) ov.end = Math.min(D, ov.start + 1.5);
-        clampTextIntoFrame(ov);
-        ve.textOverlays.push(ov);
+        made.push(ov);
+      }
+      if (made.length) {
+        try { await loadTemplateFonts({ items: made }); } catch (e) {}
+        for (const ov of made) { clampTextIntoFrame(ov); ve.textOverlays.push(ov); }
       }
       renderTextOverlays(); renderTextTrack(); renderSegments();
+      /*
+       * Captions of what is SAID, without being asked: the montage is heard
+       * (Groq's cloud Whisper when the server has it) and the lines go on the
+       * captions lane, switched on for export. Nothing said, nothing added.
+       */
+      if (captions) {
+        const c = $('#veCapExports'); if (c) c.checked = true;
+        setTimeout(() => { generateCaptions(null).catch(() => {}); }, 300);
+      }
       return true;
     },
     /** The edit the Continue card offers is gone (its video was deleted): put the card away. */

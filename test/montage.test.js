@@ -241,6 +241,19 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
   }, longCands, { full: true, lengthSec: 0 }, { bpm: 96, interval: iv, beats: bts });
   const offs = ovBeat.shots.flatMap((x) => x.overlays.map((o) => Math.min(...bts.map((b) => Math.abs(b - (x.at + o.start))))));
   const lens = ovBeat.shots.flatMap((x) => x.overlays.map((o) => o.len / iv));
+  console.log('\nTHE OPERATOR\'S OWN ORDER');
+  const V = (id, o, d) => ({ id, kind: 'video', file: id, start: 0, end: d, peak: d / 3, fileDur: d, whole: true, hasAudio: true, w: 576, h: 1024, score: 0.5, order: o });
+  const P = (id, o) => ({ id, kind: 'image', file: id, start: 0, end: 0, peak: 0, fileDur: 0, hasAudio: false, w: 1600, h: 1066, score: 0.5, order: o });
+  const oc = [P('pA', 0), V('vB', 1, 30), P('p1', 2), P('p2', 3), V('vA', 4, 20), P('p3', 5), P('p4', 6), P('p5', 7), P('p6', 8), P('p7', 9), V('vC', 10, 6)];
+  const scrambled = { shots: [oc[10], oc[4], oc[1], ...oc.filter((x) => x.kind === 'image')].map((x) => ({ id: x.id, seconds: 3, effect: 'cut', focus: 'center', transition: 'cut' })), texts: [], hashtags: [], post_caption: '', title: '', concept: '' };
+  const mine = montage.finalise(scrambled, oc, { full: true, keepOrder: true }, null);
+  const sig = mine.shots.map((x) => x.cand.id + (x.overlays.length ? '[' + x.overlays.map((o) => o.cand.id).join(',') + ']' : '')).join(' ');
+  log(mine.shots.filter((x) => x.cand.kind === 'video').map((x) => x.cand.id).join(',') === 'vB,vA,vC', 'the videos play in the order they were put in, whatever the director did', sig);
+  log(sig === 'vB[pA,p1,p2] vA[p3,p4,p5] p6 p7 vC', 'each photo goes over the video before it (or the first one); what will not fit follows it, in order');
+  const mineShort = montage.finalise({ shots: [oc[10], oc[4], oc[1], oc[4], oc[1]].map((x) => ({ id: x.id, seconds: 3, effect: 'cut', focus: 'center', transition: 'cut' })), texts: [], hashtags: [], post_caption: '', title: '', concept: '' },
+    oc.map((x) => ({ ...x, whole: false })), { full: false, keepOrder: true, lengthSec: 15 }, null);
+  log(mineShort.shots.map((x) => x.cand.id).join(',') === 'vB,vB,vA,vA,vC', 'a timed montage keeps that order too', mineShort.shots.map((x) => x.cand.id).join(','));
+
   log(offs.length >= 9 && Math.max(...offs) < 0.02 && lens.every((n) => Math.abs(n - Math.round(n)) < 0.05), 'with a song, every picture comes in ON a beat and stays whole beats', `${offs.length} pictures, worst ${Math.max(...offs).toFixed(3)} s off`);
   const ovOut = path.join(WORK, 'ov.mp4');
   const base = make(['-f', 'lavfi', '-i', 'testsrc2=s=1280x720:r=30:d=8', '-f', 'lavfi', '-i', 'sine=f=440:d=8', '-shortest', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac'], path.join(WORK, 'talk.mp4'));

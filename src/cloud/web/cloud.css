@@ -2164,7 +2164,13 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .mt-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .mt-tile, .mt-add { position: relative; aspect-ratio: 9 / 14; border-radius: 12px; overflow: hidden;
   background: var(--ph-panel-2, #1d1e24); border: 1px solid var(--ph-line, #2a2b32); }
-.mt-tile img, .mt-tile video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mt-tile img, .mt-tile video { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+/* hold and drag to reorder */
+.mt-tile { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; transition: transform .12s ease, outline-color .12s; }
+.mt-tile.mt-lift { z-index: 5; transition: none; pointer-events: none; box-shadow: 0 12px 30px rgba(0,0,0,.55), 0 0 0 2px var(--ph-accent, #8b5cf6); opacity: .95; }
+.mt-tile.mt-target { outline: 2px dashed var(--ph-accent-text, #b79cff); outline-offset: 2px; }
+.mt-num { position: absolute; left: 6px; top: 6px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px;
+  font: 800 12px/22px inherit; text-align: center; color: #fff; background: var(--ph-accent-fill, #8b5cf6); box-shadow: 0 1px 4px rgba(0,0,0,.5); }
 .mt-load { position: absolute; inset: 0; background: linear-gradient(110deg, #1d1e24 30%, #2a2b33 50%, #1d1e24 70%); background-size: 200% 100%; animation: mt-shine 1.2s linear infinite; }
 @keyframes mt-shine { to { background-position: -200% 0; } }
 .mt-custom { display: flex; gap: 10px; margin-top: 10px; }

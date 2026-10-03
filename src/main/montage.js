@@ -394,7 +394,7 @@ What makes it work:
 - Transitions (how each shot comes in): mostly "cut" on the beat; "fade" through black to change place, time or mood; "flash" (white) to hit a big moment. Never two fades in a row on a fast edit.
 - Overlays (B-roll) are what make it feel produced: lay a photo or another clip ON TOP of a video shot while that shot's sound carries on — show what is being preached or sung about, a reaction, the crowd, a moment from earlier. "cutaway" fills the frame; "pip" is a framed box in a corner. Use them on video shots whose sound carries (speech, singing, a crowd), 1.5–3.5 s each, never in the first second of the hook. A video shot can carry SEVERAL overlays, each with its own start — on a long clip, bring a picture in every 5–8 seconds so the eye always has something new while the sound tells the story.
 - Effects are seasoning: punch_in or flash on the biggest beats, slow_zoom / zoom_out to give photos life, slow_motion for one emotional peak at most. Most shots are a plain "cut".
-- On-screen words: one hook in the first shot (max 7 words, curiosity or emotion, no clickbait lies), a few short beats that carry the story (max 6 words each), and an optional call to action at the end. Plain words, no emojis inside the video text, no hashtags in it.
+- On-screen words: one hook in the first shot (max 7 words, curiosity or emotion, no clickbait lies), short beats that carry the story (max 6 words each — one every 4–8 shots, and on a long piece one every 20–30 seconds so the words keep telling it), and a call to action at the end ("cta", e.g. an invitation to come, follow or share). Plain words, no emojis inside the video text, no hashtags in it.
 - Respect the faith context: uplifting, sincere, never mocking.
 - post_caption: the caption for the post, warm and specific, one or two short lines, at most one emoji. hashtags: 4–8, relevant, without the # sign.
 Only use ids from the list. Every shot's seconds must fit the footage that candidate has (photos can be held as long as needed).`;
@@ -432,7 +432,9 @@ function fromBrief(brief) {
   const clauses = b.split(/(?:[.!?;:]+\s+|\s+[—–-]\s+|\s*[—–]\s*|\n)/).map(tidy).filter(Boolean);
   let first = clauses[0] || b;
   if (words(first).length < 2 && clauses[1]) first = first + ' ' + clauses[1];
-  const hook = tidy(words(first).slice(0, 7).join(' '));
+  // a short sentence is kept whole (a name like "The Power House church" is
+  // never cut in half); a longer one gives its first seven words
+  const hook = tidy(words(first).slice(0, words(first).length <= 9 ? 9 : 7).join(' '));
   const rest = clauses.slice(words(clauses[0] || '').length >= 2 ? 1 : 2).join(', ');
   const beats = rest.split(/\s*,\s*|\s+and\s+(?=\w+\s+\w+)/).map(tidy).filter((x) => words(x).length >= 1)
     .map((x) => tidy(words(x).slice(0, 6).join(' '))).slice(0, 3);
@@ -455,6 +457,7 @@ function briefOf(opts, music) {
       : `Target length: about ${opts.lengthSec} seconds${opts.lengthSec >= 90 ? ' (a longer piece: build it in movements — a hook, then sections that each rise and land; strong moments may return)' : ''}. Frame: ${opts.aspect}.`,
     music ? `Music: the operator's own song, ${music.bpm} BPM (one beat = ${music.interval}s). Shot lengths should be whole numbers of beats.` : 'No music chosen: the clips\' own sound plays.',
   ];
+  if (opts.keepOrder) lines.push('ORDER IS THE OPERATOR\'S: the candidates are listed in the order they chose. Keep the shots in that order — do not reorder them. You still choose lengths, effects, transitions, overlays and words.');
   if (opts.brief) {
     lines.push(`WHAT IT IS ABOUT, in the operator's own words: "${cleanBrief(opts.brief)}"`);
     lines.push('This is the story of the edit. Choose and order the shots to tell it. The hook, every word on screen, the title, the post caption and the hashtags must be about THIS — use its names, places, dates and numbers exactly as written, and never invent details it does not give.');
@@ -767,6 +770,44 @@ function spreadPhotos(shots) {
   while (p < movable.length) shots.push(movable[p++]);      // (only if every count above was short)
 }
 
+/*
+ * Keeping the operator's order: each photo belongs to the video it was put
+ * after (photos before the first video, to the first one). A video carries
+ * its own photos as B-roll, spread through it, as many as fit at the closest
+ * spacing; the rest stand right after it, in order — as a quick burst when
+ * there are more than two. Photos-only montages are left exactly as ordered.
+ */
+function keepOrderPhotos(shots) {
+  const isVid = (s) => s.cand.kind === 'video';
+  if (!shots.some(isVid)) return;
+  const own = new Map();
+  let owner = shots.find(isVid);
+  for (const sh of shots) {
+    if (isVid(sh)) { owner = sh; if (!own.has(sh)) own.set(sh, []); continue; }
+    if (!own.has(owner)) own.set(owner, []);
+    own.get(owner).push(sh);
+  }
+  const vids = shots.filter(isVid);
+  shots.length = 0;
+  let styleN = 0;
+  for (const v of vids) {
+    const pics = own.get(v) || [];
+    v.ovReq = v.ovReq || [];
+    const fit = Math.max(0, (v.seconds >= OV_LEN + 2.5 ? Math.max(1, Math.floor((v.seconds - 1.5) / 5)) : 0) - v.ovReq.length);
+    const on = pics.slice(0, fit), after = pics.slice(fit);
+    on.forEach((m, k) => {
+      const start = ((k + 0.5) * v.seconds) / on.length - OV_LEN / 2;
+      v.ovReq.push({ cand: m.cand, style: (++styleN % 3 === 0) ? 'pip' : 'cutaway', start, seconds: OV_LEN });
+    });
+    shots.push(v);
+    after.forEach((m, k) => {
+      m.transition = k === 0 ? 'fade' : 'cut';
+      if (after.length > 2) m.seconds = 2;
+      shots.push(m);
+    });
+  }
+}
+
 /**
  * The model's plan made safe and exact: known shots only, lengths that fit the
  * footage, cuts on the beat, words timed to the shots they belong to.
@@ -806,6 +847,19 @@ function finalise(raw, cands, opts, music) {
     const oc = byId.get(String(o && o.id || '').trim());
     if (base && oc) base.ovReq.push({ cand: oc, style: o.style, start: Number(o.start), seconds: Number(o.seconds) });
   }
+  /*
+   * ►► THE OPERATOR'S ORDER. ◄◄
+   * Asked to keep their order, the shots follow the order the files were put
+   * in (within one file, its moments in time order), whatever the director
+   * did. Keeping everything, each photo then goes on the video it was placed
+   * after (see spreadPhotos).
+   */
+  if (opts.keepOrder) {
+    const ord = (c) => (Number.isFinite(c.order) ? c.order : 1e6);
+    shots.forEach((sh, k) => { sh._k = k; });
+    shots.sort((a, b) => ord(a.cand) - ord(b.cand) || (a.cand.peak || 0) - (b.cand.peak || 0) || a._k - b._k);
+    shots.forEach((sh) => { delete sh._k; });
+  }
   // no more pictures on a shot than it can carry, one at a time with the clip
   // between them (keeping everything, the ones that do not fit stand on their own)
   for (const sh of shots) {
@@ -821,7 +875,11 @@ function finalise(raw, cands, opts, music) {
       shots.push({ cand: c, seconds: c.kind === 'video' ? Math.max(0.4, c.fileDur - 0.05) : 3,
         effect: c.kind === 'image' ? 'slow_zoom' : 'cut', focus: 'center', slow: false, transition: 'fade', ovReq: [] });
     }
-    spreadPhotos(shots);
+    if (opts.keepOrder) {
+      const ord = (c) => (Number.isFinite(c.order) ? c.order : 1e6);
+      shots.sort((a, b) => ord(a.cand) - ord(b.cand));
+      keepOrderPhotos(shots);
+    } else spreadPhotos(shots);
   }
   if (!shots.length) throw new Error('The montage plan had no usable shots.');
   if (shots[0]) shots[0].transition = 'cut';
@@ -1171,7 +1229,7 @@ async function render(ctx, plan, { aspect, keepAudio, output, tmp, onProgress })
  * The whole job. `stage(name)` says what is happening (for the phone), and
  * `onProgress(pct)` how far through the whole thing it is.
  */
-async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, full, aspect, brief, keepAudio, output, onProgress, stage, log }) {
+async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, full, aspect, brief, keepAudio, keepOrder, output, onProgress, stage, log }) {
   const files = (mediaPaths || []).filter((p) => p && fs.existsSync(p)).slice(0, 60);
   if (!files.length) throw new Error('Add some videos or pictures first.');
   const opts = {
@@ -1180,6 +1238,7 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, ful
     lengthSec: clamp(Number(lengthSec) || 30, 8, 600), // up to ten minutes
     aspect: ASPECTS[aspect] ? aspect : '9:16',
     brief: cleanBrief(brief),
+    keepOrder: !!keepOrder,
   };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mw-montage-'));
   const part = (a, b) => (p) => onProgress && onProgress(Math.round(a + (b - a) * (p / 100)));
@@ -1188,6 +1247,9 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, ful
     // a longer edit needs more moments to choose from (still within what one look can take)
     const budget = clamp(Math.round(opts.lengthSec / 2.5), 44, 90);
     const cands = await analyze(ctx, getInfo, files, { tmp, onProgress: part(0, 35), full: opts.full, budget });
+    cands.forEach((c) => { c.order = files.indexOf(c.file); });
+    // keeping their order, the director is shown the files in that order too
+    if (opts.keepOrder) cands.sort((a, b) => a.order - b.order || (a.start || 0) - (b.start || 0));
     let music = null;
     if (musicPath && fs.existsSync(musicPath)) {
       if (stage) stage('🎵 Finding the beat of your song…');
@@ -1204,6 +1266,7 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, ful
       output,
       duration: plan.duration,
       aspect: opts.aspect,
+      style: opts.style,
       director: d.director,
       model: d.model,
       concept: plan.concept,

@@ -1213,7 +1213,12 @@ async function authedRoutes(req, res, url, p, me) {
  */
 function receiveUpload(req, res, url) {
   const raw = url.searchParams.get('name') || 'upload.mp4';
-  const cleaned = path.basename(raw).replace(/[^\w.\- ()]+/g, '_').slice(0, 80) || 'upload.mp4';
+  // Long names are shortened from the MIDDLE of the name, never the end: a
+  // file called "AQPvBr-7yrv4JQ…(120 characters)….mp4" lost its ".mp4" to the
+  // cut and was refused as "not a video".
+  const base0 = path.basename(raw).replace(/[^\w.\- ()]+/g, '_');
+  const ext0 = path.extname(base0).slice(0, 10);
+  const cleaned = ((base0.slice(0, base0.length - ext0.length).slice(0, 70) || 'upload') + ext0) || 'upload.mp4';
   const ext = path.extname(cleaned).toLowerCase();
   if (!VIDEO_EXT.has(ext) && !AUDIO_EXT.has(ext) && !MEDIA_EXT.has(ext)) {
     return json(res, 400, { error: 'Only video, audio and picture files can be sent.' });
