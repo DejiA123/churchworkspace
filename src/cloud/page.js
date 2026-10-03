@@ -184,7 +184,7 @@ function build(opts = {}) {
   <meta name="apple-mobile-web-app-title" content="Video Studio" />
   <meta name="format-detection" content="telephone=no" />
   <link rel="manifest" href="/manifest.webmanifest" />
-  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png?v=${key}" />
   <link rel="icon" href="/icons/icon-192.png" />
   <title>Video Studio — Church Work Space</title>
 ${styles}

@@ -89,7 +89,7 @@ const sdBox = (px, py, cx, cy, hw, hh) => {
 };
 const sdRoundRect = (px, py, cx, cy, hw, hh, r) => sdBox(px, py, cx, cy, hw - r, hh - r) - r;
 
-/** Signed distance to a triangle: the largest of its three edge half-planes. */
+/** Signed distance to a triangle: the largest of its three edge half-planes. (No longer drawn; kept for the tests.) */
 function sdTriangle(px, py, a, b, c) {
   const edge = (p, q) => {
     const ex = q[0] - p[0], ey = q[1] - p[1];
@@ -101,19 +101,32 @@ function sdTriangle(px, py, a, b, c) {
   return d;
 }
 
-/**
- * Draw the icon: a cross, and under it the play triangle that says this is the
- * video side of the app, on the app's own blue-into-warm gradient.
+/*
+ * THE MARK: a white cross on an indigo square — the church's own, taken from
+ * the woven badge it sent (measured off the photograph: the cross runs from 17%
+ * to 82% of the square's height, its arm sits just above the middle at 37–52%
+ * and spans 31–71% of the width, and both bars are about 13% thick). Redrawn
+ * clean rather than traced, so it stays sharp at every size a phone asks for.
  */
-function draw(size, { maskable } = {}) {
+const INDIGO_TOP = [86, 88, 214];
+const INDIGO_BOT = [70, 72, 190];
+const CROSS = { bar: 0.13, top: 0.17, bottom: 0.82, armY: 0.445, armLeft: 0.30, armRight: 0.70, round: 0.012 };
+
+/**
+ * Draw the icon.
+ *   shape 'rounded' — its own rounded corners, transparent outside (the
+ *                     manifest's plain icon, for launchers that use it as is);
+ *   shape 'square'  — opaque edge to edge: what an iPhone wants for its home
+ *                     screen, where iOS cuts the corners itself (transparent
+ *                     corners turn black there);
+ *   shape 'maskable'— colour to the edges and the cross inside Android's safe
+ *                     circle, because the launcher crops to its own shape.
+ */
+function draw(size, { maskable, shape } = {}) {
+  const kind = shape || (maskable ? 'maskable' : 'rounded');
   const rgba = Buffer.alloc(size * size * 4);
   const c = size / 2;
-  // A maskable icon is cropped by the launcher, so the art lives in the middle
-  // 64% and the colour runs all the way to the edge. A square one keeps its own
-  // rounded corners instead, because iOS will not add them.
-  const pad = maskable ? size * 0.18 : size * 0.055;
-  const inner = size - pad * 2;
-  const radius = maskable ? 0 : size * 0.225;
+  const radius = size * 0.2237;
 
   const put = (x, y, rr, gg, bb, aa) => {
     if (aa <= 0) return;
@@ -127,44 +140,38 @@ function draw(size, { maskable } = {}) {
     rgba[i + 3] = Math.round(out * 255);
   };
 
+  // the indigo field, a breath lighter at the top
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const px = x + 0.5, py = y + 0.5;
-      const d = maskable ? -1 : sdRoundRect(px, py, c, c, c, c, radius);
+      const d = kind === 'rounded' ? sdRoundRect(px, py, c, c, c, c, radius) : -1;
       const a = clamp01(0.5 - d);
       if (a <= 0) continue;
-      const t = clamp01((px / size) * 0.55 + (py / size) * 0.45);
-      put(x, y, Math.round(lerp(79, 255, t)), Math.round(lerp(124, 122, t)), Math.round(lerp(255, 89, t)), a);
+      const t = py / size;
+      put(x, y, Math.round(lerp(INDIGO_TOP[0], INDIGO_BOT[0], t)), Math.round(lerp(INDIGO_TOP[1], INDIGO_BOT[1], t)),
+        Math.round(lerp(INDIGO_TOP[2], INDIGO_BOT[2], t)), a);
     }
   }
 
-  // The cross: an upright arm and a shorter cross-arm, both in the top two
-  // thirds so the play mark has somewhere to sit.
-  const armW = inner * 0.16;
-  const vTop = pad + inner * 0.08, vBot = pad + inner * 0.68;
-  const hTop = pad + inner * 0.26;
-  const hHalf = inner * 0.235;
-  const vcy = (vTop + vBot) / 2, vhh = (vBot - vTop) / 2;
-  const hcy = hTop + armW / 2;
-
-  // Play triangle, pointing right, under the cross.
-  const tTop = pad + inner * 0.745, tBot = pad + inner * 0.945;
-  const tL = c - inner * 0.085, tR = c + inner * 0.135;
-  const tri = [[tL, tTop], [tR, (tTop + tBot) / 2], [tL, tBot]];
-
+  // the cross, scaled into the safe circle on a maskable icon
+  const k = kind === 'maskable' ? 0.78 : 1;
+  const midY = (CROSS.top + CROSS.bottom) / 2;
+  const at = (v, mid) => (mid + (v - mid) * k) * size;
+  const bar = CROSS.bar * k * size, r = CROSS.round * k * size;
+  const vTop = at(CROSS.top, midY), vBot = at(CROSS.bottom, midY);
+  const armY = at(CROSS.armY, midY);
+  const armL = at(CROSS.armLeft, 0.5), armR = at(CROSS.armRight, 0.5);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const px = x + 0.5, py = y + 0.5;
       const d = Math.min(
-        sdBox(px, py, c, vcy, armW / 2, vhh),
-        sdBox(px, py, c, hcy, hHalf, armW / 2),
-        sdTriangle(px, py, tri[0], tri[1], tri[2]),
+        sdRoundRect(px, py, c, (vTop + vBot) / 2, bar / 2, (vBot - vTop) / 2, r),
+        sdRoundRect(px, py, (armL + armR) / 2, armY, (armR - armL) / 2, bar / 2, r),
       );
       const a = clamp01(0.5 - d);
       if (a > 0) put(x, y, 255, 255, 255, a);
     }
   }
-
   return rgba;
 }
 
@@ -182,6 +189,8 @@ function main() {
     ['icon-192.png', write('icon-192.png', 192, {})],
     ['icon-512.png', write('icon-512.png', 512, {})],
     ['icon-maskable-512.png', write('icon-maskable-512.png', 512, { maskable: true })],
+    // the iPhone home screen: 180 x 180, opaque, iOS rounds it
+    ['apple-touch-icon.png', write('apple-touch-icon.png', 180, { shape: 'square' })],
   ];
   for (const [n, b] of made) console.log(`  ${n}  ${(b / 1024).toFixed(1)} KB`);
   console.log('Cloud Studio icons written to ' + OUT);
