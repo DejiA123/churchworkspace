@@ -5512,6 +5512,10 @@
     const u = $('#veUndo'), r = $('#veRedo');
     if (u) u.disabled = ve.history.length === 0;
     if (r) r.disabled = ve.future.length === 0;
+    // …and the captions window's own pair, for a phone that has no Ctrl+Z
+    const cu = $('#capUndo'), cr = $('#capRedo');
+    if (cu) cu.disabled = ve.history.length === 0;
+    if (cr) cr.disabled = ve.future.length === 0;
   }
 
   /* ---------------- segments ---------------- */
@@ -8854,8 +8858,10 @@
     // Case dropdown rebuilds from those. A corrected line that kept its old
     // origText would put the wrong word straight back the moment somebody
     // picked ALL CAPS, so a corrected line loses it and is re-cased from itself.
-    ve.capEvents = r.lines.map((l, i) => (l !== evs[i] && l.origText != null
-      ? Object.assign({}, l, { origText: undefined }) : l));
+    ve.capEvents = r.lines.map((l, i) => (l !== evs[i]
+      ? Object.assign({}, l, l.origText != null ? { origText: undefined } : {},
+        evs[i] && l.text !== evs[i].text ? { _was: evs[i]._was != null ? evs[i]._was : evs[i].text } : {})
+      : l));
     if (rw.count) ve.capWords = rw.words;
     // The values are written into the rows that are already there rather than
     // the list being rebuilt. This sweep is triggered BY a commit, and a commit
@@ -8983,7 +8989,7 @@
     }
     const what = wbSummarise(r.changes);
     setCapFixNote(`📕 Fixed ${r.count} word${r.count === 1 ? '' : 's'} on ${r.lines} line${r.lines === 1 ? '' : 's'}: ${what}`, true);
-    window.__toast && window.__toast(`📕 Fixed ${r.count} word${r.count === 1 ? '' : 's'} on ${r.lines} line${r.lines === 1 ? '' : 's'} — ${what}. Ctrl+Z puts them back.`, 'good', 6000);
+    window.__toast && window.__toast(`📕 Fixed ${r.count} word${r.count === 1 ? '' : 's'} on ${r.lines} line${r.lines === 1 ? '' : 's'} — ${what}. ↶ Undo puts them back.`, 'good', 6000);
   }
 
   /** "Ephesians ×3, Adeboye" — the words, not the numbers. */
@@ -9751,7 +9757,14 @@
       + `<div class="cap-hl" aria-hidden="true"></div></div>`
       + `<button type="button" class="cap-g-badge hidden" data-g-i="${i}"></button>`
       + `<button type="button" class="cap-ai-line" data-ai-i="${i}" title="✨ Ask the AI to proof-read just this line">✨</button>`
+      // A line a fix changed says so, and what it said before, with its own way back.
+      + (c._was != null && c._was !== c.text
+        ? `<div class="cap-was"><span class="cap-was-tx">✍ Fixed — was “${escape2(c._was)}”</span>`
+          + `<button type="button" class="cap-was-back" data-was-i="${i}" title="Put this line back to what it said before">↶ Put back</button></div>`
+        : '')
       + `</div>`).join('');
+    list.querySelectorAll('.cap-was-back').forEach((b) => b.addEventListener('click', () => putLineBack(+b.dataset.wasI)));
+    list.querySelectorAll('.cap-was').forEach((w) => w.closest('.cap-row').classList.add('fixed'));
     list.scrollTop = keepScroll;
     list.querySelectorAll('.cap-text').forEach((inp) => {
       const commit = () => {
@@ -9760,6 +9773,7 @@
         if (!e || e.text === inp.value) return;
         const before = e.text;
         e.text = inp.value;
+        if (e._was != null && e._was === e.text) { delete e._was; renderCapList(); }
         renderCapTrack(); renderClipList();
         updateCapOverlay(ve.refs.player.currentTime || 0);
         // The whole point: this correction is now also made everywhere else in
@@ -9865,8 +9879,22 @@
   }
 
   /** Leaving the window always drops the scope, or the next opener inherits it. */
+  /** One line back to what it said before its fixes — one undo step of its own. */
+  function putLineBack(i) {
+    const e = (ve.capEvents || [])[i];
+    if (!e || e._was == null) return;
+    pushHistory({ captions: true });
+    const was = e._was;
+    ve.capEvents[i] = Object.assign({}, e, { text: was });
+    delete ve.capEvents[i]._was;
+    syncCapWordsFor(e, e.text, was);
+    afterGrammarChange();
+    window.__toast && window.__toast(`↶ Put back: “${was}”`, 'good', 3500);
+  }
   function closeCapModal() {
     commitCapEdit();
+    // The "fixed — was …" marks are for this sitting; the next one starts clean.
+    (ve.capEvents || []).forEach((e) => { if (e && e._was != null) delete e._was; });
     ve.capScope = null;
     capPlayerClose();
     document.getElementById('capModal').classList.add('hidden');
@@ -10352,7 +10380,7 @@
     b.classList.toggle('has', !!n);
     b.dataset.count = String(n);
     b.title = n
-      ? `Fix all ${n} underlined mistake${n === 1 ? '' : 's'} on ${lines} line${lines === 1 ? '' : 's'} in one go. Ctrl+Z puts them all back.`
+      ? `Fix all ${n} underlined mistake${n === 1 ? '' : 's'} on ${lines} line${lines === 1 ? '' : 's'} in one go. ↶ Undo puts them all back.`
       : 'Nothing is underlined in these lines. ✨ AI check reads them for misheard words too.';
   }
 
@@ -10423,7 +10451,9 @@
     }
     // A corrected line loses its arrival text, or the Case dropdown would
     // rebuild it from the old words (same rule as the Word Book's sweep).
-    evs[i] = Object.assign({}, e, { text: t, origText: undefined });
+    // `_was` keeps what the line said before the FIRST fix, so the window can
+    // show which lines were changed, from what, and put one back on its own.
+    evs[i] = Object.assign({}, e, { text: t, origText: undefined, _was: e._was != null ? e._was : e.text });
     syncCapWordsFor(e, e.text, t);
     gram().ai.delete(lineKey(e));
     return true;
@@ -10507,8 +10537,8 @@
     gram().open.clear();
     afterGrammarChange();
     const n = plan.length;
-    setCapFixNote(`✍ Fixed ${n} line${n === 1 ? '' : 's'}${removed ? ` (${removed} repeated word${removed === 1 ? '' : 's'} removed)` : ''} — Ctrl+Z puts them back`, true);
-    window.__toast && window.__toast(`✍ Fixed ${n} line${n === 1 ? '' : 's'}. Ctrl+Z puts them all back.`, 'good', 5000);
+    setCapFixNote(`✍ Fixed ${n} line${n === 1 ? '' : 's'}${removed ? ` (${removed} repeated word${removed === 1 ? '' : 's'} removed)` : ''} — ↶ Undo puts them back`, true);
+    window.__toast && window.__toast(`✍ Fixed ${n} line${n === 1 ? '' : 's'} — marked below. ↶ Undo puts them all back.`, 'good', 5000);
     return n;
   }
 
@@ -12286,6 +12316,9 @@
     const wbOnBox = $('#capWbOn'); if (wbOnBox) wbOnBox.addEventListener('change', () => wbSetOption({ enabled: wbOnBox.checked }));
     const wbSoundBox = $('#capWbSound'); if (wbSoundBox) wbSoundBox.addEventListener('change', () => wbSetOption({ soundAlike: wbSoundBox.checked }));
     $('#capClose').addEventListener('click', closeCapModal);
+    { const cu = $('#capUndo'), cr = $('#capRedo');
+      if (cu) cu.addEventListener('click', () => { commitCapEdit(); undoVideo(); });
+      if (cr) cr.addEventListener('click', () => { commitCapEdit(); redoVideo(); }); }
     $('#capCancel').addEventListener('click', closeCapModal);
     $('#capBurn').addEventListener('click', burnCaps);
     wireCapPlayerAndGrammar();

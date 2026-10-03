@@ -2264,3 +2264,15 @@ button.cap-model-pick .cap-model-name { align-items: flex-start; text-align: lef
 .ve-key-modal.keyoff .ve-key-swatches, .ve-key-modal.keyoff .ve-kf-row { opacity: .45; }
 .ve-media-key { position: absolute; pointer-events: none; }
 .ve-media-el.ve-media-key { box-shadow: none; border-radius: 0; }
+
+/* ---- a line a fix changed: marked, with what it said and its own way back ---- */
+#capModal .cap-row.fixed { background: rgba(139, 92, 246, .10); box-shadow: inset 3px 0 0 #8b5cf6; }
+#capModal .cap-row.fixed .cap-text { border-color: rgba(139, 92, 246, .55); }
+.cap-was { flex: 1 1 100%; display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0 0 4px 72px; font-size: 11.5px; }
+.cap-was-tx { flex: 1 1 auto; min-width: 0; color: #c4b5fd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cap-was-back { flex: 0 0 auto; width: auto; margin: 0; padding: 3px 10px; font-size: 11.5px; border-radius: 999px; cursor: pointer;
+  background: transparent; color: #ddd6fe; border: 1px solid rgba(139, 92, 246, .6); white-space: nowrap; }
+.cap-was-back:hover { background: rgba(139, 92, 246, .18); }
+#capModal .cap-head .cap-undo { margin-left: auto; margin-right: 2px; font-size: 18px; }
+#capModal .cap-head .cap-undo + .cap-undo { margin-left: 0; }
+#capModal .cap-head .cap-undo:disabled { opacity: .35; cursor: default; }
