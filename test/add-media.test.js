@@ -432,6 +432,25 @@ app.whenReady().then(async () => {
    * with adding media. What matters is that nothing NEW appeared once the files
    * went on the timeline, so the boot snapshot is subtracted.
    */
+  console.log('\n[8b] A clip added AFTER the video plays on, past its end');
+  const tail = await js(win, `
+    const T = window.VideoEditor.__test;
+    T.seekTo(T.videoDuration());                       // the playhead parked at the very end
+    await T.addAfter([${J(CAM2)}]);
+    const st = T.tailState();
+    const label = document.getElementById('veTime').textContent;
+    T.seekTo(st.dur + 1.5);                            // tap the timeline inside the added clip
+    const inTail = T.tailState();
+    T.seekTo(1);                                       // and back inside the recording
+    const back = T.tailState();
+    return { st, label, inTail, back, ct: document.querySelector('#veDrop video').currentTime };`);
+  const lastTail = tail.st.tail[tail.st.tail.length - 1];
+  log(lastTail && Math.abs(lastTail.at - tail.st.mainEnd) < 0.05 || (lastTail && lastTail.at >= tail.st.mainEnd - 0.05), 'it starts where the video ends (not on top of a moment already over)', lastTail && `${lastTail.at.toFixed(2)} of ${tail.st.mainEnd.toFixed(2)}`);
+  log(tail.st.playEnd > tail.st.dur + 1, 'the timeline now runs on to the end of it', `${tail.st.playEnd.toFixed(1)}s for a ${tail.st.dur.toFixed(1)}s video — ${tail.label}`);
+  log(lastTail && lastTail.pipW > 0.99 || (lastTail && lastTail.pipY === 0), 'it fills the frame like a main clip', lastTail && `${lastTail.pipX},${lastTail.pipY} w${lastTail.pipW}`);
+  log(tail.inTail.tailT != null && Math.abs(tail.inTail.tailT - (tail.st.dur + 1.5)) < 0.05, 'the playhead can go into it', String(tail.inTail.tailT));
+  log(tail.back.tailT == null && Math.abs(tail.ct - 1) < 0.2, 'and back into the recording, which plays again', String(tail.ct));
+
   console.log('\n[9] Nothing broke along the way');
   const noise = /Autofill|DevTools|Electron Security|source-map|Failed to load resource|No handler registered/i;
   const boot = new Set(errorsAtBoot);

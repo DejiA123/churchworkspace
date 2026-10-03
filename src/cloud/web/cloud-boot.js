@@ -2361,7 +2361,12 @@ let _hideTimer = null;
         add.className = 'cloud-tl-add';
         add.setAttribute('aria-label', 'Add a video or picture');
         add.innerHTML = mi('plus');
-        add.addEventListener('click', () => { const t = $('#veAddMedia'); if (t && !t.disabled) t.click(); });
+        // the ＋ at the END of the row adds the NEXT clip — after the video, as CapCut's does
+        add.addEventListener('click', () => {
+          const E = window.VideoEditor;
+          if (E && E.pickMediaAfter) return E.pickMediaAfter();
+          const t = $('#veAddMedia'); if (t && !t.disabled) t.click();
+        });
         mirror(add, $('#veAddMedia'), {});
         scroller.appendChild(add);
         /*
