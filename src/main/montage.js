@@ -403,6 +403,47 @@ function describe(c) {
   return `${c.id}: VIDEO "${c.name}" moment at ${c.start}s–${c.end}s of ${c.fileDur}s, up to ${len}s usable, loudness ${c.loud}, action ${c.energy}${c.hasAudio ? '' : ', silent'}`;
 }
 
+/* ------------------------------------------------- the operator's own words */
+
+/*
+ * "What's it about?" is the STORY of the montage, so it is honoured however
+ * the edit is directed: the AI is told to build the hook, the words on screen,
+ * the title, the caption and the hashtags from it; without AI it becomes them;
+ * and anything the AI left empty is filled from it. Names, places and dates are
+ * kept exactly as the operator wrote them.
+ */
+const STOP = new Set(('the a an and or but of to in on at for with from by is are was were be been this that these those it its our your my their his her we you they i me us them '
+  + 'about into over after before during three two one four five days day night week weekend time all some more most very just so then than as up out').split(' '));
+
+function cleanBrief(b) {
+  return String(b == null ? '' : b).replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500);
+}
+const words = (t) => String(t).split(' ').filter(Boolean);
+const tidy = (t) => String(t).replace(/^[\s,;:.!?\-–—"'“”]+|[\s,;:\-–—"'“”]+$/g, '').trim();
+
+/** The operator's words → a hook, story beats, a caption and hashtags. */
+function fromBrief(brief) {
+  const b = cleanBrief(brief);
+  if (!b) return null;
+  // clauses: sentences, dashes, colons and semicolons, then commas
+  const clauses = b.split(/(?:[.!?;:]+\s+|\s+[—–-]\s+|\s*[—–]\s*|\n)/).map(tidy).filter(Boolean);
+  let first = clauses[0] || b;
+  if (words(first).length < 2 && clauses[1]) first = first + ' ' + clauses[1];
+  const hook = tidy(words(first).slice(0, 7).join(' '));
+  const rest = clauses.slice(words(clauses[0] || '').length >= 2 ? 1 : 2).join(', ');
+  const beats = rest.split(/\s*,\s*|\s+and\s+(?=\w+\s+\w+)/).map(tidy).filter((x) => words(x).length >= 1)
+    .map((x) => tidy(words(x).slice(0, 6).join(' '))).slice(0, 3);
+  const caption = b.charAt(0).toUpperCase() + b.slice(1);
+  const tags = [];
+  for (const w of words(b.toLowerCase().replace(/[^\p{L}\p{N}\s#]/gu, ' '))) {
+    const t = w.replace(/^#/, '');
+    if (t.length >= 4 && !STOP.has(t) && !/^\d+$/.test(t) && !tags.includes(t)) tags.push(t);
+    if (tags.length >= 4) break;
+  }
+  for (const t of ['church', 'faith']) if (!tags.includes(t)) tags.push(t);
+  return { text: b, hook, beats, caption: caption.length > 300 ? caption.slice(0, 297).replace(/\s+\S*$/, '') + '…' : caption, hashtags: tags };
+}
+
 function briefOf(opts, music) {
   const lines = [
     `Style: ${opts.style} — ${STYLES[opts.style] || STYLES.hype}`,
@@ -411,7 +452,10 @@ function briefOf(opts, music) {
       : `Target length: about ${opts.lengthSec} seconds${opts.lengthSec >= 90 ? ' (a longer piece: build it in movements — a hook, then sections that each rise and land; strong moments may return)' : ''}. Frame: ${opts.aspect}.`,
     music ? `Music: the operator's own song, ${music.bpm} BPM (one beat = ${music.interval}s). Shot lengths should be whole numbers of beats.` : 'No music chosen: the clips\' own sound plays.',
   ];
-  if (opts.brief) lines.push(`What the operator says it is about: "${String(opts.brief).slice(0, 500)}"`);
+  if (opts.brief) {
+    lines.push(`WHAT IT IS ABOUT, in the operator's own words: "${cleanBrief(opts.brief)}"`);
+    lines.push('This is the story of the edit. Choose and order the shots to tell it. The hook, every word on screen, the title, the post caption and the hashtags must be about THIS — use its names, places, dates and numbers exactly as written, and never invent details it does not give.');
+  }
   return lines.join('\n');
 }
 
@@ -483,7 +527,8 @@ function rulesOverlays(shots, cands) {
 
 /** No AI at all: strongest first, the rest in an alternating, varied order. */
 function directByRules(cands, opts, music) {
-  const hook0 = String(opts.brief || '').replace(/\s+/g, ' ').trim().split(' ').slice(0, 7).join(' ');
+  const fb = fromBrief(opts.brief);
+  const hook0 = fb ? fb.hook : '';
   if (opts.full) {
     // everything, strongest first, photos spread between the videos, a fade
     // wherever it moves from one file to the next kind of thing
@@ -500,7 +545,8 @@ function directByRules(cands, opts, music) {
       transition: i === 0 ? 'cut' : (order[i - 1].kind !== c.kind ? 'fade' : (i % 3 === 0 ? 'flash' : 'cut')),
     }));
     return { plan: { concept: 'Everything kept, blended into one piece.', title: hook0 || 'Highlights', shots,
-      texts: hook0 ? [{ at_shot: 0, span_shots: 1, text: hook0, role: 'hook' }] : [], overlays: rulesOverlays(shots, cands), post_caption: '', hashtags: [] }, director: 'rules', model: '' };
+      texts: briefTexts(fb, shots.length), overlays: rulesOverlays(shots, cands),
+      post_caption: fb ? fb.caption : '', hashtags: fb ? fb.hashtags : [] }, director: 'rules', model: '' };
   }
   const pool = cands.slice().sort((a, b) => b.score - a.score);
   const per = music ? music.interval * (music.bpm > 120 ? 2 : 1) * (opts.style === 'worship' || opts.style === 'cinematic' ? 2 : 1) : 2;
@@ -514,12 +560,25 @@ function directByRules(cands, opts, music) {
     shots.push({ id: c.id, seconds: sec, effect: c.kind === 'image' ? (shots.length % 2 ? 'zoom_out' : 'slow_zoom') : fx[shots.length % fx.length], focus: 'center' });
     total += sec;
   }
-  // the operator's own words, if they gave any, open it
-  const hook = String(opts.brief || '').replace(/\s+/g, ' ').trim().split(' ').slice(0, 7).join(' ');
-  return { plan: { concept: 'Strongest moments first, cut to the rhythm.', title: hook || 'Highlights', shots,
-    texts: hook ? [{ at_shot: 0, span_shots: Math.min(2, shots.length), text: hook, role: 'hook' }] : [],
+  // the operator's own words open it, carry it and caption it
+  return { plan: { concept: 'Strongest moments first, cut to the rhythm.', title: hook0 || 'Highlights', shots,
+    texts: briefTexts(fb, shots.length),
     overlays: rulesOverlays(shots, cands),
-    post_caption: '', hashtags: [] }, director: 'rules', model: '' };
+    post_caption: fb ? fb.caption : '', hashtags: fb ? fb.hashtags : [] }, director: 'rules', model: '' };
+}
+
+/** The brief's hook on the first shots and its beats spread through the rest. */
+function briefTexts(fb, n) {
+  if (!fb || !n) return [];
+  const out = [{ at_shot: 0, span_shots: Math.min(2, n), text: fb.hook, role: 'hook' }];
+  const free = n - 2;
+  fb.beats.forEach((t, k) => {
+    if (free < 1) return;
+    const at = Math.min(n - 1, 2 + Math.floor(((k + 0.5) * free) / Math.max(1, fb.beats.length)));
+    if (out.some((x) => x.at_shot === at)) return;
+    out.push({ at_shot: at, span_shots: 1, text: t, role: 'beat' });
+  });
+  return out;
 }
 
 async function direct(cands, opts, music, log) {
@@ -650,11 +709,20 @@ function finalise(raw, cands, opts, music) {
     const end = round2(Math.min(duration, Math.max(last.at + last.seconds, start + 1.2)));
     texts.push({ start, end, text, role: ['hook', 'beat', 'cta'].includes(x.role) ? x.role : 'beat' });
   }
-  const tags = (Array.isArray(raw.hashtags) ? raw.hashtags : []).map((h) => String(h).replace(/^#+/, '').replace(/\s+/g, '')).filter(Boolean).slice(0, 10);
+  let tags = (Array.isArray(raw.hashtags) ? raw.hashtags : []).map((h) => String(h).replace(/^#+/, '').replace(/\s+/g, '')).filter(Boolean).slice(0, 10);
+  // whatever the director left empty, the operator's own words fill
+  const fb = fromBrief(opts.brief);
+  if (fb) {
+    if (!texts.some((x) => x.role === 'hook') && fb.hook) {
+      const first = shots[0];
+      texts.unshift({ start: 0, end: round2(Math.min(duration, Math.max(first.seconds, 2.5))), text: fb.hook, role: 'hook' });
+    }
+    if (!tags.length) tags = fb.hashtags.slice();
+  }
   return {
     concept: String(raw.concept || '').slice(0, 300),
-    title: String(raw.title || '').slice(0, 100),
-    postCaption: String(raw.post_caption || '').slice(0, 600),
+    title: String(raw.title || (fb && fb.hook) || '').slice(0, 100),
+    postCaption: String(raw.post_caption || (fb && fb.caption) || '').slice(0, 600),
     hashtags: tags,
     shots, texts, duration,
   };
@@ -795,7 +863,7 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, ful
     full: !!full || lengthSec === 'all' || Number(lengthSec) === 0,
     lengthSec: clamp(Number(lengthSec) || 30, 8, 600), // up to ten minutes
     aspect: ASPECTS[aspect] ? aspect : '9:16',
-    brief: brief ? String(brief).slice(0, 500) : '',
+    brief: cleanBrief(brief),
   };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mw-montage-'));
   const part = (a, b) => (p) => onProgress && onProgress(Math.round(a + (b - a) * (p / 100)));
@@ -844,4 +912,4 @@ function directorStatus() {
   return { director: 'rules', model: '' };
 }
 
-module.exports = { make, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };
+module.exports = { fromBrief, cleanBrief, make, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };
