@@ -248,7 +248,11 @@ is the single best thing to give a small server.
 * **📁 Files** opens what is on the studio machine: finished exports, anything
   sent from a phone, and the Videos folder. **⬆ Send a video from this phone**
   uploads from the handset, in slices, and **picks up where it left off** if the
-  signal drops.
+  signal drops. The bin on a finished export or an upload **deletes** it (a
+  second tap to be sure; **Select** deletes several at once), and the sheet says
+  how much room is left. The Videos folder is never deleted from a phone, nor a
+  video a planned post still needs, nor the one open in the studio. An upload
+  abandoned half-way is swept away after two days.
 * **⬇ Saved** is everything finished in this session. Tap one to pull it onto
   the phone's camera roll or files.
 * **Dragging.** Clips, trim handles, caption blocks, text boxes and the crop

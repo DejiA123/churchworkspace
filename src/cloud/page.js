@@ -219,32 +219,38 @@ ${styles}
   </div>
 
   <!-- Files on the studio machine: what you can open, and what you can send. -->
-  <div id="cloudFilesModal" class="cap-modal hidden">
+  <div id="cloudFilesModal" class="cap-modal hidden cloud-sheet-modal">
     <div class="cap-box cloud-files-box">
-      <div class="cap-head">
-        <strong>📁 Your files</strong>
-        <button id="cloudFilesClose" class="ghost-btn small">✕</button>
+      <div class="cloud-files-top">
+        <strong class="cloud-files-title">Your files</strong>
+        <button id="cloudFilesSelect" type="button" class="cloud-files-pill hidden">Select</button>
+        <button id="cloudFilesClose" type="button" class="cloud-files-x" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button>
       </div>
       <div class="cloud-files-bar">
-        <button id="cloudUpload" class="primary-btn small">⬆ Send a video from this phone</button>
-        <button id="cloudFilesRefresh" class="ghost-btn small">↻ Refresh</button>
+        <button id="cloudUpload" type="button" class="primary-btn cloud-files-up"><i class="mi" data-i="upload"></i><span>Send a video from this phone</span></button>
+        <button id="cloudFilesRefresh" type="button" class="cloud-files-icon" aria-label="Refresh" title="Refresh"><i class="mi" data-i="refresh"></i></button>
       </div>
+      <div id="cloudFilesDisk" class="cloud-files-disk hidden"></div>
       <div id="cloudUploadBar" class="cloud-upload-bar hidden">
         <div class="cloud-upload-name"></div>
         <div class="progress"><div class="progress-bar" style="width:0%"></div></div>
-        <button id="cloudUploadCancel" class="ghost-btn small">Stop</button>
+        <button id="cloudUploadCancel" type="button" class="cloud-files-pill">Stop</button>
       </div>
       <div id="cloudFilesList" class="cloud-files-list"></div>
+      <div id="cloudFilesSelBar" class="cloud-files-selbar hidden">
+        <span id="cloudFilesSelInfo" class="cloud-files-selinfo">Tap the videos to delete</span>
+        <button id="cloudFilesSelDelete" type="button" class="cloud-files-del" disabled><i class="mi" data-i="trash"></i><span>Delete</span></button>
+      </div>
     </div>
   </div>
 
   <!-- Finished work. On a phone "the file is in your output folder" is no use;
        this is the way it gets onto the phone itself. -->
-  <div id="cloudDownloadsModal" class="cap-modal hidden">
+  <div id="cloudDownloadsModal" class="cap-modal hidden cloud-sheet-modal">
     <div class="cap-box cloud-files-box">
-      <div class="cap-head">
-        <strong>⬇ Finished in this session</strong>
-        <button id="cloudDownloadsClose" class="ghost-btn small">✕</button>
+      <div class="cloud-files-top">
+        <strong class="cloud-files-title">Finished in this session</strong>
+        <button id="cloudDownloadsClose" type="button" class="cloud-files-x" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button>
       </div>
       <div id="cloudDownloadsList" class="cloud-files-list"></div>
     </div>
