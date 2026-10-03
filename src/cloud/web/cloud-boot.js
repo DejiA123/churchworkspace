@@ -243,6 +243,8 @@ let _hideTimer = null;
     video: {
       info: (input) => call('video:info', { input }),
       thumbnail: (input, timeSec) => call('video:thumbnail', { input, timeSec }),
+      // ✂️ Remove pauses heard by the cloud (the server allowed it; the page never asked)
+      speechPauses: (a) => call('video:speechPauses', a),
       trim: (a) => call('video:trim', a),
       export: (a) => call('video:export', a),
       extractAudio: (a) => call('video:extractAudio', a),
@@ -310,6 +312,11 @@ let _hideTimer = null;
     captions: {
       available: () => call('captions:available'),
       engineInfo: () => call('captions:engineInfo'),
+      // ✨ AI check, and whether the cloud is the one listening. Both were allowed
+      // on the server and missing here, so the phone said "The AI proof-reader is
+      // not available in this build" and labelled Groq's captions as heard on the PC.
+      grammar: (a) => call('captions:grammar', a),
+      cloud: () => call('captions:cloud'),
       transcribe: (a) => call('captions:transcribe', a),
       fonts: () => call('captions:fonts'),
       fontList: () => call('captions:fontList'),
