@@ -1185,6 +1185,9 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
   body.mw-cloud #capModal .cap-text { height: 44px; padding: 0 12px; font-size: 16px; border-radius: 10px; }
   body.mw-cloud #capModal .cap-ai-line { width: 32px; height: 32px; opacity: .65; }
   body.mw-cloud #capModal .cap-sugg { width: calc(100% - 42px); margin: 0 0 4px 42px; }
+  body.mw-cloud #capModal .cap-was { margin: 0 0 4px 42px; font-size: 13px; }
+  body.mw-cloud #capModal .cap-was-back { height: 32px; padding: 0 12px; font-size: 13px; }
+  body.mw-cloud #capModal .cap-head .cap-undo { flex: none; width: 40px; height: 40px; padding: 0; border-radius: 12px; font-size: 20px; }
   /* no lines yet: "Generate captions" is the thing to press, so it is in view
      and as wide as the sheet, not under a paragraph and a big picture */
   body.mw-cloud #capModal .cap-empty-state { flex: none; min-height: 0; justify-content: flex-start; gap: 8px; padding: 6px 4px 4px; }
