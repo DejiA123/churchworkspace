@@ -2038,6 +2038,90 @@ let _hideTimer = null;
   const panelOf = (id) => panels.find((p) => p.id === id) || null;
 
   /*
+   * AN iPHONE THAT GIVES THE APP A SHORT SCREEN.
+   *
+   * Opened from the home screen, iOS can lay the page out on a screen that is
+   * short by exactly the height of the status bar. Everything pinned to the
+   * bottom — the tool dock, the sheets — then sits that far above the bottom
+   * edge, over a black band nothing can be put in. Measured off a church's own
+   * screenshot: an iPhone Pro Max, 932 points tall, laid out on 873 — short by
+   * 59, the status bar's height to the point. iOS still DRAWS that band (it was
+   * the page's own black, not the app's background colour); it just will not lay
+   * anything out in it.
+   *
+   * So the page measures where "the bottom" really landed, and when it is short
+   * by the status bar's height on a home-screen app, lays itself out on the
+   * whole screen instead (html.mw-vpfix in cloud.css). Anything else — Safari
+   * with its toolbars, Android, a desk browser — is left exactly as it was.
+   */
+  const vpFix = {
+    probe: null,
+    on: false,
+    /** How far short the layout is, from what was measured; 0 for "it is not". */
+    judge({ standalone, ios, portrait, screenW, screenH, bottomAt, safeTop }) {
+      if (!standalone || !ios || !screenW || !screenH) return 0;
+      const full = portrait ? Math.max(screenW, screenH) : Math.min(screenW, screenH);
+      const gap = Math.round(full - bottomAt);
+      return gap >= 20 && gap <= 80 && Math.abs(gap - safeTop) <= 8 ? gap : 0;
+    },
+    measure() {
+      if (!this.probe) {
+        // a child of <html>, not <body>: once the fix is on, the body is what
+        // pinned things measure from, and the probe must still see the screen
+        this.probe = document.createElement('div');
+        this.probe.setAttribute('aria-hidden', 'true');
+        this.probe.style.cssText = 'position:fixed;left:0;bottom:0;width:1px;height:env(safe-area-inset-top);'
+          + 'visibility:hidden;pointer-events:none;z-index:-1';
+        document.documentElement.appendChild(this.probe);
+      }
+      const r = this.probe.getBoundingClientRect();
+      return {
+        standalone: navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches,
+        ios: /iP(hone|od|ad)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1),
+        portrait: window.matchMedia('(orientation: portrait)').matches,
+        screenW: window.screen.width,
+        screenH: window.screen.height,
+        bottomAt: r.bottom,
+        safeTop: r.height,
+      };
+    },
+    apply(gap, full) {
+      const on = gap > 0 && full > 0;
+      const root = document.documentElement;
+      root.classList.toggle('mw-vpfix', on);
+      root.style.setProperty('--vp-h', on ? full + 'px' : '100%');
+      cloud.vpGap = on ? gap : 0;
+      if (on !== this.on) {
+        this.on = on;
+        // the studio measures itself off the room it has; it has more now
+        setTimeout(() => { try { if (window.VideoEditor && window.VideoEditor.fit) window.VideoEditor.fit(); } catch (e) {} }, 60);
+      }
+      return on;
+    },
+    /** For the tests: hold a measurement, as a phone with the fault would give it (null lets go). */
+    pin(gap, full) { this.pinned = gap == null ? null : { gap, full }; return this.check(); },
+    check() {
+      if (this.pinned) return this.apply(this.pinned.gap, this.pinned.full);
+      const m = this.measure();
+      const gap = this.judge(m);
+      const full = m.portrait ? Math.max(m.screenW, m.screenH) : Math.min(m.screenW, m.screenH);
+      return this.apply(gap, full);
+    },
+  };
+  cloud.vpFix = vpFix;
+  {
+    let t = null;
+    const recheck = () => { clearTimeout(t); t = setTimeout(() => { try { vpFix.check(); } catch (e) {} }, 120); };
+    try { vpFix.check(); } catch (e) {}
+    // iOS settles the viewport a moment after launch, and again after a turn
+    for (const ms of [400, 1200, 3000]) setTimeout(recheck, ms);
+    window.addEventListener('resize', recheck);
+    window.addEventListener('orientationchange', recheck);
+    window.addEventListener('pageshow', recheck);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) recheck(); });
+  }
+
+  /*
    * The keyboard. A sheet sits on the bottom of the screen, which is exactly
    * where an iPhone's keyboard comes up — over the caption being typed. The
    * visual viewport says how much of the screen the keyboard has taken, and the
@@ -2046,7 +2130,9 @@ let _hideTimer = null;
   if (window.visualViewport) {
     const vv = window.visualViewport;
     const onKb = () => {
-      const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+      // measured from the real bottom of the screen when the page has been
+      // laid out on all of it (see vpFix above)
+      const kb = Math.max(0, Math.round(window.innerHeight + (cloud.vpGap || 0) - vv.height - vv.offsetTop));
       document.documentElement.style.setProperty('--kb', (kb > 90 ? kb : 0) + 'px');
     };
     vv.addEventListener('resize', onKb);
