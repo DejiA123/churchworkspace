@@ -12931,6 +12931,8 @@
     hasVideo() { return !!ve.video; },
     /** The file the studio has open — the Cloud Studio will not delete it from under the edit. */
     sourcePath() { return (ve.video && ve.video.path) || null; },
+    /** Open a file that is already on the machine (the phone's Files viewer). */
+    openPath(p) { return p ? loadVideo(p) : null; },
     /** The edit the Continue card offers is gone (its video was deleted): put the card away. */
     forgetResume() {
       const bar = $('#veResume');

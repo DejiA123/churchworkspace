@@ -844,7 +844,7 @@ let _hideTimer = null;
 
   function fileRow(f, del, picking) {
     return `<div class="cf-row${del ? ' can-del' : ''}${filesUi.chosen.has(f.path) ? ' chosen' : ''}" data-path="${escAttr(f.path)}">`
-      + `<button type="button" class="cf-main" data-act="${picking ? 'open' : 'save'}">`
+      + `<button type="button" class="cf-main" data-act="${picking ? 'open' : 'view'}">`
       + `<span class="cf-check" aria-hidden="true">${CHECK}</span>`
       + `<span class="cf-pic" data-thumb="${escAttr(f.path)}"></span>`
       + `<span class="cf-tx"><b>${escHtml(f.name)}</b><small>${fmtSize(f.size)} · ${escHtml(niceWhen(f.mtime))}</small></span>`
@@ -950,7 +950,9 @@ let _hideTimer = null;
       return;
     }
     if (act === 'open') return finishPick(pickState.multi ? [p] : p);
-    if (act === 'save') return offerDownload(p);
+    // the row itself plays it here; the ⬇ button saves it
+    if (act === 'view') return viewFile(p);
+    if (act === 'save') return offerDownload(p, (findFile(p) || {}).size);
     if (act === 'delete') { closeSure(); row.classList.add('sure'); return; }
     if (act === 'cancel') return closeSure();
     if (act === 'confirm') return deletePaths([p]);
@@ -1156,7 +1158,18 @@ let _hideTimer = null;
     c.classList.toggle('hidden', !cloud.downloads.length);
   }
 
-  function offerDownload(p) {
+  /*
+   * SAVING A FILE TO THE PHONE. A plain download link, in an iPhone home-screen
+   * app, replaced the whole app with a grey "MP4 · Open in…" page that had no
+   * way back. So on a phone a video is handed to the share sheet as a file
+   * (Save Video puts it in Photos), and when that cannot be done — too big to
+   * hold in memory, or no share sheet — it opens in an in-app browser page,
+   * which has its own Done button. The desk keeps the ordinary download.
+   */
+  const SHARE_MAX = 200 * 1024 * 1024;
+  const isStandalone = () => navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+  const onPhone = () => window.matchMedia('(max-width: 900px)').matches;
+  async function offerDownload(p, size) {
     if (!p) return;
     const name = String(p).split(/[\\/]/).pop();
     if (!/\.[A-Za-z0-9]{2,5}$/.test(name)) {
@@ -1166,12 +1179,86 @@ let _hideTimer = null;
     }
     if (!cloud.downloads.some((d) => d.path === p)) cloud.downloads.unshift({ path: p, name, at: Date.now() });
     renderDownloadCount();
+    if (onPhone() && navigator.canShare && (!size || size <= SHARE_MAX)) {
+      const id = 'save-' + name;
+      island({ id, title: 'Getting it ready…', sub: name, spin: true, sticky: true });
+      try {
+        const res = await fetch(downloadUrl(p));
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const blob = await res.blob();
+        const type = blob.type && blob.type !== 'application/octet-stream' ? blob.type : (/\.mov$/i.test(name) ? 'video/quicktime' : 'video/mp4');
+        const file = new File([blob], name, { type });
+        islandHide(id);
+        if (navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; }
+      } catch (e) {
+        islandHide(id);
+        if (e && e.name === 'AbortError') return;          // they closed the share sheet
+      }
+    }
+    if (onPhone() && isStandalone()) { window.open(downloadUrl(p), '_blank'); return; }
     const a = document.createElement('a');
     a.href = downloadUrl(p);
     a.download = name;
     document.body.appendChild(a);
     a.click();
     a.remove();
+  }
+
+  /*
+   * WATCHING A FILE. Tapping a video in Files used to "download" it, which on
+   * an iPhone meant leaving the app. Now it plays here, full screen, with ✕
+   * to come back and what you would want to do next: save it to the phone,
+   * open it in the Video Studio, or post it.
+   */
+  function viewFile(p) {
+    if (!p) return;
+    const name = String(p).split(/[\\/]/).pop();
+    const isVideo = /\.(mp4|mov|m4v|webm|mkv)$/i.test(name);
+    const isPic = /\.(png|jpe?g|webp|gif)$/i.test(name);
+    if (!isVideo && !isPic) return offerDownload(p);
+    const old = document.getElementById('cloudViewer'); if (old) old.remove();
+    const v = document.createElement('div');
+    v.id = 'cloudViewer'; v.className = 'cloud-viewer';
+    v.setAttribute('role', 'dialog'); v.setAttribute('aria-label', name);
+    const social = !!(cloud.hello && cloud.hello.social) && window.MWSocial;
+    v.innerHTML = `<div class="cv-top"><button type="button" class="cv-btn cv-close" data-cv="close" aria-label="Back">${mi('x')}</button>`
+      + `<b class="cv-name">${escHtml(name)}</b></div>`
+      + `<div class="cv-stage">${isVideo
+        ? `<video class="cv-media" src="${escAttr(window.MW_FILE_URL(p))}" controls playsinline autoplay preload="metadata"></video>`
+        : `<img class="cv-media" src="${escAttr(window.MW_FILE_URL(p))}" alt="">`}</div>`
+      + '<div class="cv-acts">'
+      + `<button type="button" class="cv-act" data-cv="save">${mi('download')}<span>Save</span></button>`
+      + (isVideo ? `<button type="button" class="cv-act" data-cv="studio">${mi('film')}<span>Edit</span></button>` : '')
+      + (isVideo && social ? `<button type="button" class="cv-act cv-primary" data-cv="post">${mi('send')}<span>Post</span></button>` : '')
+      + '</div>';
+    document.body.appendChild(v);
+    requestAnimationFrame(() => v.classList.add('on'));
+    const close = () => {
+      const m = v.querySelector('video'); if (m) { try { m.pause(); m.removeAttribute('src'); m.load(); } catch (e) {} }
+      v.classList.remove('on'); setTimeout(() => v.remove(), 220);
+      document.removeEventListener('keydown', onKey);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey);
+    v.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-cv]'); if (!b) return;
+      const act = b.dataset.cv;
+      if (act === 'close') return close();
+      if (act === 'save') return offerDownload(p, (findFile(p) || {}).size);
+      if (act === 'studio') {
+        close();
+        $$('.cap-modal:not(.hidden)').forEach((m) => m.classList.add('hidden'));
+        const fm = $('#cloudFilesModal'); if (fm) fm.classList.add('hidden');
+        if (window.MWSocial) window.MWSocial.go('studio');
+        if (window.VideoEditor && window.VideoEditor.openPath) window.VideoEditor.openPath(p);
+        return;
+      }
+      if (act === 'post') { close(); const fm = $('#cloudFilesModal'); if (fm) fm.classList.add('hidden'); return window.MWSocial.compose({ files: [p] }); }
+    });
+  }
+  function findFile(p) {
+    for (const g of ((filesCache && filesCache.groups) || [])) for (const f of (g.files || [])) if (f.path === p) return f;
+    return null;
   }
 
   function renderDownloads() {
@@ -1183,7 +1270,7 @@ let _hideTimer = null;
       return;
     }
     list.innerHTML = cloud.downloads.map((d) => `<div class="cf-row" data-path="${escAttr(d.path)}">`
-      + `<button type="button" class="cf-main" data-act="save"><span class="cf-pic" data-thumb="${escAttr(d.path)}"></span>`
+      + `<button type="button" class="cf-main" data-act="view"><span class="cf-pic" data-thumb="${escAttr(d.path)}"></span>`
       + `<span class="cf-tx"><b>${escHtml(d.name)}</b><small>Finished ${escHtml(niceWhen(d.at))}</small></span></button>`
       + `<button type="button" class="cf-btn" data-act="save" aria-label="Save to this phone" title="Save to this phone">${mi('download')}</button></div>`).join('');
     watchThumbs(list);
@@ -2527,8 +2614,9 @@ let _hideTimer = null;
     on('#cloudFilesSelect', 'click', () => setSelecting(!filesUi.selecting));
     on('#cloudFilesSelDelete', 'click', onSelDelete);
     on('#cloudDownloadsList', 'click', (e) => {
-      const row = e.target.closest('[data-act="save"]') && e.target.closest('.cf-row');
-      if (row) offerDownload(row.dataset.path);
+      const b = e.target.closest('[data-act]'); const row = b && b.closest('.cf-row');
+      if (!row) return;
+      if (b.dataset.act === 'view') viewFile(row.dataset.path); else offerDownload(row.dataset.path);
     });
     on('#cloudUpload', 'click', async () => {
       const picking = $('#cloudFilesModal').dataset.picking === '1';
@@ -2674,7 +2762,7 @@ let _hideTimer = null;
     call, island, islandHide, toast, toastText, openPanel, closePanel, panelOf,
     offerDownload, pickFiles, chooseFromDevice, refreshFiles, downloadUrl,
     mi, esc: escHtml, escAttr, jobChip: makeJobChip, jobList, jobPct: overallPct, openJobs: openJobsSheet,
-    authHeaders, fileUrl: (p) => window.MW_FILE_URL(p),
+    authHeaders, fileUrl: (p) => window.MW_FILE_URL(p), viewFile,
   });
 
   /* The version this page was built from, off this script's own URL — the page
