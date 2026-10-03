@@ -85,7 +85,20 @@ function capThreads(args) {
     if (out[i] === '-preset' && x264 && /^(medium|slow|slower|veryslow|fast|faster)$/.test(String(out[i + 1]))) out[i + 1] = draft ? 'ultrafast' : 'veryfast';
     else if (draft && out[i] === '-crf' && Number(out[i + 1]) > 0) out[i + 1] = String(Math.max(10, Number(out[i + 1]) - 4));
   }
-  if (x264 && !args.includes('-rc-lookahead') && !args.includes('-x264-params')) out.push('-rc-lookahead', '10');
+  /*
+   * ►► UNDER 1 GB, x264 KEEPS FEWER FRAMES IN HAND. ◄◄
+   * A 1080×1920 encode on its own measured 251 MB on 'veryfast' — the
+   * look-ahead, the macroblock tree and three B-frames each hold full frames.
+   * A montage piece cut from a 4K iPhone clip came to 353 MB with its decoder,
+   * and with the studio beside it a 512 MB server was killed for memory.
+   * Five frames of look-ahead, one B-frame and no macroblock tree: 166 MB for
+   * the same encode, the same CRF (the same look), a somewhat larger file.
+   */
+  const tiny = x264 && machine.memoryMB() < 1024;
+  if (x264 && !args.includes('-rc-lookahead') && !args.includes('-x264-params')) {
+    out.push('-rc-lookahead', tiny ? '5' : '10');
+    if (tiny) { out.push('-mbtree', '0'); if (!args.includes('-bf')) out.push('-bf', '1'); }
+  }
   out.push(args[args.length - 1]);
   return out;
 }

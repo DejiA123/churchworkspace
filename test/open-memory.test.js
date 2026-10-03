@@ -108,6 +108,11 @@ async function peakChildMB(fn) {
   log(at(ffm.capThreads(enc), '-preset') === 'veryfast', 'and only inside that export');
   const hw = ffm.capThreads(['-i', 'a.mp4', '-c:v', 'h264_qsv', '-preset', 'medium', 'o.mp4']);
   log(at(hw, '-preset') === 'medium', 'a hardware encoder is left alone');
+  // under 1 GB x264 holds fewer frames: 251 MB → 166 MB for a 1080×1920 piece
+  log(at(fin, '-rc-lookahead') === '5' && at(fin, '-mbtree') === '0' && at(fin, '-bf') === '1',
+    'under 1 GB x264 keeps fewer frames in hand (look-ahead 5, one B-frame, no mb-tree)');
+  const ownBf = ffm.capThreads(['-i', 'a.mp4', '-c:v', 'libx264', '-bf', '0', 'o.mp4']);
+  log(at(ownBf, '-bf') === '0' && ownBf.filter((x) => x === '-bf').length === 1, 'a command that sets its own B-frames keeps them');
 
   console.log(failed ? '\n❌ open-memory test failed' : '\n✅ open-memory test passed');
   process.exit(failed ? 1 : 0);
