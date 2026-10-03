@@ -1688,12 +1688,28 @@
     updateCropMask(); renderRuler(); renderSegments(); updatePlayhead();
   }
   const fsEl = () => document.fullscreenElement;
-  function isPreviewFull() { return fsEl() === ve.refs.drop; }
+  /*
+   * An iPhone has no full screen for a page's elements (only for a bare video,
+   * which would lose the captions and text), and a home-screen app has none at
+   * all — so ⛶ did nothing there. Where the real thing is missing or refused,
+   * the preview fills the whole window instead (.ve-pfull), with ✕ to come back.
+   */
+  const isPseudoFull = () => document.body.classList.contains('ve-pfull');
+  function isPreviewFull() { return fsEl() === ve.refs.drop || isPseudoFull(); }
+  function setPseudoFull(on) {
+    document.body.classList.toggle('ve-pfull', !!on);
+    onFullscreenChange();
+    // the picture changed size twice over (layout, then the browser bars settling)
+    setTimeout(onFullscreenChange, 250);
+  }
   async function togglePreviewFull() {
-    try {
-      if (isPreviewFull()) await document.exitFullscreen();
-      else if (ve.refs.drop.requestFullscreen) await ve.refs.drop.requestFullscreen();
-    } catch (e) { window.__toast && window.__toast('Full screen isn’t available here.', 'error'); }
+    if (isPseudoFull()) return setPseudoFull(false);
+    if (fsEl() === ve.refs.drop) { try { await document.exitFullscreen(); } catch (e) {} return; }
+    const real = ve.refs.drop.requestFullscreen && document.fullscreenEnabled !== false;
+    if (real) {
+      try { await ve.refs.drop.requestFullscreen(); return; } catch (e) { /* refused: the window instead */ }
+    }
+    setPseudoFull(true);
   }
   /** Fullscreen changes the preview's pixel size, so everything measured off it must be redrawn. */
   function onFullscreenChange() {
@@ -4302,6 +4318,51 @@
     if (ve.textEditing !== o.id) renderTextOverlays();
     renderTextTrack(); updateTextTools();
   }
+  /*
+   * SNAPPING, AS CAPCUT DOES IT. A title dragged by thumb lands a few pixels off
+   * centre every time, and "nearly centred" is the first thing a viewer sees.
+   * While a text box is dragged it clicks to the middle of the frame (across
+   * and down) and to a safe margin at each edge, and a guide line shows which.
+   * Being within SNAP_PX of a line is what catches it; dragging past lets go,
+   * because the snap is worked out from where the finger really is each time.
+   */
+  const TEXT_SNAP_PX = 9, TEXT_SAFE = 0.05;
+  let _textSnapWas = '';
+  function snapTextBox(o, fr, box) {
+    if (!fr || !fr.w || !fr.h) return null;
+    const el = box || (ve.refs.textLayer && ve.refs.textLayer.querySelector(`.ve-text-box[data-id="${o.id}"]`));
+    const bw = el ? el.offsetWidth / fr.w : o.w, bh = el ? el.offsetHeight / fr.h : 0.08;
+    const tx = TEXT_SNAP_PX / fr.w, ty = TEXT_SNAP_PX / fr.h;
+    const hit = { v: null, h: null };
+    // across: centre, then the left / right safe margins (by the box's edge)
+    const xs = [{ at: 0.5, x: 0.5, kind: 'center' },
+      { at: TEXT_SAFE, x: TEXT_SAFE + bw / 2, kind: 'edge' }, { at: 1 - TEXT_SAFE, x: 1 - TEXT_SAFE - bw / 2, kind: 'edge' }];
+    for (const c of xs) if (Math.abs(o.x - c.x) <= tx) { o.x = c.x; hit.v = c; break; }
+    const ys = [{ at: 0.5, y: 0.5, kind: 'center' },
+      { at: TEXT_SAFE, y: TEXT_SAFE + bh / 2, kind: 'edge' }, { at: 1 - TEXT_SAFE, y: 1 - TEXT_SAFE - bh / 2, kind: 'edge' }];
+    for (const c of ys) if (Math.abs(o.y - c.y) <= ty) { o.y = c.y; hit.h = c; break; }
+    const key = (hit.v ? 'v' + hit.v.at : '') + (hit.h ? 'h' + hit.h.at : '');
+    // a small tick in the hand the moment it catches (phones that can)
+    if (key && key !== _textSnapWas) { try { if (navigator.vibrate) navigator.vibrate(8); } catch (e) {} }
+    _textSnapWas = key;
+    return hit.v || hit.h ? hit : null;
+  }
+  /** The guide lines over the frame while a snap holds; null takes them away. */
+  function showTextGuides(hit, fr) {
+    const layer = ve.refs.textLayer; if (!layer || !layer.parentNode) return;
+    let g = layer.parentNode.querySelector('.ve-snap-guides');
+    if (!hit) { if (g) g.remove(); _textSnapWas = ''; return; }
+    if (!g) {
+      g = document.createElement('div');
+      g.className = 've-snap-guides';
+      g.setAttribute('aria-hidden', 'true');
+      layer.parentNode.appendChild(g);
+    }
+    const lines = [];
+    if (hit.v) lines.push(`<i class="ve-snap-v${hit.v.kind === 'center' ? ' c' : ''}" style="left:${(fr.left + hit.v.at * fr.w).toFixed(1)}px;top:${fr.top.toFixed(1)}px;height:${fr.h.toFixed(1)}px"></i>`);
+    if (hit.h) lines.push(`<i class="ve-snap-h${hit.h.kind === 'center' ? ' c' : ''}" style="top:${(fr.top + hit.h.at * fr.h).toFixed(1)}px;left:${fr.left.toFixed(1)}px;width:${fr.w.toFixed(1)}px"></i>`);
+    g.innerHTML = lines.join('');
+  }
   function onTextBoxDown(ev, box) {
     const id = box.dataset.id;
     const o = ve.textOverlays.find((x) => x.id === id); if (!o) return;
@@ -4324,11 +4385,18 @@
       // box height hugs the text, so resizing only changes WIDTH (font size sets height)
       // — measured against the export frame, which is what o.w is a fraction of.
       if (resizing) { o.w = clamp(w0 + ((e.clientX - x0) * 2) / (fr.w || 1), 0.06, 1); }
-      else { o.x = ox0 + dx; o.y = oy0 + dy; clampTextIntoFrame(o); }
+      else {
+        o.x = ox0 + dx; o.y = oy0 + dy;
+        // e.shiftKey (or alt) on the desk: move freely, no snapping
+        const snap = (e.altKey || e.shiftKey) ? null : snapTextBox(o, fr, box);
+        clampTextIntoFrame(o);
+        showTextGuides(snap, fr);
+      }
       renderTextOverlays();
     };
     const up = () => {
       document.removeEventListener('mousemove', move);
+      showTextGuides(null);
       if (moved) commitDragHistory(preSnap);
       // A plain CLICK (no drag, not the resize handle) = "I want to edit this" →
       // enter edit mode so the user can type immediately. This is what people
@@ -12165,6 +12233,7 @@
     const bigBtn = $('#veBigger'); if (bigBtn) bigBtn.addEventListener('click', () => setPreviewBig(!isPreviewBig()));
     const fullBtn = $('#veFull'); if (fullBtn) fullBtn.addEventListener('click', togglePreviewFull);
     const fsExit = $('#veFsExit'); if (fsExit) fsExit.addEventListener('click', togglePreviewFull);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && isPseudoFull()) setPseudoFull(false); });
     document.addEventListener('fullscreenchange', onFullscreenChange);
     const followBtn = $('#veFollow'); if (followBtn) followBtn.addEventListener('click', () => setFollow(!ve.follow));
     // text-style toolbar (font / size / colour / bold / delete)

@@ -186,8 +186,12 @@ function write(name, size, opts) {
 function main() {
   fs.mkdirSync(OUT, { recursive: true });
   const made = [
-    ['icon-192.png', write('icon-192.png', 192, {})],
-    ['icon-512.png', write('icon-512.png', 512, {})],
+    // SQUARE, not rounded: an iPhone on iOS 16.4+ takes its home-screen icon
+    // from the manifest rather than apple-touch-icon, and fills a transparent
+    // corner with WHITE, which put white corners round the church's cross.
+    // Opaque to the edge, iOS rounds it itself (and Android's launchers shape it).
+    ['icon-192.png', write('icon-192.png', 192, { shape: 'square' })],
+    ['icon-512.png', write('icon-512.png', 512, { shape: 'square' })],
     ['icon-maskable-512.png', write('icon-maskable-512.png', 512, { maskable: true })],
     // the iPhone home screen: 180 x 180, opaque, iOS rounds it
     ['apple-touch-icon.png', write('apple-touch-icon.png', 180, { shape: 'square' })],

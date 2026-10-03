@@ -1697,7 +1697,49 @@ let _hideTimer = null;
     }, 120);
   }
 
+  /*
+   * THE STUDIO NEVER SCROLLS ON A PHONE. Its frame is the screen; the timeline
+   * and the sheets scroll inside it. But `overflow: hidden` only stops a finger,
+   * not code: a lane or a caption block brought into view with scrollIntoView
+   * scrolled the view itself, and the preview slid up under the top bar with
+   * its top cut off until the app was reloaded. Any such scroll is put back.
+   */
+  function pinStudioFrame() {
+    const pin = (el) => {
+      if (!el || el._mwPinned) return;
+      el._mwPinned = true;
+      el.addEventListener('scroll', () => {
+        if (!window.matchMedia('(max-width: 900px)').matches) return;
+        if (el.scrollTop || el.scrollLeft) { el.scrollTop = 0; el.scrollLeft = 0; }
+      }, { passive: true });
+    };
+    pin(document.querySelector('#view-video'));
+    pin(document.querySelector('main.content'));
+    pin(document.getElementById('app'));
+    /*
+     * …and the page itself. Typing (a text box, a caption line) brings up the
+     * keyboard, and iOS scrolls the whole page up to show the field — then, in
+     * a home-screen app, often leaves it there when the keyboard goes. The
+     * studio stayed shifted up under the top bar, the top of the preview cut
+     * off. Once nothing is being typed in and the keyboard is down, it goes
+     * back to the top.
+     */
+    if (!pinStudioFrame._page) {
+      pinStudioFrame._page = true;
+      const typing = () => { const a = document.activeElement; return !!a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)); };
+      const settle = () => {
+        if (!window.matchMedia('(max-width: 900px)').matches || typing()) return;
+        if (window.scrollY || document.documentElement.scrollTop || document.body.scrollTop) {
+          window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0;
+        }
+      };
+      document.addEventListener('focusout', () => setTimeout(settle, 120));
+      window.addEventListener('scroll', () => { if (!typing()) settle(); }, { passive: true });
+      if (window.visualViewport) window.visualViewport.addEventListener('resize', () => setTimeout(settle, 120));
+    }
+  }
   function installPhoneEditor() {
+    pinStudioFrame();
     const view = $('#view-video');
     if (!view || $('#cloudDock')) return;
     if (window.MWIcons) window.MWIcons.mount([]);      // the icon set's own CSS

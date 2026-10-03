@@ -464,6 +464,9 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
   body.mw-cloud #view-video.ve-pro {
     display: flex; flex-direction: column;
     height: 100%; min-height: 0;
+    /* never a scroll box on a phone: anything that scrolled it (a lane brought
+       into view) slid the preview up under the top bar, cutting off its top */
+    overflow: hidden;
     padding-bottom: var(--ph-dock);
     background: var(--ph-bg);
   }
