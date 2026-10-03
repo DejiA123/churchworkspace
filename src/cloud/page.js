@@ -190,12 +190,12 @@ function build(opts = {}) {
        added to the home screen; cloud-boot.js (vpFix) tells an older install
        to re-add it. -->
   <meta name="apple-mobile-web-app-status-bar-style" content="black" />
-  <meta name="apple-mobile-web-app-title" content="Video Studio" />
+  <meta name="apple-mobile-web-app-title" content="Church Work Space" />
   <meta name="format-detection" content="telephone=no" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png?v=${key}" />
   <link rel="icon" href="/icons/icon-192.png" />
-  <title>Video Studio — Church Work Space</title>
+  <title>Church Work Space</title>
 ${styles}
   <link rel="stylesheet" href="/cloud.css?v=${key}" />
 </head>
@@ -203,7 +203,7 @@ ${styles}
   <!-- The cloud bar replaces the desktop sidebar: who you are connected to,
        how the work is getting home, and the way back to your files. -->
   <div id="cloudBar" class="cloud-bar">
-    <div class="cloud-brand"><span class="cloud-logo">✝</span><span class="cloud-name">Video Studio</span><span id="cloudWhere" class="cloud-where"></span></div>
+    <div class="cloud-brand"><span class="cloud-logo">✝</span><span class="cloud-name">Church Work Space</span><span id="cloudWhere" class="cloud-where"></span></div>
     <div class="cloud-bar-actions">
       <button id="cloudFiles" class="cloud-chip" title="Your recordings and finished exports on the studio machine">📁 Files</button>
       <button id="cloudDownloads" class="cloud-chip" title="Everything this session has finished — tap to save it to this phone">⬇ Saved <span id="cloudDlCount" class="cloud-badge hidden">0</span></button>
@@ -215,13 +215,13 @@ ${styles}
   <div id="cloudGate" class="cloud-gate">
     <form class="cloud-gate-box" id="cloudGateForm" autocomplete="off">
       <div class="cloud-gate-logo">✝</div>
-      <h1>Video Studio</h1>
-      <p class="cloud-gate-sub">Church Work Space, wherever you are.</p>
+      <h1>Church Work Space</h1>
+      <p class="cloud-gate-sub">Video Studio and Social Scheduler, anywhere.</p>
       <label for="cloudPass" class="cloud-gate-label">Access code</label>
       <input type="password" id="cloudPass" inputmode="text" autocomplete="current-password"
              placeholder="from the app's Settings → Cloud" enterkeyhint="go" />
       <label class="cloud-gate-remember"><input type="checkbox" id="cloudRemember" checked /> Keep me signed in on this device</label>
-      <button type="submit" id="cloudGateGo" class="primary-btn cloud-gate-go">Open the studio</button>
+      <button type="submit" id="cloudGateGo" class="primary-btn cloud-gate-go">Open</button>
       <div id="cloudGateMsg" class="cloud-gate-msg"></div>
       <div class="cloud-gate-foot">v${version}</div>
     </form>

@@ -810,7 +810,7 @@ async function handle(req, res) {
   if (p === '/api/hello') {
     return json(res, 200, {
       ok: true,
-      name: 'Church Work Space — Video Studio',
+      name: 'Church Work Space',
       version: cfg.appVersion || '',
       signedIn: authed(req, url),
       allowUpload: !!cfg.allowUpload,
