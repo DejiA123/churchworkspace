@@ -7968,7 +7968,12 @@
    * it is not — a single export, or a look-ahead that failed — tracking happens
    * here exactly as it always did.
    */
-  async function exportOneClip(s, pre) {
+  /*
+   * `draft`: captions or text are going on afterwards, so this file is only a
+   * step on the way and is re-encoded anyway — a small server encodes it fast
+   * at a higher bitrate instead of carefully twice (see asDraft in ffmpeg.js).
+   */
+  async function exportOneClip(s, pre, draft) {
     const preset = ve.aspect;
     /*
      * 1) THE OVERLAY LANE GOES ON LAST, NOT FIRST.
@@ -8000,7 +8005,7 @@
         : await window.__runJob(`🎯 Tracking the speaker in "${s.label}"…`, window.__newJobId(), () => computeReframeKeyframes(s, input, ss, ee, pieces), J(s, 'track'));
       const jobId = window.__newJobId();
       return burnOverlaysIntoShort(s, await window.__runJob(`Exporting "${s.label}" (face-tracked)${gaps}${clean}…`, jobId,
-        () => window.api.sermon.exportReframed({ input, startSec: ss, endSec: ee, preset, quality: qualityCfg(), keyframes, pieces, fill, denoise, cover: coverCfg(), fadeIn, fadeOut, motion: motionOf(s), label: s.label, jobId }), J(s, 'encode')));
+        () => window.api.sermon.exportReframed({ input, startSec: ss, endSec: ee, preset, quality: qualityCfg(), keyframes, pieces, fill, denoise, cover: coverCfg(), fadeIn, fadeOut, motion: motionOf(s), label: s.label, jobId, draft: !!draft }), J(s, 'encode')));
     }
     // A blurred/letterboxed fill shows the WHOLE picture, so a manual pan/zoom
     // crop would contradict it — the fill wins, same as it does over reframing.
@@ -8009,12 +8014,12 @@
     if (manualFraming) {
       const jobId = window.__newJobId();
       return burnOverlaysIntoShort(s, await window.__runJob(`Exporting "${s.label}" (custom framing)${gaps}${clean}…`, jobId,
-        () => window.api.sermon.exportFramed({ input, startSec: ss, endSec: ee, preset, quality: qualityCfg(), zoom: f.zoom, offsetX: f.offsetX, offsetY: f.offsetY, pieces, denoise, cover: coverCfg(), fadeIn, fadeOut, motion: motionOf(s), label: s.label, jobId }), J(s, 'encode')));
+        () => window.api.sermon.exportFramed({ input, startSec: ss, endSec: ee, preset, quality: qualityCfg(), zoom: f.zoom, offsetX: f.offsetX, offsetY: f.offsetY, pieces, denoise, cover: coverCfg(), fadeIn, fadeOut, motion: motionOf(s), label: s.label, jobId, draft: !!draft }), J(s, 'encode')));
     }
     const jobId = window.__newJobId();
     const how = fill ? (fill.mode === 'blur' ? ' (blurred background)' : ' (letterboxed)') : '';
     return burnOverlaysIntoShort(s, await window.__runJob(`Exporting "${s.label}"${how}${gaps}${clean}…`, jobId,
-      () => window.api.sermon.exportShort({ input, startSec: ss, endSec: ee, preset, quality: qualityCfg(), pieces, fill, denoise, cover: coverCfg(), fadeIn, fadeOut, motion: motionOf(s), label: s.label, jobId }), J(s, 'encode')));
+      () => window.api.sermon.exportShort({ input, startSec: ss, endSec: ee, preset, quality: qualityCfg(), pieces, fill, denoise, cover: coverCfg(), fadeIn, fadeOut, motion: motionOf(s), label: s.label, jobId, draft: !!draft }), J(s, 'encode')));
   }
 
   /**
@@ -8058,8 +8063,8 @@
       window.__chainBegin(task, exportPlan(s, { track: reframeOn() && !!window.FaceTrack, captions: withCaps }));
     }
     try {
-      let out = await exportOneClip(s);
       const text = await textImagesFor(s);
+      let out = await exportOneClip(s, null, withCaps || !!(text && text.length));
       if (withCaps) out = await autoCaptionExport(s, out, text);
       else out = await burnTextIntoShort(s, out, null, text);
       out = await finishExport(s, out); // background music, then the outro
@@ -8562,8 +8567,8 @@
             `🎯 Tracking the speaker in "${s.label}"…`, window.__newJobId(), () => p, J(s, 'track')));
           // Start the NEXT one's tracking now, so it runs under this encode.
           if (i + 1 < list.length) ahead.begin(list[i + 1]);
-          let out = await exportOneClip(s, got);
           const text = await textImagesFor(s);
+          let out = await exportOneClip(s, got, caps || !!(text && text.length));
           if (caps) out = await autoCaptionExport(s, out, text);
           else out = await burnTextIntoShort(s, out, null, text);
           out = await finishExport(s, out); // background music, then the outro
@@ -13039,6 +13044,42 @@
     sourcePath() { return (ve.video && ve.video.path) || null; },
     /** Open a file that is already on the machine (the phone's Files viewer). */
     openPath(p) { return p ? loadVideo(p) : null; },
+    /**
+     * An AI montage arrives: open it, put the operator's song on the music lane
+     * (from the top, under the whole thing, on the beats it was cut to) and the
+     * director's words on the text lane — every one an ordinary text box, so it
+     * can be retyped, restyled, moved or deleted like any other.
+     */
+    async applyMontage({ output, music, musicVolume, texts } = {}) {
+      if (!output) return false;
+      await loadVideo(output);
+      if (!ve.video) return false;
+      if (music && music.id) {
+        await libRefresh();
+        const entry = ((ve.lib && ve.lib.music) || []).find((m) => m.id === music.id) || music;
+        ve.music = musicFrom(entry, { volume: musicVolume != null ? musicVolume : 0.85, duck: false, bed: true, fadeIn: 0.2, fadeOut: 1.5 });
+        saveMusicPref();
+        renderLibrary(); renderMusicLane(); updateMusicButton();
+      }
+      const D = dur();
+      for (const t of (texts || [])) {
+        if (!t || !t.text) continue;
+        const hook = t.role === 'hook', cta = t.role === 'cta';
+        const ov = {
+          id: uid(), text: String(t.text),
+          x: 0.5, y: hook ? 0.2 : cta ? 0.5 : 0.74, w: 0.86, h: hook ? 0.16 : 0.12,
+          start: clamp(Number(t.start) || 0, 0, Math.max(0, D - 0.3)),
+          end: clamp(Number(t.end) || 0, 0.3, D),
+          color: '#ffffff', sizePct: hook ? 0.13 : 0.1, font: 'Arial', bold: true,
+          outline: true, outlineColor: '#000000',
+        };
+        if (ov.end <= ov.start + 0.2) ov.end = Math.min(D, ov.start + 1.5);
+        clampTextIntoFrame(ov);
+        ve.textOverlays.push(ov);
+      }
+      renderTextOverlays(); renderTextTrack(); renderSegments();
+      return true;
+    },
     /** The edit the Continue card offers is gone (its video was deleted): put the card away. */
     forgetResume() {
       const bar = $('#veResume');

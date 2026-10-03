@@ -80,8 +80,10 @@ function capThreads(args) {
    * look; the file is somewhat larger) and needs less memory, since it
    * compares fewer reference frames.
    */
+  const draft = x264 && draftAls.getStore() === true;
   for (let i = 0; i < out.length - 1; i++) {
-    if (out[i] === '-preset' && x264 && /^(medium|slow|slower|veryslow|fast|faster)$/.test(String(out[i + 1]))) out[i + 1] = 'veryfast';
+    if (out[i] === '-preset' && x264 && /^(medium|slow|slower|veryslow|fast|faster)$/.test(String(out[i + 1]))) out[i + 1] = draft ? 'ultrafast' : 'veryfast';
+    else if (draft && out[i] === '-crf' && Number(out[i + 1]) > 0) out[i + 1] = String(Math.max(10, Number(out[i + 1]) - 4));
   }
   if (x264 && !args.includes('-rc-lookahead') && !args.includes('-x264-params')) out.push('-rc-lookahead', '10');
   out.push(args[args.length - 1]);
@@ -130,6 +132,21 @@ function ffRelease() {
  * time out restarts the box — taking the export with it. Niceness only matters
  * when the two compete, so an encode on its own runs exactly as fast.
  */
+/*
+ * ►► A SHORT THAT IS ONLY A STEP ON THE WAY IS ENCODED FAST. ◄◄
+ *
+ * A captioned short is encoded twice: the crop, then the captions laid on that
+ * file. The first file is thrown away the moment the second exists, yet on a
+ * small server it was encoded with the same care as the finished one — over a
+ * minute of a 90-second short's time on one CPU, twenty times for a batch.
+ * Inside `asDraft` an x264 encode is 'ultrafast' at a LOWER CRF (more bits, so
+ * nothing is lost to the second encode): 56 s → 23 s for that pass, measured.
+ * Only on a small machine; the church PC keeps its settings.
+ */
+const { AsyncLocalStorage } = require('async_hooks');
+const draftAls = new AsyncLocalStorage();
+const asDraft = (on, fn) => (on && machine.small() ? draftAls.run(true, fn) : fn());
+
 function lowPriority(proc, nice = 10) {
   try { if (proc && proc.pid) require('os').setPriority(proc.pid, nice); } catch (e) {}
   return proc;
@@ -219,4 +236,4 @@ function probe(ffprobePath, input) {
   });
 }
 
-module.exports = { lowPriority, resolveFfmpeg, resolveFfprobe, runFfmpeg, runFfmpegCollect, probe, capThreads, gated, _ffState: () => ({ running: ffRunning, queued: ffQueue.length, slots: ffSlots() }) };
+module.exports = { asDraft, lowPriority, resolveFfmpeg, resolveFfprobe, runFfmpeg, runFfmpegCollect, probe, capThreads, gated, _ffState: () => ({ running: ffRunning, queued: ffQueue.length, slots: ffSlots() }) };

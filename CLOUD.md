@@ -208,6 +208,8 @@ your domain. Cloudflare Tunnel or nginx do the job equally well.
 | `MW_CLOUD_CODE` | generated | the access code — **set this**, or it changes on restart |
 | `MW_CLOUD_UPLOADS` | `on` | `off` stops phones sending files up |
 | `GROQ_API_KEY` | — | a free Groq key: the sermon scan, captions and "remove pauses" are heard by Whisper Large in the cloud. Set it in the host's dashboard, never in the repo |
+| `ANTHROPIC_API_KEY` | — | a Claude API key (console.anthropic.com): ✨ AI Montage is directed by Claude Opus 5.5, which looks at every clip and photo before cutting the edit. Without it the montage is directed by the Groq model, or the studio's own rules. Set it in the host's dashboard, never in the repo |
+| `MW_MONTAGE_MODEL` | `claude-opus-5-5` | which Claude model directs the montage |
 | `MW_CLOUD_SOCIAL` | `on` | `off` takes the Social Scheduler off the phone and stops this server publishing anything |
 | `MW_MEMORY_MB`, `MW_CPUS` | read from the container | only for a host that hides its limits — see *A small server* below |
 

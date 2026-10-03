@@ -338,6 +338,10 @@ let _hideTimer = null;
       exportTo: (id, dest) => call('session:export', { id, dest }),
       importFrom: (src) => call('session:import', { src }),
     },
+    montage: {
+      status: () => call('montage:status'),
+      create: (a) => call('montage:create', a),
+    },
     library: {
       list: () => call('library:list'),
       add: (kind, p, name, source) => call('library:add', { kind, path: p, name, source }),
@@ -1761,6 +1765,7 @@ let _hideTimer = null;
   const DOCK = {
     main: [
       { icon: 'sparkles', label: 'AI Shorts', ai: true, sheet: 'shorts', count: true },
+      { icon: 'wand-sparkle', label: 'Montage', ai: true, montage: true },
       { icon: 'scissors', label: 'Edit', row: 'edit' },
       { icon: 'music', label: 'Audio', row: 'audio' },
       { icon: 'type', label: 'Text', row: 'text' },
@@ -2095,6 +2100,7 @@ let _hideTimer = null;
     }
 
     function act(t) {
+      if (t.montage) return window.MWSocial && window.MWSocial.openMontage && window.MWSocial.openMontage();
       if (t.row) return showRow(t.row);
       if (t.fx) return openFx(t.fx);
       if (t.call) { const ed = window.VideoEditor; if (ed && typeof ed[t.call] === 'function') ed[t.call](); return; }
@@ -2923,7 +2929,7 @@ let _hideTimer = null;
     call, island, islandHide, toast, toastText, openPanel, closePanel, panelOf,
     offerDownload, pickFiles, chooseFromDevice, refreshFiles, downloadUrl,
     mi, esc: escHtml, escAttr, jobChip: makeJobChip, jobList, jobPct: overallPct, openJobs: openJobsSheet,
-    authHeaders, fileUrl: (p) => window.MW_FILE_URL(p), viewFile, openProfile,
+    authHeaders, fileUrl: (p) => window.MW_FILE_URL(p), viewFile, openProfile, uploadFile,
   });
 
   /* The version this page was built from, off this script's own URL — the page

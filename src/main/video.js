@@ -2596,7 +2596,10 @@ async function reverseClip(ctx, { input, startSec, endSec, output, onProgress })
         // -t BEFORE -i: the piece has to END for the reverse filter, or it keeps
         // reading (and holding) to the end of the file
         await ff.runFfmpeg(ctx.ffmpeg, ['-ss', ss.toFixed(6), '-t', ((first === 0 ? count - 0.5 : count) / fps).toFixed(6), '-i', clipPath, '-an',
-          '-vf', `reverse,setpts=N/(${fps}*TB)`, '-fps_mode', 'passthrough',
+          // constant rate, not passthrough: ffmpeg 7 leaves a passthrough
+          // piece's last frame without a duration, so each join overlapped the
+          // next piece by one frame and a player dropped it (231 of 240 came out)
+          '-vf', `reverse,setpts=N/(${fps}*TB)`, '-fps_mode', 'cfr', '-r', String(fps),
           '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-y', f], {
           onProgress: onProgress ? (p) => onProgress(Math.round(((n - 1 - i) + p / 100) / (n + 1) * 100)) : undefined,
           totalDurationSec: count / fps,

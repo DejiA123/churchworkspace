@@ -42,6 +42,13 @@ services:
       # the repo.
       - key: GROQ_API_KEY
         sync: false
+      # A Claude API key (console.anthropic.com → API keys). With it, ✨ AI
+      # Montage is directed by Claude Opus 5.5, which LOOKS at every clip and
+      # photo before cutting the edit. Without it the montage still works,
+      # directed by the Groq model above or the studio's own rules. Optional;
+      # set it in the dashboard, never in the repo.
+      - key: ANTHROPIC_API_KEY
+        sync: false
       # The phone's Social Scheduler is on by default (posts go out through
       # Zernio — see CLOUD.md). Add MW_CLOUD_SOCIAL=off in the dashboard to take
       # it off the phone and stop this server publishing anything.
