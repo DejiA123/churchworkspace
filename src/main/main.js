@@ -920,7 +920,9 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
   // the same video — it does mean a switch pays for a fresh transcription.
   let asr = captioner.pickScanModel(installedAsr, asrModel);
   // …and the one it will really be heard with, so the cache key tells the truth
-  if (!machine.fitsWhisper(asr)) {
+  // (a model that is not on disk is not heard with either: the server image
+  // carries Tiny alone, and transcribe steps down to it)
+  if (!machine.fitsWhisper(asr) || !installedAsr.includes(asr)) {
     const rank = (id) => (captioner.MODELS.find((m) => m.id === id) || { rank: -1 }).rank;
     const fit = installedAsr.filter((id) => machine.fitsWhisper(id)).sort((x, y) => rank(y) - rank(x))[0];
     asr = fit || 'tiny.en';
@@ -961,7 +963,12 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
   const useCloudEar = contentAware && cloudCanHear
     && (asrModel === 'cloud' || (aiModel === 'cloud' && !asrModel)
       // a machine that cannot hold the model it would use: the cloud hears it
-      || !localEngine || !localFits || (!asrModel && !machine.fitsWhisper(asr)));
+      || !localEngine || !localFits || (!asrModel && !machine.fitsWhisper(asr))
+      // Tiny is all this machine has (the server image). Small already heard
+      // "What in Nigeria" as "What an engineer" and Tiny is rougher still, so
+      // a scan left on Automatic is heard in the cloud, and Tiny only hears
+      // what the cloud cannot
+      || (!asrModel && asr === 'tiny.en'));
   const ear = { cloud: 0, pc: 0, why: '', model: '' };
   const cloudCache = useCloudEar ? new TransCache(cacheDir, input, `cloud:${cloudspeech.state().model || 'whisper'}|segment|v1`) : null;
   // …and the word timings from the same answers, for ✂️ Remove pauses (see below)
@@ -1191,6 +1198,10 @@ function wantsCloudCaptions(model, fast) {
   // a PC model this machine cannot hold, with the cloud there to hear it
   // instead (a small server — see machine.js)
   if (model && !fast && !machine.fitsWhisper(model) && cloudspeech.fileReady()) return true;
+  // …or one that is not on this machine at all (a choice remembered from
+  // another install): asked of the cloud rather than quietly heard by Tiny
+  if (model && !fast && cloudspeech.fileReady() && captioner.MODELS.some((m) => m.id === model)
+    && !captioner.models().some((m) => m.id === model && m.installed)) return true;
   // nothing on this machine to hear it with: the cloud, whatever was asked for
   if (!captioner.isAvailable() && cloudspeech.fileReady()) return true;
   if (fast || model) return false;          // an explicit PC model, or a scan

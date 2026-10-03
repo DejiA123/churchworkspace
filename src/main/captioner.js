@@ -250,9 +250,21 @@ function fontsDir() {
   const packaged = process.resourcesPath && fs.existsSync(path.join(process.resourcesPath, 'fonts'));
   return packaged ? path.join(process.resourcesPath, 'fonts') : path.join(__dirname, '..', '..', 'bin', 'fonts');
 }
+/*
+ * ANY MODEL ON DISK WILL DO. This asked for Base by name, so the Cloud Studio
+ * image — engine built in, Tiny the one model a 512 MB server can run — told
+ * the phone "The speech model is missing" and captions never started, though
+ * transcribe() already steps down to Tiny when Base is not there.
+ */
+function anyModel() {
+  const p = whisperPaths();
+  if (fs.existsSync(p.model)) return p.model;
+  for (const m of MODELS) { const mp = modelPath(m); if (mp) return mp; }
+  return null;
+}
 function isAvailable() {
-  const { cli, cliFound, model } = whisperPaths();
-  return !!cliFound && fs.existsSync(cli) && fs.existsSync(model);
+  const { cli, cliFound } = whisperPaths();
+  return !!cliFound && fs.existsSync(cli) && !!anyModel();
 }
 
 /**
@@ -281,11 +293,12 @@ function ensureExecutable(cli) {
 function engineInfo() {
   const p = whisperPaths();
   const hasCli = !!p.cliFound;
-  const hasModel = fs.existsSync(p.model);
+  const found = anyModel();
+  const hasModel = !!found;
   const info = {
     available: hasCli && hasModel,
     platform: process.platform, arch: process.arch,
-    cli: p.cli, model: p.model, hasCli, hasModel,
+    cli: p.cli, model: found || p.model, hasCli, hasModel,
   };
   if (info.available) return info;
   if (!hasCli && process.platform === 'darwin') {
@@ -295,8 +308,8 @@ function engineInfo() {
     info.reason = 'The speech engine binary is missing from this install.';
     info.howTo = `Expected it at ${p.cli}. Reinstalling the app restores it.`;
   } else {
-    info.reason = 'The speech model is missing from this install.';
-    info.howTo = `Expected ggml-base.en.bin in ${p.base}. Reinstalling the app restores it.`;
+    info.reason = 'No speech model is installed.';
+    info.howTo = `Expected ggml-base.en.bin or ggml-tiny.en.bin in ${p.base}. Reinstalling the app restores it — on a server, add a free Groq key as GROQ_API_KEY and speech is heard in the cloud instead.`;
   }
   return info;
 }
@@ -748,7 +761,9 @@ async function transcribe(ctx, { input, startSec, endSec, model: modelKind, gran
   // mode). `segments` is an alias so callers can use whichever name reads clearer.
   return {
     words: book.entries, segments: book.entries,
-    durationSec: info.durationSec, model: (bestModel() || {}).id || 'base.en',
+    // the model that really heard it: on the server image that is Tiny, which
+    // bestModel() never names
+    durationSec: info.durationSec, model: (MODELS.find((x) => path.basename(model) === x.file) || bestModel() || {}).id || 'base.en',
     // What the book changed, so the studio can say so rather than silently
     // handing back different words from the ones that were spoken into it.
     fixed: book.count, fixedWords: book.count ? wordbook.summarise(book.changes, 4) : '',

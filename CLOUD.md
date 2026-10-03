@@ -218,9 +218,11 @@ and on anything under 2 GB it works within them: exports decode on one thread
 and keep x264's look-ahead short (a 1080p short peaks near 290 MB instead of
 680), the scan streams the sermon's loudness instead of holding the recording,
 and a speech model that would not fit is never started — it steps down to one
-that does (Tiny is fetched once if nothing else fits), or, with `GROQ_API_KEY`
-set, the listening happens in the cloud and costs the server nothing. That key
-is the single best thing to give a small server.
+that does (the image carries Tiny, so captions work from the first start), or,
+with `GROQ_API_KEY` set, the listening happens in the cloud and costs the server
+nothing — Tiny then only hears what the cloud cannot. That key is the single
+best thing to give a small server: Tiny gets the gist, Whisper Large gets the
+names right.
 
 ---
 
