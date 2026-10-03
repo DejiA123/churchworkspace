@@ -543,17 +543,26 @@ let _hideTimer = null;
     clearTimeout(_hideTimer); _hideTimer = null;
     const m = $('#overlayMsg'); if (m) m.textContent = msg || 'Working…';
     const b = $('#progressBar'); if (b) b.style.width = '0%';
+    const n = $('#overlayPct'); if (n) n.textContent = '0%';
     const o = $('#overlay'); if (o) o.classList.remove('hidden');
   }
+  /*
+   * The bar AND the number under it. This moved only the bar, so on a phone
+   * the overlay read "0%" from the first short to the last while the work went
+   * on underneath it (renderer.js, which the desk uses, sets both).
+   */
   function setProgress(p) {
-    const b = $('#progressBar');
-    if (b) b.style.width = Math.max(2, Math.min(100, p)) + '%';
+    const pct = Math.max(0, Math.min(100, Math.round(p) || 0));
+    const b = $('#progressBar'); if (b) b.style.width = Math.max(2, pct) + '%';
+    const n = $('#overlayPct'); if (n) n.textContent = pct + '%';
   }
   function hideOverlay() {
     clearTimeout(_hideTimer); _hideTimer = null;
     const o = $('#overlay'); if (o) o.classList.add('hidden');
     setJobBatch(null);
     showCancel(null);
+    const bg = $('#overlayBackground');
+    if (bg) { bg.classList.add('hidden'); bg.onclick = null; }
   }
   function setJobBatch(i, n) {
     const el = $('#overlayBatch');
