@@ -12292,12 +12292,14 @@
     wirePro();
     $('#capWords').addEventListener('change', () => rebuildCapEvents());
     $('#capCase').addEventListener('change', () => rebuildCapEvents({ caseOnly: true }));
-    // Style tweaks update the live overlay immediately.
-    ['#capFont', '#capSize', '#capSizePct', '#capTracking', '#capPos', '#capColor', '#capStyleSel', '#capWordHl', '#capWordColor'].forEach((sel) => {
-      const el = $(sel); if (el) el.addEventListener('change', () => updateCapOverlay(ve.refs.player.currentTime || 0));
-    });
     // Once the box has been clicked it holds its own answer, instead of being
     // reset by the next look the operator tries on.
+    //
+    // This listener MUST be added before the overlay's (below). Listeners run in
+    // the order they were added, and the overlay's redraw reads the box through
+    // capWordHlOn — which, until the box is marked touched, puts it back to the
+    // look's own answer. Added after, the first tick was undone on the spot:
+    // "Follow the voice" took two clicks to switch on.
     const capWordHl = $('#capWordHl');
     if (capWordHl) capWordHl.addEventListener('change', () => {
       capWordHl.dataset.touched = '1';
@@ -12306,6 +12308,10 @@
       // fresh window did nothing visible at all.
       const row = document.getElementById('capWordColorRow');
       if (row) row.classList.toggle('hidden', !capWordHl.checked);
+    });
+    // Style tweaks update the live overlay immediately.
+    ['#capFont', '#capSize', '#capSizePct', '#capTracking', '#capPos', '#capColor', '#capStyleSel', '#capWordHl', '#capWordColor'].forEach((sel) => {
+      const el = $(sel); if (el) el.addEventListener('change', () => updateCapOverlay(ve.refs.player.currentTime || 0));
     });
     // The typography controls are folded away until asked for — see the note in
     // the markup. The button says which way it is.

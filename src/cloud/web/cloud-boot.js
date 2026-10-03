@@ -2169,6 +2169,9 @@ let _hideTimer = null;
     const onKb = () => {
       const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
       document.documentElement.style.setProperty('--kb', (kb > 90 ? kb : 0) + 'px');
+      // …and whether it is up at all, for layouts that make room while it is
+      // (the captions window gives its lines the space)
+      document.documentElement.classList.toggle('mw-kb', kb > 90);
     };
     vv.addEventListener('resize', onKb);
     vv.addEventListener('scroll', onKb);
