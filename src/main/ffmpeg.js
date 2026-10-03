@@ -75,7 +75,50 @@ function capThreads(args) {
   return out;
 }
 
-function runFfmpeg(ffmpegPath, args, { onProgress, totalDurationSec, signal, cwd } = {}) {
+/*
+ * ONE ENCODER AT A TIME ON A SMALL SERVER.
+ *
+ * "Export all" overlaps work to save time on the church PC: the next short's
+ * speaker tracking pulls frames (an ffmpeg each) while this short encodes.
+ * Measured on a 512 MB server exporting three 1080p shorts: five ffmpegs at
+ * once, 735 MB — and the host kills the whole studio for memory, which on a
+ * phone looks like the export crashing and the app restarting. Each ffmpeg on
+ * its own is fine (an encode peaks near 270 MB), so on a machine under 1 GB
+ * they take turns, under 2 GB two may run, and a desktop is left alone. A job
+ * waiting its turn can still be cancelled.
+ */
+const ffSlots = () => {
+  const mb = machine.memoryMB();
+  return mb < 1024 ? 1 : mb < 2048 ? 2 : Infinity;
+};
+let ffRunning = 0;
+const ffQueue = [];
+function ffAcquire() {
+  if (ffRunning < ffSlots()) { ffRunning++; return Promise.resolve(); }
+  return new Promise((resolve, reject) => {
+    const waiter = { resolve, reject, job: jobs.currentJob() };
+    ffQueue.push(waiter);
+  });
+}
+function ffRelease() {
+  ffRunning = Math.max(0, ffRunning - 1);
+  while (ffQueue.length && ffRunning < ffSlots()) {
+    const w = ffQueue.shift();
+    if (w.job && jobs.isCancelled(w.job)) { w.reject(new jobs.CancelledError()); continue; }
+    ffRunning++; w.resolve();
+  }
+}
+/** Run `start` (which returns a promise for one ffmpeg) once a slot is free. */
+async function gated(start) {
+  await ffAcquire();
+  if (jobs.isCancelled()) { ffRelease(); throw new jobs.CancelledError(); }
+  try { return await start(); } finally { ffRelease(); }
+}
+
+function runFfmpeg(ffmpegPath, args, opts = {}) {
+  return gated(() => runFfmpegNow(ffmpegPath, args, opts));
+}
+function runFfmpegNow(ffmpegPath, args, { onProgress, totalDurationSec, signal, cwd } = {}) {
   args = capThreads(args);
   return new Promise((resolve, reject) => {
     const proc = jobs.track(spawn(ffmpegPath, args, { windowsHide: true, cwd }));
@@ -112,7 +155,10 @@ function runFfmpeg(ffmpegPath, args, { onProgress, totalDurationSec, signal, cwd
 }
 
 /** Run ffmpeg purely to collect stderr (e.g. silencedetect with -f null). */
-function runFfmpegCollect(ffmpegPath, args, { cwd } = {}) {
+function runFfmpegCollect(ffmpegPath, args, opts = {}) {
+  return gated(() => runFfmpegCollectNow(ffmpegPath, args, opts));
+}
+function runFfmpegCollectNow(ffmpegPath, args, { cwd } = {}) {
   return new Promise((resolve, reject) => {
     const proc = jobs.track(spawn(ffmpegPath, args, { windowsHide: true, cwd }));
     let stderr = '';
@@ -139,4 +185,4 @@ function probe(ffprobePath, input) {
   });
 }
 
-module.exports = { resolveFfmpeg, resolveFfprobe, runFfmpeg, runFfmpegCollect, probe, capThreads };
+module.exports = { resolveFfmpeg, resolveFfprobe, runFfmpeg, runFfmpegCollect, probe, capThreads, gated, _ffState: () => ({ running: ffRunning, queued: ffQueue.length, slots: ffSlots() }) };

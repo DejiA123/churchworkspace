@@ -446,7 +446,12 @@ function capTypewriterLines(text, start, end) {
   return out;
 }
 
+// The speech engine is the biggest single process a small server runs (Tiny
+// alone is ~270 MB), so it takes its turn with the ffmpegs — see ffmpeg.gated.
 function runWhisper(cli, args, onProgress) {
+  return ff.gated(() => runWhisperNow(cli, args, onProgress));
+}
+function runWhisperNow(cli, args, onProgress) {
   return new Promise((resolve, reject) => {
     const dir = path.dirname(cli);
     ensureExecutable(cli);
