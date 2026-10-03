@@ -433,7 +433,7 @@ async function run() {
     'and it refuses to cache anything under /api/ — the studio\'s work is never replayed');
 
   r = await request('GET', '/');
-  log(r.status === 200 && /<title>Video Studio/.test(r.text), 'the page itself is served to a browser that has not signed in');
+  log(r.status === 200 && /<title>Church Work Space/.test(r.text), 'the page itself is served to a browser that has not signed in');
 
   r = await request('GET', '/ai/blaze_face_short_range.tflite');
   log(r.status === 200 && r.buf.length > 10000,

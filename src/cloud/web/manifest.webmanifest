@@ -1,7 +1,7 @@
 {
-  "name": "Church Work Space — Video Studio",
-  "short_name": "Video Studio",
-  "description": "The church's Video Studio: cut a service into shorts, caption it, reframe the speaker and export — from any phone, anywhere.",
+  "name": "Church Work Space",
+  "short_name": "Church Work Space",
+  "description": "The church's Video Studio and Social Scheduler: cut a service into shorts, caption it, export it and schedule the posts — from any phone, anywhere.",
   "id": "/",
   "start_url": "/",
   "scope": "/",

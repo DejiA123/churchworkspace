@@ -63,7 +63,8 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
   width: 26px; height: 26px; flex: none;
   display: grid; place-items: center;
   border-radius: 8px;
-  background: linear-gradient(135deg, var(--primary), var(--accent-2));
+  background: linear-gradient(180deg, #5658d6, #4648be);   /* the app icon's indigo */
+  color: #fff;
   font-size: 14px;
 }
 .cloud-name { font-weight: 700; font-size: 14px; white-space: nowrap; }
@@ -118,7 +119,8 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
   width: 52px; height: 52px; margin: 0 auto 12px;
   display: grid; place-items: center;
   border-radius: 15px;
-  background: linear-gradient(135deg, var(--primary), var(--accent-2));
+  background: linear-gradient(180deg, #5658d6, #4648be);   /* the app icon's indigo */
+  color: #fff;
   font-size: 26px;
 }
 .cloud-gate-box h1 { margin: 0 0 4px; font-size: 21px; }
@@ -142,6 +144,8 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
   display: flex; align-items: center; justify-content: center; gap: 7px;
   margin: 13px 0 16px; font-size: 12.5px; color: var(--muted);
 }
+/* the desk gives every input the full width; a checkbox is a box */
+.cloud-gate-remember input { width: auto; flex: none; margin: 0; }
 .cloud-gate-go { width: 100%; padding: 13px; font-size: 15px; border-radius: 11px; }
 .cloud-gate-msg { min-height: 18px; margin-top: 12px; font-size: 12.5px; color: var(--muted); }
 .cloud-gate-msg.bad { color: var(--danger); }
