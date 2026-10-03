@@ -177,10 +177,19 @@ function build(opts = {}) {
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' blob: data:; worker-src 'self' blob:; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://player.vimeo.com;" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#000000" media="(max-width: 900px)" />
   <meta name="theme-color" content="#0d1117" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <!-- Opaque black, not "black-translucent": on iOS 26 a home-screen app with
+       the see-through bar gets a window one status bar short of the screen,
+       and the strip under it can never be drawn in (WebKit bug 301108), so
+       the tool dock floated over a dead band or was cut off in it. Opaque, iOS
+       keeps the status bar's strip itself (black, like the studio's own top)
+       and the app reaches the bottom edge. iOS reads this when the app is
+       added to the home screen; cloud-boot.js (vpFix) tells an older install
+       to re-add it. -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
   <meta name="apple-mobile-web-app-title" content="Video Studio" />
   <meta name="format-detection" content="telephone=no" />
   <link rel="manifest" href="/manifest.webmanifest" />

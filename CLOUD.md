@@ -247,6 +247,12 @@ names right.
   whenever it comes back to the front and offers **Refresh** when there is a
   new one — never in the middle of an export. (A copy installed before this
   existed needs closing fully once: swipe it away in the app switcher.)
+* **A strip at the bottom of an iPhone.** iOS 26 gives a home-screen app with
+  a see-through status bar a window one status bar short of the screen, and
+  nothing can be drawn in the strip left over (WebKit bug 301108). The studio
+  now uses an opaque black status bar, which reaches the bottom edge, but iOS
+  reads that only when the app is added. An older install says so once: remove
+  it from the Home Screen and add it again from Safari.
 * **📁 Files** opens what is on the studio machine: finished exports, anything
   sent from a phone, and the Videos folder. **⬆ Send a video from this phone**
   uploads from the handset, in slices, and **picks up where it left off** if the

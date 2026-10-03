@@ -2040,24 +2040,28 @@ let _hideTimer = null;
   /*
    * AN iPHONE THAT GIVES THE APP A SHORT SCREEN.
    *
-   * Opened from the home screen, iOS can lay the page out on a screen that is
-   * short by exactly the height of the status bar. Everything pinned to the
-   * bottom — the tool dock, the sheets — then sits that far above the bottom
-   * edge, over a black band nothing can be put in. Measured off a church's own
-   * screenshot: an iPhone Pro Max, 932 points tall, laid out on 873 — short by
-   * 59, the status bar's height to the point. iOS still DRAWS that band (it was
-   * the page's own black, not the app's background colour); it just will not lay
-   * anything out in it.
+   * iOS 26 has a bug (WebKit 301108): a home-screen app with the see-through
+   * ("black-translucent") status bar is drawn from the top of the screen but
+   * given a window one status bar SHORTER than the screen, and the strip left
+   * at the bottom is outside the web view. Nothing can be drawn there. This
+   * used to stretch the page over the whole screen to reach it. That only
+   * pushed the dock into the strip, where iOS cut it off halfway down the
+   * icons (a church's own screenshot: 932 points of screen, nothing drawn
+   * below 873).
    *
-   * So the page measures where "the bottom" really landed, and when it is short
-   * by the status bar's height on a home-screen app, lays itself out on the
-   * whole screen instead (html.mw-vpfix in cloud.css). Anything else — Safari
-   * with its toolbars, Android, a desk browser — is left exactly as it was.
+   * The cure is in page.js: the status bar is now opaque black, which gives
+   * the app the whole screen down to the bottom edge. iOS reads that setting
+   * only when the app is ADDED to the home screen, though. So an install made
+   * before it still has the short window, and that is all this does now: it
+   * notices one (short by the status bar's height, on a home-screen iPhone),
+   * keeps the dock tight to the bottom the app is given (html.mw-vpshort in
+   * cloud.css; the home bar is down in the dead strip anyway), and says once
+   * how to get the full screen back. Anything else is left exactly as it was.
    */
   const vpFix = {
     probe: null,
     on: false,
-    /** How far short the layout is, from what was measured; 0 for "it is not". */
+    /** How far short the window is, from what was measured; 0 for "it is not". */
     judge({ standalone, ios, portrait, screenW, screenH, bottomAt, safeTop }) {
       if (!standalone || !ios || !screenW || !screenH) return 0;
       const full = portrait ? Math.max(screenW, screenH) : Math.min(screenW, screenH);
@@ -2066,8 +2070,6 @@ let _hideTimer = null;
     },
     measure() {
       if (!this.probe) {
-        // a child of <html>, not <body>: once the fix is on, the body is what
-        // pinned things measure from, and the probe must still see the screen
         this.probe = document.createElement('div');
         this.probe.setAttribute('aria-hidden', 'true');
         this.probe.style.cssText = 'position:fixed;left:0;bottom:0;width:1px;height:env(safe-area-inset-top);'
@@ -2085,27 +2087,41 @@ let _hideTimer = null;
         safeTop: r.height,
       };
     },
-    apply(gap, full) {
-      const on = gap > 0 && full > 0;
-      const root = document.documentElement;
-      root.classList.toggle('mw-vpfix', on);
-      root.style.setProperty('--vp-h', on ? full + 'px' : '100%');
-      cloud.vpGap = on ? gap : 0;
+    apply(gap) {
+      const on = gap > 0;
+      document.documentElement.classList.toggle('mw-vpshort', on);
       if (on !== this.on) {
         this.on = on;
-        // the studio measures itself off the room it has; it has more now
+        // the studio measures itself off the room it has
         setTimeout(() => { try { if (window.VideoEditor && window.VideoEditor.fit) window.VideoEditor.fit(); } catch (e) {} }, 60);
+        if (on) this.advise();
       }
       return on;
     },
+    /** Once a day at most, and only once someone is in: how to get the whole screen. */
+    advise() {
+      if (this.advised) return;
+      this.advised = true;
+      let seen = '';
+      const today = new Date().toDateString();
+      try { seen = localStorage.getItem('mw-vpshort-advised') || ''; } catch (e) {}
+      if (seen === today) return;
+      const tell = () => {
+        if (!cloud.started) { setTimeout(tell, 2000); return; }
+        try { localStorage.setItem('mw-vpshort-advised', today); } catch (e) {}
+        island({
+          id: 'vpshort', kind: 'info', ms: 14000,
+          title: 'Re-add the app for the full screen',
+          sub: 'Your iPhone is leaving a strip at the bottom. Remove Video Studio from your Home Screen, then add it again from Safari (Share → Add to Home Screen) and the tools sit on the bottom edge.',
+        });
+      };
+      setTimeout(tell, 2500);
+    },
     /** For the tests: hold a measurement, as a phone with the fault would give it (null lets go). */
-    pin(gap, full) { this.pinned = gap == null ? null : { gap, full }; return this.check(); },
+    pin(gap) { this.pinned = gap == null ? null : { gap }; return this.check(); },
     check() {
-      if (this.pinned) return this.apply(this.pinned.gap, this.pinned.full);
-      const m = this.measure();
-      const gap = this.judge(m);
-      const full = m.portrait ? Math.max(m.screenW, m.screenH) : Math.min(m.screenW, m.screenH);
-      return this.apply(gap, full);
+      if (this.pinned) return this.apply(this.pinned.gap);
+      return this.apply(this.judge(this.measure()));
     },
   };
   cloud.vpFix = vpFix;
@@ -2130,9 +2146,7 @@ let _hideTimer = null;
   if (window.visualViewport) {
     const vv = window.visualViewport;
     const onKb = () => {
-      // measured from the real bottom of the screen when the page has been
-      // laid out on all of it (see vpFix above)
-      const kb = Math.max(0, Math.round(window.innerHeight + (cloud.vpGap || 0) - vv.height - vv.offsetTop));
+      const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
       document.documentElement.style.setProperty('--kb', (kb > 90 ? kb : 0) + 'px');
     };
     vv.addEventListener('resize', onKb);
