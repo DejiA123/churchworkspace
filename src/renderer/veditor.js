@@ -162,7 +162,19 @@
   // The outro sits AFTER the footage, so the track has to be long enough to show
   // it. Everything else still maps pixel-position → source time inside [0, dur].
   const outroDur = () => (ve.outro ? (ve.outro.durationSec || 0) : 0);
-  const timelineEnd = () => dur() + outroDur();
+  /*
+   * ►► CLIPS AFTER THE VIDEO. ◄◄
+   * A second video or a picture placed at (or past) the end of the main video
+   * plays AFTER it, the way CapCut's ＋ adds the next clip: the timeline runs
+   * on to the end of the last of them (playEnd), the preview keeps playing on
+   * its own clock once the main video has ended (the "tail"), and the export
+   * adds them on the end in order.
+   */
+  const mainEnd = () => { const m = ve.segments.filter((x) => (x.lane || 0) === 0); return m.length ? Math.max(...m.map((x) => x.end)) : dur(); };
+  const isTailClip = (x) => !!(x && x.src && (x.lane || 0) >= 1 && ((x.tlStart != null ? x.tlStart : x.start) >= mainEnd() - 0.05));
+  const tailClips = () => ve.segments.filter(isTailClip).sort((a, b) => tlPos(a) - tlPos(b));
+  const playEnd = () => ve.segments.reduce((m, x) => (x.src && (x.lane || 0) >= 1 ? Math.max(m, tlPos(x) + (x.end - x.start)) : m), dur());
+  const timelineEnd = () => Math.max(dur() + outroDur(), playEnd());
   const trackW = () => Math.max(300, timelineEnd() * ve.pxPerSec);
   /* How wide the timeline may get before the filmstrip is dropped from the clip
    * blocks. 40,000px is roughly 1,700px per source frame — already far more
@@ -895,7 +907,7 @@
     }
     const outro = seg.querySelector('.ve-seg-outro');
     if (outro && ve.outro) {
-      outro.style.left = dur() * ve.pxPerSec + 'px';
+      outro.style.left = playEnd() * ve.pxPerSec + 'px';
       outro.style.width = Math.max(28, (ve.outro.durationSec || 3) * ve.pxPerSec) + 'px';
     }
     return true;
@@ -1201,13 +1213,13 @@
     }
   }
   function updatePlayhead() {
-    const t = ve.refs.player.currentTime || 0;
+    const t = nowT();
     const x = tlPadL() + t * ve.pxPerSec;
     ve.refs.playhead.style.left = x + 'px';
-    $('#veTime').textContent = `${fmt(t)} / ${fmt(dur())}`;
+    $('#veTime').textContent = `${fmt(t)} / ${fmt(playEnd())}`;
     // keep the playhead in view while playing — unless you've scrolled away yourself
     const sc = ve.refs.tlScroll;
-    if (sc && !ve.refs.player.paused && ve.follow !== false) {
+    if (sc && isPlaying() && ve.follow !== false) {
       if (x < sc.scrollLeft + 20 || x > sc.scrollLeft + sc.clientWidth - 60) setScrollLeft(sc, Math.max(0, x - 80));
     }
     updateGapMask(t);
@@ -1234,6 +1246,8 @@
     const inClip = ve.segments.some((s) => (s.lane || 0) === 0 && t >= s.start && t < s.end && !cutAt(s, t));
     const inAudio = ve.audio.some((a) => t >= a.start && t < a.end);
     m.classList.toggle('hidden', inClip);
+    // past the main video the black is the BACKGROUND of the clips that follow it
+    m.style.zIndex = t >= mainEnd() - 0.01 ? '1' : '';
     // silent while a voiceover records, so the sermon does not leak into the mic
     ve.refs.player.muted = !!ve._voiceMute || !inClip || !inAudio;
   }
@@ -3102,6 +3116,45 @@
     });
   }
 
+  /** Files as the clips that follow the main video, one after another. */
+  async function addAfterMain(list) {
+    let t = Math.max(mainEnd(), ...tailClips().map((x) => tlPos(x) + (x.end - x.start)));
+    const added = [], failed = [];
+    const pre = snapshotState();
+    const far = frameAR();
+    for (const p of list) {
+      const image = isImgPath(p);
+      let info = null;
+      try { info = await window.api.video.info(p); } catch (e) { info = null; }
+      if (!info || !info.width || !info.height) { failed.push(p.split(/[\\/]/).pop()); continue; }
+      const len = image ? IMAGE_DEFAULT_SEC : Math.max(0.5, info.durationSec || IMAGE_DEFAULT_SEC);
+      // as big as the frame allows, centred: the whole picture, like a main clip
+      const ar = info.width / info.height;
+      const hFrac = far / ar;
+      const pip = hFrac <= 1 ? { pipX: 0, pipY: (1 - hFrac) / 2, pipW: 1 } : { pipW: ar / far, pipX: (1 - ar / far) / 2, pipY: 0 };
+      const s = {
+        id: uid(), lane: 1,
+        src: p, kind: image ? 'image' : 'video',
+        srcInfo: { width: info.width, height: info.height, durationSec: image ? 0 : (info.durationSec || 0), hasAudio: !!info.hasAudio },
+        start: 0, end: len, tlStart: t,
+        label: p.split(/[\\/]/).pop(),
+        color: image ? '#0aa2c0' : '#a371f7',
+        mute: false, after: true,
+        ...pip,
+      };
+      ve.segments.push(s);
+      added.push(s);
+      t += len;
+    }
+    if (!added.length) return window.__toast && window.__toast(`⚠️ Could not read ${failed.join(', ')} — that isn't a video or a picture this can open.`, 'error', 7000);
+    commitDragHistory(pre);
+    ve.sel = added[added.length - 1].id; ve.activeRow = 'video'; ve.audioSel = null;
+    renderRuler(); renderSegments(); updatePlayhead();
+    added.forEach(loadMediaThumb);
+    window.__toast && window.__toast(`🎞 ${added.length === 1 ? `“${added[0].label}”` : added.length + ' clips'} added after your video — press ▶ to watch it all.`, 'good');
+    return added.map((x) => x.id);
+  }
+
   async function pickMediaOverlays() {
     if (!ve.video) return window.__toast && window.__toast('Open a video first, then add media on top of it.', 'error');
     let paths = null;
@@ -3125,11 +3178,17 @@
     return MAX_OVERLAY_LANES;
   }
 
-  async function addMediaOverlays(paths, atSec) {
+  async function addMediaOverlays(paths, atSec, { after = false } = {}) {
     if (!ve.video) return window.__toast && window.__toast('Open a video first, then add media on top of it.', 'error');
     const list = (paths || []).filter(Boolean);
     if (!list.length) return;
-    let t = clamp(atSec != null ? atSec : (ve.refs.player.currentTime || 0), 0, Math.max(0, dur() - 0.2));
+    // At the END of the video (the ＋ at the end of the row, or the playhead
+    // parked at the end) a file goes AFTER it — the next clip, full frame, with
+    // its own sound — instead of on top of a moment that is already over.
+    const here = atSec != null ? atSec : nowT();
+    if (!after && atSec == null && here >= Math.min(dur(), mainEnd()) - 0.3) after = true;
+    if (after) return addAfterMain(list);
+    let t = clamp(here, 0, Math.max(0, dur() - 0.2));
     const added = [], failed = [];
     const pre = snapshotState();
     for (const p of list) {
@@ -3346,7 +3405,7 @@
   function updateMediaLayer(t) {
     const layer = ve.refs.mediaLayer; if (!layer || !ve.video) return;
     if (!layer.children.length) return;
-    const playing = ve.refs.player && !ve.refs.player.paused;
+    const playing = isPlaying();
     for (const n of Array.from(layer.children)) {
       if (n.dataset.keyFor) continue;              // a key canvas — drawn with its source below
       const s = ve.segments.find((x) => String(x.id) === n.dataset.mid);
@@ -3471,7 +3530,7 @@
   function renderTextOverlays() {
     const layer = ve.refs.textLayer; if (!layer) return;
     if (ve.textEditing) return; // don't clobber the contenteditable box mid-typing
-    const t = ve.refs.player.currentTime || 0;
+    const t = nowT();
     const visible = ve.video ? ve.textOverlays.filter((o) => t >= o.start && t <= o.end) : [];
     // Font size must be COMPUTED IN PIXELS from the preview's height. A CSS
     // percentage font-size is relative to the PARENT'S font size (~14px), so the
@@ -5511,12 +5570,72 @@
   }
 
   /* ---------------- transport ---------------- */
+  /* ---- the tail clock: playing on past the end of the main video ---- */
+  function nowT() { return ve.tailT != null ? ve.tailT : ((ve.refs && ve.refs.player && ve.refs.player.currentTime) || 0); }
+  function isPlaying() { return !!ve.tailRun || !!(ve.refs && ve.refs.player && !ve.refs.player.paused); }
+  function hasTail() { return playEnd() > dur() + 0.05; }
+  function enterTail(t, play) {
+    ve.tailT = clamp(t, dur(), playEnd());
+    const p = ve.refs.player;
+    if (p && !p.paused) { ve._tailPausing = true; p.pause(); }
+    if (play) startTailRun(); else updatePlayhead();
+  }
+  function startTailRun() {
+    stopTailRun(true);
+    if (ve.tailT == null) ve.tailT = dur();
+    if (ve.tailT >= playEnd() - 0.03) ve.tailT = Math.min(playEnd(), Math.max(dur(), mainEnd()));
+    const run = { t0: performance.now(), s0: ve.tailT, raf: 0 };
+    ve.tailRun = run;
+    ve.refs.play.textContent = '⏸';
+    setFollow(true, true);
+    const step = () => {
+      if (ve.tailRun !== run) return;
+      ve.tailT = run.s0 + (performance.now() - run.t0) / 1000;
+      if (ve.tailT >= playEnd()) { ve.tailT = playEnd(); stopTailRun(); updatePlayhead(); return; }
+      updatePlayhead();
+      run.raf = requestAnimationFrame(step);
+    };
+    updatePlayhead();
+    run.raf = requestAnimationFrame(step);
+  }
+  function stopTailRun(quiet) {
+    if (ve.tailRun) cancelAnimationFrame(ve.tailRun.raf);
+    const was = !!ve.tailRun;
+    ve.tailRun = null;
+    if (!quiet && was) { ve.refs.play.textContent = '▶'; updateMediaLayer(nowT()); syncMusicPreview(); }
+  }
+  function leaveTail() { stopTailRun(true); ve.tailT = null; }
+  /* iOS lets a video play with sound only from a tap; the clips that follow the
+   * main video start later, from the clock, so they are woken on the tap. */
+  function wakeTailMedia() {
+    const layer = ve.refs.mediaLayer; if (!layer) return;
+    for (const n of Array.from(layer.querySelectorAll('video'))) {
+      const s = ve.segments.find((x) => String(x.id) === n.dataset.mid);
+      if (!s || !isTailClip(s) || !n.paused) continue;
+      const pr = n.play(); if (pr && pr.then) pr.then(() => { if (!isPlaying() || nowT() < tlPos(s)) n.pause(); }).catch(() => {});
+    }
+  }
+
   function togglePlay() {
     const p = ve.refs.player;
     if (!p.src || (ve.video && ve.video.proxying)) { window.__toast && window.__toast('Preview is still preparing…', 'error'); return; }
+    wakeTailMedia();
+    if (ve.tailT != null) {
+      if (ve.tailRun) return stopTailRun();
+      if (ve.tailT >= playEnd() - 0.05) { leaveTail(); p.currentTime = 0; const pr = p.play(); if (pr && pr.catch) pr.catch(() => {}); ve.refs.play.textContent = '⏸'; return; }
+      return startTailRun();
+    }
+    // at the very end of the main video with clips after it: carry on into them
+    if (p.paused && hasTail() && (p.currentTime || 0) >= dur() - 0.08) return enterTail(dur(), true);
     if (p.paused) { const pr = p.play(); if (pr && pr.catch) pr.catch(() => {}); ve.refs.play.textContent = '⏸'; } else { p.pause(); ve.refs.play.textContent = '▶'; }
   }
-  function seekTo(t) { ve.refs.player.currentTime = clamp(t, 0, dur()); updatePlayhead(); }
+  function seekTo(t) {
+    if (hasTail() && t > dur() + 0.001) { const was = isPlaying(); return enterTail(t, was); }
+    const wasTail = ve.tailRun; leaveTail();
+    ve.refs.player.currentTime = clamp(t, 0, dur());
+    if (wasTail) { const pr = ve.refs.player.play(); if (pr && pr.catch) pr.catch(() => {}); }
+    updatePlayhead();
+  }
 
   /** The clip card's ▶ is a real play/pause TOGGLE: while its clip is playing it
    *  shows ⏸, and clicking pauses; clicking ▶ again resumes from where it paused
@@ -8449,6 +8568,28 @@
             () => window.api.video.overlayComposite({ base: out, overlays: post, jobId: jid, deleteInput: true, outName: 'edited-overlay' }), J(whole, 'overlays'));
         }
       }
+      /*
+       * The clips placed AFTER the main video go on the end, in their order,
+       * each trimmed to the part kept (a picture held as long as its block),
+       * fitted to the video's own shape on its blurred colours.
+       */
+      const tail = tailClips();
+      if (tail.length) {
+        const clips = [];
+        for (const c of tail) {
+          if (c.kind === 'image') { clips.push({ path: c.src, durationSec: Math.max(0.5, c.end - c.start) }); continue; }
+          const full = (c.srcInfo && c.srcInfo.durationSec) || 0;
+          let pth = c.src;
+          if (c.start > 0.05 || (full && c.end < full - 0.05)) {
+            const jt = window.__newJobId();
+            pth = await window.__runJob(`✂️ Trimming “${c.label || 'clip'}”…`, jt, () => window.api.video.trim({ input: c.src, startSec: c.start, endSec: c.end, jobId: jt }));
+          }
+          clips.push({ path: pth });
+        }
+        const ja = window.__newJobId();
+        out = await window.__runJob(`🎞 Adding ${clips.length === 1 ? 'the clip' : clips.length + ' clips'} that come after…`, ja,
+          () => window.api.video.appendClips({ input: out, clips, position: 'end', fill: { mode: 'blur' }, jobId: ja, deleteInput: true, outName: 'edited-plus' }));
+      }
       const info = ve.video.info;
       const size = { w: info.width, h: info.height };
       const caps = planCaps;    // already asked, above, to build the plan
@@ -8752,7 +8893,7 @@
        * What hangs over the edge is simply not rendered (the composite is bounded
        * by the base), so only the START has to be on the timeline.
        */
-      const maxStart = (moving && moving.lane === 1) ? Math.max(0, dur() - 0.2) : dur() - len;
+      const maxStart = (moving && (moving.lane || 0) >= 1) ? Math.max(0, dur() - 0.2, isMedia(moving) ? playEnd() - 0.2 : 0) : dur() - len;
       let ns = clamp(d.p0 + (x - d.x0) / ve.pxPerSec, 0, maxStart);
       // snap the clip's LEFT edge, or its right edge, to nearby edges/playhead
       const snapL = snapT(ns, d.id), snapR = snapT(ns + len, d.id);
@@ -11811,12 +11952,11 @@
     if (!m || !m.file) { if (!a.paused) a.pause(); return; }
     if (a.dataset.file !== m.file) { a.src = fileUrl(m.file); a.dataset.file = m.file; }
     a.volume = clamp(m.volume, 0, 1);
-    const p = ve.refs.player;
-    const pos = musicPosFor(p.currentTime || 0);
+    const pos = musicPosFor(nowT());
     if (pos == null) { if (!a.paused) a.pause(); return; }
     // Only re-seek when it has genuinely drifted; nudging every frame stutters.
     if (force || Math.abs((a.currentTime || 0) - pos) > 0.35) { try { a.currentTime = pos; } catch (e) {} }
-    if (!p.paused) { if (a.paused) { const pr = a.play(); if (pr && pr.catch) pr.catch(() => {}); } }
+    if (isPlaying()) { if (a.paused) { const pr = a.play(); if (pr && pr.catch) pr.catch(() => {}); } }
     else if (!a.paused) a.pause();
   }
 
@@ -12977,9 +13117,12 @@
 
     const p = ve.refs.player;
     p.addEventListener('timeupdate', () => {
+      if (ve.tailT != null) return;     // the tail clock is driving the playhead
       // hop over any pause the user removed, so what plays IS what exports
       const jump = skipRemovedAt(p.currentTime || 0);
       if (jump != null) { p.currentTime = jump; updatePlayhead(); return; }
+      // the main video has run out and clips follow it: play on into them
+      if (!p.paused && hasTail() && (p.currentTime || 0) >= dur() - 0.06) { enterTail(dur(), true); return; }
       updatePlayhead();
       if (ve._previewEnd != null && p.currentTime >= ve._previewEnd) {
         if (ve._loopSeg) { p.currentTime = ve._loopSeg.start; } else { p.pause(); ve.refs.play.textContent = '▶'; ve._previewEnd = null; }
@@ -12988,8 +13131,10 @@
     // Pressing play is you asking to watch, so following comes back on; scrolling
     // away during playback turns it off again (see the scroll listener).
     p.addEventListener('play', () => { ve.refs.play.textContent = '⏸'; setFollow(true, true); updateClipPlayButtons(); syncMusicPreview(true); startCapTick(); });
-    p.addEventListener('pause', () => { ve.refs.play.textContent = '▶'; updateClipPlayButtons(); syncMusicPreview(); syncSoundPreview(); stopCapTick(); });
-    p.addEventListener('ended', stopCapTick);
+    p.addEventListener('pause', () => { if (ve._tailPausing || ve.tailRun) { ve._tailPausing = false; return; } ve.refs.play.textContent = '▶'; updateClipPlayButtons(); syncMusicPreview(); syncSoundPreview(); stopCapTick(); });
+    p.addEventListener('ended', () => { stopCapTick(); if (ve.tailT == null && hasTail()) enterTail(dur(), true); });
+    // anything else moving the main video's playhead (a clip's ▶, a jump) ends the tail
+    p.addEventListener('seeking', () => { if (ve.tailT != null) leaveTail(); });
     p.addEventListener('seeked', () => syncMusicPreview(true));
     p.addEventListener('error', () => {
       // Some other unplayable codec — fall back to building a proxy.
@@ -13122,6 +13267,14 @@
         if (p && !p.paused) { p.pause(); if (ve.refs.play) ve.refs.play.textContent = '▶'; }
       } catch (e) {}
       try { syncMusicPreview(); } catch (e) {}
+    },
+    /** The ＋ at the end of the row: pick files and put them AFTER the video. */
+    async pickMediaAfter() {
+      if (!ve.video) return window.__toast && window.__toast('Open a video first.', 'error');
+      let paths = null;
+      try { paths = await window.api.dialog.openFile(MEDIA_FILTERS, true); } catch (e) { paths = null; }
+      if (!paths) return null;
+      return addAfterMain(Array.isArray(paths) ? paths : [paths]);
     },
     fit() { if (ve.video) { renderRuler(); renderSegments(); updatePlayhead(); updateCropMask(); updateCapOverlay(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0); renderTextOverlays(); } },
     /**
@@ -13696,6 +13849,10 @@
           x: s.pipX, y: s.pipY, w: s.pipW, srcInfo: s.srcInfo || null,
         };
       },
+      addAfter(paths) { return addAfterMain(paths); },
+      tailState() { return { tailT: ve.tailT, running: !!ve.tailRun, playEnd: playEnd(), dur: dur(), mainEnd: mainEnd(), tail: tailClips().map((x) => ({ id: x.id, at: tlPos(x), len: x.end - x.start, pipW: x.pipW, pipX: x.pipX, pipY: x.pipY })) }; },
+      seekTo(t) { seekTo(t); return nowT(); },
+      togglePlay() { togglePlay(); },
       setMediaTl(id, tl) { const s = ve.segments.find((x) => String(x.id) === String(id)); if (s) { s.tlStart = tl; renderSegments(); } return s ? tlPos(s) : null; },
       setMediaBox(id, x, y, w) {
         const s = ve.segments.find((x2) => String(x2.id) === String(id));
