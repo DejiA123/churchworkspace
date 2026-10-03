@@ -2267,6 +2267,17 @@ let _hideTimer = null;
       tl.addEventListener('touchcancel', done);
       // iOS zooms the whole page on a pinch unless told not to.
       tl.addEventListener('gesturestart', (e) => e.preventDefault());
+      // Lanes below the fold (text, captions, sound, music): fade the bottom
+      // edge so it is plain there is more to scroll to.
+      const more = () => tl.classList.toggle('cloud-tl-more', tl.scrollTop + tl.clientHeight < tl.scrollHeight - 4);
+      tl.addEventListener('scroll', more, { passive: true });
+      if (window.ResizeObserver) {
+        const ro = new ResizeObserver(more);
+        ro.observe(tl);
+        const inner = $('#veTlScroll') || tl.firstElementChild;
+        if (inner) ro.observe(inner);
+      }
+      setTimeout(more, 500);
     }
   }
 
