@@ -51,6 +51,8 @@ const FPS = 30;
 const EFFECTS = ['cut', 'punch_in', 'flash', 'slow_zoom', 'zoom_out', 'slow_motion'];
 /* how a shot comes IN from the one before it */
 const TRANSITIONS = ['cut', 'fade', 'flash'];
+/* something laid ON a video shot while its sound plays on */
+const OVERLAY_STYLES = ['cutaway', 'pip'];
 const STYLES = {
   hype: 'High energy. Fast cuts (often under a second on a fast song), punch-ins and flashes on the big moments, the most explosive moment first.',
   worship: 'Reverent and uplifting. Unhurried shots of raised hands, faces and light; slow zooms; let moments breathe; build to a climax.',
@@ -324,7 +326,7 @@ async function beats(ctx, music) {
 const PLAN_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['concept', 'title', 'shots', 'texts', 'post_caption', 'hashtags'],
+  required: ['concept', 'title', 'shots', 'texts', 'overlays', 'post_caption', 'hashtags'],
   properties: {
     concept: { type: 'string', description: 'One sentence: the idea of this edit and why it will hold attention.' },
     title: { type: 'string' },
@@ -357,6 +359,22 @@ const PLAN_SCHEMA = {
         },
       },
     },
+    overlays: {
+      type: 'array',
+      description: 'B-roll laid ON TOP of a video shot while that shot keeps playing its sound.',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['on_shot', 'id', 'style', 'start', 'seconds'],
+        properties: {
+          on_shot: { type: 'integer', description: 'Index (0-based) of the VIDEO shot it goes over.' },
+          id: { type: 'string', description: 'The candidate shown on top (a photo or another clip).' },
+          style: { type: 'string', enum: OVERLAY_STYLES, description: '"cutaway" fills the frame; "pip" is a framed box in a corner.' },
+          start: { type: 'number', description: 'Seconds into that shot where it appears.' },
+          seconds: { type: 'number', description: 'How long it stays (1–4).' },
+        },
+      },
+    },
     post_caption: { type: 'string' },
     hashtags: { type: 'array', items: { type: 'string' } },
   },
@@ -371,6 +389,7 @@ What makes it work:
 - Faces and genuine emotion beat scenery. Avoid near-duplicate frames back to back. Skip blurry, dark or empty frames.
 - When there is music, cut lengths are multiples of the beat; faster songs mean shorter shots. Without music, 1.2–3 s per shot.
 - Transitions (how each shot comes in): mostly "cut" on the beat; "fade" through black to change place, time or mood; "flash" (white) to hit a big moment. Never two fades in a row on a fast edit.
+- Overlays (B-roll) are what make it feel produced: lay a photo or another clip ON TOP of a video shot while that shot's sound carries on — show what is being preached or sung about, a reaction, the crowd, a moment from earlier. "cutaway" fills the frame; "pip" is a framed box in a corner. Use them on video shots whose sound carries (speech, singing, a crowd), 1.5–3.5 s each, a few per edit, never in the first second of the hook.
 - Effects are seasoning: punch_in or flash on the biggest beats, slow_zoom / zoom_out to give photos life, slow_motion for one emotional peak at most. Most shots are a plain "cut".
 - On-screen words: one hook in the first shot (max 7 words, curiosity or emotion, no clickbait lies), a few short beats that carry the story (max 6 words each), and an optional call to action at the end. Plain words, no emojis inside the video text, no hashtags in it.
 - Respect the faith context: uplifting, sincere, never mocking.
@@ -444,10 +463,22 @@ async function directWithGroq(cands, opts, music) {
   if (!cw.access || !cw.access().key) return null;
   const prompt = briefOf(opts, music) + '\n\nCandidates:\n' + cands.map(describe).join('\n')
     + '\n\nReply with JSON only, exactly this shape: {"concept":"","title":"","shots":[{"id":"c1","seconds":2,"effect":"cut","focus":"center","transition":"cut"}],'
-    + '"texts":[{"at_shot":0,"span_shots":1,"text":"","role":"hook"}],"post_caption":"","hashtags":[""]}. Effects: ' + EFFECTS.join(', ') + '.';
+    + '"texts":[{"at_shot":0,"span_shots":1,"text":"","role":"hook"}],"overlays":[{"on_shot":1,"id":"c5","style":"cutaway","start":0.8,"seconds":2}],"post_caption":"","hashtags":[""]}. Effects: ' + EFFECTS.join(', ') + '. Overlay styles: ' + OVERLAY_STYLES.join(', ') + '.';
   const text = await cw.chat({ system: SYSTEM, prompt, json: true, maxTokens: 2500, temperature: 0.7, timeoutMs: 60000, evenIfOff: true });
   const plan = text ? cw.parseJson(text) : null;
   return plan && Array.isArray(plan.shots) ? { plan, director: 'groq', model: (cw.state && cw.state().model) || 'groq' } : null;
+}
+
+/** Rules' B-roll: photos laid over the longest video shots, alternating full-frame and boxed. */
+function rulesOverlays(shots, cands) {
+  const byId = new Map(cands.map((c) => [c.id, c]));
+  const pics = cands.filter((c) => c.kind === 'image');
+  if (!pics.length) return [];
+  const long = shots.map((s, i) => ({ s, i, c: byId.get(s.id) }))
+    .filter((x) => x.c && x.c.kind === 'video' && x.s.seconds >= 3)
+    .sort((a, b) => b.s.seconds - a.s.seconds).slice(0, Math.min(4, pics.length));
+  return long.map((x, k) => ({ on_shot: x.i, id: pics[k % pics.length].id, style: k % 2 ? 'pip' : 'cutaway',
+    start: Math.min(1, x.s.seconds * 0.25), seconds: Math.min(3, x.s.seconds * 0.5) }));
 }
 
 /** No AI at all: strongest first, the rest in an alternating, varied order. */
@@ -469,7 +500,7 @@ function directByRules(cands, opts, music) {
       transition: i === 0 ? 'cut' : (order[i - 1].kind !== c.kind ? 'fade' : (i % 3 === 0 ? 'flash' : 'cut')),
     }));
     return { plan: { concept: 'Everything kept, blended into one piece.', title: hook0 || 'Highlights', shots,
-      texts: hook0 ? [{ at_shot: 0, span_shots: 1, text: hook0, role: 'hook' }] : [], post_caption: '', hashtags: [] }, director: 'rules', model: '' };
+      texts: hook0 ? [{ at_shot: 0, span_shots: 1, text: hook0, role: 'hook' }] : [], overlays: rulesOverlays(shots, cands), post_caption: '', hashtags: [] }, director: 'rules', model: '' };
   }
   const pool = cands.slice().sort((a, b) => b.score - a.score);
   const per = music ? music.interval * (music.bpm > 120 ? 2 : 1) * (opts.style === 'worship' || opts.style === 'cinematic' ? 2 : 1) : 2;
@@ -487,6 +518,7 @@ function directByRules(cands, opts, music) {
   const hook = String(opts.brief || '').replace(/\s+/g, ' ').trim().split(' ').slice(0, 7).join(' ');
   return { plan: { concept: 'Strongest moments first, cut to the rhythm.', title: hook || 'Highlights', shots,
     texts: hook ? [{ at_shot: 0, span_shots: Math.min(2, shots.length), text: hook, role: 'hook' }] : [],
+    overlays: rulesOverlays(shots, cands),
     post_caption: '', hashtags: [] }, director: 'rules', model: '' };
 }
 
@@ -534,8 +566,10 @@ function finalise(raw, cands, opts, music) {
   }
   if (opts.full) {
     // nothing the operator gave is left out, even if the director skipped it
+    // (a photo shown as an overlay counts as shown)
+    const onTop = new Set((raw.overlays || []).map((o) => String(o && o.id || '').trim()));
     for (const c of cands) {
-      if (shots.some((x) => x.cand.id === c.id)) continue;
+      if (shots.some((x) => x.cand.id === c.id) || onTop.has(c.id)) continue;
       shots.push({ cand: c, seconds: c.kind === 'video' ? Math.max(0.4, c.fileDur - 0.05) : 3,
         effect: c.kind === 'image' ? 'slow_zoom' : 'cut', focus: 'center', slow: false, transition: 'fade' });
     }
@@ -591,6 +625,20 @@ function finalise(raw, cands, opts, music) {
     t += s.seconds;
   }
   const duration = round2(t);
+  // overlays: a known picture or clip, over a VIDEO shot long enough to carry it
+  for (const o of (raw.overlays || [])) {
+    const i = Math.round(Number(o && o.on_shot));
+    const base = shots[i];
+    const oc = byId.get(String(o && o.id || '').trim());
+    if (!base || !oc || base.overlay || base.cand.kind !== 'video' || oc.id === base.cand.id || base.seconds < 2.2) continue;
+    const style = OVERLAY_STYLES.includes(o.style) ? o.style : 'cutaway';
+    const start = round2(clamp(Number(o.start) || 0.8, i === 0 ? 1.2 : 0.3, base.seconds - 1.2));
+    const len = round2(clamp(Number(o.seconds) || 2, 1, Math.min(4, base.seconds - start - 0.15)));
+    if (len < 1) continue;
+    const ov = { cand: oc, style, start, len, pos: (i % 2 ? 'left' : 'right') };
+    if (oc.kind === 'video') ov.from = round2(clamp(oc.peak - len / 2, 0, Math.max(0, oc.fileDur - len - 0.05)));
+    base.overlay = ov;
+  }
   const texts = [];
   for (const x of (raw.texts || [])) {
     const i = Math.round(Number(x && x.at_shot));
@@ -614,7 +662,7 @@ function finalise(raw, cands, opts, music) {
 
 /* ------------------------------------------------------------------- render */
 
-function fitChain(c, W, H, focus, scale = 1) {
+function fitChain(c, W, H, focus, scale = 1, tag = '') {
   const w = W * scale, h = H * scale;
   const ar = c.w / c.h, tar = W / H;
   const y = focus === 'top' ? '0' : focus === 'bottom' ? '(ih-oh)' : '(ih-oh)/2';
@@ -623,8 +671,8 @@ function fitChain(c, W, H, focus, scale = 1) {
   if (Math.abs(Math.log(ar / tar)) < 0.42) {
     return `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}:(iw-ow)/2:${y},setsar=1`;
   }
-  return `split[fa][fb];[fa]scale=${Math.round(w / 4)}:${Math.round(h / 4)}:force_original_aspect_ratio=increase,crop=${Math.round(w / 4)}:${Math.round(h / 4)},boxblur=10:2,eq=brightness=-0.06,scale=${w}:${h}[bg];`
-    + `[fb]scale=${w}:${h}:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1`;
+  return `split[fa${tag}][fb${tag}];[fa${tag}]scale=${Math.round(w / 4)}:${Math.round(h / 4)}:force_original_aspect_ratio=increase,crop=${Math.round(w / 4)}:${Math.round(h / 4)},boxblur=10:2,eq=brightness=-0.06,scale=${w}:${h}[bg${tag}];`
+    + `[fb${tag}]scale=${w}:${h}:force_original_aspect_ratio=decrease[fg${tag}];[bg${tag}][fg${tag}]overlay=(W-w)/2:(H-h)/2,setsar=1`;
 }
 
 function effectChain(effect, W, H, dur) {
@@ -661,19 +709,48 @@ async function renderShot(ctx, s, W, H, keepAudio, out, next) {
   const c = s.cand, dur = s.seconds;
   const edge = edgeFades(s, next, dur);
   const args = ['-hide_banner', '-y'];
-  let v;
+  let base;
   if (c.kind === 'image') {
     // a photo comes alive: a slow push in or pull out (zoompan makes the frames)
     const frames = Math.max(2, Math.round(dur * FPS));
     args.push('-i', c.file);
     const zoomIn = s.effect !== 'zoom_out';
     const z = zoomIn ? `1+0.12*on/${frames}` : `1.12-0.12*on/${frames}`;
-    v = `[0:v]${fitChain(c, W, H, s.focus, 2)},zoompan=z='${z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${W}x${H}:fps=${FPS}`
-      + (s.effect === 'flash' && s.transition !== 'flash' ? ',fade=t=in:st=0:d=0.18:color=white' : '') + (edge.v ? ',' + edge.v : '') + ',format=yuv420p[v]';
+    base = `[0:v]${fitChain(c, W, H, s.focus, 2, 'b')},zoompan=z='${z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${W}x${H}:fps=${FPS}`
+      + (s.effect === 'flash' && s.transition !== 'flash' ? ',fade=t=in:st=0:d=0.18:color=white' : '');
   } else {
     args.push('-ss', String(s.from), '-t', String(s.need + 0.1), '-i', c.file);
     const fx = effectChain(s.effect, W, H, dur);
-    v = `[0:v]${s.slow ? 'setpts=2.0*PTS,' : ''}${fitChain(c, W, H, s.focus)}${fx ? ',' + fx : ''},fps=${FPS}${edge.v ? ',' + edge.v : ''},format=yuv420p[v]`;
+    base = `[0:v]${s.slow ? 'setpts=2.0*PTS,' : ''}${fitChain(c, W, H, s.focus, 1, 'b')}${fx ? ',' + fx : ''},fps=${FPS}`;
+  }
+  let graph;
+  let nextInput = 1;
+  const o = s.overlay;
+  if (o) {
+    /*
+     * B-ROLL: the picture changes, the sound does not. The overlay fades in
+     * and out over the base shot, which keeps playing (and keeps its audio)
+     * underneath: a full-frame cutaway with a gentle push, or a framed box.
+     */
+    const oc = o.cand;
+    if (oc.kind === 'image') args.push('-loop', '1', '-t', String(o.len + 0.2), '-i', oc.file);
+    else args.push('-ss', String(o.from || 0), '-t', String(o.len + 0.2), '-i', oc.file);
+    nextInput = 2;
+    let look;
+    let x = '0', y = '0';
+    if (o.style === 'pip') {
+      const pw = Math.round((W * (W > H ? 0.34 : 0.5)) / 2) * 2, ph = Math.round((H * 0.34) / 2) * 2;
+      look = `scale=${pw}:${ph}:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,pad=iw+12:ih+12:6:6:white,setsar=1`;
+      x = o.pos === 'left' ? '44' : `W-w-44`;
+      y = `${Math.round(H * 0.11)}`;
+    } else {
+      look = `${fitChain(oc, W, H, 'center', 1, 'o')},scale=w='trunc(${W}*(1+0.07*t/${o.len.toFixed(2)})/2)*2':h=-2:eval=frame,crop=${W}:${H}`;
+    }
+    const ov = `[1:v]${look},fps=${FPS},format=yuva420p,fade=t=in:st=0:d=0.25:alpha=1,fade=t=out:st=${Math.max(0, o.len - 0.25).toFixed(3)}:d=0.25:alpha=1,`
+      + `trim=0:${o.len.toFixed(3)},setpts=PTS-STARTPTS+${o.start.toFixed(3)}/TB[ov]`;
+    graph = `${base}[bv];${ov};[bv][ov]overlay=${x}:${y}:eof_action=pass:enable='between(t,${o.start.toFixed(3)},${(o.start + o.len).toFixed(3)})'${edge.v ? ',' + edge.v : ''},format=yuv420p[v]`;
+  } else {
+    graph = `${base}${edge.v ? ',' + edge.v : ''},format=yuv420p[v]`;
   }
   const withSound = keepAudio && c.kind === 'video' && c.hasAudio;
   let a;
@@ -681,9 +758,9 @@ async function renderShot(ctx, s, W, H, keepAudio, out, next) {
     a = `[0:a]${s.slow ? 'atempo=0.5,' : ''}aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=0:${dur.toFixed(3)}${edge.a ? ',' + edge.a : ''}[a]`;
   } else {
     args.push('-f', 'lavfi', '-t', String(dur + 0.1), '-i', 'anullsrc=r=48000:cl=stereo');
-    a = `[1:a]anull[a]`;
+    a = `[${nextInput}:a]anull[a]`;
   }
-  args.push('-filter_complex', `${v};${a}`, '-map', '[v]', '-map', '[a]', '-t', String(dur),
+  args.push('-filter_complex', `${graph};${a}`, '-map', '[v]', '-map', '[a]', '-t', String(dur),
     '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-r', String(FPS), '-pix_fmt', 'yuv420p',
     '-video_track_timescale', '30000', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2', out);
   await ff.runFfmpeg(ctx.ffmpeg, args);
@@ -750,6 +827,7 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, ful
       texts: plan.texts,
       bpm: music ? music.bpm : null,
       full: opts.full,
+      overlays: plan.shots.filter((s) => s.overlay).map((s) => ({ at: round2(s.at + s.overlay.start), seconds: s.overlay.len, style: s.overlay.style, file: s.overlay.cand.file })),
       shots: plan.shots.map((s) => ({ at: s.at, seconds: s.seconds, effect: s.effect, transition: s.transition, file: s.cand.file, kind: s.cand.kind, from: s.from == null ? null : s.from })),
     };
   } finally {
@@ -764,4 +842,4 @@ function directorStatus() {
   return { director: 'rules', model: '' };
 }
 
-module.exports = { make, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, _direct: direct };
+module.exports = { make, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };

@@ -138,6 +138,30 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
   log(resAll.full && resAll.shots.length === 3 && infoAll.durationSec >= want, 'nothing is cut out: both clips whole plus the photo', `${infoAll.durationSec.toFixed(2)} s from ${want} s of video + a photo`);
   log(resAll.shots.some((x) => x.transition === 'fade'), 'and they are blended (a fade between different kinds of shot)', resAll.shots.map((x) => x.transition).join(','));
 
+  console.log('\nB-ROLL ON TOP, THE SOUND CARRIES ON');
+  const ovPlan = montage.finalise({
+    shots: [{ id: 'c1', seconds: 6, effect: 'cut', focus: 'center', transition: 'cut' }, { id: 'c3', seconds: 2, effect: 'slow_zoom', focus: 'center', transition: 'fade' }],
+    overlays: [
+      { on_shot: 0, id: 'c3', style: 'pip', start: 0.2, seconds: 9 },
+      { on_shot: 0, id: 'c2', style: 'cutaway', start: 1, seconds: 1 },
+      { on_shot: 1, id: 'c2', style: 'cutaway', start: 0.5, seconds: 1 },
+      { on_shot: 0, id: 'nope', style: 'pip', start: 1, seconds: 1 },
+    ],
+    texts: [], hashtags: [], post_caption: '', title: '', concept: '',
+  }, cands, { lengthSec: 30 }, null);
+  const o0 = ovPlan.shots[0].overlay;
+  log(o0 && o0.style === 'pip' && o0.cand.id === 'c3', 'an overlay lands on its video shot');
+  log(o0 && o0.start >= 1.2 && o0.start + o0.len <= ovPlan.shots[0].seconds, 'kept out of the hook’s first second and inside its shot', o0 && `${o0.start}+${o0.len} of ${ovPlan.shots[0].seconds}`);
+  log(!ovPlan.shots[1].overlay, 'one per shot, and never over a photo (it has no sound to carry)');
+  const ovOut = path.join(WORK, 'ov.mp4');
+  const base = make(['-f', 'lavfi', '-i', 'testsrc2=s=1280x720:r=30:d=8', '-f', 'lavfi', '-i', 'sine=f=440:d=8', '-shortest', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac'], path.join(WORK, 'talk.mp4'));
+  const resOv = await montage.make(ctx, video.getInfo, { mediaPaths: [base, ph], full: true, style: 'worship', aspect: '9:16', keepAudio: true, output: ovOut, onProgress: () => {} });
+  log(resOv.overlays.length === 1, 'the montage lays the photo over the talking clip', JSON.stringify(resOv.overlays));
+  const o = resOv.overlays[0] || { at: 1.5, seconds: 1 };
+  const vol = require('child_process').spawnSync(ffmpeg, ['-hide_banner', '-ss', String(o.at + 0.3), '-t', String(Math.max(0.3, o.seconds - 0.6)), '-i', ovOut, '-af', 'volumedetect', '-vn', '-f', 'null', '-']).stderr.toString();
+  const mean = parseFloat((vol.match(/mean_volume:\s*(-?[\d.]+)/) || [])[1]);
+  log(mean > -40, 'and the clip’s sound keeps playing under it', mean + ' dB');
+
   fs.rmSync(WORK, { recursive: true, force: true });
   console.log(failed ? '\n❌ montage test failed' : '\n✅ montage test passed');
   process.exit(failed ? 1 : 0);

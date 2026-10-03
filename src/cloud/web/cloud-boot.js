@@ -2236,6 +2236,35 @@ let _hideTimer = null;
     const tl = $('#veTimeline');
     if (tl) {
 
+      /*
+       * CapCut's ＋ sits at the END of the video row — you scroll right to the
+       * last clip and there it is — not floating over the clips. It lives in
+       * the sideways scroller, so it moves with the timeline, and follows the
+       * row's end whenever the timeline is zoomed or a clip changes.
+       */
+      const scroller = $('#veTlScroll'), track = $('#veTrack');
+      if (scroller && track) {
+        const add = document.createElement('button');
+        add.type = 'button';
+        add.className = 'cloud-tl-add';
+        add.setAttribute('aria-label', 'Add a video or picture');
+        add.innerHTML = mi('plus');
+        add.addEventListener('click', () => { const t = $('#veAddMedia'); if (t && !t.disabled) t.click(); });
+        mirror(add, $('#veAddMedia'), {});
+        scroller.appendChild(add);
+        const place = () => {
+          const main = Array.from(track.querySelectorAll('.ve-seg')).filter((n) => !n.classList.contains('ve-seg-ov'));
+          const sr = scroller.getBoundingClientRect(), tr = track.getBoundingClientRect();
+          let top = tr.bottom - 39, h = 36;
+          if (main.length) { const r = main[0].getBoundingClientRect(); top = r.top; h = r.height; }
+          add.style.left = Math.round(tr.right - sr.left + scroller.scrollLeft + 10) + 'px';
+          add.style.top = Math.round(top - sr.top + scroller.scrollTop + (h - 34) / 2) + 'px';
+        };
+        if (window.ResizeObserver) new ResizeObserver(() => requestAnimationFrame(place)).observe(track);
+        new MutationObserver(() => requestAnimationFrame(place)).observe(track, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+        setTimeout(place, 400);
+      }
+
       let pinch = null;
       const span = (ts) => Math.hypot(ts[0].clientX - ts[1].clientX, ts[0].clientY - ts[1].clientY);
       tl.addEventListener('touchstart', (e) => {
