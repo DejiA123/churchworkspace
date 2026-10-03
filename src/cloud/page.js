@@ -220,7 +220,10 @@ ${styles}
       <label for="cloudPass" class="cloud-gate-label">Access code</label>
       <input type="password" id="cloudPass" inputmode="text" autocomplete="current-password"
              placeholder="from the app's Settings → Cloud" enterkeyhint="go" />
-      <label class="cloud-gate-remember"><input type="checkbox" id="cloudRemember" checked /> Keep me signed in on this device</label>
+      <label class="cloud-gate-remember" for="cloudRemember">
+        <span class="cgr-text"><b>Stay signed in</b><small>on this device</small></span>
+        <input type="checkbox" id="cloudRemember" class="cgr-switch" role="switch" checked />
+      </label>
       <button type="submit" id="cloudGateGo" class="primary-btn cloud-gate-go">Open</button>
       <div id="cloudGateMsg" class="cloud-gate-msg"></div>
       <div class="cloud-gate-foot">v${version}</div>
