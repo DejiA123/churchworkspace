@@ -284,8 +284,9 @@
     document.body.appendChild(el);
     el.querySelector('.ch-chip-slot').appendChild(C.jobChip());
     el.addEventListener('click', (e) => {
-      const b = e.target.closest('[data-go],[data-home],[data-post],[data-job]');
+      const b = e.target.closest('[data-go],[data-home],[data-post],[data-job],[data-view]');
       if (!b) return;
+      if (b.dataset.view) return C.viewFile && C.viewFile(b.dataset.view);
       if (b.dataset.go) return go(b.dataset.go);
       if (b.dataset.home === 'files') return $('#cloudFiles') && $('#cloudFiles').click();
       if (b.dataset.post) return compose({ files: [b.dataset.post] });
@@ -347,7 +348,7 @@
     const list = S.exports.filter((f) => isVideo(f.path)).slice(0, 10);
     sec.classList.toggle('hidden', !list.length);
     $('#chReel').innerHTML = list.map((f) => `<div class="ch-tile">`
-      + `<span class="ch-tile-pic" data-thumb="${escAttr(f.path)}"></span>`
+      + `<span class="ch-tile-pic" data-thumb="${escAttr(f.path)}" data-view="${escAttr(f.path)}" role="button" aria-label="Watch"></span>`
       + `<span class="ch-tile-name">${esc(titleFromFile(f.path))}</span>`
       + (S.social ? `<button type="button" class="ch-tile-go" data-post="${escAttr(f.path)}">${mi('send')}Post</button>` : '')
       + '</div>').join('');

@@ -2009,6 +2009,12 @@
             title="Remove the rules that depend on the sentence they were in — one everyday word swapped for another, and any pair that undoes itself. Names, phrases and anything you typed in are kept.">🧹 Tidy up</button>
           <button type="button" id="capWbApply" class="ghost-btn">🪄 Fix the captions I have open</button>
         </div>
+        <!-- Pass the book on: to another person's studio, or a new phone. -->
+        <div class="cap-wb-foot cap-wb-io">
+          <button type="button" id="capWbExport" class="ghost-btn" title="Save every correction and name in this book to a file you can share">⬇ Export Word Book</button>
+          <button type="button" id="capWbImport" class="ghost-btn" title="Add the corrections and names from a Word Book file someone shared — nothing already here is lost">⬆ Import Word Book</button>
+          <input type="file" id="capWbImportFile" accept=".json,.txt,.csv,application/json,text/plain" hidden />
+        </div>
       </div>
       <!-- Choosing a look BY SIGHT, without letting the gallery near the layout.
            The cards live in an overlay that floats over the whole window, so
