@@ -12821,6 +12821,13 @@
     },
     /** Is a video open? (The home screen says "continue" rather than "open".) */
     hasVideo() { return !!ve.video; },
+    /** The file the studio has open — the Cloud Studio will not delete it from under the edit. */
+    sourcePath() { return (ve.video && ve.video.path) || null; },
+    /** The edit the Continue card offers is gone (its video was deleted): put the card away. */
+    forgetResume() {
+      const bar = $('#veResume');
+      if (bar && !bar.classList.contains('hidden')) { bar.classList.add('hidden'); resumePromptQuiet(false); }
+    },
     outroInfo() {
       const o = ve.outro;
       return o ? { name: o.name, durationSec: o.durationSec || 0, on: ve.outroAll !== false, thumb: o.thumb ? fileUrl(o.thumb) : null } : null;

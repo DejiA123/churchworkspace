@@ -1000,6 +1000,14 @@
       bar.insertBefore(h, bar.firstChild);
     }
     C.jobListeners.push((list) => { if (S.view === 'home') renderHomeJobs(list); });
+    // a video deleted in Files leaves the home screen too — and an edit whose
+    // video went with it is no longer something to "pick up"
+    if (C.fileListeners) C.fileListeners.push((d) => {
+      const gone = new Set(d.deleted || []);
+      S.exports = S.exports.filter((f) => !gone.has(f.path));
+      if (d.autosaveCleared) S.resumeName = '';
+      if (S.view === 'home') { renderHome(); renderHomeReady(); }
+    });
     const want = String(location.hash || '').replace('#', '');
     go(want === 'studio' || want === 'scheduler' ? want : 'home');
     document.addEventListener('visibilitychange', () => {

@@ -623,6 +623,113 @@ function listDir(dir, { limit = 500, exts = VIDEO_EXT } = {}) {
   return out;
 }
 
+/** How full the disk under `dir` is: { free, total } in bytes, or null. */
+function diskOf(dir) {
+  try {
+    const st = fs.statfsSync ? fs.statfsSync(dir) : null;
+    return st ? { free: st.bavail * st.bsize, total: st.blocks * st.bsize } : null;
+  } catch (e) { return null; }
+}
+
+/*
+ * DELETING FROM A PHONE.
+ *
+ * A server's disk fills with sermons sent from phones and shorts nobody needs
+ * any more, and there was no way to clear any of it without a terminal. So a
+ * signed-in phone may delete — but only what IT put there, and only what is
+ * safe to lose:
+ *
+ *   • only files directly inside "Sent from a phone" or "Finished exports" —
+ *     never the Videos folder (on the church PC that is the real Videos
+ *     folder), never a subfolder, never anything the app keeps for itself;
+ *   • only video files, by extension;
+ *   • never a file a planned post still needs: deleting it would turn Sunday's
+ *     post into a failure at the moment it was due to go out.
+ *
+ * An export's cover picture (the .jpg written beside it) goes with it. If the
+ * deleted file was the video the rolling autosave points at, the autosave goes
+ * too — otherwise the home screen would offer to "pick up" an edit whose video
+ * no longer exists.
+ */
+const COMPANIONS = ['.jpg', '.srt', '.vtt'];
+async function deleteFiles(req, res) {
+  let body;
+  try { body = JSON.parse((await readBody(req, 256 * 1024)).toString('utf-8') || '{}'); }
+  catch (e) { return json(res, 400, { error: 'Bad request.' }); }
+  const asked = (Array.isArray(body.paths) ? body.paths : [body.path]).filter((x) => typeof x === 'string' && x).slice(0, 300);
+  if (!asked.length) return json(res, 400, { error: 'Nothing to delete.' });
+
+  const folders = [cfg.dirs.output, cfg.dirs.uploads].filter(Boolean).map((d) => path.resolve(d));
+  const key = (f) => (process.platform === 'win32' ? path.resolve(f).toLowerCase() : path.resolve(f));
+  const needed = new Map();     // file -> the title of a planned post that uses it
+  try {
+    const got = await rpc.invoke('scheduler:list', {});
+    for (const post of (got && got.ok && got.data) || []) {
+      if (post.status !== 'scheduled' && post.status !== 'posting') continue;
+      for (const m of post.mediaPaths || []) if (typeof m === 'string') needed.set(key(m), post.title || 'a planned post');
+    }
+  } catch (e) { /* no scheduler: nothing is needed by one */ }
+
+  const deleted = [], refused = [];
+  let freed = 0;
+  for (const p of asked) {
+    const full = path.resolve(p);
+    const home = folders.find((d) => path.dirname(full) === d || (process.platform === 'win32' && path.dirname(full).toLowerCase() === d.toLowerCase()));
+    if (!home) { refused.push({ path: p, why: 'Only files sent from a phone or finished exports can be deleted from here.' }); continue; }
+    if (!VIDEO_EXT.has(path.extname(full).toLowerCase())) { refused.push({ path: p, why: 'Only videos can be deleted from here.' }); continue; }
+    if (needed.has(key(full))) { refused.push({ path: p, why: `It is in a planned post (“${needed.get(key(full))}”) — delete or change that post first.` }); continue; }
+    let st;
+    try { st = fs.statSync(full); } catch (e) { deleted.push(p); continue; }      // already gone is gone
+    if (!st.isFile()) { refused.push({ path: p, why: 'That is not a file.' }); continue; }
+    try {
+      fs.unlinkSync(full);
+      freed += st.size;
+      deleted.push(p);
+    } catch (e) { refused.push({ path: p, why: 'The studio could not delete it (' + (e.code || e.message) + ').' }); continue; }
+    const base = full.replace(/\.[^.\\/]+$/, '');
+    for (const ext of COMPANIONS) {
+      try { const c = base + ext; const cs = fs.statSync(c); fs.unlinkSync(c); freed += cs.size; } catch (e) { /* none */ }
+    }
+  }
+
+  let autosaveCleared = false;
+  if (deleted.length) {
+    try {
+      const got = await rpc.invoke('session:autosaveGet', {});
+      const v = got && got.ok && got.data && got.data.video && got.data.video.path;
+      if (v && deleted.some((d) => key(d) === key(v))) {
+        await rpc.invoke('session:autosaveClear', {});
+        autosaveCleared = true;
+      }
+    } catch (e) { /* the autosave is a convenience */ }
+  }
+  return json(res, 200, { ok: true, deleted, refused, freed, autosaveCleared, disk: diskOf(cfg.dirs.output || os.tmpdir()) });
+}
+
+/*
+ * An upload that was given up on leaves its part file behind (that is what
+ * lets a dropped one carry on). Nobody comes back for one after two days, and
+ * a half-sent service recording is gigabytes, so they are swept up.
+ */
+const PART_MAX_AGE_MS = 48 * 3600 * 1000;
+function sweepParts() {
+  const dir = cfg.dirs.uploads;
+  if (!dir) return 0;
+  let n = 0;
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch (e) { return 0; }
+  for (const name of names) {
+    if (!name.startsWith('.part-')) continue;
+    const full = path.join(dir, name);
+    try {
+      const st = fs.statSync(full);
+      if (Date.now() - st.mtimeMs > PART_MAX_AGE_MS) { fs.unlinkSync(full); n++; }
+    } catch (e) { /* in use, or gone */ }
+  }
+  return n;
+}
+let sweepTimer = null;
+
 /** Everything a signed-in browser can open. */
 function browse() {
   const seen = new Set();
@@ -707,6 +814,7 @@ async function handle(req, res) {
       version: cfg.appVersion || '',
       signedIn: authed(req, url),
       allowUpload: !!cfg.allowUpload,
+      allowDelete: !!cfg.allowUpload,
       publicUrl: cfg.publicUrl || '',
       standalone: !!cfg.standalone,
       // The build the page is made from right now. An installed phone app is
@@ -806,7 +914,14 @@ async function handle(req, res) {
     });
   }
 
-  if (p === '/api/videos') return json(res, 200, { ok: true, groups: browse() });
+  if (p === '/api/videos') {
+    return json(res, 200, { ok: true, groups: browse(), disk: diskOf(cfg.dirs.output || os.tmpdir()), canDelete: !!cfg.allowUpload });
+  }
+
+  if (p === '/api/delete' && req.method === 'POST') {
+    if (!cfg.allowUpload) return json(res, 403, { error: 'Changing files on this studio from a phone is switched off.' });
+    return deleteFiles(req, res);
+  }
 
   if (p === '/api/status') return json(res, 200, status());
 
@@ -937,6 +1052,8 @@ async function start(opts = {}) {
     if (d) { try { fs.mkdirSync(d, { recursive: true }); } catch (e) {} }
   }
   loadTokens();
+  sweepParts();
+  if (!sweepTimer) { sweepTimer = setInterval(sweepParts, 6 * 3600 * 1000); if (sweepTimer.unref) sweepTimer.unref(); }
 
   // Fail loudly at start rather than mysteriously at the first click.
   const bad = page.check();
@@ -1029,5 +1146,5 @@ function setPublicUrl(u) { cfg.publicUrl = u || ''; return cfg.publicUrl; }
 module.exports = {
   start, stop, isRunning, state, status, resetCode, setPublicUrl, browse, push,
   // exported for tests
-  ALLOWED, SOCIAL_ON, makeCode, encodeEnvelope, decodeEnvelope, allowedPath, _cfg: () => cfg,
+  ALLOWED, SOCIAL_ON, makeCode, encodeEnvelope, decodeEnvelope, allowedPath, sweepParts, _cfg: () => cfg,
 };

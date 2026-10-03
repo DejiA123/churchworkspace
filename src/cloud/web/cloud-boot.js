@@ -66,6 +66,7 @@ let _hideTimer = null;
     downloads: [],      // { path, name, at } — what this session has finished
     online: true,
     jobListeners: [],   // views that show the background jobs (the home screen)
+    fileListeners: [],  // views that list files (the home screen's exports)
     eventListeners: {}, // server events other views want (the scheduler)
   };
   window.MWCloud = cloud;
@@ -746,69 +747,270 @@ let _hideTimer = null;
 
   /* ------------------------------------------------------ the files modal */
 
+  /*
+   * YOUR FILES. What is on the studio machine — finished exports, what was sent
+   * from a phone, the Videos folder — each with a picture, its size, when it was
+   * made, and what can be done with it: open it (when the studio asked for a
+   * file), save it to this phone, or delete it.
+   *
+   * Deleting is for what a phone could have put there: exports and uploads. The
+   * server refuses anything else, and anything a planned post still needs (see
+   * deleteFiles in cloud-api.js); the video open in the studio is kept here,
+   * before it is ever asked. One file is the bin on its row and a second tap to
+   * be sure; many is Select, tick them, Delete.
+   */
   let filesCache = null;
+  const filesUi = { selecting: false, chosen: new Set(), sure: false };
 
   async function openFilesModal(opts = {}) {
     const m = $('#cloudFilesModal');
     if (!m) return;
     m.classList.remove('hidden');
     m.dataset.picking = opts.picking ? '1' : '';
+    const up = $('#cloudUpload span');
+    if (up) up.textContent = window.matchMedia('(max-width: 900px)').matches ? 'Send a video from this phone' : 'Send a video from this computer';
+    setSelecting(false);
     await refreshFiles();
   }
   function closeFilesModal() {
     const m = $('#cloudFilesModal');
     if (m) { m.classList.add('hidden'); m.dataset.picking = ''; }
+    setSelecting(false);
     if (pickResolve) finishPick(null);
   }
 
-  async function refreshFiles() {
+  async function refreshFiles(quiet) {
     const list = $('#cloudFilesList');
     if (!list) return;
-    list.innerHTML = '<div class="muted small">Looking…</div>';
+    if (quiet !== true || !filesCache) list.innerHTML = '<div class="cf-loading"><i class="cf-spin"></i>Looking…</div>';
     try {
       const res = await fetch('/api/videos', { headers: authHeaders() });
       if (res.status === 401) { signedOut(); return; }
       filesCache = await res.json();
     } catch (e) {
-      list.innerHTML = '<div class="muted small">Could not reach the studio machine.</div>';
+      list.innerHTML = '<div class="cloud-files-empty"><b>Could not reach the studio machine</b><p>Check the connection and tap Refresh.</p></div>';
       return;
     }
     renderFiles();
   }
 
+  const fmtSize = (b) => {
+    b = Number(b) || 0;
+    if (b >= 1073741824) return (b / 1073741824).toFixed(b >= 10737418240 ? 0 : 1) + ' GB';
+    if (b >= 1048576) return Math.round(b / 1048576) + ' MB';
+    return Math.max(1, Math.round(b / 1024)) + ' KB';
+  };
+  /** "Today 6:35 PM", "Yesterday 2:44 PM", "Thu 4:10 PM", "2 Oct". */
+  function niceWhen(t) {
+    const d = new Date(t), now = new Date();
+    const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const ago = Math.round((day(now) - day(d)) / 86400000);
+    const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    if (ago === 0) return 'Today ' + time;
+    if (ago === 1) return 'Yesterday ' + time;
+    if (ago > 1 && ago < 7) return d.toLocaleDateString(undefined, { weekday: 'short' }) + ' ' + time;
+    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' });
+  }
+  const isPicking = () => { const m = $('#cloudFilesModal'); return !!(m && m.dataset.picking === '1'); };
+  const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
+
+  function fileRow(f, del, picking) {
+    return `<div class="cf-row${del ? ' can-del' : ''}${filesUi.chosen.has(f.path) ? ' chosen' : ''}" data-path="${escAttr(f.path)}">`
+      + `<button type="button" class="cf-main" data-act="${picking ? 'open' : 'save'}">`
+      + `<span class="cf-check" aria-hidden="true">${CHECK}</span>`
+      + `<span class="cf-pic" data-thumb="${escAttr(f.path)}"></span>`
+      + `<span class="cf-tx"><b>${escHtml(f.name)}</b><small>${fmtSize(f.size)} · ${escHtml(niceWhen(f.mtime))}</small></span>`
+      + '</button>'
+      + (picking
+        ? '<button type="button" class="cf-open" data-act="open">Open</button>'
+        : `<button type="button" class="cf-btn" data-act="save" aria-label="Save to this phone" title="Save to this phone">${mi('download')}</button>`
+          + (del ? `<button type="button" class="cf-btn cf-bin" data-act="delete" aria-label="Delete" title="Delete">${mi('trash')}</button>` : ''))
+      + (del ? `<div class="cf-sure"><span>Delete ${fmtSize(f.size)} for good?</span>`
+        + '<button type="button" class="cf-no" data-act="cancel">Cancel</button>'
+        + '<button type="button" class="cf-yes" data-act="confirm">Delete</button></div>' : '')
+      + '</div>';
+  }
+
   function renderFiles() {
     const list = $('#cloudFilesList');
     if (!list || !filesCache) return;
-    const picking = $('#cloudFilesModal').dataset.picking === '1';
+    const picking = isPicking();
     const exts = picking ? pickState.exts : null;
-    const fmtSize = (b) => (b > 1024 * 1024 * 1024 ? (b / 1073741824).toFixed(2) + ' GB' : Math.round(b / 1048576) + ' MB');
-    const when = (t) => new Date(t).toLocaleString();
-    let html = '';
-    let any = false;
+    const canDelete = filesCache.canDelete !== false && !picking;
+    let html = '', any = false, anyDel = false;
     for (const g of (filesCache.groups || [])) {
       const files = (g.files || []).filter((f) => !exts || exts.some((e) => f.name.toLowerCase().endsWith(e)));
       if (!files.length) continue;
       any = true;
-      html += `<div class="cloud-files-group"><div class="cloud-files-head">${g.label}</div>`;
-      for (const f of files) {
-        html += `<button class="cloud-file" data-path="${escAttr(f.path)}">`
-          + `<span class="cloud-file-name">${escHtml(f.name)}</span>`
-          + `<span class="cloud-file-meta">${fmtSize(f.size)} · ${when(f.mtime)}</span>`
-          + `<span class="cloud-file-go">${picking ? 'Open' : '⬇'}</span></button>`;
-      }
-      html += '</div>';
+      // exports and uploads only: the Videos folder is the machine's own
+      const del = canDelete && (g.key === 'output' || g.key === 'uploads');
+      if (del) anyDel = true;
+      const total = files.reduce((n, f) => n + (Number(f.size) || 0), 0);
+      html += `<section class="cloud-files-group"><h4 class="cloud-files-head"><span>${escHtml(g.label)}</span><small>${files.length} · ${fmtSize(total)}</small></h4>`
+        + files.map((f) => fileRow(f, del, picking)).join('') + '</section>';
     }
     if (!any) {
-      html = '<div class="muted small cloud-files-empty">Nothing here yet.'
-        + (exts ? ' Nothing of that kind, anyway.' : '')
-        + ' Send something from this device with the button above.</div>';
+      html = `<div class="cloud-files-empty"><div class="cf-empty-art">${mi('folder')}</div><b>Nothing here yet</b>`
+        + `<p>${exts ? 'Nothing of that kind, anyway. ' : ''}Send a video with the button above.</p></div>`;
     }
     list.innerHTML = html;
-    $$('.cloud-file', list).forEach((b) => b.addEventListener('click', () => {
-      const p = b.dataset.path;
-      if (picking) finishPick(pickState.multi ? [p] : p);
-      else offerDownload(p);
-    }));
+    const sel = $('#cloudFilesSelect');
+    if (sel) sel.classList.toggle('hidden', !anyDel);
+    if (filesUi.selecting && !anyDel) setSelecting(false);
+    renderDisk();
+    paintSelBar();
+    watchThumbs(list);
+  }
+
+  function renderDisk() {
+    const el = $('#cloudFilesDisk');
+    if (!el) return;
+    const d = filesCache && filesCache.disk;
+    if (!d || !d.total) { el.classList.add('hidden'); return; }
+    const used = Math.max(0, d.total - d.free);
+    el.classList.remove('hidden');
+    el.classList.toggle('low', d.free < d.total * 0.1);
+    const where = cloud.hello && cloud.hello.standalone ? 'the server' : 'the studio machine';
+    el.innerHTML = `<div class="cf-disk-bar"><i style="width:${Math.min(100, (used / d.total) * 100).toFixed(1)}%"></i></div>`
+      + `<span><b>${fmtSize(d.free)} free</b> of ${fmtSize(d.total)} on ${where}</span>`;
+  }
+
+  /* ---- deleting ---- */
+  function closeSure() { for (const r of $$('#cloudFilesList .cf-row.sure')) r.classList.remove('sure'); }
+  function setSelecting(on) {
+    filesUi.selecting = !!on;
+    filesUi.chosen.clear();
+    filesUi.sure = false;
+    const m = $('#cloudFilesModal');
+    if (m) m.classList.toggle('cf-selecting', filesUi.selecting);
+    const sel = $('#cloudFilesSelect');
+    if (sel) sel.textContent = filesUi.selecting ? 'Done' : 'Select';
+    for (const r of $$('#cloudFilesList .cf-row.chosen')) r.classList.remove('chosen');
+    closeSure();
+    paintSelBar();
+  }
+  const sizeOf = (p) => {
+    for (const g of (filesCache && filesCache.groups) || []) for (const f of g.files || []) if (f.path === p) return Number(f.size) || 0;
+    return 0;
+  };
+  function paintSelBar() {
+    const bar = $('#cloudFilesSelBar');
+    if (!bar) return;
+    bar.classList.toggle('hidden', !filesUi.selecting);
+    const n = filesUi.chosen.size;
+    const bytes = Array.from(filesUi.chosen).reduce((t, p) => t + sizeOf(p), 0);
+    const info = $('#cloudFilesSelInfo');
+    if (info) info.textContent = n ? `${n} selected · ${fmtSize(bytes)}` : 'Tap the videos to delete';
+    const del = $('#cloudFilesSelDelete');
+    if (!del) return;
+    del.disabled = !n;
+    del.classList.toggle('sure', !!(filesUi.sure && n));
+    const tx = del.querySelector('span');
+    if (tx) tx.textContent = filesUi.sure && n ? `Delete ${n === 1 ? 'it' : 'all ' + n} for good?` : n > 1 ? `Delete ${n}` : 'Delete';
+  }
+  function onFilesClick(e) {
+    const b = e.target.closest('[data-act]');
+    const row = b && b.closest('.cf-row');
+    if (!row) return;
+    const p = row.dataset.path, act = b.dataset.act;
+    if (filesUi.selecting) {
+      if (!row.classList.contains('can-del')) return;
+      if (filesUi.chosen.has(p)) filesUi.chosen.delete(p); else filesUi.chosen.add(p);
+      row.classList.toggle('chosen', filesUi.chosen.has(p));
+      filesUi.sure = false;
+      paintSelBar();
+      return;
+    }
+    if (act === 'open') return finishPick(pickState.multi ? [p] : p);
+    if (act === 'save') return offerDownload(p);
+    if (act === 'delete') { closeSure(); row.classList.add('sure'); return; }
+    if (act === 'cancel') return closeSure();
+    if (act === 'confirm') return deletePaths([p]);
+  }
+  function onSelDelete() {
+    if (!filesUi.chosen.size) return;
+    if (!filesUi.sure) { filesUi.sure = true; paintSelBar(); return; }
+    deletePaths(Array.from(filesUi.chosen));
+  }
+  async function deletePaths(paths) {
+    const open = window.VideoEditor && window.VideoEditor.sourcePath ? window.VideoEditor.sourcePath() : null;
+    const kept = paths.filter((p) => open && p === open);
+    const go = paths.filter((p) => !(open && p === open));
+    const rows = $$('#cloudFilesList .cf-row').filter((r) => go.includes(r.dataset.path));
+    let out = { deleted: [], refused: [], freed: 0 };
+    if (go.length) {
+      rows.forEach((r) => r.classList.add('busy'));
+      try {
+        const res = await fetch('/api/delete', {
+          method: 'POST',
+          headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+          body: JSON.stringify({ paths: go }),
+        });
+        if (res.status === 401) { signedOut(); return; }
+        out = await res.json();
+        if (!res.ok) throw new Error(out.error || 'The studio could not delete that.');
+      } catch (e) {
+        rows.forEach((r) => r.classList.remove('busy'));
+        closeSure();
+        island({ kind: 'error', title: 'Nothing was deleted', sub: e.message || String(e), ms: 7000 });
+        return;
+      }
+    }
+    const gone = new Set(out.deleted || []);
+    for (const r of $$('#cloudFilesList .cf-row')) {
+      r.classList.remove('busy');
+      if (gone.has(r.dataset.path)) r.classList.add('gone');
+    }
+    closeSure();
+    cloud.downloads = cloud.downloads.filter((d) => !gone.has(d.path));
+    renderDownloadCount();
+    if (out.disk && filesCache) filesCache.disk = out.disk;
+    if (out.autosaveCleared && window.VideoEditor && window.VideoEditor.forgetResume) window.VideoEditor.forgetResume();
+    for (const fn of cloud.fileListeners) { try { fn({ deleted: Array.from(gone), autosaveCleared: !!out.autosaveCleared }); } catch (e) {} }
+    const refused = (out.refused || []).concat(kept.map((p) => ({ path: p, why: 'It is open in the Video Studio — open a different video there first.' })));
+    if (gone.size) {
+      island({
+        kind: refused.length ? 'warn' : 'good',
+        title: gone.size > 1 ? `${gone.size} videos deleted` : 'Video deleted',
+        sub: (out.freed ? `${fmtSize(out.freed)} freed` : 'Removed') + (refused.length ? ` · ${refused.length} kept: ${refused[0].why}` : ''),
+        ms: refused.length ? 9000 : 4000,
+      });
+    } else if (refused.length) {
+      island({ kind: 'warn', title: refused.length > 1 ? `${refused.length} videos kept` : 'Not deleted', sub: refused[0].why, ms: 9000 });
+    }
+    setTimeout(() => { if (filesUi.selecting) setSelecting(false); refreshFiles(true); }, gone.size ? 320 : 0);
+  }
+
+  /* ---- a picture for every video, made as its row comes into view ---- */
+  const fileThumbs = new Map();          // path -> image URL ('' while it is being made)
+  let thumbQueue = Promise.resolve();     // one at a time: a small server makes them in turn anyway
+  function watchThumbs(list) {
+    if (list._thumbs) list._thumbs.disconnect();
+    const paintAll = (p) => {
+      const u = fileThumbs.get(p);
+      if (!u) return;
+      for (const el of $$(`[data-thumb="${CSS.escape(p)}"]`)) el.style.backgroundImage = `url("${u}")`;
+    };
+    const want = (el) => {
+      const p = el.dataset.thumb;
+      if (fileThumbs.get(p)) return paintAll(p);
+      if (fileThumbs.has(p)) return;     // on its way
+      fileThumbs.set(p, '');
+      thumbQueue = thumbQueue.then(async () => {
+        try {
+          const t = await window.api.video.thumbnail(p, 1);
+          if (t) fileThumbs.set(p, window.MW_FILE_URL(t)); else fileThumbs.delete(p);
+        } catch (e) { fileThumbs.delete(p); }
+        paintAll(p);
+      });
+    };
+    const els = $$('[data-thumb]', list);
+    if (!('IntersectionObserver' in window)) { els.forEach(want); return; }
+    const io = new IntersectionObserver((entries) => {
+      for (const en of entries) if (en.isIntersecting) { io.unobserve(en.target); want(en.target); }
+    }, { root: list, rootMargin: '160px' });
+    list._thumbs = io;
+    els.forEach((el) => { if (fileThumbs.get(el.dataset.thumb)) want(el); else io.observe(el); });
   }
 
   const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
@@ -948,14 +1150,15 @@ let _hideTimer = null;
     const list = $('#cloudDownloadsList');
     if (!list) return;
     if (!cloud.downloads.length) {
-      list.innerHTML = '<div class="muted small cloud-files-empty">Nothing finished yet in this session. Exports land here.</div>';
+      list.innerHTML = `<div class="cloud-files-empty"><div class="cf-empty-art">${mi('download')}</div><b>Nothing finished yet</b>`
+        + '<p>Exports from this session land here, ready to save to this phone.</p></div>';
       return;
     }
-    list.innerHTML = cloud.downloads.map((d) => `<button class="cloud-file" data-path="${escAttr(d.path)}">`
-      + `<span class="cloud-file-name">${escHtml(d.name)}</span>`
-      + `<span class="cloud-file-meta">${new Date(d.at).toLocaleTimeString()}</span>`
-      + '<span class="cloud-file-go">⬇</span></button>').join('');
-    $$('.cloud-file', list).forEach((b) => b.addEventListener('click', () => offerDownload(b.dataset.path)));
+    list.innerHTML = cloud.downloads.map((d) => `<div class="cf-row" data-path="${escAttr(d.path)}">`
+      + `<button type="button" class="cf-main" data-act="save"><span class="cf-pic" data-thumb="${escAttr(d.path)}"></span>`
+      + `<span class="cf-tx"><b>${escHtml(d.name)}</b><small>Finished ${escHtml(niceWhen(d.at))}</small></span></button>`
+      + `<button type="button" class="cf-btn" data-act="save" aria-label="Save to this phone" title="Save to this phone">${mi('download')}</button></div>`).join('');
+    watchThumbs(list);
   }
 
   /* -------------------------------------------------- a finger for a mouse */
@@ -2146,7 +2349,14 @@ let _hideTimer = null;
     });
     on('#cloudFiles', 'click', () => openFilesModal());
     on('#cloudFilesClose', 'click', closeFilesModal);
-    on('#cloudFilesRefresh', 'click', refreshFiles);
+    on('#cloudFilesRefresh', 'click', () => refreshFiles());
+    on('#cloudFilesList', 'click', onFilesClick);
+    on('#cloudFilesSelect', 'click', () => setSelecting(!filesUi.selecting));
+    on('#cloudFilesSelDelete', 'click', onSelDelete);
+    on('#cloudDownloadsList', 'click', (e) => {
+      const row = e.target.closest('[data-act="save"]') && e.target.closest('.cf-row');
+      if (row) offerDownload(row.dataset.path);
+    });
     on('#cloudUpload', 'click', async () => {
       const picking = $('#cloudFilesModal').dataset.picking === '1';
       const chosen = await chooseFromDevice(picking ? pickState.multi : true, picking ? pickState.exts : null);

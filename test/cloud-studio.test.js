@@ -30,6 +30,7 @@
  *                      broken connection
  *   [G] the PWA      — manifest, icons, and a service worker that will never
  *                      cache the studio's work
+ *   [I] deleting     — only exports and uploads, never a planned post's video
  *   [H] the scheduler— the phone's Social Scheduler: a Zernio key goes IN and
  *                      never comes back out, the accounts arrive without their
  *                      keys, a post's media is held to the same folders as
@@ -469,6 +470,33 @@ async function run() {
     log(g.status === 403, `"${ch}" (the desk's own) is still refused`, 'status ' + g.status);
   }
   await rpcOk('social:setKeys', { zoApiKey: '' });
+
+  /* ───────────── [I] deleting from a phone ───────────── */
+  console.log('\n=== [I] deleting from a phone ===');
+  const del = (paths) => request('POST', '/api/delete', {
+    headers: Object.assign({ 'Content-Type': 'application/json' }, auth()), body: JSON.stringify({ paths }),
+  });
+  const keepVideo = path.join(MEDIA, 'sermon.mp4');
+  r = await del([outside, keepVideo, path.join(WORK, 'userData', 'workstation.json')]);
+  log(r.status === 200 && r.json.deleted.length === 0 && r.json.refused.length === 3 && fs.existsSync(keepVideo),
+    'nothing outside exports and uploads can be deleted (the Videos folder is the machine’s own)');
+  const planned = await rpcOk('scheduler:add', { post: { title: 'Keep me', mediaPaths: [edited], accountIds: [], platforms: [], scheduledAt: new Date(Date.now() + 86400000).toISOString() } });
+  r = await del([edited]);
+  log(r.json && r.json.deleted.length === 0 && /planned post/.test((r.json.refused[0] || {}).why || '') && fs.existsSync(edited),
+    'a video a planned post still needs is kept, and says why');
+  await rpcOk('scheduler:remove', { id: planned.id });
+  const cover = edited.replace(/\.mp4$/, '.jpg');
+  fs.writeFileSync(cover, 'jpeg');
+  r = await del([edited, landed]);
+  log(r.json && r.json.deleted.length === 2 && !fs.existsSync(edited) && !fs.existsSync(landed) && !fs.existsSync(cover) && r.json.freed > 0,
+    'an export (with its cover picture) and an upload are deleted', (r.json && r.json.freed) + ' bytes freed');
+  r = await request('GET', '/api/videos', { headers: auth() });
+  log(r.json && r.json.disk && r.json.disk.total > 0 && r.json.canDelete === true, 'the file list says how much room is left');
+  const stale = path.join(WORK, 'uploads', '.part-old-abandoned.mp4');
+  fs.writeFileSync(stale, Buffer.alloc(2048));
+  const old = (Date.now() - 3 * 86400000) / 1000;
+  fs.utimesSync(stale, old, old);
+  log(cloud.sweepParts() >= 1 && !fs.existsSync(stale), 'an upload given up on days ago is swept away');
 
   /* ───────────── teardown ───────────── */
   cloud.stop();
