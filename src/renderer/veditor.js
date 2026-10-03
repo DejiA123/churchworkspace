@@ -9187,6 +9187,85 @@
    * a book full of them fights itself — and hides the entries that matter. This
    * keeps names, phrases and anything typed in by hand, and says what went.
    */
+  /*
+   * THE WORD BOOK, PASSED ON. One person's corrections — the pastor's name, the
+   * church's, the town, every word the captions kept mishearing — are worth as
+   * much on the next person's studio. Export writes them to a small file
+   * (JSON: { kind: 'word-book', fixes: [{from,to}], terms: [text] }); Import
+   * reads one back in and ADDS what is not there yet, through the same addFix /
+   * addTerm the book always uses, so a pair that contradicts one already in the
+   * book is refused exactly as if it had been typed. A plain text file with one
+   * "wrong -> right" (or "wrong, right") per line is read too, and a line with
+   * no arrow is a name.
+   */
+  async function wbExport() {
+    await loadWordBook(true);
+    const b = ve._wb || wbBlank();
+    const data = {
+      app: 'Church Work Space', kind: 'word-book', version: 1, exported: new Date().toISOString(),
+      fixes: (b.fixes || []).filter((f) => f.on !== false).map((f) => ({ from: f.from, to: f.to })),
+      terms: (b.terms || []).map((t) => t.text).filter(Boolean),
+    };
+    if (!data.fixes.length && !data.terms.length) return window.__toast && window.__toast('📕 The Word Book is empty — there is nothing to export yet.', 'error');
+    const name = `word-book-${new Date().toISOString().slice(0, 10)}.json`;
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const file = (typeof File === 'function') ? new File([blob], name, { type: 'application/json' }) : null;
+    // a phone: the share sheet (Save to Files, AirDrop, Messages…)
+    if (file && navigator.canShare && window.matchMedia('(max-width: 900px)').matches && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: 'Word Book' }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    window.__toast && window.__toast(`📕 Exported ${data.fixes.length} correction${data.fixes.length === 1 ? '' : 's'} and ${data.terms.length} name${data.terms.length === 1 ? '' : 's'} — ${name}`, 'good', 6000);
+  }
+  /** Read a Word Book file: JSON from Export, or one "wrong -> right" per line. */
+  function wbParse(text) {
+    const out = { fixes: [], terms: [] };
+    const t = String(text || '').replace(/^\uFEFF/, '');
+    try {
+      const j = JSON.parse(t);
+      const fx = Array.isArray(j) ? j : (j.fixes || j.corrections || []);
+      for (const f of fx) if (f && f.from && f.to) out.fixes.push({ from: String(f.from), to: String(f.to) });
+      for (const x of (j.terms || j.names || [])) { const v = typeof x === 'string' ? x : (x && x.text); if (v) out.terms.push(String(v)); }
+      return out;
+    } catch (e) { /* not JSON: lines */ }
+    for (const raw of t.split(/\r?\n/)) {
+      const line = raw.trim(); if (!line || line.startsWith('#')) continue;
+      const m = line.split(/\s*(?:->|→|=>|\t|,)\s*/);
+      if (m.length >= 2 && m[0] && m[1]) out.fixes.push({ from: m[0], to: m.slice(1).join(' ') });
+      else out.terms.push(line);
+    }
+    return out;
+  }
+  async function wbImportFile(file) {
+    const api = wbApi(); if (!api || !file) return;
+    let text = '';
+    try { text = await file.text(); } catch (e) { return window.__toast && window.__toast('📕 That file could not be read.', 'error'); }
+    const got = wbParse(text);
+    if (!got.fixes.length && !got.terms.length) return window.__toast && window.__toast('📕 No corrections or names found in that file.', 'error');
+    await loadWordBook(true);
+    const have = ve._wb || wbBlank();
+    const key = (x) => String(x || '').trim().toLowerCase();
+    const haveFix = new Set((have.fixes || []).map((f) => key(f.from) + '\u0000' + key(f.to)));
+    const haveTerm = new Set((have.terms || []).map((x) => key(x.text)));
+    let added = 0, names = 0, already = 0, refused = 0;
+    for (const f of got.fixes) {
+      if (haveFix.has(key(f.from) + '\u0000' + key(f.to))) { already++; continue; }
+      const r = await api.addFix({ from: f.from, to: f.to }).catch(() => null);
+      if (r && r.ok !== false) { added++; haveFix.add(key(f.from) + '\u0000' + key(f.to)); } else refused++;
+    }
+    for (const n of got.terms) {
+      if (haveTerm.has(key(n))) { already++; continue; }
+      const r = await api.addTerm({ text: n }).catch(() => null);
+      if (r && r.ok !== false) { names++; haveTerm.add(key(n)); } else refused++;
+    }
+    await loadWordBook(true);
+    renderWordBook();
+    window.__toast && window.__toast(`📕 Imported ${added} correction${added === 1 ? '' : 's'} and ${names} name${names === 1 ? '' : 's'}`
+      + (already ? ` · ${already} already in your book` : '') + (refused ? ` · ${refused} skipped (they clash with one you have)` : ''), 'good', 8000);
+  }
   async function wbTidyUp() {
     const api = wbApi(); if (!api || !api.tidy) return;
     const r = await api.tidy().catch(() => null);
@@ -12375,6 +12454,12 @@
     const wbFixNow = $('#capFixNow'); if (wbFixNow) wbFixNow.addEventListener('click', fixCaptionsFromBook);
     const wbApply = $('#capWbApply'); if (wbApply) wbApply.addEventListener('click', () => { showWordBook(false); fixCaptionsFromBook(); });
     const wbTidy = $('#capWbTidy'); if (wbTidy) wbTidy.addEventListener('click', wbTidyUp);
+    const wbExp = $('#capWbExport'); if (wbExp) wbExp.addEventListener('click', wbExport);
+    const wbImp = $('#capWbImport'), wbFile = $('#capWbImportFile');
+    if (wbImp && wbFile) {
+      wbImp.addEventListener('click', () => { wbFile.value = ''; wbFile.click(); });
+      wbFile.addEventListener('change', () => { if (wbFile.files && wbFile.files[0]) wbImportFile(wbFile.files[0]); });
+    }
     const wbAddBtn = $('#capWbAdd'); if (wbAddBtn) wbAddBtn.addEventListener('click', wbAddFix);
     const wbAddTermBtn = $('#capWbAddTerm'); if (wbAddTermBtn) wbAddTermBtn.addEventListener('click', wbAddTerm);
     ['#capWbFrom', '#capWbTo'].forEach((sel) => {
@@ -14450,6 +14535,8 @@
       capStyleCfg() { return capStyleCfg(); },
       updateCapOverlayAt(t) { updateCapOverlay(t); return !ve.refs.capOverlay.classList.contains('hidden'); },
       addText() { addTextOverlay(); return ve.textSel; },
+      wbParse(t) { return wbParse(t); },
+      wbImportText(t) { return wbImportFile({ text: async () => t }); },
       textPos(id) { const o = ve.textOverlays.find((x) => x.id === (id || ve.textSel)); return o ? { x: o.x, y: o.y } : null; },
       keptDurOf(id) { const s = ve.segments.find((x) => x.id === id); return s ? keptDur(s) : null; },
       capOverlayCss() {

@@ -1189,6 +1189,11 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
   body.mw-cloud #capModal .cap-ai-line { width: 32px; height: 32px; opacity: .65; }
   body.mw-cloud #capModal .cap-sugg { width: calc(100% - 42px); margin: 0 0 4px 42px; }
   body.mw-cloud #capModal .cap-was { margin: 0 0 4px 42px; font-size: 13px; }
+  /* the Word Book's footer: the count on its own line, the buttons sharing the width */
+  body.mw-cloud #capModal .cap-wb-foot { flex-wrap: wrap; gap: 8px; padding: 10px 16px; }
+  body.mw-cloud #capModal .cap-wb-foot #capWbCount { flex: 1 1 100%; font-size: 12.5px; line-height: 1.4; }
+  body.mw-cloud #capModal .cap-wb-foot button { flex: 1 1 auto; min-width: 0; height: 40px; margin: 0; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  body.mw-cloud #capModal .cap-wb-io { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
   body.mw-cloud #capModal .cap-was-back { height: 32px; padding: 0 12px; font-size: 13px; }
   body.mw-cloud #capModal .cap-head .cap-undo { flex: none; width: 40px; height: 40px; padding: 0; border-radius: 12px; font-size: 20px; }
   /* no lines yet: "Generate captions" is the thing to press, so it is in view
