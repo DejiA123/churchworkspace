@@ -461,6 +461,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
    gap mask (z 3) — so an overlay dragged outside the export frame is hidden by
    the matte, exactly as it will be missing from the exported short. */
 .ve-media-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+/* blur behind an added picture or clip: the frame filled with a soft copy of it */
+.ve-media-bg { position: absolute; object-fit: cover; filter: blur(14px) brightness(.84); clip-path: inset(0); pointer-events: none; }
 .ve-media-el { position: absolute; display: none; object-fit: contain; background: transparent; border-radius: 2px; box-shadow: 0 6px 22px rgba(0,0,0,.55); }
 /* added-media clips on the overlay lane: a picture reads teal, a second video violet */
 .ve-seg-img { border-style: solid !important; border-color: #0aa2c0 !important; box-shadow: 0 2px 10px rgba(10,162,192,.45); }

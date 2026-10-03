@@ -1884,9 +1884,24 @@ async function exportOverlayComposite(ctx, { base, overlays = [], output, baseSt
     // A picture is scaled with lanczos (it is a photo, not a moving frame) and
     // carried in RGBA so a logo's transparency survives to the overlay; footage
     // keeps its own format unless a fade-down opacity is asked for.
+    let src = `[${inIdx}:v]`;
+    const timing = [`trim=start=0:end=${olen.toFixed(3)}`, `setpts=PTS-STARTPTS+${tl.toFixed(3)}/TB`];
+    /*
+     * BLUR BEHIND: the picture over a blurred, darkened copy of itself that
+     * fills the whole frame — a landscape photo in a 9:16 short, a portrait
+     * clip in a 16:9 video — instead of over whatever is underneath.
+     */
+    if (o.bgBlur) {
+      const bw = Math.max(2, Math.round(BW / 4 / 2) * 2), bh = Math.max(2, Math.round(BH / 4 / 2) * 2);
+      parts.push(`[${inIdx}:v]${timing.join(',')},split[obg${idx}][ofg${idx}]`);
+      parts.push(`[obg${idx}]scale=${bw}:${bh}:force_original_aspect_ratio=increase,crop=${bw}:${bh},boxblur=10:2,eq=brightness=-0.08,scale=${BW}:${BH},setsar=1[bgv${idx}]`);
+      parts.push(`[${cur}][bgv${idx}]overlay=0:0:enable='between(t\\,${tl.toFixed(3)}\\,${tlEnd.toFixed(3)})':eof_action=pass[bb${idx}]`);
+      cur = `bb${idx}`;
+      src = `[ofg${idx}]`;
+      timing.length = 0;
+    }
     const chain = [
-      `trim=start=0:end=${olen.toFixed(3)}`,
-      `setpts=PTS-STARTPTS+${tl.toFixed(3)}/TB`,
+      ...timing,
       still ? `scale=${w}:-2:flags=lanczos` : `scale=${w}:-2`,
       'setsar=1',
     ];
@@ -1896,7 +1911,7 @@ async function exportOverlayComposite(ctx, { base, overlays = [], output, baseSt
     if (key) chain.push('format=yuva420p', `chromakey=color=0x${key.hex}:similarity=${key.sim.toFixed(3)}:blend=${key.blend.toFixed(3)}`);
     if (still || op < 1 || key) chain.push('format=rgba');
     if (op < 1) chain.push(`colorchannelmixer=aa=${op.toFixed(3)}`);
-    parts.push(`[${inIdx}:v]${chain.join(',')}[ov${idx}]`);
+    parts.push(`${src}${chain.join(',')}[ov${idx}]`);
     const out = (idx === overlays.length - 1) ? 'outv' : `t${idx}`;
     // composite it onto the running base, but only during its own window
     parts.push(`[${cur}][ov${idx}]overlay=${x}:${y}:enable='between(t\\,${tl.toFixed(3)}\\,${tlEnd.toFixed(3)})':eof_action=pass[${out}]`);

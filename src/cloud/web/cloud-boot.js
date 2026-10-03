@@ -1441,7 +1441,12 @@ let _hideTimer = null;
    * hold in memory, or no share sheet — it opens in an in-app browser page,
    * which has its own Done button. The desk keeps the ordinary download.
    */
-  const SHARE_MAX = 200 * 1024 * 1024;
+  /* A montage of a whole morning runs to hundreds of MB. Past the old 200 MB
+   * the phone was sent off to a browser window to "download" it — a white
+   * screen for minutes, and on an iPhone nowhere obvious for it to land. It is
+   * fetched here instead, with how far it has got, and handed to the share
+   * sheet (Save Video). WebKit keeps a blob that size on disk, not in memory. */
+  const SHARE_MAX = 1536 * 1024 * 1024;
   const isStandalone = () => navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
   const onPhone = () => window.matchMedia('(max-width: 900px)').matches;
   async function offerDownload(p, size) {
@@ -1460,17 +1465,40 @@ let _hideTimer = null;
       try {
         const res = await fetch(downloadUrl(p));
         if (!res.ok) throw new Error('HTTP ' + res.status);
-        const blob = await res.blob();
+        const total = Number(res.headers.get('content-length')) || size || 0;
+        let blob;
+        if (res.body && res.body.getReader && total) {
+          const rd = res.body.getReader(), parts = [];
+          let got = 0, shown = -1;
+          for (;;) {
+            const { done, value } = await rd.read();
+            if (done) break;
+            parts.push(value); got += value.length;
+            const pc = Math.floor((got / total) * 100);
+            if (pc !== shown && pc % 2 === 0) { shown = pc; island({ id, title: `Getting it ready… ${pc}%`, sub: name, spin: true, sticky: true }); }
+          }
+          blob = new Blob(parts, { type: res.headers.get('content-type') || '' });
+        } else blob = await res.blob();
         const type = blob.type && blob.type !== 'application/octet-stream' ? blob.type : (/\.mov$/i.test(name) ? 'video/quicktime' : 'video/mp4');
         const file = new File([blob], name, { type });
         islandHide(id);
-        if (navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; }
+        if (navigator.canShare({ files: [file] })) {
+          island({ id: id + '-tip', kind: 'good', title: 'Tap “Save Video”', sub: 'in the sheet that opens', ms: 4000 });
+          await navigator.share({ files: [file], title: name });
+          return;
+        }
       } catch (e) {
         islandHide(id);
         if (e && e.name === 'AbortError') return;          // they closed the share sheet
       }
     }
-    if (onPhone() && isStandalone()) { window.open(downloadUrl(p), '_blank'); return; }
+    if (onPhone() && isStandalone()) {
+      // The phone's own player (it plays as it arrives — never a blank page);
+      // its share button saves it to Photos.
+      island({ kind: 'info', title: 'Opening it in the player', sub: 'Tap the share button, then “Save Video”', ms: 6000 });
+      window.open(downloadUrl(p).replace('/api/file?', '/api/media?').replace('&dl=1', ''), '_blank');
+      return;
+    }
     const a = document.createElement('a');
     a.href = downloadUrl(p);
     a.download = name;
@@ -1885,6 +1913,7 @@ let _hideTimer = null;
       { icon: 'filters', label: 'Filters', fx: '#fxLook' },
       { icon: 'sliders', label: 'Adjust', fx: '#fxBri' },
       { icon: 'crop', label: 'Ratio', row: 'ratio' },
+      { icon: 'layers', label: 'Background', row: 'background' },
       { icon: 'target', label: 'Reframe', ai: true, sheet: 'insp', tab: '#veInspTabReframe' },
       { icon: 'palette', label: 'Look', sheet: 'insp', tab: '#veInspTabLook' },
       { icon: 'folder', label: 'Project', row: 'project' },
@@ -1928,12 +1957,21 @@ let _hideTimer = null;
       { icon: 'captions', label: 'Captions', ai: true, sheet: 'insp', tab: '#veInspTabCaptions' },
     ],
     ratio: [],      // built from the desk's own list of shapes
+    /* What fills the frame when the video is another shape (16:9 in a 9:16
+     * short): CapCut's Canvas. Blur is the whole picture on its own colours. */
+    background: [
+      { icon: 'filters', label: 'Blur', bg: 'blur' },
+      { icon: 'crop', label: 'Fill (crop)', bg: 'crop' },
+      { icon: 'square', label: 'Black bars', bg: 'bars' },
+      { icon: 'image', label: 'Blur behind', press: '#veOvBlur' },
+    ],
     overlay: [
       { icon: 'image', label: 'Add media', press: '#veAddMedia' },
       { icon: 'overlay', label: 'To overlay', press: '#veOverlay' },
       { icon: 'chroma', label: 'Chroma key', call: 'chromaKey' },
       { icon: 'eraser', label: 'Cut out', press: '#veCutOut' },
       { icon: 'volume', label: 'Sound', press: '#veOvSound' },
+      { icon: 'filters', label: 'Blur behind', press: '#veOvBlur' },
     ],
     project: [
       { icon: 'folder', label: 'Open', press: '#veOpen' },
@@ -2203,6 +2241,10 @@ let _hideTimer = null;
         if (box) box.addEventListener('change', sync);
         b._sync = sync; sync();
       }
+      if (t.bg) {
+        const sync = () => { const E = window.VideoEditor; b.classList.toggle('on', !!(E && E.backgroundMode && E.backgroundMode() === t.bg)); };
+        b._sync = sync; sync();
+      }
       if (t.ratio !== undefined) {
         const sync = () => b.classList.toggle('on', !!aspect && aspect.value === t.ratio);
         if (aspect) aspect.addEventListener('change', sync);
@@ -2213,6 +2255,11 @@ let _hideTimer = null;
 
     function act(t) {
       if (t.montage) return window.MWSocial && window.MWSocial.openMontage && window.MWSocial.openMontage();
+      if (t.bg) {
+        const E = window.VideoEditor; if (E && E.setBackground) E.setBackground(t.bg);
+        const r = dock.querySelector('.cloud-dock-row.on'); if (r) for (const x of r.querySelectorAll('.cloud-tool')) if (x._sync) x._sync();
+        return;
+      }
       if (t.row) return showRow(t.row);
       if (t.fx) return openFx(t.fx);
       if (t.call) { const ed = window.VideoEditor; if (ed && typeof ed[t.call] === 'function') ed[t.call](); return; }

@@ -3139,7 +3139,7 @@
         start: 0, end: len, tlStart: t,
         label: p.split(/[\\/]/).pop(),
         color: image ? '#0aa2c0' : '#a371f7',
-        mute: false, after: true,
+        mute: false, after: true, bgBlur: true,
         ...pip,
       };
       ve.segments.push(s);
@@ -3321,6 +3321,27 @@
   }
 
   /** Sound on/off for an added VIDEO overlay (a picture has none to begin with). */
+  /** 🌫 Blur behind: the clip as big as the frame allows, on a blurred copy of itself. */
+  function fitPipToFrame(s) {
+    const info = s.srcInfo || {};
+    const ar = info.width && info.height ? info.width / info.height : 16 / 9;
+    const far = frameAR();
+    const hFrac = far / ar;
+    Object.assign(s, hFrac <= 1 ? { pipX: 0, pipY: (1 - hFrac) / 2, pipW: 1 } : { pipW: ar / far, pipX: (1 - ar / far) / 2, pipY: 0 });
+  }
+  function toggleOverlayBlur(id) {
+    const s = ve.segments.find((x) => x.id === (id || ve.sel));
+    if (!s || !isMedia(s)) return window.__toast && window.__toast('Select a picture or an added video first (tap it on the timeline).', 'error');
+    pushHistory();
+    s.bgBlur = !s.bgBlur;
+    if (s.bgBlur) fitPipToFrame(s);
+    renderSegments(); renderMediaLayer(); renderOverlayGuide();
+    updateMediaLayer(nowT());
+    updateOverlayTools();
+    window.__toast && window.__toast(s.bgBlur
+      ? `🌫 “${s.label}” fills the frame on a blurred copy of itself.`
+      : `“${s.label}” is back on top of the video, no blur behind it.`, 'good');
+  }
   function toggleOverlaySound(id) {
     const s = ve.segments.find((x) => x.id === (id || ve.sel));
     if (!s || !isMedia(s) || s.kind !== 'video') return;
@@ -3345,6 +3366,13 @@
       const showK = !!(sk && isMedia(sk));
       kb.classList.toggle('hidden', !showK);
       kb.classList.toggle('on', showK && keyOn(sk));
+    }
+    const bb = $('#veOvBlur');
+    if (bb) {
+      const sb = ve.segments.find((x) => x.id === ve.sel);
+      const showB = !!(sb && isMedia(sb));
+      bb.classList.toggle('hidden', !showB);
+      bb.classList.toggle('on', showB && !!sb.bgBlur);
     }
     const b = $('#veOvSound'); if (!b) return;
     const s = ve.segments.find((x) => x.id === ve.sel);
@@ -3397,8 +3425,18 @@
         n.src = fileUrl(s.src);
         layer.appendChild(n);
       }
+      // BLUR BEHIND: a blurred copy filling the frame, under the clip itself
+      if (s.bgBlur && !n._bg) {
+        const b = document.createElement(want === 'VIDEO' ? 'video' : 'img');
+        b.className = 've-media-bg';
+        b.dataset.bgFor = String(s.id);
+        if (want === 'VIDEO') { b.playsInline = true; b.preload = 'auto'; b.muted = true; b.setAttribute('playsinline', ''); }
+        b.src = fileUrl(s.src);
+        layer.insertBefore(b, n);
+        n._bg = b;
+      } else if (!s.bgBlur && n._bg) { n._bg.remove(); n._bg = null; }
     }
-    Array.from(layer.children).forEach((n) => { if (!seen.has(n.dataset.mid || n.dataset.keyFor)) n.remove(); });
+    Array.from(layer.children).forEach((n) => { if (!seen.has(n.dataset.mid || n.dataset.keyFor || n.dataset.bgFor)) n.remove(); });
     updateMediaLayer(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
   }
 
@@ -3407,14 +3445,28 @@
     if (!layer.children.length) return;
     const playing = isPlaying();
     for (const n of Array.from(layer.children)) {
-      if (n.dataset.keyFor) continue;              // a key canvas — drawn with its source below
+      if (n.dataset.keyFor || n.dataset.bgFor) continue;   // a key canvas / blur copy — drawn with its source below
       const s = ve.segments.find((x) => String(x.id) === n.dataset.mid);
-      if (!s) { if (n._keyCv) n._keyCv.remove(); n.remove(); continue; }
+      if (!s) { if (n._keyCv) n._keyCv.remove(); if (n._bg) n._bg.remove(); n.remove(); continue; }
       const a = tlPos(s), b = a + (s.end - s.start);
       const on = t >= a && t < b;
       n.style.display = on ? 'block' : 'none';
       if (n._keyCv) n._keyCv.style.display = on ? 'block' : 'none';
-      if (!on) { if (n.tagName === 'VIDEO' && !n.paused) n.pause(); continue; }
+      if (n._bg) n._bg.style.display = on ? 'block' : 'none';
+      if (!on) { if (n.tagName === 'VIDEO' && !n.paused) n.pause(); if (n._bg && n._bg.tagName === 'VIDEO' && !n._bg.paused) n._bg.pause(); continue; }
+      if (n._bg) {
+        const fr = outputFrameRect();
+        const bg = n._bg;
+        bg.style.left = Math.round(fr.left) + 'px'; bg.style.top = Math.round(fr.top) + 'px';
+        bg.style.width = Math.round(fr.w) + 'px'; bg.style.height = Math.round(fr.h) + 'px';
+        bg.style.zIndex = String(s.lane || 1);
+        if (bg.tagName === 'VIDEO') {
+          const wantB = s.start + (t - a);
+          if (Math.abs((bg.currentTime || 0) - wantB) > 0.3) { try { bg.currentTime = wantB; } catch (e) {} }
+          if (playing && bg.paused) { const pr = bg.play(); if (pr && pr.catch) pr.catch(() => {}); }
+          else if (!playing && !bg.paused) bg.pause();
+        }
+      }
       const r = overlayPreviewRect(s);   // the SAME box the pink guide draws
       n.style.left = Math.round(r.left) + 'px';
       n.style.top = Math.round(r.top) + 'px';
@@ -7898,6 +7950,7 @@
         srcStart: w.srcStart, srcEnd: w.srcEnd, tlStart: w.tlStart,
         opacity: o.opacity != null ? o.opacity : 1,
         key: keyOn(o) ? { color: o.key.color, sim: o.key.sim, blend: o.key.blend } : undefined,
+        bgBlur: !!o.bgBlur,
       }, place));
     });
   }
@@ -12569,6 +12622,7 @@
       });
     }
     const ovSndBtn = $('#veOvSound'); if (ovSndBtn) ovSndBtn.addEventListener('click', () => toggleOverlaySound());
+    const ovBlurBtn = $('#veOvBlur'); if (ovBlurBtn) ovBlurBtn.addEventListener('click', () => toggleOverlayBlur());
     const cutBtn = $('#veCutOut'); if (cutBtn) cutBtn.addEventListener('click', () => cutOutOverlayBackground());
     const keyBtn = $('#veChromaKey'); if (keyBtn) keyBtn.addEventListener('click', () => openChromaKey());
     const kfBtn = $('#veKeyframes'); if (kfBtn) kfBtn.addEventListener('click', () => openKeyframes());
@@ -13268,6 +13322,16 @@
       } catch (e) {}
       try { syncMusicPreview(); } catch (e) {}
     },
+    /** The video's own background when its shape is not the frame's: 'crop' | 'blur' | 'bars'. */
+    setBackground(mode) {
+      if (!ve.video) { window.__toast && window.__toast('Open a video first.', 'error'); return null; }
+      setFillMode(mode);
+      const say = { crop: '✂️ The video fills the frame (cropped at the sides)', blur: '🌫 The whole video, on a blurred copy of itself', bars: '⬛ The whole video, with black bars' }[ve.fill.mode];
+      window.__toast && window.__toast(say, 'good');
+      return ve.fill.mode;
+    },
+    backgroundMode() { return ve.fill.mode; },
+    toggleBlurBehind(id) { toggleOverlayBlur(id); const s = ve.segments.find((x) => x.id === (id || ve.sel)); return s ? !!s.bgBlur : null; },
     /** The ＋ at the end of the row: pick files and put them AFTER the video. */
     async pickMediaAfter() {
       if (!ve.video) return window.__toast && window.__toast('Open a video first.', 'error');

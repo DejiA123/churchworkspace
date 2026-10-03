@@ -250,6 +250,13 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
   const sig = mine.shots.map((x) => x.cand.id + (x.overlays.length ? '[' + x.overlays.map((o) => o.cand.id).join(',') + ']' : '')).join(' ');
   log(mine.shots.filter((x) => x.cand.kind === 'video').map((x) => x.cand.id).join(',') === 'vB,vA,vC', 'the videos play in the order they were put in, whatever the director did', sig);
   log(sig === 'vB[pA,p1,p2] vA[p3,p4,p5] p6 p7 vC', 'each photo goes over the video before it (or the first one); what will not fit follows it, in order');
+  // the usual way to add them: every clip first, then every photo
+  const oc2 = [V('w1', 0, 44), V('w2', 1, 66), V('w3', 2, 28)];
+  for (let k = 0; k < 20; k++) oc2.push(P('q' + (k + 1), 3 + k));
+  const clipsFirst = montage.finalise({ shots: oc2.map((x) => ({ id: x.id, seconds: 3, effect: 'cut', focus: 'center', transition: 'cut' })), texts: [], hashtags: [], post_caption: '', title: '', concept: '' }, oc2, { full: true, keepOrder: true }, null);
+  const per = clipsFirst.shots.filter((x) => x.cand.kind === 'video').map((x) => x.cand.id + ':' + x.overlays.length);
+  log(clipsFirst.shots.filter((x) => x.cand.kind === 'video').every((x) => x.overlays.length >= 2) && clipsFirst.shots.filter((x) => x.cand.kind === 'video').map((x) => x.cand.id).join(',') === 'w1,w2,w3',
+    'clips first, photos after: the photos go through EVERY clip, from the first one — not piled on the last', per.join(' '));
   const mineShort = montage.finalise({ shots: [oc[10], oc[4], oc[1], oc[4], oc[1]].map((x) => ({ id: x.id, seconds: 3, effect: 'cut', focus: 'center', transition: 'cut' })), texts: [], hashtags: [], post_caption: '', title: '', concept: '' },
     oc.map((x) => ({ ...x, whole: false })), { full: false, keepOrder: true, lengthSec: 15 }, null);
   log(mineShort.shots.map((x) => x.cand.id).join(',') === 'vB,vB,vA,vA,vC', 'a timed montage keeps that order too', mineShort.shots.map((x) => x.cand.id).join(','));

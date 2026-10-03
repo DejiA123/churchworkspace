@@ -780,6 +780,14 @@ function spreadPhotos(shots) {
 function keepOrderPhotos(shots) {
   const isVid = (s) => s.cand.kind === 'video';
   if (!shots.some(isVid)) return;
+  // Photos added AFTER every video (the usual way: the clips first, then the
+  // pictures) belong to no clip in particular — they were all landing on the
+  // last one and piling up after it. They are laid through ALL the clips, in
+  // order, by spreadPhotos below. Photos placed between clips stay with the
+  // clip before them.
+  const lastV = shots.map(isVid).lastIndexOf(true);
+  const loose = shots.slice(lastV + 1);
+  shots.splice(lastV + 1);
   const own = new Map();
   let owner = shots.find(isVid);
   for (const sh of shots) {
@@ -806,6 +814,7 @@ function keepOrderPhotos(shots) {
       shots.push(m);
     });
   }
+  if (loose.length) { shots.push(...loose); spreadPhotos(shots); }
 }
 
 /**
