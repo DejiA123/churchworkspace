@@ -49,6 +49,8 @@ const ASPECTS = {
 };
 const FPS = 30;
 const EFFECTS = ['cut', 'punch_in', 'flash', 'slow_zoom', 'zoom_out', 'slow_motion'];
+/* how a shot comes IN from the one before it */
+const TRANSITIONS = ['cut', 'fade', 'flash'];
 const STYLES = {
   hype: 'High energy. Fast cuts (often under a second on a fast song), punch-ins and flashes on the big moments, the most explosive moment first.',
   worship: 'Reverent and uplifting. Unhurried shots of raised hands, faces and light; slow zooms; let moments breathe; build to a climax.',
@@ -121,7 +123,7 @@ async function thumb(ctx, file, atSec, dest, image) {
  * `budget` caps the number of candidates across all files (each is a picture
  * the director has to look at).
  */
-async function analyze(ctx, getInfo, files, { tmp, budget = 44, onProgress } = {}) {
+async function analyze(ctx, getInfo, files, { tmp, budget = 44, onProgress, full = false } = {}) {
   const say = (p) => { if (onProgress) onProgress(Math.round(p)); };
   const infos = [];
   for (const f of files) {
@@ -178,6 +180,14 @@ async function analyze(ctx, getInfo, files, { tmp, budget = 44, onProgress } = {
       // a shot that cuts often around it is where things HAPPEN
       s.energy = clamp(scenes.filter((t) => t > s.start - 2 && t < s.end + 2).length / 4, 0, 1);
       s.score = 0.55 * s.loud + 0.3 * s.energy + 0.15 * clamp((s.end - s.start) / 3, 0, 1);
+    }
+    // KEEP EVERYTHING: the whole clip is one shot; its frame is its best moment
+    if (full) {
+      const best = segs.slice().sort((x, y) => y.score - x.score)[0] || { peak: D / 2, loud: 0, energy: 0, score: 0.5 };
+      cands.push({ id: 'c' + (++k), file: v.file, kind: 'video', start: 0, end: round2(D), peak: round2(best.peak), whole: true,
+        fileDur: round2(D), loud: round2(best.loud || 0), energy: round2(best.energy || 0), score: round2(best.score || 0.5),
+        hasAudio: !!v.info.hasAudio, w: v.info.width, h: v.info.height, name: path.basename(v.file) });
+      continue;
     }
     const want = clamp(Math.round((forVideos * D) / totalLen), 1, 8);
     // best first, then spread out (no two picks from the same few seconds)
@@ -323,9 +333,10 @@ const PLAN_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['id', 'seconds', 'effect', 'focus'],
+        required: ['id', 'seconds', 'effect', 'focus', 'transition'],
         properties: {
           id: { type: 'string', description: 'A candidate id from the list, e.g. "c4".' },
+          transition: { type: 'string', enum: TRANSITIONS, description: 'How this shot comes in from the previous one: a hard cut, a fade through black, or a white flash.' },
           seconds: { type: 'number', description: 'How long the shot stays on screen.' },
           effect: { type: 'string', enum: EFFECTS },
           focus: { type: 'string', enum: ['center', 'top', 'bottom'], description: 'Which part of the picture to keep when it is cropped to the frame.' },
@@ -359,6 +370,7 @@ What makes it work:
 - Give it an arc: hook, build, peak, payoff. Vary rhythm; save one strong moment for the end so people watch to the last frame (and loop it).
 - Faces and genuine emotion beat scenery. Avoid near-duplicate frames back to back. Skip blurry, dark or empty frames.
 - When there is music, cut lengths are multiples of the beat; faster songs mean shorter shots. Without music, 1.2–3 s per shot.
+- Transitions (how each shot comes in): mostly "cut" on the beat; "fade" through black to change place, time or mood; "flash" (white) to hit a big moment. Never two fades in a row on a fast edit.
 - Effects are seasoning: punch_in or flash on the biggest beats, slow_zoom / zoom_out to give photos life, slow_motion for one emotional peak at most. Most shots are a plain "cut".
 - On-screen words: one hook in the first shot (max 7 words, curiosity or emotion, no clickbait lies), a few short beats that carry the story (max 6 words each), and an optional call to action at the end. Plain words, no emojis inside the video text, no hashtags in it.
 - Respect the faith context: uplifting, sincere, never mocking.
@@ -367,6 +379,7 @@ Only use ids from the list. Every shot's seconds must fit the footage that candi
 
 function describe(c) {
   if (c.kind === 'image') return `${c.id}: PHOTO "${c.name}" (${c.w}x${c.h})`;
+  if (c.whole) return `${c.id}: VIDEO "${c.name}", ${c.fileDur}s, plays IN FULL (its seconds are fixed), loudness ${c.loud}, action ${c.energy}${c.hasAudio ? '' : ', silent'}`;
   const len = round2(Math.min(c.fileDur, Math.max(c.end - c.start, 0) + 3));
   return `${c.id}: VIDEO "${c.name}" moment at ${c.start}s–${c.end}s of ${c.fileDur}s, up to ${len}s usable, loudness ${c.loud}, action ${c.energy}${c.hasAudio ? '' : ', silent'}`;
 }
@@ -374,7 +387,9 @@ function describe(c) {
 function briefOf(opts, music) {
   const lines = [
     `Style: ${opts.style} — ${STYLES[opts.style] || STYLES.hype}`,
-    `Target length: about ${opts.lengthSec} seconds. Frame: ${opts.aspect}.`,
+    opts.full
+      ? `KEEP EVERYTHING: the operator wants nothing cut out. Use EVERY candidate exactly once. Videos play in full — you choose the ORDER, how each one comes in (transition), its effect and focus. Photos: 2–5 s each, with motion. Blend it all into one flowing piece with the words on screen. Frame: ${opts.aspect}.`
+      : `Target length: about ${opts.lengthSec} seconds. Frame: ${opts.aspect}.`,
     music ? `Music: the operator's own song, ${music.bpm} BPM (one beat = ${music.interval}s). Shot lengths should be whole numbers of beats.` : 'No music chosen: the clips\' own sound plays.',
   ];
   if (opts.brief) lines.push(`What the operator says it is about: "${String(opts.brief).slice(0, 500)}"`);
@@ -428,7 +443,7 @@ async function directWithGroq(cands, opts, music) {
   try { cw = require('./cloudwrite'); } catch (e) { return null; }
   if (!cw.access || !cw.access().key) return null;
   const prompt = briefOf(opts, music) + '\n\nCandidates:\n' + cands.map(describe).join('\n')
-    + '\n\nReply with JSON only, exactly this shape: {"concept":"","title":"","shots":[{"id":"c1","seconds":2,"effect":"cut","focus":"center"}],'
+    + '\n\nReply with JSON only, exactly this shape: {"concept":"","title":"","shots":[{"id":"c1","seconds":2,"effect":"cut","focus":"center","transition":"cut"}],'
     + '"texts":[{"at_shot":0,"span_shots":1,"text":"","role":"hook"}],"post_caption":"","hashtags":[""]}. Effects: ' + EFFECTS.join(', ') + '.';
   const text = await cw.chat({ system: SYSTEM, prompt, json: true, maxTokens: 2500, temperature: 0.7, timeoutMs: 60000, evenIfOff: true });
   const plan = text ? cw.parseJson(text) : null;
@@ -437,6 +452,25 @@ async function directWithGroq(cands, opts, music) {
 
 /** No AI at all: strongest first, the rest in an alternating, varied order. */
 function directByRules(cands, opts, music) {
+  const hook0 = String(opts.brief || '').replace(/\s+/g, ' ').trim().split(' ').slice(0, 7).join(' ');
+  if (opts.full) {
+    // everything, strongest first, photos spread between the videos, a fade
+    // wherever it moves from one file to the next kind of thing
+    const vids = cands.filter((c) => c.kind === 'video').sort((a, b) => b.score - a.score);
+    const pics = cands.filter((c) => c.kind === 'image');
+    const order = [];
+    const gap = vids.length ? Math.max(1, Math.ceil(pics.length / vids.length)) : pics.length;
+    let pi = 0;
+    for (const v of vids) { order.push(v); for (let j = 0; j < gap && pi < pics.length; j++) order.push(pics[pi++]); }
+    while (pi < pics.length) order.push(pics[pi++]);
+    const shots = order.map((c, i) => ({
+      id: c.id, seconds: c.kind === 'image' ? 3 : c.fileDur, focus: 'center',
+      effect: c.kind === 'image' ? (i % 2 ? 'zoom_out' : 'slow_zoom') : (i === 0 ? 'punch_in' : 'cut'),
+      transition: i === 0 ? 'cut' : (order[i - 1].kind !== c.kind ? 'fade' : (i % 3 === 0 ? 'flash' : 'cut')),
+    }));
+    return { plan: { concept: 'Everything kept, blended into one piece.', title: hook0 || 'Highlights', shots,
+      texts: hook0 ? [{ at_shot: 0, span_shots: 1, text: hook0, role: 'hook' }] : [], post_caption: '', hashtags: [] }, director: 'rules', model: '' };
+  }
   const pool = cands.slice().sort((a, b) => b.score - a.score);
   const per = music ? music.interval * (music.bpm > 120 ? 2 : 1) * (opts.style === 'worship' || opts.style === 'cinematic' ? 2 : 1) : 2;
   const shots = [];
@@ -481,19 +515,37 @@ function finalise(raw, cands, opts, music) {
   for (const s of (raw.shots || [])) {
     const c = byId.get(String(s && s.id || '').trim());
     if (!c) continue;
-    const effect = EFFECTS.includes(s.effect) ? s.effect : 'cut';
+    let effect = EFFECTS.includes(s.effect) ? s.effect : 'cut';
     const focus = ['center', 'top', 'bottom'].includes(s.focus) ? s.focus : 'center';
+    const transition = TRANSITIONS.includes(s.transition) ? s.transition : 'cut';
+    if (opts.full) {
+      // every file once, videos whole (slow motion would double a whole clip)
+      if (shots.some((x) => x.cand.id === c.id)) continue;
+      if (effect === 'slow_motion') effect = 'cut';
+      const sec = c.kind === 'video' ? Math.max(0.4, c.fileDur - 0.05) : clamp(Number(s.seconds) || 3, 1.5, 6);
+      shots.push({ cand: c, seconds: sec, effect, focus, slow: false, transition });
+      continue;
+    }
     let sec = clamp(Number(s.seconds) || 2, 0.4, 12);
     const slow = effect === 'slow_motion' && c.kind === 'video';
     if (c.kind === 'video') sec = Math.min(sec, (c.fileDur - 0.05) * (slow ? 2 : 1));
     if (sec < 0.4) continue;
-    shots.push({ cand: c, seconds: sec, effect, focus, slow });
+    shots.push({ cand: c, seconds: sec, effect, focus, slow, transition });
+  }
+  if (opts.full) {
+    // nothing the operator gave is left out, even if the director skipped it
+    for (const c of cands) {
+      if (shots.some((x) => x.cand.id === c.id)) continue;
+      shots.push({ cand: c, seconds: c.kind === 'video' ? Math.max(0.4, c.fileDur - 0.05) : 3,
+        effect: c.kind === 'image' ? 'slow_zoom' : 'cut', focus: 'center', slow: false, transition: 'fade' });
+    }
   }
   if (!shots.length) throw new Error('The montage plan had no usable shots.');
+  if (shots[0]) shots[0].transition = 'cut';
   // the length asked for, give or take a shot
   const target = clamp(Number(opts.lengthSec) || 30, 8, 180);
   let total = shots.reduce((n, s) => n + s.seconds, 0);
-  while (shots.length > 3 && total - shots[shots.length - 1].seconds >= target * 1.1) {
+  while (!opts.full && shots.length > 3 && total - shots[shots.length - 1].seconds >= target * 1.1) {
     total -= shots.pop().seconds;
   }
   // on the beat: every cut moves to the nearest beat after the last one
@@ -502,6 +554,7 @@ function finalise(raw, cands, opts, music) {
     let at = 0;
     const B = music.beats;
     for (const s of shots) {
+      if (opts.full && s.cand.kind === 'video') { at += s.seconds; continue; }
       const want = at + s.seconds;
       // a video shot can only reach as far as its footage: the cut goes on the
       // last beat it CAN reach, never past the end of the clip and off the beat
@@ -524,7 +577,9 @@ function finalise(raw, cands, opts, music) {
     const c = s.cand;
     s.seconds = round2(Math.max(0.4, s.seconds));
     s.at = round2(t);
-    if (c.kind === 'video') {
+    if (c.kind === 'video' && opts.full) {
+      s.from = 0; s.need = round2(s.seconds);
+    } else if (c.kind === 'video') {
       const need = s.seconds / (s.slow ? 2 : 1);
       const n = nth.get(c.id) || 0;
       nth.set(c.id, n + 1);
@@ -583,9 +638,28 @@ function effectChain(effect, W, H, dur) {
   }
 }
 
+/*
+ * Blending without a second encode: a "fade" is the outgoing shot dipping to
+ * black and the incoming one rising from it, a "flash" a burst of white — each
+ * done on the EDGES of the two pieces as they are encoded, so the pieces still
+ * join with a plain copy. The sound eases out and in across every join.
+ */
+function edgeFades(s, next, dur) {
+  const v = [], a = [];
+  const inT = s.transition, outT = next ? next.transition : null;
+  if (inT === 'fade') { v.push(`fade=t=in:st=0:d=0.35`); a.push(`afade=t=in:st=0:d=0.3`); }
+  else if (inT === 'flash') v.push(`fade=t=in:st=0:d=0.2:color=white`);
+  else a.push(`afade=t=in:st=0:d=0.03`);
+  if (outT === 'fade') { v.push(`fade=t=out:st=${Math.max(0, dur - 0.35).toFixed(3)}:d=0.35`); a.push(`afade=t=out:st=${Math.max(0, dur - 0.3).toFixed(3)}:d=0.3`); }
+  else if (outT === 'flash') v.push(`fade=t=out:st=${Math.max(0, dur - 0.12).toFixed(3)}:d=0.12:color=white`);
+  else a.push(`afade=t=out:st=${Math.max(0, dur - 0.03).toFixed(3)}:d=0.03`);
+  return { v: v.join(','), a: a.join(',') };
+}
+
 /** One shot → a piece encoded exactly like every other piece, so they join without re-encoding. */
-async function renderShot(ctx, s, W, H, keepAudio, out) {
+async function renderShot(ctx, s, W, H, keepAudio, out, next) {
   const c = s.cand, dur = s.seconds;
+  const edge = edgeFades(s, next, dur);
   const args = ['-hide_banner', '-y'];
   let v;
   if (c.kind === 'image') {
@@ -595,16 +669,16 @@ async function renderShot(ctx, s, W, H, keepAudio, out) {
     const zoomIn = s.effect !== 'zoom_out';
     const z = zoomIn ? `1+0.12*on/${frames}` : `1.12-0.12*on/${frames}`;
     v = `[0:v]${fitChain(c, W, H, s.focus, 2)},zoompan=z='${z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${W}x${H}:fps=${FPS}`
-      + (s.effect === 'flash' ? ',fade=t=in:st=0:d=0.18:color=white' : '') + ',format=yuv420p[v]';
+      + (s.effect === 'flash' && s.transition !== 'flash' ? ',fade=t=in:st=0:d=0.18:color=white' : '') + (edge.v ? ',' + edge.v : '') + ',format=yuv420p[v]';
   } else {
     args.push('-ss', String(s.from), '-t', String(s.need + 0.1), '-i', c.file);
     const fx = effectChain(s.effect, W, H, dur);
-    v = `[0:v]${s.slow ? 'setpts=2.0*PTS,' : ''}${fitChain(c, W, H, s.focus)}${fx ? ',' + fx : ''},fps=${FPS},format=yuv420p[v]`;
+    v = `[0:v]${s.slow ? 'setpts=2.0*PTS,' : ''}${fitChain(c, W, H, s.focus)}${fx ? ',' + fx : ''},fps=${FPS}${edge.v ? ',' + edge.v : ''},format=yuv420p[v]`;
   }
   const withSound = keepAudio && c.kind === 'video' && c.hasAudio;
   let a;
   if (withSound) {
-    a = `[0:a]${s.slow ? 'atempo=0.5,' : ''}aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,apad[a]`;
+    a = `[0:a]${s.slow ? 'atempo=0.5,' : ''}aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=0:${dur.toFixed(3)}${edge.a ? ',' + edge.a : ''}[a]`;
   } else {
     args.push('-f', 'lavfi', '-t', String(dur + 0.1), '-i', 'anullsrc=r=48000:cl=stereo');
     a = `[1:a]anull[a]`;
@@ -620,7 +694,7 @@ async function render(ctx, plan, { aspect, keepAudio, output, tmp, onProgress })
   const { w: W, h: H } = ASPECTS[aspect] || ASPECTS['9:16'];
   const pieces = [];
   for (let i = 0; i < plan.shots.length; i++) {
-    pieces.push(await renderShot(ctx, plan.shots[i], W, H, keepAudio, path.join(tmp, `shot-${String(i).padStart(3, '0')}.mp4`)));
+    pieces.push(await renderShot(ctx, plan.shots[i], W, H, keepAudio, path.join(tmp, `shot-${String(i).padStart(3, '0')}.mp4`), plan.shots[i + 1]));
     if (onProgress) onProgress(Math.round(((i + 1) / plan.shots.length) * 95));
   }
   const list = path.join(tmp, 'pieces.txt');
@@ -636,11 +710,12 @@ async function render(ctx, plan, { aspect, keepAudio, output, tmp, onProgress })
  * The whole job. `stage(name)` says what is happening (for the phone), and
  * `onProgress(pct)` how far through the whole thing it is.
  */
-async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, aspect, brief, keepAudio, output, onProgress, stage, log }) {
+async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, full, aspect, brief, keepAudio, output, onProgress, stage, log }) {
   const files = (mediaPaths || []).filter((p) => p && fs.existsSync(p)).slice(0, 60);
   if (!files.length) throw new Error('Add some videos or pictures first.');
   const opts = {
     style: STYLES[style] ? style : 'hype',
+    full: !!full || lengthSec === 'all' || Number(lengthSec) === 0,
     lengthSec: clamp(Number(lengthSec) || 30, 8, 180),
     aspect: ASPECTS[aspect] ? aspect : '9:16',
     brief: brief ? String(brief).slice(0, 500) : '',
@@ -649,7 +724,7 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, asp
   const part = (a, b) => (p) => onProgress && onProgress(Math.round(a + (b - a) * (p / 100)));
   try {
     if (stage) stage('👀 Watching every clip and picture…');
-    const cands = await analyze(ctx, getInfo, files, { tmp, onProgress: part(0, 35) });
+    const cands = await analyze(ctx, getInfo, files, { tmp, onProgress: part(0, 35), full: opts.full });
     let music = null;
     if (musicPath && fs.existsSync(musicPath)) {
       if (stage) stage('🎵 Finding the beat of your song…');
@@ -660,7 +735,7 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, asp
     const d = await direct(cands, opts, music, log);
     if (onProgress) onProgress(50);
     const plan = finalise(d.plan, cands, opts, music);
-    if (stage) stage(`✂️ Cutting ${plan.shots.length} shots together…`);
+    if (stage) stage(opts.full ? `🎞 Blending all ${plan.shots.length} together…` : `✂️ Cutting ${plan.shots.length} shots together…`);
     await render(ctx, plan, { aspect: opts.aspect, keepAudio: keepAudio !== false, output, tmp, onProgress: part(50, 100) });
     return {
       output,
@@ -674,7 +749,8 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, asp
       hashtags: plan.hashtags,
       texts: plan.texts,
       bpm: music ? music.bpm : null,
-      shots: plan.shots.map((s) => ({ at: s.at, seconds: s.seconds, effect: s.effect, file: s.cand.file, kind: s.cand.kind, from: s.from == null ? null : s.from })),
+      full: opts.full,
+      shots: plan.shots.map((s) => ({ at: s.at, seconds: s.seconds, effect: s.effect, transition: s.transition, file: s.cand.file, kind: s.cand.kind, from: s.from == null ? null : s.from })),
     };
   } finally {
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
@@ -688,4 +764,4 @@ function directorStatus() {
   return { director: 'rules', model: '' };
 }
 
-module.exports = { make, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, _direct: direct };
+module.exports = { make, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, _direct: direct };

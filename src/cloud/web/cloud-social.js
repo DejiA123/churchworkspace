@@ -1038,7 +1038,7 @@
    */
   const MT = { items: [], song: null, songFile: null, style: 'hype', len: 30, aspect: '9:16', keep: true, brief: '', busy: false };
   const MT_STYLES = [['hype', 'Hype'], ['worship', 'Worship'], ['emotional', 'Emotional'], ['cinematic', 'Cinematic'], ['fun', 'Fun']];
-  const MT_LENS = [15, 30, 45, 60];
+  const MT_LENS = [['all', 'Use everything'], [15, '15s'], [30, '30s'], [45, '45s'], [60, '60s']];
   const MT_ASPECTS = [['9:16', 'Reels / TikTok'], ['1:1', 'Square'], ['4:5', 'Feed'], ['16:9', 'YouTube']];
 
   async function openMontage() {
@@ -1069,7 +1069,7 @@
       <p class="mt-lead">${mi('sparkles')} ${brain}</p>
       <section class="mt-sec"><h3>Your clips &amp; photos <small>${MT.items.length ? MT.items.length + ' added' : 'add 2 or more'}</small></h3>
         <div class="mt-grid">${MT.items.map((it, i) => `<div class="mt-tile" data-i="${i}">${it.kind === 'image'
-          ? `<img src="${attr(it.url)}" alt="" />` : `<video src="${attr(it.url)}#t=0.5" muted playsinline preload="metadata"></video><span class="mt-dur">▶</span>`}
+          ? `<img src="${attr(it.url)}" alt="" />` : (it.poster ? `<img src="${attr(it.poster)}" alt="" />` : '<span class="mt-load"></span>') + `<span class="mt-dur">▶${it.secs ? ' ' + Math.floor(it.secs / 60) + ':' + String(Math.round(it.secs % 60)).padStart(2, '0') : ''}</span>`}
           <button type="button" class="mt-x" data-mt-del="${i}" aria-label="Remove">✕</button></div>`).join('')}
           <button type="button" class="mt-add" data-mt="add">${mi('plus')}<span>Add</span></button></div>
       </section>
@@ -1082,7 +1082,8 @@
         <label class="mt-toggle"><input type="checkbox" id="mtKeep" ${MT.keep ? 'checked' : ''}/> <span>Keep the clips’ own sound${MT.song || MT.songFile ? ' under the music' : ''}</span></label>
       </section>
       <section class="mt-sec"><h3>Style</h3><div class="mt-row">${chips(MT_STYLES, MT.style, 'style')}</div></section>
-      <section class="mt-sec"><h3>Length</h3><div class="mt-row">${chips(MT_LENS.map((n) => [n, n + 's']), MT.len, 'len')}</div></section>
+      <section class="mt-sec"><h3>Length</h3><div class="mt-row">${chips(MT_LENS, MT.len, 'len')}</div>
+        <small class="mt-hint">${MT.len === 'all' ? 'Nothing is cut out: every clip plays in full and every photo gets its moment — the AI orders them and blends them together with fades, flashes and cuts on the beat.' : 'The AI picks the best moments to fit this length.'}</small></section>
       <section class="mt-sec"><h3>Shape</h3><div class="mt-row">${chips(MT_ASPECTS.map(([v, l]) => [v, v + ' · ' + l]), MT.aspect, 'aspect')}</div></section>
       <section class="mt-sec"><h3>What’s it about? <small>optional</small></h3>
         <textarea id="mtBrief" class="mt-brief" rows="2" maxlength="400" placeholder="e.g. Youth camp 2026 — three days of worship, games and baptisms">${esc(MT.brief)}</textarea></section>
@@ -1100,7 +1101,7 @@
       if (d.mtDel != null) { const it = MT.items.splice(+d.mtDel, 1)[0]; if (it) URL.revokeObjectURL(it.url); return mtPaint(); }
       if (d.mtSong != null) { MT.song = d.mtSong ? MT.lib.find((m) => m.id === d.mtSong) || null : null; MT.songFile = null; return mtPaint(); }
       if (d.mtStyle) { MT.style = d.mtStyle; return mtPaint(); }
-      if (d.mtLen) { MT.len = +d.mtLen; return mtPaint(); }
+      if (d.mtLen) { MT.len = d.mtLen === 'all' ? 'all' : +d.mtLen; return mtPaint(); }
       if (d.mtAspect) { MT.aspect = d.mtAspect; return mtPaint(); }
       if (d.mt === 'add') return $('#mtPick', p.body).click();
       if (d.mt === 'song') return $('#mtSong', p.body).click();
@@ -1112,7 +1113,9 @@
       if (e.target.id === 'mtPick') {
         for (const f of Array.from(e.target.files || []).slice(0, 60 - MT.items.length)) {
           const kind = /^image\//.test(f.type) || /\.(jpe?g|png|webp|heic|avif)$/i.test(f.name) ? 'image' : 'video';
-          MT.items.push({ file: f, kind, url: URL.createObjectURL(f) });
+          const it = { file: f, kind, url: URL.createObjectURL(f) };
+          MT.items.push(it);
+          if (kind === 'video') mtPoster(it);
         }
         e.target.value = '';
         mtPaint();
@@ -1124,6 +1127,39 @@
       } else if (e.target.id === 'mtKeep') MT.keep = e.target.checked;
     });
     p.body.addEventListener('input', (e) => { if (e.target.id === 'mtBrief') MT.brief = e.target.value; });
+  }
+
+  /*
+   * A frame of each video for its tile. iOS paints a <video> black until it is
+   * played, so the tile showed nothing; a frame is grabbed onto a canvas once
+   * instead (half a second in, past any fade from black).
+   */
+  function mtPoster(it) {
+    const v = document.createElement('video');
+    v.muted = true; v.playsInline = true; v.preload = 'auto';
+    v.setAttribute('playsinline', ''); v.setAttribute('muted', '');
+    let done = false;
+    const finish = () => { done = true; try { v.removeAttribute('src'); v.load(); } catch (e) {} };
+    const grab = () => {
+      if (done) return;
+      try {
+        const w = 240, h = Math.round(240 * (v.videoHeight / Math.max(1, v.videoWidth))) || 400;
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        c.getContext('2d').drawImage(v, 0, 0, w, h);
+        it.poster = c.toDataURL('image/jpeg', 0.7);
+      } catch (e) { /* the play mark alone */ }
+      finish();
+      mtPaint();
+    };
+    v.addEventListener('loadedmetadata', () => {
+      it.secs = v.duration || 0;
+      try { v.currentTime = Math.min(0.5, (v.duration || 1) / 3); } catch (e) {}
+    });
+    v.addEventListener('seeked', grab);
+    v.addEventListener('error', finish);
+    setTimeout(() => { if (!done && v.readyState >= 2) grab(); }, 2500);
+    v.src = it.url;
+    v.load();
   }
 
   function mtProgress(title, pct, note) {
@@ -1167,7 +1203,8 @@
         mtProgress(d.stage || 'Working…', 32 + (d.percent || 0) * 0.68);
       });
       const res = await window.api.montage.create({
-        mediaPaths: paths, musicPath: song ? song.file : null, style: MT.style, lengthSec: MT.len,
+        mediaPaths: paths, musicPath: song ? song.file : null, style: MT.style,
+        lengthSec: MT.len === 'all' ? 0 : MT.len, full: MT.len === 'all',
         aspect: MT.aspect, brief: MT.brief, keepAudio: MT.keep, jobId,
       });
       if (off) off();
