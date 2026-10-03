@@ -35,6 +35,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const ff = require('./ffmpeg');
 const jobs = require('./jobs');
+const machine = require('./machine');
 
 const IMG_RE = /\.(jpe?g|png|webp|bmp|tiff?|avif|heic)$/i;
 const isImage = (p) => IMG_RE.test(String(p || ''));
@@ -146,7 +147,9 @@ async function analyze(ctx, getInfo, files, { tmp, budget = 44, onProgress, full
   for (const v of videos) {
     const D = v.info.durationSec;
     let scenes = [], loud = [];
-    try { scenes = await sceneTimes(ctx, v.file, D); } catch (e) { if (e instanceof jobs.CancelledError) throw e; }
+    // keeping everything, nothing is cut on a scene change: the loudest moment
+    // (for the director's look at the clip) is all that is needed
+    if (!full) { try { scenes = await sceneTimes(ctx, v.file, D); } catch (e) { if (e instanceof jobs.CancelledError) throw e; } }
     say((++step / steps) * 70);
     if (v.info.hasAudio) { try { loud = await loudness(ctx, v.file); } catch (e) { if (e instanceof jobs.CancelledError) throw e; } }
     say((++step / steps) * 70);
@@ -857,6 +860,22 @@ function edgeFades(s, next, dur) {
   return { v: v.join(','), a: a.join(',') };
 }
 
+/*
+ * ►► A MONTAGE IS QUICK ON A SMALL SERVER. ◄◄
+ * Timed on one core: a 3-second photo shot 5.6 s on 'veryfast', 2.0 s on
+ * 'ultrafast'; ten seconds of 1080p video 9.4 s → 4.9 s. The pieces are the
+ * finished file (they are joined without another encode), so they are made at
+ * CRF 20 rather than the draft trick's lower number — a clean picture for a
+ * social post at a sensible size. A desktop keeps 'medium' at CRF 18.
+ *
+ * And a 4K iPhone clip cost more to DECODE than to encode: ten seconds of 4K
+ * 10-bit HEVC took 15 s just to read. Skipping the decoder's loop filter took
+ * that to 9.6 s; shrunk to 1080 wide, the difference does not show.
+ */
+const encodeOpts = () => (machine.small() ? ['-preset', 'ultrafast', '-crf', '20'] : ['-preset', 'medium', '-crf', '18']);
+const bigSource = (c, W, H) => !!(c && c.kind === 'video' && c.w && c.h && c.w * c.h > 2.5 * W * H);
+const decodeOpts = (c, W, H) => (bigSource(c, W, H) ? ['-skip_loop_filter', 'all'] : []);
+
 /** One shot → a piece encoded exactly like every other piece, so they join without re-encoding. */
 async function renderShot(ctx, s, W, H, keepAudio, out, next) {
   const c = s.cand, dur = s.seconds;
@@ -872,7 +891,7 @@ async function renderShot(ctx, s, W, H, keepAudio, out, next) {
     base = `[0:v]${fitChain(c, W, H, s.focus, 2, 'b')},zoompan=z='${z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=${W}x${H}:fps=${FPS}`
       + (s.effect === 'flash' && s.transition !== 'flash' ? ',fade=t=in:st=0:d=0.18:color=white' : '');
   } else {
-    args.push('-ss', String(s.from), '-t', String(s.need + 0.1), '-i', c.file);
+    args.push('-ss', String(s.from), '-t', String(s.need + 0.1), ...decodeOpts(c, W, H), '-i', c.file);
     const fx = effectChain(s.effect, W, H, dur);
     base = `[0:v]${s.slow ? 'setpts=2.0*PTS,' : ''}${fitChain(c, W, H, s.focus, 1, 'b')}${fx ? ',' + fx : ''},fps=${FPS}`;
   }
@@ -886,19 +905,25 @@ async function renderShot(ctx, s, W, H, keepAudio, out, next) {
      * underneath: a full-frame cutaway with a gentle push, or a framed box.
      */
     const oc = o.cand;
-    if (oc.kind === 'image') args.push('-loop', '1', '-t', String(o.len + 0.2), '-i', oc.file);
-    else args.push('-ss', String(o.from || 0), '-t', String(o.len + 0.2), '-i', oc.file);
+    // A photo is read and fitted ONCE, then held for the overlay's length. Fed
+    // with -loop 1 it was decoded and resized again for every frame — a 12 MP
+    // picture thirty times a second, the slowest part of the whole montage.
+    if (oc.kind === 'image') args.push('-i', oc.file);
+    else args.push('-ss', String(o.from || 0), '-t', String(o.len + 0.2), ...decodeOpts(oc, W, H), '-i', oc.file);
     nextInput = 2;
-    let look;
+    let fit, move = '';
     let x = '0', y = '0';
     if (o.style === 'pip') {
       const pw = Math.round((W * (W > H ? 0.34 : 0.5)) / 2) * 2, ph = Math.round((H * 0.34) / 2) * 2;
-      look = `scale=${pw}:${ph}:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,pad=iw+12:ih+12:6:6:white,setsar=1`;
+      fit = `scale=${pw}:${ph}:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,pad=iw+12:ih+12:6:6:white,setsar=1`;
       x = o.pos === 'left' ? '44' : `W-w-44`;
       y = `${Math.round(H * 0.11)}`;
     } else {
-      look = `${fitChain(oc, W, H, 'center', 1, 'o')},scale=w='trunc(${W}*(1+0.07*t/${o.len.toFixed(2)})/2)*2':h=-2:eval=frame,crop=${W}:${H}`;
+      fit = fitChain(oc, W, H, 'center', 1, 'o');
+      move = `scale=w='trunc(${W}*(1+0.07*t/${o.len.toFixed(2)})/2)*2':h=-2:eval=frame,crop=${W}:${H}`;
     }
+    const hold = oc.kind === 'image' ? `,loop=loop=${Math.ceil((o.len + 0.2) * FPS)}:size=1:start=0,setpts=N/${FPS}/TB` : '';
+    const look = `${fit}${hold}${move ? ',' + move : ''}`;
     const ov = `[1:v]${look},fps=${FPS},format=yuva420p,fade=t=in:st=0:d=0.25:alpha=1,fade=t=out:st=${Math.max(0, o.len - 0.25).toFixed(3)}:d=0.25:alpha=1,`
       + `trim=0:${o.len.toFixed(3)},setpts=PTS-STARTPTS+${o.start.toFixed(3)}/TB[ov]`;
     graph = `${base}[bv];${ov};[bv][ov]overlay=${x}:${y}:eof_action=pass:enable='between(t,${o.start.toFixed(3)},${(o.start + o.len).toFixed(3)})'${edge.v ? ',' + edge.v : ''},format=yuv420p[v]`;
@@ -914,7 +939,7 @@ async function renderShot(ctx, s, W, H, keepAudio, out, next) {
     a = `[${nextInput}:a]anull[a]`;
   }
   args.push('-filter_complex', `${graph};${a}`, '-map', '[v]', '-map', '[a]', '-t', String(dur),
-    '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-r', String(FPS), '-pix_fmt', 'yuv420p',
+    '-c:v', 'libx264', ...encodeOpts(), '-r', String(FPS), '-pix_fmt', 'yuv420p',
     '-video_track_timescale', '30000', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2', out);
   await ff.runFfmpeg(ctx.ffmpeg, args);
   return out;
@@ -922,11 +947,26 @@ async function renderShot(ctx, s, W, H, keepAudio, out, next) {
 
 async function render(ctx, plan, { aspect, keepAudio, output, tmp, onProgress }) {
   const { w: W, h: H } = ASPECTS[aspect] || ASPECTS['9:16'];
-  const pieces = [];
-  for (let i = 0; i < plan.shots.length; i++) {
-    pieces.push(await renderShot(ctx, plan.shots[i], W, H, keepAudio, path.join(tmp, `shot-${String(i).padStart(3, '0')}.mp4`), plan.shots[i + 1]));
-    if (onProgress) onProgress(Math.round(((i + 1) / plan.shots.length) * 95));
-  }
+  /*
+   * Pieces are independent, so a server with more than one CPU makes several
+   * at once (the encoder gate still decides how many fit in its memory); on
+   * one CPU this is the same one-after-another as before.
+   */
+  const n = plan.shots.length;
+  const pieces = new Array(n);
+  let next = 0, done = 0;
+  const worker = async () => {
+    while (next < n) {
+      const i = next++;
+      const t0 = Date.now();
+      pieces[i] = await renderShot(ctx, plan.shots[i], W, H, keepAudio, path.join(tmp, `shot-${String(i).padStart(3, '0')}.mp4`), plan.shots[i + 1]);
+      if (process.env.MW_MONTAGE_PROFILE) { const sh = plan.shots[i]; console.log('[piece]', i, sh.cand.kind, sh.cand.w + 'x' + sh.cand.h, sh.seconds.toFixed(1) + 's', sh.effect, sh.slow ? 'slow' : '', sh.overlay ? 'overlay:' + sh.overlay.style : '', ((Date.now() - t0) / 1000).toFixed(1) + 's'); }
+      done++;
+      if (onProgress) onProgress(Math.round((done / n) * 95));
+    }
+  };
+  const lanes = Math.max(1, Math.min(4, machine.cpus(), n));
+  await Promise.all(Array.from({ length: lanes }, worker));
   const list = path.join(tmp, 'pieces.txt');
   fs.writeFileSync(list, pieces.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'));
   await ff.runFfmpeg(ctx.ffmpeg, ['-hide_banner', '-y', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', '-movflags', '+faststart', output]);

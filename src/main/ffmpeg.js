@@ -95,7 +95,8 @@ function capThreads(args) {
    * the same encode, the same CRF (the same look), a somewhat larger file.
    */
   const tiny = x264 && machine.memoryMB() < 1024;
-  if (x264 && !args.includes('-rc-lookahead') && !args.includes('-x264-params')) {
+  const uf = /^ultrafast$/.test(String(out[out.indexOf('-preset') + 1] || ''));   // looks ahead at nothing anyway
+  if (x264 && !uf && !args.includes('-rc-lookahead') && !args.includes('-x264-params')) {
     out.push('-rc-lookahead', tiny ? '5' : '10');
     if (tiny) { out.push('-mbtree', '0'); if (!args.includes('-bf')) out.push('-bf', '1'); }
   }
