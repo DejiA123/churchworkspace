@@ -392,7 +392,7 @@ What makes it work:
 - Faces and genuine emotion beat scenery. Avoid near-duplicate frames back to back. Skip blurry, dark or empty frames.
 - When there is music, cut lengths are multiples of the beat; faster songs mean shorter shots. Without music, 1.2–3 s per shot.
 - Transitions (how each shot comes in): mostly "cut" on the beat; "fade" through black to change place, time or mood; "flash" (white) to hit a big moment. Never two fades in a row on a fast edit.
-- Overlays (B-roll) are what make it feel produced: lay a photo or another clip ON TOP of a video shot while that shot's sound carries on — show what is being preached or sung about, a reaction, the crowd, a moment from earlier. "cutaway" fills the frame; "pip" is a framed box in a corner. Use them on video shots whose sound carries (speech, singing, a crowd), 1.5–3.5 s each, a few per edit, never in the first second of the hook.
+- Overlays (B-roll) are what make it feel produced: lay a photo or another clip ON TOP of a video shot while that shot's sound carries on — show what is being preached or sung about, a reaction, the crowd, a moment from earlier. "cutaway" fills the frame; "pip" is a framed box in a corner. Use them on video shots whose sound carries (speech, singing, a crowd), 1.5–3.5 s each, never in the first second of the hook. A video shot can carry SEVERAL overlays, each with its own start — on a long clip, bring a picture in every 5–8 seconds so the eye always has something new while the sound tells the story.
 - Effects are seasoning: punch_in or flash on the biggest beats, slow_zoom / zoom_out to give photos life, slow_motion for one emotional peak at most. Most shots are a plain "cut".
 - On-screen words: one hook in the first shot (max 7 words, curiosity or emotion, no clickbait lies), a few short beats that carry the story (max 6 words each), and an optional call to action at the end. Plain words, no emojis inside the video text, no hashtags in it.
 - Respect the faith context: uplifting, sincere, never mocking.
@@ -451,7 +451,7 @@ function briefOf(opts, music) {
   const lines = [
     `Style: ${opts.style} — ${STYLES[opts.style] || STYLES.hype}`,
     opts.full
-      ? `KEEP EVERYTHING: the operator wants nothing cut out. Use EVERY candidate exactly once. Videos play in full — you choose the ORDER, how each one comes in (transition), its effect and focus. Photos: 2–5 s each, with motion. Blend it all into one flowing piece with the words on screen. Frame: ${opts.aspect}.`
+      ? `KEEP EVERYTHING: the operator wants nothing cut out. Use EVERY candidate exactly once. Videos play in full — you choose the ORDER, how each one comes in (transition), its effect and focus. PHOTOS: lay most of them ON the videos as overlays, spread right through each clip (a picture every 5–8 s, matched to what is being said or shown, mostly "cutaway", sometimes "pip"), while the clip's own sound plays on; a few may stand on their own between videos (2–5 s, with motion) as a breath. NEVER put the photos in a block after the videos. Blend it all into one flowing piece with the words on screen. Frame: ${opts.aspect}.`
       : `Target length: about ${opts.lengthSec} seconds${opts.lengthSec >= 90 ? ' (a longer piece: build it in movements — a hook, then sections that each rise and land; strong moments may return)' : ''}. Frame: ${opts.aspect}.`,
     music ? `Music: the operator's own song, ${music.bpm} BPM (one beat = ${music.interval}s). Shot lengths should be whole numbers of beats.` : 'No music chosen: the clips\' own sound plays.',
   ];
@@ -620,20 +620,18 @@ function directByRules(cands, opts, music) {
   if (opts.full) {
     // everything, strongest first, photos spread between the videos, a fade
     // wherever it moves from one file to the next kind of thing
+    // the videos strongest first; the photos after them, which finalise lays
+    // through the videos as B-roll (spreadPhotos) — or, with no video, in order
     const vids = cands.filter((c) => c.kind === 'video').sort((a, b) => b.score - a.score);
     const pics = cands.filter((c) => c.kind === 'image');
-    const order = [];
-    const gap = vids.length ? Math.max(1, Math.ceil(pics.length / vids.length)) : pics.length;
-    let pi = 0;
-    for (const v of vids) { order.push(v); for (let j = 0; j < gap && pi < pics.length; j++) order.push(pics[pi++]); }
-    while (pi < pics.length) order.push(pics[pi++]);
+    const order = vids.concat(pics);
     const shots = order.map((c, i) => ({
       id: c.id, seconds: c.kind === 'image' ? 3 : c.fileDur, focus: 'center',
       effect: c.kind === 'image' ? (i % 2 ? 'zoom_out' : 'slow_zoom') : (i === 0 ? 'punch_in' : 'cut'),
       transition: i === 0 ? 'cut' : (order[i - 1].kind !== c.kind ? 'fade' : (i % 3 === 0 ? 'flash' : 'cut')),
     }));
     return { plan: { concept: 'Everything kept, blended into one piece.', title: hook0 || 'Highlights', shots,
-      texts: briefTexts(fb, shots.length), overlays: rulesOverlays(shots, cands),
+      texts: briefTexts(fb, shots.length), overlays: [],
       post_caption: fb ? fb.caption : '', hashtags: fb ? fb.hashtags : [] }, director: 'rules', model: '' };
   }
   const pool = cands.slice().sort((a, b) => b.score - a.score);
@@ -684,6 +682,91 @@ async function direct(cands, opts, music, log, ctx, tmp) {
 
 /* ----------------------------------------------------------------- finalise */
 
+/*
+ * ►► PHOTOS GO ON THE VIDEOS, NOT AFTER THEM. ◄◄
+ * Keeping everything, a director that ordered the videos and left the photos
+ * (or that the plan topped up with what it skipped) put every picture in one
+ * block after the last clip: forty photos at the end of nine minutes of video.
+ * Those photos become B-roll laid THROUGH the videos instead — about every six
+ * and a half seconds a picture for three, mostly full-frame, now and then a
+ * framed box, the clip's own sound carrying on underneath — in the order they
+ * were given. What the videos cannot carry stands between them, spread out,
+ * never piled up at the end. Photos the director placed between videos stay.
+ */
+const OV_EVERY = 6.5, OV_LEN = 3;
+function spreadPhotos(shots) {
+  const isVid = (s) => s.cand.kind === 'video';
+  const lastV = shots.map(isVid).lastIndexOf(true);
+  if (lastV < 0) return;                                   // photos only: nothing to lay them on
+  // after the last video, or a third photo in a row between videos
+  let run = 0;
+  const movable = shots.filter((s, i) => {
+    if (isVid(s)) { run = 0; return false; }
+    run++;
+    return i > lastV || run > 2;
+  });
+  if (!movable.length) return;
+  for (const m of movable) shots.splice(shots.indexOf(m), 1);
+  const vids = shots.filter(isVid);
+  // a clip of 5.5 s or more carries one picture; longer, one every 6.5 s —
+  // closer (down to every 5 s: three of picture, two of the clip) when there
+  // are more photos than that, so they do not pile up between the clips
+  const capAt = (every) => vids.map((v) => Math.max(0, (v.seconds >= OV_LEN + 2.5 ? Math.max(1, Math.floor((v.seconds - 1.5) / every)) : 0) - (v.ovReq || []).length));
+  let cap = capAt(OV_EVERY);
+  for (let every = OV_EVERY - 0.5; every >= 5 - 1e-9 && cap.reduce((a, b) => a + b, 0) + 2 * Math.max(1, vids.length - 1) < movable.length; every -= 0.5) cap = capAt(every);
+  const total = cap.reduce((a, b) => a + b, 0);
+  // a few always stand between the videos — a breath between clips
+  const stand = Math.max(movable.length - total, Math.min(vids.length - 1, Math.floor(movable.length / 5)));
+  const onTop = movable.length - stand;
+  // overlay pictures shared across the videos by how much each can carry, in order
+  // every clip that can carry one gets one first, then the rest by how much more each can take
+  const want = cap.map(() => 0);
+  let left = onTop;
+  cap.forEach((c, j) => { if (c > 0 && left > 0) { want[j] = 1; left--; } });
+  const more = cap.map((c, j) => c - want[j]);
+  const room = more.reduce((a, b) => a + b, 0);
+  if (room > 0 && left > 0) {
+    const share = more.map((m) => (m / room) * left);
+    share.forEach((x, j) => { want[j] += Math.floor(x); });
+    let rest = onTop - want.reduce((a, b) => a + b, 0);
+    share.map((x, j) => [x - Math.floor(x), j]).sort((a, b) => b[0] - a[0]).forEach(([, j]) => { if (rest > 0 && want[j] < cap[j]) { want[j]++; rest--; } });
+  }
+  // standalone pictures: spread evenly through the gaps between videos
+  const gaps = Math.max(1, vids.length - 1);
+  const standAt = new Array(vids.length).fill(0);
+  for (let k = 0; k < stand; k++) standAt[Math.min(vids.length - 1, Math.floor(((k + 0.5) * gaps) / stand))]++;
+  // a gap that would hold more than two gives the rest back to the clips as
+  // B-roll wherever there is still room at the closest spacing
+  const most = capAt(5);
+  for (let j = 0; j < vids.length; j++) {
+    while (standAt[j] > 2) {
+      const k = most.findIndex((m, i) => m > want[i]);
+      if (k < 0) break;
+      want[k]++; standAt[j]--;
+    }
+  }
+  let p = 0, styleN = 0;
+  vids.forEach((v, j) => {
+    v.ovReq = v.ovReq || [];
+    const n = want[j];
+    for (let k = 0; k < n && p < movable.length; k++) {
+      const start = ((k + 0.5) * v.seconds) / n - OV_LEN / 2;
+      v.ovReq.push({ cand: movable[p++].cand, style: (++styleN % 3 === 0) ? 'pip' : 'cutaway', start, seconds: OV_LEN });
+    }
+    // the standalone ones go after this video
+    // (more than two between clips — only when the clips are already full of
+    // pictures — become a quick burst, two seconds each, not a slideshow)
+    let at = shots.indexOf(v) + 1;
+    for (let k = 0; k < standAt[j] && p < movable.length; k++) {
+      const m = movable[p++];
+      m.transition = k === 0 ? 'fade' : 'cut';
+      if (standAt[j] > 2) m.seconds = 2;
+      shots.splice(at++, 0, m);
+    }
+  });
+  while (p < movable.length) shots.push(movable[p++]);      // (only if every count above was short)
+}
+
 /**
  * The model's plan made safe and exact: known shots only, lengths that fit the
  * footage, cuts on the beat, words timed to the shots they belong to.
@@ -691,35 +774,54 @@ async function direct(cands, opts, music, log, ctx, tmp) {
 function finalise(raw, cands, opts, music) {
   const byId = new Map(cands.map((c) => [c.id, c]));
   const shots = [];
-  for (const s of (raw.shots || [])) {
+  const fromRaw = new Map();   // the director's shot index → the shot it became
+  (raw.shots || []).forEach((s, ri) => {
     const c = byId.get(String(s && s.id || '').trim());
-    if (!c) continue;
+    if (!c) return;
+    const before = shots.length;
+    addShot(s, c);
+    if (shots.length > before) fromRaw.set(ri, shots[shots.length - 1]);
+  });
+  function addShot(s, c) {
     let effect = EFFECTS.includes(s.effect) ? s.effect : 'cut';
     const focus = ['center', 'top', 'bottom'].includes(s.focus) ? s.focus : 'center';
     const transition = TRANSITIONS.includes(s.transition) ? s.transition : 'cut';
     if (opts.full) {
       // every file once, videos whole (slow motion would double a whole clip)
-      if (shots.some((x) => x.cand.id === c.id)) continue;
+      if (shots.some((x) => x.cand.id === c.id)) return;
       if (effect === 'slow_motion') effect = 'cut';
       const sec = c.kind === 'video' ? Math.max(0.4, c.fileDur - 0.05) : clamp(Number(s.seconds) || 3, 1.5, 6);
-      shots.push({ cand: c, seconds: sec, effect, focus, slow: false, transition });
-      continue;
+      shots.push({ cand: c, seconds: sec, effect, focus, slow: false, transition, ovReq: [] });
+      return;
     }
     let sec = clamp(Number(s.seconds) || 2, 0.4, 12);
     const slow = effect === 'slow_motion' && c.kind === 'video';
     if (c.kind === 'video') sec = Math.min(sec, (c.fileDur - 0.05) * (slow ? 2 : 1));
-    if (sec < 0.4) continue;
-    shots.push({ cand: c, seconds: sec, effect, focus, slow, transition });
+    if (sec < 0.4) return;
+    shots.push({ cand: c, seconds: sec, effect, focus, slow, transition, ovReq: [] });
+  }
+  // the director's B-roll, held on the shot it was asked for until the timing is known
+  for (const o of (raw.overlays || [])) {
+    const base = fromRaw.get(Math.round(Number(o && o.on_shot)));
+    const oc = byId.get(String(o && o.id || '').trim());
+    if (base && oc) base.ovReq.push({ cand: oc, style: o.style, start: Number(o.start), seconds: Number(o.seconds) });
+  }
+  // no more pictures on a shot than it can carry, one at a time with the clip
+  // between them (keeping everything, the ones that do not fit stand on their own)
+  for (const sh of shots) {
+    const room = sh.cand.kind === 'video' ? Math.max(0, Math.floor((sh.seconds - 1.5) / (OV_LEN + 1))) : 0;
+    if (sh.ovReq.length > room) sh.ovReq = sh.ovReq.sort((a, b) => (a.start || 0) - (b.start || 0)).slice(0, room);
   }
   if (opts.full) {
     // nothing the operator gave is left out, even if the director skipped it
     // (a photo shown as an overlay counts as shown)
-    const onTop = new Set((raw.overlays || []).map((o) => String(o && o.id || '').trim()));
+    const onTop = new Set(shots.flatMap((sh) => sh.ovReq.map((o) => o.cand.id)));
     for (const c of cands) {
       if (shots.some((x) => x.cand.id === c.id) || onTop.has(c.id)) continue;
       shots.push({ cand: c, seconds: c.kind === 'video' ? Math.max(0.4, c.fileDur - 0.05) : 3,
-        effect: c.kind === 'image' ? 'slow_zoom' : 'cut', focus: 'center', slow: false, transition: 'fade' });
+        effect: c.kind === 'image' ? 'slow_zoom' : 'cut', focus: 'center', slow: false, transition: 'fade', ovReq: [] });
     }
+    spreadPhotos(shots);
   }
   if (!shots.length) throw new Error('The montage plan had no usable shots.');
   if (shots[0]) shots[0].transition = 'cut';
@@ -772,23 +874,41 @@ function finalise(raw, cands, opts, music) {
     t += s.seconds;
   }
   const duration = round2(t);
-  // overlays: a known picture or clip, over a VIDEO shot long enough to carry it
-  for (const o of (raw.overlays || [])) {
-    const i = Math.round(Number(o && o.on_shot));
-    const base = shots[i];
-    const oc = byId.get(String(o && o.id || '').trim());
-    if (!base || !oc || base.overlay || base.cand.kind !== 'video' || oc.id === base.cand.id || base.seconds < 2.2) continue;
-    const style = OVERLAY_STYLES.includes(o.style) ? o.style : 'cutaway';
-    const start = round2(clamp(Number(o.start) || 0.8, i === 0 ? 1.2 : 0.3, base.seconds - 1.2));
-    const len = round2(clamp(Number(o.seconds) || 2, 1, Math.min(4, base.seconds - start - 0.15)));
-    if (len < 1) continue;
-    const ov = { cand: oc, style, start, len, pos: (i % 2 ? 'left' : 'right') };
-    if (oc.kind === 'video') ov.from = round2(clamp(oc.peak - len / 2, 0, Math.max(0, oc.fileDur - len - 0.05)));
-    base.overlay = ov;
-  }
+  // overlays: known pictures or clips over a VIDEO shot long enough to carry
+  // them — as many as fit, each clear of the next, kept out of the hook's
+  // first second, and on the beat when there is a song
+  shots.forEach((base, i) => {
+    base.overlays = [];
+    if (base.cand.kind !== 'video' || base.seconds < 2.2) return;
+    const reqs = (base.ovReq || []).filter((o) => o.cand.id !== base.cand.id)
+      .map((o) => ({ ...o, start: Number.isFinite(o.start) ? o.start : 0.8 })).sort((a, b) => a.start - b.start);
+    let free = i === 0 ? 1.2 : 0.3;
+    for (const o of reqs) {
+      let start = clamp(o.start, free, base.seconds - 1.2);
+      let len = clamp(Number(o.seconds) || 2.5, 1, 4);
+      if (music && music.beats && music.beats.length > 4) {
+        // the picture lands on a beat and stays a whole number of them
+        const abs = base.at + start;
+        let best = null;
+        for (const b of music.beats) { if (b < base.at + free - 1e-6) continue; if (best == null || Math.abs(b - abs) < Math.abs(best - abs)) best = b; if (b > abs + music.interval) break; }
+        if (best != null) start = best - base.at;
+        len = Math.max(music.interval, Math.round(len / music.interval) * music.interval);
+      }
+      start = round2(start);
+      len = round2(Math.min(len, base.seconds - start - 0.15));
+      if (len < 1 || start < free - 1e-6) continue;
+      const ov = { cand: o.cand, style: OVERLAY_STYLES.includes(o.style) ? o.style : 'cutaway', start, len, pos: ((i + base.overlays.length) % 2 ? 'left' : 'right') };
+      if (o.cand.kind === 'video') ov.from = round2(clamp(o.cand.peak - len / 2, 0, Math.max(0, o.cand.fileDur - len - 0.05)));
+      base.overlays.push(ov);
+      free = start + len + 1.0;   // at least a second of the clip itself between pictures
+    }
+    delete base.ovReq;
+  });
   const texts = [];
   for (const x of (raw.texts || [])) {
-    const i = Math.round(Number(x && x.at_shot));
+    // the director counted ITS shots; follow that shot to where it ended up
+    const ri = Math.round(Number(x && x.at_shot));
+    const i = fromRaw.has(ri) ? shots.indexOf(fromRaw.get(ri)) : ri;
     const text = String((x && x.text) || '').replace(/\s+/g, ' ').trim().slice(0, 80);
     if (!text || !(i >= 0 && i < shots.length)) continue;
     const span = clamp(Math.round(Number(x.span_shots) || 1), 1, shots.length - i);
@@ -831,13 +951,15 @@ function fitChain(c, W, H, focus, scale = 1, tag = '') {
     + `[fb${tag}]scale=${w}:${h}:force_original_aspect_ratio=decrease[fg${tag}];[bg${tag}][fg${tag}]overlay=(W-w)/2:(H-h)/2,setsar=1`;
 }
 
-function effectChain(effect, W, H, dur) {
+/** `t0`: where in the shot this piece starts, so a zoom carries on across the sections of one shot. */
+function effectChain(effect, W, H, dur, t0 = 0) {
   const sc = (f) => `scale=w='trunc(${W}*(${f})/2)*2':h=-2:eval=frame,crop=${W}:${H}`;
+  const T = t0 ? `(t+${t0.toFixed(3)})` : 't';
   switch (effect) {
-    case 'punch_in': return sc('if(lt(t,0.3),1.16-0.53*t,1)');
-    case 'slow_zoom': return sc(`1+0.09*t/${dur.toFixed(2)}`);
-    case 'zoom_out': return sc(`1.1-0.1*t/${dur.toFixed(2)}`);
-    case 'flash': return 'fade=t=in:st=0:d=0.18:color=white';
+    case 'punch_in': return t0 >= 0.3 ? '' : sc(`if(lt(${T},0.3),1.16-0.53*${T},1)`);
+    case 'slow_zoom': return sc(`1+0.09*${T}/${dur.toFixed(2)}`);
+    case 'zoom_out': return sc(`1.1-0.1*${T}/${dur.toFixed(2)}`);
+    case 'flash': return t0 ? '' : 'fade=t=in:st=0:d=0.18:color=white';
     default: return '';
   }
 }
@@ -876,8 +998,60 @@ const encodeOpts = () => (machine.small() ? ['-preset', 'ultrafast', '-crf', '20
 const bigSource = (c, W, H) => !!(c && c.kind === 'video' && c.w && c.h && c.w * c.h > 2.5 * W * H);
 const decodeOpts = (c, W, H) => (bigSource(c, W, H) ? ['-skip_loop_filter', 'all'] : []);
 
-/** One shot → a piece encoded exactly like every other piece, so they join without re-encoding. */
+/**
+ * One shot → a piece encoded exactly like every other piece, so they join
+ * without re-encoding. A video shot carrying several pictures is made in
+ * SECTIONS, one picture each (one ffmpeg holds one picture, so a long clip
+ * with ten photos never needs ten in memory at once), and its sound is made
+ * once for the whole shot and laid under them — no seam where sections meet.
+ */
 async function renderShot(ctx, s, W, H, keepAudio, out, next) {
+  const ovs = s.overlays || [];
+  if (s.cand.kind !== 'video' || ovs.length <= 1) return renderPiece(ctx, s, W, H, keepAudio, out, next, { overlay: ovs[0] });
+  const dur = s.seconds;
+  const totalFrames = Math.max(1, Math.round(dur * FPS));
+  // cut halfway between one picture's end and the next one's start
+  const cuts = [0];
+  for (let k = 1; k < ovs.length; k++) cuts.push(Math.round(((ovs[k - 1].start + ovs[k - 1].len + ovs[k].start) / 2) * FPS));
+  cuts.push(totalFrames);
+  const base = out.replace(/\.mp4$/, '');
+  const parts = [];
+  for (let k = 0; k < ovs.length; k++) {
+    const f0 = cuts[k], f1 = cuts[k + 1];
+    if (f1 <= f0) continue;
+    const t0 = f0 / FPS, len = (f1 - f0) / FPS;
+    const sub = { ...s, from: round2(s.from + t0 / (s.slow ? 2 : 1)), need: round2(len / (s.slow ? 2 : 1)) + 0.05, seconds: len,
+      transition: k === 0 ? s.transition : 'cut' };
+    const o = { ...ovs[k], start: ovs[k].start - t0 };
+    const part = `${base}-part${k}.mp4`;
+    await renderPiece(ctx, sub, W, H, false, part, k === ovs.length - 1 ? next : null,
+      { overlay: o, videoOnly: true, t0, effectDur: dur, frames: f1 - f0 });
+    parts.push(part);
+  }
+  // the whole shot's sound, once
+  const sound = `${base}-sound.m4a`;
+  const edge = edgeFades(s, next, dur);
+  const aargs = ['-hide_banner', '-y'];
+  const withSound = keepAudio && s.cand.hasAudio;
+  let a;
+  if (withSound) {
+    aargs.push('-ss', String(s.from), '-t', String(s.need + 0.1), '-i', s.cand.file);
+    a = `[0:a]${s.slow ? 'atempo=0.5,' : ''}aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,apad,atrim=0:${dur.toFixed(3)}${edge.a ? ',' + edge.a : ''}[a]`;
+  } else {
+    aargs.push('-f', 'lavfi', '-t', String(dur + 0.1), '-i', 'anullsrc=r=48000:cl=stereo');
+    a = '[0:a]anull[a]';
+  }
+  aargs.push('-filter_complex', a, '-map', '[a]', '-t', String(totalFrames / FPS), '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2', sound);
+  await ff.runFfmpeg(ctx.ffmpeg, aargs);
+  const list = `${base}-parts.txt`;
+  fs.writeFileSync(list, parts.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'));
+  await ff.runFfmpeg(ctx.ffmpeg, ['-hide_banner', '-y', '-f', 'concat', '-safe', '0', '-i', list, '-i', sound,
+    '-map', '0:v', '-map', '1:a', '-c', 'copy', '-video_track_timescale', '30000', out]);
+  for (const p of parts.concat([sound, list])) { try { fs.unlinkSync(p); } catch (e) {} }
+  return out;
+}
+
+async function renderPiece(ctx, s, W, H, keepAudio, out, next, { overlay = null, videoOnly = false, t0 = 0, effectDur = 0, frames = 0 } = {}) {
   const c = s.cand, dur = s.seconds;
   const edge = edgeFades(s, next, dur);
   const args = ['-hide_banner', '-y'];
@@ -892,12 +1066,12 @@ async function renderShot(ctx, s, W, H, keepAudio, out, next) {
       + (s.effect === 'flash' && s.transition !== 'flash' ? ',fade=t=in:st=0:d=0.18:color=white' : '');
   } else {
     args.push('-ss', String(s.from), '-t', String(s.need + 0.1), ...decodeOpts(c, W, H), '-i', c.file);
-    const fx = effectChain(s.effect, W, H, dur);
+    const fx = effectChain(s.effect, W, H, effectDur || dur, t0);
     base = `[0:v]${s.slow ? 'setpts=2.0*PTS,' : ''}${fitChain(c, W, H, s.focus, 1, 'b')}${fx ? ',' + fx : ''},fps=${FPS}`;
   }
   let graph;
   let nextInput = 1;
-  const o = s.overlay;
+  const o = overlay;
   if (o) {
     /*
      * B-ROLL: the picture changes, the sound does not. The overlay fades in
@@ -918,6 +1092,17 @@ async function renderShot(ctx, s, W, H, keepAudio, out, next) {
       fit = `scale=${pw}:${ph}:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,pad=iw+12:ih+12:6:6:white,setsar=1`;
       x = o.pos === 'left' ? '44' : `W-w-44`;
       y = `${Math.round(H * 0.11)}`;
+    } else if (oc.kind === 'image' && oc.w / oc.h > (W / H) * 1.25) {
+      /*
+       * A photo much wider than the frame (a landscape picture in a 9:16
+       * short) FILLS it and glides across, the way a trailer shows a wide
+       * shot — instead of a small picture over a blur. It travels the middle
+       * part of the picture, left to right or right to left by turns.
+       */
+      const ph = H % 2 ? H + 1 : H;
+      fit = `scale=-2:${ph},setsar=1`;
+      const a = o.pos === 'left' ? '0.62-0.24*t/' : '0.38+0.24*t/';
+      move = `crop=${W}:${H}:x='(iw-${W})*(${a}${o.len.toFixed(2)})':y=0`;
     } else {
       fit = fitChain(oc, W, H, 'center', 1, 'o');
       move = `scale=w='trunc(${W}*(1+0.07*t/${o.len.toFixed(2)})/2)*2':h=-2:eval=frame,crop=${W}:${H}`;
@@ -929,6 +1114,12 @@ async function renderShot(ctx, s, W, H, keepAudio, out, next) {
     graph = `${base}[bv];${ov};[bv][ov]overlay=${x}:${y}:eof_action=pass:enable='between(t,${o.start.toFixed(3)},${(o.start + o.len).toFixed(3)})'${edge.v ? ',' + edge.v : ''},format=yuv420p[v]`;
   } else {
     graph = `${base}${edge.v ? ',' + edge.v : ''},format=yuv420p[v]`;
+  }
+  if (videoOnly) {
+    args.push('-filter_complex', graph, '-map', '[v]', '-an', ...(frames ? ['-frames:v', String(frames)] : ['-t', String(dur)]),
+      '-c:v', 'libx264', ...encodeOpts(), '-r', String(FPS), '-pix_fmt', 'yuv420p', '-video_track_timescale', '30000', out);
+    await ff.runFfmpeg(ctx.ffmpeg, args);
+    return out;
   }
   const withSound = keepAudio && c.kind === 'video' && c.hasAudio;
   let a;
@@ -960,7 +1151,7 @@ async function render(ctx, plan, { aspect, keepAudio, output, tmp, onProgress })
       const i = next++;
       const t0 = Date.now();
       pieces[i] = await renderShot(ctx, plan.shots[i], W, H, keepAudio, path.join(tmp, `shot-${String(i).padStart(3, '0')}.mp4`), plan.shots[i + 1]);
-      if (process.env.MW_MONTAGE_PROFILE) { const sh = plan.shots[i]; console.log('[piece]', i, sh.cand.kind, sh.cand.w + 'x' + sh.cand.h, sh.seconds.toFixed(1) + 's', sh.effect, sh.slow ? 'slow' : '', sh.overlay ? 'overlay:' + sh.overlay.style : '', ((Date.now() - t0) / 1000).toFixed(1) + 's'); }
+      if (process.env.MW_MONTAGE_PROFILE) { const sh = plan.shots[i]; console.log('[piece]', i, sh.cand.kind, sh.cand.w + 'x' + sh.cand.h, sh.seconds.toFixed(1) + 's', sh.effect, sh.slow ? 'slow' : '', (sh.overlays || []).length ? 'overlays:' + sh.overlays.length : '', ((Date.now() - t0) / 1000).toFixed(1) + 's'); }
       done++;
       if (onProgress) onProgress(Math.round((done / n) * 95));
     }
@@ -1007,7 +1198,7 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, ful
     const d = await direct(cands, opts, music, log, ctx, tmp);
     if (onProgress) onProgress(50);
     const plan = finalise(d.plan, cands, opts, music);
-    if (stage) stage(opts.full ? `🎞 Blending all ${plan.shots.length} together…` : `✂️ Cutting ${plan.shots.length} shots together…`);
+    if (stage) stage(opts.full ? `🎞 Blending all ${files.length} together…` : `✂️ Cutting ${plan.shots.length} shots together…`);
     await render(ctx, plan, { aspect: opts.aspect, keepAudio: keepAudio !== false, output, tmp, onProgress: part(50, 100) });
     return {
       output,
@@ -1022,7 +1213,7 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, ful
       texts: plan.texts,
       bpm: music ? music.bpm : null,
       full: opts.full,
-      overlays: plan.shots.filter((s) => s.overlay).map((s) => ({ at: round2(s.at + s.overlay.start), seconds: s.overlay.len, style: s.overlay.style, file: s.overlay.cand.file })),
+      overlays: plan.shots.flatMap((s) => (s.overlays || []).map((o) => ({ at: round2(s.at + o.start), seconds: o.len, style: o.style, file: o.cand.file }))),
       shots: plan.shots.map((s) => ({ at: s.at, seconds: s.seconds, effect: s.effect, transition: s.transition, file: s.cand.file, kind: s.cand.kind, from: s.from == null ? null : s.from })),
     };
   } finally {
