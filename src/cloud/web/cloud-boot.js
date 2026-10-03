@@ -2277,22 +2277,39 @@ let _hideTimer = null;
         setTimeout(place, 400);
       }
 
-      let pinch = null;
+      /*
+       * ►► PINCH TO ZOOM, SMOOTHLY. ◄◄
+       * It used to press the − and + buttons each time the fingers had spread
+       * by 20%: the timeline jumped in steps, about its middle, and lagged the
+       * fingers. Now the zoom follows the spread continuously (once a frame),
+       * the moment that was under the fingers stays under them, and moving
+       * both fingers sideways pans — CapCut's feel.
+       */
+      let pinch = null, raf = 0;
       const span = (ts) => Math.hypot(ts[0].clientX - ts[1].clientX, ts[0].clientY - ts[1].clientY);
+      const midX = (ts) => (ts[0].clientX + ts[1].clientX) / 2;
+      const ed = () => window.VideoEditor;
       tl.addEventListener('touchstart', (e) => {
         if (e.touches.length !== 2) return;
         // A first finger may have started a drag; a pinch is not one.
         document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-        pinch = { d: span(e.touches) };
+        const E = ed();
+        if (!E || !E.zoomAround) return;
+        const m = midX(e.touches);
+        pinch = { d: Math.max(20, span(e.touches)), px: E.zoomLevel(), t: E.timeAtClientX(m), x: m, nd: 0 };
       }, { passive: true });
       tl.addEventListener('touchmove', (e) => {
         if (!pinch || e.touches.length !== 2) return;
         e.preventDefault();
-        const d = span(e.touches);
-        const r = d / pinch.d;
-        const step = (sel) => { const el = $(sel); if (el) el.click(); pinch.d = d; };
-        if (r > 1.2) step('#veZoomIn');
-        else if (r < 1 / 1.2) step('#veZoomOut');
+        pinch.nd = span(e.touches);
+        pinch.x = midX(e.touches);
+        if (raf) return;
+        raf = requestAnimationFrame(() => {
+          raf = 0;
+          if (!pinch) return;
+          const E = ed();
+          if (E && E.zoomAround) E.zoomAround(pinch.px * (pinch.nd / pinch.d), pinch.t, pinch.x);
+        });
       }, { passive: false });
       const done = (e) => { if (e.touches.length < 2) pinch = null; };
       tl.addEventListener('touchend', done);

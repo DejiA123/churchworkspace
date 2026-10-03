@@ -408,7 +408,7 @@ function briefOf(opts, music) {
     `Style: ${opts.style} — ${STYLES[opts.style] || STYLES.hype}`,
     opts.full
       ? `KEEP EVERYTHING: the operator wants nothing cut out. Use EVERY candidate exactly once. Videos play in full — you choose the ORDER, how each one comes in (transition), its effect and focus. Photos: 2–5 s each, with motion. Blend it all into one flowing piece with the words on screen. Frame: ${opts.aspect}.`
-      : `Target length: about ${opts.lengthSec} seconds. Frame: ${opts.aspect}.`,
+      : `Target length: about ${opts.lengthSec} seconds${opts.lengthSec >= 90 ? ' (a longer piece: build it in movements — a hook, then sections that each rise and land; strong moments may return)' : ''}. Frame: ${opts.aspect}.`,
     music ? `Music: the operator's own song, ${music.bpm} BPM (one beat = ${music.interval}s). Shot lengths should be whole numbers of beats.` : 'No music chosen: the clips\' own sound plays.',
   ];
   if (opts.brief) lines.push(`What the operator says it is about: "${String(opts.brief).slice(0, 500)}"`);
@@ -507,7 +507,7 @@ function directByRules(cands, opts, music) {
   const shots = [];
   let total = 0, i = 0;
   const fx = ['punch_in', 'cut', 'cut', 'flash', 'cut', 'slow_zoom'];
-  while (total < opts.lengthSec && shots.length < 80) {
+  while (total < opts.lengthSec && shots.length < 300) {
     const c = pool[i % pool.length];
     i++;
     const sec = c.kind === 'image' ? per * 1.5 : per;
@@ -577,7 +577,7 @@ function finalise(raw, cands, opts, music) {
   if (!shots.length) throw new Error('The montage plan had no usable shots.');
   if (shots[0]) shots[0].transition = 'cut';
   // the length asked for, give or take a shot
-  const target = clamp(Number(opts.lengthSec) || 30, 8, 180);
+  const target = clamp(Number(opts.lengthSec) || 30, 8, 600);
   let total = shots.reduce((n, s) => n + s.seconds, 0);
   while (!opts.full && shots.length > 3 && total - shots[shots.length - 1].seconds >= target * 1.1) {
     total -= shots.pop().seconds;
@@ -793,7 +793,7 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, ful
   const opts = {
     style: STYLES[style] ? style : 'hype',
     full: !!full || lengthSec === 'all' || Number(lengthSec) === 0,
-    lengthSec: clamp(Number(lengthSec) || 30, 8, 180),
+    lengthSec: clamp(Number(lengthSec) || 30, 8, 600), // up to ten minutes
     aspect: ASPECTS[aspect] ? aspect : '9:16',
     brief: brief ? String(brief).slice(0, 500) : '',
   };
@@ -801,7 +801,9 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, ful
   const part = (a, b) => (p) => onProgress && onProgress(Math.round(a + (b - a) * (p / 100)));
   try {
     if (stage) stage('👀 Watching every clip and picture…');
-    const cands = await analyze(ctx, getInfo, files, { tmp, onProgress: part(0, 35), full: opts.full });
+    // a longer edit needs more moments to choose from (still within what one look can take)
+    const budget = clamp(Math.round(opts.lengthSec / 2.5), 44, 90);
+    const cands = await analyze(ctx, getInfo, files, { tmp, onProgress: part(0, 35), full: opts.full, budget });
     let music = null;
     if (musicPath && fs.existsSync(musicPath)) {
       if (stage) stage('🎵 Finding the beat of your song…');

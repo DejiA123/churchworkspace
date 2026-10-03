@@ -594,7 +594,7 @@
   }
 
   /* ---- zoom controls ---- */
-  function setZoom(px, keepCenter) {
+  function setZoom(px, keepCenter, anchor) {
     // A caption being typed into is skipped by renderCapTrack (so the caret is
     // never yanked out mid-word) — save it first, or the lane would keep its old
     // pixel positions while every other lane rescales.
@@ -616,13 +616,30 @@
      * the new one — two renders per zoom step, and a visible flash of empty
      * lanes in between.
      */
-    if (centerT != null && sc) setScrollLeft(sc, Math.max(0, centerT * ve.pxPerSec - sc.clientWidth / 2));
+    if (anchor && sc) setScrollLeft(sc, Math.max(0, anchor.t * ve.pxPerSec - anchor.x));
+    else if (centerT != null && sc) setScrollLeft(sc, Math.max(0, centerT * ve.pxPerSec - sc.clientWidth / 2));
     // Zooming rescales every lane — but only the lanes, and coalesced to one
     // render per frame, because the wheel and the slider both fire far faster
     // than the screen refreshes.
     renderRuler(); renderLanesSoon(); updatePlayhead();
   }
   function zoomBy(factor) { setZoom(ve.pxPerSec * factor, true); }
+  /*
+   * A pinch: zoom to `px` keeping `anchorT` (the moment that was under the
+   * fingers when they landed) under `clientX` (where the fingers are NOW) — so
+   * the timeline stretches around the fingers and follows them sideways, the
+   * way CapCut's does, instead of jumping in steps about the middle.
+   */
+  function zoomAround(px, anchorT, clientX) {
+    const sc = ve.refs.tlScroll;
+    if (!sc) return setZoom(px, true);
+    setZoom(px, false, { t: anchorT, x: clientX - sc.getBoundingClientRect().left });
+  }
+  function timeAtClientX(clientX) {
+    const sc = ve.refs.tlScroll;
+    if (!sc) return 0;
+    return Math.max(0, (sc.scrollLeft + clientX - sc.getBoundingClientRect().left) / ve.pxPerSec);
+  }
   function fitZoom() {
     if (!ve.video) return;
     const sc = ve.refs.tlScroll;
@@ -13042,6 +13059,11 @@
     hasVideo() { return !!ve.video; },
     /** The file the studio has open — the Cloud Studio will not delete it from under the edit. */
     sourcePath() { return (ve.video && ve.video.path) || null; },
+    /** Pinch-to-zoom on a phone (cloud-boot.js): the zoom now, the moment under a
+        finger, and a zoom kept around that moment. */
+    zoomLevel() { return ve.pxPerSec; },
+    timeAtClientX(x) { return timeAtClientX(x); },
+    zoomAround(px, anchorT, clientX) { return zoomAround(px, anchorT, clientX); },
     /** Open a file that is already on the machine (the phone's Files viewer). */
     openPath(p) { return p ? loadVideo(p) : null; },
     /**
