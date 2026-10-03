@@ -1036,9 +1036,9 @@
    * the words as text boxes, so captions, restyling and export are the studio's
    * own — nothing here re-invents them.
    */
-  const MT = { items: [], song: null, songFile: null, style: 'hype', len: 30, aspect: '9:16', keep: true, brief: '', busy: false };
+  const MT = { items: [], song: null, songFile: null, style: 'hype', len: 30, custom: 120, aspect: '9:16', keep: true, brief: '', busy: false };
   const MT_STYLES = [['hype', 'Hype'], ['worship', 'Worship'], ['emotional', 'Emotional'], ['cinematic', 'Cinematic'], ['fun', 'Fun']];
-  const MT_LENS = [['all', 'Use everything'], [15, '15s'], [30, '30s'], [45, '45s'], [60, '60s']];
+  const MT_LENS = [['all', 'Use everything'], [15, '15s'], [30, '30s'], [45, '45s'], [60, '60s'], ['custom', 'Custom']];
   const MT_ASPECTS = [['9:16', 'Reels / TikTok'], ['1:1', 'Square'], ['4:5', 'Feed'], ['16:9', 'YouTube']];
 
   async function openMontage() {
@@ -1083,7 +1083,9 @@
       </section>
       <section class="mt-sec"><h3>Style</h3><div class="mt-row">${chips(MT_STYLES, MT.style, 'style')}</div></section>
       <section class="mt-sec"><h3>Length</h3><div class="mt-row">${chips(MT_LENS, MT.len, 'len')}</div>
-        <small class="mt-hint">${MT.len === 'all' ? 'Nothing is cut out: every clip plays in full and every photo gets its moment — the AI orders them and blends them together with fades, flashes and cuts on the beat.' : 'The AI picks the best moments to fit this length.'}</small></section>
+        ${MT.len === 'custom' ? `<div class="mt-custom"><label><input type="number" id="mtMin" inputmode="numeric" min="0" max="10" value="${Math.floor(MT.custom / 60)}" /><span>min</span></label>
+          <label><input type="number" id="mtSec" inputmode="numeric" min="0" max="59" step="5" value="${MT.custom % 60}" /><span>sec</span></label></div>` : ''}
+        <small class="mt-hint">${MT.len === 'custom' ? 'Any length from 8 seconds to 10 minutes — the AI builds a longer piece in sections, each rising and landing.' : MT.len === 'all' ? 'Nothing is cut out: every clip plays in full and every photo gets its moment — the AI orders them and blends them together with fades, flashes and cuts on the beat.' : 'The AI picks the best moments to fit this length.'}</small></section>
       <section class="mt-sec"><h3>Shape</h3><div class="mt-row">${chips(MT_ASPECTS.map(([v, l]) => [v, v + ' · ' + l]), MT.aspect, 'aspect')}</div></section>
       <section class="mt-sec"><h3>What’s it about? <small>optional</small></h3>
         <textarea id="mtBrief" class="mt-brief" rows="2" maxlength="400" placeholder="e.g. Youth camp 2026 — three days of worship, games and baptisms">${esc(MT.brief)}</textarea></section>
@@ -1101,7 +1103,7 @@
       if (d.mtDel != null) { const it = MT.items.splice(+d.mtDel, 1)[0]; if (it) URL.revokeObjectURL(it.url); return mtPaint(); }
       if (d.mtSong != null) { MT.song = d.mtSong ? MT.lib.find((m) => m.id === d.mtSong) || null : null; MT.songFile = null; return mtPaint(); }
       if (d.mtStyle) { MT.style = d.mtStyle; return mtPaint(); }
-      if (d.mtLen) { MT.len = d.mtLen === 'all' ? 'all' : +d.mtLen; return mtPaint(); }
+      if (d.mtLen) { MT.len = d.mtLen === 'all' || d.mtLen === 'custom' ? d.mtLen : +d.mtLen; return mtPaint(); }
       if (d.mtAspect) { MT.aspect = d.mtAspect; return mtPaint(); }
       if (d.mt === 'add') return $('#mtPick', p.body).click();
       if (d.mt === 'song') return $('#mtSong', p.body).click();
@@ -1126,7 +1128,14 @@
         mtPaint();
       } else if (e.target.id === 'mtKeep') MT.keep = e.target.checked;
     });
-    p.body.addEventListener('input', (e) => { if (e.target.id === 'mtBrief') MT.brief = e.target.value; });
+    p.body.addEventListener('input', (e) => {
+      if (e.target.id === 'mtBrief') MT.brief = e.target.value;
+      if (e.target.id === 'mtMin' || e.target.id === 'mtSec') {
+        const mm = Math.max(0, Math.min(10, parseInt($('#mtMin', p.body).value, 10) || 0));
+        const ss = Math.max(0, Math.min(59, parseInt($('#mtSec', p.body).value, 10) || 0));
+        MT.custom = Math.max(8, Math.min(600, mm * 60 + ss));
+      }
+    });
   }
 
   /*
@@ -1204,7 +1213,7 @@
       });
       const res = await window.api.montage.create({
         mediaPaths: paths, musicPath: song ? song.file : null, style: MT.style,
-        lengthSec: MT.len === 'all' ? 0 : MT.len, full: MT.len === 'all',
+        lengthSec: MT.len === 'all' ? 0 : MT.len === 'custom' ? MT.custom : MT.len, full: MT.len === 'all',
         aspect: MT.aspect, brief: MT.brief, keepAudio: MT.keep, jobId,
       });
       if (off) off();

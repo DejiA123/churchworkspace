@@ -2167,6 +2167,12 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .mt-tile img, .mt-tile video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .mt-load { position: absolute; inset: 0; background: linear-gradient(110deg, #1d1e24 30%, #2a2b33 50%, #1d1e24 70%); background-size: 200% 100%; animation: mt-shine 1.2s linear infinite; }
 @keyframes mt-shine { to { background-position: -200% 0; } }
+.mt-custom { display: flex; gap: 10px; margin-top: 10px; }
+.mt-custom label { display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 14px; border-radius: 12px;
+  background: var(--ph-panel-2, #1d1e24); border: 1px solid var(--ph-line, #2a2b32); color: var(--ph-muted, #9b9ea8); font-size: 14px; }
+.mt-custom input { width: 54px; margin: 0; padding: 0; border: 0; background: transparent; color: var(--ph-text, #fff);
+  font: 700 20px/1 inherit; text-align: right; -webkit-user-select: text; user-select: text; }
+.mt-custom input:focus { outline: none; }
 .mt-hint { display: block; margin-top: 9px; font-size: 12.5px; line-height: 1.45; color: var(--ph-muted, #9b9ea8); }
 .mt-dur { position: absolute; left: 6px; bottom: 5px; font-size: 11px; font-weight: 700; color: #fff; text-shadow: 0 1px 3px #000; }
 .mt-x { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; margin: 0; padding: 0; border: 0; border-radius: 50%;
