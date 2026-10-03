@@ -756,12 +756,12 @@ ipcMain.handle('machine:info', wrap(async () => {
    events, so the phone can say what is happening, not just how far. */
 const montage = require('./montage');
 ipcMain.handle('montage:status', wrap(async () => montage.directorStatus()));
-ipcMain.handle('montage:create', wrap(async (e, { mediaPaths, musicPath, style, lengthSec, full, aspect, brief, keepAudio, jobId }) => {
+ipcMain.handle('montage:create', wrap(async (e, { mediaPaths, musicPath, style, lengthSec, full, aspect, brief, keepAudio, keepOrder, jobId }) => {
   const output = outPath(`montage-${stamp()}.mp4`);
   let pct = 0, stageName = '';
   const tell = () => { if (jobId && e && !e.sender.isDestroyed()) e.sender.send('job:progress', { jobId, percent: pct, stage: stageName }); };
   return montage.make(getCtx(), video.getInfo, {
-    mediaPaths, musicPath, style, lengthSec, full, aspect, brief, keepAudio, output,
+    mediaPaths, musicPath, style, lengthSec, full, aspect, brief, keepAudio, keepOrder, output,
     onProgress: (p) => { pct = p; tell(); },
     stage: (name) => { stageName = name; tell(); },
     log: (m) => console.warn('[montage]', m),

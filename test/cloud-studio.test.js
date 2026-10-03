@@ -646,6 +646,11 @@ async function run() {
   // Ama's own video, in her own space (the owner's recording is not hers to use)
   const amaVid = (await request('POST', `/api/upload?name=ama-real.mp4&id=amareal1&size=${bytes.length}&offset=0`, {
     headers: { 'Content-Type': 'application/octet-stream', Authorization: 'Bearer ' + ama }, body: bytes })).json.path;
+  // a phone/WhatsApp file name 120 characters long keeps its ".mp4" (it was cut off and refused)
+  const longName = 'AQPvBr-7yrv4JQkyl1eLtSxpmb4PEKSY3prohUaBzRy2s9hDj0yQ3pfJoKCW2YCGM5CbERpwe6q9HIVxvhCtKFdDBcN9c5S1Klfn4VWR97L6j7GL9pZE.mp4';
+  const longUp = await request('POST', `/api/upload?name=${encodeURIComponent(longName)}&id=longname1&size=${bytes.length}&offset=0`, {
+    headers: { 'Content-Type': 'application/octet-stream', Authorization: 'Bearer ' + ama }, body: bytes });
+  log(longUp.json && /\.mp4$/.test(longUp.json.path || ''), 'a video with a very long name is accepted, ".mp4" and all', (longUp.json && (longUp.json.path || longUp.json.error)) || '');
   const rec2 = (label, input) => [{ channel: 'sermon:exportShort', args: { input, startSec: 1, endSec: 3, preset: 'reel-9x16', quality: '720p', label, jobId: 'x' } }];
   r = await as(ama, 'batch:open', { label: 'Sneaky', total: 1 });
   r = await as(ama, 'batch:add', { id: r.data.id, label: 'Sneaky', steps: rec2('Sneaky', sermon) });

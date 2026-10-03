@@ -1324,10 +1324,20 @@ let _hideTimer = null;
    * and "give up". The server keeps the part file; `?probe=1` says how much of
    * it it already has.
    */
+  /* A file with no ending of its own (some phones and apps hand one over
+   * like that) is named for what it IS, so the server knows it is a video. */
+  const MIME_EXT = { 'video/mp4': '.mp4', 'video/quicktime': '.mov', 'video/webm': '.webm', 'video/x-matroska': '.mkv', 'video/3gpp': '.3gp',
+    'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/heic': '.heic', 'image/heif': '.heic', 'image/gif': '.gif',
+    'audio/mpeg': '.mp3', 'audio/mp4': '.m4a', 'audio/x-m4a': '.m4a', 'audio/aac': '.aac', 'audio/wav': '.wav', 'audio/x-wav': '.wav', 'audio/ogg': '.ogg' };
+  function nameWithExt(file) {
+    const n = String(file.name || 'upload');
+    if (/\.[a-z0-9]{2,5}$/i.test(n)) return n;
+    return n + (MIME_EXT[String(file.type || '').toLowerCase()] || (/^video\//.test(file.type) ? '.mp4' : /^image\//.test(file.type) ? '.jpg' : /^audio\//.test(file.type) ? '.mp3' : ''));
+  }
   async function uploadFile(file, onProgress) {
     const CHUNK = 8 * 1024 * 1024;
     const id = 'u' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-    const q = (extra) => `/api/upload?name=${encodeURIComponent(file.name)}&id=${id}&size=${file.size}${extra || ''}`;
+    const q = (extra) => `/api/upload?name=${encodeURIComponent(nameWithExt(file))}&id=${id}&size=${file.size}${extra || ''}`;
     let sent = 0;
     const ctl = { cancelled: false };
     currentUpload = ctl;

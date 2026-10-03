@@ -1036,7 +1036,8 @@
    * the words as text boxes, so captions, restyling and export are the studio's
    * own — nothing here re-invents them.
    */
-  const MT = { items: [], song: null, songFile: null, style: 'hype', len: 30, custom: 120, aspect: '9:16', keep: true, brief: '', busy: false };
+  const MT = { items: [], song: null, songFile: null, style: 'hype', len: 30, custom: 120, aspect: '9:16', keep: true, brief: '', busy: false, order: 'ai', caps: true };
+  const MT_ORDERS = [['ai', '✨ AI decides'], ['mine', '📌 My order']];
   const MT_STYLES = [['hype', 'Hype'], ['worship', 'Worship'], ['emotional', 'Emotional'], ['cinematic', 'Cinematic'], ['fun', 'Fun']];
   const MT_LENS = [['all', 'Use everything'], [15, '15s'], [30, '30s'], [45, '45s'], [60, '60s'], ['custom', 'Custom']];
   const MT_ASPECTS = [['9:16', 'Reels / TikTok'], ['1:1', 'Square'], ['4:5', 'Feed'], ['16:9', 'YouTube']];
@@ -1068,11 +1069,14 @@
     p.body.innerHTML = `
       <p class="mt-lead">${mi('sparkles')} ${brain}</p>
       <section class="mt-sec"><h3>Your clips &amp; photos <small>${MT.items.length ? MT.items.length + ' added' : 'add 2 or more'}</small></h3>
-        <div class="mt-grid">${MT.items.map((it, i) => `<div class="mt-tile" data-i="${i}">${it.kind === 'image'
-          ? `<img src="${attr(it.url)}" alt="" />` : (it.poster ? `<img src="${attr(it.poster)}" alt="" />` : '<span class="mt-load"></span>') + `<span class="mt-dur">▶${it.secs ? ' ' + Math.floor(it.secs / 60) + ':' + String(Math.round(it.secs % 60)).padStart(2, '0') : ''}</span>`}
+        <div class="mt-grid${MT.order === 'mine' ? ' mt-ordered' : ''}">${MT.items.map((it, i) => `<div class="mt-tile" data-i="${i}">${it.kind === 'image'
+          ? `<img src="${attr(it.url)}" alt="" draggable="false" />` : (it.poster ? `<img src="${attr(it.poster)}" alt="" draggable="false" />` : '<span class="mt-load"></span>') + `<span class="mt-dur">▶${it.secs ? ' ' + Math.floor(it.secs / 60) + ':' + String(Math.round(it.secs % 60)).padStart(2, '0') : ''}</span>`}
+          ${MT.order === 'mine' ? `<span class="mt-num">${i + 1}</span>` : ''}
           <button type="button" class="mt-x" data-mt-del="${i}" aria-label="Remove">✕</button></div>`).join('')}
           <button type="button" class="mt-add" data-mt="add">${mi('plus')}<span>Add</span></button></div>
       </section>
+      <section class="mt-sec"><h3>Order</h3><div class="mt-row">${chips(MT_ORDERS, MT.order, 'order')}</div>
+        <small class="mt-hint">${MT.order === 'mine' ? 'The clips play in this order. Hold a tile and drag it to move it — a photo goes over the video before it.' : 'The AI puts the strongest moment first and orders the rest for the story. Hold and drag a tile to set your own order.'}</small></section>
       <section class="mt-sec"><h3>Music</h3>
         <div class="mt-songs">
           <button type="button" class="mt-chip${!MT.song && !MT.songFile ? ' on' : ''}" data-mt-song="">No music</button>
@@ -1087,6 +1091,9 @@
           <label><input type="number" id="mtSec" inputmode="numeric" min="0" max="59" step="5" value="${MT.custom % 60}" /><span>sec</span></label></div>` : ''}
         <small class="mt-hint">${MT.len === 'custom' ? 'Any length from 8 seconds to 10 minutes — the AI builds a longer piece in sections, each rising and landing.' : MT.len === 'all' ? 'Nothing is cut out: every clip plays in full and every photo gets its moment — the AI orders them and blends them together with fades, flashes and cuts on the beat.' : 'The AI picks the best moments to fit this length.'}</small></section>
       <section class="mt-sec"><h3>Shape</h3><div class="mt-row">${chips(MT_ASPECTS.map(([v, l]) => [v, v + ' · ' + l]), MT.aspect, 'aspect')}</div></section>
+      <section class="mt-sec"><h3>Words on screen</h3>
+        <label class="mt-toggle"><input type="checkbox" id="mtCaps" ${MT.caps ? 'checked' : ''}/> <span>💬 Captions of what’s said, added automatically</span></label>
+        <small class="mt-hint">The AI also writes a hook, story lines and a closing line, styled to match — tell it the story below.</small></section>
       <section class="mt-sec"><h3>What’s it about? <small>optional</small></h3>
         <textarea id="mtBrief" class="mt-brief" rows="2" maxlength="400" placeholder="e.g. Youth camp 2026 — three days of worship, games and baptisms">${esc(MT.brief)}</textarea></section>
       <input type="file" id="mtPick" accept="video/*,image/*" multiple hidden />
@@ -1097,9 +1104,10 @@
 
   function mtWire(p) {
     const onClick = async (e) => {
-      const b = e.target.closest('[data-mt],[data-mt-del],[data-mt-song],[data-mt-style],[data-mt-len],[data-mt-aspect]');
-      if (!b || MT.busy) return;
+      const b = e.target.closest('[data-mt],[data-mt-del],[data-mt-song],[data-mt-style],[data-mt-len],[data-mt-aspect],[data-mt-order]');
+      if (!b || MT.busy || mtDrag.just) return;
       const d = b.dataset;
+      if (d.mtOrder) { MT.order = d.mtOrder; return mtPaint(); }
       if (d.mtDel != null) { const it = MT.items.splice(+d.mtDel, 1)[0]; if (it) URL.revokeObjectURL(it.url); return mtPaint(); }
       if (d.mtSong != null) { MT.song = d.mtSong ? MT.lib.find((m) => m.id === d.mtSong) || null : null; MT.songFile = null; return mtPaint(); }
       if (d.mtStyle) { MT.style = d.mtStyle; return mtPaint(); }
@@ -1127,7 +1135,9 @@
         e.target.value = '';
         mtPaint();
       } else if (e.target.id === 'mtKeep') MT.keep = e.target.checked;
+      else if (e.target.id === 'mtCaps') MT.caps = e.target.checked;
     });
+    mtWireDrag(p);
     p.body.addEventListener('input', (e) => {
       if (e.target.id === 'mtBrief') MT.brief = e.target.value;
       if (e.target.id === 'mtMin' || e.target.id === 'mtSec') {
@@ -1136,6 +1146,64 @@
         MT.custom = Math.max(8, Math.min(600, mm * 60 + ss));
       }
     });
+  }
+
+  /*
+   * ►► HOLD AND DRAG TO SET THE ORDER. ◄◄
+   * A short hold on a tile picks it up (a quick swipe still scrolls the
+   * sheet); it follows the finger, the tile under the finger is where it will
+   * land, and letting go puts it there. Moving a tile means the operator wants
+   * their own order, so "My order" switches on.
+   */
+  const mtDrag = { just: false };
+  function mtWireDrag(p) {
+    let hold = null, drag = null;
+    const tileAt = (x, y) => {
+      const el = document.elementFromPoint(x, y);
+      const t = el && el.closest && el.closest('.mt-tile');
+      return t && !t.classList.contains('mt-lift') ? t : null;
+    };
+    const end = () => { clearTimeout(hold && hold.timer); hold = null; };
+    p.body.addEventListener('pointerdown', (e) => {
+      const tile = e.target.closest('.mt-tile');
+      if (!tile || e.target.closest('.mt-x') || MT.busy) return;
+      const x0 = e.clientX, y0 = e.clientY, id = e.pointerId;
+      hold = { x0, y0, timer: setTimeout(() => {
+        const r = tile.getBoundingClientRect();
+        drag = { tile, from: +tile.dataset.i, to: +tile.dataset.i, dx: x0 - r.left, dy: y0 - r.top, id };
+        tile.classList.add('mt-lift');   // (it lets the finger see the tile under it: pointer-events none)
+        if (navigator.vibrate) try { navigator.vibrate(10); } catch (er) {}
+      }, 260) };
+    });
+    p.body.addEventListener('pointermove', (e) => {
+      if (hold && !drag && Math.hypot(e.clientX - hold.x0, e.clientY - hold.y0) > 10) end();
+      if (!drag || e.pointerId !== drag.id) return;
+      e.preventDefault();
+      drag.tile.style.transform = `translate(${e.clientX - hold.x0}px, ${e.clientY - hold.y0}px) scale(1.06)`;
+      const over = tileAt(e.clientX, e.clientY);
+      $$('.mt-tile.mt-target', p.body).forEach((t) => t.classList.remove('mt-target'));
+      if (over) { over.classList.add('mt-target'); drag.to = +over.dataset.i; }
+    }, { passive: false });
+    // while a tile is held, the finger moves the tile, not the sheet
+    p.body.addEventListener('touchmove', (e) => { if (drag) e.preventDefault(); }, { passive: false });
+    const drop = (e) => {
+      if (drag && (!e || e.pointerId === drag.id)) {
+        const { from, to } = drag;
+        drag = null; end();
+        mtDrag.just = true; setTimeout(() => { mtDrag.just = false; }, 350);
+        if (to !== from) {
+          const [it] = MT.items.splice(from, 1);
+          MT.items.splice(to, 0, it);
+          MT.order = 'mine';
+        }
+        mtPaint();
+        return;
+      }
+      end();
+    };
+    p.body.addEventListener('pointerup', drop);
+    p.body.addEventListener('pointercancel', drop);
+    p.body.addEventListener('contextmenu', (e) => { if (e.target.closest('.mt-tile')) e.preventDefault(); });
   }
 
   /*
@@ -1214,16 +1282,17 @@
       const res = await window.api.montage.create({
         mediaPaths: paths, musicPath: song ? song.file : null, style: MT.style,
         lengthSec: MT.len === 'all' ? 0 : MT.len === 'custom' ? MT.custom : MT.len, full: MT.len === 'all',
-        aspect: MT.aspect, brief: MT.brief, keepAudio: MT.keep, jobId,
+        aspect: MT.aspect, brief: MT.brief, keepAudio: MT.keep, keepOrder: MT.order === 'mine', jobId,
       });
       if (off) off();
       MT.busy = false;
       mtProgress('Opening it in the studio…', 100, ' ');
       go('studio');
-      await window.VideoEditor.applyMontage({ output: res.output, music: song, musicVolume: MT.keep ? 0.7 : 1, texts: res.texts });
+      await window.VideoEditor.applyMontage({ output: res.output, music: song, musicVolume: MT.keep ? 0.7 : 1, texts: res.texts, style: res.style || MT.style, captions: MT.caps && MT.keep });
       C.closePanel(MT.panel, true);
       mtRelease();
       MT.items = []; MT.brief = '';
+      res.autoCaps = MT.caps && MT.keep;
       mtResult(res);
     } catch (e) {
       if (off) off();
@@ -1242,7 +1311,7 @@
     const p = C.openPanel({ id: 'cloudMontageDone', title: res.title || 'Your montage', cls: 'cp-montage' });
     p.body.innerHTML = `<p class="mt-lead">${mi('check')} ${C.esc(Math.round(res.duration))}s · ${C.esc(String((res.shots || []).length))} shots${res.bpm ? ' · cut to ' + C.esc(String(Math.round(res.bpm))) + ' BPM' : ''}</p>
       ${res.concept ? `<p class="mt-concept">${C.esc(res.concept)}</p>` : ''}
-      <p class="mt-tip">It’s open in the studio now${res.texts && res.texts.length ? ' — the words on screen are text boxes, tap one to change it' : ''}. Add captions from the 💬 Captions tool, change the music volume in Audio, then export as usual.</p>
+      <p class="mt-tip">It’s open in the studio now${res.texts && res.texts.length ? ' — the words on screen are text boxes, tap one to change it' : ''}. ${res.autoCaps ? 'Captions of what’s said are being added by themselves — they go into the export.' : 'Add captions from the 💬 Captions tool.'} Change the music volume in Audio, then export as usual.</p>
       ${caption ? `<section class="mt-sec"><h3>Post caption</h3><textarea class="mt-brief" rows="4" readonly>${C.esc(caption)}</textarea>
         <button type="button" class="mt-chip on" data-mt-copy>Copy caption</button></section>` : ''}`;
     p.foot.innerHTML = '<button type="button" class="mt-go" data-mt-ok>Start editing</button>';
