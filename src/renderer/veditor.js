@@ -10429,15 +10429,34 @@
       : o.op === 'del' ? `<del>${escape2(o.text)}</del>` : `<ins>${escape2(o.text)}</ins>`)).join(' ');
   }
   /* The see-through copy of the words must be laid out exactly like the box. */
+  const HL_PROPS = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'wordSpacing', 'textTransform', 'lineHeight',
+    'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth',
+    'borderBottomWidth', 'borderLeftWidth', 'textIndent', 'boxSizing'];
+  // Reading window.innerWidth also makes the browser lay the page out first, so
+  // the size is read once and then only when the window really changes.
+  let hlSizeKey = '';
+  window.addEventListener('resize', () => { hlSizeKey = ''; });
   function syncHlStyle(inp, hl) {
     // Re-measured when the window changes size: the box's padding is smaller
     // on a short screen, and stale padding would put every underline off by it.
-    const sizeKey = window.innerWidth + 'x' + window.innerHeight;
+    if (!hlSizeKey) hlSizeKey = window.innerWidth + 'x' + window.innerHeight;
+    const sizeKey = hlSizeKey;
     if (hl._styled === sizeKey) return;
-    const cs = getComputedStyle(inp);
-    ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'wordSpacing', 'textTransform', 'lineHeight',
-      'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth',
-      'borderBottomWidth', 'borderLeftWidth', 'textIndent', 'boxSizing'].forEach((k) => { hl.style[k] = cs[k]; });
+    /*
+     * MEASURED ONCE, NOT ONCE PER LINE. Every line's box is the same class, so
+     * one read of the computed style serves them all. Reading it per row, after
+     * the row before it had just been written, made the browser lay the whole
+     * list out again for every line: on a whole sermon (1,578 lines) "No
+     * mistakes" and Undo froze a phone for nine seconds each.
+     */
+    let cached = syncHlStyle._c;
+    if (!cached || cached.key !== sizeKey) {
+      const cs = getComputedStyle(inp);
+      const props = {};
+      HL_PROPS.forEach((k) => { props[k] = cs[k]; });
+      cached = syncHlStyle._c = { key: sizeKey, props };
+    }
+    Object.assign(hl.style, cached.props);
     hl.style.borderStyle = 'solid';
     hl.style.borderColor = 'transparent';
     hl.style.display = 'flex';
@@ -10472,7 +10491,9 @@
       }
       html += escape2(t.slice(at));
       if (hl.innerHTML !== html) hl.innerHTML = '<span>' + html + '</span>';
-      hl.scrollLeft = inp.scrollLeft;
+      // Only the line being typed in can have scrolled sideways, and reading
+      // scrollLeft forces a layout of the whole list — so only that one asks.
+      if (inp === document.activeElement) hl.scrollLeft = inp.scrollLeft;
     }
     const n = issues.length + (ai ? 1 : 0);
     const badge = row.querySelector('.cap-g-badge');
