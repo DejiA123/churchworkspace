@@ -93,13 +93,18 @@ if (schedulerMod.Scheduler && schedulerMod.Scheduler.prototype) {
      * well, which is where somebody is actually looking.
      */
     const notify = proto._notify;
+    // …to the phones of the person whose post it is (space.js), not everyone's
+    const ownerOf = (sched, postId) => {
+      try { const p = (sched.store.get('posts') || []).find((x) => x.id === postId); return p ? (p.owner || null) : null; } catch (e) { return null; }
+    };
     proto._notify = function (title, body, postId) {
-      try { cloudApi.push('scheduler:notice', { title, body, postId }); } catch (e) {}
+      try { cloudApi.push('scheduler:notice', { title, body, postId }, { space: ownerOf(this, postId) }); } catch (e) {}
       return notify.call(this, title, body, postId);
     };
     const pushUpdate = proto._pushUpdate;
     proto._pushUpdate = function (postId) {
-      try { cloudApi.push('scheduler:changed', { postId }); } catch (e) {}
+      // says only that a list changed; every page re-reads its own
+      try { cloudApi.push('scheduler:changed', { postId }, { all: true }); } catch (e) {}
       return pushUpdate.call(this, postId);
     };
   }

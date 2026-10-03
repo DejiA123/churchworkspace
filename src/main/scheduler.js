@@ -117,6 +117,8 @@ class Scheduler {
       handoffErrors: {},
       createdAt: now,
       updatedAt: now,
+      // whose space made it, on a shared Cloud Studio (null = the owner; see space.js)
+      owner: post.owner || null,
     };
     posts.push(record);
     this.store.set('posts', posts);

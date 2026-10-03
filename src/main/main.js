@@ -98,6 +98,7 @@ const llmjudge = require('./llmjudge');
 const jobs = require('./jobs');
 const library = require('./library');
 const sessions = require('./sessions');
+const space = require('./space');
 const mediaCache = require('./media-cache');
 const bible = require('./bible');
 const songbank = require('./songbank');
@@ -185,7 +186,8 @@ function getCtx() {
 
 function ensureOutputDir() {
   const s = store.get('settings') || {};
-  const dir = s.outputDir || defaultOutputDir();
+  // each person on a shared Cloud Studio exports into a folder of their own (space.js)
+  const dir = space.pathFor(s.outputDir || defaultOutputDir());
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -315,6 +317,7 @@ app.whenReady().then(() => {
     presentThemes: [],
   });
 
+  space.init(userData);   // each Cloud Studio person's own folders, under <userData>/spaces
   library.init(userData); // saved music + outro clips live under <userData>/library
   sessions.init(userData); // saved editing sessions under <userData>/sessions
   mediaCache.init(path.join(app.getPath('temp'), 'cws-media-cache')); // timeline pictures + HEVC previews, per recording
@@ -2206,28 +2209,43 @@ ipcMain.handle('social:planSchedule', wrap(async (e, { count, spacingHours } = {
     iso: p.iso, label: p.label, dayLabel: p.dayLabel, timeLabel: p.timeLabel,
   }))));
 
-ipcMain.handle('scheduler:list', wrap(async () => scheduler.list()));
-ipcMain.handle('scheduler:add', wrap(async (e, { post }) => scheduler.add(post)));
+/*
+ * Each person's posts are their own (space.js): a post remembers whose space
+ * made it, the list shows only that space's, and nobody can move, post or
+ * delete a post that is not theirs. The posting itself is one service for the
+ * whole studio, so everybody's posts still go out on time.
+ */
+const myPost = (p) => !!p && (p.owner || null) === space.current();
+const myPosts = () => scheduler.list().filter(myPost);
+const ownPost = (id) => {
+  if (!myPost(scheduler.list().find((p) => p.id === id))) throw new Error('That post is not in your space.');
+  return id;
+};
+ipcMain.handle('scheduler:list', wrap(async () => myPosts()));
+ipcMain.handle('scheduler:add', wrap(async (e, { post }) => scheduler.add(Object.assign({}, post, { owner: space.current() }))));
 // Moving or rewording a post gives back whatever booking a platform is
 // holding for it and takes a new one — see Scheduler.reschedule.
-ipcMain.handle('scheduler:update', wrap(async (e, { id, patch }) => scheduler.reschedule(id, patch)));
-ipcMain.handle('scheduler:remove', wrap(async (e, { id }) => scheduler.remove(id)));
-ipcMain.handle('scheduler:publish', wrap(async (e, { id }) => scheduler.publishNow(id)));
+ipcMain.handle('scheduler:update', wrap(async (e, { id, patch }) => {
+  const clean = Object.assign({}, patch); delete clean.owner;
+  return scheduler.reschedule(ownPost(id), clean);
+}));
+ipcMain.handle('scheduler:remove', wrap(async (e, { id }) => scheduler.remove(ownPost(id))));
+ipcMain.handle('scheduler:publish', wrap(async (e, { id }) => scheduler.publishNow(ownPost(id))));
 // Real auto-posting: publish this post to the connected Facebook Page right now.
-ipcMain.handle('scheduler:publishAuto', wrap(async (e, { id }) => scheduler.autoPublish(id)));
-ipcMain.handle('scheduler:retry', wrap(async (e, { id }) => scheduler.retry(id)));
+ipcMain.handle('scheduler:publishAuto', wrap(async (e, { id }) => scheduler.autoPublish(ownPost(id))));
+ipcMain.handle('scheduler:retry', wrap(async (e, { id }) => scheduler.retry(ownPost(id))));
 // Which of a post's accounts the PLATFORM is holding, and which still need
 // this PC switched on. The Scheduler page shows this per post, because the
 // difference is real and the operator has to be able to see it.
 ipcMain.handle('scheduler:plans', wrap(async () => {
   const out = {};
-  for (const p of scheduler.list()) {
+  for (const p of myPosts()) {
     if (p.status !== 'scheduled' && p.status !== 'failed') continue;
     out[p.id] = scheduler.handoffPlan(p);
   }
   return out;
 }));
-ipcMain.handle('scheduler:handOff', wrap(async (e, { id }) => scheduler.handOff(id)));
+ipcMain.handle('scheduler:handOff', wrap(async (e, { id }) => scheduler.handOff(ownPost(id))));
 
 /* --------- IPC: posting while the app is closed (src/main/autopost.js) -------
  * The studio only ever asks the OS to run the poster; it never posts on the

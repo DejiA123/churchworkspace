@@ -28,16 +28,31 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const engine = require('../renderer/wordbook.js');
+const space = require('./space');
 
 /** Enough for years of Sundays; the oldest unused entries go first if it fills. */
 const MAX_FIXES = 4000;
 const MAX_TERMS = 2000;
 const WRITE_DELAY_MS = 400;
 
-let file = null;
-let book = null;
-let compiled = null;          // lazily rebuilt whenever the book changes
-let writeTimer = null;
+/*
+ * ONE BOOK PER SPACE. Every person on a shared Cloud Studio has a Word Book of
+ * their own (see space.js): the owner's is <userData>/word-book.json, anyone
+ * else's sits in their own space. Each is loaded the first time that person
+ * uses it and then kept, with its own debounced write.
+ */
+let baseDir = null;
+const states = new Map();     // space id ('' = owner) -> { file, book, compiled, writeTimer, lastTidy }
+function fileFor(id) {
+  if (!id) return path.join(baseDir, 'word-book.json');
+  return path.join(space.pathFor(path.join(baseDir, 'wordbook'), id), 'word-book.json');
+}
+function S() {
+  const id = space.current() || '';
+  let st = states.get(id);
+  if (!st) { st = loadState(id); states.set(id, st); }
+  return st;
+}
 
 const newId = () => Date.now().toString(36) + crypto.randomBytes(3).toString('hex');
 const nowIso = () => new Date().toISOString();
@@ -93,11 +108,10 @@ function sanitise(raw) {
   return b;
 }
 
-function init(userDataDir) {
-  file = path.join(userDataDir, 'word-book.json');
-  try { book = sanitise(JSON.parse(fs.readFileSync(file, 'utf-8'))); }
-  catch (e) { book = blank(); }
-  compiled = null;
+function loadState(id) {
+  const st = { file: baseDir ? fileFor(id) : null, book: null, compiled: null, writeTimer: null, lastTidy: null };
+  try { st.book = sanitise(JSON.parse(fs.readFileSync(st.file, 'utf-8'))); }
+  catch (e) { st.book = blank(); }
   /*
    * A BOOK WRITTEN UNDER THE OLD RULE IS TIDIED BEFORE IT IS EVER USED.
    *
@@ -106,53 +120,64 @@ function init(userDataDir) {
    * out is reported so the studio can say so rather than quietly editing
    * somebody's settings behind their back.
    */
-  lastTidy = null;
-  if ((book.version || 1) < engine.VERSION) {
+  if ((st.book.version || 1) < engine.VERSION) {
+    states.set(id, st);       // tidy() works on the current space's book
     const r = tidy();
-    book.version = engine.VERSION;
-    if (r.removed) lastTidy = r;
-    flushSync();
+    st.book.version = engine.VERSION;
+    if (r.removed) st.lastTidy = r;
+    writeNow(st);
   }
-  return file;
+  return st;
+}
+function init(userDataDir) {
+  baseDir = userDataDir;
+  states.clear();
+  return S().file;
 }
 
 /** What the last load had to clean up, for the studio to report once. */
-let lastTidy = null;
-const tidyReport = () => lastTidy;
+const tidyReport = () => S().lastTidy;
 
 /* Debounced like every other store in the app: this thread also drives five
  * studios, and learning eight corrections out of one edited line must not be
  * eight synchronous disk writes. flushSync() on the way out. */
 function queueWrite() {
-  if (writeTimer) return;
-  writeTimer = setTimeout(() => { writeTimer = null; writeNow(); }, WRITE_DELAY_MS);
+  const st = S();
+  if (st.writeTimer) return;
+  st.writeTimer = setTimeout(() => { st.writeTimer = null; writeNow(st); }, WRITE_DELAY_MS);
 }
-function writeNow() {
-  if (!file || !book) return;
+function writeNow(st) {
+  st = st || S();
+  if (!st.file || !st.book) return;
   try {
-    const tmp = file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(book, null, 2), 'utf-8');
-    fs.renameSync(tmp, file);
+    fs.mkdirSync(path.dirname(st.file), { recursive: true });
+    const tmp = st.file + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(st.book, null, 2), 'utf-8');
+    fs.renameSync(tmp, st.file);
   } catch (e) {
-    try { fs.writeFileSync(file, JSON.stringify(book, null, 2), 'utf-8'); }
+    try { fs.writeFileSync(st.file, JSON.stringify(st.book, null, 2), 'utf-8'); }
     catch (e2) { console.warn('[wordbook] could not save: ' + e2.message); }
   }
 }
+/** Every space's pending write, now (on the way out). */
 function flushSync() {
-  if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
-  writeNow();
+  for (const st of states.values()) {
+    if (st.writeTimer) { clearTimeout(st.writeTimer); st.writeTimer = null; writeNow(st); }
+  }
 }
-function changed() { compiled = null; queueWrite(); }
+function changed() { S().compiled = null; queueWrite(); }
 
 function get() {
-  if (!book) book = blank();
-  return book;
+  const st = S();
+  if (!st.book) st.book = blank();
+  return st.book;
 }
 
 /** The compiled lookup tables — built once per change, not once per word. */
 function matcher() {
-  if (!compiled) compiled = engine.compile(get());
-  return compiled;
+  const st = S();
+  if (!st.compiled) st.compiled = engine.compile(get());
+  return st.compiled;
 }
 
 /** What the Word Book panel shows. Newest first: the thing you just taught it

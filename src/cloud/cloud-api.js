@@ -48,6 +48,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const rpc = require('../main/rpc');
+const space = require('../main/space');
 const { makeGuard, within } = require('../main/path-guard');
 const page = require('./page');
 
@@ -80,7 +81,24 @@ const REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;    // "keep me signed in"
 const MAX_ATTEMPTS = 8;
 const LOCKOUT_MS = 15 * 60 * 1000;
 
-const guard = makeGuard(() => Object.values(cfg.dirs).filter(Boolean));
+/*
+ * WHERE THIS PERSON MAY POINT. The owner (and a studio with no accounts yet)
+ * keeps every folder the studio was started with. Anyone else gets their own
+ * exports, uploads, library and sessions (space.js), plus the read-only things
+ * every page needs — fonts, the AI assets, the temp folder the studio works
+ * in — and never the server's Videos folder or another person's space.
+ */
+function dirsFor(id) {
+  const d = cfg.dirs;
+  const who = id === undefined ? space.current() : id;
+  if (!who) return d;
+  return {
+    output: space.pathFor(d.output, who), uploads: space.pathFor(d.uploads, who),
+    library: space.pathFor(d.library, who), sessions: space.pathFor(d.sessions, who),
+    temp: d.temp, fonts: d.fonts, ai: d.ai, videos: '',
+  };
+}
+const guard = makeGuard(() => Object.values(dirsFor()).filter(Boolean));
 const allowedPath = (p) => guard.allowedPath(p);
 
 /* -------------------------------------------------------------- allowlist */
@@ -420,6 +438,71 @@ function makeCode() {
 
 const newToken = () => crypto.randomBytes(32).toString('base64url');
 
+/* ------------------------------------------------------------- accounts
+ *
+ * EVERYONE HAS THEIR OWN SPACE. A name and a password, and behind it a space
+ * of their own (src/main/space.js): their uploads, exports, saved sessions,
+ * Word Book, library and posts, and nobody else's.
+ *
+ *   • Making a space needs the church's access code, so a stranger who finds
+ *     the address cannot just sign themselves up.
+ *   • The FIRST space made on a server is the owner's. It keeps the folders the
+ *     studio already had, so nothing that was there before is lost or moved,
+ *     and the owner can reset a forgotten password or remove a space.
+ *   • Passwords are stored as scrypt hashes with their own salt, never as text.
+ *   • Until the first space exists, the access code alone still opens the
+ *     studio as the owner, so an installed app keeps working through the
+ *     update. After that, signing in is by name and password.
+ */
+let users = [];          // [{ uid, name, salt, hash, owner, space, createdAt }]
+const usersFile = () => (cfg.dirs.uploads ? path.join(path.dirname(cfg.dirs.uploads), 'cloud-users.json') : '');
+function loadUsers() {
+  users = [];
+  const f = usersFile(); if (!f) return;
+  try { const raw = JSON.parse(fs.readFileSync(f, 'utf-8')); if (Array.isArray(raw.users)) users = raw.users.filter((u) => u && u.uid && u.hash); } catch (e) {}
+}
+function saveUsers() {
+  const f = usersFile(); if (!f) return;
+  try {
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    const tmp = f + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ users }, null, 2), { encoding: 'utf-8', mode: 0o600 });
+    fs.renameSync(tmp, f);
+  } catch (e) { console.warn('[cloud] could not save accounts: ' + e.message); }
+}
+const nameKey = (n) => String(n || '').trim().toLowerCase().replace(/\s+/g, ' ');
+const hashPass = (pw, salt) => crypto.scryptSync(String(pw), salt, 32).toString('hex');
+function checkPass(u, pw) {
+  try {
+    const a = Buffer.from(hashPass(pw, u.salt), 'hex'), b = Buffer.from(u.hash, 'hex');
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  } catch (e) { return false; }
+}
+function setPass(u, pw) { u.salt = crypto.randomBytes(16).toString('hex'); u.hash = hashPass(pw, u.salt); }
+const userById = (uid) => users.find((u) => u.uid === uid) || null;
+const userByName = (n) => users.find((u) => nameKey(u.name) === nameKey(n)) || null;
+const publicUser = (u) => (u ? { uid: u.uid, name: u.name, owner: !!u.owner, createdAt: u.createdAt } : null);
+function makeUser(name, pw) {
+  const owner = !users.length;
+  const u = {
+    uid: crypto.randomBytes(8).toString('hex'),
+    name: String(name).trim().replace(/\s+/g, ' ').slice(0, 40),
+    owner,
+    // the owner keeps the studio's original folders; anyone else gets a space
+    space: owner ? null : crypto.randomBytes(8).toString('hex'),
+    createdAt: new Date().toISOString(),
+  };
+  setPass(u, pw);
+  users.push(u);
+  saveUsers();
+  return u;
+}
+/** The person behind a request's token, or null (a studio with no accounts yet: the owner). */
+function userOf(req, url) {
+  const rec = tokens.get(tokenOf(req, url));
+  return rec && rec.uid ? userById(rec.uid) : null;
+}
+
 /** Constant-time compare that does not leak the length either. */
 function codeMatches(given) {
   const want = String(cfg.code || '');
@@ -526,6 +609,9 @@ function authed(req, url) {
   const rec = tokens.get(t);
   if (!rec) return false;
   if (Date.now() - rec.at > (rec.ttl || SESSION_TTL_MS)) { tokens.delete(t); return false; }
+  // A device signed in with the code alone, from before there were accounts,
+  // has to sign in properly once there are; a removed person is signed out.
+  if (users.length && !(rec.uid && userById(rec.uid))) { tokens.delete(t); return false; }
   rec.at = Date.now();
   return true;
 }
@@ -542,10 +628,18 @@ const sseSender = {
   isDestroyed() { return false; },
 };
 
-function push(event, data) {
+/*
+ * Each browser's event stream belongs to a space, and an event goes only to
+ * the space it is about: the one whose request raised it, or the one named in
+ * `opts.space`. `opts.all` is for events that say nothing about anybody's work
+ * (a list somewhere changed; each page re-reads its own).
+ */
+function push(event, data, opts = {}) {
   if (!sseClients.size) return;
+  const target = Object.prototype.hasOwnProperty.call(opts, 'space') ? (opts.space || null) : space.current();
   const frame = `event: ${event}\ndata: ${JSON.stringify(data == null ? {} : data)}\n\n`;
   for (const res of Array.from(sseClients)) {
+    if (!opts.all && (res._mwSpace || null) !== target) continue;
     try { res.write(frame); } catch (e) { sseClients.delete(res); }
   }
 }
@@ -659,7 +753,8 @@ async function deleteFiles(req, res) {
   const asked = (Array.isArray(body.paths) ? body.paths : [body.path]).filter((x) => typeof x === 'string' && x).slice(0, 300);
   if (!asked.length) return json(res, 400, { error: 'Nothing to delete.' });
 
-  const folders = [cfg.dirs.output, cfg.dirs.uploads].filter(Boolean).map((d) => path.resolve(d));
+  const mine = dirsFor();
+  const folders = [mine.output, mine.uploads].filter(Boolean).map((d) => path.resolve(d));
   const key = (f) => (process.platform === 'win32' ? path.resolve(f).toLowerCase() : path.resolve(f));
   const needed = new Map();     // file -> the title of a planned post that uses it
   try {
@@ -703,7 +798,7 @@ async function deleteFiles(req, res) {
       }
     } catch (e) { /* the autosave is a convenience */ }
   }
-  return json(res, 200, { ok: true, deleted, refused, freed, autosaveCleared, disk: diskOf(cfg.dirs.output || os.tmpdir()) });
+  return json(res, 200, { ok: true, deleted, refused, freed, autosaveCleared, disk: diskOf(mine.output || os.tmpdir()) });
 }
 
 /*
@@ -713,8 +808,13 @@ async function deleteFiles(req, res) {
  */
 const PART_MAX_AGE_MS = 48 * 3600 * 1000;
 function sweepParts() {
-  const dir = cfg.dirs.uploads;
-  if (!dir) return 0;
+  // the owner's uploads, and every space's
+  const dirs = [cfg.dirs.uploads].concat(users.filter((u) => u.space).map((u) => space.pathFor(cfg.dirs.uploads, u.space))).filter(Boolean);
+  let n = 0;
+  for (const dir of dirs) n += sweepPartsIn(dir);
+  return n;
+}
+function sweepPartsIn(dir) {
   let n = 0;
   let names = [];
   try { names = fs.readdirSync(dir); } catch (e) { return 0; }
@@ -733,10 +833,11 @@ let sweepTimer = null;
 /** Everything a signed-in browser can open. */
 function browse() {
   const seen = new Set();
+  const d = dirsFor();
   const groups = [
-    { key: 'output', label: 'Finished exports', dir: cfg.dirs.output },
-    { key: 'uploads', label: 'Sent from a phone', dir: cfg.dirs.uploads },
-    { key: 'videos', label: 'Videos folder', dir: cfg.dirs.videos },
+    { key: 'output', label: 'Finished exports', dir: d.output },
+    { key: 'uploads', label: 'Sent from a phone', dir: d.uploads },
+    { key: 'videos', label: 'Videos folder', dir: d.videos },
   ];
   return groups.map((g) => {
     const items = listDir(g.dir).filter((f) => {
@@ -813,6 +914,9 @@ async function handle(req, res) {
       name: 'Church Work Space',
       version: cfg.appVersion || '',
       signedIn: authed(req, url),
+      // spaces: whether this studio has accounts yet, and who is signed in
+      accounts: users.length,
+      me: authed(req, url) ? publicUser(userOf(req, url)) : null,
       allowUpload: !!cfg.allowUpload,
       allowDelete: !!cfg.allowUpload,
       publicUrl: cfg.publicUrl || '',
@@ -828,32 +932,103 @@ async function handle(req, res) {
   if (p === '/api/login' && req.method === 'POST') {
     const ip = clientIp(req);
     if (lockedOut(ip)) {
-      return json(res, 429, { error: `Too many wrong codes. Try again in ${lockoutLeft(ip)} minutes.` });
+      return json(res, 429, { error: `Too many wrong tries. Try again in ${lockoutLeft(ip)} minutes.` });
     }
     let body;
     try { body = JSON.parse((await readBody(req, 4096)).toString('utf-8') || '{}'); }
     catch (e) { return json(res, 400, { error: 'Bad request.' }); }
-    const given = String((body && body.code) || '').trim().toLowerCase().replace(/\s+/g, '-');
-    if (!codeMatches(given)) {
+    body = body || {};
+    const given = String(body.code || '').trim().toLowerCase().replace(/\s+/g, '-');
+    const name = String(body.name || '').trim();
+    const pw = String(body.password || '');
+    const issue = (u) => {
+      clearFailures(ip);
+      const t = newToken();
+      tokens.set(t, {
+        at: Date.now(),
+        ip,
+        ttl: body.remember ? REMEMBER_TTL_MS : SESSION_TTL_MS,
+        agent: String(req.headers['user-agent'] || '').slice(0, 120),
+        uid: u ? u.uid : undefined,
+      });
+      saveTokens();
+      return json(res, 200, { ok: true, token: t, version: cfg.appVersion || '', me: publicUser(u) });
+    };
+    const wrong = (msg, code) => {
       noteFailure(ip);
       const left = lockedOut(ip) ? ` Locked for ${lockoutLeft(ip)} minutes.` : '';
-      return json(res, 401, { error: 'That code is not right.' + left });
+      return json(res, code || 401, { error: msg + left });
+    };
+    // Making a space: the church's code says they belong here.
+    if (body.create) {
+      if (!codeMatches(given)) return wrong('That access code is not right — ask whoever runs the studio for it.');
+      if (name.length < 2) return json(res, 400, { error: 'Type your name (at least 2 letters).' });
+      if (pw.length < 6) return json(res, 400, { error: 'Choose a password of at least 6 characters.' });
+      if (userByName(name)) return json(res, 409, { error: 'There is already a space with that name — sign in, or choose another name.' });
+      return issue(makeUser(name, pw));
     }
-    clearFailures(ip);
-    const t = newToken();
-    tokens.set(t, {
-      at: Date.now(),
-      ip,
-      ttl: body && body.remember ? REMEMBER_TTL_MS : SESSION_TTL_MS,
-      agent: String(req.headers['user-agent'] || '').slice(0, 120),
-    });
-    saveTokens();
-    return json(res, 200, { ok: true, token: t, version: cfg.appVersion || '' });
+    // Signing in to a space.
+    if (name || pw) {
+      const u = userByName(name);
+      if (!u || !checkPass(u, pw)) return wrong('That name and password do not match.');
+      return issue(u);
+    }
+    // The code alone: only while there are no spaces yet (an older installed app).
+    if (users.length) return json(res, 401, { error: 'Sign in with your name and password.', needsAccount: true });
+    if (!codeMatches(given)) return wrong('That code is not right.');
+    return issue(null);
   }
 
   /* --- everything below needs a signed-in browser ----------------------- */
 
   if (!authed(req, url)) return json(res, 401, { error: 'Sign in first.', needsAuth: true });
+
+  // Everything from here on runs in the signed-in person's own space.
+  const me = userOf(req, url);
+  return space.run(me ? me.space : null, () => authedRoutes(req, res, url, p, me));
+}
+
+async function authedRoutes(req, res, url, p, me) {
+  if (p === '/api/me') {
+    return json(res, 200, { ok: true, me: publicUser(me), accounts: users.length, people: me && me.owner ? users.map(publicUser) : undefined });
+  }
+  if (p === '/api/me/password' && req.method === 'POST') {
+    if (!me) return json(res, 400, { error: 'Make your space first.' });
+    let body; try { body = JSON.parse((await readBody(req, 4096)).toString('utf-8') || '{}'); } catch (e) { return json(res, 400, { error: 'Bad request.' }); }
+    if (!checkPass(me, body.current)) return json(res, 401, { error: 'Your current password is not right.' });
+    if (String(body.password || '').length < 6) return json(res, 400, { error: 'Choose a password of at least 6 characters.' });
+    setPass(me, body.password); saveUsers();
+    return json(res, 200, { ok: true });
+  }
+  // The owner looks after the spaces: a new password for someone who forgot
+  // theirs, and removing a space (with its files) when someone leaves.
+  if (p.startsWith('/api/people/') && req.method === 'POST') {
+    if (!me || !me.owner) return json(res, 403, { error: 'Only the owner can change other people’s spaces.' });
+    let body; try { body = JSON.parse((await readBody(req, 4096)).toString('utf-8') || '{}'); } catch (e) { return json(res, 400, { error: 'Bad request.' }); }
+    const u = userById(body.uid);
+    if (!u) return json(res, 404, { error: 'That space is not here any more.' });
+    if (p === '/api/people/reset') {
+      const temp = crypto.randomBytes(5).toString('base64url').replace(/[-_]/g, 'x').slice(0, 8);
+      setPass(u, temp); saveUsers();
+      for (const [t, rec] of tokens) if (rec.uid === u.uid && u !== me) tokens.delete(t);
+      saveTokens();
+      return json(res, 200, { ok: true, password: temp });
+    }
+    if (p === '/api/people/remove') {
+      if (u.owner) return json(res, 400, { error: 'The owner’s space cannot be removed.' });
+      users = users.filter((x) => x !== u); saveUsers();
+      for (const [t, rec] of tokens) if (rec.uid === u.uid) tokens.delete(t);
+      saveTokens();
+      const root = space.rootOf(u.space);
+      if (root) { try { fs.rmSync(root, { recursive: true, force: true }); } catch (e) {} }
+      for (const d of ['output', 'uploads']) {
+        const dir = space.pathFor(cfg.dirs[d], u.space);
+        if (dir && dir !== cfg.dirs[d] && root && !dir.startsWith(root)) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {} }
+      }
+      return json(res, 200, { ok: true });
+    }
+    return json(res, 404, { error: 'not found' });
+  }
 
   if (p === '/api/logout' && req.method === 'POST') {
     tokens.delete(tokenOf(req, url));
@@ -869,6 +1044,7 @@ async function handle(req, res) {
       'X-Accel-Buffering': 'no',
     });
     res.write(': connected\n\n');
+    res._mwSpace = space.current();
     sseClients.add(res);
     // A tunnel or a mobile network will drop a silent connection; this keeps it.
     const ka = setInterval(() => { try { res.write(': ka\n\n'); } catch (e) {} }, 15000);
@@ -915,7 +1091,7 @@ async function handle(req, res) {
   }
 
   if (p === '/api/videos') {
-    return json(res, 200, { ok: true, groups: browse(), disk: diskOf(cfg.dirs.output || os.tmpdir()), canDelete: !!cfg.allowUpload });
+    return json(res, 200, { ok: true, groups: browse(), disk: diskOf(dirsFor().output || os.tmpdir()), canDelete: !!cfg.allowUpload });
   }
 
   if (p === '/api/delete' && req.method === 'POST') {
@@ -952,7 +1128,7 @@ function receiveUpload(req, res, url) {
     return json(res, 400, { error: 'Only video, audio and picture files can be sent.' });
   }
 
-  const dir = cfg.dirs.uploads;
+  const dir = dirsFor().uploads;
   try { fs.mkdirSync(dir, { recursive: true }); } catch (e) {}
 
   // The id keeps a resumed upload pointing at the same file on disk.
@@ -1037,8 +1213,8 @@ function status() {
     uptimeSec: started ? Math.round((Date.now() - started) / 1000) : 0,
     signedInDevices: tokens.size,
     watching: sseClients.size,
-    outputDir: cfg.dirs.output,
-    freeBytes: free(cfg.dirs.output || os.tmpdir()),
+    outputDir: dirsFor().output,
+    freeBytes: free(dirsFor().output || os.tmpdir()),
     channels: Object.keys(ALLOWED).length,
     uploads: Array.from(uploads.values()).map((u) => ({ id: u.id, name: u.name, received: u.received, total: u.total })),
   };
@@ -1051,6 +1227,7 @@ async function start(opts = {}) {
   for (const d of [cfg.dirs.uploads, cfg.dirs.output]) {
     if (d) { try { fs.mkdirSync(d, { recursive: true }); } catch (e) {} }
   }
+  loadUsers();
   loadTokens();
   sweepParts();
   if (!sweepTimer) { sweepTimer = setInterval(sweepParts, 6 * 3600 * 1000); if (sweepTimer.unref) sweepTimer.unref(); }

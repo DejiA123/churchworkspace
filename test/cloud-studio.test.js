@@ -31,6 +31,7 @@
  *   [G] the PWA      — manifest, icons, and a service worker that will never
  *                      cache the studio's work
  *   [I] deleting     — only exports and uploads, never a planned post's video
+ *   [J] spaces       — each account sees only its own work
  *   [H] the scheduler— the phone's Social Scheduler: a Zernio key goes IN and
  *                      never comes back out, the accounts arrive without their
  *                      keys, a post's media is held to the same folders as
@@ -497,6 +498,91 @@ async function run() {
   const old = (Date.now() - 3 * 86400000) / 1000;
   fs.utimesSync(stale, old, old);
   log(cloud.sweepParts() >= 1 && !fs.existsSync(stale), 'an upload given up on days ago is swept away');
+
+  /* ───────────── [J] personal spaces ───────────── */
+  // Last, because once there is an account the code alone stops opening the studio.
+  console.log('\n=== [J] personal spaces ===');
+  const jpost = (p, body, token) => request('POST', p, {
+    headers: Object.assign({ 'Content-Type': 'application/json' }, token ? { Authorization: 'Bearer ' + token } : {}),
+    body: JSON.stringify(body),
+  });
+  const as = async (token, channel, args) => { const keep = TOKEN; TOKEN = token; try { return (await rpc(channel, args)).body || {}; } finally { TOKEN = keep; } };
+  const filesOf = async (token) => {
+    const g = await request('GET', '/api/videos', { headers: { Authorization: 'Bearer ' + token } });
+    return ((g.json && g.json.groups) || []).flatMap((x) => x.files.map((f) => f.path));
+  };
+  const sendFile = async (token, name, fill) => {
+    const b = Buffer.alloc(4096, fill);
+    const u = await request('POST', `/api/upload?name=${name}&id=sp${fill}x&size=${b.length}&offset=0`, {
+      headers: { 'Content-Type': 'application/octet-stream', Authorization: 'Bearer ' + token }, body: b,
+    });
+    return u.json && u.json.path;
+  };
+  r = await request('GET', '/api/hello');
+  log(r.json && r.json.accounts === 0, 'a studio starts with no accounts');
+  r = await jpost('/api/login', { create: true, name: 'Deji', password: 'jesus-is-lord', code: CODE });
+  const owner = r.json && r.json.token;
+  log(!!owner && r.json.me.owner, 'the first account is the owner’s');
+  r = await jpost('/api/login', { create: true, name: 'Ama', password: 'secret12', code: 'wrong-code' });
+  log(r.status === 401, 'a new account needs the church access code');
+  r = await jpost('/api/login', { create: true, name: 'Ama', password: 'secret12', code: CODE });
+  const ama = r.json && r.json.token;
+  log(!!ama && !r.json.me.owner, 'someone else makes their own space with the code');
+  r = await jpost('/api/login', { create: true, name: 'ama', password: 'secret12', code: CODE });
+  log(r.status === 409, 'names are unique');
+  r = await login(CODE);
+  log(r.status === 401 && r.json.needsAccount, 'the code alone no longer opens the studio');
+  r = await request('GET', '/api/videos', { headers: auth() });
+  log(r.status === 401, 'and a token from before accounts is signed out');
+  r = await jpost('/api/login', { name: 'Ama', password: 'wrong' });
+  log(r.status === 401, 'a wrong password is refused');
+
+  const oFile = await sendFile(owner, 'owner-sermon.mp4', 1);
+  const aFile = await sendFile(ama, 'ama-clip.mp4', 2);
+  log(oFile && aFile && path.dirname(oFile) !== path.dirname(aFile), 'each upload lands in its sender’s own space');
+  const oSees = await filesOf(owner), aSees = await filesOf(ama);
+  log(oSees.includes(oFile) && !oSees.includes(aFile) && aSees.includes(aFile) && !aSees.includes(oFile),
+    'each person’s Files shows only their own work');
+  log(!aSees.some((p) => p.startsWith(MEDIA)), 'the server’s Videos folder is the owner’s only');
+  r = await request('GET', '/api/media?p=' + encodeURIComponent(oFile), { headers: { Authorization: 'Bearer ' + ama } });
+  log(r.status === 403, 'someone else’s file cannot be opened by its address');
+  r = await as(ama, 'video:info', { input: oFile });
+  log(r.ok === false, 'nor handed to the studio');
+  r = await jpost('/api/delete', { paths: [oFile] }, ama);
+  log(r.json && r.json.deleted.length === 0 && fs.existsSync(oFile), 'nor deleted');
+
+  await as(owner, 'wordbook:addFix', { from: 'bishop richmond', to: 'Bishop Richman' });
+  const wbO = await as(owner, 'wordbook:get', {}), wbA = await as(ama, 'wordbook:get', {});
+  log(wbO.data.fixes.some((f) => f.to === 'Bishop Richman') && !wbA.data.fixes.some((f) => f.to === 'Bishop Richman'),
+    'each Word Book is its owner’s');
+  await as(owner, 'session:autosave', { data: { video: { path: oFile }, name: 'Owner edit', timeline: {} } });
+  const asA = await as(ama, 'session:autosaveGet', {});
+  log(!(asA.data && asA.data.name === 'Owner edit'), '“Continue editing” is each person’s own');
+  const pO = await as(owner, 'paths:get', {}), pA = await as(ama, 'paths:get', {});
+  log(pO.data.outputDir && pA.data.outputDir && pO.data.outputDir !== pA.data.outputDir, 'exports go to each person’s own folder');
+  const spPost = await as(owner, 'scheduler:add', { post: { title: 'Sunday clip', caption: 'x', scheduledAt: new Date(Date.now() + 864e5).toISOString(), mediaPaths: [oFile] } });
+  const listA = await as(ama, 'scheduler:list', {});
+  log(!listA.data.some((x) => x.title === 'Sunday clip'), 'planned posts are each person’s own');
+  r = await as(ama, 'scheduler:remove', { id: spPost.data.id });
+  log(r.ok === false, 'nobody can delete someone else’s post');
+  await as(owner, 'scheduler:remove', { id: spPost.data.id });
+
+  const me = (await request('GET', '/api/me', { headers: { Authorization: 'Bearer ' + owner } })).json;
+  const amaUid = me.people.find((u) => u.name === 'Ama').uid;
+  log(me.people.length === 2 && !(await request('GET', '/api/me', { headers: { Authorization: 'Bearer ' + ama } })).json.people,
+    'only the owner sees who has a space');
+  r = await jpost('/api/people/reset', { uid: amaUid }, ama);
+  log(r.status === 403, 'only the owner can reset a password');
+  r = await jpost('/api/people/reset', { uid: amaUid }, owner);
+  const temp = r.json && r.json.password;
+  log(!!temp && (await request('GET', '/api/videos', { headers: { Authorization: 'Bearer ' + ama } })).status === 401, 'a reset signs that person out');
+  r = await jpost('/api/login', { name: 'Ama', password: temp });
+  const ama2 = r.json && r.json.token;
+  r = await jpost('/api/me/password', { current: temp, password: 'my-own-pass' }, ama2);
+  log(!!ama2 && r.json && r.json.ok, 'the new password works, and they can choose their own');
+  r = await jpost('/api/people/remove', { uid: amaUid }, owner);
+  log(r.json && r.json.ok && (await request('GET', '/api/videos', { headers: { Authorization: 'Bearer ' + ama2 } })).status === 401
+    && !fs.existsSync(aFile) && fs.existsSync(oFile), 'removing a space signs them out and deletes only their files');
 
   /* ───────────── teardown ───────────── */
   cloud.stop();

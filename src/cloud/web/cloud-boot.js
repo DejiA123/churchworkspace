@@ -704,37 +704,147 @@ let _hideTimer = null;
 
   /* -------------------------------------------------------------- signing in */
 
-  function signedOut() {
+  /*
+   * SIGNING IN TO YOUR OWN SPACE. A name and a password (cloud-api.js,
+   * "accounts"); "New here" makes a space, which needs the church's access code
+   * as well. The very first space on a studio is the owner's and keeps what was
+   * already there. `gateMode` is which of the two the card is showing.
+   */
+  let gateMode = 'signin';
+  const NAME_KEY = 'mw.cloud.name';
+  function setGateMode(mode, firstEver) {
+    gateMode = mode === 'create' ? 'create' : 'signin';
+    const form = $('#cloudGateForm'); if (!form) return;
+    form.classList.toggle('mode-create', gateMode === 'create');
+    $$('#cloudGateTabs .cg-tab').forEach((t) => t.classList.toggle('on', t.dataset.gmode === gateMode));
+    const tabs = $('#cloudGateTabs'); if (tabs) tabs.classList.toggle('hidden', !!firstEver);
+    const note = $('#cloudGateNote');
+    if (note) {
+      note.textContent = firstEver
+        ? 'You are the first here. Make your space: it is the owner’s, and keeps everything already on the studio.'
+        : gateMode === 'create' ? 'Your own space: your videos, exports, captions and posts, and nobody else’s.' : '';
+      note.classList.toggle('hidden', !note.textContent);
+    }
+    const pw = $('#cloudPw'); if (pw) pw.setAttribute('autocomplete', gateMode === 'create' ? 'new-password' : 'current-password');
+    const go = $('#cloudGateGo'); if (go) go.textContent = gateMode === 'create' ? 'Create my space' : 'Sign in';
+    const msg = $('#cloudGateMsg'); if (msg) { msg.textContent = ''; msg.className = 'cloud-gate-msg'; }
+  }
+
+  function signedOut(why) {
     token = '';
     try { localStorage.removeItem(TOKEN_KEY); } catch (e) {}
     const gate = $('#cloudGate');
     if (gate) gate.classList.remove('gone');
+    setGateMode('signin', cloud.hello && cloud.hello.accounts === 0);
     const msg = $('#cloudGateMsg');
-    if (msg) { msg.textContent = 'Signed out. Enter the access code again.'; msg.className = 'cloud-gate-msg'; }
+    if (msg) { msg.textContent = why || 'Signed out. Sign in to your space again.'; msg.className = 'cloud-gate-msg'; }
   }
 
-  async function signIn(code, remember) {
+  async function signIn(remember) {
     const msg = $('#cloudGateMsg');
     const btn = $('#cloudGateGo');
-    if (btn) { btn.disabled = true; btn.textContent = 'Opening…'; }
+    const label = btn ? btn.textContent : '';
+    const name = ($('#cloudName') || {}).value || '';
+    const password = ($('#cloudPw') || {}).value || '';
+    const code = String(($('#cloudPass') || {}).value || '').trim().toLowerCase().replace(/\s+/g, '-');
+    if (btn) { btn.disabled = true; btn.textContent = gateMode === 'create' ? 'Making your space…' : 'Opening…'; }
     if (msg) { msg.textContent = ''; msg.className = 'cloud-gate-msg'; }
     try {
+      const body = gateMode === 'create'
+        ? { create: true, name, password, code, remember: !!remember }
+        : { name, password, remember: !!remember };
       const res = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, remember: !!remember }),
+        body: JSON.stringify(body),
       });
       const out = await res.json();
-      if (!res.ok || !out.token) throw new Error(out.error || 'That code is not right.');
+      if (!res.ok || !out.token) throw new Error(out.error || 'That did not work — check your name and password.');
       token = out.token;
-      try { localStorage.setItem(TOKEN_KEY, token); } catch (e) {}
+      try { localStorage.setItem(TOKEN_KEY, token); localStorage.setItem(NAME_KEY, name.trim()); } catch (e) {}
+      cloud.me = out.me || null;
+      if (cloud.hello) { cloud.hello.me = cloud.me; cloud.hello.accounts = Math.max(1, cloud.hello.accounts || 0); }
       $('#cloudGate').classList.add('gone');
       await startStudio();
     } catch (e) {
       if (msg) { msg.textContent = e.message || String(e); msg.className = 'cloud-gate-msg bad'; }
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Open'; }
+      if (btn) { btn.disabled = false; btn.textContent = label || 'Sign in'; }
     }
+  }
+
+  /* ------------------------------------------------------------ your space */
+
+  /*
+   * The person menu: who is signed in, a new password, signing out — and for
+   * the owner, the people with spaces here (a new password for someone who
+   * forgot theirs; removing a space when someone leaves).
+   */
+  async function api(pathname, body) {
+    const res = await fetch(pathname, {
+      method: body ? 'POST' : 'GET',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(out.error || 'That did not work.');
+    return out;
+  }
+  async function openProfile() {
+    let info = null;
+    try { info = await api('/api/me'); } catch (e) { info = { me: cloud.me }; }
+    const me = info.me || cloud.me;
+    const panel = openPanel({ id: 'cloudProfile', title: 'Your space', cls: 'cp-profile' });
+    const paint = () => {
+      const people = (info.people || []).filter((u) => !me || u.uid !== me.uid);
+      panel.body.innerHTML = `<div class="pf-me"><span class="pf-ava">${escHtml(((me && me.name) || '?').charAt(0).toUpperCase())}</span>`
+        + `<span class="pf-tx"><b>${escHtml((me && me.name) || 'This studio')}</b><small>${me ? (me.owner ? 'Owner · your space keeps the studio’s own files' : 'Your own space — only you see your work') : 'Signed in with the access code'}</small></span></div>`
+        + (me ? `<div class="pf-sec"><b>Change your password</b>`
+          + '<input type="password" class="pf-in" id="pfCur" placeholder="current password" autocomplete="current-password" />'
+          + '<input type="password" class="pf-in" id="pfNew" placeholder="new password (6+ characters)" autocomplete="new-password" />'
+          + '<button type="button" class="pf-btn" data-pf="pass">Save new password</button></div>' : '')
+        + (me && me.owner ? `<div class="pf-sec"><b>People with a space here</b>${people.length ? '' : '<small class="pf-empty">Nobody else yet. Share the studio’s address and access code, and they tap “New here”.</small>'}`
+          + people.map((u) => `<div class="pf-person" data-uid="${escAttr(u.uid)}"><span class="pf-ava sm">${escHtml(u.name.charAt(0).toUpperCase())}</span>`
+            + `<span class="pf-pname">${escHtml(u.name)}</span>`
+            + '<button type="button" class="pf-mini" data-pf="reset">New password</button>'
+            + '<button type="button" class="pf-mini danger" data-pf="remove">Remove</button></div>').join('') + '</div>' : '')
+        + `<button type="button" class="pf-out" data-pf="out">${mi('x')}Sign out</button>`;
+    };
+    paint();
+    panel.body.addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-pf]'); if (!b) return;
+      const act = b.dataset.pf;
+      const row = b.closest('.pf-person'); const uid = row && row.dataset.uid;
+      const who = uid && (info.people || []).find((u) => u.uid === uid);
+      try {
+        if (act === 'out') {
+          try { await api('/api/logout', {}); } catch (er) {}
+          closePanel(panel, true);
+          signedOut('Signed out. Sign in to your space again.');
+          setTimeout(() => location.reload(), 300);
+          return;
+        }
+        if (act === 'pass') {
+          await api('/api/me/password', { current: $('#pfCur').value, password: $('#pfNew').value });
+          island({ kind: 'good', title: 'Password changed' });
+          paint();
+          return;
+        }
+        if (act === 'reset' && who) {
+          if (!window.confirm(`Give ${who.name} a new password? Their old one stops working.`)) return;
+          const r = await api('/api/people/reset', { uid });
+          island({ kind: 'good', title: `New password for ${who.name}: ${r.password}`, sub: 'Tell them — they can change it in Your space after signing in.', sticky: true });
+          return;
+        }
+        if (act === 'remove' && who) {
+          if (!window.confirm(`Remove ${who.name}’s space? Their uploads, exports, sessions and posts are deleted for good.`)) return;
+          await api('/api/people/remove', { uid });
+          info.people = (info.people || []).filter((u) => u.uid !== uid);
+          island({ kind: 'good', title: `${who.name}’s space was removed` });
+          paint();
+        }
+      } catch (er) { island({ kind: 'error', title: er.message || String(er) }); }
+    });
   }
 
   /* ------------------------------------------------- choosing a file to open */
@@ -2605,8 +2715,9 @@ let _hideTimer = null;
 
     on('#cloudGateForm', 'submit', (e) => {
       e.preventDefault();
-      signIn($('#cloudPass').value.trim().toLowerCase().replace(/\s+/g, '-'), $('#cloudRemember').checked);
+      signIn($('#cloudRemember').checked);
     });
+    on('#cloudGateTabs', 'click', (e) => { const t = e.target.closest('[data-gmode]'); if (t) setGateMode(t.dataset.gmode); });
     on('#cloudFiles', 'click', () => openFilesModal());
     on('#cloudFilesClose', 'click', closeFilesModal);
     on('#cloudFilesRefresh', 'click', () => refreshFiles());
@@ -2762,7 +2873,7 @@ let _hideTimer = null;
     call, island, islandHide, toast, toastText, openPanel, closePanel, panelOf,
     offerDownload, pickFiles, chooseFromDevice, refreshFiles, downloadUrl,
     mi, esc: escHtml, escAttr, jobChip: makeJobChip, jobList, jobPct: overallPct, openJobs: openJobsSheet,
-    authHeaders, fileUrl: (p) => window.MW_FILE_URL(p), viewFile,
+    authHeaders, fileUrl: (p) => window.MW_FILE_URL(p), viewFile, openProfile,
   });
 
   /* The version this page was built from, off this script's own URL — the page
@@ -2789,15 +2900,19 @@ let _hideTimer = null;
     catch (e) { hello = null; }
     cloud.hello = hello;
 
+    cloud.me = (hello && hello.me) || null;
     if (hello && hello.signedIn) {
       $('#cloudGate').classList.add('gone');
       await startStudio();
     } else {
+      // no spaces yet: the first one is made here, and it is the owner's
+      setGateMode(hello && hello.accounts === 0 ? 'create' : 'signin', !!hello && hello.accounts === 0);
+      try { const n = localStorage.getItem(NAME_KEY); if (n && $('#cloudName')) $('#cloudName').value = n; } catch (e) {}
       if (!hello) {
         const msg = $('#cloudGateMsg');
         if (msg) { msg.textContent = 'Cannot reach the studio machine. Is it switched on?'; msg.className = 'cloud-gate-msg bad'; }
       }
-      const pass = $('#cloudPass');
+      const pass = $('#cloudName') && $('#cloudName').value ? $('#cloudPw') : $('#cloudName');
       // Only invite the keyboard on a real keyboard's device — a phone popping
       // one up over the sign-in card on arrival is nobody's idea of welcoming.
       if (pass && !window.matchMedia('(max-width: 900px)').matches) pass.focus();
