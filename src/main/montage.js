@@ -716,10 +716,11 @@ function spreadPhotos(shots) {
   // are more photos than that, so they do not pile up between the clips
   const capAt = (every) => vids.map((v) => Math.max(0, (v.seconds >= OV_LEN + 2.5 ? Math.max(1, Math.floor((v.seconds - 1.5) / every)) : 0) - (v.ovReq || []).length));
   let cap = capAt(OV_EVERY);
-  for (let every = OV_EVERY - 0.5; every >= 5 - 1e-9 && cap.reduce((a, b) => a + b, 0) + 2 * Math.max(1, vids.length - 1) < movable.length; every -= 0.5) cap = capAt(every);
+  for (let every = OV_EVERY - 0.5; every >= 5 - 1e-9 && cap.reduce((a, b) => a + b, 0) < movable.length; every -= 0.5) cap = capAt(every);
   const total = cap.reduce((a, b) => a + b, 0);
   // a few always stand between the videos — a breath between clips
-  const stand = Math.max(movable.length - total, Math.min(vids.length - 1, Math.floor(movable.length / 5)));
+  // every photo goes ON a clip; one stands alone only when the clips are full
+  const stand = Math.max(0, movable.length - total);
   const onTop = movable.length - stand;
   // overlay pictures shared across the videos by how much each can carry, in order
   // every clip that can carry one gets one first, then the rest by how much more each can take
@@ -768,6 +769,56 @@ function spreadPhotos(shots) {
     }
   });
   while (p < movable.length) shots.push(movable[p++]);      // (only if every count above was short)
+}
+
+/*
+ * ►► A TIMED MONTAGE LAYS ITS PHOTOS OVER THE CLIPS TOO. ◄◄
+ * With a length chosen (15 s … 10 min) the photos the director picked stood
+ * as their own shots — in a test with 30 photos, none over a clip and half of
+ * them after the last one. They now go ON the video shots, spread through the
+ * edit, while the clip's sound carries on; the time they took is given back
+ * to the video shots (as far as each has footage), so the length is still
+ * the one asked for. The opening shot keeps its hook clear.
+ */
+function layPhotosOverClips(shots) {
+  const isVid = (s) => s.cand.kind === 'video';
+  const vids = shots.filter(isVid);
+  const pics = shots.filter((s) => !isVid(s));
+  if (!vids.length || !pics.length) return;
+  let freed = pics.reduce((n, s) => n + s.seconds, 0);
+  for (const m of pics) shots.splice(shots.indexOf(m), 1);
+  // a picture the director already laid over a clip is not laid a second time
+  const already = new Set(vids.flatMap((v) => (v.ovReq || []).map((o) => o.cand.id)));
+  for (let k = pics.length - 1; k >= 0; k--) if (already.has(pics[k].cand.id)) pics.splice(k, 1);
+  // the freed time back to the clips, each up to the footage it has
+  for (let pass = 0; pass < 4 && freed > 0.05; pass++) {
+    const room = vids.map((v) => Math.max(0, (v.cand.fileDur - 0.05) * (v.slow ? 2 : 1) - v.seconds));
+    const total = room.reduce((a, b) => a + b, 0);
+    if (total <= 0.05) break;
+    const give = Math.min(freed, total);
+    vids.forEach((v, i) => { const add = (room[i] / total) * give; v.seconds += add; });
+    freed -= give;
+  }
+  // which clips carry them: spread through the edit, skipping the hook
+  const hosts = vids.filter((v, i) => v.seconds >= 1.5 && !(shots.indexOf(v) === 0 && vids.length > 1));
+  if (!hosts.length) return;
+  const capOf = (v) => Math.max(1, Math.floor((v.seconds - 0.5) / 4));
+  // round the clips, one picture at a time, so they spread through the edit
+  const want = hosts.map(() => 0);
+  let left = pics.length;
+  for (let k = 0; left > 0 && k < pics.length * hosts.length; k++) {
+    const j = k % hosts.length;
+    if (want[j] < capOf(hosts[j])) { want[j]++; left--; }
+  }
+  let p = 0, styleN = 0;
+  hosts.forEach((v, j) => {
+    const n = want[j];
+    for (let i = 0; i < n && p < pics.length; i++) {
+      const seg = v.seconds / n;
+      const len = clamp(seg * 0.65, 1, OV_LEN);
+      v.ovReq.push({ cand: pics[p++].cand, style: (++styleN % 3 === 0) ? 'pip' : 'cutaway', start: i * seg + (seg - len) / 2, seconds: len });
+    }
+  });
 }
 
 /*
@@ -875,6 +926,7 @@ function finalise(raw, cands, opts, music) {
     const room = sh.cand.kind === 'video' ? Math.max(0, Math.floor((sh.seconds - 1.5) / (OV_LEN + 1))) : 0;
     if (sh.ovReq.length > room) sh.ovReq = sh.ovReq.sort((a, b) => (a.start || 0) - (b.start || 0)).slice(0, room);
   }
+  if (!opts.full) layPhotosOverClips(shots);
   if (opts.full) {
     // nothing the operator gave is left out, even if the director skipped it
     // (a photo shown as an overlay counts as shown)
@@ -946,7 +998,7 @@ function finalise(raw, cands, opts, music) {
   // first second, and on the beat when there is a song
   shots.forEach((base, i) => {
     base.overlays = [];
-    if (base.cand.kind !== 'video' || base.seconds < 2.2) return;
+    if (base.cand.kind !== 'video' || base.seconds < (opts.full ? 2.2 : 1.5)) return;
     const reqs = (base.ovReq || []).filter((o) => o.cand.id !== base.cand.id)
       .map((o) => ({ ...o, start: Number.isFinite(o.start) ? o.start : 0.8 })).sort((a, b) => a.start - b.start);
     let free = i === 0 ? 1.2 : 0.3;
@@ -963,7 +1015,7 @@ function finalise(raw, cands, opts, music) {
       }
       start = round2(start);
       len = round2(Math.min(len, base.seconds - start - 0.15));
-      if (len < 1 || start < free - 1e-6) continue;
+      if (len < (opts.full ? 1 : 0.8) || start < free - 1e-6) continue;
       const ov = { cand: o.cand, style: OVERLAY_STYLES.includes(o.style) ? o.style : 'cutaway', start, len, pos: ((i + base.overlays.length) % 2 ? 'left' : 'right') };
       if (o.cand.kind === 'video') ov.from = round2(clamp(o.cand.peak - len / 2, 0, Math.max(0, o.cand.fileDur - len - 0.05)));
       base.overlays.push(ov);
@@ -975,7 +1027,12 @@ function finalise(raw, cands, opts, music) {
   for (const x of (raw.texts || [])) {
     // the director counted ITS shots; follow that shot to where it ended up
     const ri = Math.round(Number(x && x.at_shot));
-    const i = fromRaw.has(ri) ? shots.indexOf(fromRaw.get(ri)) : ri;
+    let i = fromRaw.has(ri) ? shots.indexOf(fromRaw.get(ri)) : ri;
+    // its shot became a picture laid over a clip: the words go with the next shot still there
+    if (i < 0 && fromRaw.has(ri)) {
+      for (let r = ri + 1; i < 0 && fromRaw.has(r); r++) i = shots.indexOf(fromRaw.get(r));
+      for (let r = ri - 1; i < 0 && r >= 0; r--) if (fromRaw.has(r)) i = shots.indexOf(fromRaw.get(r));
+    }
     const text = String((x && x.text) || '').replace(/\s+/g, ' ').trim().slice(0, 80);
     if (!text || !(i >= 0 && i < shots.length)) continue;
     const span = clamp(Math.round(Number(x.span_shots) || 1), 1, shots.length - i);
