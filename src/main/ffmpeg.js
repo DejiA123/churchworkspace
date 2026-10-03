@@ -70,6 +70,19 @@ function capThreads(args) {
    */
   for (const a of args.slice(0, -1)) { if (a === '-i') out.push('-threads', '1'); out.push(a); }
   if (enc >= 0) out.push('-threads', String(n));
+  /*
+   * ►► 'veryfast', NOT 'medium', ON A SMALL SERVER. ◄◄
+   *
+   * 'medium' is right on the church PC. On a cloud box with half a CPU it
+   * encoded a 1080p service at a few frames a second: an hour-long export took
+   * hours, and to the person holding the phone that is an export that never
+   * finishes. 'veryfast' is about four times quicker at the same CRF (the same
+   * look; the file is somewhat larger) and needs less memory, since it
+   * compares fewer reference frames.
+   */
+  for (let i = 0; i < out.length - 1; i++) {
+    if (out[i] === '-preset' && x264 && /^(medium|slow|slower|veryslow|fast|faster)$/.test(String(out[i + 1]))) out[i + 1] = 'veryfast';
+  }
   if (x264 && !args.includes('-rc-lookahead') && !args.includes('-x264-params')) out.push('-rc-lookahead', '10');
   out.push(args[args.length - 1]);
   return out;
@@ -109,6 +122,19 @@ function ffRelease() {
   }
 }
 /** Run `start` (which returns a promise for one ffmpeg) once a slot is free. */
+/*
+ * The encoders run BELOW the server in priority. On a small cloud box (half a
+ * CPU) an x264 encode takes every cycle there is, and the server that has to
+ * answer the phone, the progress stream and the host's health check was left
+ * queuing behind it: pages timed out, and a host that sees its health check
+ * time out restarts the box — taking the export with it. Niceness only matters
+ * when the two compete, so an encode on its own runs exactly as fast.
+ */
+function lowPriority(proc, nice = 10) {
+  try { if (proc && proc.pid) require('os').setPriority(proc.pid, nice); } catch (e) {}
+  return proc;
+}
+
 async function gated(start) {
   await ffAcquire();
   if (jobs.isCancelled()) { ffRelease(); throw new jobs.CancelledError(); }
@@ -116,12 +142,20 @@ async function gated(start) {
 }
 
 function runFfmpeg(ffmpegPath, args, opts = {}) {
+  /*
+   * `background`: work nobody is waiting on to finish (the preview copy of a
+   * recording the phone cannot play). It is light — ultrafast, one thread,
+   * under 100 MB — but long, and in the queue it made every export wait behind
+   * an hour of it. So it does not take a turn: it runs beside the encoders at
+   * the lowest priority, and an export starting gets nearly all of the CPU.
+   */
+  if (opts.background) return runFfmpegNow(ffmpegPath, args, opts);
   return gated(() => runFfmpegNow(ffmpegPath, args, opts));
 }
-function runFfmpegNow(ffmpegPath, args, { onProgress, totalDurationSec, signal, cwd } = {}) {
+function runFfmpegNow(ffmpegPath, args, { onProgress, totalDurationSec, signal, cwd, background } = {}) {
   args = capThreads(args);
   return new Promise((resolve, reject) => {
-    const proc = jobs.track(spawn(ffmpegPath, args, { windowsHide: true, cwd }));
+    const proc = lowPriority(jobs.track(spawn(ffmpegPath, args, { windowsHide: true, cwd })), background ? 19 : 10);
     let stderr = '';
 
     if (signal) {
@@ -160,7 +194,7 @@ function runFfmpegCollect(ffmpegPath, args, opts = {}) {
 }
 function runFfmpegCollectNow(ffmpegPath, args, { cwd } = {}) {
   return new Promise((resolve, reject) => {
-    const proc = jobs.track(spawn(ffmpegPath, args, { windowsHide: true, cwd }));
+    const proc = lowPriority(jobs.track(spawn(ffmpegPath, args, { windowsHide: true, cwd })));
     let stderr = '';
     proc.stderr.on('data', (d) => { stderr += d.toString(); });
     proc.on('error', (err) => reject(new Error('Could not start ffmpeg: ' + err.message)));
@@ -185,4 +219,4 @@ function probe(ffprobePath, input) {
   });
 }
 
-module.exports = { resolveFfmpeg, resolveFfprobe, runFfmpeg, runFfmpegCollect, probe, capThreads, gated, _ffState: () => ({ running: ffRunning, queued: ffQueue.length, slots: ffSlots() }) };
+module.exports = { lowPriority, resolveFfmpeg, resolveFfprobe, runFfmpeg, runFfmpegCollect, probe, capThreads, gated, _ffState: () => ({ running: ffRunning, queued: ffQueue.length, slots: ffSlots() }) };

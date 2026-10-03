@@ -149,41 +149,91 @@ let _hideTimer = null;
    * unwraps, including the cancelled flag — so a job the operator stopped reads
    * as "stopped" here too, and not as "ffmpeg crashed".
    */
-  async function call(channel, args) {
-    const packed = pack({ channel, args: args || {} });
-    let res;
-    try {
-      res = await fetch('/api/rpc', {
-        method: 'POST',
-        headers: Object.assign({ 'Content-Type': packed.type }, authHeaders()),
-        body: packed.body,
-      });
-    } catch (e) {
-      setLink(false);
-      // The job itself is running on the studio machine and is NOT affected by
-      // this browser losing signal — saying "failed" would be a lie that makes
-      // people re-run a twenty-minute export.
-      const err = new Error('Lost the connection to the studio. The job may still be running there — it will reappear when you are back.');
-      err.offline = true;
-      throw err;
-    }
-    setLink(true);
-    if (res.status === 401) { signedOut(); throw new Error('Signed out.'); }
+  /*
+   * ►► A CALL SURVIVES THE PHONE LOCKING. ◄◄
+   *
+   * Each call carries a name (`X-MW-Call`) and the studio keeps its answer, so
+   * a long one — an export above all — no longer depends on one request staying
+   * open for twenty minutes. The studio answers "still working" (202) after a
+   * while and this page keeps asking; if the connection drops (screen locked,
+   * app in the background, signal gone) it waits and asks again, and the answer
+   * is still there. See "calls that outlive a request" in cloud-api.js.
+   */
+  const newCallId = () => {
+    const b = new Uint8Array(12);
+    (window.crypto || {}).getRandomValues ? crypto.getRandomValues(b) : b.forEach((_, i) => { b[i] = Math.random() * 256; });
+    return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  };
+  const pause = (ms) => new Promise((resolve) => {
+    // coming back to the app is the moment to try, not the end of a back-off
+    const back = () => { if (document.visibilityState === 'visible') done(); };
+    const done = () => { clearTimeout(t); document.removeEventListener('visibilitychange', back); window.removeEventListener('online', done); resolve(); };
+    const t = setTimeout(done, ms);
+    document.addEventListener('visibilitychange', back);
+    window.addEventListener('online', done);
+  });
+  // How long a call may go unanswered by an UNREACHABLE studio before giving up.
+  const GIVE_UP_MS = 6 * 3600 * 1000;
+
+  const answerOf = async (res, channel) => {
     const ct = res.headers.get('content-type') || '';
-    // Anything but our own answer is the HOST talking, not the studio: a 502
-    // page because the server restarted (out of memory, most often) or is
-    // still deploying. Parsing it as JSON gave "<!DOCTYPE … is not valid JSON"
-    // on Chrome and "The string did not match the expected pattern" on Safari.
-    if (ct.indexOf('x-mw-rpc') < 0 && ct.indexOf('json') < 0) {
-      throw new Error('The studio server did not answer (HTTP ' + res.status + '). It may have restarted — '
-        + 'often because it ran out of memory on a long video. Wait a minute and try again; if it keeps '
-        + 'happening, give the server more memory.');
-    }
     const env = ct.indexOf('x-mw-rpc') >= 0 ? unpack(await res.arrayBuffer()) : await res.json();
     if (env && env.ok) return env.data;
     const err = new Error((env && env.error) || ('Unknown error in ' + channel));
     if (env && env.cancelled) err.cancelled = true;
     throw err;
+  };
+
+  async function call(channel, args) {
+    const packed = pack({ channel, args: args || {} });
+    const id = newCallId();
+    const post = () => fetch('/api/rpc', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': packed.type, 'X-MW-Call': id }, authHeaders()),
+      body: packed.body,
+    });
+    const ask = () => fetch('/api/rpc/wait?call=' + id, { headers: authHeaders(), cache: 'no-store' });
+    let sent = false;   // the studio is known to have this call
+    let unsure = false; // the POST may or may not have arrived
+    let lostAt = 0;
+    let delay = 1000;
+    for (;;) {
+      let res = null;
+      try { res = await (sent || unsure ? ask() : post()); } catch (e) { res = null; }
+      const ct = res ? (res.headers.get('content-type') || '') : '';
+      // anything but our own answer is the HOST (a 502 page while it restarts)
+      const ours = !!res && (ct.indexOf('x-mw-rpc') >= 0 || ct.indexOf('json') >= 0);
+      if (ours) {
+        setLink(true);
+        lostAt = 0;
+        if (res.status === 401) { signedOut(); throw new Error('Signed out.'); }
+        if (res.status === 200) return answerOf(res, channel);
+        if (res.status === 202) { sent = true; unsure = false; delay = 1000; continue; }
+        if (res.status === 404 && unsure && !sent) { unsure = false; continue; } // never arrived: send it
+        if (res.status === 404 && sent) {
+          throw new Error('The studio server restarted while doing this, so it was lost — most often because it ran out of '
+            + 'memory on a long video. Please try again; if it keeps happening, give the server more memory.');
+        }
+        let env = null;
+        try { env = await res.json(); } catch (e) { env = null; }
+        throw new Error((env && env.error) || ('The studio refused this (HTTP ' + res.status + ').'));
+      }
+      /*
+       * No answer at all, or the host's error page. The work may well still be
+       * running on the studio, so wait and ask again rather than calling it a
+       * failure — the call is named, so asking cannot start it twice.
+       */
+      setLink(false);
+      if (!sent) unsure = true;
+      if (!lostAt) lostAt = Date.now();
+      if (Date.now() - lostAt > GIVE_UP_MS) {
+        const err = new Error('Lost the connection to the studio. The job may still be running there — it will reappear when you are back.');
+        err.offline = true;
+        throw err;
+      }
+      await pause(delay);
+      delay = Math.min(10000, delay * 2);
+    }
   }
 
   /* ------------------------------------------------------- files as URLs */
