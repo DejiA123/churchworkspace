@@ -19,26 +19,16 @@
 
 body.mw-cloud { overflow: hidden; }
 
-/*
- * An iPhone home-screen app that was handed a screen short by the status bar's
- * height (cloud-boot.js, vpFix): the page is laid out on the WHOLE screen. The
- * body takes the screen's real height and, by being transformed, becomes what
- * everything pinned to the bottom is measured from — the dock, the sheets, the
- * panels — so they sit on the real bottom edge instead of 59 points above it.
- * Fixed, so it adds nothing for the page to scroll by.
- */
-html.mw-vpfix body.mw-cloud {
-  position: fixed; top: 0; left: 0; right: 0;
-  height: var(--vp-h, 100%);
-  transform: translateZ(0);
-}
-html.mw-vpfix body.mw-cloud #app { height: 100%; }
-
 body.mw-cloud #app {
   display: block;
   height: 100vh;
   height: 100dvh;                 /* a phone's address bar is not a wall */
   padding-top: 46px;              /* the cloud bar */
+}
+/* A home-screen app has no address bar, and iOS can report 100dvh short for a
+   moment after launch; 100vh is the one that is right from the first frame. */
+@media (display-mode: standalone) {
+  body.mw-cloud #app { height: 100vh; }
 }
 body.mw-cloud .content {
   height: 100%;
@@ -410,9 +400,9 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
     --ph-top: calc(52px + env(safe-area-inset-top));
     --ph-tr: 42px;
     --ph-tl: clamp(140px, 26dvh, 232px);
-    /* The tools sit down by the home bar, as CapCut's do: the home bar's own
-       clearance (34px on an iPhone) is mostly air, so only part of it is kept. */
-    --ph-safe-b: max(4px, calc(env(safe-area-inset-bottom) - 18px));
+    /* The tools stand on the home bar's clearance, as CapCut's do: on an
+       iPhone that is 34pt, and CapCut's labels end just above it. */
+    --ph-safe-b: max(4px, env(safe-area-inset-bottom));
     --ph-dock: calc(58px + var(--ph-safe-b));
     --ph-sheet: calc(var(--ph-tl) + var(--ph-dock));
     background: var(--ph-bg);
@@ -425,6 +415,11 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
   }
   body.mw-cloud button, body.mw-cloud select, body.mw-cloud input, body.mw-cloud textarea { font-family: inherit; }
   body.mw-cloud.mw-sheet-tall { --ph-sheet: min(78dvh, calc(100dvh - var(--ph-top) - 120px)); }
+  /* A home-screen install made before the status bar went opaque: iOS gives it
+     a window that stops a status bar short of the screen, with the home bar
+     down in the dead strip below (vpFix in cloud-boot.js). The dock keeps
+     tight to the bottom it was given rather than leaving more air above it. */
+  html.mw-vpshort body.mw-cloud { --ph-safe-b: 2px; }
   body.mw-cloud input, body.mw-cloud textarea, body.mw-cloud [contenteditable] { -webkit-user-select: text; user-select: text; }
 
   /* ---------------------------------------------------------- the frame */
@@ -735,12 +730,12 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
     display: flex; flex-direction: column; align-items: center; gap: 5px;
     background: transparent; border: 0; border-radius: 12px;
     color: #e4e5e9;
-    font-weight: 500; font-size: 10.5px; line-height: 1.15; font-family: inherit;
+    font-weight: 500; font-size: 11.5px; line-height: 1.15; font-family: inherit;
     letter-spacing: .1px;
     white-space: nowrap;
     cursor: pointer;
   }
-  .cloud-tool .mi { width: 23px; height: 23px; margin: 0; }
+  .cloud-tool .mi { width: 24px; height: 24px; margin: 0; }
   .cloud-tool:active { background: var(--ph-panel-2); }
   .cloud-tool:disabled { color: #4a4c55; }
   .cloud-tool.on { color: var(--ph-accent-text); }
