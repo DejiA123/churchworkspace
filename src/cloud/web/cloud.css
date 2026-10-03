@@ -677,11 +677,26 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
   }
+  /*
+   * ►► SIDEWAYS ONLY, SO UP-AND-DOWN REACHES THE TIMELINE. ◄◄
+   * `overflow-y: visible` beside `overflow-x: auto` is computed as AUTO, so this
+   * row was a vertical scroller too — with nothing to scroll. iOS hands a swipe
+   * to the innermost scroller and keeps it there: the finger bounced this row
+   * and the timeline behind it, the one with the music lane below the fold,
+   * never moved. Hidden makes it a sideways-only scroller (a carousel), and
+   * vertical swipes go up to .ve-timeline, which is the one that scrolls.
+   */
   body.mw-cloud #view-video.ve-pro .ve-tl-scroll {
-    padding: 2px 10px 12px;
-    overflow-y: visible;
+    padding: 2px 10px 18px;
+    overflow-y: hidden;
+    min-height: 0; height: auto;
     touch-action: pan-x pan-y;
     scrollbar-width: none;
+  }
+  /* more lanes below the fold: a soft edge says so */
+  body.mw-cloud #view-video.ve-pro .ve-timeline.cloud-tl-more {
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), rgba(0,0,0,.35));
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), rgba(0,0,0,.35));
   }
   body.mw-cloud #view-video.ve-pro .ve-tl-scroll::-webkit-scrollbar { display: none; }
   body.mw-cloud #view-video.ve-pro .ve-ruler { height: 22px; border-bottom-color: transparent; }
