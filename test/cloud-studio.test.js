@@ -637,6 +637,33 @@ async function run() {
   log(ob && !seenByAma.some((x) => x.id === ob.id), 'a server batch is its owner’s: nobody else sees it');
   r = await as(ama, 'batch:cancel', { id: ob.id });
   log(r.ok === false, 'nor can stop it');
+  // everyone at once: each person's dials, each person's exports, nobody touches the shared models
+  await as(ama, 'video:setExportPrefs', { fps: 60, rate: 'higher' });
+  const oPrefs = (await as(owner, 'video:getExportPrefs', {})).data, aPrefs = (await as(ama, 'video:getExportPrefs', {})).data;
+  log(oPrefs.fps === 0 && aPrefs.fps === 60, 'export dials are each person’s own (60 fps for one is not 60 fps for all)', `${oPrefs.fps} / ${aPrefs.fps}`);
+  r = await as(ama, 'captions:removeModel', { id: 'tiny.en' });
+  log(r.ok === false && /owner/.test(r.error || ''), 'only the owner can remove a speech model everyone shares');
+  // Ama's own video, in her own space (the owner's recording is not hers to use)
+  const amaVid = (await request('POST', `/api/upload?name=ama-real.mp4&id=amareal1&size=${bytes.length}&offset=0`, {
+    headers: { 'Content-Type': 'application/octet-stream', Authorization: 'Bearer ' + ama }, body: bytes })).json.path;
+  const rec2 = (label, input) => [{ channel: 'sermon:exportShort', args: { input, startSec: 1, endSec: 3, preset: 'reel-9x16', quality: '720p', label, jobId: 'x' } }];
+  r = await as(ama, 'batch:open', { label: 'Sneaky', total: 1 });
+  r = await as(ama, 'batch:add', { id: r.data.id, label: 'Sneaky', steps: rec2('Sneaky', sermon) });
+  log(r.ok === false, 'nobody can put someone else’s video in their export recipe');
+  const [bo, ba] = [(await as(owner, 'batch:open', { label: 'O', total: 1 })).data, (await as(ama, 'batch:open', { label: 'A', total: 1 })).data];
+  await Promise.all([as(owner, 'batch:add', { id: bo.id, label: 'Owner short', steps: rec2('Owner', sermon) }), as(ama, 'batch:add', { id: ba.id, label: 'Ama short', steps: rec2('Ama', amaVid) })]);
+  await Promise.all([as(owner, 'batch:seal', { id: bo.id }), as(ama, 'batch:seal', { id: ba.id })]);
+  let fo = null, fa = null;
+  for (let i = 0; i < 240 && !(fo && fa); i++) {
+    fo = ((await as(owner, 'batch:list', {})).data || []).find((x) => x.id === bo.id && x.state === 'done') || null;
+    fa = ((await as(ama, 'batch:list', {})).data || []).find((x) => x.id === ba.id && x.state === 'done') || null;
+    if (!(fo && fa)) await sleep(500);
+  }
+  const oOut = fo && fo.items[0].output, aOut = fa && fa.items[0].output;
+  log(oOut && aOut && fs.existsSync(oOut) && fs.existsSync(aOut) && path.dirname(oOut) !== path.dirname(aOut),
+    'two people exporting on the server at the same time both finish, each into their own space', oOut && aOut && `${path.basename(path.dirname(oOut))} / ${path.basename(path.dirname(aOut))}`);
+  const aFiles = await filesOf(ama);
+  log(aFiles.includes(aOut) && !aFiles.includes(oOut), 'and each sees only their own in Files');
   const me = (await request('GET', '/api/me', { headers: { Authorization: 'Bearer ' + owner } })).json;
   const amaUid = me.people.find((u) => u.name === 'Ama').uid;
   log(me.people.length === 2 && !(await request('GET', '/api/me', { headers: { Authorization: 'Bearer ' + ama } })).json.people,

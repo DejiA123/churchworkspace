@@ -500,6 +500,91 @@ async function directWithClaude(cands, opts, music) {
   return plan ? { plan, director: 'claude', model: res.model || model } : null;
 }
 
+/*
+ * ►► GROQ LOOKS TOO. ◄◄
+ * Groq's free vision models take only a handful of pictures per request, so
+ * the candidate frames are laid out on CONTACT SHEETS — up to sixteen tiles
+ * each, every tile stamped with its id — and three sheets carry forty-odd
+ * moments in one look. The model then directs from what it SEES, like Claude
+ * does, instead of from a list of loudness numbers.
+ */
+let hasDrawtext = null; // not every ffmpeg build has it (the bundled one has no freetype)
+async function canDrawText(ctx) {
+  if (hasDrawtext !== null) return hasDrawtext;
+  try { const { stdout } = await collect(ctx.ffmpeg, ['-hide_banner', '-filters'], { stdout: true }); hasDrawtext = /\bdrawtext\b/.test(stdout.toString()); }
+  catch (e) { hasDrawtext = false; }
+  return hasDrawtext;
+}
+
+async function contactSheets(ctx, cands, tmp) {
+  let font = null;
+  try { const f = path.join(require('./captioner').fontsDir(), 'Poppins-Bold.ttf'); if (fs.existsSync(f) && await canDrawText(ctx)) font = f; } catch (e) {}
+  const esc = (t) => String(t).replace(/[\\:']/g, '\\$&');
+  const fontArg = font ? `:fontfile='${esc(font)}'` : '';
+  const tiles = [];
+  for (let i = 0; i < cands.length; i++) {
+    const c = cands[i];
+    const out = path.join(tmp, `tile-${String(i).padStart(3, '0')}.jpg`);
+    const label = font ? `,drawtext=text='${esc(c.id)}'${fontArg}:fontsize=34:fontcolor=yellow:box=1:boxcolor=black@0.75:boxborderw=6:x=8:y=8` : '';
+    const vf = `scale=256:256:force_original_aspect_ratio=decrease,pad=256:256:(ow-iw)/2:(oh-ih)/2:color=0x101014${label}`;
+    const args = c.thumb ? ['-hide_banner', '-y', '-i', c.thumb, '-vf', vf, '-frames:v', '1', '-q:v', '4', out]
+      : ['-hide_banner', '-y', '-f', 'lavfi', '-i', 'color=c=0x101014:s=256x256:d=1', '-vf', vf.replace(/^scale[^,]*,pad[^,]*/, 'null'), '-frames:v', '1', out];
+    try { await collect(ctx.ffmpeg, args); } catch (e) { if (e instanceof jobs.CancelledError) throw e; }
+    tiles.push(fs.existsSync(out) ? out : null);
+  }
+  const sheets = [];
+  for (let k = 0; k < tiles.length; k += 16) {
+    const group = tiles.slice(k, k + 16);
+    const dirK = path.join(tmp, `sheet-${k}`);
+    fs.mkdirSync(dirK, { recursive: true });
+    group.forEach((t, j) => { try { if (t) fs.copyFileSync(t, path.join(dirK, `t${String(j).padStart(3, '0')}.jpg`)); } catch (e) {} });
+    const cols = Math.min(4, group.length), rows = Math.ceil(group.length / cols);
+    const out = path.join(tmp, `sheet-${k}.jpg`);
+    try {
+      await collect(ctx.ffmpeg, ['-hide_banner', '-y', '-framerate', '1', '-i', path.join(dirK, 't%03d.jpg'),
+        '-vf', `tile=${cols}x${rows}:padding=4:color=0x000000`, '-frames:v', '1', '-q:v', '4', out]);
+    } catch (e) { if (e instanceof jobs.CancelledError) throw e; }
+    if (fs.existsSync(out)) sheets.push({ file: out, ids: cands.slice(k, k + 16).map((c) => c.id), cols });
+  }
+  return { sheets, labelled: !!font };
+}
+
+async function directWithGroqVision(cands, opts, music, ctx, tmp) {
+  let cw, see;
+  try { cw = require('./cloudwrite'); see = require('./cloudsee'); } catch (e) { return null; }
+  const a = cw.access && cw.access();
+  if (!a || !a.key || !a.url || !ctx || !tmp) return null;
+  const models = ((see.VISION && see.VISION[a.provider]) || []).slice(0, 3);
+  if (a.provider === 'custom' && a.model) models.unshift(a.model);
+  if (!models.length) return null;
+  const { sheets, labelled } = await contactSheets(ctx, cands, tmp);
+  if (!sheets.length) return null;
+  const where = sheets.map((sh, i) => `Sheet ${i + 1}: ${sh.ids.join(', ')} (${labelled ? 'each tile is stamped with its id' : `tiles in reading order, ${sh.cols} per row`})`).join('\n');
+  const prompt = briefOf(opts, music) + '\n\nCandidates:\n' + cands.map(describe).join('\n')
+    + '\n\nThe pictures are contact sheets of those candidates — look at them to choose:\n' + where
+    + '\n\nReply with JSON only, exactly this shape: {"concept":"","title":"","shots":[{"id":"c1","seconds":2,"effect":"cut","focus":"center","transition":"cut"}],'
+    + '"texts":[{"at_shot":0,"span_shots":1,"text":"","role":"hook"}],"overlays":[{"on_shot":1,"id":"c5","style":"cutaway","start":0.8,"seconds":2}],"post_caption":"","hashtags":[""]}. Effects: '
+    + EFFECTS.join(', ') + '. Transitions: ' + TRANSITIONS.join(', ') + '. Overlay styles: ' + OVERLAY_STYLES.join(', ') + '.';
+  const content = [{ type: 'text', text: prompt }];
+  for (const sh of sheets.slice(0, 4)) content.push({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + fs.readFileSync(sh.file).toString('base64') } });
+  for (const model of models) {
+    const body = { model, temperature: 0.7, max_tokens: 6000, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content }] };
+    if (/qwen3/i.test(model)) body.reasoning_effort = 'none';
+    let res;
+    try {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 120000);
+      try { res = await fetch(a.url, { method: 'POST', headers: a.headers, body: JSON.stringify(body), signal: ac.signal }); }
+      finally { clearTimeout(timer); }
+    } catch (e) { continue; }
+    if (!res || !res.ok) continue;
+    let j = null; try { j = await res.json(); } catch (e) { j = null; }
+    const plan = cw.parseJson(cw.textFrom(j) || '');
+    if (plan && Array.isArray(plan.shots) && plan.shots.length) return { plan, director: 'groq', model, vision: true };
+  }
+  return null;
+}
+
 /** The Groq model the studio already uses, reading descriptions (no pictures). */
 async function directWithGroq(cands, opts, music) {
   let cw;
@@ -581,10 +666,10 @@ function briefTexts(fb, n) {
   return out;
 }
 
-async function direct(cands, opts, music, log) {
-  for (const [name, fn] of [['Claude', directWithClaude], ['Groq', directWithGroq]]) {
+async function direct(cands, opts, music, log, ctx, tmp) {
+  for (const [name, fn] of [['Claude', directWithClaude], ['Groq (looking)', directWithGroqVision], ['Groq', directWithGroq]]) {
     try {
-      const r = await fn(cands, opts, music);
+      const r = await fn(cands, opts, music, ctx, tmp);
       if (r && r.plan && Array.isArray(r.plan.shots) && r.plan.shots.length) return r;
     } catch (e) {
       if (e instanceof jobs.CancelledError) throw e;
@@ -878,8 +963,8 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, ful
       try { music = await beats(ctx, musicPath); } catch (e) { if (e instanceof jobs.CancelledError) throw e; music = null; }
     }
     if (onProgress) onProgress(38);
-    if (stage) stage(process.env.ANTHROPIC_API_KEY ? '🎬 Claude is directing your edit…' : '🎬 Directing your edit…');
-    const d = await direct(cands, opts, music, log);
+    if (stage) stage(process.env.ANTHROPIC_API_KEY ? '🎬 Claude is directing your edit…' : '🎬 The AI is watching your shots and directing…');
+    const d = await direct(cands, opts, music, log, ctx, tmp);
     if (onProgress) onProgress(50);
     const plan = finalise(d.plan, cands, opts, music);
     if (stage) stage(opts.full ? `🎞 Blending all ${plan.shots.length} together…` : `✂️ Cutting ${plan.shots.length} shots together…`);
@@ -908,7 +993,7 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, ful
 /** Which director the montage would use right now (for the phone to say so). */
 function directorStatus() {
   if (process.env.ANTHROPIC_API_KEY) return { director: 'claude', model: process.env.MW_MONTAGE_MODEL || 'claude-opus-5-5' };
-  try { const cw = require('./cloudwrite'); if (cw.access && cw.access().key) return { director: 'groq', model: '' }; } catch (e) {}
+  try { const cw = require('./cloudwrite'); if (cw.access && cw.access().key) return { director: 'groq', model: '', vision: true }; } catch (e) {}
   return { director: 'rules', model: '' };
 }
 
