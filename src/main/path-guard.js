@@ -77,6 +77,8 @@ function makeGuard(roots) {
       const v = value[k];
       const here = keyPath ? `${keyPath}.${k}` : k;
       if (typeof v === 'string') {
+        // a batch recipe's "the file step N made" (batch.js) — not a path yet
+        if (PATH_KEYS.has(k) && /^@@step-\d+@@(\.[a-z0-9]+)?$/i.test(v)) continue;
         if (PATH_KEYS.has(k) && v && !allowedPath(v)) return here;
       } else if (v && typeof v === 'object') {
         const bad = checkArgPaths(v, here, depth + 1);
