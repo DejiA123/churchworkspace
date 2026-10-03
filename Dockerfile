@@ -16,10 +16,13 @@
 #   ffmpeg      yes — from the npm package, so it is the same build the desktop
 #                     uses and the encoder settings behave identically.
 #   whisper     yes — built from source below, because captions are the reason
-#                     most people came. The MODELS are not baked in (they are
-#                     hundreds of megabytes and the app downloads the one you
-#                     choose); they live on the /data volume after that, so they
-#                     survive a rebuild.
+#                     most people came, with the Tiny model (78 MB) baked in so
+#                     captions work the moment the server starts, with or
+#                     without a Groq key. Tiny is the one model a 512 MB server
+#                     can run; a bigger one is downloaded from Settings onto the
+#                     /data volume, so it survives a rebuild. With GROQ_API_KEY
+#                     set, speech is heard in the cloud first and Tiny only
+#                     covers what the cloud cannot.
 #   MediaPipe   yes — bin/ai is copied, and auto-reframe runs in the BROWSER
 #                     anyway, so the server never needs a GPU for it.
 #   NDI,        no  — they drive hardware in a building. The cloud allowlist
@@ -36,13 +39,32 @@
 FROM debian:bookworm-slim AS whisper
 ARG WHISPER_REF=v1.7.4
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      git build-essential cmake ca-certificates \
+      git build-essential cmake ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 RUN git clone --depth 1 --branch ${WHISPER_REF} https://github.com/ggerganov/whisper.cpp.git \
     && cd whisper.cpp \
     && cmake -B build -DCMAKE_BUILD_TYPE=Release -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON \
-    && cmake --build build --config Release -j"$(nproc)"
+         -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF \
+    && cmake --build build --config Release -j"$(nproc)" --target whisper-cli
+# BUILD_SHARED_LIBS=OFF: whisper.cpp builds shared libraries by default on
+# Linux, so whisper-cli wanted libwhisper.so.1 and three libggml*.so from this
+# stage's build folder, which is not in the final image. Only the binary is
+# copied, so it could not even start ("error while loading shared libraries").
+# Static, it needs nothing but libc, libstdc++ and libgomp.
+# GGML_NATIVE=OFF: -march=native would tune it to whichever CPU happened to run
+# the BUILD, and a server on an older one then dies on an illegal instruction.
+# Off, it targets AVX2/FMA, which every x86 cloud machine has.
+
+# The Tiny speech model. Without a model file the engine above is just a binary:
+# the studio said "The speech model is missing from this install" and no caption
+# started. A short or failed transfer fails the BUILD (the checksum), so a
+# truncated model that whisper would load and turn into gibberish never ships.
+# The checksum is the one whisper.cpp publishes for it (models/README.md).
+ARG TINY_MODEL_URL=https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin
+ARG TINY_MODEL_SHA1=c78c86eb1a8faa21b369bcd33207cc90d64ae9df
+RUN curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o /src/ggml-tiny.en.bin "${TINY_MODEL_URL}" \
+    && echo "${TINY_MODEL_SHA1}  /src/ggml-tiny.en.bin" | sha1sum -c -
 
 # ── the studio ───────────────────────────────────────────────────────────────
 FROM node:20-bookworm-slim
@@ -58,7 +80,7 @@ LABEL org.opencontainers.image.description="The church Video Studio, in a browse
 # prefers the bundled binary and falls back to PATH (src/main/ffmpeg.js), so on
 # x64 the npm build still wins and nothing about the encoding changes.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 ca-certificates fontconfig tini ffmpeg \
+      python3 ca-certificates fontconfig tini ffmpeg libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -83,12 +105,16 @@ COPY legal/ ./legal/
 # what an x64 and an arm64 drop would use to sit side by side. Copying to both
 # means this image works whichever rule wins.
 COPY --from=whisper /src/whisper.cpp/build/bin/whisper-cli /app/bin/whisper/whisper-cli
+COPY --from=whisper /src/ggml-tiny.en.bin /app/bin/whisper/ggml-tiny.en.bin
 RUN chmod +x /app/bin/whisper/whisper-cli \
-    && ln -sf whisper-cli "/app/bin/whisper/whisper-cli-$(node -p 'process.arch')"
+    && ln -sf whisper-cli "/app/bin/whisper/whisper-cli-$(node -p 'process.arch')" \
+    && /app/bin/whisper/whisper-cli --help > /dev/null
+# (that last line starts the engine once: an image whose engine cannot load its
+# libraries fails here, at build time, not on the first caption)
 
 # Recordings go in /media, everything the app keeps goes in /data — both are
 # volumes so a rebuilt image keeps the church's library, its saved sessions and
-# the speech model it downloaded.
+# any bigger speech model it downloaded.
 ENV MW_CLOUD_DATA=/data \
     MW_CLOUD_MEDIA=/media \
     MW_CLOUD_PORT=7390 \
