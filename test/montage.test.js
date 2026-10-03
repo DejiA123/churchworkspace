@@ -58,12 +58,12 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
     texts: [{ at_shot: 0, span_shots: 2, text: 'He was not ready for this', role: 'hook' }, { at_shot: 9, span_shots: 1, text: 'lost', role: 'beat' }],
     hashtags: ['#church', 'youth camp'], post_caption: 'What a night', title: 'Camp', concept: 'x',
   }, cands, { lengthSec: 30 }, music);
-  log(plan.shots.length === 4, 'a shot the director made up is dropped', plan.shots.length + ' shots');
+  log(plan.shots.length === 3 && plan.shots.some((x) => x.overlays.some((o) => o.cand.id === 'c3')), 'a shot the director made up is dropped (and the photo goes over a clip)', plan.shots.length + ' shots');
   log(plan.shots[1].effect === 'cut' && plan.shots[1].focus === 'top', 'an effect that does not exist becomes a plain cut');
   log(plan.shots[1].seconds <= 2, 'a shot is never longer than its footage', plan.shots[1].seconds + ' s from a 2 s clip');
   const onBeat = plan.shots.every((s) => Math.abs((s.at / 0.5) - Math.round(s.at / 0.5)) < 0.02);
   log(onBeat, 'every cut lands on a beat', plan.shots.map((s) => s.at).join(', '));
-  log(plan.shots[3].from > plan.shots[0].from, 'a moment used twice carries on rather than repeating', `${plan.shots[0].from} → ${plan.shots[3].from}`);
+  log(plan.shots[2].from > plan.shots[0].from, 'a moment used twice carries on rather than repeating', `${plan.shots[0].from} → ${plan.shots[2].from}`);
   log(plan.texts.length === 1 && plan.texts[0].start === 0 && plan.texts[0].end === round(plan.shots[2].at), 'words are timed to their shots; one pointing nowhere is dropped', JSON.stringify(plan.texts));
   log(plan.hashtags.join(',') === 'church,youthcamp', 'hashtags lose their # and spaces');
 
@@ -207,7 +207,7 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
   const o0 = ovPlan.shots[0].overlays[0];
   log(o0 && o0.style === 'pip' && o0.cand.id === 'c3', 'an overlay lands on its video shot');
   log(o0 && o0.start >= 1.2 && o0.start + o0.len <= ovPlan.shots[0].seconds, 'kept out of the hook’s first second and inside its shot', o0 && `${o0.start}+${o0.len} of ${ovPlan.shots[0].seconds}`);
-  log(ovPlan.shots[0].overlays.length === 1 && !ovPlan.shots[1].overlays.length, 'no more than a 6 s shot can carry, and never over a photo (it has no sound to carry)');
+  log(ovPlan.shots[0].overlays.length === 1 && ovPlan.shots.every((x) => x.cand.kind === 'video'), 'no more than a 6 s shot can carry, and never over a photo (the photo shot goes over the clip instead)', `${ovPlan.shots.length} shot(s), ${ovPlan.shots[0].overlays.length} overlay`);
 
   console.log('\nPHOTOS GO ON THE VIDEOS, NOT AFTER THEM');
   const longCands = [
@@ -257,6 +257,13 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
   const per = clipsFirst.shots.filter((x) => x.cand.kind === 'video').map((x) => x.cand.id + ':' + x.overlays.length);
   log(clipsFirst.shots.filter((x) => x.cand.kind === 'video').every((x) => x.overlays.length >= 2) && clipsFirst.shots.filter((x) => x.cand.kind === 'video').map((x) => x.cand.id).join(',') === 'w1,w2,w3',
     'clips first, photos after: the photos go through EVERY clip, from the first one — not piled on the last', per.join(' '));
+  // a TIMED montage: the photos the director picked go over the clips too, and the length holds
+  const tc = [V('t1', 0, 40), V('t2', 1, 40)].map((x) => ({ ...x, whole: false }));
+  for (let k = 0; k < 6; k++) tc.push(P('tp' + k, 2 + k));
+  const timed = montage.finalise({ shots: [tc[0], tc[2], tc[1], tc[3], tc[4], tc[0], tc[5], tc[1], tc[6], tc[7]].map((x) => ({ id: x.id, seconds: 3, effect: 'cut', focus: 'center', transition: 'cut' })), texts: [], hashtags: [], post_caption: '', title: '', concept: '' }, tc, { full: false, lengthSec: 30 }, null);
+  const tOv = timed.shots.reduce((n, x) => n + x.overlays.length, 0);
+  log(timed.shots.every((x) => x.cand.kind === 'video') && tOv >= 3 && Math.abs(timed.duration - 30) < 2,
+    'a timed montage puts its photos ON the clips, and stays the length asked for', `${tOv} over clips, 0 on their own, ${timed.duration}s`);
   const mineShort = montage.finalise({ shots: [oc[10], oc[4], oc[1], oc[4], oc[1]].map((x) => ({ id: x.id, seconds: 3, effect: 'cut', focus: 'center', transition: 'cut' })), texts: [], hashtags: [], post_caption: '', title: '', concept: '' },
     oc.map((x) => ({ ...x, whole: false })), { full: false, keepOrder: true, lengthSec: 15 }, null);
   log(mineShort.shots.map((x) => x.cand.id).join(',') === 'vB,vB,vA,vA,vC', 'a timed montage keeps that order too', mineShort.shots.map((x) => x.cand.id).join(','));
