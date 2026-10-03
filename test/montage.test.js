@@ -117,6 +117,27 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
   log(res.bpm && Math.abs(res.bpm - 128) <= 1 && res.texts.length === 1 && res.texts[0].text === 'Camp night', 'cut to the song, with the operator’s words as the hook', `${res.bpm} BPM, ${JSON.stringify(res.texts)}`);
   log(stages.length >= 3, 'it says what it is doing', stages.join(' / '));
 
+  console.log('\nKEEP EVERYTHING');
+  const fullPlan = montage.finalise({
+    shots: [
+      { id: 'c3', seconds: 2.5, effect: 'slow_zoom', focus: 'center', transition: 'cut' },
+      { id: 'c1', seconds: 1, effect: 'slow_motion', focus: 'center', transition: 'fade' },
+      { id: 'c1', seconds: 1, effect: 'cut', focus: 'center', transition: 'cut' },
+    ],
+    texts: [], hashtags: [], post_caption: '', title: '', concept: '',
+  }, cands.map((c) => Object.assign({}, c, c.kind === 'video' ? { whole: true, start: 0, end: c.fileDur } : {})), { full: true, lengthSec: 15 }, null);
+  log(fullPlan.shots.length === 3 && new Set(fullPlan.shots.map((x) => x.cand.id)).size === 3, 'every file is in it once — one the director skipped is added, a repeat dropped', fullPlan.shots.map((x) => x.cand.id).join(','));
+  const v1shot = fullPlan.shots.find((x) => x.cand.id === 'c1');
+  log(v1shot && v1shot.from === 0 && Math.abs(v1shot.seconds - 9.95) < 0.06 && v1shot.effect === 'cut', 'a video plays whole, from the start (no slow motion on a whole clip)', v1shot && `${v1shot.from}+${v1shot.seconds}`);
+  log(fullPlan.shots[0].transition === 'cut' && v1shot.transition === 'fade', 'the transitions are kept (and the first shot just starts)');
+  const outAll = path.join(WORK, 'all.mp4');
+  const resAll = await montage.make(ctx, video.getInfo, { mediaPaths: [v1, v2, ph], musicPath: null, style: 'worship', full: true, aspect: '9:16',
+    brief: '', keepAudio: true, output: outAll, onProgress: () => {} });
+  const infoAll = await video.getInfo(ctx, outAll);
+  const want = 8 + 6;
+  log(resAll.full && resAll.shots.length === 3 && infoAll.durationSec >= want, 'nothing is cut out: both clips whole plus the photo', `${infoAll.durationSec.toFixed(2)} s from ${want} s of video + a photo`);
+  log(resAll.shots.some((x) => x.transition === 'fade'), 'and they are blended (a fade between different kinds of shot)', resAll.shots.map((x) => x.transition).join(','));
+
   fs.rmSync(WORK, { recursive: true, force: true });
   console.log(failed ? '\n❌ montage test failed' : '\n✅ montage test passed');
   process.exit(failed ? 1 : 0);

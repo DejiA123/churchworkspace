@@ -13062,15 +13062,22 @@
         renderLibrary(); renderMusicLane(); updateMusicButton();
       }
       const D = dur();
+      // Sized to the words and the frame: a hook fits on two lines at most, a
+      // beat on one or two — never one word broken across lines. (The size is a
+      // fraction of the frame's HEIGHT; the box is 86% of its width.)
+      const info = (ve.video && ve.video.info) || {};
+      const ar = info.width && info.height ? info.width / info.height : 9 / 16;
+      const fit = (text, lines, lo, hi) => clamp((lines * 0.86 * ar) / (Math.max(6, String(text).length) * 0.6), lo, hi);
       for (const t of (texts || [])) {
         if (!t || !t.text) continue;
         const hook = t.role === 'hook', cta = t.role === 'cta';
+        const sizePct = hook ? fit(t.text, 2, 0.035, 0.075) : fit(t.text, 2, 0.03, 0.058);
         const ov = {
           id: uid(), text: String(t.text),
-          x: 0.5, y: hook ? 0.2 : cta ? 0.5 : 0.74, w: 0.86, h: hook ? 0.16 : 0.12,
+          x: 0.5, y: hook ? 0.2 : cta ? 0.5 : 0.74, w: 0.86, h: Math.min(0.3, sizePct * 2.6),
           start: clamp(Number(t.start) || 0, 0, Math.max(0, D - 0.3)),
           end: clamp(Number(t.end) || 0, 0.3, D),
-          color: '#ffffff', sizePct: hook ? 0.13 : 0.1, font: 'Arial', bold: true,
+          color: hook ? '#ffffff' : cta ? '#ffe14d' : '#ffffff', sizePct, font: 'Poppins', bold: true,
           outline: true, outlineColor: '#000000',
         };
         if (ov.end <= ov.start + 0.2) ov.end = Math.min(D, ov.start + 1.5);
