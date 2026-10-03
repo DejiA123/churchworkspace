@@ -2067,6 +2067,7 @@ let _hideTimer = null;
       }, { passive: true });
     };
     pin(document.querySelector('#view-video'));
+    pin(document.getElementById('veDrop'));
     pin(document.querySelector('main.content'));
     pin(document.getElementById('app'));
     /*
@@ -2454,7 +2455,13 @@ let _hideTimer = null;
         if (over > 1) view.style.paddingBottom = (pb + over) + 'px';
         fitting = false;
         more();
+        // The picture can MOVE without changing size (iOS shifting the page);
+        // its frame is fitted to what is visible, so it is fitted again.
+        const drop = $('#veDrop');
+        const top = drop ? Math.round(drop.getBoundingClientRect().top) : 0;
+        if (top !== lastTop) { lastTop = top; const E = ed(); if (E && E.fit) E.fit(); }
       };
+      let lastTop = null;
       cloud.fitTimeline = fitTl;
       window.addEventListener('resize', fitTl);
       window.addEventListener('orientationchange', () => setTimeout(fitTl, 350));
