@@ -101,20 +101,30 @@ const DEFAULT_QUALITY = '1080p';
  */
 const RATE_CRF = { lower: 4, recommended: 0, higher: -3 };
 const FPS_CHOICES = [24, 25, 30, 50, 60];
-let exportPrefs = { fps: 0, rate: 'recommended' };
-function setExportPrefs(p = {}) {
+/*
+ * PER PERSON on a shared Cloud Studio: one person choosing 60 fps must not
+ * change the next person's exports. Keyed by the space the work runs in (the
+ * owner, and the desktop, are '').
+ */
+const prefsBySpace = new Map();
+const whose = () => { try { return require('./space').current() || ''; } catch (e) { return ''; } };
+const cleanPrefs = (p = {}) => {
   const fps = Number(p.fps) || 0;
-  exportPrefs = {
-    fps: FPS_CHOICES.includes(fps) ? fps : 0,
-    rate: Object.prototype.hasOwnProperty.call(RATE_CRF, p.rate) ? p.rate : 'recommended',
-  };
-  return exportPrefs;
+  return { fps: FPS_CHOICES.includes(fps) ? fps : 0, rate: Object.prototype.hasOwnProperty.call(RATE_CRF, p.rate) ? p.rate : 'recommended' };
+};
+function setExportPrefs(p = {}, who) {
+  const v = cleanPrefs(p);
+  prefsBySpace.set(who === undefined ? whose() : (who || ''), v);
+  return Object.assign({}, v);
 }
-const getExportPrefs = () => Object.assign({}, exportPrefs);
+const getExportPrefs = (who) => Object.assign({}, prefsBySpace.get(who === undefined ? whose() : (who || '')) || { fps: 0, rate: 'recommended' });
+/** Everyone's, for saving (main.js keeps them on disk). */
+const allExportPrefs = () => Object.fromEntries(prefsBySpace);
+const loadExportPrefs = (all = {}) => { for (const [k, v] of Object.entries(all || {})) prefsBySpace.set(k, cleanPrefs(v)); };
 
 const qualityDef = (q) => {
   const base = QUALITY[String(q || '').toLowerCase()] || QUALITY[DEFAULT_QUALITY];
-  const d = RATE_CRF[exportPrefs.rate] || 0;
+  const d = RATE_CRF[getExportPrefs().rate] || 0;
   return d ? Object.assign({}, base, { crf: base.crf + d, qsv: base.qsv + d }) : base;
 };
 
@@ -167,7 +177,8 @@ function upscaleFactor(info, target) {
  * accepts (and to something a church laptop can actually encode).
  */
 function outputFps(info) {
-  if (exportPrefs.fps) return exportPrefs.fps;      // the operator's choice (see setExportPrefs)
+  const fpsPick = getExportPrefs().fps;
+  if (fpsPick) return fpsPick;      // the operator's choice (see setExportPrefs)
   const src = Number(info && info.fps) || 30;
   if (!Number.isFinite(src) || src <= 0) return 30;
   return Math.max(24, Math.min(60, Math.round(src * 100) / 100));
@@ -3060,7 +3071,7 @@ const INFO_SHAPE = require('crypto').createHash('sha1').update(probeInfo.toStrin
 
 module.exports = {
   PRESETS, QUALITY, DEFAULT_QUALITY, qualityDef, presetSize, sourceSize, upscaleFactor, outputFps,
-  setExportPrefs, getExportPrefs, RATE_CRF, FPS_CHOICES, TRANSITIONS, transitionOf,
+  setExportPrefs, getExportPrefs, allExportPrefs, loadExportPrefs, RATE_CRF, FPS_CHOICES, TRANSITIONS, transitionOf,
   SFX, makeSfx, mixSounds, saveRecording,
   getInfo, INFO_SHAPE, trim, exportForPlatform, thumbnail,
   extractAudio, autoTrimSilence, merge, joinPieces, normalizePieces, addCaptions, exportShort, filmstrip, makeProxy, needsProxy, applyEdits,

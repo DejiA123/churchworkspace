@@ -140,6 +140,9 @@ const SOCIAL = {
  *
  * This is a list of NAMES. `video:*` would quietly admit tomorrow's handler.
  */
+/* Channels that change something every person on the server shares. */
+const OWNER_ONLY = new Set(['captions:removeModel', 'captions:downloadModel', 'llm:install']);
+
 const ALLOWED = {
   'job:cancel': true,
 
@@ -1143,6 +1146,10 @@ async function authedRoutes(req, res, url, p, me) {
     }
     if (rule && typeof rule === 'object' && rule.args && !rule.args(args)) {
       return json(res, 403, { ok: false, error: `"${channel}" refused those arguments.` });
+    }
+    // shared by everyone on the server: only the owner may remove or install them
+    if (OWNER_ONLY.has(channel) && me && !me.owner) {
+      return json(res, 403, { ok: false, error: 'Only the studio’s owner can change that — it is shared by everyone here.' });
     }
     const badKey = guard.checkArgPaths(args);
     if (badKey) {

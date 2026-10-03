@@ -1062,7 +1062,7 @@
     const esc = C.esc, attr = C.escAttr;
     const who = MT.who || {};
     const brain = who.director === 'claude' ? `Directed by <b>Claude</b> (${esc(who.model || 'Opus')}), looking at every shot`
-      : who.director === 'groq' ? 'Directed by the studio’s AI. <small>Add a Claude key on the server for the best edits.</small>'
+      : who.director === 'groq' ? 'Directed by Groq AI (free), looking at every shot. <small>A Claude key on the server gives the very best edits.</small>'
         : 'Directed by the studio’s own editor. <small>Add a Claude key on the server for AI-directed edits.</small>';
     const chips = (list, cur, key) => list.map(([v, label]) => `<button type="button" class="mt-chip${String(cur) === String(v) ? ' on' : ''}" data-mt-${key}="${attr(v)}">${esc(label)}</button>`).join('');
     p.body.innerHTML = `

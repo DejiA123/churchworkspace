@@ -24,6 +24,8 @@ const { AsyncLocalStorage } = require('async_hooks');
 
 const als = new AsyncLocalStorage();
 const live = new Map();       // jobId -> Set<ChildProcess> currently running
+const owners = new Map();     // jobId -> the space (person) that started it
+const whose = () => { try { return require('./space').current() || ''; } catch (e) { return ''; } };
 const cancelled = new Set();  // jobIds the user pulled the plug on
 
 /** Thrown (and recognised across IPC) when the user cancelled the job. */
@@ -47,6 +49,7 @@ async function run(jobId, fn) {
   if (!jobId) return fn();
   cancelled.delete(jobId);
   live.set(jobId, new Set());
+  owners.set(jobId, whose());
   try {
     return await als.run({ jobId }, fn);
   } catch (err) {
@@ -57,6 +60,7 @@ async function run(jobId, fn) {
     throw err;
   } finally {
     live.delete(jobId);
+    owners.delete(jobId);
     cancelled.delete(jobId);
   }
 }
@@ -83,6 +87,8 @@ function track(proc) {
 /** Kill everything running under `jobId`. Safe to call for an unknown id. */
 function cancel(jobId) {
   if (!jobId) return { cancelled: false, killed: 0 };
+  // on a shared Cloud Studio, only the person whose job it is can stop it
+  if (owners.has(jobId) && owners.get(jobId) !== whose()) return { cancelled: false, killed: 0 };
   cancelled.add(jobId);
   const set = live.get(jobId);
   let killed = 0;

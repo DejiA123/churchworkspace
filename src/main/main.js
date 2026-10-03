@@ -346,7 +346,11 @@ app.whenReady().then(() => {
   // 🎤 Listen's cloud ear, from what this church saved last time. Doing it here
   // rather than when the studio first asks means the very first phrase of the
   // morning is already going to the right engine.
-  try { video.setExportPrefs((store.get('settings') || {}).exportPrefs || {}); } catch (e) {}
+  try {
+    const st = store.get('settings') || {};
+    video.setExportPrefs(st.exportPrefs || {}, '');          // the owner's (and the desktop's)
+    video.loadExportPrefs(st.exportPrefsBySpace || {});      // everyone else's on a shared Cloud Studio
+  } catch (e) {}
   try { loadCloudSpeech(); } catch (e) {}
   // …and the model that writes the social posts, which shares that same key.
   try { loadCloudWrite(); } catch (e) {}
@@ -530,8 +534,15 @@ function wrap(handler) {
 // Stop a running job (Cancel on the progress overlay).
 ipcMain.handle('job:cancel', wrap(async (e, { id }) => jobs.cancel(id)));
 
+const claimed = new Set(); // names handed out but not written yet (two exports in the same second)
 function outPath(name) {
-  return path.join(ensureOutputDir(), name);
+  const dirOut = ensureOutputDir();
+  const ext = path.extname(name), base = name.slice(0, name.length - ext.length);
+  let p = path.join(dirOut, name);
+  for (let n = 2; (fs.existsSync(p) || claimed.has(p)) && n < 1000; n++) p = path.join(dirOut, `${base}-${n}${ext}`);
+  claimed.add(p);
+  setTimeout(() => claimed.delete(p), 10 * 60e3).unref?.();
+  return p;
 }
 function stamp() {
   const d = new Date();
@@ -714,9 +725,11 @@ ipcMain.handle('video:filmstrip', wrap(async (e, { input, count }) => {
 /* Frame rate and bitrate, CapCut's two other export dials: kept on disk and
    handed to video.js, which every export reads (see setExportPrefs). */
 ipcMain.handle('video:setExportPrefs', wrap(async (e, p = {}) => {
-  const prefs = video.setExportPrefs(p);
+  const prefs = video.setExportPrefs(p);   // this person's — see video.js
   const settings = store.get('settings') || {};
-  store.set('settings', Object.assign({}, settings, { exportPrefs: prefs }));
+  const all = video.allExportPrefs();
+  const others = Object.fromEntries(Object.entries(all).filter(([k]) => k));
+  store.set('settings', Object.assign({}, settings, { exportPrefs: all[''] || settings.exportPrefs || {}, exportPrefsBySpace: others }));
   return prefs;
 }));
 ipcMain.handle('video:getExportPrefs', wrap(async () => video.getExportPrefs()));

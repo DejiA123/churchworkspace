@@ -129,6 +129,33 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
   const said = ((seen[0] && seen[0].messages[0].content[0].text) || '');
   log(said.includes(brief) && /story of the edit/.test(said) && /exactly as written/.test(said), 'Claude is given the words verbatim, as the story to tell');
 
+  console.log('\nGROQ LOOKS AT THE SHOTS TOO (contact sheets)');
+  const realCw = require.cache[require.resolve(path.join(ROOT, 'src/main/cloudwrite'))];
+  const cwPath = require.resolve(path.join(ROOT, 'src/main/cloudwrite'));
+  const realFetch = global.fetch;
+  const sentG = [];
+  require.cache[cwPath] = { id: cwPath, filename: cwPath, loaded: true, exports: Object.assign({}, require(cwPath), {
+    access: () => ({ provider: 'groq', key: 'test', url: 'https://example.invalid/chat', headers: { 'content-type': 'application/json' } }),
+    chat: async () => '',
+  }) };
+  global.fetch = async (url, init) => {
+    const body = JSON.parse(init.body); sentG.push(body);
+    return { ok: true, json: async () => ({ choices: [{ message: { content: JSON.stringify({ concept: 'seen', title: 'Camp', post_caption: '', hashtags: [], texts: [], overlays: [],
+      shots: [{ id: 'c2', seconds: 1.5, effect: 'cut', focus: 'center', transition: 'cut' }, { id: 'c1', seconds: 2, effect: 'flash', focus: 'center', transition: 'flash' }] }) } }] }) };
+  };
+  const tmpG = fs.mkdtempSync(path.join(WORK, 'g-'));
+  const gotG = await montage._direct(thumbs, { style: 'hype', lengthSec: 15, aspect: '9:16', brief: '' }, music, (m) => console.log('    (director said: ' + m + ')'), ctx, tmpG);
+  global.fetch = realFetch;
+  if (realCw) require.cache[cwPath] = realCw; else delete require.cache[cwPath];
+  const g0 = sentG[0] || { messages: [{}, { content: [] }] };
+  const pics = (g0.messages[1].content || []).filter((c) => c.type === 'image_url');
+  log(gotG.director === 'groq' && gotG.vision && gotG.plan.shots.length === 2, 'without a Claude key, Groq directs from what it SEES', gotG.director + (gotG.vision ? ' (looking)' : ''));
+  log(pics.length >= 1 && pics.length <= 4 && /^data:image\/jpeg;base64,/.test(pics[0].image_url.url), 'every candidate goes on contact sheets — within Groq’s pictures-per-request', pics.length + ' sheet(s)');
+  log(/qwen|llama-4/.test(g0.model || ''), 'on a vision model', g0.model);
+  const sheet = fs.readdirSync(tmpG).find((f) => /^sheet-\d+\.jpg$/.test(f));
+  log(!!sheet, 'the sheet is a real picture', sheet);
+  if (sheet && process.env.KEEP_SHEET) fs.copyFileSync(path.join(tmpG, sheet), process.env.KEEP_SHEET);
+
   console.log('\nA REAL MONTAGE, ON A 512 MB SETTING');
   const v1 = make(['-f', 'lavfi', '-i', 'testsrc2=s=1280x720:r=30:d=8', '-f', 'lavfi', '-i', 'sine=f=300:d=8', '-shortest', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac'], path.join(WORK, 'wide.mp4'));
   const v2 = make(['-f', 'lavfi', '-i', 'testsrc=s=720x1280:r=30:d=6', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p'], path.join(WORK, 'tall.mp4'));

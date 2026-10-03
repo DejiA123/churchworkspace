@@ -8510,6 +8510,7 @@
      */
     list.forEach((s) => armExport(s, task));
     let done = 0, stopped = null;
+    const skipped = [];
     /*
      * A BATCH IS A PIPELINE, NOT A QUEUE.
      *
@@ -8628,7 +8629,12 @@
           done++;
           // Let this one be seen to finish before the next resets the number.
           if (window.__chainDone) await window.__chainDone(task);
-        } catch (e) { stopped = e; break; }
+        } catch (e) {
+          // Stop means stop. Anything else costs THIS short, not the other nineteen.
+          if (e && (e.cancelled || /cancel/i.test(e.message || ''))) { stopped = e; break; }
+          skipped.push(`“${s.label || 'a short'}”: ${(e && e.message) || e}`);
+          window.__toast && window.__toast(`⚠️ “${s.label || 'A short'}” could not be made — carrying on with the rest. ${(e && e.message) || ''}`, 'error', 9000);
+        }
       }
     } finally {
       // Whatever ended the batch — finished, stopped, broke — a look-ahead may
@@ -8644,6 +8650,7 @@
     if (sent) {
       // the server has them: this phone's part is over
       const note = `✅ ${sent} short${sent > 1 ? 's are' : ' is'} exporting on the server${done > sent ? ` (${done - sent} made here)` : ''} — you can close the app; they will be in Files.`
+        + (skipped.length ? ` ${skipped.length} could not be prepared: ${skipped.join('; ')}.` : '')
         + (stopped ? ` The rest ${stopped.cancelled ? 'were stopped' : 'did not finish'}.` : '');
       if (window.__endTask) window.__endTask(task, { ok: true, note });
       // the progress box this phone showed while handing over is finished with
@@ -8651,6 +8658,7 @@
       window.__toast && window.__toast(note, 'good', 9000);
     } else if (done) {
       const note = `✅ Exported ${done} short${done > 1 ? 's' : ''}${withCaps ? ' with captions' : ''}${extras ? ' + ' + extras : ''} to your output folder.`
+        + (skipped.length ? ` ${skipped.length} could not be made: ${skipped.join('; ')}.` : '')
         + (stopped ? ` The rest ${stopped.cancelled ? 'were stopped' : 'did not finish'}.` : '');
       const inBg = window.__endTask ? window.__endTask(task, { ok: true, note }) : false;
       window.__toast && window.__toast(note, 'good');

@@ -278,4 +278,4 @@ async function ask({ image, frames, columns = 8, maxWaitMs = 45000 } = {}) {
   return fail(lastWhy || 'no AI model would answer');
 }
 
-module.exports = { whoIsSpeaking, state, ready, SYSTEM, _health: () => health, _blocked: () => blocked };
+module.exports = { VISION, whoIsSpeaking, state, ready, SYSTEM, _health: () => health, _blocked: () => blocked };
