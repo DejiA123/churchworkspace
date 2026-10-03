@@ -101,6 +101,34 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
   const noKey = await montage._direct(thumbs, { style: 'hype', lengthSec: 15, aspect: '9:16', brief: 'Youth camp worship' }, null);
   log(noKey.director === 'rules' || noKey.director === 'groq', 'without a key it still directs (' + noKey.director + ')');
 
+  console.log('\n“WHAT’S IT ABOUT?” IS HONOURED EVERYWHERE');
+  const brief = 'Youth camp 2026 — three days of worship, games and baptisms';
+  const fbx = montage.fromBrief(brief);
+  log(fbx.hook === 'Youth camp 2026', 'the first clause becomes the hook', fbx.hook);
+  log(fbx.beats.join(' | ') === 'three days of worship | games and baptisms', 'the rest become short beats', fbx.beats.join(' | '));
+  log(fbx.caption === brief && fbx.hashtags.includes('worship') && fbx.hashtags.includes('church'), 'and the caption and hashtags', fbx.hashtags.join(','));
+  log(montage.fromBrief('   ') === null && montage.fromBrief('baptism').hook === 'baptism', 'an empty brief adds nothing; one word still works');
+  const odd = montage.fromBrief('  🙏 Revival night: 400 souls, healing & joy <3  \n');
+  log(odd.hook === '🙏 Revival night' && odd.beats.includes('healing & joy <3'), 'emoji, numbers and symbols survive as written', JSON.stringify(odd.beats));
+  // no AI: the brief is the hook, the beats, the caption and the tags
+  const rb = montage.directByRules(thumbs, { style: 'hype', lengthSec: 15, aspect: '9:16', brief }, music);
+  const rp = montage.finalise(rb.plan, thumbs, { lengthSec: 15, brief }, music);
+  log(rp.texts[0] && rp.texts[0].text === 'Youth camp 2026' && rp.texts[0].role === 'hook' && rp.texts[0].start === 0, 'without AI: the hook opens it');
+  log(rp.texts.filter((x) => x.role === 'beat').length >= 1, 'its beats appear later on', rp.texts.map((x) => x.text).join(' / '));
+  log(rp.postCaption === brief && rp.title === 'Youth camp 2026' && rp.hashtags.length >= 3, 'and it is the title, the caption and the hashtags');
+  // an AI that forgot: the brief fills the gaps, never overrides what it wrote
+  const forgot = montage.finalise({ shots: [{ id: 'c1', seconds: 3, effect: 'cut', focus: 'center', transition: 'cut' }], texts: [], hashtags: [], post_caption: '', title: '', concept: '' }, cands, { lengthSec: 15, brief }, null);
+  log(forgot.texts[0] && forgot.texts[0].text === 'Youth camp 2026' && forgot.postCaption === brief && forgot.hashtags.length, 'an AI that left the hook and caption empty is filled in from it');
+  const kept = montage.finalise({ shots: [{ id: 'c1', seconds: 3, effect: 'cut', focus: 'center', transition: 'cut' }], texts: [{ at_shot: 0, span_shots: 1, text: 'They came hungry', role: 'hook' }], hashtags: ['youthcamp'], post_caption: 'Three days we will never forget', title: 'Camp', concept: '' }, cands, { lengthSec: 15, brief }, null);
+  log(kept.texts.length === 1 && kept.texts[0].text === 'They came hungry' && kept.postCaption === 'Three days we will never forget', 'and what the AI did write is left alone');
+  // what the AI is told
+  seen.length = 0;
+  process.env.ANTHROPIC_API_KEY = 'test-not-a-key';
+  await montage._direct(thumbs, { style: 'hype', lengthSec: 15, aspect: '9:16', brief }, music);
+  delete process.env.ANTHROPIC_API_KEY;
+  const said = ((seen[0] && seen[0].messages[0].content[0].text) || '');
+  log(said.includes(brief) && /story of the edit/.test(said) && /exactly as written/.test(said), 'Claude is given the words verbatim, as the story to tell');
+
   console.log('\nA REAL MONTAGE, ON A 512 MB SETTING');
   const v1 = make(['-f', 'lavfi', '-i', 'testsrc2=s=1280x720:r=30:d=8', '-f', 'lavfi', '-i', 'sine=f=300:d=8', '-shortest', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac'], path.join(WORK, 'wide.mp4'));
   const v2 = make(['-f', 'lavfi', '-i', 'testsrc=s=720x1280:r=30:d=6', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p'], path.join(WORK, 'tall.mp4'));
