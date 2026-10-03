@@ -258,6 +258,7 @@
         <div class="ch-brand"><span class="ch-logo">✝</span><span class="ch-name">Church Work Space</span></div>
         <div class="ch-acts"><span class="ch-chip-slot"></span>
           <button type="button" class="ch-round" data-home="files" aria-label="Your files">${mi('folder')}</button>
+          <button type="button" class="ch-round ch-me" data-home="me" aria-label="Your space"><b id="chMeInitial">${esc(((C.me && C.me.name) || '').charAt(0).toUpperCase()) || mi('user')}</b></button>
         </div>
       </header>
       <main class="ch-scroll">
@@ -289,6 +290,7 @@
       if (b.dataset.view) return C.viewFile && C.viewFile(b.dataset.view);
       if (b.dataset.go) return go(b.dataset.go);
       if (b.dataset.home === 'files') return $('#cloudFiles') && $('#cloudFiles').click();
+      if (b.dataset.home === 'me') return C.openProfile && C.openProfile();
       if (b.dataset.post) return compose({ files: [b.dataset.post] });
       if (b.dataset.job) return C.openJobs();
     });
@@ -297,7 +299,7 @@
 
   async function renderHome(refresh) {
     const el = $('#cloudHome') || buildHome();
-    $('#chHello').textContent = greeting();
+    $('#chHello').textContent = greeting() + (C.me && C.me.name ? ', ' + C.me.name.split(' ')[0] : '');
     const where = (C.hello && C.hello.standalone) ? 'Working on the church’s cloud server' : 'Working on the church’s studio machine';
     $('#chWhere').textContent = where + (C.hello && C.hello.version ? ` · v${C.hello.version}` : '');
     // the studio's door says what is waiting behind it

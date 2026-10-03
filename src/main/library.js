@@ -15,6 +15,7 @@
  */
 const fs = require('fs');
 const os = require('os');
+const space = require('./space');
 const path = require('path');
 const https = require('https');
 const { spawn } = require('child_process');
@@ -39,8 +40,15 @@ function init(userDataDir) {
   }
   return ROOT;
 }
-const root = () => ROOT || init(path.join(os.homedir(), '.church-work-space'));
-const toolsDir = () => path.join(path.dirname(root()), 'tools');
+// Each person on a shared Cloud Studio has their own music and outro library
+// (space.js); the owner's is the original folder.
+const root = () => {
+  const base = ROOT || init(path.join(os.homedir(), '.church-work-space'));
+  const r = space.pathFor(base);
+  if (r !== base) for (const d of [path.join(r, 'music'), path.join(r, 'clips')]) { try { fs.mkdirSync(d, { recursive: true }); } catch (e) {} }
+  return r;
+};
+const toolsDir = () => path.join(path.dirname(ROOT || root()), 'tools');
 const dbPath = () => path.join(root(), 'media.json');
 
 function readDb() {

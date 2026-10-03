@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const space = require('./space');
 
 /*
  * SAVED EDITING SESSIONS — "pick up where I left off".
@@ -34,7 +35,8 @@ function init(userDataDir) {
 }
 function dir() {
   if (!DIR) throw new Error('sessions not initialised');
-  return DIR;
+  // each person on a shared Cloud Studio has their own saved sessions (space.js)
+  return space.pathFor(DIR);
 }
 const fileOf = (id) => path.join(dir(), id + '.json');
 const AUTOSAVE = 'autosave';
