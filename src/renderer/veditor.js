@@ -1522,9 +1522,38 @@
     const cw = ve.refs.preview.clientWidth || 1, ch = ve.refs.preview.clientHeight || 1;
     const preset = ve.presets[ve.aspect]; if (!preset) return null;
     const tAR = preset.w / preset.h;
-    let fw = ch * tAR, fh = ch;
+    const band = visibleBand(ch);
+    const bh = Math.max(1, band.bottom - band.top);
+    let fw = bh * tAR, fh = bh;
     if (fw > cw) { fw = cw; fh = cw / tAR; }
-    return { left: (cw - fw) / 2, top: (ch - fh) / 2, w: fw, h: fh, tAR };
+    return { left: (cw - fw) / 2, top: band.top + (bh - fh) / 2, w: fw, h: fh, tAR };
+  }
+  /*
+   * The part of the preview you can actually SEE, in its own coordinates. On
+   * a phone the top bar is fixed over the page and the play row sits below
+   * the picture; if iOS ever leaves the picture partly under either (the
+   * frame came out wider than 9:16 with the speaker's head and the top text
+   * hidden under the bar), the export frame is fitted to what is visible
+   * instead of to a box that is partly covered.
+   */
+  function visibleBand(ch) {
+    const el = ve.refs.preview;
+    if (!el || !document.body.classList.contains('mw-cloud') || document.fullscreenElement) return { top: 0, bottom: ch };
+    const r = el.getBoundingClientRect();
+    if (!r.height) return { top: 0, bottom: ch };
+    let top = 0, bottom = ch;
+    const bar = document.querySelector('.cloud-bar');
+    const view = proView();
+    if (bar && bar.getClientRects().length && !(view && view.classList.contains('ve-big'))) {
+      const bb = bar.getBoundingClientRect().bottom;
+      if (bb > r.top) top = Math.min(ch - 40, bb - r.top);
+    }
+    const tr = view && view.querySelector('.ve-transport');
+    if (tr && tr.getClientRects().length) {
+      const tt = tr.getBoundingClientRect().top;
+      if (tt > r.top && tt < r.bottom) bottom = Math.max(top + 40, tt - r.top);
+    }
+    return { top, bottom };
   }
 
   /** The crop window inside the SOURCE frame (fractions 0..1) for the current
@@ -13094,7 +13123,7 @@
       } catch (e) {}
       try { syncMusicPreview(); } catch (e) {}
     },
-    fit() { if (ve.video) { renderRuler(); renderSegments(); updatePlayhead(); updateCropMask(); } },
+    fit() { if (ve.video) { renderRuler(); renderSegments(); updatePlayhead(); updateCropMask(); updateCapOverlay(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0); renderTextOverlays(); } },
     /**
      * The phone's Transition tool: the join nearest the playhead (or the one
      * into the selected clip). Says so when there is no join to put one on.
