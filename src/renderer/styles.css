@@ -2276,3 +2276,12 @@ button.cap-model-pick .cap-model-name { align-items: flex-start; text-align: lef
 #capModal .cap-head .cap-undo { margin-left: auto; margin-right: 2px; font-size: 18px; }
 #capModal .cap-head .cap-undo + .cap-undo { margin-left: 0; }
 #capModal .cap-head .cap-undo:disabled { opacity: .35; cursor: default; }
+
+/* ---- snap guides while a text box is dragged (see snapTextBox) ---- */
+.ve-snap-guides { position: absolute; inset: 0; z-index: 8; pointer-events: none; }
+.ve-snap-guides i { position: absolute; display: block; background: #ff4fd8; box-shadow: 0 0 0 .5px rgba(0,0,0,.35); opacity: .9; }
+.ve-snap-guides .ve-snap-v { width: 1px; transform: translateX(-.5px); }
+.ve-snap-guides .ve-snap-h { height: 1px; transform: translateY(-.5px); }
+.ve-snap-guides i:not(.c) { background: repeating-linear-gradient(to bottom, #ff4fd8 0 6px, transparent 6px 10px); }
+.ve-snap-guides .ve-snap-h:not(.c) { background: repeating-linear-gradient(to right, #ff4fd8 0 6px, transparent 6px 10px); }
+.ve-snap-guides i.c { box-shadow: 0 0 6px rgba(255, 79, 216, .7); }
