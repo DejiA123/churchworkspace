@@ -652,6 +652,23 @@ let _hideTimer = null;
     const el = islandMount();
     const body = el.querySelector('.ci-body');
     const msg = Object.assign({ kind: 'info' }, m);
+    /*
+     * The SAME message moving on (a percentage ticking up) changes its words in
+     * place — no swap, no spring. Redrawing the capsule for every percent made
+     * a long download's "Getting it ready…" blink the whole way through.
+     */
+    if (el.classList.contains('on') && islandCur && msg.id && islandCur.id === msg.id
+      && islandCur.kind === msg.kind && !!islandCur.spin === !!msg.spin && !islandCur.action && !msg.action) {
+      const t = body.querySelector('.ci-title'), sb = body.querySelector('.ci-sub');
+      if (t && (sb || !msg.sub)) {
+        t.textContent = msg.title;
+        if (sb) sb.textContent = msg.sub || '';
+        islandCur = msg;
+        clearTimeout(islandTimer);
+        if (!msg.sticky) islandTimer = setTimeout(islandHide, msg.ms || 4200);
+        return;
+      }
+    }
     const html = islandHtml(msg);
     // Measure the new words at their own size, so the capsule can spring to it.
     // Off to one side, not inside the capsule: on its way in the capsule is
@@ -1456,7 +1473,7 @@ let _hideTimer = null;
   /*
    * ►► A BIG FILE COMES DOWN IN PIECES. ◄◄
    * One request for a 700 MB montage over a phone's connection stalled at 2%
-   * and never moved again. It is fetched in 4 MB pieces, three at a time; a
+   * and never moved again. It is fetched in 4 MB pieces, four at a time; a
    * piece that stalls for 25 s is asked for again (up to six times), so a
    * dropped connection costs one piece, not the whole download. Each piece is
    * kept as a Blob (WebKit keeps those out of the page's memory) and the file
@@ -1506,10 +1523,10 @@ let _hideTimer = null;
         parts[i] = await one(i);
         got += parts[i].size;
         const pc = Math.min(99, Math.floor((got / total) * 100));
-        if (pc !== shown) { shown = pc; onPct(pc); }
+        if (pc !== shown) { shown = pc; onPct(pc, got, total); }
       }
     };
-    await Promise.all([worker(), worker(), worker()]);
+    await Promise.all([worker(), worker(), worker(), worker()]);
     return new File(parts, name, { type });
   }
   async function offerDownload(p, size) {
@@ -1526,7 +1543,8 @@ let _hideTimer = null;
       const id = 'save-' + name;
       island({ id, title: 'Getting it ready…', sub: name, spin: true, sticky: true });
       try {
-        const file = await fetchForSaving(p, name, size, (pc) => island({ id, title: `Getting it ready… ${pc}%`, sub: name, spin: true, sticky: true }));
+        const file = await fetchForSaving(p, name, size, (pc, got, total) => island({ id, title: `Getting it ready… ${pc}%`,
+          sub: total ? `${Math.round(got / 1048576)} of ${Math.round(total / 1048576)} MB · ${name}` : name, spin: true, sticky: true }));
         if (navigator.canShare({ files: [file] })) {
           /*
            * The share sheet only opens straight after a tap — a download of
