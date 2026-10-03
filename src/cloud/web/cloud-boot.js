@@ -586,6 +586,18 @@ let _hideTimer = null;
   window.__cancelJob = cancelCurrentJob;
   // tasks.js drives the overlay's Cancel button as it moves through a chain.
   window.__showCancel = showCancel;
+  /*
+   * …and a press of it has to reach cancelCurrentJob. On the desk renderer.js
+   * wires that click; the cloud page does not load renderer.js, and the copy
+   * of these functions above came without the wiring, so on a phone ✕ Cancel
+   * lit up, said nothing and stopped nothing — twenty shorts of captioning had
+   * to be sat through. One listener on the document, so it holds whatever
+   * redraws the overlay.
+   */
+  document.addEventListener('click', (e) => {
+    const b = e.target && e.target.closest ? e.target.closest('#overlayCancel') : null;
+    if (b && !b.disabled) cancelCurrentJob();
+  });
 
   /*
    * runJob is NOT here. It lives in tasks.js, which both pages load: it is the
