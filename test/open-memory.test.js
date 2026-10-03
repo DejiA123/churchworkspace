@@ -97,6 +97,18 @@ async function peakChildMB(fn) {
   const wrong = a.slice().reverse().filter((v, i) => Math.abs(v - b[i]) > 3).length;
   log(a.length === b.length && wrong === 0, 'every frame is there, exactly backwards', `${b.length}/${a.length} frames, ${wrong} out of place`);
 
+  console.log('\nENCODER SETTINGS ON A SMALL SERVER');
+  const ffm = require(path.join(__dirname, '..', 'src', 'main', 'ffmpeg'));
+  const enc = ['-i', 'a.mp4', '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', 'o.mp4'];
+  const at = (a, k) => a[a.indexOf(k) + 1];
+  const fin = ffm.capThreads(enc);
+  log(at(fin, '-preset') === 'veryfast' && at(fin, '-crf') === '18', 'a finished file: veryfast, same CRF', fin.join(' '));
+  const dr = await ffm.asDraft(true, async () => { await new Promise((r) => setTimeout(r, 5)); return ffm.capThreads(enc); });
+  log(at(dr, '-preset') === 'ultrafast' && at(dr, '-crf') === '14', 'a step on the way (captions follow): ultrafast, more bits', dr.join(' '));
+  log(at(ffm.capThreads(enc), '-preset') === 'veryfast', 'and only inside that export');
+  const hw = ffm.capThreads(['-i', 'a.mp4', '-c:v', 'h264_qsv', '-preset', 'medium', 'o.mp4']);
+  log(at(hw, '-preset') === 'medium', 'a hardware encoder is left alone');
+
   console.log(failed ? '\n❌ open-memory test failed' : '\n✅ open-memory test passed');
   process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -189,6 +189,8 @@ const ALLOWED = {
 
   // long → short
   'sermon:analyze': true,
+  'montage:status': true,
+  'montage:create': true,
   'sermon:exportShort': true,
   'sermon:exportReframed': true,
   'sermon:exportFramed': true,

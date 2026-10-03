@@ -269,6 +269,12 @@
           <span class="ch-copy"><b>Video Studio</b><small>Edit the sermon, cut AI shorts, captions and exports</small></span>
           <span class="ch-foot"><span class="ch-foot-tx" id="chStudioFoot">Open a video to start</span><span class="ch-arrow">${mi('chev-right')}</span></span>
         </button>
+        <button type="button" class="ch-card ch-montage" data-home="montage">
+          <span class="ch-glow"></span>
+          <span class="ch-art">${mi('sparkles')}</span>
+          <span class="ch-copy"><b>AI Montage</b><small>Drop in videos and photos — AI cuts a scroll-stopping edit to your music</small></span>
+          <span class="ch-foot"><span class="ch-foot-tx">Make one in a few taps</span><span class="ch-arrow">${mi('chev-right')}</span></span>
+        </button>
         <button type="button" class="ch-card ch-social" data-go="scheduler" id="chSocialCard">
           <span class="ch-glow"></span>
           <span class="ch-art">${mi('calendar')}</span>
@@ -291,6 +297,7 @@
       if (b.dataset.go) return go(b.dataset.go);
       if (b.dataset.home === 'files') return $('#cloudFiles') && $('#cloudFiles').click();
       if (b.dataset.home === 'me') return C.openProfile && C.openProfile();
+      if (b.dataset.home === 'montage') return openMontage();
       if (b.dataset.post) return compose({ files: [b.dataset.post] });
       if (b.dataset.job) return C.openJobs();
     });
@@ -1020,5 +1027,186 @@
     });
   }
 
-  window.MWSocial = { start, go, compose, openConnect, view: () => S.view, _state: S, _planTimes: planTimes, _titleFromFile: titleFromFile };
+
+  /* ================================ AI MONTAGE ================================
+   *
+   * A pile of videos and photos from the phone → one edit cut to the operator's
+   * own song, directed by the strongest AI the server has (see montage.js).
+   * The result opens in the Video Studio with the song on the music lane and
+   * the words as text boxes, so captions, restyling and export are the studio's
+   * own — nothing here re-invents them.
+   */
+  const MT = { items: [], song: null, songFile: null, style: 'hype', len: 30, aspect: '9:16', keep: true, brief: '', busy: false };
+  const MT_STYLES = [['hype', 'Hype'], ['worship', 'Worship'], ['emotional', 'Emotional'], ['cinematic', 'Cinematic'], ['fun', 'Fun']];
+  const MT_LENS = [15, 30, 45, 60];
+  const MT_ASPECTS = [['9:16', 'Reels / TikTok'], ['1:1', 'Square'], ['4:5', 'Feed'], ['16:9', 'YouTube']];
+
+  async function openMontage() {
+    if (MT.busy && MT.panel && document.body.contains(MT.panel.el)) return;
+    const panel = C.openPanel({ id: 'cloudMontage', title: 'AI Montage', cls: 'cp-montage', onClose: () => { if (!MT.busy) mtRelease(); } });
+    MT.panel = panel;
+    let who = null, lib = null;
+    try { who = await window.api.montage.status(); } catch (e) { who = null; }
+    try { lib = await window.api.library.list(); } catch (e) { lib = null; }
+    MT.lib = (lib && lib.music) || [];
+    MT.who = who;
+    mtPaint();
+  }
+
+  function mtRelease() {
+    for (const it of MT.items) { try { URL.revokeObjectURL(it.url); } catch (e) {} }
+  }
+
+  function mtPaint() {
+    const p = MT.panel; if (!p) return;
+    const esc = C.esc, attr = C.escAttr;
+    const who = MT.who || {};
+    const brain = who.director === 'claude' ? `Directed by <b>Claude</b> (${esc(who.model || 'Opus')}), looking at every shot`
+      : who.director === 'groq' ? 'Directed by the studio’s AI. <small>Add a Claude key on the server for the best edits.</small>'
+        : 'Directed by the studio’s own editor. <small>Add a Claude key on the server for AI-directed edits.</small>';
+    const chips = (list, cur, key) => list.map(([v, label]) => `<button type="button" class="mt-chip${String(cur) === String(v) ? ' on' : ''}" data-mt-${key}="${attr(v)}">${esc(label)}</button>`).join('');
+    p.body.innerHTML = `
+      <p class="mt-lead">${mi('sparkles')} ${brain}</p>
+      <section class="mt-sec"><h3>Your clips &amp; photos <small>${MT.items.length ? MT.items.length + ' added' : 'add 2 or more'}</small></h3>
+        <div class="mt-grid">${MT.items.map((it, i) => `<div class="mt-tile" data-i="${i}">${it.kind === 'image'
+          ? `<img src="${attr(it.url)}" alt="" />` : `<video src="${attr(it.url)}#t=0.5" muted playsinline preload="metadata"></video><span class="mt-dur">▶</span>`}
+          <button type="button" class="mt-x" data-mt-del="${i}" aria-label="Remove">✕</button></div>`).join('')}
+          <button type="button" class="mt-add" data-mt="add">${mi('plus')}<span>Add</span></button></div>
+      </section>
+      <section class="mt-sec"><h3>Music</h3>
+        <div class="mt-songs">
+          <button type="button" class="mt-chip${!MT.song && !MT.songFile ? ' on' : ''}" data-mt-song="">No music</button>
+          <button type="button" class="mt-chip mt-upsong${MT.songFile ? ' on' : ''}" data-mt="song">🎵 ${MT.songFile ? esc(MT.songFile.name.slice(0, 26)) : 'Add your song'}</button>
+          ${MT.lib.slice(0, 12).map((m) => `<button type="button" class="mt-chip${MT.song && MT.song.id === m.id ? ' on' : ''}" data-mt-song="${attr(m.id)}">${esc(String(m.name || 'song').slice(0, 26))}</button>`).join('')}
+        </div>
+        <label class="mt-toggle"><input type="checkbox" id="mtKeep" ${MT.keep ? 'checked' : ''}/> <span>Keep the clips’ own sound${MT.song || MT.songFile ? ' under the music' : ''}</span></label>
+      </section>
+      <section class="mt-sec"><h3>Style</h3><div class="mt-row">${chips(MT_STYLES, MT.style, 'style')}</div></section>
+      <section class="mt-sec"><h3>Length</h3><div class="mt-row">${chips(MT_LENS.map((n) => [n, n + 's']), MT.len, 'len')}</div></section>
+      <section class="mt-sec"><h3>Shape</h3><div class="mt-row">${chips(MT_ASPECTS.map(([v, l]) => [v, v + ' · ' + l]), MT.aspect, 'aspect')}</div></section>
+      <section class="mt-sec"><h3>What’s it about? <small>optional</small></h3>
+        <textarea id="mtBrief" class="mt-brief" rows="2" maxlength="400" placeholder="e.g. Youth camp 2026 — three days of worship, games and baptisms">${esc(MT.brief)}</textarea></section>
+      <input type="file" id="mtPick" accept="video/*,image/*" multiple hidden />
+      <input type="file" id="mtSong" accept="audio/*,.mp3,.m4a,.wav,.aac" hidden />`;
+    p.foot.innerHTML = `<button type="button" class="mt-go" data-mt="go"${MT.items.length < 2 ? ' disabled' : ''}>${mi('sparkles')} Make my montage</button>`;
+    if (!p._wired) { p._wired = true; mtWire(p); }
+  }
+
+  function mtWire(p) {
+    const onClick = async (e) => {
+      const b = e.target.closest('[data-mt],[data-mt-del],[data-mt-song],[data-mt-style],[data-mt-len],[data-mt-aspect]');
+      if (!b || MT.busy) return;
+      const d = b.dataset;
+      if (d.mtDel != null) { const it = MT.items.splice(+d.mtDel, 1)[0]; if (it) URL.revokeObjectURL(it.url); return mtPaint(); }
+      if (d.mtSong != null) { MT.song = d.mtSong ? MT.lib.find((m) => m.id === d.mtSong) || null : null; MT.songFile = null; return mtPaint(); }
+      if (d.mtStyle) { MT.style = d.mtStyle; return mtPaint(); }
+      if (d.mtLen) { MT.len = +d.mtLen; return mtPaint(); }
+      if (d.mtAspect) { MT.aspect = d.mtAspect; return mtPaint(); }
+      if (d.mt === 'add') return $('#mtPick', p.body).click();
+      if (d.mt === 'song') return $('#mtSong', p.body).click();
+      if (d.mt === 'go') return mtMake();
+    };
+    p.body.addEventListener('click', onClick);
+    p.foot.addEventListener('click', onClick);
+    p.body.addEventListener('change', (e) => {
+      if (e.target.id === 'mtPick') {
+        for (const f of Array.from(e.target.files || []).slice(0, 60 - MT.items.length)) {
+          const kind = /^image\//.test(f.type) || /\.(jpe?g|png|webp|heic|avif)$/i.test(f.name) ? 'image' : 'video';
+          MT.items.push({ file: f, kind, url: URL.createObjectURL(f) });
+        }
+        e.target.value = '';
+        mtPaint();
+      } else if (e.target.id === 'mtSong') {
+        const f = e.target.files && e.target.files[0];
+        if (f) { MT.songFile = f; MT.song = null; }
+        e.target.value = '';
+        mtPaint();
+      } else if (e.target.id === 'mtKeep') MT.keep = e.target.checked;
+    });
+    p.body.addEventListener('input', (e) => { if (e.target.id === 'mtBrief') MT.brief = e.target.value; });
+  }
+
+  function mtProgress(title, pct, note) {
+    const p = MT.panel; if (!p) return;
+    p.body.innerHTML = `<div class="mt-run"><div class="mt-orb">${mi('sparkles')}</div><b class="mt-stage">${C.esc(title)}</b>
+      <div class="mt-bar"><i style="width:${Math.max(2, Math.min(100, pct || 0))}%"></i></div>
+      <small class="mt-note">${C.esc(note || 'You can lock your phone — it carries on, and the montage opens when you come back.')}</small></div>`;
+    p.foot.innerHTML = '';
+  }
+
+  async function mtMake() {
+    if (MT.items.length < 2) return;
+    MT.busy = true;
+    const jobId = 'mt' + Date.now().toString(36);
+    let off = null;
+    try {
+      // 1) the files go up one by one (resumable, like every upload here)
+      const paths = [];
+      const total = MT.items.reduce((n, it) => n + (it.file.size || 1), 0) + ((MT.songFile && MT.songFile.size) || 0);
+      let done = 0;
+      for (let i = 0; i < MT.items.length; i++) {
+        const it = MT.items[i];
+        if (it.path) { paths.push(it.path); done += it.file.size || 1; continue; }
+        mtProgress(`Sending ${i + 1} of ${MT.items.length}…`, (done / total) * 30);
+        it.path = await C.uploadFile(it.file, (pc) => mtProgress(`Sending ${i + 1} of ${MT.items.length}…`, ((done + (it.file.size || 1) * pc / 100) / total) * 30));
+        done += it.file.size || 1;
+        paths.push(it.path);
+      }
+      // 2) the song joins the music library, so it is on the music lane afterwards
+      let song = MT.song;
+      if (MT.songFile) {
+        mtProgress('Sending your song…', 30);
+        const up = await C.uploadFile(MT.songFile, () => {});
+        song = await window.api.library.add('music', up, MT.songFile.name.replace(/\.[^.]+$/, ''), 'montage');
+        MT.song = song; MT.songFile = null;
+      }
+      // 3) the edit itself — long, so its stages are shown as they happen
+      mtProgress('Starting…', 32);
+      off = window.api.onJobProgress((d) => {
+        if (!d || d.jobId !== jobId) return;
+        mtProgress(d.stage || 'Working…', 32 + (d.percent || 0) * 0.68);
+      });
+      const res = await window.api.montage.create({
+        mediaPaths: paths, musicPath: song ? song.file : null, style: MT.style, lengthSec: MT.len,
+        aspect: MT.aspect, brief: MT.brief, keepAudio: MT.keep, jobId,
+      });
+      if (off) off();
+      MT.busy = false;
+      mtProgress('Opening it in the studio…', 100, ' ');
+      go('studio');
+      await window.VideoEditor.applyMontage({ output: res.output, music: song, musicVolume: MT.keep ? 0.7 : 1, texts: res.texts });
+      C.closePanel(MT.panel, true);
+      mtRelease();
+      MT.items = []; MT.brief = '';
+      mtResult(res);
+    } catch (e) {
+      if (off) off();
+      MT.busy = false;
+      const p = MT.panel; if (!p) return;
+      p.body.innerHTML = `<div class="mt-run"><div class="mt-orb bad">!</div><b class="mt-stage">That montage didn’t finish</b>
+        <small class="mt-note">${C.esc((e && e.message) || 'Something went wrong.')}</small></div>`;
+      p.foot.innerHTML = '<button type="button" class="mt-go" data-mt="back">Back to my clips</button>';
+      p.foot.onclick = (ev) => { if (ev.target.closest('[data-mt="back"]')) { p.foot.onclick = null; mtPaint(); } };
+    }
+  }
+
+  function mtResult(res) {
+    const tags = (res.hashtags || []).map((h) => '#' + h).join(' ');
+    const caption = [res.postCaption, tags].filter(Boolean).join('\n\n');
+    const p = C.openPanel({ id: 'cloudMontageDone', title: res.title || 'Your montage', cls: 'cp-montage' });
+    p.body.innerHTML = `<p class="mt-lead">${mi('check')} ${C.esc(Math.round(res.duration))}s · ${C.esc(String((res.shots || []).length))} shots${res.bpm ? ' · cut to ' + C.esc(String(Math.round(res.bpm))) + ' BPM' : ''}</p>
+      ${res.concept ? `<p class="mt-concept">${C.esc(res.concept)}</p>` : ''}
+      <p class="mt-tip">It’s open in the studio now${res.texts && res.texts.length ? ' — the words on screen are text boxes, tap one to change it' : ''}. Add captions from the 💬 Captions tool, change the music volume in Audio, then export as usual.</p>
+      ${caption ? `<section class="mt-sec"><h3>Post caption</h3><textarea class="mt-brief" rows="4" readonly>${C.esc(caption)}</textarea>
+        <button type="button" class="mt-chip on" data-mt-copy>Copy caption</button></section>` : ''}`;
+    p.foot.innerHTML = '<button type="button" class="mt-go" data-mt-ok>Start editing</button>';
+    p.el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-mt-ok]')) C.closePanel(p);
+      if (e.target.closest('[data-mt-copy]')) {
+        try { navigator.clipboard.writeText(caption); C.island({ kind: 'good', title: 'Caption copied' }); } catch (er) {}
+      }
+    });
+  }
+
+  window.MWSocial = { start, go, compose, openConnect, openMontage, view: () => S.view, _state: S, _planTimes: planTimes, _titleFromFile: titleFromFile };
 })();

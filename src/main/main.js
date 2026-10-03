@@ -711,6 +711,23 @@ ipcMain.handle('video:makeProxy', wrap(async (e, { input, jobId }) => {
   return cachedMedia(input, 'proxy', '.mp4', (output) => video.makeProxy(getCtx(), { input, output, onProgress: onProgress(e, jobId) }));
 }));
 
+/* AI montage: a pile of videos and pictures → one edit, directed by the best
+   model available (see montage.js). Its stage names ride on the progress
+   events, so the phone can say what is happening, not just how far. */
+const montage = require('./montage');
+ipcMain.handle('montage:status', wrap(async () => montage.directorStatus()));
+ipcMain.handle('montage:create', wrap(async (e, { mediaPaths, musicPath, style, lengthSec, aspect, brief, keepAudio, jobId }) => {
+  const output = outPath(`montage-${stamp()}.mp4`);
+  let pct = 0, stageName = '';
+  const tell = () => { if (jobId && e && !e.sender.isDestroyed()) e.sender.send('job:progress', { jobId, percent: pct, stage: stageName }); };
+  return montage.make(getCtx(), video.getInfo, {
+    mediaPaths, musicPath, style, lengthSec, aspect, brief, keepAudio, output,
+    onProgress: (p) => { pct = p; tell(); },
+    stage: (name) => { stageName = name; tell(); },
+    log: (m) => console.warn('[montage]', m),
+  });
+}));
+
 ipcMain.handle('video:applyEdits', wrap(async (e, { input, edits, jobId }) => {
   const output = outPath(`edited-${stamp()}.mp4`);
   await video.applyEdits(getCtx(), { input, edits: edits || {}, output, onProgress: onProgress(e, jobId) });
@@ -1079,10 +1096,10 @@ ipcMain.handle('llm:removeModel', wrap(async (e, { modelId }) => {
 
 // `pieces` (present when the user closed gaps on this clip) cuts the pauses out
 // inside the export's own pass — no joined intermediate to render first.
-ipcMain.handle('sermon:exportShort', wrap(async (e, { input, startSec, endSec, preset, quality, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, label, jobId }) => {
+ipcMain.handle('sermon:exportShort', wrap(async (e, { input, startSec, endSec, preset, quality, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, label, jobId, draft }) => {
   const safe = (label || 'short').replace(/[^\w.-]+/g, '_').slice(0, 40);
   const output = outPath(`short-${safe}-${stamp()}.mp4`);
-  await video.exportShort(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, output, onProgress: onProgress(e, jobId) });
+  await ffmod.asDraft(draft, () => video.exportShort(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, output, onProgress: onProgress(e, jobId) }));
   return output;
 }));
 
@@ -1108,18 +1125,18 @@ ipcMain.handle('video:attachThumb', wrap(async (e, { input, imagePath, atSec }) 
 ipcMain.handle('fs:rmdir', wrap(async (e, { dir }) => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch (er) {} return true; }));
 
 // Export a speaker-following (auto-reframed) 9:16 short from face-track keyframes.
-ipcMain.handle('sermon:exportReframed', wrap(async (e, { input, startSec, endSec, preset, quality, keyframes, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, label, jobId }) => {
+ipcMain.handle('sermon:exportReframed', wrap(async (e, { input, startSec, endSec, preset, quality, keyframes, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, label, jobId, draft }) => {
   const safe = (label || 'short').replace(/[^\w.-]+/g, '_').slice(0, 40);
   const output = outPath(`short-${safe}-${stamp()}.mp4`);
-  await video.exportShortReframed(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, keyframes, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, output, onProgress: onProgress(e, jobId) });
+  await ffmod.asDraft(draft, () => video.exportShortReframed(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, keyframes, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, output, onProgress: onProgress(e, jobId) }));
   return output;
 }));
 
 // Export a short using a MANUAL pan/zoom crop the user dragged/zoomed in the preview.
-ipcMain.handle('sermon:exportFramed', wrap(async (e, { input, startSec, endSec, preset, quality, zoom, offsetX, offsetY, pieces, denoise, cover, fadeIn, fadeOut, motion, label, jobId }) => {
+ipcMain.handle('sermon:exportFramed', wrap(async (e, { input, startSec, endSec, preset, quality, zoom, offsetX, offsetY, pieces, denoise, cover, fadeIn, fadeOut, motion, label, jobId, draft }) => {
   const safe = (label || 'short').replace(/[^\w.-]+/g, '_').slice(0, 40);
   const output = outPath(`short-${safe}-${stamp()}.mp4`);
-  const res = await video.exportShortFramed(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, zoom, offsetX, offsetY, pieces, denoise, cover, fadeIn, fadeOut, motion, output, onProgress: onProgress(e, jobId) });
+  const res = await ffmod.asDraft(draft, () => video.exportShortFramed(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, zoom, offsetX, offsetY, pieces, denoise, cover, fadeIn, fadeOut, motion, output, onProgress: onProgress(e, jobId) }));
   return res.output;
 }));
 

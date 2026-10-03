@@ -209,9 +209,11 @@
     "bundle:cloud": "node scripts/make-cloud-bundle.js",
     "test:text-anim": "node test/text-anim.test.js",
     "test:keyframes-chroma": "node test/keyframes-chroma.test.js",
-    "test:open-memory": "node test/open-memory.test.js"
+    "test:open-memory": "node test/open-memory.test.js",
+    "test:montage": "node test/montage.test.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
     "ffmpeg-static": "^5.2.0",
     "ffprobe-static": "^3.1.0",
     "koffi": "^2.16.2",
