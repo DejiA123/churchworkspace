@@ -2285,3 +2285,15 @@ button.cap-model-pick .cap-model-name { align-items: flex-start; text-align: lef
 .ve-snap-guides i:not(.c) { background: repeating-linear-gradient(to bottom, #ff4fd8 0 6px, transparent 6px 10px); }
 .ve-snap-guides .ve-snap-h:not(.c) { background: repeating-linear-gradient(to right, #ff4fd8 0 6px, transparent 6px 10px); }
 .ve-snap-guides i.c { box-shadow: 0 0 6px rgba(255, 79, 216, .7); }
+
+/* ---- full screen where the browser has none (an iPhone): the preview fills the window ---- */
+body.ve-pfull #veDrop.ve-preview, body.ve-pfull .ve-preview#veDrop {
+  position: fixed !important; inset: 0 !important; z-index: 900 !important;
+  width: 100vw !important; height: 100vh !important; height: 100dvh !important; max-height: none !important;
+  margin: 0 !important; border: 0 !important; border-radius: 0 !important; background: #000 !important;
+}
+body.ve-pfull .ve-preview .ve-fs-exit {
+  display: block; top: calc(env(safe-area-inset-top) + 12px); left: 14px; right: auto;
+  width: auto; height: 40px; padding: 0 16px; border-radius: 999px;
+  font-size: 15px; font-weight: 700; white-space: nowrap;
+}

@@ -1688,12 +1688,28 @@
     updateCropMask(); renderRuler(); renderSegments(); updatePlayhead();
   }
   const fsEl = () => document.fullscreenElement;
-  function isPreviewFull() { return fsEl() === ve.refs.drop; }
+  /*
+   * An iPhone has no full screen for a page's elements (only for a bare video,
+   * which would lose the captions and text), and a home-screen app has none at
+   * all — so ⛶ did nothing there. Where the real thing is missing or refused,
+   * the preview fills the whole window instead (.ve-pfull), with ✕ to come back.
+   */
+  const isPseudoFull = () => document.body.classList.contains('ve-pfull');
+  function isPreviewFull() { return fsEl() === ve.refs.drop || isPseudoFull(); }
+  function setPseudoFull(on) {
+    document.body.classList.toggle('ve-pfull', !!on);
+    onFullscreenChange();
+    // the picture changed size twice over (layout, then the browser bars settling)
+    setTimeout(onFullscreenChange, 250);
+  }
   async function togglePreviewFull() {
-    try {
-      if (isPreviewFull()) await document.exitFullscreen();
-      else if (ve.refs.drop.requestFullscreen) await ve.refs.drop.requestFullscreen();
-    } catch (e) { window.__toast && window.__toast('Full screen isn’t available here.', 'error'); }
+    if (isPseudoFull()) return setPseudoFull(false);
+    if (fsEl() === ve.refs.drop) { try { await document.exitFullscreen(); } catch (e) {} return; }
+    const real = ve.refs.drop.requestFullscreen && document.fullscreenEnabled !== false;
+    if (real) {
+      try { await ve.refs.drop.requestFullscreen(); return; } catch (e) { /* refused: the window instead */ }
+    }
+    setPseudoFull(true);
   }
   /** Fullscreen changes the preview's pixel size, so everything measured off it must be redrawn. */
   function onFullscreenChange() {
@@ -12217,6 +12233,7 @@
     const bigBtn = $('#veBigger'); if (bigBtn) bigBtn.addEventListener('click', () => setPreviewBig(!isPreviewBig()));
     const fullBtn = $('#veFull'); if (fullBtn) fullBtn.addEventListener('click', togglePreviewFull);
     const fsExit = $('#veFsExit'); if (fsExit) fsExit.addEventListener('click', togglePreviewFull);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && isPseudoFull()) setPseudoFull(false); });
     document.addEventListener('fullscreenchange', onFullscreenChange);
     const followBtn = $('#veFollow'); if (followBtn) followBtn.addEventListener('click', () => setFollow(!ve.follow));
     // text-style toolbar (font / size / colour / bold / delete)
