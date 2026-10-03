@@ -11842,7 +11842,19 @@
       await libRefresh();
       useMusic(entry.id);
       setLibTab('music');
-    } catch (e) {}
+    } catch (e) {
+      // YouTube's robot check needs explaining, and a toast is too short for it.
+      const msg = (e && e.message) || '';
+      const list = $('#libYtList');
+      if (list && /robot|not a bot/i.test(msg)) {
+        const old = $('.lib-yt-blocked', list.parentNode); if (old) old.remove();
+        const note = document.createElement('div');
+        note.className = 'lib-yt-blocked lib-note';
+        note.innerHTML = `⚠️ ${escape2(msg)} <button class="ghost-btn small" data-ytmine>🎵 My music</button>`;
+        list.parentNode.insertBefore(note, list);
+        const b = $('[data-ytmine]', note); if (b) b.addEventListener('click', () => setLibTab('music'));
+      }
+    }
   }
 
   /* ---- what happens on export ---- */
