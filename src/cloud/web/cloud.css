@@ -744,8 +744,10 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
     box-shadow: 0 2px 10px rgba(0,0,0,.6);
   }
   body.mw-cloud #view-video.ve-pro .cloud-tl-add .mi { width: 20px; height: 20px; margin: 0; }
-  /* room past the end of the clips for it */
-  body.mw-cloud #view-video.ve-pro .ve-tl-scroll { padding-right: 60px; }
+  /* the room past the last clip is .cloud-tl-tail, a block cloud-boot.js sizes
+     (iOS will not scroll into padding); it also leaves air under the last lane */
+  .cloud-tl-tail { display: none; }
+  body.mw-cloud #view-video.ve-pro .cloud-tl-tail { display: block; height: 10px; pointer-events: none; }
 
   body.mw-cloud #view-video.ve-pro .ve-playhead { width: 2px; background: #fff; box-shadow: 0 0 6px rgba(0,0,0,.7); }
   body.mw-cloud #view-video.ve-pro .ve-playhead::before { left: -5px; border-width: 6px; border-top-color: #fff; }

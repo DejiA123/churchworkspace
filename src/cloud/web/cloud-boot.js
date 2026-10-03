@@ -2252,12 +2252,24 @@ let _hideTimer = null;
         add.addEventListener('click', () => { const t = $('#veAddMedia'); if (t && !t.disabled) t.click(); });
         mirror(add, $('#veAddMedia'), {});
         scroller.appendChild(add);
+        /*
+         * Room for it that iOS counts: Safari does not scroll into a scroller's
+         * padding or out to an absolutely placed child, so the timeline stopped
+         * at the last clip with the ＋ just past the edge. A plain block this
+         * wide is content every browser scrolls to.
+         */
+        const tail = document.createElement('div');
+        tail.className = 'cloud-tl-tail';
+        tail.setAttribute('aria-hidden', 'true');
+        scroller.appendChild(tail);
         const place = () => {
           const main = Array.from(track.querySelectorAll('.ve-seg')).filter((n) => !n.classList.contains('ve-seg-ov'));
           const sr = scroller.getBoundingClientRect(), tr = track.getBoundingClientRect();
           let top = tr.bottom - 39, h = 36;
           if (main.length) { const r = main[0].getBoundingClientRect(); top = r.top; h = r.height; }
-          add.style.left = Math.round(tr.right - sr.left + scroller.scrollLeft + 10) + 'px';
+          const endX = Math.round(tr.right - sr.left + scroller.scrollLeft);
+          add.style.left = (endX + 10) + 'px';
+          tail.style.width = (endX + 56) + 'px';
           add.style.top = Math.round(top - sr.top + scroller.scrollTop + (h - 34) / 2) + 'px';
         };
         if (window.ResizeObserver) new ResizeObserver(() => requestAnimationFrame(place)).observe(track);
