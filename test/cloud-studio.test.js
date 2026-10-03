@@ -31,6 +31,8 @@
  *   [G] the PWA      — manifest, icons, and a service worker that will never
  *                      cache the studio's work
  *   [I] deleting     — only exports and uploads, never a planned post's video
+ *   [K] long calls   — an export outlives the request that started it (a
+ *                      phone that locks or loses signal still gets the file)
  *   [J] spaces       — each account sees only its own work
  *   [H] the scheduler— the phone's Social Scheduler: a Zernio key goes IN and
  *                      never comes back out, the accounts arrive without their
@@ -47,6 +49,8 @@ const http = require('http');
 const { execFileSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
+// a call answers "still working" after this long (20 s on a real server)
+process.env.MW_CALL_HOLD_MS = '400';
 const PORT = 7394;
 const CODE = 'anchor-harvest-4271';
 
@@ -498,6 +502,33 @@ async function run() {
   const old = (Date.now() - 3 * 86400000) / 1000;
   fs.utimesSync(stale, old, old);
   log(cloud.sweepParts() >= 1 && !fs.existsSync(stale), 'an upload given up on days ago is swept away');
+
+  /* ───────────── [K] a call outlives its request ───────────── */
+  console.log('\n=== [K] a call outlives its request ===');
+  const named = (id, envlp) => request('POST', '/api/rpc', {
+    headers: Object.assign({ 'Content-Type': 'application/json', 'X-MW-Call': id }, auth()), body: JSON.stringify(envlp),
+  });
+  const waitFor = (id) => request('GET', '/api/rpc/wait?call=' + id, { headers: auth() });
+  let runs = 0;
+  const realInvoke = rpcBridge.invoke;
+  rpcBridge.invoke = function (ch) { if (ch === 'video:applyEdits') runs++; return realInvoke.apply(this, arguments); };
+  const cid = 'call' + Date.now();
+  const longCall = { channel: 'video:applyEdits', args: { input: sermon, edits: { cuts: [], preset: 'reel-9x16', quality: '720p' }, jobId: 'k_' + Date.now() } };
+  r = await named(cid, longCall);
+  log(r.status === 202 && r.json && r.json.pending, 'a long export answers “still working” instead of holding the request open');
+  r = await named(cid, longCall);
+  log(r.status === 202 || r.status === 200, 'the same call sent again (the phone was not sure it arrived) is recognised');
+  for (let i = 0; i < 300 && r.status !== 200; i++) r = await waitFor(cid);
+  log(r.status === 200 && r.json && r.json.ok && fs.existsSync(r.json.data), 'asking again later collects the finished export', r.json && path.basename(String(r.json.data)));
+  log(runs === 1, 'and it was exported once, not twice', runs + ' run(s)');
+  const again = await waitFor(cid);
+  log(again.status === 200 && again.json && again.json.data === r.json.data, 'an answer that got lost on the way can be collected again');
+  r = await waitFor('nosuchcall123');
+  log(r.status === 404 && r.json && r.json.unknown, 'a call the studio never had says so (so the phone knows to send it)');
+  r = await request('GET', '/api/rpc/wait?call=' + cid);
+  log(r.status === 401, 'nobody signed out can collect it');
+  rpcBridge.invoke = realInvoke;
+  try { fs.rmSync(again.json.data, { force: true }); } catch (e) {}
 
   /* ───────────── [J] personal spaces ───────────── */
   // Last, because once there is an account the code alone stops opening the studio.

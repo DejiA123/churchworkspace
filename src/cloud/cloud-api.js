@@ -644,6 +644,64 @@ function push(event, data, opts = {}) {
   }
 }
 
+/* ------------------------------------------------- calls that outlive a request */
+
+/*
+ * ►► AN EXPORT DOES NOT HANG ON ONE HTTP REQUEST. ◄◄
+ *
+ * A call used to be one POST that stayed open until the work was done, and a
+ * service-length export is many minutes of that request saying nothing. On a
+ * phone that does not survive: the screen locks, the app goes behind another
+ * one, the signal drops in the car park, a proxy on the way gives up on a
+ * silent connection. Every one of those threw away the ANSWER, so the export
+ * finished on the server and the phone said it had failed (and never offered
+ * the file).
+ *
+ * So the page names each call (`X-MW-Call`) and the server keeps its answer:
+ *   • a call that finishes within HOLD_MS answers on the same request, as before;
+ *   • a longer one answers 202 "still working", and the page asks
+ *     `/api/rpc/wait?call=` (each ask waits up to HOLD_MS) until it is done;
+ *   • a page that lost the connection simply asks again when it is back, and a
+ *     repeat of the POST itself attaches to the call already running.
+ * Answers are kept for a while after they finish, in case the one sent was lost.
+ */
+const HOLD_MS = +process.env.MW_CALL_HOLD_MS || 20000; // (tests shorten it)
+const KEEP_MS = 6 * 3600000;       // a finished answer nobody has collected (a phone left locked)
+const KEEP_AFTER_READ_MS = 120000; // …and one that was sent, in case it was lost
+const calls = new Map();
+const validCallId = (id) => typeof id === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(id);
+const callKey = (me, id) => (validCallId(id) ? ((me && me.uid) || '-') + ':' + id : null);
+
+function trackCall(key, work) {
+  const c = { done: false, enc: null, waiters: new Set(), timer: null };
+  calls.set(key, c);
+  const expire = (ms) => { clearTimeout(c.timer); c.timer = setTimeout(() => calls.delete(key), ms); if (c.timer.unref) c.timer.unref(); };
+  c.expire = expire;
+  work.then((out) => {
+    c.enc = encodeEnvelope(out);
+    c.done = true;
+    expire(KEEP_MS);
+    for (const w of Array.from(c.waiters)) w();
+  });
+  return c;
+}
+
+function answerCall(c, req, res) {
+  const reply = () => {
+    if (res.writableEnded) return;
+    // a quick answer is forgotten soon; a long job's is kept in case it was lost
+    c.expire(c.long ? KEEP_AFTER_READ_MS : 15000);
+    send(res, 200, c.enc.binary ? 'application/x-mw-rpc' : 'application/json; charset=utf-8', c.enc.body);
+  };
+  if (c.done) return reply();
+  let t = null;
+  const w = () => { clearTimeout(t); c.waiters.delete(w); reply(); };
+  c.waiters.add(w);
+  t = setTimeout(() => { c.waiters.delete(w); c.long = true; if (!res.writableEnded) json(res, 202, { pending: true }); }, HOLD_MS);
+  res.on('close', () => { clearTimeout(t); c.waiters.delete(w); });
+  return undefined;
+}
+
 /* ------------------------------------------------------------ file serving */
 
 /** Serve a file with Range support — no phone browser will scrub without it. */
@@ -1052,7 +1110,19 @@ async function authedRoutes(req, res, url, p, me) {
     return undefined;
   }
 
+  if (p === '/api/rpc/wait') {
+    const c = calls.get(callKey(me, url.searchParams.get('call')));
+    if (!c) return json(res, 404, { unknown: true });
+    return answerCall(c, req, res);
+  }
+
   if (p === '/api/rpc' && req.method === 'POST') {
+    // A retry of a call the server already has (the phone lost the answer, or
+    // never knew whether the request arrived): wait on the one that is
+    // running instead of starting the export a second time.
+    const cid = req.headers['x-mw-call'];
+    const known = calls.get(callKey(me, cid));
+    if (known) { req.resume(); return answerCall(known, req, res); }
     let body;
     try { body = decodeEnvelope(await readBody(req, 512 * 1024 * 1024)); }
     catch (e) { return json(res, 400, { ok: false, error: e.message }); }
@@ -1071,14 +1141,20 @@ async function authedRoutes(req, res, url, p, me) {
       return json(res, 403, { ok: false, error: `That file is outside the folders this studio may use (${badKey}).` });
     }
 
-    let out = await rpc.invoke(channel, args, sseSender);
-    if (out && out.ok && rule && typeof rule === 'object' && rule.result) {
-      out = { ok: true, data: rule.result(out.data) };
+    const work = rpc.invoke(channel, args, sseSender).then((out) => {
+      if (out && out.ok && rule && typeof rule === 'object' && rule.result) {
+        out = { ok: true, data: rule.result(out.data) };
+      }
+      return out;
+    }, (e) => ({ ok: false, error: (e && e.message) || String(e) }));
+    // Without a call id (an older page) the request simply waits, as it always did.
+    if (!validCallId(cid)) {
+      // The envelope is passed through otherwise untouched — a browser sees exactly
+      // what the desktop renderer sees, cancellations included.
+      const enc = encodeEnvelope(await work);
+      return send(res, 200, enc.binary ? 'application/x-mw-rpc' : 'application/json; charset=utf-8', enc.body);
     }
-    // The envelope is passed through otherwise untouched — a browser sees exactly
-    // what the desktop renderer sees, cancellations included.
-    const enc = encodeEnvelope(out);
-    return send(res, 200, enc.binary ? 'application/x-mw-rpc' : 'application/json; charset=utf-8', enc.body);
+    return answerCall(trackCall(callKey(me, cid), work), req, res);
   }
 
   if (p === '/api/media' || p === '/api/file') {

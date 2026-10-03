@@ -1372,7 +1372,7 @@ async function makeProxy(ctx, { input, output, onProgress }) {
     '-g', String(Math.round(fps)), '-keyint_min', String(Math.round(fps)),
     ...(info.hasAudio ? ['-c:a', 'aac', '-b:a', '128k', '-ac', '2'] : ['-an']),
     '-movflags', '+faststart', '-y', output];
-  await ff.runFfmpeg(ctx.ffmpeg, args, { onProgress, totalDurationSec: info.durationSec });
+  await ff.runFfmpeg(ctx.ffmpeg, args, { onProgress, totalDurationSec: info.durationSec, background: true });
   return output;
 }
 
