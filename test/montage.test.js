@@ -190,8 +190,8 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
     brief: '', keepAudio: true, output: outAll, onProgress: () => {} });
   const infoAll = await video.getInfo(ctx, outAll);
   const want = 8 + 6;
-  log(resAll.full && resAll.shots.length === 3 && infoAll.durationSec >= want, 'nothing is cut out: both clips whole plus the photo', `${infoAll.durationSec.toFixed(2)} s from ${want} s of video + a photo`);
-  log(resAll.shots.some((x) => x.transition === 'fade'), 'and they are blended (a fade between different kinds of shot)', resAll.shots.map((x) => x.transition).join(','));
+  log(resAll.full && resAll.shots.length + resAll.overlays.length === 3 && infoAll.durationSec >= want - 0.2, 'nothing is cut out: both clips whole plus the photo', `${infoAll.durationSec.toFixed(2)} s from ${want} s of video + a photo`);
+  log(resAll.overlays.length === 1, 'and the photo is laid over a clip rather than tacked on the end', JSON.stringify(resAll.overlays.map((o) => o.style)));
 
   console.log('\nB-ROLL ON TOP, THE SOUND CARRIES ON');
   const ovPlan = montage.finalise({
@@ -204,10 +204,44 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
     ],
     texts: [], hashtags: [], post_caption: '', title: '', concept: '',
   }, cands, { lengthSec: 30 }, null);
-  const o0 = ovPlan.shots[0].overlay;
+  const o0 = ovPlan.shots[0].overlays[0];
   log(o0 && o0.style === 'pip' && o0.cand.id === 'c3', 'an overlay lands on its video shot');
   log(o0 && o0.start >= 1.2 && o0.start + o0.len <= ovPlan.shots[0].seconds, 'kept out of the hook’s first second and inside its shot', o0 && `${o0.start}+${o0.len} of ${ovPlan.shots[0].seconds}`);
-  log(!ovPlan.shots[1].overlay, 'one per shot, and never over a photo (it has no sound to carry)');
+  log(ovPlan.shots[0].overlays.length === 1 && !ovPlan.shots[1].overlays.length, 'no more than a 6 s shot can carry, and never over a photo (it has no sound to carry)');
+
+  console.log('\nPHOTOS GO ON THE VIDEOS, NOT AFTER THEM');
+  const longCands = [
+    { id: 'v1', kind: 'video', file: 'a.mov', start: 0, end: 44, peak: 10, fileDur: 44, whole: true, hasAudio: true, w: 576, h: 1024, score: 0.6 },
+    { id: 'v2', kind: 'video', file: 'b.mov', start: 0, end: 66, peak: 20, fileDur: 66, whole: true, hasAudio: true, w: 464, h: 832, score: 0.5 },
+    { id: 'v3', kind: 'video', file: 'c.mov', start: 0, end: 10, peak: 5, fileDur: 10, whole: true, hasAudio: true, w: 1920, h: 1080, score: 0.4 },
+  ];
+  for (let k = 1; k <= 12; k++) longCands.push({ id: 'p' + k, kind: 'image', file: `p${k}.jpg`, start: 0, end: 0, peak: 0, fileDur: 0, hasAudio: false, w: k % 2 ? 1600 : 1066, h: k % 2 ? 1066 : 1600, score: 0.5 });
+  // what a director did with the real photos: every video, then every photo
+  const atEnd = montage.finalise({
+    shots: longCands.map((c) => ({ id: c.id, seconds: 3, effect: c.kind === 'image' ? 'slow_zoom' : 'cut', focus: 'center', transition: 'cut' })),
+    texts: [{ at_shot: 0, span_shots: 1, text: 'The Power House', role: 'hook' }], hashtags: [], post_caption: '', title: '', concept: '',
+  }, longCands, { full: true, lengthSec: 0 }, null);
+  const lastVid = atEnd.shots.map((x) => x.cand.kind).lastIndexOf('video');
+  const ovs = atEnd.shots.flatMap((x) => x.overlays.map((o) => ({ o, x })));
+  const standing = atEnd.shots.filter((x) => x.cand.kind === 'image');
+  log(lastVid === atEnd.shots.length - 1, 'no photo is left in a pile after the last video', atEnd.shots.map((x) => x.cand.id).join(','));
+  log(ovs.length >= 9 && ovs.length + standing.length === 12, 'most become B-roll over the videos, and every photo is still shown once', `${ovs.length} on top, ${standing.length} between`);
+  log(atEnd.shots.filter((x) => x.cand.kind === 'video').every((v) => v.overlays.length >= 1 || v.seconds < 8), 'spread through every clip long enough to carry one', atEnd.shots.map((x) => x.cand.id + ':' + x.overlays.length).join(' '));
+  log(atEnd.shots.every((x) => x.overlays.every((o, k) => o.start + o.len <= x.seconds && (!k || o.start >= x.overlays[k - 1].start + x.overlays[k - 1].len + 0.99))), 'each picture inside its clip, with the clip itself between them');
+  log(ovs.some(({ o }) => o.style === 'pip') && ovs.some(({ o }) => o.style === 'cutaway'), 'mostly full-frame, sometimes a framed box');
+  log(atEnd.texts[0] && atEnd.texts[0].start === 0, 'the hook stays on the opening shot');
+  let run = 0, worst = 0;
+  for (const x of atEnd.shots) { run = x.cand.kind === 'image' ? run + 1 : 0; worst = Math.max(worst, run); }
+  log(worst <= 2, 'never more than two photos in a row between clips', 'longest run ' + worst);
+  const iv = 60 / 96, bts = [];
+  for (let t = 0.21; t < 140; t += iv) bts.push(Math.round(t * 1000) / 1000);
+  const ovBeat = montage.finalise({
+    shots: longCands.map((c) => ({ id: c.id, seconds: 3, effect: 'cut', focus: 'center', transition: 'cut' })),
+    texts: [], hashtags: [], post_caption: '', title: '', concept: '',
+  }, longCands, { full: true, lengthSec: 0 }, { bpm: 96, interval: iv, beats: bts });
+  const offs = ovBeat.shots.flatMap((x) => x.overlays.map((o) => Math.min(...bts.map((b) => Math.abs(b - (x.at + o.start))))));
+  const lens = ovBeat.shots.flatMap((x) => x.overlays.map((o) => o.len / iv));
+  log(offs.length >= 9 && Math.max(...offs) < 0.02 && lens.every((n) => Math.abs(n - Math.round(n)) < 0.05), 'with a song, every picture comes in ON a beat and stays whole beats', `${offs.length} pictures, worst ${Math.max(...offs).toFixed(3)} s off`);
   const ovOut = path.join(WORK, 'ov.mp4');
   const base = make(['-f', 'lavfi', '-i', 'testsrc2=s=1280x720:r=30:d=8', '-f', 'lavfi', '-i', 'sine=f=440:d=8', '-shortest', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-c:a', 'aac'], path.join(WORK, 'talk.mp4'));
   const resOv = await montage.make(ctx, video.getInfo, { mediaPaths: [base, ph], full: true, style: 'worship', aspect: '9:16', keepAudio: true, output: ovOut, onProgress: () => {} });
