@@ -2235,15 +2235,6 @@ let _hideTimer = null;
     /* ---- pinch the timeline to zoom it ------------------------------- */
     const tl = $('#veTimeline');
     if (tl) {
-      // CapCut's ＋ at the end of the video row: put a video or picture on.
-      const add = document.createElement('button');
-      add.type = 'button';
-      add.className = 'cloud-tl-add';
-      add.setAttribute('aria-label', 'Add a video or picture');
-      add.innerHTML = mi('plus');
-      add.addEventListener('click', () => { const t = $('#veAddMedia'); if (t && !t.disabled) t.click(); });
-      mirror(add, $('#veAddMedia'), {});
-      tl.appendChild(add);
 
       let pinch = null;
       const span = (ts) => Math.hypot(ts[0].clientX - ts[1].clientX, ts[0].clientY - ts[1].clientY);
@@ -2278,6 +2269,43 @@ let _hideTimer = null;
         if (inner) ro.observe(inner);
       }
       setTimeout(more, 500);
+
+      /*
+       * ►► THE TIMELINE ENDS WHERE THE TOOLS BEGIN. ◄◄
+       * On an iPhone the bottom ~58pt of the timeline sat BEHIND the dock (the
+       * window iOS gives a home-screen app is not the one CSS was told about),
+       * so the last lane — the music — was in that hidden strip: scrolled to
+       * the end it was still under the tools, and the finger bounced back. So
+       * the real positions are measured and the timeline is made to stop at the
+       * dock; if it would get too short, its lanes get room to scroll up instead.
+       */
+      let fitting = false;
+      const fitTl = () => {
+        if (fitting || !document.body.classList.contains('mw-cloud')) return;
+        const dock = $('#cloudDock'), view = $('#view-video');
+        if (!dock || !view || !tl.offsetParent) return;
+        fitting = true;
+        view.style.paddingBottom = '';
+        const vr = view.getBoundingClientRect();
+        const pb = parseFloat(getComputedStyle(view).paddingBottom) || 0;
+        const vv = window.visualViewport;
+        const limit = Math.min(dock.getBoundingClientRect().top, vv ? vv.offsetTop + vv.height : window.innerHeight);
+        // the studio's content ends where its padding starts; it must end at the dock
+        const over = Math.ceil((vr.bottom - pb) - limit);
+        if (over > 1) view.style.paddingBottom = (pb + over) + 'px';
+        fitting = false;
+        more();
+      };
+      cloud.fitTimeline = fitTl;
+      window.addEventListener('resize', fitTl);
+      window.addEventListener('orientationchange', () => setTimeout(fitTl, 350));
+      if (window.visualViewport) window.visualViewport.addEventListener('resize', fitTl);
+      if (window.ResizeObserver) {
+        const ro2 = new ResizeObserver(() => requestAnimationFrame(fitTl));
+        const dockEl = $('#cloudDock'), viewEl = $('#view-video');
+        for (const el of [dockEl, viewEl]) if (el) ro2.observe(el);
+      }
+      setTimeout(fitTl, 300); setTimeout(fitTl, 1500);
     }
   }
 

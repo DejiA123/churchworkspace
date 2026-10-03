@@ -733,22 +733,7 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
   body.mw-cloud .ve-sfx-grid { grid-template-columns: repeat(3, 1fr); }
   body.mw-cloud #view-video.ve-pro .ve-seg-label { background: rgba(0,0,0,.45); font-weight: 700; }
 
-  /* CapCut's white ＋ at the end of the video row: add a video or a picture. */
   .cloud-tl-add { display: none; }
-  body.mw-cloud #view-video.ve-pro .cloud-tl-add {
-    display: grid; place-items: center;
-    position: absolute; z-index: 6;
-    right: 7px; top: 37px;
-    width: 34px; height: 34px; padding: 0;
-    background: #fff; color: #000;
-    border: 0; border-radius: 8px;
-    box-shadow: 0 2px 10px rgba(0,0,0,.6);
-  }
-  body.mw-cloud #view-video.ve-pro .cloud-tl-add .mi { width: 20px; height: 20px; margin: 0; }
-  body.mw-cloud #view-video.ve-pro .ve-timeline:has(.ve-seg-ov) .cloud-tl-add { top: 80px; }
-  /* the ＋ has a column of its own, so it never sits over a clip's white
-     right-hand edge (the studio fits the video to the scroller's width) */
-  body.mw-cloud #view-video.ve-pro .ve-tl-scroll { margin-right: 48px; }
 
   body.mw-cloud #view-video.ve-pro .ve-playhead { width: 2px; background: #fff; box-shadow: 0 0 6px rgba(0,0,0,.7); }
   body.mw-cloud #view-video.ve-pro .ve-playhead::before { left: -5px; border-width: 6px; border-top-color: #fff; }
