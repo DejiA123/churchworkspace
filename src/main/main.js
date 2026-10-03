@@ -889,9 +889,16 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
    * result says why.
    */
   // (Tiny counts even when it is not installed yet: transcribe fetches it)
-  const localFits = installedAsr.some((id) => machine.fitsWhisper(id)) || machine.fitsWhisper('tiny.en');
+  const localEngine = captioner.isAvailable();
+  const localFits = localEngine && (installedAsr.some((id) => machine.fitsWhisper(id)) || machine.fitsWhisper('tiny.en'));
   const cloudCanHear = cloudspeech.fileReady();
-  const wantedDeep = deep !== false && captioner.isAvailable();
+  /*
+   * The cloud ear on its own is enough to read the sermon. This required the
+   * PC engine as well, so a server with a Groq key and no model file (the
+   * Docker image) ran every "Deep" scan by sound alone — no words, so every
+   * short came out titled "Key moment 4" — and said nothing about why.
+   */
+  const wantedDeep = deep !== false && (localEngine || cloudCanHear);
   const contentAware = wantedDeep && (localFits || cloudCanHear);
   // Return SENTENCE-level segments with clip-relative timing so the highlighter can
   // snap each clip to complete-sentence boundaries (perfect human-like start/finish),
@@ -932,6 +939,8 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
   const cacheDir = path.join(app.getPath('userData'), 'transcript-cache');
   const cache = contentAware ? new TransCache(cacheDir, input, `${asr}|segment|fast|v2`) : null;
   const localRange = async (s, en) => {
+    // no engine here: a stretch the cloud could not hear is a stretch with no words
+    if (!localEngine) return { segs: [] };
     const hit = cache.get(s, en);
     if (hit) return { segs: hit.map((g) => ({ start: g.start - s, end: g.end - s, text: g.text })), cached: true };
     const r = await captioner.transcribe(ctx, { input, startSec: s, endSec: en, model: asr, granularity: 'segment', fast: true, threads });
@@ -952,7 +961,7 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
   const useCloudEar = contentAware && cloudCanHear
     && (asrModel === 'cloud' || (aiModel === 'cloud' && !asrModel)
       // a machine that cannot hold the model it would use: the cloud hears it
-      || !localFits || (!asrModel && !machine.fitsWhisper(asr)));
+      || !localEngine || !localFits || (!asrModel && !machine.fitsWhisper(asr)));
   const ear = { cloud: 0, pc: 0, why: '', model: '' };
   const cloudCache = useCloudEar ? new TransCache(cacheDir, input, `cloud:${cloudspeech.state().model || 'whisper'}|segment|v1`) : null;
   // …and the word timings from the same answers, for ✂️ Remove pauses (see below)
@@ -1106,10 +1115,22 @@ ipcMain.handle('sermon:exportFramed', wrap(async (e, { input, startSec, endSec, 
 
 /* --------------------------- IPC: auto-captions ------------------------- */
 
-ipcMain.handle('captions:available', wrap(async () => captioner.isAvailable()));
+/*
+ * Captions can be heard on this machine (whisper and its model) OR by the cloud
+ * ear (a Groq key). A server built without the model file — the Docker image,
+ * which ships the engine but not the model — used to answer "not available"
+ * here with a Groq key in place, and every caption and Deep scan quietly
+ * stood down. Either one is enough.
+ */
+const captionsHearable = () => captioner.isAvailable() || cloudspeech.fileReady();
+ipcMain.handle('captions:available', wrap(async () => captionsHearable()));
 // Why captions are / aren't usable, so the UI can say something actionable
 // instead of a dead-end "not available in this build".
-ipcMain.handle('captions:engineInfo', wrap(async () => captioner.engineInfo()));
+ipcMain.handle('captions:engineInfo', wrap(async () => {
+  const info = captioner.engineInfo();
+  if (!info.available && cloudspeech.fileReady()) return Object.assign({}, info, { available: true, cloudOnly: true, reason: '', howTo: '' });
+  return info;
+}));
 
 /**
  * Caption transcription — ACCURACY FIRST.
@@ -1170,6 +1191,8 @@ function wantsCloudCaptions(model, fast) {
   // a PC model this machine cannot hold, with the cloud there to hear it
   // instead (a small server — see machine.js)
   if (model && !fast && !machine.fitsWhisper(model) && cloudspeech.fileReady()) return true;
+  // nothing on this machine to hear it with: the cloud, whatever was asked for
+  if (!captioner.isAvailable() && cloudspeech.fileReady()) return true;
   if (fast || model) return false;          // an explicit PC model, or a scan
   return cloudspeech.fileReady();
 }
@@ -1184,11 +1207,14 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, onP
   const t0 = Date.now();
   // The cloud owns most of the bar; a PC finish (if one is needed) owns the rest.
   let r = null;
-  // the scan's cloud ear already heard this short (sermon:analyze hands its words over)
-  if (Array.isArray(words) && words.length) {
-    r = { words: words.map((w) => ({ text: w.text, start: w.start - from, end: w.end - from })), doneSec: to - from, model: cloudspeech.state().model };
-  }
-  if (!r) try {
+  /*
+   * (A block copied here from video:speechPauses used to read that handler's
+   * `words` argument — which this function has never had. `let words` further
+   * down made it a ReferenceError, so EVERY caption meant for the cloud failed
+   * with "Cannot access 'words' before initialization": on a server with a Groq
+   * key and no speech model of its own, captions did not work at all.)
+   */
+  try {
     r = await cloudspeech.transcribeWords({ input, startSec: from, endSec: to, onProgress: (p) => prog && prog(Math.round(p * 0.9)) });
   } catch (err) {
     if (err && err.cancelled) throw new jobs.CancelledError();
@@ -1200,7 +1226,13 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, onP
   if (r.doneSec < span - 0.5) {
     // Nothing came back from the cloud at all: the ordinary PC path, which
     // reports its own progress and says why (see cloudWhy in the handler).
-    if (!words.length && r.doneSec <= 0) return null;
+    if (!words.length && r.doneSec <= 0) {
+      if (!captioner.isAvailable()) throw new Error('The cloud could not hear this clip (' + (r.why || 'no answer') + ') and this server has no speech model of its own to try instead.');
+      return null;
+    }
+    if (!captioner.isAvailable()) {
+      throw new Error('The cloud stopped part-way (' + (r.why || 'no answer') + ') and this server has no speech model of its own to hear the rest — try again in a minute.');
+    }
     // Stopped part-way: the PC hears what is left, and the two are joined.
     const restFrom = from + r.doneSec;
     const rest = await captioner.transcribe(getCtx(), {

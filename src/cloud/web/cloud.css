@@ -19,6 +19,21 @@
 
 body.mw-cloud { overflow: hidden; }
 
+/*
+ * An iPhone home-screen app that was handed a screen short by the status bar's
+ * height (cloud-boot.js, vpFix): the page is laid out on the WHOLE screen. The
+ * body takes the screen's real height and, by being transformed, becomes what
+ * everything pinned to the bottom is measured from — the dock, the sheets, the
+ * panels — so they sit on the real bottom edge instead of 59 points above it.
+ * Fixed, so it adds nothing for the page to scroll by.
+ */
+html.mw-vpfix body.mw-cloud {
+  position: fixed; top: 0; left: 0; right: 0;
+  height: var(--vp-h, 100%);
+  transform: translateZ(0);
+}
+html.mw-vpfix body.mw-cloud #app { height: 100%; }
+
 body.mw-cloud #app {
   display: block;
   height: 100vh;
