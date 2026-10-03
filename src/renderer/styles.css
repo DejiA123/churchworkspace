@@ -1121,6 +1121,8 @@ button.cap-model-pick .cap-model-name { align-items: flex-start; text-align: lef
 .lib-actions input[type=text] { flex: 1; min-width: 200px; margin: 0; padding: 8px 11px; }
 .lib-note { margin: 0 0 12px; font-size: 11.5px; color: var(--muted); background: var(--bg-2);
   border: 1px dashed var(--border); border-radius: 8px; padding: 8px 11px; }
+.lib-yt-blocked { color: var(--text); border: 1px solid rgba(245,158,11,.45); background: rgba(245,158,11,.10); line-height: 1.45; }
+.lib-yt-blocked button { margin-left: 6px; }
 /* 🛡️ Copyright-free search: the default-on toggle, quick-pick chips, result badge */
 .lib-free-toggle { display: flex; align-items: center; gap: 7px; margin: 0 0 10px; padding: 8px 11px; font-size: 12px;
   background: rgba(63,185,80,.08); border: 1px solid rgba(63,185,80,.35); border-radius: 8px; color: var(--text); cursor: pointer; }

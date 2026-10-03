@@ -244,12 +244,67 @@ async function ytInstall({ onProgress } = {}) {
   return { path: dest, installed: true };
 }
 
+/* YouTube refuses downloads from data-centre addresses (a cloud server) with
+ * “Sign in to confirm you’re not a bot”. Two things get past it, both set by
+ * the studio's owner on the server, never in the app or the repo:
+ *   - YT_COOKIES (the cookies.txt text) or a secret file youtube-cookies.txt
+ *     (Render → Environment → Secret Files) — a signed-in browser's cookies
+ *   - YT_PROXY — a proxy yt-dlp should go through
+ * yt-dlp rewrites its cookie file, and secret files are read-only, so it is
+ * always given a private copy. */
+const COOKIE_FILES = () => [
+  process.env.YT_COOKIES_FILE,
+  '/etc/secrets/youtube-cookies.txt',
+  path.join(process.cwd(), 'youtube-cookies.txt'),
+].filter(Boolean);
+function cookieText() {
+  const env = String(process.env.YT_COOKIES || '').trim();
+  if (env) return env.replace(/\\n/g, '\n');
+  for (const f of COOKIE_FILES()) {
+    try { if (fs.existsSync(f)) { const t = fs.readFileSync(f, 'utf8').trim(); if (t) return t; } } catch (e) {}
+  }
+  return '';
+}
+let cookieCopy = null;
+function ytAuthArgs() {
+  const out = [];
+  const text = cookieText();
+  if (text) {
+    try {
+      if (!cookieCopy || !fs.existsSync(cookieCopy.file) || cookieCopy.src !== text) {
+        const file = path.join(toolsDir(), 'yt-cookies.txt');
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        // Netscape cookie files must start with this line or yt-dlp ignores them.
+        const body = /^# (Netscape )?HTTP Cookie File/i.test(text) ? text : '# Netscape HTTP Cookie File\n' + text;
+        fs.writeFileSync(file, body + '\n', { mode: 0o600 });
+        cookieCopy = { file, src: text };
+      }
+      out.push('--cookies', cookieCopy.file);
+    } catch (e) {}
+  }
+  const proxy = String(process.env.YT_PROXY || '').trim();
+  if (proxy) out.push('--proxy', proxy);
+  return out;
+}
+const hasYtAuth = () => !!cookieText();
+const isBotCheck = (e) => /not a bot|sign in to confirm|confirm your age|cookies-from-browser|HTTP Error 429/i.test((e && e.message) || '');
+/* Other YouTube "players" sometimes still answer when the default is told to
+ * sign in, so a blocked download tries these before giving up. */
+const PLAYER_FALLBACKS = ['tv_simply,web_safari', 'mweb,android_vr', 'tv,web_embedded'];
+
+function botCheckHelp() {
+  return new Error(hasYtAuth()
+    ? 'YouTube is still asking the server to prove it isn’t a robot. The YouTube cookies on the server have probably expired — the studio’s owner should export fresh ones and replace them. Meanwhile, add the song from your phone under 🎵 My music.'
+    : 'YouTube blocks downloads from cloud servers (“confirm you’re not a bot”). Searching still works. To fix it, the studio’s owner adds YouTube cookies on the server once (Render → Environment → Secret Files → youtube-cookies.txt). Meanwhile, add the song from your phone under 🎵 My music.');
+}
+
 /** Run yt-dlp and collect stdout. Cancellable like any other job. */
 function runYt(args, { onProgress, timeoutMs = 180000 } = {}) {
   const cli = ytPath();
   if (!cli) return Promise.reject(new Error('The YouTube helper isn’t installed yet — click “Enable YouTube” first.'));
+  const full = args[0] === '-U' ? args : ytAuthArgs().concat(args);
   return new Promise((resolve, reject) => {
-    const proc = jobs.track(spawn(cli, args, { windowsHide: true }));
+    const proc = jobs.track(spawn(cli, full, { windowsHide: true }));
     let out = '', err = '';
     const killer = setTimeout(() => { try { proc.kill('SIGKILL'); } catch (e) {} }, timeoutMs);
     proc.stdout.on('data', (d) => { out += d.toString(); if (out.length > 8e6) out = out.slice(-4e6); });
@@ -335,6 +390,23 @@ async function runYtWithRepair(args, opts) {
   }
 }
 
+/** Download, getting past a stale helper or YouTube's robot check where it can. */
+async function getAudio(args, url, opts) {
+  const withPlayer = (p) => args.slice(0, -1).concat(p ? ['--extractor-args', 'youtube:player_client=' + p] : [], [url]);
+  let last;
+  try { return await runYtWithRepair(args, opts); } catch (e) { last = e; }
+  if (!isBotCheck(last)) throw last;
+  for (const p of PLAYER_FALLBACKS) {
+    try { return await runYt(withPlayer(p), opts); } catch (e) {
+      if (e instanceof jobs.CancelledError) throw e;
+      last = e;
+      if (!isBotCheck(e)) break;
+    }
+  }
+  if (isBotCheck(last)) throw botCheckHelp();
+  throw last;
+}
+
 /**
  * Import a YouTube video's AUDIO into the music library.
  *
@@ -353,7 +425,7 @@ async function ytImport(ctx, video, { url, title, onProgress }) {
   if (ctx && ctx.ffmpeg) args.push('--ffmpeg-location', ctx.ffmpeg);
   args.push(url);
   try {
-    await runYt(args, { onProgress, timeoutMs: 900000 });
+    await getAudio(args, url, { onProgress, timeoutMs: 900000 });
     const got = fs.readdirSync(dir).map((f) => path.join(dir, f)).filter((f) => /\.(mp3|m4a|opus|webm|ogg|wav)$/i.test(f));
     if (!got.length) throw new Error('Nothing was downloaded from that video.');
     return await add(ctx, video, { kind: 'music', path: got[0], name: title || 'YouTube track', source: 'youtube' });
@@ -364,6 +436,6 @@ async function ytImport(ctx, video, { url, title, onProgress }) {
 
 module.exports = {
   init, list, add, remove, rename, root, toolsDir,
-  ytPath, ytStatus, ytInstall, ytSearch, ytImport, looksCopyrightFree,
+  ytPath, ytStatus, ytInstall, ytSearch, ytImport, looksCopyrightFree, ytAuthArgs, isBotCheck,
   MUSIC_EXT, CLIP_EXT, STILL_EXT, STILL_SEC, safeName,
 };
