@@ -1061,7 +1061,14 @@ function edgeFades(s, next, dur) {
  * 10-bit HEVC took 15 s just to read. Skipping the decoder's loop filter took
  * that to 9.6 s; shrunk to 1080 wide, the difference does not show.
  */
-const encodeOpts = () => (machine.small() ? ['-preset', 'ultrafast', '-crf', '20'] : ['-preset', 'medium', '-crf', '18']);
+/* …with x264's deblocking, CABAC and two B-frames switched back on (ultrafast
+ * drops them): on the operator's own clip that halved the file — 9.3 → 4.4
+ * Mbit/s, a ten-minute montage 700 → 330 MB, the size a phone can actually
+ * save — at a slightly HIGHER likeness to the source (SSIM 0.9895 → 0.9908),
+ * for about a tenth more encoding time. */
+const encodeOpts = () => (machine.small()
+  ? ['-preset', 'ultrafast', '-crf', '23', '-x264-params', 'no-deblock=0:cabac=1:bframes=2']
+  : ['-preset', 'medium', '-crf', '18']);
 const bigSource = (c, W, H) => !!(c && c.kind === 'video' && c.w && c.h && c.w * c.h > 2.5 * W * H);
 const decodeOpts = (c, W, H) => (bigSource(c, W, H) ? ['-skip_loop_filter', 'all'] : []);
 

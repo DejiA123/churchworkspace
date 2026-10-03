@@ -1449,6 +1449,69 @@ let _hideTimer = null;
   const SHARE_MAX = 1536 * 1024 * 1024;
   const isStandalone = () => navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
   const onPhone = () => window.matchMedia('(max-width: 900px)').matches;
+  function openInPlayer(p) {
+    island({ kind: 'info', title: 'Opening it in the player', sub: 'Tap the share button, then “Save Video”', ms: 6000 });
+    window.open(downloadUrl(p).replace('/api/file?', '/api/media?').replace('&dl=1', ''), '_blank');
+  }
+  /*
+   * ►► A BIG FILE COMES DOWN IN PIECES. ◄◄
+   * One request for a 700 MB montage over a phone's connection stalled at 2%
+   * and never moved again. It is fetched in 4 MB pieces, three at a time; a
+   * piece that stalls for 25 s is asked for again (up to six times), so a
+   * dropped connection costs one piece, not the whole download. Each piece is
+   * kept as a Blob (WebKit keeps those out of the page's memory) and the file
+   * is put together from them.
+   */
+  async function fetchForSaving(p, name, size, onPct) {
+    const url = downloadUrl(p);
+    let total = Number(size) || 0;
+    if (!total) {
+      const r = await fetch(url, { headers: { Range: 'bytes=0-0' } });
+      const cr = r.headers.get('content-range') || '';
+      total = Number((/\/(\d+)$/.exec(cr) || [])[1]) || Number(r.headers.get('content-length')) || 0;
+      try { await r.arrayBuffer(); } catch (e) {}
+    }
+    const type = /\.mov$/i.test(name) ? 'video/quicktime' : /\.(jpe?g)$/i.test(name) ? 'image/jpeg' : /\.png$/i.test(name) ? 'image/png' : 'video/mp4';
+    if (!total) {   // a server that will not say how big: one go
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return new File([await res.blob()], name, { type });
+    }
+    const CHUNK = 4 * 1024 * 1024;
+    const n = Math.ceil(total / CHUNK);
+    const parts = new Array(n);
+    let next = 0, got = 0, shown = -1;
+    const one = async (i) => {
+      const a = i * CHUNK, b = Math.min(total, a + CHUNK) - 1;
+      for (let tries = 0; ; tries++) {
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), 25000);
+        try {
+          const r = await fetch(url, { headers: { Range: `bytes=${a}-${b}` }, signal: ac.signal, cache: 'no-store' });
+          if (!(r.status === 206 || (r.status === 200 && n === 1))) throw new Error('HTTP ' + r.status);
+          const blob = await r.blob();
+          if (blob.size !== b - a + 1) throw new Error('short piece');
+          clearTimeout(timer);
+          return blob;
+        } catch (e) {
+          clearTimeout(timer);
+          if (tries >= 5) throw e;
+          await new Promise((res) => setTimeout(res, 800 * (tries + 1)));
+        }
+      }
+    };
+    const worker = async () => {
+      while (next < n) {
+        const i = next++;
+        parts[i] = await one(i);
+        got += parts[i].size;
+        const pc = Math.min(99, Math.floor((got / total) * 100));
+        if (pc !== shown) { shown = pc; onPct(pc); }
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    return new File(parts, name, { type });
+  }
   async function offerDownload(p, size) {
     if (!p) return;
     const name = String(p).split(/[\\/]/).pop();
@@ -1463,42 +1526,31 @@ let _hideTimer = null;
       const id = 'save-' + name;
       island({ id, title: 'Getting it ready…', sub: name, spin: true, sticky: true });
       try {
-        const res = await fetch(downloadUrl(p));
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const total = Number(res.headers.get('content-length')) || size || 0;
-        let blob;
-        if (res.body && res.body.getReader && total) {
-          const rd = res.body.getReader(), parts = [];
-          let got = 0, shown = -1;
-          for (;;) {
-            const { done, value } = await rd.read();
-            if (done) break;
-            parts.push(value); got += value.length;
-            const pc = Math.floor((got / total) * 100);
-            if (pc !== shown && pc % 2 === 0) { shown = pc; island({ id, title: `Getting it ready… ${pc}%`, sub: name, spin: true, sticky: true }); }
-          }
-          blob = new Blob(parts, { type: res.headers.get('content-type') || '' });
-        } else blob = await res.blob();
-        const type = blob.type && blob.type !== 'application/octet-stream' ? blob.type : (/\.mov$/i.test(name) ? 'video/quicktime' : 'video/mp4');
-        const file = new File([blob], name, { type });
-        islandHide(id);
+        const file = await fetchForSaving(p, name, size, (pc) => island({ id, title: `Getting it ready… ${pc}%`, sub: name, spin: true, sticky: true }));
         if (navigator.canShare({ files: [file] })) {
-          island({ id: id + '-tip', kind: 'good', title: 'Tap “Save Video”', sub: 'in the sheet that opens', ms: 4000 });
-          await navigator.share({ files: [file], title: name });
+          /*
+           * The share sheet only opens straight after a tap — a download of
+           * hundreds of MB has long used that tap up, and the sheet silently
+           * refused. So when it is ready, it asks for one more tap.
+           */
+          island({ id, kind: 'good', title: 'Ready to save', sub: name, sticky: true,
+            action: { label: 'Save Video', onClick: () => {
+              islandHide(id);
+              navigator.share({ files: [file], title: name }).catch((e) => {
+                if (e && e.name === 'AbortError') return;
+                openInPlayer(p);
+              });
+            } } });
           return;
         }
+        islandHide(id);
       } catch (e) {
         islandHide(id);
-        if (e && e.name === 'AbortError') return;          // they closed the share sheet
+        if (e && e.name === 'AbortError') return;
+        island({ kind: 'warn', title: 'The download kept dropping', sub: 'Opening it in the player instead', ms: 5000 });
       }
     }
-    if (onPhone() && isStandalone()) {
-      // The phone's own player (it plays as it arrives — never a blank page);
-      // its share button saves it to Photos.
-      island({ kind: 'info', title: 'Opening it in the player', sub: 'Tap the share button, then “Save Video”', ms: 6000 });
-      window.open(downloadUrl(p).replace('/api/file?', '/api/media?').replace('&dl=1', ''), '_blank');
-      return;
-    }
+    if (onPhone() && isStandalone()) { openInPlayer(p); return; }   // the phone's own player — never a blank page
     const a = document.createElement('a');
     a.href = downloadUrl(p);
     a.download = name;
