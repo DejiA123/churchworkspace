@@ -319,6 +319,20 @@ app.whenReady().then(() => {
 
   space.init(userData);   // each Cloud Studio person's own folders, under <userData>/spaces
   library.init(userData); // saved music + outro clips live under <userData>/library
+  // server-run exports, resumed after a restart (half-made files of the cut-off attempt are cleared first)
+  require('./batch').init(path.join(userData, 'batches'), {
+    onInterrupted: ({ space: who, label, since, made, keep }) => setTimeout(() => space.run(who, () => {
+      const dirOut = ensureOutputDir();
+      const safe = (label || 'short').replace(/[^\w.-]+/g, '_').slice(0, 40);
+      for (const f of fs.readdirSync(dirOut)) {
+        const full = path.join(dirOut, f);
+        if (keep.has(full)) continue;
+        let st = null; try { st = fs.statSync(full); } catch (e) { continue; }
+        const mine = made.includes(full) || (f.startsWith(`short-${safe}-`) && st.mtimeMs >= since - 2000);
+        if (mine) { try { fs.rmSync(full, { force: true }); } catch (e) {} }
+      }
+    }), 1000),
+  });
   sessions.init(userData); // saved editing sessions under <userData>/sessions
   mediaCache.init(path.join(app.getPath('temp'), 'cws-media-cache')); // timeline pictures + HEVC previews, per recording
   songbank.init(userData); // the songs the church sings, under <userData>/song-bank.json
@@ -709,6 +723,19 @@ ipcMain.handle('video:getExportPrefs', wrap(async () => video.getExportPrefs()))
 
 ipcMain.handle('video:makeProxy', wrap(async (e, { input, jobId }) => {
   return cachedMedia(input, 'proxy', '.mp4', (output) => video.makeProxy(getCtx(), { input, output, onProgress: onProgress(e, jobId) }));
+}));
+
+/* Exports that run on the server by themselves — the phone hands over a
+   recipe per short and can be closed (see batch.js). */
+const batch = require('./batch');
+ipcMain.handle('batch:open', wrap(async (e, a) => batch.open(a, e.sender)));
+ipcMain.handle('batch:add', wrap(async (e, a) => batch.add(a, e.sender)));
+ipcMain.handle('batch:seal', wrap(async (e, a) => batch.seal(a)));
+ipcMain.handle('batch:list', wrap(async (e) => batch.list(e && e.sender)));
+ipcMain.handle('batch:cancel', wrap(async (e, a) => batch.cancel(a)));
+ipcMain.handle('machine:info', wrap(async () => {
+  const m = require('./machine');
+  return { cpus: m.cpus(), memoryMB: m.memoryMB(), quota: m.quota ? m.quota() : 0, small: m.small() };
 }));
 
 /* AI montage: a pile of videos and pictures → one edit, directed by the best

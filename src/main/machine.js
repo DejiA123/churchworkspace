@@ -78,4 +78,6 @@ const fitsWhisper = (modelId) => whisperNeedMB(modelId) + HEADROOM_MB <= memoryM
 /** How many encoder threads a small machine should give ffmpeg; 0 = leave it to ffmpeg. */
 const ffmpegThreads = () => (small() ? Math.max(1, Math.min(2, cpus())) : 0);
 
-module.exports = { cpus, memoryMB, small, whisperNeedMB, fitsWhisper, ffmpegThreads, HEADROOM_MB, _reset: () => { cached = null; } };
+/** The CPU share the host really gives (0.5 = half a core); 0 when unlimited. */
+const quota = () => measure().quota || 0;
+module.exports = { quota, cpus, memoryMB, small, whisperNeedMB, fitsWhisper, ffmpegThreads, HEADROOM_MB, _reset: () => { cached = null; } };

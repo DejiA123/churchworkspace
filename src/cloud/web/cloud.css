@@ -2210,3 +2210,5 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .mt-concept { margin: 6px 0; font-size: 15px; line-height: 1.45; color: var(--ph-text, #fff); }
 .mt-tip { margin: 8px 0 4px; font-size: 13.5px; line-height: 1.5; color: var(--ph-muted, #9b9ea8); }
 @media (prefers-reduced-motion: reduce) { .mt-orb, .mt-orb .mi { animation: none; } }
+
+.cj-server { display: block; margin-top: 10px; text-align: center; font-size: 12px; line-height: 1.45; color: var(--ph-muted, #9b9ea8); }

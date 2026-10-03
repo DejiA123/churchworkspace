@@ -101,4 +101,13 @@ function throwIfCancelled() {
   if (isCancelled()) throw new CancelledError();
 }
 
-module.exports = { run, track, cancel, isCancelled, throwIfCancelled, currentJob, CancelledError, isCancelError };
+/** Shutting down: every process a job started goes with the server — an encode
+ *  left running on its own would finish a file nobody is waiting for, and the
+ *  restarted server would do the same short again beside it. */
+function killAll() {
+  let n = 0;
+  for (const set of live.values()) for (const p of set) { try { p.kill('SIGKILL'); n++; } catch (e) {} }
+  return n;
+}
+
+module.exports = { killAll, run, track, cancel, isCancelled, throwIfCancelled, currentJob, CancelledError, isCancelError };

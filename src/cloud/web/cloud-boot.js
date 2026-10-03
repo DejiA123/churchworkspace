@@ -184,7 +184,108 @@ let _hideTimer = null;
     throw err;
   };
 
+  /*
+   * ►► RECORD MODE: A SHORT BECOMES A RECIPE FOR THE SERVER. ◄◄
+   * While a batch export is being handed to the server (window.__mwBatch, used
+   * by the studio's Export all), the steps that are server work are not sent
+   * one by one and waited on: they are written down, and each answers at once
+   * with a stand-in for the file it will make ("@@step-N@@.mp4"), so the studio
+   * carries on to the next step exactly as it always does. Everything that
+   * needs THIS device — following the speaker, drawing the captions and the
+   * text — really runs. The finished list goes to the server (batch.js), which
+   * runs it on its own: the phone can be closed. A step that would need to look
+   * at a file that does not exist yet throws, and that short is exported the
+   * ordinary way instead.
+   */
+  const REC_STEPS = new Set([
+    'sermon:exportShort', 'sermon:exportReframed', 'sermon:exportFramed',
+    'captions:burnTrack', 'captions:burn', 'overlays:burnImages', 'overlays:burn',
+    'video:overlayComposite', 'video:mixSounds', 'video:mixMusic', 'video:appendClips', 'video:attachThumb',
+  ]);
+  const IS_STANDIN = /^@@step-\d+@@(\.[a-z0-9]+)?$/i;
+  const rec = { on: false, steps: null };
+  const hasStandIn = (v, d = 0) => {
+    if (d > 8 || v == null) return false;
+    if (typeof v === 'string') return IS_STANDIN.test(v);
+    if (Array.isArray(v)) return v.some((x) => hasStandIn(x, d + 1));
+    if (typeof v === 'object' && !ArrayBuffer.isView(v) && !(v instanceof ArrayBuffer)) return Object.keys(v).some((k) => hasStandIn(v[k], d + 1));
+    return false;
+  };
+  function recordCall(channel, args) {
+    // the size of a short that is not made yet is known from its shape and quality
+    if (channel === 'video:info' && rec.expect && args && typeof args.input === 'string' && IS_STANDIN.test(args.input)) {
+      return Object.assign({}, rec.expect);
+    }
+    if (!REC_STEPS.has(channel)) {
+      if (hasStandIn(args)) {
+        const err = new Error('This step needs a file the server has not made yet.');
+        err.recordUnsupported = true;
+        throw err;
+      }
+      return undefined;
+    }
+    const n = rec.steps.length;
+    rec.steps.push({ channel, args: args || {} });
+    if (channel === 'video:attachThumb') return {};
+    return `@@step-${n}@@.mp4`;
+  }
+  window.__mwBatch = {
+    supported: () => true,
+    isStandIn: (p) => typeof p === 'string' && IS_STANDIN.test(p),
+    begin(expect) { rec.on = true; rec.steps = []; rec.expect = expect || null; },
+    end() { const st = rec.steps || []; rec.on = false; rec.steps = null; rec.expect = null; return st; },
+    recording: () => rec.on,
+    open: (label, total) => call('batch:open', { label, total }),
+    add: (id, label, steps) => call('batch:add', { id, label, steps }),
+    seal: (id) => call('batch:seal', { id }),
+    list: () => call('batch:list', {}),
+    cancel: (id) => call('batch:cancel', { id }),
+  };
+
+  /*
+   * A batch running on the server, shown where every export is shown (the pill
+   * at the top, Running now) — on this phone, on another, or after the app was
+   * closed and opened again. Its progress arrives as 'batch:progress' events;
+   * Stop stops it on the server.
+   */
+  const serverTasks = new Map(); // batchId -> taskId
+  function showServerBatch(b) {
+    if (!b || !b.id || !window.__newTask) return;
+    let tid = serverTasks.get(b.id);
+    if (!tid) {
+      if (b.state !== 'running') return;
+      tid = window.__newTask(b.label || 'Exporting on the server', { background: true });
+      serverTasks.set(b.id, tid);
+    }
+    const left = b.total - b.done - b.failed;
+    if (window.__setTaskBatch) window.__setTaskBatch(tid, Math.min(b.total, b.done + b.failed + 1), b.total);
+    for (const it of b.items || []) if (it.state === 'done' && it.output && window.__taskAddFile) window.__taskAddFile(tid, it.output);
+    if (b.state === 'running') {
+      const cur = b.current;
+      const step = cur ? `On the server · ${cur.label}` : (b.received < b.total ? `Preparing on your phone… ${b.received} of ${b.total} sent` : 'Queued on the server');
+      if (window.__taskSay) window.__taskSay(tid, step + (b.sealed ? ' — you can close the app' : ''));
+      // the chip's number is THIS short's, as for every export; "1 of 20" beside it is the batch
+      if (window.__taskProgress) window.__taskProgress(tid, cur ? cur.pct : 0);
+      return;
+    }
+    serverTasks.delete(b.id);
+    const note = b.state === 'cancelled' ? 'Stopped.'
+      : `✅ ${b.done} short${b.done === 1 ? '' : 's'} exported on the server${b.failed ? ` · ${b.failed} could not be made` : ''}.`;
+    if (window.__endTask) window.__endTask(tid, { ok: b.state !== 'cancelled' && b.done > 0, state: b.state === 'cancelled' ? 'stopped' : (b.done ? 'done' : 'fail'), note });
+    if (b.state === 'done') {
+      island({ kind: b.failed ? 'warn' : 'good', title: `${b.done} short${b.done === 1 ? '' : 's'} ready`, text: b.failed ? `${b.failed} could not be made — tap Running now for why.` : 'They are in Files.' });
+      if (typeof refreshFiles === 'function') { try { refreshFiles(); } catch (e) {} }
+    }
+    void left;
+  }
+  cloud.serverTasks = serverTasks;
+  cloud.showServerBatch = showServerBatch;
+
   async function call(channel, args) {
+    if (rec.on) {
+      const r = recordCall(channel, args);
+      if (r !== undefined) return r;
+    }
     const packed = pack({ channel, args: args || {} });
     const id = newCallId();
     const post = () => fetch('/api/rpc', {
@@ -2724,7 +2825,16 @@ let _hideTimer = null;
       onClose: () => { clearInterval(jobs.timer); jobs.timer = null; jobs.sig = ''; },
     });
     p.body.addEventListener('click', onJobsClick);
-    p.foot.innerHTML = `<button type="button" class="cp-link" data-jobs="saved">${mi('download')}Everything finished this session</button>`;
+    p.foot.innerHTML = `<button type="button" class="cp-link" data-jobs="saved">${mi('download')}Everything finished this session</button>`
+      + '<small class="cj-server" id="cjServer"></small>';
+    // What the exports are running on — the one number that explains their speed.
+    call('machine:info').then((m) => {
+      const el = $('#cjServer'); if (!el || !m) return;
+      const cpu = m.quota ? (m.quota >= 1 ? `${Math.round(m.quota * 10) / 10} CPU` : `${Math.round(m.quota * 100) / 100} of a CPU`) : `${m.cpus} CPU${m.cpus > 1 ? 's' : ''}`;
+      const slow = m.quota && m.quota < 1;
+      el.innerHTML = `Server: ${escHtml(cpu)} · ${escHtml(String(Math.round(m.memoryMB)))} MB`
+        + (slow ? '<br>A 90-second 1080p short takes several minutes on this — a bigger server plan makes every export faster.' : '');
+    }).catch(() => {});
     p.foot.addEventListener('click', (e) => {
       if (!e.target.closest('[data-jobs="saved"]')) return;
       p.close();
@@ -2929,6 +3039,7 @@ let _hideTimer = null;
     if (window.MWSocial) { try { window.MWSocial.start(cloud.hello); } catch (e) { console.error(e); } }
 
     connectEvents();
+    setTimeout(wireServerBatches, 1200);
 
     let presets = {};
     try { presets = await window.api.video.presets(); } catch (e) { presets = {}; }
@@ -3020,6 +3131,29 @@ let _hideTimer = null;
     setTimeout(() => checkForUpdate(true), 4000);
   }
   cloud.checkForUpdate = checkForUpdate;
+
+  /* Server batches: their progress, Stop, and picking them up again after the
+     app was closed (see showServerBatch). */
+  function wireServerBatches() {
+    if (cloud._batchWired) return;
+    cloud._batchWired = true;
+    cloud.onEvent('batch:progress', (b) => showServerBatch(b));
+    const stop = window.__taskStop;
+    if (stop) {
+      window.__taskStop = async (taskId) => {
+        for (const [bid, tid] of serverTasks) {
+          if (tid === taskId) { try { await window.__mwBatch.cancel(bid); } catch (e) {} return true; }
+        }
+        return stop(taskId);
+      };
+    }
+    const pick = async () => {
+      try { for (const b of (await window.__mwBatch.list()) || []) if (b.state === 'running' || serverTasks.has(b.id)) showServerBatch(b); } catch (e) {}
+    };
+    pick();
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) pick(); });
+  }
+  cloud.wireServerBatches = wireServerBatches;
 
   /* What the home screen and the scheduler (cloud-social.js) borrow from here. */
   Object.assign(cloud, {

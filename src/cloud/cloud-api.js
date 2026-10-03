@@ -189,6 +189,12 @@ const ALLOWED = {
 
   // long → short
   'sermon:analyze': true,
+  'batch:open': true,
+  'batch:add': true,
+  'batch:seal': true,
+  'batch:list': true,
+  'batch:cancel': true,
+  'machine:info': true,
   'montage:status': true,
   'montage:create': true,
   'sermon:exportShort': true,

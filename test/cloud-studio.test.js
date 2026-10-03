@@ -33,6 +33,8 @@
  *   [I] deleting     — only exports and uploads, never a planned post's video
  *   [K] long calls   — an export outlives the request that started it (a
  *                      phone that locks or loses signal still gets the file)
+ *   [L] server batch — the phone hands over each short's recipe; the server
+ *                      finishes alone, and refuses anything but export steps
  *   [J] spaces       — each account sees only its own work
  *   [H] the scheduler— the phone's Social Scheduler: a Zernio key goes IN and
  *                      never comes back out, the accounts arrive without their
@@ -530,6 +532,38 @@ async function run() {
   rpcBridge.invoke = realInvoke;
   try { fs.rmSync(again.json.data, { force: true }); } catch (e) {}
 
+
+  /* ───────────── [L] an export the server finishes alone ───────────── */
+  console.log('\n=== [L] server batch: the phone hands over a recipe and can go ===');
+  const bopen = await rpcOk('batch:open', { label: 'Exporting 2 shorts', total: 2 });
+  log(bopen && bopen.id && bopen.state === 'running', 'a batch opens on the server');
+  const recipe = (label) => [
+    { channel: 'sermon:exportShort', args: { input: sermon, startSec: 1, endSec: 4, preset: 'reel-9x16', quality: '720p', label, jobId: 'x' } },
+    { channel: 'video:attachThumb', args: { input: '@@step-0@@.mp4', atSec: 0.5 } },
+  ];
+  r = await rpc('batch:add', { id: bopen.id, label: 'One', steps: recipe('One') });
+  log(r.status === 200 && r.body.ok, 'a short’s recipe is accepted (its later steps name the earlier step’s file)');
+  r = await rpc('batch:add', { id: bopen.id, label: 'Bad', steps: [{ channel: 'social:setKeys', args: {} }] });
+  log(!r.body.ok && /not an export step/.test(r.body.error || ''), 'a recipe cannot do anything but export', r.body.error);
+  r = await rpc('batch:add', { id: bopen.id, label: 'Bad', steps: [{ channel: 'video:attachThumb', args: { input: '@@step-3@@.mp4' } }] });
+  log(!r.body.ok, 'a step cannot use a file from a step after it');
+  r = await rpc('batch:add', { id: bopen.id, label: 'Bad', steps: [{ channel: 'sermon:exportShort', args: { input: outside, startSec: 0, endSec: 1 } }] });
+  log(r.status === 403, 'nor a file outside the studio’s folders', 'status ' + r.status);
+  await rpcOk('batch:add', { id: bopen.id, label: 'Two', steps: recipe('Two') });
+  await rpcOk('batch:seal', { id: bopen.id });
+  let bl = null;
+  for (let i = 0; i < 240; i++) {
+    bl = (await rpcOk('batch:list', {})).find((x) => x.id === bopen.id);
+    if (bl && bl.state !== 'running') break;
+    await sleep(500);
+  }
+  log(bl && bl.state === 'done' && bl.done === 2 && bl.items.every((x) => x.output && fs.existsSync(x.output)), 'the server makes both by itself', bl && bl.items.map((x) => path.basename(String(x.output))).join(', '));
+  const leftover = fs.readdirSync(path.join(WORK, 'userData', 'batches')).filter((f) => /\.bin$/.test(f));
+  log(leftover.length === 0, 'and clears its recipes away', leftover.length + ' left');
+  const saved = JSON.parse(fs.readFileSync(path.join(WORK, 'userData', 'batches', 'batches.json'), 'utf8'));
+  log(saved.some((x) => x.id === bopen.id), 'its state is on disk, so a restart can carry on');
+  for (const x of bl.items) { try { fs.rmSync(x.output, { force: true }); } catch (e) {} }
+
   /* ───────────── [J] personal spaces ───────────── */
   // Last, because once there is an account the code alone stops opening the studio.
   console.log('\n=== [J] personal spaces ===');
@@ -598,6 +632,11 @@ async function run() {
   log(r.ok === false, 'nobody can delete someone else’s post');
   await as(owner, 'scheduler:remove', { id: spPost.data.id });
 
+  const ob = (await as(owner, 'batch:open', { label: 'Owner batch', total: 1 })).data;
+  const seenByAma = (await as(ama, 'batch:list', {})).data || [];
+  log(ob && !seenByAma.some((x) => x.id === ob.id), 'a server batch is its owner’s: nobody else sees it');
+  r = await as(ama, 'batch:cancel', { id: ob.id });
+  log(r.ok === false, 'nor can stop it');
   const me = (await request('GET', '/api/me', { headers: { Authorization: 'Bearer ' + owner } })).json;
   const amaUid = me.people.find((u) => u.name === 'Ama').uid;
   log(me.people.length === 2 && !(await request('GET', '/api/me', { headers: { Authorization: 'Bearer ' + ama } })).json.people,

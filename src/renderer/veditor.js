@@ -8548,6 +8548,26 @@
       const kf = await computeReframeKeyframes(s, input, ss, ee, pieces, cancelled);
       return kf && kf.length ? { keyframes: kf } : null;
     });
+    /*
+     * ON THE SERVER, WHERE THERE IS ONE (the Cloud Studio). Each short's chain
+     * still runs here — the tracking, the caption and text drawing — but its
+     * server steps are recorded instead of waited on (cloud-boot.js) and the
+     * recipe is handed to the server, which runs it by itself. The phone can be
+     * closed once every short has been handed over. A short whose chain needs
+     * to look at a file the server has not made yet is exported the ordinary way.
+     */
+    const SB = window.__mwBatch && window.__mwBatch.supported && window.__mwBatch.supported() ? window.__mwBatch : null;
+    let sbatch = null, sent = 0;
+    if (SB) { try { sbatch = await SB.open(`Exporting ${list.length} short${list.length > 1 ? 's' : ''}`, list.length); } catch (e) { sbatch = null; } }
+    const expectFor = (s) => {
+      const p = (ve.presets && ve.presets[ve.aspect]) || { w: 1080, h: 1920 };
+      const q = String(qualityCfg() || '1080p');
+      const short = /4k/i.test(q) ? 2160 : (parseInt(q, 10) || 1080);
+      const ratio = p.w / p.h;
+      const even = (n) => Math.max(2, Math.round(n / 2) * 2);
+      const w = ratio >= 1 ? even(short * ratio) : short, h = ratio >= 1 ? short : even(short / ratio);
+      return { width: w, height: h, durationSec: Math.max(0.1, (s.end || 0) - (s.start || 0)), hasAudio: true, fps: 24 };
+    };
     try {
       for (let i = 0; i < list.length; i++) {
         const s = list[i];
@@ -8584,12 +8604,27 @@
             `🎯 Tracking the speaker in "${s.label}"…`, window.__newJobId(), () => p, J(s, 'track')));
           // Start the NEXT one's tracking now, so it runs under this encode.
           if (i + 1 < list.length) ahead.begin(list[i + 1]);
-          const text = await textImagesFor(s);
-          let out = await exportOneClip(s, got, caps || !!(text && text.length));
-          if (caps) out = await autoCaptionExport(s, out, text);
-          else out = await burnTextIntoShort(s, out, null, text);
-          out = await finishExport(s, out); // background music, then the outro
-          if (window.__taskAddFile) window.__taskAddFile(task, out);
+          const chain = async () => {
+            const text = await textImagesFor(s);
+            let out = await exportOneClip(s, got, caps || !!(text && text.length));
+            if (caps) out = await autoCaptionExport(s, out, text);
+            else out = await burnTextIntoShort(s, out, null, text);
+            return finishExport(s, out); // background music, then the outro
+          };
+          let steps = null;
+          if (sbatch) {
+            SB.begin(expectFor(s));
+            try { await chain(); steps = SB.end(); }
+            catch (e) { SB.end(); if (!e || !e.recordUnsupported) throw e; steps = null; }
+          }
+          if (steps && steps.length) {
+            await SB.add(sbatch.id, s.label, steps);
+            sent++;
+            if (window.__taskSay) window.__taskSay(task, `Handed ${sent} of ${list.length} to the server — it is exporting them`);
+          } else {
+            const out = await chain();
+            if (window.__taskAddFile) window.__taskAddFile(task, out);
+          }
           done++;
           // Let this one be seen to finish before the next resets the number.
           if (window.__chainDone) await window.__chainDone(task);
@@ -8604,8 +8639,17 @@
       list.forEach(disarmExport);
     }
     if (window.__setJobBatch) window.__setJobBatch(null);
+    if (sbatch) { try { await SB.seal(sbatch.id); } catch (e) {} }
     const extras = [ve.music ? 'music' : null, (ve.outro && ve.outroAll !== false) ? 'your outro' : null].filter(Boolean).join(' + ');
-    if (done) {
+    if (sent) {
+      // the server has them: this phone's part is over
+      const note = `✅ ${sent} short${sent > 1 ? 's are' : ' is'} exporting on the server${done > sent ? ` (${done - sent} made here)` : ''} — you can close the app; they will be in Files.`
+        + (stopped ? ` The rest ${stopped.cancelled ? 'were stopped' : 'did not finish'}.` : '');
+      if (window.__endTask) window.__endTask(task, { ok: true, note });
+      // the progress box this phone showed while handing over is finished with
+      window.__hideOverlay && window.__hideOverlay();
+      window.__toast && window.__toast(note, 'good', 9000);
+    } else if (done) {
       const note = `✅ Exported ${done} short${done > 1 ? 's' : ''}${withCaps ? ' with captions' : ''}${extras ? ' + ' + extras : ''} to your output folder.`
         + (stopped ? ` The rest ${stopped.cancelled ? 'were stopped' : 'did not finish'}.` : '');
       const inBg = window.__endTask ? window.__endTask(task, { ok: true, note }) : false;

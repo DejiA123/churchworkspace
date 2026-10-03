@@ -199,6 +199,7 @@ main().catch((e) => {
 
 const bye = () => {
   console.log('\nStopping…');
+  try { require('../main/jobs').killAll(); } catch (e) {}
   try { cloud.stop(); } catch (e) {}
   process.exit(0);
 };
