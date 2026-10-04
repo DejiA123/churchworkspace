@@ -1613,9 +1613,10 @@ body.mw-cloud #toast { display: none !important; }
 /*  HOME — the two rooms                                                 */
 /* ===================================================================== */
 
-.cloud-home, .cloud-sched { display: none; }
+.cloud-home, .cloud-sched, .cloud-proj { display: none; }
 body.mw-cloud.mw-home .cloud-home,
-body.mw-cloud.mw-sched .cloud-sched {
+body.mw-cloud.mw-sched .cloud-sched,
+body.mw-cloud.mw-projects .cloud-proj {
   display: flex; flex-direction: column;
   position: fixed; inset: 0; z-index: 250;
   background: radial-gradient(1100px 520px at 85% -12%, rgba(139,92,246,.20), transparent 60%), #000;
@@ -1626,8 +1627,8 @@ body.mw-cloud.mw-sched .cloud-sched {
   animation: chIn .28s ease-out;
 }
 @keyframes chIn { from { opacity: .4; transform: scale(.985); } to { opacity: 1; transform: none; } }
-.cloud-home button, .cloud-sched button { font-family: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
-.cloud-home .hidden, .cloud-sched .hidden { display: none !important; }
+.cloud-home button, .cloud-sched button, .cloud-proj button { font-family: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.cloud-home .hidden, .cloud-sched .hidden, .cloud-proj .hidden { display: none !important; }
 
 .ch-top, .cs-top {
   flex: none; display: flex; align-items: center; gap: 10px;
@@ -1781,13 +1782,33 @@ body.mw-cloud.mw-sched .cloud-sched {
 .pj-new { width: 100%; min-height: 52px; border: 0; border-radius: 16px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%); color: #fff; font: inherit; font-size: 15px; font-weight: 800; box-shadow: 0 4px 18px rgba(139, 92, 246, .4); }
 .pj-new .mi { width: 18px; height: 18px; margin: 0; }
+/* the Projects screen (Video Studio's front door) */
+.pv-scroll { padding-bottom: calc(28px + env(safe-area-inset-bottom)); }
+.pv-new { width: 100%; display: flex; align-items: center; gap: 14px; margin: 6px 0 14px; padding: 16px; border: 0; border-radius: 22px; text-align: left; color: #fff;
+  background: linear-gradient(135deg, #a855f7 0%, #7c3aed 60%, #5b21b6 100%); box-shadow: 0 10px 30px rgba(124,58,237,.42); }
+.pv-new-art { flex: none; width: 52px; height: 52px; border-radius: 16px; display: grid; place-items: center; background: rgba(255,255,255,.2); }
+.pv-new-art .mi { width: 26px; height: 26px; margin: 0; }
+.pv-new-tx { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.pv-new-tx b { font-size: 18px; font-weight: 800; }
+.pv-new-tx small { font-size: 13px; opacity: .85; }
+.pv-cur { margin-bottom: 6px; }
+.pv-cont { width: 100%; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; column-gap: 10px; padding: 14px 16px; border: 0; border-radius: 18px; text-align: left; color: #fff;
+  background: #15161b; box-shadow: inset 0 0 0 1.5px rgba(167,139,250,.7); }
+.pv-cont-k { grid-column: 1; font-size: 12px; font-weight: 700; color: #c4b5fd; text-transform: uppercase; letter-spacing: .4px; }
+.pv-cont b { grid-column: 1; font-size: 16px; font-weight: 750; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pv-cont-go { grid-column: 2; grid-row: 1 / 3; align-self: center; display: inline-flex; align-items: center; gap: 4px; padding: 8px 12px; border-radius: 12px; background: rgba(139,92,246,.3); font-size: 14px; font-weight: 750; }
+.pv-cont-go .mi { width: 15px; height: 15px; margin: 0; }
+.pv-h { display: flex; align-items: baseline; gap: 8px; margin: 18px 2px 10px; font-size: 18px; font-weight: 800; }
+.pv-h small { font-size: 14px; color: #9b9ea8; font-weight: 700; }
+.pv-none { margin: 4px 2px; font-size: 13px; color: #9b9ea8; }
+.cloud-proj .pj-row { background: #121317; }
 .ch-foot-note { margin: 26px 0 0; text-align: center; font-size: 12px; color: #5f626c; }
 
 /* the studio's way home, where Files used to sit on a phone */
 .cloud-home-btn .mi { margin-right: 6px; }
 @media (max-width: 900px) {
   body.mw-cloud #cloudFiles { display: none; }
-  body.mw-cloud #cloudHomeBtn { order: 1; }
+  body.mw-cloud #cloudHomeBtn, body.mw-cloud #cloudProjBtn { order: 1; }
   body.mw-cloud .cloud-bar .cloud-chip, body.mw-cloud .cloud-bar .cloud-jobchip,
   body.mw-cloud .cloud-q, body.mw-cloud .cloud-export { flex: none; }
 }
@@ -2098,7 +2119,7 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 
 /* a wide screen: the same rooms, in a comfortable column */
 @media (min-width: 901px) {
-  body.mw-cloud.mw-home .cloud-home, body.mw-cloud.mw-sched .cloud-sched { background: radial-gradient(1200px 600px at 80% -20%, rgba(139,92,246,.18), transparent 60%), #08090c; }
+  body.mw-cloud.mw-home .cloud-home, body.mw-cloud.mw-sched .cloud-sched, body.mw-cloud.mw-projects .cloud-proj { background: radial-gradient(1200px 600px at 80% -20%, rgba(139,92,246,.18), transparent 60%), #08090c; }
   .ch-top, .cs-top { max-width: 792px; width: 100%; margin: 0 auto; }
   .ch-cards-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   .cs-tabs { background: #08090c; }

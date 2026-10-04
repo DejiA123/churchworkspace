@@ -233,6 +233,8 @@
       // session, and the one before it stays saved under its own name
       if (!ve._restoring) { ve.sessionId = null; ve.sessionName = null; ve.sessionThumb = null; ve.sessionDirty = false; ve.sessionAuto = false; }
       updateSessionChip();
+      // opening a video in the studio is starting work on it: it is a project from here on (saveProject)
+      if (!ve._restoring) setTimeout(() => { if (ve.video && ve.video.path === path) touchSession(); }, 0);
       const resumeBar = $('#veResume'); if (resumeBar) resumeBar.classList.add('hidden');
       resumePromptQuiet(false);
 
@@ -6495,7 +6497,8 @@
    * and named by hand. Now the first real change to a video makes it a project
    * (named after the video), and every save after that goes to it as well — so
    * a church editing three services keeps three, and picks which to carry on
-   * from Projects. Opening a video only to look at it makes nothing.
+   * from Projects. (Watching a video happens in the Files viewer; opening it
+   * in the studio is starting work on it, so that makes its project at once.)
    */
   function saveProject(data) {
     if (!data || !window.api.sessions || !window.api.sessions.save) return Promise.resolve(null);

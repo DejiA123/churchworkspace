@@ -79,11 +79,8 @@ function summarise(id, data, stat) {
 function migrateAutosave() {
   const a = readAutosave();
   if (!a || a.projectId || !a.video || !a.video.path) return;
-  const tl = a.timeline || {};
-  const worth = (Array.isArray(tl.segments) && tl.segments.some((x) => x && !x.seed))
-    || (a.captions && Array.isArray(a.captions.events) && a.captions.events.length)
-    || (Array.isArray(tl.textOverlays) && tl.textOverlays.length);
-  if (!worth) return;
+  // a video open in the studio is a project, edited yet or not
+  if (!fs.existsSync(a.video.path)) return;
   // a project for this video already (made here earlier, or by the studio): nothing to add
   if (listRaw().some((r) => r.videoPath === a.video.path)) return;
   const data = Object.assign({}, a);
