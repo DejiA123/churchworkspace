@@ -1527,7 +1527,10 @@ let _hideTimer = null;
       }
     };
     await Promise.all([worker(), worker(), worker(), worker()]);
-    return new File(parts, name, { type });
+    // a short, plain name ending in its real extension (what Photos and Files show)
+    const ext = (/\.[A-Za-z0-9]{2,5}$/.exec(name) || ['.mp4'])[0];
+    const nice = name.length > 60 ? name.slice(0, 60 - ext.length).replace(/[-_.\s]+$/, '') + ext : name;
+    return new File(parts, nice, { type });
   }
   async function offerDownload(p, size) {
     if (!p) return;
@@ -1554,7 +1557,10 @@ let _hideTimer = null;
           island({ id, kind: 'good', title: 'Ready to save', sub: name, sticky: true,
             action: { label: 'Save Video', onClick: () => {
               islandHide(id);
-              navigator.share({ files: [file], title: name }).catch((e) => {
+              // ONLY the file: with a title beside it iOS shares a second, TEXT
+              // item — the sheet then offers to save a .txt and leaves "Save
+              // Video" out, because a video and some text cannot both go to Photos.
+              navigator.share({ files: [file] }).catch((e) => {
                 if (e && e.name === 'AbortError') return;
                 openInPlayer(p);
               });
