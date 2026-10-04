@@ -13,9 +13,8 @@
  * So a phone is never handed more than PART_MAX at a time. A video bigger
  * than that gets a copy made for the phone, kept beside it in `.phone/`:
  *
- *   – re-encoded to fit in ONE file: full HD where the bit rate allows,
- *     720p where it does not (still sharp on a phone's screen);
- *   – only when even 720p cannot fit (a very long video), in parts: cut by
+ *   – re-encoded to fit in ONE full-HD (1080p) file, up to ~16 minutes;
+ *   – only when that cannot fit (a very long video), in parts: cut by
  *     stream copy when the video is already lean (seconds, not a pixel
  *     changed), otherwise encoded once with a key frame exactly at each cut.
  *
@@ -99,20 +98,19 @@ function plan({ size, durationSec, width, height, encode }, partMax = PART_MAX) 
   const short = Math.min(width || 1080, height || 1920) || 1080;
   const totalKbps = (size * 8) / dur / 1000;
   const fitKbps = Math.floor(((partMax * 0.92) * 8) / dur / 1000) - AUDIO_KBPS;   // one file, a little headroom
-  // one video is what anyone wants in Photos: re-encoded to fit, when it can look right
-  if (fitKbps >= 2500) return { how: 'encode', parts: 1, side: Math.min(short, 1080), kbps: Math.min(fitKbps, 8000), segSec: 0 };
-  // 720p down to 1 Mbit/s: still clean for a phone's screen, and one video (an 8:46 montage came in two parts at 1.5)
-  if (fitKbps >= 1000) return { how: 'encode', parts: 1, side: Math.min(short, 720), kbps: fitKbps, segSec: 0 };
+  // one video, in full HD, is what anyone wants in Photos: re-encoded to fit (down to 1 Mbit/s — an
+  // 8:46 montage came in two parts at a higher floor, and was asked for in 1080p, not 720p)
+  if (fitKbps >= 1000) return { how: 'encode', parts: 1, side: Math.min(short, 1080), kbps: Math.min(fitKbps, 8000), segSec: 0 };
   // a long video already at a modest bit rate only needs cutting
   if (totalKbps <= 4500 && !encode) {
     const parts = Math.ceil(size / (partMax * 0.85));
     return { how: 'copy', parts, side: short, kbps: Math.round(totalKbps), segSec: dur / parts };
   }
-  // too long for one file at any decent quality: 720p at 2 Mbit/s, in parts
-  const kbps = 2000;
+  // too long for one file at any decent quality: full HD at 2.5 Mbit/s, in parts
+  const kbps = 2500;
   const perPartSec = ((partMax * 0.88) * 8) / ((kbps + AUDIO_KBPS) * 1000);
   const parts = Math.ceil(dur / perPartSec);
-  return { how: 'encode', parts, side: Math.min(short, 720), kbps, segSec: dur / parts };
+  return { how: 'encode', parts, side: Math.min(short, 1080), kbps, segSec: dur / parts };
 }
 
 /* A copy being made, with everyone waiting on it told how far it has got —
@@ -199,7 +197,8 @@ async function run(ctx, input, tmp, p, info, onProgress) {
     const vf = ['format=yuv420p'];
     if (fit) vf.unshift(`scale=${fit[0]}:${fit[1]}:flags=bicubic`);
     args = ['-y', '-hide_banner', '-i', input, '-map', '0:v:0', '-map', '0:a:0?', '-vf', vf.join(','),
-      '-c:v', 'libx264', '-preset', machine.small() ? 'superfast' : 'veryfast', '-profile:v', 'high',
+      // full HD on few bits needs x264's better search: 'veryfast' below 2.5 Mbit/s, even on a small server
+      '-c:v', 'libx264', '-preset', machine.small() && p.kbps >= 2500 ? 'superfast' : 'veryfast', '-profile:v', 'high',
       '-b:v', `${p.kbps}k`, '-maxrate', `${Math.round(p.kbps * 1.4)}k`, '-bufsize', `${p.kbps * 2}k`,
       ...(p.parts > 1 ? ['-force_key_frames', `expr:gte(t,n_forced*${p.segSec.toFixed(3)})`] : []),
       '-c:a', 'aac', '-b:a', `${AUDIO_KBPS}k`, '-ac', '2', ...seg, out];
