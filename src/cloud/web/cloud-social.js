@@ -269,6 +269,10 @@
           <span class="ch-copy"><b>Video Studio</b><small>Edit the sermon, cut AI shorts, captions and exports</small></span>
           <span class="ch-foot"><span class="ch-foot-tx" id="chStudioFoot">Open a video to start</span><span class="ch-arrow">${mi('chev-right')}</span></span>
         </button>
+        <section class="ch-sec ch-projsec hidden" id="chProjects">
+          <h2>Your projects <button type="button" class="ch-link" data-home="projects">See all</button></h2>
+          <div class="pj-list" id="chProjList"></div>
+        </section>
         <button type="button" class="ch-card ch-montage" data-home="montage">
           <span class="ch-glow"></span>
           <span class="ch-art">${mi('sparkles')}</span>
@@ -291,8 +295,10 @@
     document.body.appendChild(el);
     el.querySelector('.ch-chip-slot').appendChild(C.jobChip());
     el.addEventListener('click', (e) => {
-      const b = e.target.closest('[data-go],[data-home],[data-post],[data-job],[data-view]');
+      const b = e.target.closest('[data-go],[data-home],[data-post],[data-job],[data-view],[data-proj]');
       if (!b) return;
+      if (b.dataset.proj) return openProject(b.dataset.proj);
+      if (b.dataset.home === 'projects') return openProjects();
       if (b.dataset.view) return C.viewFile && C.viewFile(b.dataset.view);
       if (b.dataset.go) return go(b.dataset.go);
       if (b.dataset.home === 'files') return $('#cloudFiles') && $('#cloudFiles').click();
@@ -313,12 +319,15 @@
     const ed = window.VideoEditor;
     let foot = 'Open a video to start';
     if (ed && ed.hasVideo && ed.hasVideo()) foot = 'Carry on editing';
+    else if (S.projects && S.projects.length) foot = `${S.projects.length} project${S.projects.length > 1 ? 's' : ''} · or start a new one`;
     else if (S.resumeName) foot = `Pick up “${S.resumeName}”`;
     $('#chStudioFoot').textContent = foot;
+    renderHomeProjects();
     $('#chSocialCard').classList.toggle('hidden', !S.social);
     renderHomeSocial();
     renderHomeJobs(C.jobList());
     if (!refresh) return;
+    loadProjects().then(() => renderHome());
     loadExports().then(renderHomeReady);
     loadSocial(true).then(renderHomeSocial);
     if (!S.resumeChecked) {
@@ -352,6 +361,112 @@
         + `<span class="ch-arrow">${mi('chev-right')}</span></button>`;
     }).join('');
   }
+  /* ------------------------------------------------------------- projects */
+
+  /*
+   * ►► PROJECTS — EVERY VIDEO BEING EDITED KEEPS ITS OWN. ◄◄
+   * The studio saves each video's edit as a project of its own as you work
+   * (veditor saveProject): the clips, cuts, captions, text, music and where
+   * you were. Here they are listed to pick up: the three latest on the home
+   * screen under the Video Studio, every one in Projects (also in the
+   * studio's Project row), with rename and delete. Deleting a project never
+   * touches the video or its exports.
+   */
+  async function loadProjects() {
+    try { S.projects = (await window.api.sessions.list()) || []; } catch (e) { S.projects = S.projects || []; }
+    return S.projects;
+  }
+  function agoWords(iso) {
+    if (!iso) return '';
+    const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins} min ago`;
+    const hrs = Math.round(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.round(hrs / 24);
+    if (days < 7) return days === 1 ? 'yesterday' : `${days} days ago`;
+    return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  }
+  function projRow(r, opts) {
+    const o = opts || {};
+    const openNow = window.VideoEditor && window.VideoEditor.projectId && window.VideoEditor.projectId() === r.id;
+    const bits = [
+      r.clips ? `${r.clips} clip${r.clips === 1 ? '' : 's'}` : null,
+      r.shorts ? `${r.shorts} short${r.shorts === 1 ? '' : 's'}` : null,
+      r.captions ? 'captions' : null,
+    ].filter(Boolean).join(' · ');
+    const pic = r.thumb ? `<span class="pj-pic" style="background-image:url('${escAttr(r.thumb)}')"></span>`
+      : `<span class="pj-pic" ${r.videoPath && !r.videoMissing ? `data-thumb="${escAttr(r.videoPath)}"` : ''}>${mi('film')}</span>`;
+    return `<div class="pj-row${r.videoMissing ? ' missing' : ''}${openNow ? ' now' : ''}">`
+      + `<button type="button" class="pj-main" data-proj="${escAttr(r.id)}"${r.videoMissing ? ' disabled' : ''}>${pic}`
+      + `<span class="pj-tx"><b>${esc(r.name || 'Untitled project')}</b>`
+      + `<small>${openNow ? '<i class="pj-now">Open now</i> · ' : ''}${r.videoMissing ? 'Its video was deleted' : esc(`Edited ${agoWords(r.savedAt)}`) + (bits ? ' · ' + esc(bits) : '')}</small></span>`
+      + (o.manage ? '' : `<span class="pj-go">${mi('chev-right')}</span>`) + '</button>'
+      + (o.manage ? `<button type="button" class="pj-more" data-pjren="${escAttr(r.id)}" aria-label="Rename">${mi('pen')}</button>`
+        + `<button type="button" class="pj-more pj-del" data-pjdel="${escAttr(r.id)}" aria-label="Delete">${mi('trash')}</button>` : '')
+      + '</div>';
+  }
+  function renderHomeProjects() {
+    const sec = $('#chProjects'); if (!sec) return;
+    const list = (S.projects || []).filter((r) => !r.videoMissing).slice(0, 3);
+    sec.classList.toggle('hidden', !list.length);
+    $('#chProjList').innerHTML = list.map((r) => projRow(r)).join('');
+    paintThumbs(sec);
+  }
+  async function openProject(id) {
+    const ed = window.VideoEditor;
+    if (!ed || !ed.openProject) return;
+    const p = C.panelOf && C.panelOf('cloudProjects'); if (p) p.close();
+    go('studio');
+    C.island({ id: 'proj', title: 'Opening your project…', spin: true, sticky: true });
+    let ok = false;
+    try { ok = await ed.openProject(id); } catch (e) { ok = false; }
+    C.islandHide('proj');
+    if (!ok) C.island({ kind: 'warn', title: 'That project could not be opened', sub: 'Its video may have been deleted', ms: 5000 });
+  }
+  async function openProjects() {
+    const panel = C.openPanel({ id: 'cloudProjects', title: 'Projects', cls: 'cp-projects' });
+    panel.foot.innerHTML = `<button type="button" class="pj-new">${mi('plus')}<span>New project — open a video</span></button>`;
+    const paint = async () => {
+      panel.body.innerHTML = '<p class="pj-empty">Looking…</p>';
+      try { const ed = window.VideoEditor; if (ed && ed.flushProject) await ed.flushProject(); } catch (e) {}
+      const rows = await loadProjects();
+      panel.body.innerHTML = rows.length
+        ? `<p class="pj-hint">Every video you edit is kept here as you work — pick one to carry on.</p><div class="pj-list">${rows.map((r) => projRow(r, { manage: true })).join('')}</div>`
+        : `<div class="pj-empty"><span class="pj-empty-art">${mi('layers')}</span><b>No projects yet</b><p>Open a video in the Video Studio and start editing — it is kept here as you work.</p></div>`;
+      paintThumbs(panel.body);
+      renderHome();
+    };
+    panel.body.addEventListener('click', async (e) => {
+      const open = e.target.closest('[data-proj]');
+      if (open) return openProject(open.dataset.proj);
+      const ren = e.target.closest('[data-pjren]');
+      if (ren) {
+        const row = (S.projects || []).find((r) => r.id === ren.dataset.pjren);
+        const nm = window.prompt('Name this project', row ? row.name : '');
+        if (nm == null || !String(nm).trim()) return;
+        try { await window.api.sessions.rename(ren.dataset.pjren, String(nm).trim().slice(0, 80)); } catch (er) {}
+        const ed = window.VideoEditor; if (ed && ed.projectRenamed) ed.projectRenamed(ren.dataset.pjren, String(nm).trim().slice(0, 80));
+        return paint();
+      }
+      const del = e.target.closest('[data-pjdel]');
+      if (del) {
+        const row = (S.projects || []).find((r) => r.id === del.dataset.pjdel);
+        if (!window.confirm(`Delete the project “${row ? row.name : ''}”?\n\nThe video and anything you exported stay — only this edit goes.`)) return;
+        try { await window.api.sessions.remove(del.dataset.pjdel); } catch (er) {}
+        const ed = window.VideoEditor; if (ed && ed.projectRemoved) ed.projectRemoved(del.dataset.pjdel);
+        return paint();
+      }
+    });
+    panel.foot.querySelector('.pj-new').addEventListener('click', async () => {
+      panel.close();
+      try { const ed = window.VideoEditor; if (ed && ed.flushProject) await ed.flushProject(); } catch (e) {}
+      go('studio');
+      const b = document.getElementById('veOpen'); if (b) b.click();
+    });
+    paint();
+  }
+
   function renderHomeReady() {
     const sec = $('#chReady'); if (!sec) return;
     const list = S.exports.filter((f) => isVideo(f.path)).slice(0, 10);
@@ -1500,5 +1615,5 @@
     }
   }
 
-  window.MWSocial = { start, go, compose, openConnect, openMontage, editMontage, view: () => S.view, _state: S, _planTimes: planTimes, _titleFromFile: titleFromFile };
+  window.MWSocial = { start, go, compose, openConnect, openMontage, editMontage, openProjects, openProject, view: () => S.view, _state: S, _planTimes: planTimes, _titleFromFile: titleFromFile };
 })();

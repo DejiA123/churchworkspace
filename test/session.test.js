@@ -245,16 +245,19 @@ app.whenReady().then(async () => {
   for (const id of [oldSess.id, newSess.id]) sessions.remove(id); // [7b] counts the cards
   await js(win, `await window.VideoEditor.__test.openSession(${JSON.stringify(saved.id)}); return 1;`);
 
-  /* ---- [6] the autosave must not eat a named session ---------------------- */
-  console.log('\n[6] The rolling autosave never overwrites a named session');
+  /* ---- [6] a project keeps saving as you work ---------------------------- */
+  // (Until projects, a named session was frozen and only the rolling slot
+  // followed the work. Now every video's edit is a project that keeps itself
+  // up to date — closing the app or switching videos loses nothing.)
+  console.log('\n[6] The open project keeps saving as you work');
   await js(win, `
     const T = window.VideoEditor.__test;
     T.addShort(1, 4);
     T.flushSession();`);
   await sleep(200);
   const stillNamed = sessions.load(saved.id);
-  log(stillNamed && stillNamed.timeline.segments.length === built.segs,
-    'the saved session is exactly as it was saved', stillNamed.timeline.segments.length + ' clips');
+  log(stillNamed && stillNamed.timeline.segments.length === built.segs + 1 && stillNamed.name === 'Sunday morning',
+    'the project has the new short too, under its name', stillNamed.timeline.segments.length + ' clips · ' + stillNamed.name);
   const auto2 = sessions.readAutosave();
   log(auto2 && auto2.timeline.segments.length === built.segs + 1,
     'while the rolling slot has the newer work', auto2.timeline.segments.length + ' clips');
