@@ -1498,7 +1498,24 @@ let _hideTimer = null;
     }
     const CHUNK = 4 * 1024 * 1024;
     const n = Math.ceil(total / CHUNK);
-    const parts = new Array(n);
+    // a short, plain name ending in its real extension (what Photos and Files show)
+    const ext = (/\.[A-Za-z0-9]{2,5}$/.exec(name) || ['.mp4'])[0];
+    const nice = (name.length > 60 ? name.slice(0, 60 - ext.length).replace(/[-_.\s]+$/, '') + ext : name).replace(/[\\/:*?"<>|]+/g, '_');
+    /*
+     * ►► THE VIDEO GOES TO THE PHONE'S STORAGE, NOT ITS MEMORY. ◄◄
+     * Kept in memory, a 700 MB montage (and the copy iOS makes of it for the
+     * share sheet) got the app's page killed: a white screen, then the app
+     * starting again on its home screen. Each piece is written to the app's
+     * own storage on the phone the moment it arrives and let go, and the share
+     * sheet is handed that file — a few MB of memory whatever the size.
+     */
+    const disk = await diskSaver(nice, total);
+    if (!disk && total > MEMORY_MAX) {
+      const e = new Error('This phone cannot hold a video this big for saving from inside the app.');
+      e.code = 'TOO_BIG';
+      throw e;
+    }
+    const parts = disk ? null : new Array(n);
     let next = 0, got = 0, shown = -1;
     const one = async (i) => {
       const a = i * CHUNK, b = Math.min(total, a + CHUNK) - 1;
@@ -1522,17 +1539,77 @@ let _hideTimer = null;
     const worker = async () => {
       while (next < n) {
         const i = next++;
-        parts[i] = await one(i);
-        got += parts[i].size;
+        const blob = await one(i);
+        if (disk) await disk.write(i * CHUNK, blob); else parts[i] = blob;
+        got += blob.size;
         const pc = Math.min(99, Math.floor((got / total) * 100));
         if (pc !== shown) { shown = pc; onPct(pc, got, total); }
       }
     };
-    await Promise.all([worker(), worker(), worker(), worker()]);
-    // a short, plain name ending in its real extension (what Photos and Files show)
-    const ext = (/\.[A-Za-z0-9]{2,5}$/.exec(name) || ['.mp4'])[0];
-    const nice = name.length > 60 ? name.slice(0, 60 - ext.length).replace(/[-_.\s]+$/, '') + ext : name;
+    try {
+      await Promise.all([worker(), worker(), worker(), worker()]);
+    } catch (e) {
+      if (disk) disk.abort();
+      if (e && (e.name === 'QuotaExceededError' || /quota/i.test(e.message || ''))) {
+        const q = new Error(`Not enough free space on this phone — it needs about ${Math.ceil(total / 1048576)} MB.`); q.code = 'SPACE'; throw q;
+      }
+      throw e;
+    }
+    if (disk) {
+      const f = await disk.finish();
+      return f.type ? f : new File([f], nice, { type });
+    }
     return new File(parts, nice, { type });
+  }
+
+  /* Past this, a video is only ever saved through the phone's storage. */
+  const MEMORY_MAX = 150 * 1024 * 1024;
+  /*
+   * A file in the app's private storage on the phone (the Origin Private File
+   * System), written piece by piece. Through a writable stream where the
+   * browser has one; otherwise from a small worker with a synchronous handle
+   * (what older iPhones offer). Null when there is neither, or not the room.
+   */
+  async function diskSaver(name, total) {
+    try {
+      if (!navigator.storage || !navigator.storage.getDirectory) return null;
+      try {
+        const est = navigator.storage.estimate ? await navigator.storage.estimate() : null;
+        if (est && est.quota && est.quota - (est.usage || 0) < total * 1.05) {
+          const q = new Error(`Not enough free space on this phone — it needs about ${Math.ceil(total / 1048576)} MB.`); q.code = 'SPACE'; throw q;
+        }
+      } catch (e) { if (e && e.code === 'SPACE') throw e; }
+      const root = await navigator.storage.getDirectory();
+      // one save at a time: whatever an earlier one left is cleared first
+      try { await root.removeEntry('mw-saves', { recursive: true }); } catch (e) {}
+      const dir = await root.getDirectoryHandle('mw-saves', { create: true });
+      const fh = await dir.getFileHandle(name, { create: true });
+      if (typeof fh.createWritable === 'function') {
+        const w = await fh.createWritable({ keepExistingData: false });
+        let chain = Promise.resolve();
+        return {
+          // one write at a time, in whatever order the pieces arrive (each at its own place)
+          write: (pos, blob) => (chain = chain.then(() => w.write({ type: 'write', position: pos, data: blob }))),
+          finish: async () => { await chain; await w.close(); return fh.getFile(); },
+          abort: () => { try { w.abort(); } catch (e) {} },
+        };
+      }
+      const src = "let h=null;onmessage=async(e)=>{const d=e.data;try{if(d.op==='open'){const r=await navigator.storage.getDirectory();const dir=await r.getDirectoryHandle('mw-saves',{create:true});const f=await dir.getFileHandle(d.name,{create:true});h=await f.createSyncAccessHandle();h.truncate(0);}else if(d.op==='write'){h.write(new Uint8Array(await d.blob.arrayBuffer()),{at:d.pos});}else if(d.op==='close'){h.flush();h.close();h=null;}postMessage({id:d.id});}catch(err){postMessage({id:d.id,err:String((err&&err.name==='QuotaExceededError'?'quota ':'')+((err&&err.message)||err))});}};";
+      const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+      const wk = new Worker(url);
+      let seq = 0; const pend = new Map();
+      wk.onmessage = (e) => { const q = pend.get(e.data.id); pend.delete(e.data.id); if (q) { if (e.data.err) q.rej(new Error(e.data.err)); else q.res(); } };
+      const call = (msg) => new Promise((res, rej) => { const id = ++seq; pend.set(id, { res, rej }); wk.postMessage(Object.assign({ id }, msg)); });
+      await call({ op: 'open', name });
+      return {
+        write: (pos, blob) => call({ op: 'write', pos, blob }),
+        finish: async () => { await call({ op: 'close' }); wk.terminate(); URL.revokeObjectURL(url); return fh.getFile(); },
+        abort: () => { try { wk.terminate(); URL.revokeObjectURL(url); } catch (e) {} },
+      };
+    } catch (e) {
+      if (e && e.code === 'SPACE') throw e;
+      return null;
+    }
   }
   /*
    * The file last brought down for saving, kept so a second tap (the share
@@ -1598,6 +1675,8 @@ let _hideTimer = null;
         show.fail('This phone cannot save it from here — opening it in the player');
       } catch (e) {
         if (e && e.name === 'AbortError') return;
+        if (e && e.code === 'SPACE') { show.fail(e.message); return; }
+        if (e && e.code === 'TOO_BIG') { show.fail('Too big to save from inside the app on this phone — opening it in the player: tap Share, then “Save Video”.'); openInPlayer(p); return; }
         show.fail('The download kept dropping. Check the signal and try again.');
         return;
       }
