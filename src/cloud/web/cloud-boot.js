@@ -1638,9 +1638,9 @@ let _hideTimer = null;
    * the sheet opened on nothing (a blank white card) — wherever the download
    * itself had been kept. A video bigger than this is first made into a phone
    * copy on the studio (phonecopy.js): one video under it whenever that can
-   * look right, numbered parts only for a very long one.
+   * look right (up to ~16 minutes), numbered parts only for a longer one.
    */
-  const PHONE_PART_MAX = 95 * 1024 * 1024;
+  const PHONE_PART_MAX = 140 * 1024 * 1024;   // the same as phonecopy.js PART_MAX
   async function offerDownload(p, size, ui) {
     if (!p) return;
     const name = String(p).split(/[\\/]/).pop();
