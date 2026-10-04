@@ -1460,12 +1460,6 @@ let _hideTimer = null;
    * hold in memory, or no share sheet — it opens in an in-app browser page,
    * which has its own Done button. The desk keeps the ordinary download.
    */
-  /* A montage of a whole morning runs to hundreds of MB. Past the old 200 MB
-   * the phone was sent off to a browser window to "download" it — a white
-   * screen for minutes, and on an iPhone nowhere obvious for it to land. It is
-   * fetched here instead, with how far it has got, and handed to the share
-   * sheet (Save Video). WebKit keeps a blob that size on disk, not in memory. */
-  const SHARE_MAX = 1536 * 1024 * 1024;
   const isStandalone = () => navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
   const onPhone = () => window.matchMedia('(max-width: 900px)').matches;
   function openInPlayer(p) {
@@ -1624,17 +1618,29 @@ let _hideTimer = null;
    */
   function islandSaveUi(name) {
     const id = 'save-' + name;
+    const of = (k, n) => (n > 1 ? ` part ${k + 1} of ${n}` : '');
     return {
-      progress: (pc, got, total) => island({ id, title: `Getting it ready… ${pc}%`, spin: true, sticky: true,
+      making: (pc) => island({ id, title: `Making a phone copy… ${pc}%`, spin: true, sticky: true, sub: name }),
+      progress: (pc, got, total, k, n) => island({ id, title: `Getting${of(k, n)} ready… ${pc}%`, spin: true, sticky: true,
         sub: total ? `${Math.round(got / 1048576)} of ${Math.round(total / 1048576)} MB · ${name}` : name }),
-      ready: (share) => island({ id, kind: 'good', title: 'Ready to save', sub: name, sticky: true,
+      ready: (share, k, n) => island({ id, kind: 'good', title: `Ready to save${of(k, n)}`, sub: name, sticky: true,
         action: { label: 'Save Video', onClick: () => { islandHide(id); share(); } } }),
-      done: () => island({ id, kind: 'good', title: 'Saved', sub: 'Find it in Photos (or Files, if you chose that)', ms: 4000 }),
-      cancelled: (share) => island({ id, kind: 'info', title: 'Not saved yet', sub: name, sticky: true,
+      done: (n) => island({ id, kind: 'good', title: n > 1 ? `All ${n} parts saved` : 'Saved', sub: 'Find it in Photos (or Files, if you chose that)', ms: 4000 }),
+      cancelled: (share, k, n) => island({ id, kind: 'info', title: `Not saved yet${of(k, n)}`, sub: name, sticky: true,
         action: { label: 'Save Video', onClick: () => { islandHide(id); share(); } } }),
       fail: (msg) => island({ id, kind: 'warn', title: 'Could not save it', sub: msg, ms: 6000 }),
     };
   }
+  /*
+   * ►► NEVER MORE THAN THE SHARE SHEET CAN CARRY. ◄◄
+   * Safari reads a shared file whole into the app's memory before the share
+   * sheet sees it, so a 500 MB montage got the app killed (white screen) and
+   * the sheet opened on nothing (a blank white card) — wherever the download
+   * itself had been kept. A video bigger than this is first made into a phone
+   * copy on the studio (phonecopy.js): one video under it whenever that can
+   * look right, numbered parts only for a very long one.
+   */
+  const PHONE_PART_MAX = 95 * 1024 * 1024;
   async function offerDownload(p, size, ui) {
     if (!p) return;
     const name = String(p).split(/[\\/]/).pop();
@@ -1645,39 +1651,73 @@ let _hideTimer = null;
     }
     if (!cloud.downloads.some((d) => d.path === p)) cloud.downloads.unshift({ path: p, name, at: Date.now() });
     renderDownloadCount();
-    if (onPhone() && navigator.canShare && (!size || size <= SHARE_MAX)) {
+    if (onPhone() && navigator.canShare && navigator.share) {
       const show = ui || islandSaveUi(name);
+      const failed = (e) => {
+        if (e && e.name === 'AbortError') return;
+        if (e && e.code === 'SPACE') return show.fail(e.message);
+        if (e && e.code === 'TOO_BIG') { show.fail('Too big to save from inside the app on this phone — opening it in the player: tap Share, then “Save Video”.'); openInPlayer(p); return; }
+        if (e && e.code === 'COPY') return show.fail(e.message);
+        show.fail('The download kept dropping. Check the signal and try again.');
+      };
       try {
-        let file = saveCache && saveCache.path === p ? saveCache.file : null;
-        if (!file) {
-          show.progress(0, 0, Number(size) || 0);
-          file = await fetchForSaving(p, name, size, show.progress);
-          saveCache = { path: p, file };
+        let parts = saveCache && saveCache.path === p ? saveCache.parts : null;
+        if (!parts) {
+          let list = [{ path: p, size: Number(size) || 0 }];
+          if (!size || size > PHONE_PART_MAX) {
+            show.making(0);
+            const jobId = 'pc' + Date.now().toString(36);
+            const off = window.api.onJobProgress((d) => { if (d && d.jobId === jobId) show.making(Math.min(99, Math.round(d.percent || 0))); });
+            try {
+              const got = await call('video:phoneCopy', { input: p, jobId });
+              if (got && Array.isArray(got.parts) && got.parts.length) list = got.parts;
+            } catch (e) {
+              const c = new Error('The studio could not make a copy for your phone' + (e && e.message ? ' — ' + String(e.message).split('\n')[0].slice(0, 120) : '') + '. Try again.');
+              c.code = 'COPY'; throw c;
+            } finally { off(); }
+          }
+          const stem = name.replace(/\.[^.]+$/, '');
+          parts = list.map((x, i) => ({ path: x.path, size: x.size, file: null, saved: false,
+            name: list.length > 1 ? `${stem}-part${i + 1}of${list.length}.mp4` : (x.path === p ? name : stem + '.mp4') }));
+          saveCache = { path: p, parts };
         }
-        if (navigator.canShare({ files: [file] })) {
+        const n = parts.length;
+        const step = async (k) => {
+          while (k < n && parts[k].saved) k++;
+          if (k >= n) { saveCache = null; return show.done(n); }
+          const part = parts[k];
+          if (!part.file) {
+            show.progress(0, 0, part.size || 0, k, n);
+            part.file = await fetchForSaving(part.path, part.name, part.size, (pc, got, total) => show.progress(pc, got, total, k, n));
+          }
+          if (!navigator.canShare({ files: [part.file] })) {
+            show.fail('This phone cannot save it from here — opening it in the player');
+            openInPlayer(part.path);
+            return;
+          }
           /*
-           * The share sheet only opens straight after a tap — a download of
-           * hundreds of MB has long used that tap up, and the sheet silently
-           * refused. So when it is ready, it asks for one more tap.
+           * The share sheet only opens straight after a tap — a download has
+           * long used that tap up, and the sheet silently refused. So when it
+           * is ready, it asks for one more tap.
            *
            * ONLY the file is shared: with a title beside it iOS shares a
            * second, TEXT item — the sheet then offers to save a .txt and
            * leaves "Save Video" out.
            */
-          const share = () => navigator.share({ files: [file] }).then(() => show.done(), (e) => {
-            if (e && e.name === 'AbortError') return show.cancelled(share);
+          const share = () => navigator.share({ files: [part.file] }).then(() => {
+            part.saved = true; part.file = null;
+            step(k + 1).catch(failed);
+          }, (e) => {
+            if (e && e.name === 'AbortError') return show.cancelled(share, k, n);
             show.fail('The share sheet would not open — opening it in the player instead');
-            openInPlayer(p);
+            openInPlayer(part.path);
           });
-          show.ready(share);
-          return;
-        }
-        show.fail('This phone cannot save it from here — opening it in the player');
+          show.ready(share, k, n);
+        };
+        await step(0);
+        return;
       } catch (e) {
-        if (e && e.name === 'AbortError') return;
-        if (e && e.code === 'SPACE') { show.fail(e.message); return; }
-        if (e && e.code === 'TOO_BIG') { show.fail('Too big to save from inside the app on this phone — opening it in the player: tap Share, then “Save Video”.'); openInPlayer(p); return; }
-        show.fail('The download kept dropping. Check the signal and try again.');
+        failed(e);
         return;
       }
     }
@@ -1770,12 +1810,21 @@ let _hideTimer = null;
       return false;
     }
     const mb = (b) => (b >= 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : Math.max(1, Math.round(b / 1048576)) + ' MB');
+    const of = (k, n) => (n > 1 ? ` part ${k + 1} of ${n}` : '');
     const ui = {
-      progress: (pc, got, total) => go('loading', `Downloading ${pc}%`,
-        total ? `Getting the video onto your phone — ${mb(got)} of ${mb(total)}. Keep the app open.` : 'Getting the video onto your phone… Keep the app open.', pc),
-      ready: (share) => { btn._share = share; go('ready', 'Save to Photos', 'It’s on your phone. Tap “Save to Photos”, then choose “Save Video”.'); try { if (navigator.vibrate) navigator.vibrate(15); } catch (e) {} },
-      done: () => { btn._share = null; go('done', 'Saved ✓', 'Saved — find it in your Photos (or Files, if you chose that).'); },
-      cancelled: (share) => { btn._share = share; go('ready', 'Save to Photos', 'Not saved yet — tap “Save to Photos” and choose “Save Video”.'); },
+      making: (pc) => go('loading', `Preparing ${pc}%`,
+        'Making a phone-size copy — iPhones can’t save a video this big from an app. Keep the app open.', pc),
+      progress: (pc, got, total, k, n) => go('loading', n > 1 ? `Part ${k + 1}/${n} · ${pc}%` : `Downloading ${pc}%`,
+        `Getting${of(k, n) || ' the video'} onto your phone${total ? ` — ${mb(got)} of ${mb(total)}` : '…'} Keep the app open.`, pc),
+      ready: (share, k, n) => {
+        btn._share = share;
+        go('ready', n > 1 ? `Save part ${k + 1} of ${n}` : 'Save to Photos',
+          n > 1 ? `Part ${k + 1} of ${n} is on your phone. Tap “Save part ${k + 1} of ${n}”, then choose “Save Video”.`
+            : 'It’s on your phone. Tap “Save to Photos”, then choose “Save Video”.');
+        try { if (navigator.vibrate) navigator.vibrate(15); } catch (e) {}
+      },
+      done: (n) => { btn._share = null; go('done', 'Saved ✓', n > 1 ? `All ${n} parts saved — find them in your Photos.` : 'Saved — find it in your Photos (or Files, if you chose that).'); },
+      cancelled: (share, k, n) => { btn._share = share; go('ready', n > 1 ? `Save part ${k + 1} of ${n}` : 'Save to Photos', `Not saved yet — tap “${n > 1 ? `Save part ${k + 1} of ${n}` : 'Save to Photos'}” and choose “Save Video”.`); },
       fail: (msg) => { btn._share = null; go('fail', 'Try again', msg); },
       player: () => go('done', 'Save', 'Opening it in the player: tap Share, then “Save Video”.'),
       browser: () => go('done', 'Saved ✓', 'Your browser is downloading it.'),

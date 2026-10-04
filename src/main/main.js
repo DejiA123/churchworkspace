@@ -755,17 +755,20 @@ ipcMain.handle('machine:info', wrap(async () => {
    model available (see montage.js). Its stage names ride on the progress
    events, so the phone can say what is happening, not just how far. */
 const montage = require('./montage');
+const phonecopy = require('./phonecopy');
 ipcMain.handle('montage:status', wrap(async () => montage.directorStatus()));
 ipcMain.handle('montage:create', wrap(async (e, { mediaPaths, musicPath, style, lengthSec, full, aspect, brief, keepAudio, keepOrder, jobId }) => {
   const output = outPath(`montage-${stamp()}.mp4`);
   let pct = 0, stageName = '';
   const tell = () => { if (jobId && e && !e.sender.isDestroyed()) e.sender.send('job:progress', { jobId, percent: pct, stage: stageName }); };
-  return montage.make(getCtx(), video.getInfo, {
+  const made = await montage.make(getCtx(), video.getInfo, {
     mediaPaths, musicPath, style, lengthSec, full, aspect, brief, keepAudio, keepOrder, output,
     onProgress: (p) => { pct = p; tell(); },
     stage: (name) => { stageName = name; tell(); },
     log: (m) => console.warn('[montage]', m),
   });
+  phonecopy.prepare(getCtx(), video.getInfo, output);   // ready for Save before it is tapped
+  return made;
 }));
 
 /* A made montage's own edit (shot by shot, with a frame of each), to rearrange. */
@@ -777,12 +780,19 @@ ipcMain.handle('montage:remake', wrap(async (e, { path: p, edits, jobId }) => {
   const output = outPath(`montage-${stamp()}.mp4`);
   let pct = 0, stageName = '';
   const tell = () => { if (jobId && e && !e.sender.isDestroyed()) e.sender.send('job:progress', { jobId, percent: pct, stage: stageName }); };
-  return montage.remake(getCtx(), {
+  const made = await montage.remake(getCtx(), {
     project, edits, output,
     onProgress: (q) => { pct = q; tell(); },
     stage: (name) => { stageName = name; tell(); },
   });
+  phonecopy.prepare(getCtx(), video.getInfo, output);
+  return made;
 }));
+
+/* The file(s) a phone is handed to save a video — a phone-size copy when the
+   video is too big for the iPhone's share sheet (see phonecopy.js). */
+ipcMain.handle('video:phoneCopy', wrap(async (e, { input, jobId }) =>
+  phonecopy.phoneCopy(getCtx(), video.getInfo, { input, onProgress: onProgress(e, jobId) })));
 
 ipcMain.handle('video:applyEdits', wrap(async (e, { input, edits, jobId }) => {
   const output = outPath(`edited-${stamp()}.mp4`);

@@ -188,6 +188,7 @@ const ALLOWED = {
   'video:overlayComposite': true,
   'video:mixMusic': true,
   'video:appendClips': true,
+  'video:phoneCopy': true,
   'video:captions': true,
 
   // long → short
@@ -852,7 +853,8 @@ async function deleteFiles(req, res) {
       freed += st.size;
       deleted.push(p);
     } catch (e) { refused.push({ path: p, why: 'The studio could not delete it (' + (e.code || e.message) + ').' }); continue; }
-    // a montage's saved edit goes with it
+    // a montage's saved edit goes with it, and any copy made for saving to a phone
+    try { freed += require('../main/phonecopy').removeFor(full); } catch (e) { /* none */ }
     try { const sc = full + '.montage.json'; const ss = fs.statSync(sc); fs.unlinkSync(sc); freed += ss.size; } catch (e) { /* none */ }
     const base = full.replace(/\.[^.\\/]+$/, '');
     for (const ext of COMPANIONS) {
