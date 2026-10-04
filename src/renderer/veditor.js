@@ -9509,7 +9509,7 @@
     const file = (typeof File === 'function') ? new File([blob], name, { type: 'application/json' }) : null;
     // a phone: the share sheet (Save to Files, AirDrop, Messages…)
     if (file && navigator.canShare && window.matchMedia('(max-width: 900px)').matches && navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: 'Word Book' }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
+      try { await navigator.share({ files: [file] }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
     }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = name;
