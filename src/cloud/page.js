@@ -263,7 +263,8 @@ ${styles}
       </div>
       <div id="cloudFilesList" class="cloud-files-list"></div>
       <div id="cloudFilesSelBar" class="cloud-files-selbar hidden">
-        <span id="cloudFilesSelInfo" class="cloud-files-selinfo">Tap the videos to delete</span>
+        <span id="cloudFilesSelInfo" class="cloud-files-selinfo">Tap videos to save or delete</span>
+        <button id="cloudFilesSelSave" type="button" class="cloud-files-del cloud-files-save" disabled><i class="mi" data-i="download"></i><span>Save</span></button>
         <button id="cloudFilesSelDelete" type="button" class="cloud-files-del" disabled><i class="mi" data-i="trash"></i><span>Delete</span></button>
       </div>
     </div>

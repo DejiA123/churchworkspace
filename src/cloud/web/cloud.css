@@ -311,6 +311,7 @@ body.mw-cloud .cloud-sheet-modal .cloud-files-box {
 }
 .cloud-files-del .mi { width: 18px; height: 18px; margin: 0; }
 .cloud-files-del:disabled { opacity: .35; cursor: default; }
+.cloud-files-save { background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); padding: 0 14px; }
 .cloud-files-del.sure { background: #d70015; box-shadow: 0 0 0 3px rgba(255,69,58,.3); }
 .cloud-files-empty { padding: 34px 16px; text-align: center; color: #9b9ea8; }
 .cloud-files-empty b { display: block; margin-bottom: 6px; font-size: 17px; color: #f5f6f8; }
@@ -2116,6 +2117,20 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .cv-save.cv-done { border-color: rgba(34, 197, 94, .6); color: #86efac; }
 .cv-save.cv-fail { border-color: rgba(245, 158, 11, .7); color: #fcd34d; }
 @keyframes cv-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.03); } }
+.cp-saveall .sa-list { display: flex; flex-direction: column; gap: 8px; padding: 4px 0 8px; }
+.sa-row { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 14px; background: rgba(255,255,255,.05); }
+.sa-pic { flex: none; width: 40px; height: 56px; border-radius: 8px; background: rgba(255,255,255,.08) center/cover no-repeat; }
+.sa-tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sa-tx b { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sa-tx small { font-size: 12px; opacity: .7; font-variant-numeric: tabular-nums; }
+.sa-st { flex: none; width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,.18); }
+.sa-row[data-st="loading"] .sa-st { background: #a78bfa; animation: cv-pulse 1s ease-in-out infinite; }
+.sa-row[data-st="ready"] .sa-st { background: #a78bfa; }
+.sa-row[data-st="done"] .sa-st { background: #22c55e; }
+.sa-row[data-st="done"] small { color: #86efac; opacity: 1; }
+.sa-row[data-st="fail"] .sa-st { background: #f59e0b; }
+.cp-saveall .sa-go, .sa-all { width: 100%; max-width: none; min-height: 52px; justify-content: center; }
+.sa-all { margin: 0 0 12px; }
 .cv-q { flex: none; display: flex; gap: 10px; margin: 8px 16px 0; animation: cv-q-in .2s ease; }
 .cv-q-b { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px 8px; border-radius: 14px;
   border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.08); color: #fff; font: inherit; cursor: pointer; }
