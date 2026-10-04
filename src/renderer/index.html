@@ -1953,8 +1953,9 @@
         <button type="button" id="capGrammarFix" class="ghost-btn cap-wb-btn cap-g-all"
           title="Fix every underlined mistake in the lines below in one go — missing apostrophes, wrong sound-alike words, a/an, repeated words, names. Ctrl+Z puts them all back.">✍ No mistakes</button>
         <button type="button" id="capGrammarAi" class="ghost-btn cap-wb-btn cap-g-ai"
-          title="Ask the AI to proof-read these lines — it catches words the speech recognition misheard (“begotten sun” → “begotten Son”). It only suggests: you choose what to keep.">✨ AI check</button>
-        <label class="cap-g-autolab" title="Have the AI proof-read new captions as soon as they are made — its suggestions wait under each line for you to accept. Uses the same free Groq key as the captions."><input type="checkbox" id="capGrammarAuto" checked /> auto</label>
+          title="Ask the AI to proof-read these lines — it reads the whole sermon first, then catches words the speech recognition misheard (“begotten sun” → “begotten Son”, “is real” → “Israel”). What it is sure of it fixes (you can put any back); the rest it suggests.">✨ AI check</button>
+        <label class="cap-g-autolab" title="Have the AI proof-read new captions as soon as they are made. Uses the same free Groq key as the captions (or Claude, when the server has its key)."><input type="checkbox" id="capGrammarAuto" checked /> auto</label>
+        <label class="cap-g-autolab" title="Make the corrections the AI is sure of straight away (each line says what it was, with a button to put it back; ↶ Undo puts them all back). Only the doubtful ones wait under their lines. Untick to have every suggestion wait for you."><input type="checkbox" id="capGrammarApply" checked /> fix sure ones</label>
         <select id="capGrammarMode" class="cap-g-mode" title="How much the AI may change">
           <option value="exact" title="Fix mishearings, spelling and names — keep the speaker's own words">Exact words</option>
           <option value="tidy" title="Also tidy clear grammar slips, keeping the speaker's voice">Tidy grammar</option>
