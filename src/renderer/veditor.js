@@ -10252,7 +10252,7 @@
       + `<button type="button" class="cap-ai-line" data-ai-i="${i}" title="✨ Ask the AI to proof-read just this line">✨</button>`
       // A line a fix changed says so, and what it said before, with its own way back.
       + (c._was != null && c._was !== c.text
-        ? `<div class="cap-was"><span class="cap-was-tx">✍ Fixed — was “${escape2(c._was)}”</span>`
+        ? `<div class="cap-was"><span class="cap-was-tx" title="${escape2(c._byAi || '').replace(/"/g, '&quot;')}">${c._byAi ? '✨ AI fixed' : '✍ Fixed'} — was “${escape2(c._was)}”</span>`
           + `<button type="button" class="cap-was-back" data-was-i="${i}" title="Put this line back to what it said before">↶ Put back</button></div>`
         : '')
       + `</div>`).join('');
@@ -10380,6 +10380,7 @@
     const was = e._was;
     ve.capEvents[i] = Object.assign({}, e, { text: was });
     delete ve.capEvents[i]._was;
+    delete ve.capEvents[i]._byAi;
     syncCapWordsFor(e, e.text, was);
     afterGrammarChange();
     window.__toast && window.__toast(`↶ Put back: “${was}”`, 'good', 3500);
@@ -10387,7 +10388,7 @@
   function closeCapModal() {
     commitCapEdit();
     // The "fixed — was …" marks are for this sitting; the next one starts clean.
-    (ve.capEvents || []).forEach((e) => { if (e && e._was != null) delete e._was; });
+    (ve.capEvents || []).forEach((e) => { if (e && e._was != null) delete e._was; if (e) delete e._byAi; });
     ve.capScope = null;
     capPlayerClose();
     document.getElementById('capModal').classList.add('hidden');
@@ -11158,6 +11159,15 @@
       box._wired = true;
       box.addEventListener('change', () => { try { localStorage.setItem(AI_AUTO_KEY, box.checked ? '1' : '0'); } catch (e) {} });
     }
+    // …and whether the corrections it is sure of are made at once (on unless unticked)
+    const ap = document.getElementById('capGrammarApply');
+    if (ap && !ap._wired) {
+      ap._wired = true;
+      let w = null;
+      try { w = localStorage.getItem('mw-cap-ai-apply'); } catch (e) {}
+      ap.checked = w !== '0';
+      ap.addEventListener('change', () => { try { localStorage.setItem('mw-cap-ai-apply', ap.checked ? '1' : '0'); } catch (e) {} });
+    }
   }
   /** After captions are made: hand the new lines to the AI, without waiting on it. */
   function maybeAutoProofread(indexes) {
@@ -11183,6 +11193,8 @@
     const before = [lo - 2, lo - 1].filter((k) => k >= 0 && evs[k]).map((k) => ({ i: k, text: evs[k].text }));
     const after = [hi + 1, hi + 2].filter((k) => evs[k]).map((k) => ({ i: k, text: evs[k].text }));
     const mode = ($('#capGrammarMode') || {}).value || 'exact';
+    // Everything that was said, in order: the AI reads it for the sermon's notes and the context around each line.
+    const passage = evs.map((e, i) => ({ i, text: e.text }));
     const btn = only != null ? document.querySelector(`#capList .cap-ai-line[data-ai-i="${only}"]`) : $('#capGrammarAi');
     const label = btn ? btn.textContent : '';
     if (btn) { btn.classList.add('busy'); if (only == null) btn.textContent = `✨ Reading ${lines.length} line${lines.length === 1 ? '' : 's'}…`; }
@@ -11192,7 +11204,7 @@
       offProg = window.api.onJobProgress(({ jobId: j, percent }) => { if (j === jobId && btn.classList.contains('busy')) btn.textContent = `✨ Reading… ${percent}%`; });
     }
     let res = null;
-    try { res = await api({ lines, before, after, caseMode: capGroupCfg().tc, mode, jobId }); }
+    try { res = await api({ lines, before, after, passage, caseMode: capGroupCfg().tc, mode, jobId }); }
     catch (e) { res = { fixes: [], why: (e && e.message) || 'the AI did not answer' }; }
     finally {
       if (btn) { btn.classList.remove('busy'); btn.textContent = label; }
@@ -11204,17 +11216,49 @@
       window.__toast && window.__toast(`✨ The AI proof-reader needs the free Groq key (${res.why}). Add it with ☁️ Groq cloud in the Hearing list above, or in 🎤 Listen — the same key does both. The underlined fixes work without it.`, 'error', 12000);
       return res;
     }
-    let shown = 0;
+    /*
+     * ►► WHAT IT IS SURE OF, IT FIXES. ◄◄
+     * Every AI correction used to wait under its line for a tap, so a sermon
+     * with forty misheard words was forty taps (or one ✍ Fix all that also
+     * took the doubtful ones). Now the corrections the AI is sure of are made
+     * at once — one ↶ Undo for all of them, and each line says "✨ AI fixed —
+     * was …" with a button to put it back — and only the judgement calls wait
+     * as suggestions. Untick "apply sure fixes" to have them all wait.
+     */
+    const applyBox = document.getElementById('capGrammarApply');
+    const applySure = only == null && (!applyBox || applyBox.checked);
+    let shown = 0, applied = 0;
+    const plan = [];
     for (const f of (res.fixes || [])) {
       const e = evs[f.i];
       const sent = lines.find((l) => l.i === f.i);
       if (!e || !sent || e.text !== sent.text) continue;     // the line changed while the AI was reading
+      // held to the same guard here too, which also puts the line's own case back (ALL CAPS stays ALL CAPS)
+      if (CG() && CG().vetAiLine) {
+        const v = CG().vetAiLine(e.text, f.text, { caseMode: capGroupCfg().tc, mode });
+        if (!v.ok) continue;
+        f.text = v.text;
+      }
+      if (applySure && f.sure) { plan.push(f); continue; }
       gram().ai.set(lineKey(e), { text: f.text, orig: e.text, why: f.why || '' });
       gram().open.add(lineKey(e));
       shown++;
     }
+    if (plan.length) {
+      pushHistory({ captions: true });
+      for (const f of plan.sort((a, b) => b.i - a.i)) {
+        if (setCapLineText(f.i, f.text)) { applied++; if (ve.capEvents[f.i]) ve.capEvents[f.i]._byAi = f.why || 'AI correction'; }
+      }
+      afterGrammarChange();
+    }
     paintAllGrammar();
     const by = res.by ? ` (${res.by})` : '';
+    if (applied) {
+      const more = shown ? ` and suggests ${shown} more under their lines` : '';
+      setCapFixNote(`✨ The AI fixed ${applied} line${applied === 1 ? '' : 's'}${by}${more} — ↶ Undo puts them all back`, true);
+      window.__toast && window.__toast(`✨ Fixed ${applied} misheard line${applied === 1 ? '' : 's'}${more}. Each says what it was, with a button to put it back; ↶ Undo puts them all back.`, 'good', 8000);
+      return Object.assign({}, res, { shown, applied });
+    }
     if (o.auto) {
       // Proof-read on its own after the captions were made: one quiet word,
       // and only if there is something to look at.

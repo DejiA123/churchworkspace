@@ -1391,52 +1391,36 @@ ipcMain.handle('captions:cloudKey', wrap(async (e, { key } = {}) => {
  * and the operator says yes.
  */
 const capGrammar = require('../renderer/capgrammar.js');
-ipcMain.handle('captions:grammar', wrap(async (e, { lines, before, after, caseMode, mode, jobId } = {}) => {
-  const okLine = (l) => l && Number.isFinite(+l.i) && typeof l.text === 'string';
-  const L = (lines || []).filter(okLine);
-  // The lines either side of what was asked about: read for meaning, never returned.
-  const edgeBefore = (before || []).filter(okLine).slice(-2);
-  const edgeAfter = (after || []).filter(okLine).slice(0, 2);
-  if (!L.length) return { fixes: [], by: '', checked: 0 };
-  const cloudOk = cloudwrite.ready();
-  const localOk = !cloudOk && llm.isAvailable();
-  if (!cloudOk && !localOk) {
+const claudetext = require('./claudetext');
+const capproof = require('./capproof');
+ipcMain.handle('captions:grammar', wrap(async (e, { lines, before, after, passage, caseMode, mode, jobId } = {}) => {
+  // The reader: Claude when the server has its key, else the free Groq models, else the PC's own.
+  const engine = claudetext.ready() ? 'claude' : cloudwrite.ready() ? 'groq' : llm.isAvailable() ? 'local' : '';
+  if (!engine) {
     const cw = cloudwrite.state();
     return { fixes: [], by: '', checked: 0, unavailable: true,
       why: cw.why || (cw.hasKey || cw.borrowingKey ? 'the AI writer is switched off in Settings' : 'no Groq key yet') };
   }
-  const chat = cloudOk ? (a) => cloudwrite.chat(a) : (a) => llm.chat(a);
-  const SIZE = cloudOk ? 40 : 12;          // the PC model gets small batches: it is slow and its context is short
-  const prog = onProgress(e, jobId);
-  const fixes = [];
-  let asked = 0, failedBatches = 0, rejected = 0;
-  for (let b = 0; b < L.length; b += SIZE) {
-    if (jobs.isCancelled()) throw new jobs.CancelledError();
-    const part = L.slice(b, b + SIZE);
-    const ctxBefore = (b === 0 ? edgeBefore : L.slice(Math.max(0, b - 2), b)).map((l) => ({ n: l.i, text: l.text, context: true }));
-    const ctxAfter = (b + SIZE >= L.length ? edgeAfter : L.slice(b + SIZE, b + SIZE + 2)).map((l) => ({ n: l.i, text: l.text, context: true }));
-    const batch = ctxBefore.concat(part.map((l) => ({ n: l.i, text: l.text })), ctxAfter);
-    const { system, prompt } = capGrammar.buildAiPrompt(batch, { mode });
-    const answer = await chat({ system, prompt, maxTokens: cloudOk ? 2000 : 700, temperature: 0, json: true, timeoutMs: cloudOk ? 45000 : 180000 });
-    asked += part.length;
-    const got = capGrammar.parseAiFixes(answer, batch);
-    if (!got) { failedBatches++; } else {
-      for (const f of got) {
-        const orig = part.find((l) => l.i === f.n);
-        if (!orig) continue;
-        const v = capGrammar.vetAiLine(orig.text, f.text, { caseMode, mode });
-        if (v.ok) fixes.push({ i: f.n, text: v.text, why: f.why || 'AI correction' });
-        else if (v.reason !== 'no change') rejected++;
-      }
-    }
-    if (prog) prog(Math.round((Math.min(L.length, b + SIZE) / L.length) * 100));
-  }
+  const ask = engine === 'claude'
+    ? ({ system, prompt, schema, maxTokens }) => claudetext.chatJson({ system, prompt, schema, maxTokens: Math.max(8000, maxTokens || 0) })
+    : engine === 'groq'
+      ? ({ system, prompt, maxTokens }) => cloudwrite.chat({ system, prompt, maxTokens: maxTokens || 2000, temperature: 0, json: true, timeoutMs: 60000 })
+      : ({ system, prompt, maxTokens }) => llm.chat({ system, prompt, maxTokens: Math.min(700, maxTokens || 700), temperature: 0, json: true, timeoutMs: 180000 });
+  // The church's own spellings and the corrections the editor has made before (the Word Book).
+  let terms = [], known = [];
+  try {
+    const wb = wordbook.view();
+    terms = (wb.terms || []).map((t) => t && (t.text || t.term)).filter(Boolean).slice(0, 60);
+    known = (wb.fixes || []).filter((f) => f && f.from && f.to && f.on !== false).slice(0, 40).map((f) => ({ from: f.from, to: f.to }));
+  } catch (er) { /* the book is a help, not a need */ }
+  const out = await capproof.proofread({ lines, before, after, passage, caseMode, mode }, {
+    engine, ask, terms, known, onProgress: onProgress(e, jobId),
+    cancelled: () => jobs.isCancelled(), CancelledError: jobs.CancelledError,
+  });
   const cw = cloudwrite.state();
-  return {
-    fixes, checked: asked, rejected, failedBatches,
-    by: cloudOk ? `${cw.providerName}${cw.usingModel ? ' — ' + cw.usingModel : ''}` : 'the AI model on this PC',
-    why: failedBatches && !fixes.length ? (cw.why || 'the AI did not answer') : '',
-  };
+  out.by = engine === 'claude' ? `Claude (${claudetext.model()})` : engine === 'groq' ? `${cw.providerName}${cw.usingModel ? ' — ' + cw.usingModel : ''}` : 'the AI model on this PC';
+  if (out.failedBatches && !out.fixes.length) out.why = engine === 'groq' ? (cw.why || 'the AI did not answer') : 'the AI did not answer';
+  return out;
 }));
 
 /* Optional higher-accuracy speech models (one-time download, then offline). */

@@ -470,6 +470,25 @@
     return out;
   }
 
+  /** Edit distance between two short strings. */
+  function lev(x, y) {
+    const n = x.length, m = y.length;
+    if (!n) return m; if (!m) return n;
+    let prev = Array.from({ length: m + 1 }, (_, j) => j);
+    for (let i = 1; i <= n; i++) {
+      const cur = [i];
+      for (let j = 1; j <= m; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+    return prev[m];
+  }
+  /** The same letters with the spaces moved — two letters' slack at most (case ignored). */
+  function soundsSame(x, y) {
+    const a = String(x).replace(/[^a-z0-9]/g, ''), b = String(y).replace(/[^a-z0-9]/g, '');
+    if (!a || !b || Math.abs(a.length - b.length) > 2) return false;
+    return lev(a, b) <= Math.min(2, Math.max(1, Math.floor(Math.max(a.length, b.length) / 3)));
+  }
+
   /**
    * Is the AI's version of a line a CORRECTION of it, or a rewrite? Returns the
    * line to offer (in the caption's own case) or null.
@@ -493,7 +512,18 @@
     const changed = (a.length - same) + (b.length - same);
     const tidy = o.mode === 'tidy';
     const limit = tidy ? Math.max(3, Math.ceil(a.length * 0.6)) : Math.max(2, Math.ceil(a.length * 0.5));
-    if (changed > limit) return { ok: false, reason: 'rewrote the line' };
+    /*
+     * A mishearing is often the same SOUNDS cut into different words — "is
+     * real" for "Israel", "a men" for "Amen", "for giving" for "forgiving".
+     * Counted in words that is a big change (two out, one in) and it was
+     * thrown away as a rewrite, though it is the most typical fix there is.
+     * So when the words differ a lot but the LETTERS barely do, it is a
+     * respacing of what was heard, not a new sentence.
+     */
+    const respaced = changed > limit && Math.abs(b.length - a.length) <= 2 && soundsSame(a.join(''), b.join(''));
+    if (changed > limit && !respaced) return { ok: false, reason: 'rewrote the line' };
+    // the same words in a different order is a rewrite, however small
+    if (a.length === b.length && a.join(' ') !== b.join(' ') && a.slice().sort().join(' ') === b.slice().sort().join(' ')) return { ok: false, reason: 'reordered the words' };
     if (Math.abs(b.length - a.length) > (tidy ? 3 : 2)) return { ok: false, reason: 'changed the length' };
     const style = lineStyle(src, o.caseMode);
     if (style === 'upper') t = t.toUpperCase();
@@ -503,40 +533,136 @@
     return { ok: true, text: tidySpaces(t) };
   }
 
+  /*
+   * ►► READ THE WHOLE SERMON FIRST. ◄◄
+   * The proof-reader used to see forty caption lines and two either side —
+   * no idea what the sermon was about, which passage was being preached,
+   * who the people in it were or how the church spells its own name. A
+   * misheard word is only wrong IN CONTEXT ("the lamb of guard" is nonsense
+   * only if you know it is about the Lamb of God), so it missed most of them
+   * and the operator fixed them by hand. Now the transcript is read once for
+   * notes — topic, scriptures quoted, names, recurring words and mishearings
+   * — and every batch is corrected with those notes, the church's own Word
+   * Book, and a wide stretch of what was said either side.
+   */
+  const BRIEF_SCHEMA = {
+    type: 'object',
+    properties: {
+      topic: { type: 'string' },
+      speaker: { type: 'string' },
+      scriptures: { type: 'array', items: { type: 'string' } },
+      names: { type: 'array', items: { type: 'string' } },
+      terms: { type: 'array', items: { type: 'string' } },
+      mishearings: { type: 'array', items: { type: 'object', properties: { heard: { type: 'string' }, meant: { type: 'string' } }, required: ['heard', 'meant'], additionalProperties: false } },
+    },
+    required: ['topic', 'speaker', 'scriptures', 'names', 'terms', 'mishearings'],
+    additionalProperties: false,
+  };
+  const FIX_SCHEMA = {
+    type: 'object',
+    properties: {
+      fixes: { type: 'array', items: { type: 'object', properties: {
+        n: { type: 'integer' }, text: { type: 'string' }, why: { type: 'string' }, sure: { type: 'boolean' },
+      }, required: ['n', 'text', 'why', 'sure'], additionalProperties: false } },
+    },
+    required: ['fixes'],
+    additionalProperties: false,
+  };
+
+  function buildBriefPrompt(transcript) {
+    const system = [
+      'You are helping correct the captions of a church sermon video. The transcript below was written by speech recognition,',
+      'so some words are misheard as other words that sound alike. Read it all and write the notes a careful editor would want',
+      'beside them while correcting the captions:',
+      '- topic: what the sermon is about, in one or two sentences',
+      '- speaker: who is preaching, if it is said (else "")',
+      '- scriptures: every Bible passage read or quoted, as "Book chapter:verse — the words as the Bible has them"',
+      '  (use the translation the preacher seems to use; only passages that are really there)',
+      '- names: people, places, churches, ministries and events, spelled correctly',
+      '- terms: words and phrases that come up again and again (spelled as they should be)',
+      '- mishearings: words the speech recognition clearly got wrong, more than once if possible, as heard -> meant',
+      'Reply with JSON only: {"topic":"","speaker":"","scriptures":[],"names":[],"terms":[],"mishearings":[{"heard":"","meant":""}]}',
+    ].join('\n');
+    return { system, prompt: 'Transcript:\n' + String(transcript || '') };
+  }
+  function parseBrief(answer) {
+    const j = firstJson(answer);
+    if (!j || typeof j !== 'object' || Array.isArray(j)) return null;
+    const list = (v, n) => (Array.isArray(v) ? v : []).map((x) => String(x == null ? '' : x).trim().slice(0, 200)).filter(Boolean).slice(0, n);
+    const mis = (Array.isArray(j.mishearings) ? j.mishearings : [])
+      .filter((m) => m && m.heard && m.meant && String(m.heard).trim().toLowerCase() !== String(m.meant).trim().toLowerCase())
+      .slice(0, 30).map((m) => ({ heard: String(m.heard).trim().slice(0, 60), meant: String(m.meant).trim().slice(0, 60) }));
+    const b = { topic: String(j.topic || '').trim().slice(0, 400), speaker: String(j.speaker || '').trim().slice(0, 80),
+      scriptures: list(j.scriptures, 25), names: list(j.names, 40), terms: list(j.terms, 40), mishearings: mis };
+    return b.topic || b.scriptures.length || b.names.length || b.terms.length ? b : null;
+  }
+  /** The notes, as the lines that go in front of every batch. */
+  function briefText(b) {
+    if (!b) return '';
+    const out = [];
+    if (b.topic) out.push('Topic: ' + b.topic);
+    if (b.speaker) out.push('Speaker: ' + b.speaker);
+    if (b.scriptures && b.scriptures.length) out.push('Scripture in this sermon:\n' + b.scriptures.map((x) => '  - ' + x).join('\n'));
+    if (b.names && b.names.length) out.push('Names: ' + b.names.join(', '));
+    if (b.terms && b.terms.length) out.push('Recurring words: ' + b.terms.join(', '));
+    if (b.mishearings && b.mishearings.length) out.push('Mishearings seen in this transcript: ' + b.mishearings.map((m) => `"${m.heard}" -> "${m.meant}"`).join('; '));
+    return out.join('\n');
+  }
+
   /**
-   * The brief. `batch` is [{ n, text, context }] — n is the number the model
-   * refers to; context lines are shown for meaning but must not be returned.
+   * The brief for one batch. `batch` is [{ n, text, context }] — n is the
+   * number the model refers to; context rows (old callers) are shown for
+   * meaning but never returned. `opts`: mode, brief (notes object), terms
+   * (the church's own spellings), known ([{from,to}] the editor fixed
+   * before), before / after (the passage either side, as plain text).
    */
   function buildAiPrompt(batch, opts) {
     const o = opts || {};
     const tidy = o.mode === 'tidy';
     const system = [
-      'You proofread the burned-in captions of a church sermon video. The captions were made by speech recognition,',
-      'so they contain the mistakes speech recognition makes. Each caption line is a few words of what the speaker said.',
+      'You correct the burned-in captions of a church sermon video. Speech recognition wrote them, so some words are',
+      'misheard as other words that sound alike, and your job is to make every line say what the preacher actually said.',
       '',
-      'Fix ONLY these:',
-      '- words the speech recognition misheard — use the lines around it to work out what was really said',
-      "  (e.g. 'holy goat' -> 'Holy Ghost', 'only begotten sun' -> 'only begotten Son', 'let us prey' -> 'let us pray')",
-      '- spelling mistakes and missing apostrophes (dont -> don\'t)',
-      "- the wrong sound-alike word (there/their/they're, your/you're, its/it's, to/too, then/than, a/an)",
-      '- a word accidentally repeated (the the -> the)',
-      '- capitals for names: God, Jesus, Holy Spirit, books of the Bible, people and places',
+      'Read for meaning first: the caption lines run on from one another and a sentence usually spans several lines.',
+      'Use the sermon notes, the passage before and after, and the lines around each one to work out what was really said —',
+      'a word that sounds right but makes no sense where it stands is almost always a mishearing.',
+      '',
+      'Correct:',
+      "- misheard words: 'holy goat' -> 'Holy Ghost', 'is real' -> 'Israel', 'a men' -> 'Amen', 'the lamb of guard' -> 'the Lamb of God',",
+      "  'let us prey' -> 'let us pray', 'cavalry' -> 'Calvary' (the cross), 'only begotten sun' -> 'only begotten Son', 'sums' -> 'Psalms'",
+      '- words split or joined wrongly by the recogniser, spelling mistakes, missing apostrophes',
+      "- the wrong sound-alike word (there/their/they're, your/you're, its/it's, to/too, then/than, a/an, know/no, whole/hole)",
+      '- a word accidentally repeated by the recogniser (the the -> the)',
+      '- capitals for God, Jesus, Lord, Holy Spirit/Holy Ghost, He/Him only where the speaker means God and the line already uses capitals that way,',
+      '  books of the Bible, people, places and the church\'s own names',
+      '- scripture the preacher is plainly quoting: the words as the Bible has them, where the recogniser garbled them',
       tidy
         ? '- clear grammar slips, keeping the speaker\'s own words and voice as far as possible'
-        : '- nothing else: keep the speaker\'s exact words even when their spoken grammar is informal',
+        : '- nothing else: keep the speaker\'s own words, even informal spoken grammar, false starts and repeated phrases they really said',
       '',
-      'Never rephrase, never make it sound better, never add or remove meaning, never add punctuation',
-      '(captions have no full stops, commas or question marks), never join or split lines.',
+      'Never rephrase or improve the wording, never add words that were not said, never add punctuation (captions have',
+      'no full stops, commas or question marks), and never move words from one line to another.',
       'Lines may be written in ALL CAPS; answer in normal sentence case — the app puts the caps back.',
-      'If you are not sure a line is wrong, leave it alone.',
       '',
-      'Reply with JSON only, in this exact shape, listing ONLY the lines you changed:',
-      '{"fixes":[{"n":12,"text":"the corrected line","why":"3 to 6 words"}]}',
+      'For each line you change, say if you are sure: true when the line as it stands is clearly wrong and your version',
+      'is clearly what was said; false when it is a judgement call. Leave a line alone when you cannot tell.',
+      '',
+      'Reply with JSON only, listing ONLY the lines you changed:',
+      '{"fixes":[{"n":12,"text":"the corrected line","why":"3 to 6 words","sure":true}]}',
       'If nothing needs fixing reply {"fixes":[]}.',
     ].join('\n');
+    const parts = [];
+    const notes = typeof o.brief === 'string' ? o.brief : briefText(o.brief);
+    if (notes) parts.push('SERMON NOTES (from the whole transcript):\n' + notes);
+    const terms = (o.terms || []).map((t) => String(t).trim()).filter(Boolean).slice(0, 60);
+    if (terms.length) parts.push('WORDS THIS CHURCH USES — spell them exactly like this: ' + terms.join(', '));
+    const known = (o.known || []).filter((k) => k && k.from && k.to).slice(0, 40);
+    if (known.length) parts.push('CORRECTIONS THE EDITOR HAS MADE BEFORE (the same mishearings come back): ' + known.map((k) => `"${k.from}" -> "${k.to}"`).join('; '));
+    if (o.before) parts.push('WHAT WAS SAID JUST BEFORE (for meaning only):\n' + o.before);
     const rows = (batch || []).map((r) => (r.context ? `(${r.n}) ${r.text}   <- context only, do not return` : `${r.n} | ${r.text}`));
-    const prompt = 'Caption lines (number | text):\n' + rows.join('\n');
-    return { system, prompt };
+    parts.push('CAPTION LINES TO CHECK (number | text):\n' + rows.join('\n'));
+    if (o.after) parts.push('WHAT IS SAID RIGHT AFTER (for meaning only):\n' + o.after);
+    return { system, prompt: parts.join('\n\n') };
   }
 
   /** Pull the first balanced JSON value out of an answer (models wrap it in prose). */
@@ -578,7 +704,7 @@
       const text = typeof f.text === 'string' ? f.text : (typeof f.fixed === 'string' ? f.fixed : null);
       if (text == null) continue;
       seen.add(n);
-      out.push({ n, text, why: String(f.why || f.reason || '').slice(0, 80) });
+      out.push({ n, text, why: String(f.why || f.reason || '').slice(0, 80), sure: f.sure === true || f.sure === 'true' });
     }
     return out;
   }
@@ -586,7 +712,8 @@
   return {
     tokenize, lineStyle, dress, soundsVowel,
     checkLine, checkLines, applyIssue, tidySpaces,
-    stripCaptionPunct, diffWords, vetAiLine, buildAiPrompt, parseAiFixes, firstJson,
+    stripCaptionPunct, diffWords, vetAiLine, buildAiPrompt, parseAiFixes, firstJson, soundsSame,
+    buildBriefPrompt, parseBrief, briefText, BRIEF_SCHEMA, FIX_SCHEMA,
     CONTRACTIONS, PHRASES, STUTTER, PROPER,
   };
 }));
