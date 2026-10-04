@@ -1620,7 +1620,7 @@ let _hideTimer = null;
     const id = 'save-' + name;
     const of = (k, n) => (n > 1 ? ` part ${k + 1} of ${n}` : '');
     return {
-      making: (pc) => island({ id, title: `Making a phone copy… ${pc}%`, spin: true, sticky: true, sub: name }),
+      making: (pc, q) => island({ id, title: `Making a ${q === 'fast' ? '720p' : '1080p'} phone copy… ${pc}%`, spin: true, sticky: true, sub: name }),
       progress: (pc, got, total, k, n) => island({ id, title: `Getting${of(k, n)} ready… ${pc}%`, spin: true, sticky: true,
         sub: total ? `${Math.round(got / 1048576)} of ${Math.round(total / 1048576)} MB · ${name}` : name }),
       ready: (share, k, n) => island({ id, kind: 'good', title: `Ready to save${of(k, n)}`, sub: name, sticky: true,
@@ -1664,12 +1664,26 @@ let _hideTimer = null;
         let parts = saveCache && saveCache.path === p ? saveCache.parts : null;
         if (!parts) {
           let list = [{ path: p, size: Number(size) || 0 }];
-          if (!size || size > PHONE_PART_MAX) {
-            show.making(0);
+          let needed = !size || size > PHONE_PART_MAX;
+          /*
+           * 1080p or 720p? Asked only when a copy has to be made: the full-HD
+           * one takes a few minutes on a small server, the 720p one about half
+           * that. A copy already made (the one started when a montage
+           * finished) is used without asking.
+           */
+          let quality = 'hd';
+          if (needed) {
+            let stt = null;
+            try { stt = await call('video:phoneCopyStatus', { input: p }); } catch (e) { /* an older studio: just make it */ }
+            if (stt && stt.needed === false) needed = false;
+            else if (stt && stt.needed && !(stt.hd && stt.hd.ready) && show.choose) quality = await show.choose(stt);
+          }
+          if (needed) {
+            show.making(0, quality);
             const jobId = 'pc' + Date.now().toString(36);
-            const off = window.api.onJobProgress((d) => { if (d && d.jobId === jobId) show.making(Math.min(99, Math.round(d.percent || 0))); });
+            const off = window.api.onJobProgress((d) => { if (d && d.jobId === jobId) show.making(Math.min(99, Math.round(d.percent || 0)), quality); });
             try {
-              const got = await call('video:phoneCopy', { input: p, jobId });
+              const got = await call('video:phoneCopy', { input: p, jobId, quality });
               if (got && Array.isArray(got.parts) && got.parts.length) list = got.parts;
             } catch (e) {
               const c = new Error('The studio could not make a copy for your phone' + (e && e.message ? ' — ' + String(e.message).split('\n')[0].slice(0, 120) : '') + '. Try again.');
@@ -1796,7 +1810,7 @@ let _hideTimer = null;
   function viewerSave(v, p) {
     const btn = v.querySelector('[data-cv="save"]');
     const note = v.querySelector('.cv-save-note');
-    if (!btn || btn.dataset.state === 'loading' || btn.dataset.state === 'sharing') return;
+    if (!btn || btn.dataset.state === 'loading' || btn.dataset.state === 'sharing' || btn.dataset.state === 'choose') return;
     const label = btn.querySelector('span');
     const fill = btn.querySelector('.cv-fill');
     // ready: this tap is the one the share sheet needs
@@ -1812,8 +1826,24 @@ let _hideTimer = null;
     const mb = (b) => (b >= 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : Math.max(1, Math.round(b / 1048576)) + ' MB');
     const of = (k, n) => (n > 1 ? ` part ${k + 1} of ${n}` : '');
     const ui = {
-      making: (pc) => go('loading', `Preparing ${pc}%`,
-        'Making a phone-size copy — iPhones can’t save a video this big from an app. Keep the app open.', pc),
+      making: (pc, q) => go('loading', `Preparing ${pc}%`,
+        `Making a ${q === 'fast' ? '720p' : '1080p'} copy your iPhone can save. Keep the app open.`, pc),
+      /* two buttons above Save: full HD, or quicker */
+      choose: (stt) => new Promise((resolve) => {
+        go('choose', 'Pick ↑', 'This video is too big for an iPhone to save as it is, so the studio makes a copy. Which quality?');
+        const old = v.querySelector('.cv-q'); if (old) old.remove();
+        const hint = (x, slow) => (x && x.ready ? 'Ready now' : x && x.making ? `Being made · ${x.pct || 0}%` : slow);
+        const box = document.createElement('div');
+        box.className = 'cv-q';
+        box.innerHTML = `<button type="button" class="cv-q-b cv-q-hd" data-q="hd"><b>1080p · Best</b><small>${escHtml(hint(stt.hd, 'Takes a few minutes'))}</small></button>`
+          + `<button type="button" class="cv-q-b" data-q="fast"><b>720p · Faster</b><small>${escHtml(hint(stt.fast, 'Quicker · smaller file'))}</small></button>`;
+        box.addEventListener('click', (e) => {
+          const b = e.target.closest('[data-q]'); if (!b) return;
+          box.remove();
+          resolve(b.dataset.q === 'fast' ? 'fast' : 'hd');
+        });
+        v.querySelector('.cv-acts').before(box);
+      }),
       progress: (pc, got, total, k, n) => go('loading', n > 1 ? `Part ${k + 1}/${n} · ${pc}%` : `Downloading ${pc}%`,
         `Getting${of(k, n) || ' the video'} onto your phone${total ? ` — ${mb(got)} of ${mb(total)}` : '…'} Keep the app open.`, pc),
       ready: (share, k, n) => {

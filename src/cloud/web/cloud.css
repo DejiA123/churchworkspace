@@ -2116,6 +2116,14 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .cv-save.cv-done { border-color: rgba(34, 197, 94, .6); color: #86efac; }
 .cv-save.cv-fail { border-color: rgba(245, 158, 11, .7); color: #fcd34d; }
 @keyframes cv-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.03); } }
+.cv-q { flex: none; display: flex; gap: 10px; margin: 8px 16px 0; animation: cv-q-in .2s ease; }
+.cv-q-b { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px 8px; border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.18); background: rgba(255,255,255,.08); color: #fff; font: inherit; cursor: pointer; }
+.cv-q-b b { font-size: 15px; font-weight: 700; }
+.cv-q-b small { font-size: 12px; opacity: .75; }
+.cv-q-b.cv-q-hd { background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%); border-color: transparent; box-shadow: 0 4px 16px rgba(139, 92, 246, .4); }
+.cv-q-b:active { transform: scale(.97); }
+@keyframes cv-q-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .cv-save-note { flex: none; margin: 0 16px; padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,.08);
   font: 500 13.5px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", Roboto, sans-serif; color: #e5e7eb; text-align: center; }
 .cv-save-note.hidden { display: none; }

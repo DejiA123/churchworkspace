@@ -189,6 +189,7 @@ const ALLOWED = {
   'video:mixMusic': true,
   'video:appendClips': true,
   'video:phoneCopy': true,
+  'video:phoneCopyStatus': true,
   'video:captions': true,
 
   // long → short
