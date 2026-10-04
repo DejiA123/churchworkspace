@@ -6358,6 +6358,9 @@
       models: { capModel: ve.capModel || '', aiModel: ve.aiModel || '', asrModel: ve.asrModel || '' },
       bulk: { files: (ve.bulk && ve.bulk.files) || [], overlays: (ve.bulk && ve.bulk.overlays) || [] },
       thumb: ve.sessionThumb || null,
+      // the rolling slot says which project it is, so carrying on from it is carrying on THAT project
+      projectId: ve.sessionId || null,
+      auto: !!ve.sessionAuto,
     };
   }
   const valOf = (sel) => { const el = $(sel); return el ? el.value : null; };
@@ -6440,9 +6443,9 @@
 
     // a restored session is a clean starting point, not something to undo INTO
     ve.history = []; ve.future = []; updateUndoRedoButtons();
-    ve.sessionId = data.id && data.id !== 'autosave' ? data.id : null;
+    ve.sessionId = data.id && data.id !== 'autosave' ? data.id : (data.projectId || null);
     ve.sessionName = data.name || null;
-    ve.sessionAuto = !!data.auto;   // named after its video by the studio, not by a person (yet)
+    ve.sessionAuto = !!data.auto || (data.id === 'autosave' && !data.projectId);   // named after its video by the studio, not by a person (yet)
     ve.sessionThumb = data.thumb || null;
     ve.sessionDirty = false;
 
@@ -6502,7 +6505,11 @@
     const forVideo = ve.video && ve.video.path;
     const name = ve.sessionName || prettyVideoName((forVideo || '').split(/[\\/]/).pop());
     const auto = !ve.sessionId || !!ve.sessionAuto;
-    ve._projSaving = window.api.sessions.save(ve.sessionId || null, name, Object.assign({}, data, { name, auto }))
+    // work open from before projects was made a project on the server (sessions.js migrateAutosave): adopt it, no twin
+    const adopt = ve.sessionId ? Promise.resolve(null)
+      : Promise.resolve(window.api.sessions.list()).then((rows) => (rows || []).find((r) => r.fromAutosave && r.videoPath === forVideo) || null, () => null);
+    ve._projSaving = adopt.then((hit) => { if (hit && !ve.sessionId && ve.video && ve.video.path === forVideo) { ve.sessionId = hit.id; ve.sessionAuto = true; } })
+      .then(() => window.api.sessions.save(ve.sessionId || null, name, Object.assign({}, data, { name, auto, projectId: undefined, fromAutosave: undefined })))
       .then((res) => {
         // a different video was opened while this was on its way: it is not that one's project
         if (res && res.id && ve.video && ve.video.path === forVideo) {
