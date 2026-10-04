@@ -104,6 +104,13 @@ function fakeModel(log) {
   const rod = byLine.get(4);
   check('a judgement call is marked not sure', rod && rod.sure === false, rod && rod.text);
 
+  head('[3b] Two sound-alike swaps in one 3-word line (from the operator\'s own sermon)');
+  const v1 = G.vetAiLine('FACE THAT WERE', 'faith that we', { caseMode: 'upper' });
+  check('"FACE THAT WERE" -> "FAITH THAT WE" is a correction, not a rewrite', v1.ok && v1.text === 'FAITH THAT WE', JSON.stringify(v1));
+  check('…but swapping in unrelated words still is', !G.vetAiLine('GIVE THANKS ALWAYS', 'sing praise always', {}).ok);
+  check('…and adding a word in "exact" mode still is', !G.vetAiLine('HE GO TO CHURCH', 'he goes to the church', { mode: 'exact' }).ok);
+  check('the AI is told about accent sound swaps', /'face' for 'faith'/.test(G.buildAiPrompt([{ n: 1, text: 'x' }], {}).system));
+
   head('[4] The notes are kept until the words change');
   log = { briefs: [], batches: [] };
   await proofread({ lines: all.slice(0, 10), passage: all }, { engine: 'groq', ask: fakeModel(log), terms, known });
