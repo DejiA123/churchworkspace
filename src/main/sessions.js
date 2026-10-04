@@ -66,11 +66,39 @@ function summarise(id, data, stat) {
     captions: data && data.captions && Array.isArray(data.captions.events) ? data.captions.events.length : 0,
     thumb: (data && data.thumb) || null,
     bytes: stat ? stat.size : 0,
+    fromAutosave: !!(data && data.fromAutosave),
   };
+}
+
+/*
+ * An edit from before projects lived only in the rolling slot, so Projects
+ * came up empty with work still open. The first time the list is asked for,
+ * that edit becomes a project of its own (once: the slot remembers which),
+ * and the studio adopts it rather than making a twin (fromAutosave).
+ */
+function migrateAutosave() {
+  const a = readAutosave();
+  if (!a || a.projectId || !a.video || !a.video.path) return;
+  const tl = a.timeline || {};
+  const worth = (Array.isArray(tl.segments) && tl.segments.some((x) => x && !x.seed))
+    || (a.captions && Array.isArray(a.captions.events) && a.captions.events.length)
+    || (Array.isArray(tl.textOverlays) && tl.textOverlays.length);
+  if (!worth) return;
+  // a project for this video already (made here earlier, or by the studio): nothing to add
+  if (listRaw().some((r) => r.videoPath === a.video.path)) return;
+  const data = Object.assign({}, a);
+  delete data.id; delete data.summary; delete data.videoMissing;
+  const base = String(a.video.path).split(/[\\/]/).pop().replace(/\.[a-z0-9]{2,5}$/i, '');
+  const res = save({ name: a.name && a.name !== 'Session' ? String(a.name).replace(/\.[a-z0-9]{2,5}$/i, '') : base, data: Object.assign(data, { auto: true, fromAutosave: true }) });
+  try { autosave(Object.assign(data, { projectId: res.id, fromAutosave: undefined })); } catch (e) { /* listed again next time: harmless, it checks */ }
 }
 
 /** Every saved session, newest first. The autosave slot is NOT one of them. */
 function list() {
+  try { migrateAutosave(); } catch (e) { /* the list still answers */ }
+  return listRaw();
+}
+function listRaw() {
   let files = [];
   try { files = fs.readdirSync(dir()).filter((f) => f.endsWith('.json')); } catch (e) { return []; }
   const out = [];
