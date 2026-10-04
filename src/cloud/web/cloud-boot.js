@@ -1532,7 +1532,31 @@ let _hideTimer = null;
     const nice = name.length > 60 ? name.slice(0, 60 - ext.length).replace(/[-_.\s]+$/, '') + ext : name;
     return new File(parts, nice, { type });
   }
-  async function offerDownload(p, size) {
+  /*
+   * The file last brought down for saving, kept so a second tap (the share
+   * sheet closed by mistake) does not download hundreds of MB again.
+   */
+  let saveCache = null;
+  /*
+   * How a save SHOWS itself. Out of the viewer it is the island; the viewer
+   * passes its own (the Save button itself fills up, then becomes "Save to
+   * Photos") — the island sat underneath the full-screen viewer, so tapping
+   * Save there looked like nothing happened at all.
+   */
+  function islandSaveUi(name) {
+    const id = 'save-' + name;
+    return {
+      progress: (pc, got, total) => island({ id, title: `Getting it ready… ${pc}%`, spin: true, sticky: true,
+        sub: total ? `${Math.round(got / 1048576)} of ${Math.round(total / 1048576)} MB · ${name}` : name }),
+      ready: (share) => island({ id, kind: 'good', title: 'Ready to save', sub: name, sticky: true,
+        action: { label: 'Save Video', onClick: () => { islandHide(id); share(); } } }),
+      done: () => island({ id, kind: 'good', title: 'Saved', sub: 'Find it in Photos (or Files, if you chose that)', ms: 4000 }),
+      cancelled: (share) => island({ id, kind: 'info', title: 'Not saved yet', sub: name, sticky: true,
+        action: { label: 'Save Video', onClick: () => { islandHide(id); share(); } } }),
+      fail: (msg) => island({ id, kind: 'warn', title: 'Could not save it', sub: msg, ms: 6000 }),
+    };
+  }
+  async function offerDownload(p, size, ui) {
     if (!p) return;
     const name = String(p).split(/[\\/]/).pop();
     if (!/\.[A-Za-z0-9]{2,5}$/.test(name)) {
@@ -1543,44 +1567,47 @@ let _hideTimer = null;
     if (!cloud.downloads.some((d) => d.path === p)) cloud.downloads.unshift({ path: p, name, at: Date.now() });
     renderDownloadCount();
     if (onPhone() && navigator.canShare && (!size || size <= SHARE_MAX)) {
-      const id = 'save-' + name;
-      island({ id, title: 'Getting it ready…', sub: name, spin: true, sticky: true });
+      const show = ui || islandSaveUi(name);
       try {
-        const file = await fetchForSaving(p, name, size, (pc, got, total) => island({ id, title: `Getting it ready… ${pc}%`,
-          sub: total ? `${Math.round(got / 1048576)} of ${Math.round(total / 1048576)} MB · ${name}` : name, spin: true, sticky: true }));
+        let file = saveCache && saveCache.path === p ? saveCache.file : null;
+        if (!file) {
+          show.progress(0, 0, Number(size) || 0);
+          file = await fetchForSaving(p, name, size, show.progress);
+          saveCache = { path: p, file };
+        }
         if (navigator.canShare({ files: [file] })) {
           /*
            * The share sheet only opens straight after a tap — a download of
            * hundreds of MB has long used that tap up, and the sheet silently
            * refused. So when it is ready, it asks for one more tap.
+           *
+           * ONLY the file is shared: with a title beside it iOS shares a
+           * second, TEXT item — the sheet then offers to save a .txt and
+           * leaves "Save Video" out.
            */
-          island({ id, kind: 'good', title: 'Ready to save', sub: name, sticky: true,
-            action: { label: 'Save Video', onClick: () => {
-              islandHide(id);
-              // ONLY the file: with a title beside it iOS shares a second, TEXT
-              // item — the sheet then offers to save a .txt and leaves "Save
-              // Video" out, because a video and some text cannot both go to Photos.
-              navigator.share({ files: [file] }).catch((e) => {
-                if (e && e.name === 'AbortError') return;
-                openInPlayer(p);
-              });
-            } } });
+          const share = () => navigator.share({ files: [file] }).then(() => show.done(), (e) => {
+            if (e && e.name === 'AbortError') return show.cancelled(share);
+            show.fail('The share sheet would not open — opening it in the player instead');
+            openInPlayer(p);
+          });
+          show.ready(share);
           return;
         }
-        islandHide(id);
+        show.fail('This phone cannot save it from here — opening it in the player');
       } catch (e) {
-        islandHide(id);
         if (e && e.name === 'AbortError') return;
-        island({ kind: 'warn', title: 'The download kept dropping', sub: 'Opening it in the player instead', ms: 5000 });
+        show.fail('The download kept dropping. Check the signal and try again.');
+        return;
       }
     }
-    if (onPhone() && isStandalone()) { openInPlayer(p); return; }   // the phone's own player — never a blank page
+    if (onPhone() && isStandalone()) { if (ui && ui.player) ui.player(); openInPlayer(p); return; }   // the phone's own player — never a blank page
     const a = document.createElement('a');
     a.href = downloadUrl(p);
     a.download = name;
     document.body.appendChild(a);
     a.click();
     a.remove();
+    if (ui && ui.browser) ui.browser();
   }
 
   /*
@@ -1605,8 +1632,9 @@ let _hideTimer = null;
       + `<div class="cv-stage">${isVideo
         ? `<video class="cv-media" src="${escAttr(window.MW_FILE_URL(p))}" controls playsinline autoplay preload="metadata"></video>`
         : `<img class="cv-media" src="${escAttr(window.MW_FILE_URL(p))}" alt="">`}</div>`
+      + '<p class="cv-save-note hidden" aria-live="polite"></p>'
       + '<div class="cv-acts">'
-      + `<button type="button" class="cv-act" data-cv="save">${mi('download')}<span>Save</span></button>`
+      + `<button type="button" class="cv-act cv-save" data-cv="save"><i class="cv-fill"></i>${mi('download')}<span>Save</span></button>`
       + (isVideo ? `<button type="button" class="cv-act" data-cv="studio">${mi('film')}<span>Edit</span></button>` : '')
       + (isVideo && social ? `<button type="button" class="cv-act cv-primary" data-cv="post">${mi('send')}<span>Post</span></button>` : '')
       + '</div>';
@@ -1623,7 +1651,7 @@ let _hideTimer = null;
       const b = e.target.closest('[data-cv]'); if (!b) return;
       const act = b.dataset.cv;
       if (act === 'close') return close();
-      if (act === 'save') return offerDownload(p, (findFile(p) || {}).size);
+      if (act === 'save') return viewerSave(v, p);
       if (act === 'studio') {
         close();
         $$('.cap-modal:not(.hidden)').forEach((m) => m.classList.add('hidden'));
@@ -1634,6 +1662,43 @@ let _hideTimer = null;
       }
       if (act === 'post') { close(); const fm = $('#cloudFilesModal'); if (fm) fm.classList.add('hidden'); return window.MWSocial.compose({ files: [p] }); }
     });
+  }
+  /*
+   * ►► SAVING, WHERE YOU CAN SEE IT. ◄◄
+   * The Save button itself shows every step: it fills up as the video comes
+   * down (with how much of how many MB), turns into "Save to Photos" when it
+   * is on the phone, and says "Saved" when the share sheet is done — with a
+   * line above the buttons saying what is happening and what to tap next.
+   */
+  function viewerSave(v, p) {
+    const btn = v.querySelector('[data-cv="save"]');
+    const note = v.querySelector('.cv-save-note');
+    if (!btn || btn.dataset.state === 'loading' || btn.dataset.state === 'sharing') return;
+    const label = btn.querySelector('span');
+    const fill = btn.querySelector('.cv-fill');
+    // ready: this tap is the one the share sheet needs
+    if (btn.dataset.state === 'ready' && btn._share) { go('sharing', 'Opening…', 'Choose “Save Video” to put it in Photos.'); btn._share(); return; }
+    function go(state, text, line, pc) {
+      btn.dataset.state = state;
+      btn.className = 'cv-act cv-save cv-' + state;
+      label.textContent = text;
+      if (fill) fill.style.width = (pc == null ? (state === 'loading' ? 0 : 100) : pc) + '%';
+      if (note) { note.textContent = line || ''; note.classList.toggle('hidden', !line); }
+      return false;
+    }
+    const mb = (b) => (b >= 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : Math.max(1, Math.round(b / 1048576)) + ' MB');
+    const ui = {
+      progress: (pc, got, total) => go('loading', `Downloading ${pc}%`,
+        total ? `Getting the video onto your phone — ${mb(got)} of ${mb(total)}. Keep the app open.` : 'Getting the video onto your phone… Keep the app open.', pc),
+      ready: (share) => { btn._share = share; go('ready', 'Save to Photos', 'It’s on your phone. Tap “Save to Photos”, then choose “Save Video”.'); try { if (navigator.vibrate) navigator.vibrate(15); } catch (e) {} },
+      done: () => { btn._share = null; go('done', 'Saved ✓', 'Saved — find it in your Photos (or Files, if you chose that).'); },
+      cancelled: (share) => { btn._share = share; go('ready', 'Save to Photos', 'Not saved yet — tap “Save to Photos” and choose “Save Video”.'); },
+      fail: (msg) => { btn._share = null; go('fail', 'Try again', msg); },
+      player: () => go('done', 'Save', 'Opening it in the player: tap Share, then “Save Video”.'),
+      browser: () => go('done', 'Saved ✓', 'Your browser is downloading it.'),
+    };
+    go('loading', 'Starting…', 'Getting the video onto your phone…', 0);
+    offerDownload(p, (findFile(p) || {}).size, ui).catch(() => ui.fail('Something went wrong. Try again.'));
   }
   function findFile(p) {
     for (const g of ((filesCache && filesCache.groups) || [])) for (const f of (g.files || [])) if (f.path === p) return f;

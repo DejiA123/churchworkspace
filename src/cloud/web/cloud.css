@@ -1340,7 +1340,8 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
  */
 body.mw-cloud #toast { display: none !important; }
 .cloud-island {
-  position: fixed; z-index: 460;
+  /* above everything, the full-screen viewer included (z-index 2000) */
+  position: fixed; z-index: 2100;
   left: 50%; top: calc(46px + env(safe-area-inset-top) + 10px);
   width: 120px; height: 36px;
   transform: translate(-50%, -18px) scale(.8);
@@ -2104,6 +2105,20 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .cv-act .mi { width: 20px; height: 20px; margin: 0; flex: none; }
 .cv-act.cv-primary { background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%); border-color: transparent; box-shadow: 0 4px 18px rgba(139, 92, 246, .45); }
 .cv-act:active { filter: brightness(.88); }
+/* Save shows every step on the button itself */
+.cv-save { position: relative; overflow: hidden; transition: flex-grow .25s ease, background-color .2s; }
+.cv-save > * { position: relative; z-index: 1; }
+.cv-save .cv-fill { position: absolute; z-index: 0; left: 0; top: 0; bottom: 0; width: 0; background: rgba(139, 92, 246, .55); transition: width .3s ease; pointer-events: none; }
+.cv-save:not(.cv-loading):not(.cv-sharing) .cv-fill { display: none; }
+.cv-save.cv-loading, .cv-save.cv-sharing, .cv-save.cv-ready, .cv-save.cv-fail { flex-grow: 2; max-width: none; }
+.cv-save.cv-loading { font-variant-numeric: tabular-nums; }
+.cv-save.cv-ready { background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); border-color: transparent; box-shadow: 0 4px 18px rgba(34, 197, 94, .45); animation: cv-pulse 1.4s ease-in-out infinite; }
+.cv-save.cv-done { border-color: rgba(34, 197, 94, .6); color: #86efac; }
+.cv-save.cv-fail { border-color: rgba(245, 158, 11, .7); color: #fcd34d; }
+@keyframes cv-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.03); } }
+.cv-save-note { flex: none; margin: 0 16px; padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,.08);
+  font: 500 13.5px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", Roboto, sans-serif; color: #e5e7eb; text-align: center; }
+.cv-save-note.hidden { display: none; }
 
 /* ------------------------------------------------ your own space: signing in */
 .cg-tabs { display: flex; gap: 4px; padding: 4px; margin: 0 0 14px; background: var(--bg-3); border: 1px solid var(--border); border-radius: 12px; }
