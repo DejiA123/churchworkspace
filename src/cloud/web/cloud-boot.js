@@ -273,7 +273,12 @@ let _hideTimer = null;
       : `✅ ${b.done} short${b.done === 1 ? '' : 's'} exported on the server${b.failed ? ` · ${b.failed} could not be made` : ''}.`;
     if (window.__endTask) window.__endTask(tid, { ok: b.state !== 'cancelled' && b.done > 0, state: b.state === 'cancelled' ? 'stopped' : (b.done ? 'done' : 'fail'), note });
     if (b.state === 'done') {
-      island({ kind: b.failed ? 'warn' : 'good', title: `${b.done} short${b.done === 1 ? '' : 's'} ready`, text: b.failed ? `${b.failed} could not be made — tap Running now for why.` : 'They are in Files.' });
+      const outs = (b.items || []).filter((it) => it.state === 'done' && it.output).map((it) => it.output);
+      for (const o of outs.slice().reverse()) if (!cloud.downloads.some((d) => d.path === o)) cloud.downloads.unshift({ path: o, name: String(o).split(/[\\/]/).pop(), at: Date.now() });
+      renderDownloadCount();
+      island({ kind: b.failed ? 'warn' : 'good', title: `${b.done} short${b.done === 1 ? '' : 's'} ready`, sticky: !!outs.length,
+        sub: b.failed ? `${b.failed} could not be made — tap Running now for why.` : 'Save them all to your Photos',
+        action: outs.length ? { label: 'Save all', onClick: () => saveAll(outs) } : undefined });
       if (typeof refreshFiles === 'function') { try { refreshFiles(); } catch (e) {} }
     }
     void left;
@@ -1212,7 +1217,9 @@ let _hideTimer = null;
     const n = filesUi.chosen.size;
     const bytes = Array.from(filesUi.chosen).reduce((t, p) => t + sizeOf(p), 0);
     const info = $('#cloudFilesSelInfo');
-    if (info) info.textContent = n ? `${n} selected · ${fmtSize(bytes)}` : 'Tap the videos to delete';
+    if (info) info.textContent = n ? `${n} selected · ${fmtSize(bytes)}` : 'Tap videos to save or delete';
+    const sv = $('#cloudFilesSelSave');
+    if (sv) { sv.disabled = !n; const t = sv.querySelector('span'); if (t) t.textContent = n > 1 ? `Save ${n}` : 'Save'; }
     const del = $('#cloudFilesSelDelete');
     if (!del) return;
     del.disabled = !n;
@@ -1475,7 +1482,7 @@ let _hideTimer = null;
    * kept as a Blob (WebKit keeps those out of the page's memory) and the file
    * is put together from them.
    */
-  async function fetchForSaving(p, name, size, onPct) {
+  async function fetchForSaving(p, name, size, onPct, opts) {
     const url = downloadUrl(p);
     let total = Number(size) || 0;
     if (!total) {
@@ -1503,7 +1510,7 @@ let _hideTimer = null;
      * own storage on the phone the moment it arrives and let go, and the share
      * sheet is handed that file — a few MB of memory whatever the size.
      */
-    const disk = await diskSaver(nice, total);
+    const disk = await diskSaver(nice, total, !(opts && opts.keep));
     if (!disk && total > MEMORY_MAX) {
       const e = new Error('This phone cannot hold a video this big for saving from inside the app.');
       e.code = 'TOO_BIG';
@@ -1564,7 +1571,7 @@ let _hideTimer = null;
    * browser has one; otherwise from a small worker with a synchronous handle
    * (what older iPhones offer). Null when there is neither, or not the room.
    */
-  async function diskSaver(name, total) {
+  async function diskSaver(name, total, fresh = true) {
     try {
       if (!navigator.storage || !navigator.storage.getDirectory) return null;
       try {
@@ -1574,8 +1581,9 @@ let _hideTimer = null;
         }
       } catch (e) { if (e && e.code === 'SPACE') throw e; }
       const root = await navigator.storage.getDirectory();
-      // one save at a time: whatever an earlier one left is cleared first
-      try { await root.removeEntry('mw-saves', { recursive: true }); } catch (e) {}
+      // one save at a time: whatever an earlier one left is cleared first (a
+      // Save all keeps the other videos of the same share beside it)
+      if (fresh) { try { await root.removeEntry('mw-saves', { recursive: true }); } catch (e) {} }
       const dir = await root.getDirectoryHandle('mw-saves', { create: true });
       const fh = await dir.getFileHandle(name, { create: true });
       if (typeof fh.createWritable === 'function') {
@@ -1645,7 +1653,8 @@ let _hideTimer = null;
     if (!p) return;
     const name = String(p).split(/[\\/]/).pop();
     if (!/\.[A-Za-z0-9]{2,5}$/.test(name)) {
-      // A folder — the nearest honest equivalent is the file list.
+      // A folder (an export finishing) — what was just made, with Save all; else the file list.
+      if (cloud.downloads.length) { const b = $('#cloudDownloads'); if (b) { b.click(); return; } }
       openFilesModal();
       return;
     }
@@ -1830,7 +1839,7 @@ let _hideTimer = null;
         `Making a ${q === 'fast' ? '720p' : '1080p'} copy your iPhone can save. Keep the app open.`, pc),
       /* two buttons above Save: full HD, or quicker */
       choose: (stt) => new Promise((resolve) => {
-        go('choose', 'Pick ↑', 'This video is too big for an iPhone to save as it is, so the studio makes a copy. Which quality?');
+        go('choose', 'Pick ↑', '');
         const old = v.querySelector('.cv-q'); if (old) old.remove();
         const hint = (x, slow) => (x && x.ready ? 'Ready now' : x && x.making ? `Being made · ${x.pct || 0}%` : slow);
         const box = document.createElement('div');
@@ -1862,6 +1871,124 @@ let _hideTimer = null;
     go('loading', 'Starting…', 'Getting the video onto your phone…', 0);
     offerDownload(p, (findFile(p) || {}).size, ui).catch(() => ui.fail('Something went wrong. Try again.'));
   }
+  /*
+   * ►► SAVE ALL — EVERY SHORT OF AN EXPORT ALL, TO PHOTOS. ◄◄
+   * The same road as one video (a phone copy when one is too big, the
+   * download kept on the phone's storage, the share sheet), but several
+   * videos to a tap: the share sheet takes a few files at once and offers
+   * “Save N Videos”. Never more than PHONE_PART_MAX in one share — the whole
+   * share is read into memory, which is what crashed the app at 500 MB.
+   */
+  async function sizeOnServer(p) {
+    try {
+      const r = await fetch(downloadUrl(p), { headers: { Range: 'bytes=0-0' }, cache: 'no-store' });
+      const n = Number((/\/(\d+)$/.exec(r.headers.get('content-range') || '') || [])[1]) || 0;
+      try { await r.arrayBuffer(); } catch (e) {}
+      return n;
+    } catch (e) { return 0; }
+  }
+  function saveAll(paths) {
+    const items = (paths || []).filter((p) => /\.(mp4|mov|m4v)$/i.test(String(p))).map((p) => ({
+      path: p, name: String(p).split(/[\\/]/).pop(), size: (findFile(p) || {}).size || 0, state: 'wait', pct: 0,
+    }));
+    if (!items.length) return;
+    if (!(onPhone() && navigator.canShare && navigator.share)) { items.forEach((it) => offerDownload(it.path)); return; }
+    const panel = openPanel({ id: 'cloudSaveAll', title: `Save ${items.length} video${items.length > 1 ? 's' : ''}`, cls: 'cp-saveall' });
+    panel.body.innerHTML = '<div class="sa-list">' + items.map((it, i) => `<div class="sa-row" data-i="${i}"><span class="sa-pic" data-thumb="${escAttr(it.path)}"></span>`
+      + `<span class="sa-tx"><b>${escHtml(it.name)}</b><small></small></span><i class="sa-st"></i></div>`).join('') + '</div>';
+    watchThumbs(panel.body);
+    panel.foot.innerHTML = `<button type="button" class="cv-act cv-save sa-go"><i class="cv-fill"></i>${mi('download')}<span></span></button>`;
+    const btn = panel.foot.querySelector('.sa-go'), label = btn.querySelector('span'), fill = btn.querySelector('.cv-fill');
+    const mb = (b) => Math.max(1, Math.round(b / 1048576)) + ' MB';
+    const row = (i, text, st) => {
+      const r = panel.body.querySelector(`.sa-row[data-i="${i}"]`); if (!r) return;
+      r.querySelector('small').textContent = text || '';
+      r.dataset.st = st || '';
+      if (st === 'loading') r.scrollIntoView({ block: 'nearest' });
+    };
+    const go = (state, text, pc) => {
+      btn.dataset.state = state;
+      btn.className = 'cv-act cv-save sa-go cv-' + state;
+      label.textContent = text;
+      if (fill) fill.style.width = (pc == null ? (state === 'loading' ? 0 : 100) : pc) + '%';
+    };
+    items.forEach((it, i) => row(i, it.size ? mb(it.size) : '', ''));
+    go('ready', `Save all ${items.length} to Photos`);
+    let onTap = null;
+    btn.addEventListener('click', () => { if (btn.dataset.state === 'ready' && onTap) { const f = onTap; onTap = null; f(); } });
+    const tapThen = (text) => new Promise((resolve) => { go('ready', text); onTap = resolve; try { if (navigator.vibrate) navigator.vibrate(15); } catch (e) {} });
+    const run = async () => {
+      let saved = 0;
+      let bundle = [];            // { file, i, size }
+      let bundleBytes = 0;
+      const total = items.length;
+      // one share: needs its own tap; cancelled → the same button again
+      const flush = async (last) => {
+        if (!bundle.length) return;
+        let files = bundle.map((b) => b.file);
+        if (files.length > 1 && !navigator.canShare({ files })) files = null;
+        const groups = files ? [bundle] : bundle.map((b) => [b]);
+        for (const g of groups) {
+          const n = g.length;
+          for (;;) {
+            await tapThen(n > 1 ? `Save ${n} videos to Photos` : 'Save to Photos');
+            go('sharing', 'Opening…');
+            try {
+              await navigator.share({ files: g.map((b) => b.file) });
+              break;
+            } catch (e) {
+              if (!(e && e.name === 'AbortError')) { g.forEach((b) => row(b.i, 'The share sheet would not open', 'fail')); break; }
+            }
+          }
+          g.forEach((b) => { b.file = null; row(b.i, 'Saved ✓', 'done'); });
+          saved += new Set(g.map((b) => b.i)).size;
+        }
+        bundle = []; bundleBytes = 0;
+        void last;
+      };
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        let parts = [{ path: it.path, size: it.size }];
+        try {
+          if (!it.size) { it.size = await sizeOnServer(it.path); parts[0].size = it.size; }
+          // too big for a share on its own: its phone copy (1080p), as for one video
+          if (!it.size || it.size > PHONE_PART_MAX) {
+            const stt = await call('video:phoneCopyStatus', { input: it.path }).catch(() => null);
+            if (!stt || stt.needed !== false) {
+              const jobId = 'pc' + Date.now().toString(36) + i;
+              const off = window.api.onJobProgress((d) => { if (d && d.jobId === jobId) { row(i, `Making a phone copy… ${Math.round(d.percent || 0)}%`, 'loading'); go('loading', `Preparing ${i + 1} of ${total}`, d.percent || 0); } });
+              row(i, 'Making a phone copy…', 'loading'); go('loading', `Preparing ${i + 1} of ${total}`, 0);
+              try { const got = await call('video:phoneCopy', { input: it.path, jobId }); if (got && got.parts && got.parts.length) parts = got.parts; }
+              finally { off(); }
+            }
+          }
+          const stem = it.name.replace(/\.[^.]+$/, '');
+          for (let k = 0; k < parts.length; k++) {
+            const part = parts[k];
+            const nm = parts.length > 1 ? `${stem}-part${k + 1}of${parts.length}.mp4` : (part.path === it.path ? it.name : stem + '.mp4');
+            if (!part.size) part.size = await sizeOnServer(part.path);   // the bundle's limit needs every size
+            if (bundle.length && bundleBytes + (part.size || 0) > PHONE_PART_MAX) await flush();
+            row(i, 'Downloading…', 'loading');
+            const file = await fetchForSaving(part.path, nm, part.size, (pc, got, tot) => {
+              row(i, `Downloading ${pc}%${tot ? ' · ' + mb(got) + ' of ' + mb(tot) : ''}`, 'loading');
+              go('loading', `Downloading ${i + 1} of ${total} · ${pc}%`, pc);
+            }, { keep: bundle.length > 0 });
+            bundle.push({ file, i, size: file.size });
+            bundleBytes += file.size;
+            row(i, 'On your phone — ready to save', 'ready');
+          }
+        } catch (e) {
+          row(i, (e && e.code === 'SPACE') ? e.message : 'Could not get this one — the rest carry on', 'fail');
+        }
+      }
+      await flush(true);
+      const failed = items.length - saved;
+      go(failed ? 'fail' : 'done', failed ? `Saved ${saved} of ${items.length}` : `All ${items.length} saved ✓`);
+      if (!failed) island({ kind: 'good', title: `All ${items.length} saved`, sub: 'Find them in your Photos', ms: 4000 });
+    };
+    onTap = () => { run().catch(() => go('fail', 'Something went wrong — try again')); };
+  }
+
   function findFile(p) {
     for (const g of ((filesCache && filesCache.groups) || [])) for (const f of (g.files || [])) if (f.path === p) return f;
     return null;
@@ -1875,7 +2002,9 @@ let _hideTimer = null;
         + '<p>Exports from this session land here, ready to save to this phone.</p></div>';
       return;
     }
-    list.innerHTML = cloud.downloads.map((d) => `<div class="cf-row" data-path="${escAttr(d.path)}">`
+    const vids = cloud.downloads.filter((d) => /\.(mp4|mov|m4v)$/i.test(d.name));
+    list.innerHTML = (vids.length > 1 ? `<button type="button" class="cv-act cv-save cv-ready sa-all" data-act="saveall">${mi('download')}<span>Save all ${vids.length} to Photos</span></button>` : '')
+      + cloud.downloads.map((d) => `<div class="cf-row" data-path="${escAttr(d.path)}">`
       + `<button type="button" class="cf-main" data-act="view"><span class="cf-pic" data-thumb="${escAttr(d.path)}"></span>`
       + `<span class="cf-tx"><b>${escHtml(d.name)}</b><small>Finished ${escHtml(niceWhen(d.at))}</small></span></button>`
       + `<button type="button" class="cf-btn" data-act="save" aria-label="Save to this phone" title="Save to this phone">${mi('download')}</button></div>`).join('');
@@ -3359,8 +3488,21 @@ let _hideTimer = null;
     on('#cloudFilesList', 'click', onFilesClick);
     on('#cloudFilesSelect', 'click', () => setSelecting(!filesUi.selecting));
     on('#cloudFilesSelDelete', 'click', onSelDelete);
+    // the chosen videos, all to Photos (Save all — a few to each tap of the share sheet)
+    on('#cloudFilesSelSave', 'click', () => {
+      const chosen = Array.from(filesUi.chosen);
+      if (!chosen.length) return;
+      setSelecting(false);
+      closeFilesModal();
+      saveAll(chosen);
+    });
     on('#cloudDownloadsList', 'click', (e) => {
-      const b = e.target.closest('[data-act]'); const row = b && b.closest('.cf-row');
+      const b = e.target.closest('[data-act]');
+      if (b && b.dataset.act === 'saveall') {
+        $('#cloudDownloadsModal').classList.add('hidden');
+        return saveAll(cloud.downloads.filter((d) => /\.(mp4|mov|m4v)$/i.test(d.name)).map((d) => d.path));
+      }
+      const row = b && b.closest('.cf-row');
       if (!row) return;
       if (b.dataset.act === 'view') viewFile(row.dataset.path); else offerDownload(row.dataset.path);
     });
@@ -3532,7 +3674,7 @@ let _hideTimer = null;
     call, island, islandHide, toast, toastText, openPanel, closePanel, panelOf,
     offerDownload, pickFiles, chooseFromDevice, refreshFiles, downloadUrl,
     mi, esc: escHtml, escAttr, jobChip: makeJobChip, jobList, jobPct: overallPct, openJobs: openJobsSheet,
-    authHeaders, fileUrl: (p) => window.MW_FILE_URL(p), viewFile, openProfile, uploadFile,
+    authHeaders, fileUrl: (p) => window.MW_FILE_URL(p), viewFile, saveAll, openProfile, uploadFile,
   });
 
   /* The version this page was built from, off this script's own URL — the page
