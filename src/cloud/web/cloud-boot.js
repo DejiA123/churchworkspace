@@ -2408,7 +2408,7 @@ let _hideTimer = null;
     project: [
       { icon: 'folder', label: 'Open', press: '#veOpen' },
       { icon: 'save', label: 'Save', press: '#veSaveSession' },
-      { icon: 'layers', label: 'Sessions', press: '#veSessions' },
+      { icon: 'layers', label: 'Projects', projects: true },
       { icon: 'clapper', label: 'Outros', press: '#veClips' },
       { icon: 'package', label: 'Batch', press: '#veBulk' },
       { icon: 'download', label: 'Saved', press: '#cloudDownloads' },
@@ -2687,6 +2687,7 @@ let _hideTimer = null;
 
     function act(t) {
       if (t.montage) return window.MWSocial && window.MWSocial.openMontage && window.MWSocial.openMontage();
+      if (t.projects) return window.MWSocial && window.MWSocial.openProjects && window.MWSocial.openProjects();
       if (t.bg) {
         const E = window.VideoEditor; if (E && E.setBackground) E.setBackground(t.bg);
         const r = dock.querySelector('.cloud-dock-row.on'); if (r) for (const x of r.querySelectorAll('.cloud-tool')) if (x._sync) x._sync();

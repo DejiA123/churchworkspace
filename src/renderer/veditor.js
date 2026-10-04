@@ -231,7 +231,7 @@
 
       // a different recording is a different piece of work: it gets its own
       // session, and the one before it stays saved under its own name
-      if (!ve._restoring) { ve.sessionId = null; ve.sessionName = null; ve.sessionThumb = null; ve.sessionDirty = false; }
+      if (!ve._restoring) { ve.sessionId = null; ve.sessionName = null; ve.sessionThumb = null; ve.sessionDirty = false; ve.sessionAuto = false; }
       updateSessionChip();
       const resumeBar = $('#veResume'); if (resumeBar) resumeBar.classList.add('hidden');
       resumePromptQuiet(false);
@@ -6442,6 +6442,7 @@
     ve.history = []; ve.future = []; updateUndoRedoButtons();
     ve.sessionId = data.id && data.id !== 'autosave' ? data.id : null;
     ve.sessionName = data.name || null;
+    ve.sessionAuto = !!data.auto;   // named after its video by the studio, not by a person (yet)
     ve.sessionThumb = data.thumb || null;
     ve.sessionDirty = false;
 
@@ -6480,7 +6481,43 @@
       if (!json || json === ve._sessionLastJson) return;
       ve._sessionLastJson = json;
       window.api.sessions.autosave(JSON.parse(json)).catch(() => {});
+      saveProject(JSON.parse(json));
     }, SESSION_SWEEP_MS);
+  }
+
+  /*
+   * ►► EVERY VIDEO YOU WORK ON IS A PROJECT OF ITS OWN. ◄◄
+   * The rolling slot above holds ONE edit: opening a second video and touching
+   * it threw the first one's clips and captions away unless it had been saved
+   * and named by hand. Now the first real change to a video makes it a project
+   * (named after the video), and every save after that goes to it as well — so
+   * a church editing three services keeps three, and picks which to carry on
+   * from Projects. Opening a video only to look at it makes nothing.
+   */
+  function saveProject(data) {
+    if (!data || !window.api.sessions || !window.api.sessions.save) return Promise.resolve(null);
+    if (!ve.sessionId && !ve.sessionDirty) return Promise.resolve(null);
+    if (ve._projSaving) { ve._projAgain = data; return ve._projSaving; }
+    if (!ve.sessionThumb) { grabSessionThumb(); if (ve.sessionThumb) data.thumb = ve.sessionThumb; }
+    const forVideo = ve.video && ve.video.path;
+    const name = ve.sessionName || prettyVideoName((forVideo || '').split(/[\\/]/).pop());
+    const auto = !ve.sessionId || !!ve.sessionAuto;
+    ve._projSaving = window.api.sessions.save(ve.sessionId || null, name, Object.assign({}, data, { name, auto }))
+      .then((res) => {
+        // a different video was opened while this was on its way: it is not that one's project
+        if (res && res.id && ve.video && ve.video.path === forVideo) {
+          if (!ve.sessionId) { ve.sessionId = res.id; ve.sessionAuto = true; }
+          if (!ve.sessionName) ve.sessionName = res.name;
+          updateSessionChip();
+        }
+        return res;
+      }, () => null)
+      .finally(() => {
+        ve._projSaving = null;
+        const again = ve._projAgain; ve._projAgain = null;
+        if (again && ve.video && ve.video.path === (again.video && again.video.path)) saveProject(again);
+      });
+    return ve._projSaving;
   }
 
   /** Something changed: mark it, and schedule the write. */
@@ -6499,6 +6536,7 @@
       await window.api.sessions.autosave(data);
       ve.sessionSavedAt = Date.now();
       try { ve._sessionLastJson = JSON.stringify(data); } catch (e) {}
+      saveProject(data);
     } catch (e) { /* the sweep will try again */ }
   }
 
@@ -6538,10 +6576,11 @@
       if (!name) return null;
     }
     grabSessionThumb();
-    const data = collectSession(name);
+    const data = Object.assign(collectSession(name), { auto: false });
     try {
-      const res = await window.api.sessions.save(askName ? null : ve.sessionId, name, data);
-      ve.sessionId = res.id; ve.sessionName = res.name; ve.sessionDirty = false;
+      // naming the project the studio made for this video renames it, rather than leaving a twin behind
+      const res = await window.api.sessions.save(askName && !ve.sessionAuto ? null : ve.sessionId, name, data);
+      ve.sessionId = res.id; ve.sessionName = res.name; ve.sessionDirty = false; ve.sessionAuto = false;
       updateSessionChip();
       window.__toast && window.__toast('💾 Session saved — "' + res.name + '". Open it any time from 💾 Sessions.', 'good', 6000);
       return res;
@@ -13378,6 +13417,25 @@
     zoomAround(px, anchorT, clientX) { return zoomAround(px, anchorT, clientX); },
     /** Open a file that is already on the machine (the phone's Files viewer). */
     openPath(p) { return p ? loadVideo(p) : null; },
+    /** Projects (every video worked on keeps its own — see saveProject). */
+    projectId() { return ve.video ? ve.sessionId || null : null; },
+    /** Whatever is on screen written to its project NOW (before switching to another). */
+    async flushProject() {
+      if (!ve.video) return null;
+      if (ve._sessionTimer) { clearTimeout(ve._sessionTimer); await writeAutosave(); }
+      else { const d = collectSession(); if (d) await saveProject(d); }
+      if (ve._projSaving) await ve._projSaving;
+      return ve.sessionId || null;
+    },
+    async openProject(id) {
+      if (!id) return false;
+      if (ve.video && ve.sessionId === id) return true;
+      try { await this.flushProject(); } catch (e) { /* switching still goes ahead */ }
+      return openSessionById(id);
+    },
+    /** A project renamed elsewhere (the phone's Projects sheet): the open one follows. */
+    projectRenamed(id, name) { if (ve.sessionId === id) { ve.sessionName = name; updateSessionChip(); } },
+    projectRemoved(id) { if (ve.sessionId === id) { ve.sessionId = null; ve.sessionName = null; ve.sessionDirty = false; updateSessionChip(); } },
     /**
      * An AI montage arrives: open it, put the operator's song on the music lane
      * (from the top, under the whole thing, on the beats it was cut to) and the
@@ -14786,7 +14844,7 @@
       /* ---- saved sessions ---- */
       videoPath() { return ve.video ? ve.video.path : null; },
       sessionChip() { return { name: ve.sessionName || 'Unsaved session', dirty: !!ve.sessionDirty, id: ve.sessionId || null }; },
-      async saveSessionAs(name) { ve.sessionName = name; ve.sessionId = null; return await saveSession(false); },
+      async saveSessionAs(name) { ve.sessionName = name; if (!ve.sessionAuto) ve.sessionId = null; return await saveSession(false); },
       async openSession(id) { return await openSessionById(id); },
       /** Give every short the full-size PNG a pre-2.80 session carried, plus the
        *  stuck "making one" flag. */
