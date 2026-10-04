@@ -172,7 +172,37 @@ async function gated(start) {
   try { return await start(); } finally { ffRelease(); }
 }
 
+/*
+ * ►► A THUMBNAIL DOES NOT WAIT FOR SOMEONE ELSE'S EXPORT. ◄◄
+ * Measured with 20 people on one 512 MB / 1 CPU server: the encodes take
+ * turns (as they must), and a thumbnail or the timeline's filmstrip waited
+ * behind them — up to 113 s for a picture that takes a moment. Those preview
+ * jobs (one at a time already: video.js inPreviewLane, under 200 MB each even
+ * for 4K, test/open-memory.test.js) now run BESIDE the encode — but only when
+ * what is really in use (this server plus every ffmpeg it has running) leaves
+ * PREVIEW_MB to spare. A big 4K encode or speech recognition fills the
+ * machine, and then the preview waits its turn exactly as before.
+ */
+const PREVIEW_MB = 200;
+const liveProcs = new Set();
+function rssMB(pid) {
+  try { const m = /VmRSS:\s+(\d+)/.exec(fs.readFileSync(`/proc/${pid}/status`, 'utf-8')); return m ? Number(m[1]) / 1024 : 0; } catch (e) { return 0; }
+}
+/** Memory in use now: this process and the ffmpegs it runs (null where /proc cannot say). */
+function usedMB() {
+  if (!fs.existsSync('/proc/self/status')) return null;
+  let mb = process.memoryUsage().rss / 1048576;
+  for (const p of liveProcs) mb += rssMB(p.pid);
+  return mb;
+}
+function previewMayRunBeside() {
+  if (ffRunning < ffSlots()) return false;            // a turn is free anyway: take it
+  const used = usedMB();
+  return used != null && used + PREVIEW_MB <= machine.memoryMB();
+}
+
 function runFfmpeg(ffmpegPath, args, opts = {}) {
+  if (opts.preview && previewMayRunBeside()) return runFfmpegNow(ffmpegPath, args, Object.assign({}, opts, { nice: 5 }));
   /*
    * `background`: work nobody is waiting on to finish (the preview copy of a
    * recording the phone cannot play). It is light — ultrafast, one thread,
@@ -183,10 +213,13 @@ function runFfmpeg(ffmpegPath, args, opts = {}) {
   if (opts.background) return runFfmpegNow(ffmpegPath, args, opts);
   return gated(() => runFfmpegNow(ffmpegPath, args, opts));
 }
-function runFfmpegNow(ffmpegPath, args, { onProgress, totalDurationSec, signal, cwd, background } = {}) {
+function runFfmpegNow(ffmpegPath, args, { onProgress, totalDurationSec, signal, cwd, background, nice } = {}) {
   args = capThreads(args);
   return new Promise((resolve, reject) => {
-    const proc = lowPriority(jobs.track(spawn(ffmpegPath, args, { windowsHide: true, cwd })), background ? 19 : 10);
+    const proc = lowPriority(jobs.track(spawn(ffmpegPath, args, { windowsHide: true, cwd })), background ? 19 : (nice != null ? nice : 10));
+    liveProcs.add(proc);
+    proc.on('close', () => liveProcs.delete(proc));
+    proc.on('error', () => liveProcs.delete(proc));
     let stderr = '';
 
     if (signal) {
@@ -250,4 +283,4 @@ function probe(ffprobePath, input) {
   });
 }
 
-module.exports = { asDraft, lowPriority, resolveFfmpeg, resolveFfprobe, runFfmpeg, runFfmpegCollect, probe, capThreads, gated, _ffState: () => ({ running: ffRunning, queued: ffQueue.length, slots: ffSlots() }) };
+module.exports = { usedMB, asDraft, lowPriority, resolveFfmpeg, resolveFfprobe, runFfmpeg, runFfmpegCollect, probe, capThreads, gated, _ffState: () => ({ running: ffRunning, queued: ffQueue.length, slots: ffSlots() }) };

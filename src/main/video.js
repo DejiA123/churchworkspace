@@ -1071,7 +1071,7 @@ async function thumbnail(ctx, { input, timeSec = 1, output, width = 640 }) {
     '-ss', String(Math.max(0, timeSec)), '-i', input,
     '-frames:v', '1', '-an', '-sn', '-dn', '-vf', `scale=${width}:-2`, '-y', output,
   ];
-  await inPreviewLane(() => ff.runFfmpeg(ctx.ffmpeg, args, {}));
+  await inPreviewLane(() => ff.runFfmpeg(ctx.ffmpeg, args, { preview: true }));
   return output;
 }
 
@@ -2264,7 +2264,7 @@ async function filmstrip(ctx, { input, count = 16, height = 90, output }) {
     // HEVC, against 2.6 s and 168 MB. Short videos keep the exact frame.
     const fast = D / count > 10 ? ['-noaccurate_seek', '-skip_frame', 'nokey'] : [];
     tasks.push(() => inPreviewLane(() => ff.runFfmpeg(ctx.ffmpeg,
-      ['-hwaccel', 'auto', ...fast, '-ss', String(t), '-i', input, '-frames:v', '1', '-an', '-sn', '-dn', '-vf', `scale=-2:${height}`, '-y', f], {})));
+      ['-hwaccel', 'auto', ...fast, '-ss', String(t), '-i', input, '-frames:v', '1', '-an', '-sn', '-dn', '-vf', `scale=-2:${height}`, '-y', f], { preview: true })));
   }
   await runLimited(tasks, machine.small() ? 1 : 6);
   const have = frames.filter((f) => fs.existsSync(f) && fs.statSync(f).size > 0);
@@ -2540,7 +2540,7 @@ async function waveform(ctx, { input, width = 1600, height = 90, color = '0x4f7c
     `[0:a]aresample=${rate},aformat=sample_fmts=s16:channel_layouts=mono,asetnsamples=n=8192,`
     + `showwavespic=s=${width}x${height}:colors=${color}:scale=sqrt[v]`,
     '-map', '[v]', '-frames:v', '1', '-y', output];
-  await inPreviewLane(() => ff.runFfmpeg(ctx.ffmpeg, args, {}));
+  await inPreviewLane(() => ff.runFfmpeg(ctx.ffmpeg, args, { preview: true }));
   return output;
 }
 
