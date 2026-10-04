@@ -41,18 +41,18 @@ function plans() {
   let p = pc.plan({ size: 600 * MB, durationSec: 240, width: 1080, height: 1920 });
   log(p.how === 'encode' && p.parts === 1 && p.side === 1080 && p.kbps >= 2500, '4-min 600 MB montage → one 1080p video', JSON.stringify(p));
   log((p.kbps + 128) * 1000 * 240 / 8 < pc.PART_MAX, '   …that fits under the share limit', `${Math.round((p.kbps + 128) * 240 / 8 / 1024)} MB`);
-  // 7 minutes: one 720p video
+  // 7 minutes: one 1080p video
   p = pc.plan({ size: 900 * MB, durationSec: 420, width: 1920, height: 1080 });
-  log(p.how === 'encode' && p.parts === 1 && p.side === 720, '7-min 900 MB video → one 720p video', JSON.stringify(p));
+  log(p.how === 'encode' && p.parts === 1 && p.side === 1080, '7-min 900 MB video → one 1080p video', JSON.stringify(p));
   // the 8:46 montage that came out in two parts: now one video
   p = pc.plan({ size: 700 * MB, durationSec: 526, width: 1080, height: 1920 });
-  log(p.how === 'encode' && p.parts === 1, '8:46 montage → ONE video', JSON.stringify(p));
+  log(p.how === 'encode' && p.parts === 1 && p.side === 1080, '8:46 montage → ONE 1080p video', JSON.stringify(p));
   p = pc.plan({ size: 1500 * MB, durationSec: 15 * 60, width: 1080, height: 1920 });
-  log(p.parts === 1, '15-min montage → still one video', JSON.stringify(p));
-  // an hour at 15 Mbit/s: 720p parts, each under the limit
+  log(p.parts === 1 && p.side === 1080, '15-min montage → still one 1080p video', JSON.stringify(p));
+  // an hour at 15 Mbit/s: 1080p parts, each under the limit
   p = pc.plan({ size: 6500 * MB, durationSec: 3600, width: 1920, height: 1080 });
   const each = (p.kbps + 128) * 1000 * p.segSec / 8;
-  log(p.how === 'encode' && p.parts > 1 && each < pc.PART_MAX, '1-hour video → 720p parts under the limit', `${p.parts} parts of ~${Math.round(each / MB)} MB`);
+  log(p.how === 'encode' && p.parts > 1 && each < pc.PART_MAX, '1-hour video → 1080p parts under the limit', `${p.parts} parts of ~${Math.round(each / MB)} MB`);
   // an hour already at 2 Mbit/s: cut, not re-encoded
   p = pc.plan({ size: 900 * MB, durationSec: 3600, width: 1920, height: 1080 });
   log(p.how === 'copy' && p.parts >= 5, '1-hour lean video → cut by stream copy', JSON.stringify(p));
@@ -88,7 +88,7 @@ async function real() {
   const again = await pc.phoneCopy(ctx, video.getInfo, { input: src, partMax: one });
   log(again.parts[0].path === r.parts[0].path, 'a second tap reuses the copy');
 
-  // a limit so small even 720p cannot fit in one: parts
+  // a limit so small not even 1 Mbit/s fits in one: parts
   const tiny = Math.round(((600 + 128) * 1000 * 20) / 8 / 0.92);
   r = await pc.phoneCopy(ctx, video.getInfo, { input: src, partMax: tiny });
   const total = r.parts.reduce((a, x) => a + dur(x.path), 0);
