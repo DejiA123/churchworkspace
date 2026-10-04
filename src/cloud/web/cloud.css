@@ -2233,3 +2233,35 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 @media (prefers-reduced-motion: reduce) { .mt-orb, .mt-orb .mi { animation: none; } }
 
 .cj-server { display: block; margin-top: 10px; text-align: center; font-size: 12px; line-height: 1.45; color: var(--ph-muted, #9b9ea8); }
+
+/* ------------------------------------------------ editing a made montage */
+.me-lead { margin: 0 0 12px; }
+.me-list { display: flex; flex-direction: column; gap: 10px; }
+.me-shot { border: 1px solid var(--ph-line, #2a2b32); border-radius: 14px; background: var(--ph-panel-2, #1d1e24); padding: 10px; }
+.me-shot.sel { border-color: var(--ph-accent, #8b5cf6); box-shadow: 0 0 0 1px var(--ph-accent, #8b5cf6) inset; }
+.me-row { display: flex; align-items: center; gap: 10px; }
+.me-n { flex: none; width: 24px; height: 24px; border-radius: 12px; display: grid; place-items: center; font: 800 12px/1 inherit; color: #fff; background: var(--ph-accent-fill, #8b5cf6); }
+.me-th { flex: none; width: 48px; height: 72px; border-radius: 8px; overflow: hidden; background: #111; }
+.me-th img, .me-ov img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.me-nothumb { display: block; width: 100%; height: 100%; background: #222; }
+.me-info { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.me-info b { font-size: 14px; color: var(--ph-text, #fff); }
+.me-info small { font-size: 12px; color: var(--ph-muted, #9b9ea8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.me-btns { flex: none; display: flex; gap: 6px; }
+.me-btns button { width: 38px; height: 38px; margin: 0; padding: 0; border-radius: 10px; border: 1px solid var(--ph-line, #2a2b32); background: #26272e; color: #fff; font-size: 14px; cursor: pointer; }
+.me-btns button:disabled { opacity: .3; }
+.me-ovs, .me-tray { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.me-ov { position: relative; width: 54px; height: 72px; margin: 0; padding: 0; border-radius: 8px; overflow: hidden; border: 2px solid transparent; background: #111; cursor: pointer; }
+.me-ov.on { border-color: var(--ph-accent-text, #b79cff); }
+.me-ov span { position: absolute; left: 0; right: 0; bottom: 0; padding: 2px 0; font: 700 10px/1.2 inherit; color: #fff; background: rgba(0,0,0,.6); text-align: center; }
+.me-none { color: var(--ph-muted, #9b9ea8); font-size: 12px; }
+.me-ovtools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.me-ovtools button { flex: 1 1 auto; height: 38px; margin: 0; padding: 0 10px; border-radius: 10px; border: 1px solid var(--ph-line, #2a2b32); background: #26272e; color: #fff; font: 600 12.5px/1 inherit; cursor: pointer; }
+.me-ovtools button:disabled { opacity: .35; }
+.me-banner { display: flex; align-items: center; gap: 10px; width: 100%; margin: 0 0 12px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--ph-accent, #8b5cf6);
+  background: rgba(139, 92, 246, .14); color: #fff; text-align: left; font-size: 18px; cursor: pointer; }
+.me-banner span { display: flex; flex-direction: column; gap: 2px; }
+.me-banner b { font-size: 14px; } .me-banner small { font-size: 12px; color: var(--ph-muted, #9b9ea8); }
+.mt-foot2 { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.mt-edit { width: 100%; height: 46px; margin: 0; border-radius: 14px; border: 1px solid var(--ph-accent, #8b5cf6); background: rgba(139, 92, 246, .14);
+  color: #fff; font: 700 15px/1 inherit; cursor: pointer; }

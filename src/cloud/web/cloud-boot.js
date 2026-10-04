@@ -442,6 +442,8 @@ let _hideTimer = null;
     montage: {
       status: () => call('montage:status'),
       create: (a) => call('montage:create', a),
+      project: (path) => call('montage:project', { path }),
+      remake: (a) => call('montage:remake', a),
     },
     library: {
       list: () => call('library:list'),
@@ -1636,6 +1638,7 @@ let _hideTimer = null;
       + '<div class="cv-acts">'
       + `<button type="button" class="cv-act cv-save" data-cv="save"><i class="cv-fill"></i>${mi('download')}<span>Save</span></button>`
       + (isVideo ? `<button type="button" class="cv-act" data-cv="studio">${mi('film')}<span>Edit</span></button>` : '')
+      + (isVideo && /^montage-.*\.mp4$/i.test(name) && window.MWSocial && window.MWSocial.editMontage ? `<button type="button" class="cv-act" data-cv="shots">${mi('layers')}<span>Shots</span></button>` : '')
       + (isVideo && social ? `<button type="button" class="cv-act cv-primary" data-cv="post">${mi('send')}<span>Post</span></button>` : '')
       + '</div>';
     document.body.appendChild(v);
@@ -1652,6 +1655,7 @@ let _hideTimer = null;
       const act = b.dataset.cv;
       if (act === 'close') return close();
       if (act === 'save') return viewerSave(v, p);
+      if (act === 'shots') { close(); const fm = $('#cloudFilesModal'); if (fm) fm.classList.add('hidden'); return window.MWSocial.editMontage(p); }
       if (act === 'studio') {
         close();
         $$('.cap-modal:not(.hidden)').forEach((m) => m.classList.add('hidden'));

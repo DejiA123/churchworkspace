@@ -768,6 +768,22 @@ ipcMain.handle('montage:create', wrap(async (e, { mediaPaths, musicPath, style, 
   });
 }));
 
+/* A made montage's own edit (shot by shot, with a frame of each), to rearrange. */
+ipcMain.handle('montage:project', wrap(async (e, { path: p }) => (p ? montage.loadProject(p) : null)));
+/* …and the montage made again from the rearranged plan — no AI, unchanged shots reused. */
+ipcMain.handle('montage:remake', wrap(async (e, { path: p, edits, jobId }) => {
+  const project = p ? montage.loadProject(p) : null;
+  if (!project) throw new Error('This montage has no saved edit to change — it was made before montages could be rearranged.');
+  const output = outPath(`montage-${stamp()}.mp4`);
+  let pct = 0, stageName = '';
+  const tell = () => { if (jobId && e && !e.sender.isDestroyed()) e.sender.send('job:progress', { jobId, percent: pct, stage: stageName }); };
+  return montage.remake(getCtx(), {
+    project, edits, output,
+    onProgress: (q) => { pct = q; tell(); },
+    stage: (name) => { stageName = name; tell(); },
+  });
+}));
+
 ipcMain.handle('video:applyEdits', wrap(async (e, { input, edits, jobId }) => {
   const output = outPath(`edited-${stamp()}.mp4`);
   await video.applyEdits(getCtx(), { input, edits: edits || {}, output, onProgress: onProgress(e, jobId) });

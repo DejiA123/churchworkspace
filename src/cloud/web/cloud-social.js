@@ -1066,7 +1066,10 @@
       : who.director === 'groq' ? 'Directed by Groq AI (free), looking at every shot. <small>A Claude key on the server gives the very best edits.</small>'
         : 'Directed by the studio’s own editor. <small>Add a Claude key on the server for AI-directed edits.</small>';
     const chips = (list, cur, key) => list.map(([v, label]) => `<button type="button" class="mt-chip${String(cur) === String(v) ? ' on' : ''}" data-mt-${key}="${attr(v)}">${esc(label)}</button>`).join('');
+    const openPath = window.VideoEditor && window.VideoEditor.currentPath ? window.VideoEditor.currentPath() : null;
+    const openIsMontage = !!openPath && /(^|[\\/])montage-[^\\/]*\.mp4$/i.test(openPath);
     p.body.innerHTML = `
+      ${openIsMontage ? `<button type="button" class="me-banner" data-mt-rearrange>✏️ <span><b>Rearrange the montage that’s open</b><small>Move clips and photos, then remake it</small></span></button>` : ''}
       <p class="mt-lead">${mi('sparkles')} ${brain}</p>
       <section class="mt-sec"><h3>Your clips &amp; photos <small>${MT.items.length ? MT.items.length + ' added' : 'add 2 or more'}</small></h3>
         <div class="mt-grid${MT.order === 'mine' ? ' mt-ordered' : ''}">${MT.items.map((it, i) => `<div class="mt-tile" data-i="${i}">${it.kind === 'image'
@@ -1104,6 +1107,11 @@
 
   function mtWire(p) {
     const onClick = async (e) => {
+      if (e.target.closest('[data-mt-rearrange]') && !MT.busy) {
+        const op = window.VideoEditor && window.VideoEditor.currentPath ? window.VideoEditor.currentPath() : null;
+        C.closePanel(p, true);
+        return editMontage(op);
+      }
       const b = e.target.closest('[data-mt],[data-mt-del],[data-mt-song],[data-mt-style],[data-mt-len],[data-mt-aspect],[data-mt-order]');
       if (!b || MT.busy || mtDrag.just) return;
       const d = b.dataset;
@@ -1288,7 +1296,8 @@
       MT.busy = false;
       mtProgress('Opening it in the studio…', 100, ' ');
       go('studio');
-      await window.VideoEditor.applyMontage({ output: res.output, music: song, musicVolume: MT.keep ? 0.7 : 1, texts: res.texts, style: res.style || MT.style, captions: MT.caps && MT.keep });
+      await window.VideoEditor.applyMontage({ output: res.output, music: song, musicVolume: MT.keep ? 0.7 : 1, texts: res.texts, style: res.style || MT.style, captions: MT.caps && MT.keep, cuts: res.cuts });
+      res.song = song || null;
       C.closePanel(MT.panel, true);
       mtRelease();
       MT.items = []; MT.brief = '';
@@ -1314,14 +1323,182 @@
       <p class="mt-tip">It’s open in the studio now${res.texts && res.texts.length ? ' — the words on screen are text boxes, tap one to change it' : ''}. ${res.autoCaps ? 'Captions of what’s said are being added by themselves — they go into the export.' : 'Add captions from the 💬 Captions tool.'} Change the music volume in Audio, then export as usual.</p>
       ${caption ? `<section class="mt-sec"><h3>Post caption</h3><textarea class="mt-brief" rows="4" readonly>${C.esc(caption)}</textarea>
         <button type="button" class="mt-chip on" data-mt-copy>Copy caption</button></section>` : ''}`;
-    p.foot.innerHTML = '<button type="button" class="mt-go" data-mt-ok>Start editing</button>';
+    p.foot.innerHTML = `<div class="mt-foot2">${res.project ? '<button type="button" class="mt-edit" data-mt-shots>✏️ Rearrange shots &amp; photos</button>' : ''}<button type="button" class="mt-go" data-mt-ok>Start editing</button></div>`;
     p.el.addEventListener('click', (e) => {
       if (e.target.closest('[data-mt-ok]')) C.closePanel(p);
+      if (e.target.closest('[data-mt-shots]')) { C.closePanel(p, true); editMontage(res.output, res.song || null); }
       if (e.target.closest('[data-mt-copy]')) {
         try { navigator.clipboard.writeText(caption); C.island({ kind: 'good', title: 'Caption copied' }); } catch (er) {}
       }
     });
   }
 
-  window.MWSocial = { start, go, compose, openConnect, openMontage, view: () => S.view, _state: S, _planTimes: planTimes, _titleFromFile: titleFromFile };
+  /* ============================ EDIT A MADE MONTAGE ============================
+   *
+   * The montage's own edit, shot by shot, to change by hand: move a clip
+   * earlier or later, take one out, move a photo to the clip before or after,
+   * switch it between full screen and a framed box, take it off, or put an
+   * unused one on. "Remake" builds the video again from this — no AI, and the
+   * shots that did not change are not made again (montage.js remake()).
+   */
+  const ME = { path: '', project: null, shots: [], sel: null, selShot: -1, busy: false, dirty: false, music: null, panel: null };
+
+  async function editMontage(path, music) {
+    if (!path) return;
+    let project = null;
+    try { project = await window.api.montage.project(path); } catch (e) { project = null; }
+    if (!project || !Array.isArray(project.shots)) {
+      return C.island({ kind: 'warn', title: 'Nothing to rearrange', sub: 'This montage was made before montages could be edited shot by shot — make it again to edit it.', ms: 6000 });
+    }
+    ME.path = path; ME.project = project; ME.sel = null; ME.selShot = -1; ME.dirty = false; ME.busy = false;
+    if (music !== undefined) ME.music = music;
+    ME.shots = project.shots.map((sh, key) => ({ key, transition: sh.transition, overlays: sh.overlays.map((o) => ({ cid: o.cid, style: o.style })) }));
+    ME.panel = C.openPanel({ id: 'cloudMontageEdit', title: 'Edit the montage', cls: 'cp-montage' });
+    if (!ME.panel._wired) { ME.panel._wired = true; meWire(ME.panel); }
+    mePaint();
+  }
+
+  const meCand = (cid) => (ME.project && ME.project.cands[cid]) || null;
+  const meBase = (sh) => ME.project.shots[sh.key];
+  function meUnused() {
+    const on = new Set();
+    ME.shots.forEach((sh) => { on.add(meBase(sh).cid); sh.overlays.forEach((o) => on.add(o.cid)); });
+    return Object.values(ME.project.cands).filter((c) => c.kind === 'image' && !on.has(c.id));
+  }
+  const fmtS = (x) => { const v = Math.round(Number(x) || 0); return Math.floor(v / 60) + ':' + String(v % 60).padStart(2, '0'); };
+
+  function mePaint() {
+    const p = ME.panel; if (!p) return;
+    const esc = C.esc, attr = C.escAttr;
+    const thumb = (c) => (c && c.thumb ? `<img src="${attr(c.thumb)}" alt="" draggable="false" />` : '<span class="me-nothumb"></span>');
+    let t = 0;
+    const rows = ME.shots.map((sh, i) => {
+      const b = meBase(sh), c = meCand(b.cid) || {};
+      const at = t; t += b.seconds;
+      const vid = c.kind === 'video';
+      const sel = ME.sel && ME.sel.i === i ? ME.sel.j : -1;
+      const ovs = vid ? sh.overlays.map((o, j) => {
+        const oc = meCand(o.cid);
+        return `<button type="button" class="me-ov${sel === j ? ' on' : ''}" data-me-ov="${i}:${j}">${thumb(oc)}<span>${o.style === 'pip' ? 'Box' : 'Full'}</span></button>`;
+      }).join('') : '';
+      const tools = sel >= 0 ? `<div class="me-ovtools">
+          <button type="button" data-me-ovact="prev"${meNeighbour(i, -1) < 0 ? ' disabled' : ''}>◀ Earlier clip</button>
+          <button type="button" data-me-ovact="next"${meNeighbour(i, 1) < 0 ? ' disabled' : ''}>Later clip ▶</button>
+          <button type="button" data-me-ovact="style">${sh.overlays[sel] && sh.overlays[sel].style === 'pip' ? 'Make it full screen' : 'Make it a box'}</button>
+          <button type="button" data-me-ovact="del">Take it off</button></div>` : '';
+      return `<div class="me-shot${ME.selShot === i ? ' sel' : ''}" data-me-shot="${i}">
+          <div class="me-row">
+            <span class="me-n">${i + 1}</span>
+            <span class="me-th">${thumb(c)}</span>
+            <span class="me-info"><b>${vid ? 'Clip' : 'Photo'} · ${esc(fmtS(b.seconds))}</b><small>${esc((c.name || '').slice(0, 28))}</small><small>starts ${esc(fmtS(at))}${i ? ' · ' + esc(sh.transition) + ' in' : ''}</small></span>
+            <span class="me-btns">
+              <button type="button" data-me-move="-1" aria-label="Earlier"${i === 0 ? ' disabled' : ''}>▲</button>
+              <button type="button" data-me-move="1" aria-label="Later"${i === ME.shots.length - 1 ? ' disabled' : ''}>▼</button>
+              <button type="button" data-me-del aria-label="Take out">✕</button>
+            </span>
+          </div>
+          ${vid ? `<div class="me-ovs">${ovs || '<small class="me-none">No photos on this clip — tap it, then a photo below to add one.</small>'}</div>${tools}` : ''}
+        </div>`;
+    }).join('');
+    const unused = meUnused();
+    p.body.innerHTML = `
+      <p class="mt-lead">${mi('sparkles')} Your montage, shot by shot.</p>
+      <p class="mt-hint me-lead">Move clips with ▲ ▼, take one out with ✕. Tap a photo on a clip to move it to another clip, make it full screen or a box, or take it off. Then <b>Remake</b> — only the shots you changed are made again.</p>
+      <div class="me-list">${rows}</div>
+      ${unused.length ? `<section class="mt-sec"><h3>Photos not in it <small>${ME.selShot >= 0 ? 'tap one to put it on clip ' + (ME.selShot + 1) : 'tap a clip first, then a photo'}</small></h3>
+        <div class="me-tray">${unused.map((c) => `<button type="button" class="me-ov" data-me-add="${attr(c.id)}">${thumb(c)}<span>Add</span></button>`).join('')}</div></section>` : ''}`;
+    p.foot.innerHTML = `<button type="button" class="mt-go" data-me-go${ME.dirty ? '' : ' disabled'}>${mi('sparkles')} ${ME.dirty ? 'Remake montage' : 'Change something to remake'}</button>`;
+  }
+
+  /** The nearest CLIP before/after shot i (photos cannot carry a picture). */
+  function meNeighbour(i, dir) {
+    for (let k = i + dir; k >= 0 && k < ME.shots.length; k += dir) {
+      const c = meCand(meBase(ME.shots[k]).cid);
+      if (c && c.kind === 'video') return k;
+    }
+    return -1;
+  }
+
+  function meWire(p) {
+    p.body.addEventListener('click', (e) => {
+      if (ME.busy) return;
+      const shotEl = e.target.closest('[data-me-shot]');
+      const i = shotEl ? +shotEl.dataset.meShot : -1;
+      const mv = e.target.closest('[data-me-move]');
+      if (mv) {
+        const j = i + (+mv.dataset.meMove);
+        if (j < 0 || j >= ME.shots.length) return;
+        const [x] = ME.shots.splice(i, 1); ME.shots.splice(j, 0, x);
+        ME.sel = null; ME.selShot = j; ME.dirty = true; return mePaint();
+      }
+      if (e.target.closest('[data-me-del]')) {
+        if (ME.shots.length <= 1) return C.island({ kind: 'warn', title: 'A montage needs at least one shot', ms: 3000 });
+        ME.shots.splice(i, 1); ME.sel = null; ME.selShot = -1; ME.dirty = true; return mePaint();
+      }
+      const ov = e.target.closest('[data-me-ov]');
+      if (ov) {
+        const [a, b] = ov.dataset.meOv.split(':').map(Number);
+        ME.sel = ME.sel && ME.sel.i === a && ME.sel.j === b ? null : { i: a, j: b };
+        ME.selShot = a; return mePaint();
+      }
+      const act = e.target.closest('[data-me-ovact]');
+      if (act && ME.sel) {
+        const sh = ME.shots[ME.sel.i], o = sh.overlays[ME.sel.j];
+        if (!o) return;
+        const what = act.dataset.meOvact;
+        if (what === 'style') o.style = o.style === 'pip' ? 'cutaway' : 'pip';
+        else if (what === 'del') { sh.overlays.splice(ME.sel.j, 1); ME.sel = null; }
+        else {
+          const k = meNeighbour(ME.sel.i, what === 'prev' ? -1 : 1);
+          if (k < 0) return;
+          sh.overlays.splice(ME.sel.j, 1);
+          const to = ME.shots[k];
+          if (what === 'prev') to.overlays.push(o); else to.overlays.unshift(o);
+          ME.sel = { i: k, j: what === 'prev' ? to.overlays.length - 1 : 0 }; ME.selShot = k;
+        }
+        ME.dirty = true; return mePaint();
+      }
+      const add = e.target.closest('[data-me-add]');
+      if (add) {
+        let k = ME.selShot >= 0 && meCand(meBase(ME.shots[ME.selShot]).cid).kind === 'video' ? ME.selShot : meNeighbour(-1, 1);
+        if (k < 0) return C.island({ kind: 'warn', title: 'There is no clip to put it on', ms: 3000 });
+        ME.shots[k].overlays.push({ cid: add.dataset.meAdd, style: 'cutaway' });
+        ME.selShot = k; ME.dirty = true; return mePaint();
+      }
+      if (shotEl && !e.target.closest('button')) { ME.selShot = ME.selShot === i ? -1 : i; ME.sel = null; return mePaint(); }
+    });
+    p.foot.addEventListener('click', (e) => { if (e.target.closest('[data-me-go]') && ME.dirty && !ME.busy) meRemake(); });
+  }
+
+  async function meRemake() {
+    const p = ME.panel;
+    ME.busy = true;
+    const jobId = 'me' + Date.now().toString(36);
+    const show = (title, pct) => {
+      p.body.innerHTML = `<div class="mt-run"><div class="mt-orb">${mi('sparkles')}</div><b class="mt-stage">${C.esc(title)}</b>
+        <div class="mt-bar"><i style="width:${Math.max(2, Math.min(100, pct || 0))}%"></i></div>
+        <small class="mt-note">Only the shots you changed are made again. You can lock your phone.</small></div>`;
+      p.foot.innerHTML = '';
+    };
+    show('Remaking your montage…', 2);
+    const off = window.api.onJobProgress((d) => { if (d && d.jobId === jobId) show(d.stage || 'Remaking your montage…', d.percent || 0); });
+    try {
+      const res = await window.api.montage.remake({ path: ME.path, edits: { shots: ME.shots }, jobId });
+      off && off();
+      ME.busy = false;
+      show('Opening it in the studio…', 100);
+      go('studio');
+      await window.VideoEditor.applyMontage({ output: res.output, texts: res.texts, style: res.style, cuts: res.cuts, music: ME.music || undefined, keepMusic: true });
+      C.closePanel(p, true);
+      C.island({ kind: 'good', title: 'Montage remade', sub: `${Math.round(res.duration)}s · ${res.shots.length} shots — it’s in the studio`, ms: 4500 });
+    } catch (e) {
+      off && off();
+      ME.busy = false;
+      p.body.innerHTML = `<div class="mt-run"><div class="mt-orb bad">!</div><b class="mt-stage">That didn’t remake</b><small class="mt-note">${C.esc((e && e.message) || 'Something went wrong.')}</small></div>`;
+      p.foot.innerHTML = '<button type="button" class="mt-go" data-me-back>Back to the shots</button>';
+      p.foot.onclick = (ev) => { if (ev.target.closest('[data-me-back]')) { p.foot.onclick = null; mePaint(); } };
+    }
+  }
+
+  window.MWSocial = { start, go, compose, openConnect, openMontage, editMontage, view: () => S.view, _state: S, _planTimes: planTimes, _titleFromFile: titleFromFile };
 })();

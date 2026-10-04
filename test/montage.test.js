@@ -189,6 +189,21 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
   const resAll = await montage.make(ctx, video.getInfo, { mediaPaths: [v1, v2, ph], musicPath: null, style: 'worship', full: true, aspect: '9:16',
     brief: '', keepAudio: true, output: outAll, onProgress: () => {} });
   const infoAll = await video.getInfo(ctx, outAll);
+
+  console.log('\nREARRANGE A MADE MONTAGE');
+  const pj = montage.loadProject(outAll);
+  log(!!pj && pj.shots.length === resAll.shots.length && Object.values(pj.cands).every((c) => c.thumb && /^data:image\/jpeg;base64,/.test(c.thumb)), 'the montage keeps its own edit beside it, with a frame of every clip and photo', pj && `${pj.shots.length} shots`);
+  log(Array.isArray(resAll.cuts) && resAll.cuts.length === resAll.shots.length - 1, 'and says where each shot starts, for the timeline', JSON.stringify(resAll.cuts));
+  const rev = pj.shots.map((x, key) => ({ key, transition: x.transition, overlays: x.overlays })).reverse();
+  const outRe = path.join(WORK, 'remade.mp4');
+  const re = await montage.remake(ctx, { project: pj, edits: { shots: rev }, output: outRe, onProgress: () => {} });
+  const reInfo = await video.getInfo(ctx, outRe);
+  log(re.shots.map((x) => x.file).join() === resAll.shots.map((x) => x.file).reverse().join() && Math.abs(reInfo.durationSec - resAll.duration) < 0.5,
+    'remade in the new order, the same length', `${reInfo.durationSec.toFixed(2)} s`);
+  const tRe = Date.now();
+  await montage.remake(ctx, { project: montage.loadProject(outRe), edits: null, output: path.join(WORK, 'remade2.mp4'), onProgress: () => {} });
+  log(Date.now() - tRe < 5000, 'remade again unchanged: every shot reused, nothing encoded', ((Date.now() - tRe) / 1000).toFixed(1) + ' s');
+  log(await montage.remake(ctx, { project: null, edits: null, output: path.join(WORK, 'x.mp4') }).then(() => false, (e) => /no saved edit/.test(e.message)), 'a montage without a saved edit says so');
   const want = 8 + 6;
   log(resAll.full && resAll.shots.length + resAll.overlays.length === 3 && infoAll.durationSec >= want - 0.2, 'nothing is cut out: both clips whole plus the photo', `${infoAll.durationSec.toFixed(2)} s from ${want} s of video + a photo`);
   log(resAll.overlays.length === 1, 'and the photo is laid over a clip rather than tacked on the end', JSON.stringify(resAll.overlays.map((o) => o.style)));
