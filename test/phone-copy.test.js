@@ -88,6 +88,19 @@ async function real() {
   const again = await pc.phoneCopy(ctx, video.getInfo, { input: src, partMax: one });
   log(again.parts[0].path === r.parts[0].path, 'a second tap reuses the copy');
 
+  // the quicker 720p copy, asked for on the phone — kept beside the 1080p one
+  const hdPath = r.parts[0].path;
+  let stt = pc.status(src, one);
+  log(stt.needed && stt.hd.ready && !stt.fast.ready, 'status: 1080p ready, 720p not yet', JSON.stringify(stt));
+  const t0 = Date.now();
+  const fastR = await pc.phoneCopy(ctx, video.getInfo, { input: src, partMax: one, quality: 'fast' });
+  const wh = execFileSync(ffprobe, ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', fastR.parts[0].path]).toString().trim();
+  log(fastR.parts.length === 1 && wh === '720,1280' && fastR.parts[0].size <= one, '720p copy: one video, 720×1280, under the limit', `${wh}, ${Math.round(fastR.parts[0].size / 1024)} KB in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+  log(plays(fastR.parts[0].path), '   …plays through');
+  stt = pc.status(src, one);
+  log(stt.hd.ready && stt.fast.ready && fs.existsSync(hdPath), '   …and the 1080p copy is still there');
+  log(pc.status(src, size + 1).needed === false, 'status: a small video needs no copy');
+
   // a limit so small not even 1 Mbit/s fits in one: parts
   const tiny = Math.round(((600 + 128) * 1000 * 20) / 8 / 0.92);
   r = await pc.phoneCopy(ctx, video.getInfo, { input: src, partMax: tiny });

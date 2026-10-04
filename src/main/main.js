@@ -791,8 +791,10 @@ ipcMain.handle('montage:remake', wrap(async (e, { path: p, edits, jobId }) => {
 
 /* The file(s) a phone is handed to save a video — a phone-size copy when the
    video is too big for the iPhone's share sheet (see phonecopy.js). */
-ipcMain.handle('video:phoneCopy', wrap(async (e, { input, jobId }) =>
-  phonecopy.phoneCopy(getCtx(), video.getInfo, { input, onProgress: onProgress(e, jobId) })));
+ipcMain.handle('video:phoneCopy', wrap(async (e, { input, jobId, quality }) =>
+  phonecopy.phoneCopy(getCtx(), video.getInfo, { input, quality, onProgress: onProgress(e, jobId) })));
+/* …and before asking which quality: is a copy needed, and is either already made (or being made)? */
+ipcMain.handle('video:phoneCopyStatus', wrap(async (e, { input }) => phonecopy.status(input)));
 
 ipcMain.handle('video:applyEdits', wrap(async (e, { input, edits, jobId }) => {
   const output = outPath(`edited-${stamp()}.mp4`);
