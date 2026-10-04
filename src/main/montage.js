@@ -33,6 +33,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
+const crypto = require('crypto');
 const ff = require('./ffmpeg');
 const jobs = require('./jobs');
 const machine = require('./machine');
@@ -1281,7 +1282,13 @@ async function render(ctx, plan, { aspect, keepAudio, output, tmp, onProgress })
     while (next < n) {
       const i = next++;
       const t0 = Date.now();
-      pieces[i] = await renderShot(ctx, plan.shots[i], W, H, keepAudio, path.join(tmp, `shot-${String(i).padStart(3, '0')}.mp4`), plan.shots[i + 1]);
+      const out = path.join(tmp, `shot-${String(i).padStart(3, '0')}.mp4`);
+      const key = pieceKey(plan.shots[i], plan.shots[i + 1], W, H, keepAudio);
+      if (!fromCache(key, out)) {
+        await renderShot(ctx, plan.shots[i], W, H, keepAudio, out, plan.shots[i + 1]);
+        toCache(key, out);
+      }
+      pieces[i] = out;
       if (process.env.MW_MONTAGE_PROFILE) { const sh = plan.shots[i]; console.log('[piece]', i, sh.cand.kind, sh.cand.w + 'x' + sh.cand.h, sh.seconds.toFixed(1) + 's', sh.effect, sh.slow ? 'slow' : '', (sh.overlays || []).length ? 'overlays:' + sh.overlays.length : '', ((Date.now() - t0) / 1000).toFixed(1) + 's'); }
       done++;
       if (onProgress) onProgress(Math.round((done / n) * 95));
@@ -1292,8 +1299,200 @@ async function render(ctx, plan, { aspect, keepAudio, output, tmp, onProgress })
   const list = path.join(tmp, 'pieces.txt');
   fs.writeFileSync(list, pieces.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'));
   await ff.runFfmpeg(ctx.ffmpeg, ['-hide_banner', '-y', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', '-movflags', '+faststart', output]);
+  pruneCache();
   if (onProgress) onProgress(100);
   return output;
+}
+
+/*
+ * ►► A SHOT ALREADY MADE IS NOT MADE AGAIN. ◄◄
+ * Every finished piece is kept, named by everything that decides how it looks
+ * and sounds (the file and its size/date, the moment, the effect, the way in
+ * and out, the pictures on it, the frame, the encoder). Remaking a montage
+ * after moving a clip re-encodes only the shots whose neighbours changed —
+ * the rest are picked up as they are. Old pieces are swept away.
+ */
+const PIECES = path.join(os.tmpdir(), 'mw-montage-pieces');
+const PIECES_MAX = 1536 * 1024 * 1024;
+function fileSig(f) { try { const st = fs.statSync(f); return st.size + ':' + Math.round(st.mtimeMs); } catch (e) { return '0'; } }
+function pieceKey(s, next, W, H, keepAudio) {
+  const c = s.cand;
+  return crypto.createHash('sha1').update(JSON.stringify({
+    v: 3, f: c.file, sig: fileSig(c.file), k: c.kind, w: c.w, h: c.h, a: !!c.hasAudio,
+    sec: s.seconds, from: s.from, need: s.need, e: s.effect, fo: s.focus, sl: !!s.slow, tr: s.transition, nt: next ? next.transition : null,
+    ov: (s.overlays || []).map((o) => [o.cand.file, fileSig(o.cand.file), o.cand.kind, o.cand.w, o.cand.h, o.style, o.start, o.len, o.pos, o.from]),
+    W, H, keepAudio: !!keepAudio, enc: encodeOpts(),
+  })).digest('hex');
+}
+function fromCache(key, out) {
+  const f = path.join(PIECES, key + '.mp4');
+  try {
+    if (!fs.existsSync(f)) return false;
+    try { fs.linkSync(f, out); } catch (e) { fs.copyFileSync(f, out); }
+    const now = new Date(); try { fs.utimesSync(f, now, now); } catch (e) {}
+    return true;
+  } catch (e) { return false; }
+}
+function toCache(key, out) {
+  try {
+    fs.mkdirSync(PIECES, { recursive: true });
+    const f = path.join(PIECES, key + '.mp4');
+    if (fs.existsSync(f)) return;
+    try { fs.linkSync(out, f); } catch (e) { fs.copyFileSync(out, f); }
+  } catch (e) { /* a full disk just means no reuse next time */ }
+}
+function pruneCache() {
+  try {
+    const now = Date.now();
+    const all = fs.readdirSync(PIECES).map((n) => { const f = path.join(PIECES, n); try { const st = fs.statSync(f); return { f, size: st.size, t: st.mtimeMs }; } catch (e) { return null; } }).filter(Boolean);
+    let total = 0;
+    for (const x of all.sort((a, b) => b.t - a.t)) {
+      total += x.size;
+      if (now - x.t > 24 * 3600 * 1000 || total > PIECES_MAX) { try { fs.unlinkSync(x.f); } catch (e) {} }
+    }
+  } catch (e) {}
+}
+
+/* ------------------------------------------------------------- the project
+ *
+ * The montage's own edit, saved beside the video (<video>.montage.json): the
+ * clips and pictures it was made from (with a small frame of each), and every
+ * shot — which clip, which moment, how long, how it comes in, what lies on
+ * it. The phone shows it shot by shot to rearrange, and remake() builds the
+ * video again from the rearranged plan without asking the AI again.
+ */
+const sidecarOf = (output) => output + '.montage.json';
+function thumbData(f) {
+  try { return f && fs.existsSync(f) ? 'data:image/jpeg;base64,' + fs.readFileSync(f).toString('base64') : null; } catch (e) { return null; }
+}
+function projectOf(plan, cands, { aspect, keepAudio, style, full }, meta = {}) {
+  const C = {};
+  for (const c of cands) {
+    C[c.id] = { id: c.id, kind: c.kind, file: c.file, name: c.name || path.basename(c.file), w: c.w, h: c.h, hasAudio: !!c.hasAudio,
+      fileDur: c.fileDur || 0, peak: c.peak || 0, start: c.start || 0, end: c.end || 0, whole: !!c.whole, thumb: c.thumbData || thumbData(c.thumb) };
+  }
+  const shotAt = (t) => { let k = 0; plan.shots.forEach((s, i) => { if (t >= s.at - 0.01) k = i; }); return k; };
+  return {
+    v: 1, aspect, keepAudio: keepAudio !== false, style, full: !!full,
+    title: meta.title || plan.title || '', postCaption: meta.postCaption || plan.postCaption || '', hashtags: meta.hashtags || plan.hashtags || [],
+    cands: C,
+    shots: plan.shots.map((s) => ({
+      cid: s.cand.id, seconds: s.seconds, from: s.from == null ? null : s.from, need: s.need == null ? null : s.need,
+      effect: s.effect, focus: s.focus, slow: !!s.slow, transition: s.transition,
+      overlays: (s.overlays || []).map((o) => ({ cid: o.cand.id, style: o.style, start: o.start, len: o.len, pos: o.pos, from: o.from == null ? null : o.from })),
+    })),
+    texts: (plan.texts || []).map((t) => {
+      const a = shotAt(t.start), b = shotAt(Math.max(t.start, t.end - 0.05));
+      return { shot: a, span: Math.max(1, b - a + 1), text: t.text, role: t.role };
+    }),
+  };
+}
+function saveProject(output, project) {
+  try { fs.writeFileSync(sidecarOf(output), JSON.stringify(project)); } catch (e) { /* the video is what matters */ }
+}
+function loadProject(output) {
+  try { return JSON.parse(fs.readFileSync(sidecarOf(output), 'utf8')); } catch (e) { return null; }
+}
+
+/** Pictures laid evenly through a shot, each clear of the next and of the hook. */
+function spaceOverlays(list, seconds, first) {
+  const n = list.length;
+  if (!n) return [];
+  const lo = first ? 1.2 : 0.3;
+  const room = Math.max(0, seconds - lo - 0.15);
+  const len = clamp(Math.min(OV_LEN, room / n - 1), 0.8, OV_LEN);
+  const fit = Math.max(0, Math.floor((room + 1) / (len + 1)));
+  return list.slice(0, fit).map((o, k) => {
+    const slot = room / Math.min(n, fit);
+    return Object.assign({}, o, { start: round2(lo + k * slot + Math.max(0, (slot - len) / 2)), len: round2(len) });
+  });
+}
+
+/**
+ * Build the montage again from an edited plan. `edits.shots` is the new order:
+ * [{ key, transition?, overlays: [{ cid, style }] }] where `key` is the index
+ * of a shot in the saved project (a shot's moment and length come from there —
+ * nothing the phone sends names a file). Pictures that stayed where they were
+ * keep their timing; a shot whose pictures changed has them spaced again.
+ */
+async function remake(ctx, { project, edits, output, onProgress, stage }) {
+  if (!project || !project.cands || !Array.isArray(project.shots)) throw new Error('This montage has no saved edit to change.');
+  const C = project.cands;
+  const want = (edits && Array.isArray(edits.shots)) ? edits.shots : project.shots.map((s, key) => ({ key, overlays: s.overlays }));
+  const shots = [];
+  const oldIdx = [];
+  want.forEach((w) => {
+    const base = project.shots[Math.round(Number(w && w.key))];
+    if (!base) return;
+    const c = C[base.cid];
+    if (!c || !fs.existsSync(c.file)) return;
+    const sh = {
+      cand: c, seconds: base.seconds, from: base.from, need: base.need, effect: base.effect, focus: base.focus, slow: !!base.slow,
+      transition: TRANSITIONS.includes(w.transition) ? w.transition : base.transition, overlays: [],
+    };
+    // the pictures on it: kept as they were, or spaced again if they changed
+    const asked = (Array.isArray(w.overlays) ? w.overlays : base.overlays).filter((o) => o && C[o.cid] && C[o.cid].id !== c.id && fs.existsSync(C[o.cid].file));
+    const same = asked.length === base.overlays.length && asked.every((o, k) => o.cid === base.overlays[k].cid);
+    if (c.kind === 'video' && asked.length) {
+      const list = asked.map((o, k) => {
+        const was = same ? base.overlays[k] : null;
+        return { cand: C[o.cid], style: OVERLAY_STYLES.includes(o.style) ? o.style : 'cutaway', start: was ? was.start : 0, len: was ? was.len : OV_LEN,
+          pos: (k % 2 ? 'left' : 'right'), from: was && was.from != null ? was.from : null };
+      });
+      const firstShot = shots.length === 0;
+      sh.overlays = (same && !(firstShot && list.some((o) => o.start < 1.2))) ? list : spaceOverlays(list, sh.seconds, firstShot);
+      sh.overlays.forEach((o) => {
+        if (o.cand.kind === 'video' && o.from == null) o.from = round2(clamp((o.cand.peak || 0) - o.len / 2, 0, Math.max(0, (o.cand.fileDur || 0) - o.len - 0.05)));
+      });
+    }
+    shots.push(sh);
+    oldIdx.push(Math.round(Number(w.key)));
+  });
+  if (!shots.length) throw new Error('There is nothing left in this montage to make.');
+  shots[0].transition = 'cut';
+  let t = 0;
+  for (const s of shots) { s.at = round2(t); t += s.seconds; }
+  const duration = round2(t);
+  // the words follow their shots; the hook stays on the opening one
+  const texts = [];
+  for (const x of (project.texts || [])) {
+    let i = x.role === 'hook' ? 0 : oldIdx.indexOf(x.shot);
+    if (i < 0) continue;
+    const span = clamp(Math.round(Number(x.span) || 1), 1, shots.length - i);
+    const last = shots[i + span - 1];
+    texts.push({ start: shots[i].at, end: round2(Math.min(duration, Math.max(last.at + last.seconds, shots[i].at + 1.2))), text: x.text, role: x.role });
+  }
+  const plan = { shots, texts, duration, title: project.title, postCaption: project.postCaption, hashtags: project.hashtags };
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mw-montage-'));
+  try {
+    if (stage) stage(`🎞 Remaking it — ${shots.length} shots`);
+    await render(ctx, plan, { aspect: project.aspect, keepAudio: project.keepAudio !== false, output, tmp, onProgress });
+    const cands = Object.values(C).map((c) => Object.assign({}, c, { thumbData: c.thumb }));
+    saveProject(output, projectOf(plan, cands, project, plan));
+    return resultOf(plan, output, project, {});
+  } finally {
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+}
+
+/** What the phone is told about a finished montage (made or remade). */
+function resultOf(plan, output, opts, extra) {
+  return Object.assign({
+    output,
+    duration: plan.duration,
+    aspect: opts.aspect,
+    style: opts.style,
+    concept: plan.concept || '',
+    title: plan.title,
+    postCaption: plan.postCaption,
+    hashtags: plan.hashtags,
+    texts: plan.texts,
+    full: !!opts.full,
+    project: true,
+    cuts: plan.shots.slice(1).map((s) => s.at),
+    overlays: plan.shots.flatMap((s) => (s.overlays || []).map((o) => ({ at: round2(s.at + o.start), seconds: o.len, style: o.style, file: o.cand.file }))),
+    shots: plan.shots.map((s) => ({ at: s.at, seconds: s.seconds, effect: s.effect, transition: s.transition, file: s.cand.file, kind: s.cand.kind, from: s.from == null ? null : s.from })),
+  }, extra);
 }
 
 /* --------------------------------------------------------------------- make */
@@ -1335,23 +1534,9 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, ful
     const plan = finalise(d.plan, cands, opts, music);
     if (stage) stage(opts.full ? `🎞 Blending all ${files.length} together…` : `✂️ Cutting ${plan.shots.length} shots together…`);
     await render(ctx, plan, { aspect: opts.aspect, keepAudio: keepAudio !== false, output, tmp, onProgress: part(50, 100) });
-    return {
-      output,
-      duration: plan.duration,
-      aspect: opts.aspect,
-      style: opts.style,
-      director: d.director,
-      model: d.model,
-      concept: plan.concept,
-      title: plan.title,
-      postCaption: plan.postCaption,
-      hashtags: plan.hashtags,
-      texts: plan.texts,
-      bpm: music ? music.bpm : null,
-      full: opts.full,
-      overlays: plan.shots.flatMap((s) => (s.overlays || []).map((o) => ({ at: round2(s.at + o.start), seconds: o.len, style: o.style, file: o.cand.file }))),
-      shots: plan.shots.map((s) => ({ at: s.at, seconds: s.seconds, effect: s.effect, transition: s.transition, file: s.cand.file, kind: s.cand.kind, from: s.from == null ? null : s.from })),
-    };
+    // the edit itself, beside the video, so it can be rearranged later
+    saveProject(output, projectOf(plan, cands, { aspect: opts.aspect, keepAudio, style: opts.style, full: opts.full }, plan));
+    return resultOf(plan, output, opts, { director: d.director, model: d.model, bpm: music ? music.bpm : null });
   } finally {
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
   }
@@ -1364,4 +1549,4 @@ function directorStatus() {
   return { director: 'rules', model: '' };
 }
 
-module.exports = { fromBrief, cleanBrief, make, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };
+module.exports = { fromBrief, cleanBrief, make, remake, loadProject, sidecarOf, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };

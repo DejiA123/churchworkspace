@@ -5859,7 +5859,7 @@
     if (rightCuts.length) right.cuts = rightCuts;
     splitKf(s, right, t);
     selectSeg(right.id); renderSegments();
-    window.__toast && window.__toast(s.seed
+    if (!ve._quietSplit) window.__toast && window.__toast(s.seed
       ? '✂ Split — delete the part you don’t want, then 💾 Export video. (Splitting your video doesn’t make shorts — use ✂️ Long to short clips for that.)'
       : '✂ Split into 2 clips — drag one aside to make a gap / overlay.', 'good');
   }
@@ -13322,6 +13322,8 @@
       } catch (e) {}
       try { syncMusicPreview(); } catch (e) {}
     },
+    /** The file open in the studio (the original, never its preview copy). */
+    currentPath() { return ve.video ? ve.video.path : null; },
     /** The video's own background when its shape is not the frame's: 'crop' | 'blur' | 'bars'. */
     setBackground(mode) {
       if (!ve.video) { window.__toast && window.__toast('Open a video first.', 'error'); return null; }
@@ -13382,10 +13384,32 @@
      * director's words on the text lane — every one an ordinary text box, so it
      * can be retyped, restyled, moved or deleted like any other.
      */
-    async applyMontage({ output, music, musicVolume, texts, style, captions } = {}) {
+    async applyMontage({ output, music, musicVolume, texts, style, captions, cuts } = {}) {
       if (!output) return false;
       await loadVideo(output);
       if (!ve.video) return false;
+      /*
+       * The montage's own shots, as blocks on the timeline: it is cut at every
+       * place one shot gives way to the next, so each can be trimmed, split
+       * further or taken out like any clip. (Moving clips into a new ORDER, or
+       * photos onto other clips, is "Rearrange shots" — it remakes the video.)
+       */
+      if (Array.isArray(cuts) && cuts.length) {
+        const D0 = dur();
+        ve._quietSplit = true;   // these cuts are the montage's own, not a Split the operator made
+        try {
+          for (const t of cuts.slice().sort((a, b) => a - b)) {
+            if (!(t > 0.3 && t < D0 - 0.3)) continue;
+            const s = ve.segments.find((x) => (x.lane || 0) === 0 && x.start < t - 0.2 && x.end > t + 0.2);
+            if (s) doSplitInner(s, t);
+          }
+        } finally { ve._quietSplit = false; }
+        ve.sel = null;
+        ve.segments.filter((x) => (x.lane || 0) === 0).sort((a, b) => a.start - b.start)
+          .forEach((x, k) => { x.label = `Shot ${k + 1}`; x.seed = true; });
+        ve.history = []; ve.future = []; updateUndoRedoButtons();   // the cuts are the starting point, not edits to undo
+        renderSegments();
+      }
       if (music && music.id) {
         await libRefresh();
         const entry = ((ve.lib && ve.lib.music) || []).find((m) => m.id === music.id) || music;

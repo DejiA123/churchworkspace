@@ -200,6 +200,8 @@ const ALLOWED = {
   'machine:info': true,
   'montage:status': true,
   'montage:create': true,
+  'montage:project': true,
+  'montage:remake': true,
   'sermon:exportShort': true,
   'sermon:exportReframed': true,
   'sermon:exportFramed': true,
@@ -850,6 +852,8 @@ async function deleteFiles(req, res) {
       freed += st.size;
       deleted.push(p);
     } catch (e) { refused.push({ path: p, why: 'The studio could not delete it (' + (e.code || e.message) + ').' }); continue; }
+    // a montage's saved edit goes with it
+    try { const sc = full + '.montage.json'; const ss = fs.statSync(sc); fs.unlinkSync(sc); freed += ss.size; } catch (e) { /* none */ }
     const base = full.replace(/\.[^.\\/]+$/, '');
     for (const ext of COMPANIONS) {
       try { const c = base + ext; const cs = fs.statSync(c); fs.unlinkSync(c); freed += cs.size; } catch (e) { /* none */ }
