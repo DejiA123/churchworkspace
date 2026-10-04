@@ -228,8 +228,10 @@
     document.body.classList.toggle('mw-home', view === 'home');
     document.body.classList.toggle('mw-sched', view === 'scheduler');
     document.body.classList.toggle('mw-in-studio', view === 'studio');
+    document.body.classList.toggle('mw-projects', view === 'projects');
     clearInterval(S.poll); S.poll = null;
     if (view === 'home') renderHome(true);
+    if (view === 'projects') renderProjectsView();
     if (view === 'scheduler') {
       renderSched();
       loadSocial(true).then(renderSched);
@@ -263,7 +265,7 @@
       </header>
       <main class="ch-scroll">
         <section class="ch-hello"><h1 id="chHello"></h1><p>What are we making today?</p></section>
-        <button type="button" class="ch-card ch-studio" data-go="studio">
+        <button type="button" class="ch-card ch-studio" data-go="projects">
           <span class="ch-glow"></span>
           <span class="ch-art">${mi('film')}</span>
           <span class="ch-copy"><b>Video Studio</b><small>Edit the sermon, cut AI shorts, captions and exports</small></span>
@@ -319,7 +321,7 @@
     const ed = window.VideoEditor;
     let foot = 'Open a video to start';
     if (ed && ed.hasVideo && ed.hasVideo()) foot = 'Carry on editing';
-    else if (S.projects && S.projects.length) foot = `${S.projects.length} project${S.projects.length > 1 ? 's' : ''} · or start a new one`;
+    if (S.projects && S.projects.length) foot = `${S.projects.length} project${S.projects.length > 1 ? 's' : ''} · open one or start new`;
     else if (S.resumeName) foot = `Pick up “${S.resumeName}”`;
     $('#chStudioFoot').textContent = foot;
     renderHomeProjects();
@@ -424,47 +426,94 @@
     C.islandHide('proj');
     if (!ok) C.island({ kind: 'warn', title: 'That project could not be opened', sub: 'Its video may have been deleted', ms: 5000 });
   }
-  async function openProjects() {
-    const panel = C.openPanel({ id: 'cloudProjects', title: 'Projects', cls: 'cp-projects' });
-    panel.foot.innerHTML = `<button type="button" class="pj-new">${mi('plus')}<span>New project — open a video</span></button>`;
-    const paint = async () => {
-      panel.body.innerHTML = '<p class="pj-empty">Looking…</p>';
-      try { const ed = window.VideoEditor; if (ed && ed.flushProject) await ed.flushProject(); } catch (e) {}
-      const rows = await loadProjects();
-      panel.body.innerHTML = rows.length
-        ? `<p class="pj-hint">Every video you edit is kept here as you work — pick one to carry on.</p><div class="pj-list">${rows.map((r) => projRow(r, { manage: true })).join('')}</div>`
-        : `<div class="pj-empty"><span class="pj-empty-art">${mi('layers')}</span><b>No projects yet</b><p>Open a video in the Video Studio and start editing — it is kept here as you work.</p></div>`;
-      paintThumbs(panel.body);
-      renderHome();
-    };
-    panel.body.addEventListener('click', async (e) => {
-      const open = e.target.closest('[data-proj]');
-      if (open) return openProject(open.dataset.proj);
-      const ren = e.target.closest('[data-pjren]');
-      if (ren) {
-        const row = (S.projects || []).find((r) => r.id === ren.dataset.pjren);
+  /*
+   * ►► THE PROJECTS SCREEN — what tapping the Video Studio opens. ◄◄
+   * Like CapCut's: a big New project, then every project to pick from (the
+   * one open in the editor marked), each with rename and delete. The editor's
+   * top bar has a Projects button to come back here; leaving the editor saves
+   * the open project first.
+   */
+  function openProjects() { go('projects'); }
+  function buildProjectsView() {
+    const el = document.createElement('div');
+    el.id = 'cloudProjView';
+    el.className = 'cloud-proj';
+    el.innerHTML = `
+      <header class="cs-top">
+        <button type="button" class="cs-back" data-go="home" aria-label="Home">${mi('chev-left')}</button>
+        <h1>Video Studio</h1>
+        <span class="cs-chip-slot"></span>
+      </header>
+      <main class="cs-scroll pv-scroll">
+        <button type="button" class="pv-new" data-pv="new">
+          <span class="pv-new-art">${mi('plus')}</span>
+          <span class="pv-new-tx"><b>New project</b><small>Open a video to edit — a sermon, a clip, anything</small></span>
+        </button>
+        <section class="pv-cur hidden" id="pvCur"></section>
+        <h2 class="pv-h">Your projects <small id="pvCount"></small></h2>
+        <div class="pj-list" id="pvList"></div>
+      </main>`;
+    document.body.appendChild(el);
+    el.querySelector('.cs-chip-slot').appendChild(C.jobChip());
+    el.addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-go],[data-pv],[data-proj],[data-pjren],[data-pjdel]');
+      if (!b) return;
+      if (b.dataset.go) return go(b.dataset.go);
+      if (b.dataset.pv === 'new') {
+        // the picker first, straight from the tap (a phone only opens one from a tap); the open project is saved meanwhile
+        const ed = window.VideoEditor;
+        const saving = ed && ed.flushProject ? ed.flushProject().catch(() => null) : null;
+        go('studio');
+        const o = document.getElementById('veOpen'); if (o) o.click();
+        await saving;
+        return;
+      }
+      if (b.dataset.pv === 'continue') return go('studio');
+      if (b.dataset.proj) return openProject(b.dataset.proj);
+      if (b.dataset.pjren) {
+        const row = (S.projects || []).find((r) => r.id === b.dataset.pjren);
         const nm = window.prompt('Name this project', row ? row.name : '');
         if (nm == null || !String(nm).trim()) return;
-        try { await window.api.sessions.rename(ren.dataset.pjren, String(nm).trim().slice(0, 80)); } catch (er) {}
-        const ed = window.VideoEditor; if (ed && ed.projectRenamed) ed.projectRenamed(ren.dataset.pjren, String(nm).trim().slice(0, 80));
-        return paint();
+        const name = String(nm).trim().slice(0, 80);
+        try { await window.api.sessions.rename(b.dataset.pjren, name); } catch (er) {}
+        const ed = window.VideoEditor; if (ed && ed.projectRenamed) ed.projectRenamed(b.dataset.pjren, name);
+        return renderProjectsView();
       }
-      const del = e.target.closest('[data-pjdel]');
-      if (del) {
-        const row = (S.projects || []).find((r) => r.id === del.dataset.pjdel);
+      if (b.dataset.pjdel) {
+        const row = (S.projects || []).find((r) => r.id === b.dataset.pjdel);
         if (!window.confirm(`Delete the project “${row ? row.name : ''}”?\n\nThe video and anything you exported stay — only this edit goes.`)) return;
-        try { await window.api.sessions.remove(del.dataset.pjdel); } catch (er) {}
-        const ed = window.VideoEditor; if (ed && ed.projectRemoved) ed.projectRemoved(del.dataset.pjdel);
-        return paint();
+        try { await window.api.sessions.remove(b.dataset.pjdel); } catch (er) {}
+        const ed = window.VideoEditor; if (ed && ed.projectRemoved) ed.projectRemoved(b.dataset.pjdel);
+        return renderProjectsView();
       }
     });
-    panel.foot.querySelector('.pj-new').addEventListener('click', async () => {
-      panel.close();
-      try { const ed = window.VideoEditor; if (ed && ed.flushProject) await ed.flushProject(); } catch (e) {}
-      go('studio');
-      const b = document.getElementById('veOpen'); if (b) b.click();
-    });
-    paint();
+    return el;
+  }
+  async function renderProjectsView() {
+    const el = $('#cloudProjView') || buildProjectsView();
+    const list = $('#pvList', el);
+    if (!S.projects) list.innerHTML = '<p class="pj-empty">Looking…</p>';
+    try { const ed = window.VideoEditor; if (ed && ed.flushProject) await ed.flushProject(); } catch (e) {}
+    const rows = await loadProjects();
+    if (S.view !== 'projects') return;
+    const ed = window.VideoEditor;
+    const openId = ed && ed.projectId ? ed.projectId() : null;
+    // the edit open in the editor, first — even before it has been saved as a project
+    const cur = $('#pvCur', el);
+    const curRow = openId ? rows.find((r) => r.id === openId) : null;
+    const hasVid = ed && ed.hasVideo && ed.hasVideo();
+    cur.classList.toggle('hidden', !hasVid);
+    if (hasVid) {
+      const nm = curRow ? curRow.name : String((ed.sourcePath && ed.sourcePath()) || '').split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
+      cur.innerHTML = `<button type="button" class="pv-cont" data-pv="continue"><span class="pv-cont-k">Open in the editor</span><b>${esc(nm || 'Your video')}</b><span class="pv-cont-go">Continue ${mi('chev-right')}</span></button>`;
+    }
+    const others = rows.filter((r) => r.id !== openId);
+    $('#pvCount', el).textContent = rows.length ? String(rows.length) : '';
+    list.innerHTML = others.length
+      ? others.map((r) => projRow(r, { manage: true })).join('')
+      : (rows.length ? '<p class="pv-none">This is your only project so far.</p>'
+        : `<div class="pj-empty"><span class="pj-empty-art">${mi('layers')}</span><b>No projects yet</b><p>Tap <b>New project</b> and open a video — every video you edit is kept here, to carry on any time.</p></div>`);
+    paintThumbs(el);
   }
 
   function renderHomeReady() {
@@ -1123,6 +1172,15 @@
       h.innerHTML = `${mi('home', 'mi-l')}<span class="cloud-chip-tx">Home</span>`;
       h.addEventListener('click', () => go('home'));
       bar.insertBefore(h, bar.firstChild);
+      // …and back to the Projects screen, to pick another (the open one is saved on the way)
+      const pj = document.createElement('button');
+      pj.id = 'cloudProjBtn';
+      pj.className = 'cloud-chip cloud-home-btn cloud-proj-btn';
+      pj.setAttribute('aria-label', 'Projects');
+      pj.title = 'Projects — pick another video to edit';
+      pj.innerHTML = `${mi('layers', 'mi-l')}<span class="cloud-chip-tx">Projects</span>`;
+      pj.addEventListener('click', () => go('projects'));
+      h.after(pj);
     }
     C.jobListeners.push((list) => { if (S.view === 'home') renderHomeJobs(list); });
     // a video deleted in Files leaves the home screen too — and an edit whose
@@ -1134,11 +1192,12 @@
       if (S.view === 'home') { renderHome(); renderHomeReady(); }
     });
     const want = String(location.hash || '').replace('#', '');
-    go(want === 'studio' || want === 'scheduler' ? want : 'home');
+    go(want === 'studio' || want === 'scheduler' || want === 'projects' ? want : 'home');
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) return;
       if (S.view === 'scheduler') loadSocial(true).then(renderSched);
       if (S.view === 'home') renderHome(true);
+      if (S.view === 'projects') renderProjectsView();
     });
   }
 
