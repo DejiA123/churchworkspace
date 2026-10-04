@@ -489,6 +489,34 @@
     return lev(a, b) <= Math.min(2, Math.max(1, Math.floor(Math.max(a.length, b.length) / 3)));
   }
 
+  /** Two words a recogniser could mistake for each other: same first letter, or nearly the same letters. */
+  function closeWords(x, y) {
+    const a = String(x).replace(/[^a-z0-9]/g, ''), b = String(y).replace(/[^a-z0-9]/g, '');
+    if (!a || !b) return false;
+    return a[0] === b[0] || soundsSame(a, b);
+  }
+  /** The word-level edit as one-for-one swaps: true when every change is a sound-alike swap (see vetAiLine). */
+  function soundAlikeSwaps(A, B, tidy) {
+    const ops = diffWords(A.join(' '), B.join(' '));
+    const swaps = [];
+    let dels = [], adds = [], loose = 0;
+    const flush = () => {
+      const n = Math.min(dels.length, adds.length);
+      for (let k = 0; k < n; k++) swaps.push([dels[k], adds[k]]);
+      loose += dels.length - n + adds.length - n;
+      dels = []; adds = [];
+    };
+    for (const o of ops) {
+      if (o.op === 'same') flush();
+      else if (o.op === 'del') dels.push(o.text);
+      else adds.push(o.text);
+    }
+    flush();
+    if (!swaps.length || loose > (tidy ? 1 : 0)) return false;
+    if (swaps.length > Math.max(1, Math.ceil(A.length / 2))) return false;
+    return swaps.every(([x, y]) => closeWords(x, y));
+  }
+
   /**
    * Is the AI's version of a line a CORRECTION of it, or a rewrite? Returns the
    * line to offer (in the caption's own case) or null.
@@ -521,7 +549,18 @@
      * respacing of what was heard, not a new sentence.
      */
     const respaced = changed > limit && Math.abs(b.length - a.length) <= 2 && soundsSame(a.join(''), b.join(''));
-    if (changed > limit && !respaced) return { ok: false, reason: 'rewrote the line' };
+    /*
+     * ►► WORD FOR A SOUND-ALIKE WORD, more than once in a short line. ◄◄
+     * Captions run three words a line, so "FACE THAT WERE" -> "FAITH THAT WE"
+     * is two thirds of the line — and was thrown away as a rewrite, leaving the
+     * operator to fix both by hand. Counted word by word it is two swaps, each
+     * keeping its word's sound (face/faith, were/we); a rewrite swaps in words
+     * that sound like nothing that was there. So: every changed word replaced
+     * one-for-one by a word that starts the same or sounds alike, nothing added
+     * or dropped, at most half the line (rounded up) — a correction.
+     */
+    const swapped = changed > limit && !respaced && soundAlikeSwaps(a, b, tidy);
+    if (changed > limit && !respaced && !swapped) return { ok: false, reason: 'rewrote the line' };
     // the same words in a different order is a rewrite, however small
     if (a.length === b.length && a.join(' ') !== b.join(' ') && a.slice().sort().join(' ') === b.slice().sort().join(' ')) return { ok: false, reason: 'reordered the words' };
     if (Math.abs(b.length - a.length) > (tidy ? 3 : 2)) return { ok: false, reason: 'changed the length' };
@@ -580,7 +619,8 @@
       '  (use the translation the preacher seems to use; only passages that are really there)',
       '- names: people, places, churches, ministries and events, spelled correctly',
       '- terms: words and phrases that come up again and again (spelled as they should be)',
-      '- mishearings: words the speech recognition clearly got wrong, more than once if possible, as heard -> meant',
+      '- mishearings: words the speech recognition clearly got wrong, as heard -> meant — especially sounds the speaker\'s',
+      '  accent makes it swap again and again (e.g. "face" -> "faith", "were" -> "we")',
       'Reply with JSON only: {"topic":"","speaker":"","scriptures":[],"names":[],"terms":[],"mishearings":[{"heard":"","meant":""}]}',
     ].join('\n');
     return { system, prompt: 'Transcript:\n' + String(transcript || '') };
@@ -632,6 +672,9 @@
       "  'let us prey' -> 'let us pray', 'cavalry' -> 'Calvary' (the cross), 'only begotten sun' -> 'only begotten Son', 'sums' -> 'Psalms'",
       '- words split or joined wrongly by the recogniser, spelling mistakes, missing apostrophes',
       "- the wrong sound-alike word (there/their/they're, your/you're, its/it's, to/too, then/than, a/an, know/no, whole/hole)",
+      "- sounds the speaker's accent makes the recogniser swap: 'face' for 'faith', 'tree' for 'three', 'tink' for 'think',",
+      "  'world' for 'word', 'work' for 'walk', 'leave' for 'live', and small words it hears wrong ('were' for 'we', 'his' for 'is')",
+      "  — two of these can be in one short line ('face that were receive' -> 'faith that we receive')",
       '- a word accidentally repeated by the recogniser (the the -> the)',
       '- capitals for God, Jesus, Lord, Holy Spirit/Holy Ghost, He/Him only where the speaker means God and the line already uses capitals that way,',
       '  books of the Bible, people, places and the church\'s own names',
