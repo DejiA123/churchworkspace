@@ -27,7 +27,13 @@ const path = require('path');
 const ff = require('./ffmpeg');
 const machine = require('./machine');
 
-const PART_MAX = 95 * 1024 * 1024;   // what one share may carry
+/*
+ * What one share may carry. The montages that crashed were 300-700 MB (well
+ * over a gigabyte of memory once Safari had read and copied them); 95 MB parts
+ * saved fine on the iPhone. 140 MB keeps a long margin from the crash and
+ * lets a video of up to ~16 minutes save as ONE video, not parts.
+ */
+const PART_MAX = 140 * 1024 * 1024;
 const KEEP_MS = 2 * 24 * 3600e3;
 const AUDIO_KBPS = 128;
 
@@ -95,7 +101,8 @@ function plan({ size, durationSec, width, height, encode }, partMax = PART_MAX) 
   const fitKbps = Math.floor(((partMax * 0.92) * 8) / dur / 1000) - AUDIO_KBPS;   // one file, a little headroom
   // one video is what anyone wants in Photos: re-encoded to fit, when it can look right
   if (fitKbps >= 2500) return { how: 'encode', parts: 1, side: Math.min(short, 1080), kbps: Math.min(fitKbps, 8000), segSec: 0 };
-  if (fitKbps >= 1500) return { how: 'encode', parts: 1, side: Math.min(short, 720), kbps: fitKbps, segSec: 0 };
+  // 720p down to 1 Mbit/s: still clean for a phone's screen, and one video (an 8:46 montage came in two parts at 1.5)
+  if (fitKbps >= 1000) return { how: 'encode', parts: 1, side: Math.min(short, 720), kbps: fitKbps, segSec: 0 };
   // a long video already at a modest bit rate only needs cutting
   if (totalKbps <= 4500 && !encode) {
     const parts = Math.ceil(size / (partMax * 0.85));
