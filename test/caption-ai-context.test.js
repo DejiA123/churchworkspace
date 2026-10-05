@@ -61,7 +61,9 @@ function fakeModel(log) {
         if (t.includes('read sea')) fixes.push({ n, text: t.replace('read sea', 'Red Sea'), why: 'misheard Red Sea', sure: true });
       }
       if (t.includes('a men')) fixes.push({ n, text: t.replace('a men', 'Amen'), why: 'misheard Amen', sure: true });
-      if (t === 'Moses lifted up his rod' && n < 10) fixes.push({ n, text: 'Moses lifted up his staff', why: 'rod or staff', sure: false });
+      if (t === 'Moses lifted up his rod' && n < 10) fixes.push({ n, text: 'Moses lifted up his rods', why: 'one rod or two', sure: false });
+      // a different word, not a sound-alike: "keep their exact words" refuses it, sure or not
+      else if (t === 'Moses lifted up his rod') fixes.push({ n, text: 'Moses lifted up his staff', why: 'rod or staff', sure: false });
       if (t === 'look at the story of' && n < 10) fixes.push({ n, text: 'let us all read the passage about', why: 'clearer', sure: true });
     }
     return JSON.stringify({ fixes });
@@ -103,6 +105,7 @@ function fakeModel(log) {
   check('sure fixes are marked sure', israel.every((f) => f.sure === true));
   const rod = byLine.get(4);
   check('a judgement call is marked not sure', rod && rod.sure === false, rod && rod.text);
+  check('a word swapped for one that sounds nothing like it ("rod" -> "staff") is refused', !res.fixes.some((f) => /staff/.test(f.text)));
 
   head('[3b] Two sound-alike swaps in one 3-word line (from the operator\'s own sermon)');
   const v1 = G.vetAiLine('FACE THAT WERE', 'faith that we', { caseMode: 'upper' });

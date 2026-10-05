@@ -255,13 +255,16 @@ async function discoverModels(signal) {
  * time, then the preference order — with anything this account does not have
  * removed, and its own models kept behind as a last resort.
  */
-function ladderFrom(have) {
+function ladderFrom(have, first) {
   const prefer = provider().models.map((m) => m.id);
   const has = have && have.length ? (id) => have.includes(id) : () => true;
   const out = [];
   // A model with no tokens left this minute is not worth a round trip; it comes
   // back on its own as soon as the provider says its bucket has refilled.
   const add = (id) => { if (id && !out.includes(id) && !limitedNow(id)) out.push(id); };
+  // A job that needs the strongest reader asks for it by name, ahead of the
+  // writer's own pick (see captions:grammar) — when this account has it.
+  for (const id of (first || [])) if (has(id)) add(id);
   // An explicit choice is an instruction and is tried first, present or not:
   // the operator may know something the list does not.
   if (cfg.model) add(cfg.model);
@@ -396,13 +399,13 @@ function textFrom(json) {
  * request, not a guarantee, so the caller still parses defensively (a model
  * that wraps JSON in a ```json fence is the norm, not the exception).
  */
-async function chat({ system, prompt, maxTokens = 1400, temperature = 0.8, json = false, timeoutMs = 30000, signal, evenIfOff = false } = {}) {
+async function chat({ system, prompt, maxTokens = 1400, temperature = 0.8, json = false, timeoutMs = 30000, signal, evenIfOff = false, prefer = null } = {}) {
   // evenIfOff: other features ride on this account (the clip judge) and must not
   // stop because the operator switched the CAPTION writer off
   if (!(evenIfOff ? reachable() : ready())) return '';
   const t0 = Date.now();
   const have = await discoverModels(signal);
-  const list = ladderFrom(have).slice(0, 4);
+  const list = ladderFrom(have, prefer).slice(0, 4);
   const tried = [];
 
   /** One request. Returns { text } | { retryNoJson } | { next } | { stop, why, forMs }. */

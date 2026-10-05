@@ -517,6 +517,59 @@
     return swaps.every(([x, y]) => closeWords(x, y));
   }
 
+  /*
+   * ►► "KEEP THEIR EXACT WORDS" MEANS NO WORD IN AND NO WORD OUT. ◄◄
+   *
+   * Measured on the live server, on a sermon whose captions were already 98.9%
+   * right: the automatic AI check (Groq's gpt-oss-20b) made eleven "sure" fixes
+   * and TEN were wrong — the error rate went from 1.1% to 3.0%. Almost all of
+   * them were the same mistake: a caption line is three words cut out of a
+   * sentence ("LIE THOUGH IT", "BECOME NEW ZACCHAEUS"), the model read the
+   * fragment as a broken sentence and "fixed" it by DELETING the words that
+   * belong to the next one — "though it", "Zacchaeus", "this", "the" — or
+   * pushed a word into the line ("PHILIPPINES CHAPTER 4 VERSE"). The old limit
+   * counted changes, and two deleted words in a three-word line were within it.
+   *
+   * A misheard word is a SWAP: the right word for one that sounds like it. So in
+   * exact mode every change must be one of
+   *   • one word for a word that sounds like it   (face → faith, sun → Son)
+   *   • the same sounds re-spaced                  (is real → Israel, a men → Amen)
+   *   • a word the recogniser said twice, once     (the the → the)
+   * and anything else — a word dropped, a word added, a word swapped for one
+   * that sounds nothing like it ("by" → "power") — is not a correction.
+   */
+  const lettersOnly = (w) => String(w || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  /** How a word starts to the ear: the silent letters some spellings start with go. */
+  const heardStart = (w) => w.replace(/^(ps|pn|kn|gn|wr)/, (m) => m[1]).replace(/^ph/, 'f').replace(/^wh/, 'w');
+  /** The consonants after the first sound — what survives an accent's vowels. */
+  const skeleton = (w) => w[0] + w.slice(1).replace(/[aeiouyhw]/g, '');
+  const likeness = (a, b) => 1 - lev(a, b) / Math.max(a.length, b.length, 1);
+  function soundAlike(x, y) {
+    const a = heardStart(lettersOnly(x)), b = heardStart(lettersOnly(y));
+    if (!a || !b) return false;
+    if (soundsSame(a, b)) return true;
+    const first = (c) => (c === 'k' || c === 'q' ? 'c' : c === 'z' ? 's' : c);
+    if (first(a[0]) !== first(b[0])) return false;
+    return likeness(a, b) >= 0.5 || likeness(skeleton(a), skeleton(b)) >= 0.5;
+  }
+  function onlySwaps(A, B) {
+    const ops = diffWords(A.join(' '), B.join(' '));
+    let dels = [], adds = [], prev = null, ok = true;
+    const flush = (next) => {
+      if (!dels.length && !adds.length) return;
+      if (dels.length === adds.length) { if (!dels.every((d, k) => soundAlike(d, adds[k]))) ok = false; }
+      else if (dels.length && adds.length && soundsSame(dels.join(''), adds.join(''))) { /* re-spaced */ }
+      else if (!adds.length && dels.every((d, k) => d === prev || d === next || d === dels[k - 1] || d === dels[k + 1])) { /* said twice */ }
+      else ok = false;
+      dels = []; adds = [];
+    };
+    for (const o of ops) {
+      if (o.op === 'same') { flush(o.text); prev = o.text; } else if (o.op === 'del') dels.push(o.text); else adds.push(o.text);
+    }
+    flush(null);
+    return ok;
+  }
+
   /**
    * Is the AI's version of a line a CORRECTION of it, or a rewrite? Returns the
    * line to offer (in the caption's own case) or null.
@@ -561,6 +614,7 @@
      */
     const swapped = changed > limit && !respaced && soundAlikeSwaps(a, b, tidy);
     if (changed > limit && !respaced && !swapped) return { ok: false, reason: 'rewrote the line' };
+    if (!tidy && !onlySwaps(a, b)) return { ok: false, reason: 'added, dropped or replaced words' };
     // the same words in a different order is a rewrite, however small
     if (a.length === b.length && a.join(' ') !== b.join(' ') && a.slice().sort().join(' ') === b.slice().sort().join(' ')) return { ok: false, reason: 'reordered the words' };
     if (Math.abs(b.length - a.length) > (tidy ? 3 : 2)) return { ok: false, reason: 'changed the length' };

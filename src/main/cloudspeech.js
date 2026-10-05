@@ -1047,7 +1047,153 @@ async function transcribeWords({ input, startSec = 0, endSec = 0, totalSec = 0, 
     if (onProgress) { try { onProgress(Math.round(((i + 1) / pieces) * 100)); } catch (e) {} }
   }
   // Pieces arrive in order and each is in spoken order; only the seams need tidying.
-  return { words: inSpokenOrder(words), doneSec: span, why: '', model: modelId() };
+  const heard = inSpokenOrder(words);
+  const back = await hearGapsAgain({ input, from, span, words: heard });
+  return { words: back.words, doneSec: span, why: '', model: modelId(), reheard: back.added };
+}
+
+/*
+ * ►► WHAT THE BIG MODEL LEFT OUT, HEARD AGAIN. ◄◄
+ *
+ * Measured on the live server: a 117-second sermon came back with its whole
+ * LAST SENTENCE missing — "The Lord is my shepherd, I shall not want", nine
+ * words, every time it was asked. The same audio asked from 30, 60 or 87 s
+ * heard it; the same audio a few milliseconds shorter heard it; the same audio
+ * with two seconds of silence added did NOT. Whisper decides window by window
+ * whether there is more to say, and now and then it decides wrong and stops —
+ * not a quiet passage, not a cut, nothing a setting fixes. A caption that
+ * silently leaves out what was said is the worst kind there is, because
+ * nothing on the screen shows it is missing.
+ *
+ * So after the whole span is heard, the stretches where something was LOUD
+ * ENOUGH TO BE SPEECH and no word landed are asked about again, on their own,
+ * with a second of what was said either side for context: the stretch after
+ * the last word first (where the measured loss was), then the longest gaps
+ * between words. A stretch at the level of the room between sentences is a
+ * pause and is left alone; a word only counts if it falls inside the gap, and
+ * an answer that is nothing but Whisper's stock filler ("Thank you.") over
+ * music is dropped. At most GAP_TRIES requests, so a sermon with a long music
+ * interval costs a few seconds, not a second listen.
+ */
+const GAP_TAIL_SEC = 1.2;       // after the last word: shorter than this is the speaker's breath
+const GAP_MID_SEC = 3;          // between two words
+const GAP_CTX_SEC = 1;          // heard either side of the gap, so the model has the sentence
+const GAP_WIN_SEC = 28;         // a request covers at most this much of a gap (one Whisper window)
+const GAP_TRIES = 6;
+const GAP_LOUD_DB = 14;         // a gap this close to the speech's own level may be speech…
+const GAP_FLOOR_DB = -55;       // …and never one quieter than this, whatever the speech was
+const LEVEL_STEP = 0.25;        // the level is read in quarter seconds
+
+/** Loudness of [from, from+dur] in LEVEL_STEP blocks, dB full scale. Null if it cannot be read. */
+function levelsOf(input, from, dur) {
+  const SR = 8000, per = Math.round(SR * LEVEL_STEP);
+  const args = ['-v', 'error', ...(from > 0 ? ['-ss', String(from)] : []), '-t', String(dur),
+    '-i', input, '-vn', '-ac', '1', '-ar', String(SR), '-f', 's16le', 'pipe:1'];
+  return new Promise((resolve) => {
+    let proc;
+    try { proc = spawn(ffmpegPath, args, { windowsHide: true }); } catch (e) { return resolve(null); }
+    if (jobs) jobs.track(proc);
+    const db = [];
+    let sum = 0, n = 0, carry = null;
+    const timer = setTimeout(() => { try { proc.kill(); } catch (e) {} }, 120000);
+    proc.stdout.on('data', (d) => {
+      const buf = carry ? Buffer.concat([carry, d]) : d;
+      const whole = buf.length - (buf.length % 2);
+      for (let o = 0; o < whole; o += 2) {
+        const s = buf.readInt16LE(o) / 32768;
+        sum += s * s;
+        if (++n === per) { db.push(10 * Math.log10(sum / n + 1e-12)); sum = 0; n = 0; }
+      }
+      carry = whole < buf.length ? buf.subarray(whole) : null;
+    });
+    proc.on('error', () => { clearTimeout(timer); resolve(null); });
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (n > per / 4) db.push(10 * Math.log10(sum / n + 1e-12));
+      resolve(code === 0 && db.length ? db : null);
+    });
+  });
+}
+
+/**
+ * The stretches worth asking about again, most likely first. Pure, so the test
+ * can pin it: `words` on the span's clock, `levels` from levelsOf (or null,
+ * which asks about every long-enough gap).
+ */
+function gapsToHear(words, span, levels) {
+  const gaps = [];
+  if (!words.length || !(span > 0)) return gaps;
+  const last = words[words.length - 1];
+  if (span - last.end >= GAP_TAIL_SEC) gaps.push({ a: last.end, b: span, tail: true });
+  if (words[0].start >= GAP_MID_SEC) gaps.push({ a: 0, b: words[0].start });
+  for (let k = 1; k < words.length; k++) {
+    if (words[k].start - words[k - 1].end >= GAP_MID_SEC) gaps.push({ a: words[k - 1].end, b: words[k].start });
+  }
+  let loud = gaps;
+  if (levels && levels.length) {
+    // The speech's own level: the middle of the blocks the words were heard in.
+    const at = (t) => Math.min(levels.length - 1, Math.max(0, Math.floor(t / LEVEL_STEP)));
+    const spoken = [];
+    for (const w of words) for (let i = at(w.start); i <= at(w.end); i++) spoken.push(levels[i]);
+    spoken.sort((x, y) => x - y);
+    const ref = spoken.length ? spoken[Math.floor(spoken.length / 2)] : -Infinity;
+    loud = gaps.filter((g) => {
+      const bl = levels.slice(at(g.a), at(Math.min(g.b, g.a + GAP_WIN_SEC)) + 1).slice().sort((x, y) => y - x);
+      // the loud fifth of the gap, against the speech: a pause sits well below it
+      return bl.length && bl[Math.floor(bl.length * 0.2)] >= Math.max(ref - GAP_LOUD_DB, GAP_FLOOR_DB);
+    });
+  }
+  const tail = loud.filter((g) => g.tail);
+  const rest = loud.filter((g) => !g.tail).sort((x, y) => (y.b - y.a) - (x.b - x.a));
+  return tail.concat(rest).slice(0, GAP_TRIES);
+}
+
+const normWord = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9']/g, '');
+
+async function hearGapsAgain({ input, from, span, words }) {
+  const keep = { words, added: 0 };
+  if (!words.length) return keep;              // nothing heard at all: music, or silence — not a gap
+  let levels = null;
+  try { levels = await levelsOf(input, from, span); } catch (e) { levels = null; }
+  const todo = gapsToHear(words, span, levels);
+  if (!todo.length) return keep;
+  // The ending gets a second try with more of the sentence before it: the
+  // loss being undone is itself a coin toss, and a different window re-tosses it.
+  const tries = [];
+  for (const g of todo) { tries.push({ g, ctx: GAP_CTX_SEC }); if (g.tail) tries.push({ g, ctx: GAP_CTX_SEC * 4, again: true }); }
+  let out = words, tailDone = false;
+  for (const { g, ctx, again } of tries.slice(0, GAP_TRIES)) {
+    if (jobCancelled()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
+    if (again && tailDone) continue;
+    const ha = Math.max(0, g.a - ctx);
+    const hb = Math.min(span, Math.min(g.b, g.a + GAP_WIN_SEC) + GAP_CTX_SEC);
+    if (!(hb - ha > 0.5)) continue;
+    let json;
+    try {
+      const body = await encodeRange(input, from + ha, hb - ha, 60000);
+      if (!body || !body.length) continue;
+      json = await postAudioWords(body, { timeoutMs: 60000 });
+    } catch (e) {
+      if (e && e.cancelled) throw e;
+      continue;                                // a second chance that fails leaves the first answer as it was
+    }
+    // only what lands INSIDE the gap — the context either side was already heard
+    let got = wordsFromVerbose(json, ha).filter((w) => {
+      const mid = (w.start + w.end) / 2;
+      return mid > g.a + 0.2 && mid < g.b - 0.2;
+    });
+    // the context's own edge words, re-stamped a little into the gap, are not new
+    const before = out.filter((w) => w.end <= g.a + 0.01).pop();
+    const after = out.find((w) => w.start >= g.b - 0.01);
+    while (got.length && before && normWord(got[0].text) === normWord(before.text)) got = got.slice(1);
+    while (got.length && after && normWord(got[got.length - 1].text) === normWord(after.text)) got = got.slice(0, -1);
+    if (!got.length || isArtefact(got.map((w) => w.text).join(' '))) continue;
+    out = out.concat(got).sort((x, y) => x.start - y.start);
+    keep.added += got.length;
+    if (g.tail) tailDone = true;
+  }
+  keep.words = inSpokenOrder(out);
+  return keep;
 }
 
 /**
@@ -1100,7 +1246,7 @@ async function transcribeSegments({ input, startSec = 0, endSec = 0 } = {}) {
 module.exports = {
   configure, state, ready, transcribe, test, cadence,
   fileReady, transcribeFile, transcribeWords, transcribeSegments, shareKey,
-  wordsFromVerbose, retryWaitMs, inSpokenOrder,
+  wordsFromVerbose, retryWaitMs, inSpokenOrder, gapsToHear,
   /** Was the last window handed to the PC a paced skip, or a real failure? */
   lastDecline: () => lastDecline,
   PROVIDERS, DEFAULT_PROVIDER, SAMPLE_RATE,

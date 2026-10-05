@@ -227,6 +227,63 @@ head('[9] ☁️ The cloud ear, sent in pieces: every word once, none lost at a 
     part.doneSec === 80 && part.words.length > 0 && /503/.test(part.why) && part.words[part.words.length - 1].start < 80,
     JSON.stringify({ doneSec: part.doneSec, why: part.why, last: part.words[part.words.length - 1] }));
 
+  /*
+   * THE LAST SENTENCE, DROPPED — and heard again. Measured live: Groq returned
+   * a 117 s sermon without its final nine words, every time. Here the fake
+   * provider does the same (stops at 20 s of a 30 s clip that is loud all the
+   * way through), and the stretch after the last word must be asked about on
+   * its own and its words put back — once, in order, on the file's clock.
+   */
+  const loudWav = path.join(os.tmpdir(), 'mw-cloudgap-' + process.pid + '.wav');
+  execFileSync(ffmpeg, ['-v', 'error', '-f', 'lavfi', '-i', 'anoisesrc=r=16000:a=0.2:c=pink', '-t', '30', '-y', loudWav]);
+  let cutAt = Infinity, onlyFiller = false;
+  const sayWords = (ha, hb) => {
+    const words = [];
+    for (let k = Math.ceil(ha / 0.5); k * 0.5 + 0.3 <= hb && k * 0.5 < cutAt; k++) words.push({ word: 'w' + k, start: +(k * 0.5 - ha).toFixed(3), end: +(k * 0.5 + 0.3 - ha).toFixed(3) });
+    return words;
+  };
+  global.fetch = async (url, init) => {
+    calls.push({ gran: init.body.getAll('timestamp_granularities[]') });
+    const [ha, hb] = plan[served++] || [0, 0];
+    if (served === 1) return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ words: sayWords(ha, hb), segments: [] }) };
+    // the second chance: the dropped words, or (over music) nothing but a filler
+    cutAt = Infinity;
+    const words = onlyFiller ? [{ word: 'Thank', start: 1.5, end: 1.8 }, { word: 'you.', start: 1.8, end: 2.1 }] : sayWords(ha, hb);
+    return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ words, segments: [] }) };
+  };
+  calls.length = 0; served = 0; cutAt = 20; plan = [[0, 30], [18.8, 30]];
+  const gap = await cs.transcribeWords({ input: loudWav, startSec: 0, endSec: 30 });
+  const gt = gap.words.map((w) => w.text);
+  const want = []; for (let k = 0; k * 0.5 + 0.3 <= 30; k++) want.push('w' + k);
+  check('a dropped ending is asked about again, on its own (one extra request)', calls.length === 2, calls.length);
+  check('…and its words are put back: all of them, once, in order', gt.length === want.length && gt.every((t, i) => t === want[i]),
+    `${gt.length} of ${want.length}: …${gt.slice(-4).join(' ')}`);
+  check('…on the file\'s clock', gap.words.every((w) => Math.abs(w.start - (+w.text.slice(1)) * 0.5) < 0.002), JSON.stringify(gap.words.slice(-2)));
+  check('…and the answer says how many were recovered', gap.reheard === want.length - 40, gap.reheard);
+  // The same, but the second chance only "hears" Whisper's stock filler: nothing is added.
+  calls.length = 0; served = 0; cutAt = 20; onlyFiller = true; plan = [[0, 30], [18.8, 30]];
+  const filler = await cs.transcribeWords({ input: loudWav, startSec: 0, endSec: 30 });
+  onlyFiller = false;
+  check('a second chance that only hears "Thank you." adds nothing', filler.words.length === 40 && filler.reheard === 0,
+    `${filler.words.length} words, +${filler.reheard}`);
+  // Words to the end: no second chance is asked for.
+  calls.length = 0; served = 0; cutAt = Infinity; plan = [[0, 30]];
+  await cs.transcribeWords({ input: loudWav, startSec: 0, endSec: 30 });
+  check('a clip heard to its last word costs exactly one request', calls.length === 1, calls.length);
+  // The finder itself: a pause at the room's level is not a gap; speech-loud stretches are, the ending first.
+  {
+    const ws = [{ text: 'a', start: 0, end: 4 }, { text: 'b', start: 8, end: 12 }, { text: 'c', start: 20, end: 24 }];
+    const lv = new Array(30 * 4).fill(-20);                 // speech level everywhere…
+    for (let i = 4 * 4; i < 8 * 4; i++) lv[i] = -60;        // …but 4–8 s is a quiet pause
+    const g = cs.gapsToHear(ws, 30, lv);
+    check('gaps: the ending first, then the longest loud gap; the quiet pause is left alone',
+      g.length === 2 && g[0].tail && g[0].a === 24 && g[1].a === 12 && g[1].b === 20, JSON.stringify(g));
+    check('gaps: none to hear when nothing was heard at all (music, silence)', cs.gapsToHear([], 30, lv).length === 0);
+    const silent = new Array(30 * 4).fill(-90);
+    check('gaps: a silent recording has no gap worth a request', cs.gapsToHear(ws, 30, silent).length === 0);
+  }
+  try { fs.unlinkSync(loudWav); } catch (e) {}
+
   // No key at all: null, so the studio uses the PC without a word of fuss.
   cs.configure({ on: false, provider: 'groq', key: '' });
   cs.shareKey('groq', '');

@@ -818,7 +818,8 @@ function fillChain(srcW, srcH, W, H, fill, label = 'f') {
  */
 const VOICE_PASS_LADDER = [2, 3, 1, 4];
 const VOICE_WANTED_GAIN_DB = 8;    // an isolation run that worked is worth far more than this
-async function renderVerifiedVoice(ctx, { inputArgs, cut, af, hasAudio, cwd, signal }) {
+async function renderVerifiedVoice(ctx, { inputArgs, cut, af, hasAudio, cwd, signal, onProgress, durSec }) {
+  const tell = (p) => { if (onProgress) { try { onProgress(p); } catch (e) {} } };
   /*
    * DeepFilterNet first, wherever it is installed: every setting, Light to
    * Studio, goes through it (see deepfilter.js for what it replaced and why).
@@ -827,8 +828,8 @@ async function renderVerifiedVoice(ctx, { inputArgs, cut, af, hasAudio, cwd, sig
    */
   if (af && hasAudio && deepfilter.splitChain(af) && deepfilter.binPath()) {
     try {
-      const voice = await deepfilter.renderVoice(ctx, { inputArgs, cut, af, cwd, signal });
-      if (voice) return voice;
+      const voice = await deepfilter.renderVoice(ctx, { inputArgs, cut, af, cwd, signal, onProgress: tell, durSec });
+      if (voice) { tell(100); return voice; }
     } catch (e) {
       if (e && e.name === 'CancelledError') throw e;
       console.warn('[voice] DeepFilterNet failed; using the ffmpeg chain instead: ' + ((e && e.message) || e));
@@ -857,12 +858,14 @@ async function renderVerifiedVoice(ctx, { inputArgs, cut, af, hasAudio, cwd, sig
      */
     const bare = af.replace(/arnndn=.*?,atrim=start_sample=\d+,asetpts=[^,]*,?/g, '').replace(/^,|,$/g, '');
     const ref = await measureSeparation(ctx, { inputArgs, cut, af: bare });
+    tell(15);
 
-    let best = null, bestSep = -Infinity;
+    let best = null, bestSep = -Infinity, tries = 0;
     for (const passes of VOICE_PASS_LADDER) {
       const out = `${stem}-${passes}.wav`;
       await render(withVoicePasses(af, passes), out);
       const sep = await measureSeparation(ctx, { inputArgs: ['-i', out] });
+      tell(15 + Math.round((85 * ++tries) / VOICE_PASS_LADDER.length));
       if (sep == null) { best = out; break; }            // cannot read it back: take it
       if (sep > bestSep) { if (best) drop(best); best = out; bestSep = sep; } else drop(out);
       if (ref == null) break;                            // nothing to compare against
@@ -874,6 +877,33 @@ async function renderVerifiedVoice(ctx, { inputArgs, cut, af, hasAudio, cwd, sig
     for (const f of made) drop(f);
     return null;                                          // fall back to filtering inline
   }
+}
+
+/*
+ * ►► THE VOICE IS PART OF THE BAR. ◄◄
+ *
+ * Studio sound renders the cleaned voice BEFORE the picture is touched, and
+ * that render used to report nothing — so the studio's bar crept forward on
+ * its own (tasks.js), parked on 73% and sat there for minutes while the voice
+ * cleaner and then most of the encode ran underneath it. "It's on 73% for some
+ * time!!" on a 10:32 export. Now the voice reports its own progress and has
+ * the first slice of the export's bar; the encode has the rest.
+ *
+ * The slice is measured, on the Oracle server: a 2-minute 1080p export took
+ * 87 s plain and 110 s with Studio sound, so the voice is ~20% of the export.
+ * (Where the picture is encoded on a GPU the voice is relatively bigger; being
+ * a little out changes the pace of the bar, never whether it moves.)
+ */
+const VOICE_SHARE = 22;
+const voiceWillRender = (af, hasAudio) => !!(af && hasAudio
+  && ((deepfilter.splitChain(af) && deepfilter.binPath()) || /arnndn/.test(af)));
+function voiceThenPicture(onProgress, af, hasAudio) {
+  if (!onProgress || !voiceWillRender(af, hasAudio)) return { voice: null, picture: onProgress };
+  const clamp = (p) => Math.max(0, Math.min(100, Number(p) || 0));
+  return {
+    voice: (p) => onProgress(Math.round((clamp(p) * VOICE_SHARE) / 100)),
+    picture: (p) => onProgress(Math.round(VOICE_SHARE + (clamp(p) * (100 - VOICE_SHARE)) / 100)),
+  };
 }
 
 /**
@@ -894,7 +924,9 @@ async function encodeWithFallback(ctx, { inputArgs, cut, vfCore, af, dur, hasAud
    * audio and simply plays that file: the expensive video work then happens
    * exactly once, over sound already known to be clean.
    */
-  const voiceTrack = await renderVerifiedVoice(ctx, { inputArgs, cut, af, hasAudio, cwd, signal });
+  const bar = voiceThenPicture(onProgress, af, hasAudio);
+  const voiceTrack = await renderVerifiedVoice(ctx, { inputArgs, cut, af, hasAudio, cwd, signal, onProgress: bar.voice, durSec: dur });
+  onProgress = bar.picture;
   // Which input the checked track is: it goes on the end, after however many
   // the caller already had.
   const voiceIdx = inputArgs.filter((x) => x === '-i').length;
@@ -1817,7 +1849,10 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
        * shorts kept the old sound. It goes in as one more input, AFTER the
        * clip's own (its `-t` stays the output's cap, see encodeWithFallback).
        */
-      const voice = (af && info.hasAudio) ? await renderVerifiedVoice(ctx, { inputArgs, cut, af, hasAudio: true }) : null;
+      const bar = voiceThenPicture(onProgress, af, info.hasAudio);
+      const voice = (af && info.hasAudio) ? await renderVerifiedVoice(ctx, { inputArgs, cut, af, hasAudio: true, onProgress: bar.voice, durSec: dur }) : null;
+      // (its own name: a fall-through to the plain path below starts the bar over)
+      const padProg = bar.picture;
       const lastI = inputArgs.lastIndexOf('-i');
       const ins = voice ? [...inputArgs.slice(0, lastI + 2), '-i', voice, ...inputArgs.slice(lastI + 2)] : inputArgs;
       const voiceIdx = inputArgs.filter((x) => x === '-i').length;
@@ -1852,7 +1887,7 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
           const hw = process.platform === 'darwin'
             ? padArgs(['-hwaccel', 'auto'], 'nv12', ['-c:v', 'h264_videotoolbox', '-q:v', '65'])
             : padArgs(['-hwaccel', 'auto'], 'nv12', ['-c:v', 'h264_qsv', '-global_quality', String(qd.qsv)]);
-          await ff.runFfmpeg(ctx.ffmpeg, hw, { onProgress, totalDurationSec: dur });
+          await ff.runFfmpeg(ctx.ffmpeg, hw, { onProgress: padProg, totalDurationSec: dur });
           if (await isCleanEncode(ctx, output)) return output;
         } catch (e) { /* fall through to software */ }
       }
@@ -1864,7 +1899,7 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
         // from the quality tier, so 4K is no longer judged by a 1080p yardstick.
         await ff.runFfmpeg(ctx.ffmpeg,
           padArgs([], 'yuv420p', ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', String(qd.crf)]),
-          { onProgress, totalDurationSec: dur });
+          { onProgress: padProg, totalDurationSec: dur });
         return output;
       } catch (e) { /* fall through to the plain clamped path below */ }
       } finally {
@@ -2812,7 +2847,9 @@ async function applyEdits(ctx, { input, output, edits = {}, onProgress }) {
   // The cleaned voice is rendered first, as for every other export (see
   // renderVerifiedVoice) — not left to run inline, where neither the voice
   // cleaner nor the RNNoise check can happen.
-  const voice = denoiseAf && info.hasAudio ? await renderVerifiedVoice(ctx, { inputArgs: ['-i', input], af: denoiseAf, hasAudio: true }) : null;
+  const bar = voiceThenPicture(onProgress, denoiseAf, info.hasAudio);
+  const voice = denoiseAf && info.hasAudio ? await renderVerifiedVoice(ctx, { inputArgs: ['-i', input], af: denoiseAf, hasAudio: true, onProgress: bar.voice, durSec: info.durationSec }) : null;
+  if (bar.picture) onProgress = bar.picture;
   const voiceIn = music ? 2 : 1;
   if (voice) args.push('-i', voice);
 
@@ -3210,7 +3247,7 @@ async function appendClips(ctx, { input, output, clips = [], position = 'end', f
 const INFO_SHAPE = require('crypto').createHash('sha1').update(probeInfo.toString()).digest('hex').slice(0, 8);
 
 module.exports = {
-  PRESETS, QUALITY, DEFAULT_QUALITY, qualityDef, presetSize, sourceSize, upscaleFactor, outputFps,
+  PRESETS, QUALITY, DEFAULT_QUALITY, VOICE_SHARE, qualityDef, presetSize, sourceSize, upscaleFactor, outputFps,
   setExportPrefs, getExportPrefs, allExportPrefs, loadExportPrefs, RATE_CRF, FPS_CHOICES, TRANSITIONS, transitionOf,
   SFX, makeSfx, mixSounds, saveRecording,
   getInfo, INFO_SHAPE, trim, exportForPlatform, thumbnail,
