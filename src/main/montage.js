@@ -1127,7 +1127,7 @@ function edgeFades(s, next, dur) {
 const encodeOpts = () => (machine.small()
   ? ['-preset', 'ultrafast', '-crf', '23', '-x264-params', 'no-deblock=0:cabac=1:bframes=2']
   // a big server with no GPU (Oracle's free Ampere box): quick, with the bits to look right
-  : machine.fastEncode() ? ['-preset', 'veryfast', '-crf', '20']
+  : machine.fastEncode() ? ['-preset', 'superfast', '-crf', '23', '-maxrate', '8M', '-bufsize', '16M']   // see quickPreset in ffmpeg.js
     : ['-preset', 'medium', '-crf', '18']);
 const bigSource = (c, W, H) => !!(c && c.kind === 'video' && c.w && c.h && c.w * c.h > 2.5 * W * H);
 const decodeOpts = (c, W, H) => (bigSource(c, W, H) ? ['-skip_loop_filter', 'all'] : []);
