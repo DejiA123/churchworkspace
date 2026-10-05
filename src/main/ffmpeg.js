@@ -127,9 +127,20 @@ function quickPreset(out) {
   return out;
 }
 
+/*
+ * ►► A BIG SERVER: ONE ENCODE PER CORE, THE REST IN TURN. ◄◄
+ * Measured on Oracle's free Ampere box (4 cores, 24 GB): eight people
+ * exporting at once all finished together at 133 s — every encode shared the
+ * four cores, so nobody had theirs any sooner than the last person. With one
+ * per core and the rest queued in order, the same eight take the same time in
+ * all, but the first four are done in about half of it. (A desktop keeps no
+ * limit: there, one person runs everything.)
+ */
 const ffSlots = () => {
   const mb = machine.memoryMB();
-  return mb < 1024 ? 1 : mb < 2048 ? 2 : Infinity;
+  if (mb < 1024) return 1;
+  if (mb < 2048) return 2;
+  return machine.fastEncode() ? Math.max(2, machine.cpus()) : Infinity;
 };
 let ffRunning = 0;
 const ffQueue = [];
