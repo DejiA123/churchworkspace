@@ -1,4 +1,7 @@
 'use strict';
+// A server has no graphics card to encode with, however much memory it has:
+// encoders take the quick settings here (machine.js fastEncode).
+if (!process.env.MW_CLOUD_SERVER) process.env.MW_CLOUD_SERVER = '1';
 /*
  * THE CLOUD STUDIO, STANDALONE.
  *
