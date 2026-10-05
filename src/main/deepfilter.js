@@ -255,10 +255,29 @@ function wavSamples(file) {
  * Returns a temp WAV, or null when this machine has no voice cleaner or the
  * chain carries no marker (the caller then does what it always did).
  */
-async function renderVoice(ctx, { inputArgs, cut, af, cwd, signal, pieceSec }) {
+/*
+ * HOW FAR IT HAS GOT, for the export's bar (video.js voiceThenPicture). The
+ * network itself prints nothing while it works, and on a 10-minute sermon that
+ * is a minute and a half of silence — so the bar is paced through it by how
+ * fast the network ran on this machine last time (seconds of audio per second,
+ * per piece), and moved on for real as each piece and each ffmpeg pass ends.
+ * The first run on a machine starts from the Oracle Ampere's measured pace.
+ */
+let netPace = 2;
+const PROG = { extract: 10, levels: 13, net: 85, join: 92 };
+
+async function renderVoice(ctx, { inputArgs, cut, af, cwd, signal, pieceSec, onProgress, durSec }) {
   const bin = binPath();
   const parts = splitChain(af);
   if (!bin || !parts) return null;
+  let shown = 0;
+  const tell = (p) => {
+    const v = Math.max(shown, Math.min(99, Math.round(p)));
+    if (v === shown || !onProgress) return;
+    shown = v;
+    try { onProgress(v); } catch (e) {}
+  };
+  let pacer = null;
   const stem = path.join(os.tmpdir(), `cws-dfn-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   fs.mkdirSync(stem, { recursive: true });
   const ffArgs = (head, chain, out) => [...head, '-af', chain, '-ar', String(SR), '-c:a', 'pcm_s16le', '-y', out];
@@ -281,11 +300,14 @@ async function renderVoice(ctx, { inputArgs, cut, af, cwd, signal, pieceSec }) {
     if (cut && cut.chain && cut.a) a.push('-filter_complex', `${cut.chain};${cut.v ? `[${cut.v}]nullsink;` : ''}[${cut.a}]${pre}[aout]`, '-map', '[aout]');
     else a.push('-vn', '-af', pre);
     a.push('-ar', String(SR), '-c:a', 'pcm_s16le', '-y', src);
-    await ff.runFfmpeg(ctx.ffmpeg, a, { signal, cwd });
+    await ff.runFfmpeg(ctx.ffmpeg, a, { signal, cwd,
+      ...(durSec > 0 ? { onProgress: (q) => tell((q * PROG.extract) / 100), totalDurationSec: durSec } : {}) });
+    tell(PROG.extract);
     const N = wavSamples(src);
     if (!N) return null;
     // fed at FEED_LUFS (never pushed past -0.5 dBTP); a silent track is left as it is
     const heard = await levels(ctx, src);
+    tell(PROG.levels);
     const feed = heard ? Math.min(clampDb(FEED_LUFS - heard.loud, -20, 24), -0.5 - heard.peak) : 0;
 
     /* 2. the network, in pieces across the cores when it is long */
@@ -317,18 +339,34 @@ async function renderVoice(ctx, { inputArgs, cut, af, cwd, signal, pieceSec }) {
     // `lanes` at a time; the first failure stops the rest at once rather than
     // leaving them running for minutes beside the fallback
     const pieces = new Array(bounds.length);
-    let next = 0, failure = null;
+    let next = 0, failure = null, finished = 0;
+    // The pace: each piece hears its own audio plus the warm-up; the lanes run side by side.
+    const nLanes = Math.max(1, Math.min(lanes, bounds.length));
+    const laneSec = new Array(nLanes).fill(0);
+    bounds.forEach(([s, e], i) => { laneSec[i % nLanes] += (e - s + WARM_SEC * SR) / SR; });
+    const expectMs = (Math.max(...laneSec) / netPace) * 1000;
+    const netFrom = Date.now();
+    const paced = () => {
+      const byTime = Math.min(0.95, (Date.now() - netFrom) / Math.max(1, expectMs));
+      tell(PROG.levels + (PROG.net - PROG.levels) * Math.max(byTime, finished / bounds.length));
+    };
+    if (onProgress) pacer = setInterval(paced, 500);
     const lane = async () => {
       while (next < bounds.length && !failure) {
         const i = next++;
-        try { pieces[i] = await one(bounds[i], i); } catch (e) {
+        try { pieces[i] = await one(bounds[i], i); finished++; paced(); } catch (e) {
           if (!failure) failure = e;
           for (const p of live) { try { p.kill('SIGKILL'); } catch (er) {} }
         }
       }
     };
     await Promise.all(Array.from({ length: Math.min(lanes, bounds.length) }, lane));
+    if (pacer) { clearInterval(pacer); pacer = null; }
     if (failure) throw failure;
+    // what this machine actually managed, for the next export's bar
+    const took = (Date.now() - netFrom) / 1000;
+    if (took > 2) netPace = Math.max(0.2, Math.min(50, Math.max(...laneSec) / took));
+    tell(PROG.net);
 
     /* 3. join, trim to the exact length, and run the rest of the chain */
     const head = [];
@@ -342,6 +380,7 @@ async function renderVoice(ctx, { inputArgs, cut, af, cwd, signal, pieceSec }) {
     fc += `;[${last}]atrim=end_sample=${N}[aout]`;
     const cleaned = path.join(stem, 'cleaned.wav');
     await ff.runFfmpeg(ctx.ffmpeg, [...head, '-filter_complex', fc, '-map', '[aout]', '-c:a', 'pcm_s16le', '-y', cleaned], { signal });
+    tell(PROG.join);
     // the voice back as loud as it was in the recording, its true peak never past -1.5 dBTP
     const got = await levels(ctx, cleaned);
     let makeup = heard && got ? heard.loud - got.loud : -feed;
@@ -355,6 +394,7 @@ async function renderVoice(ctx, { inputArgs, cut, af, cwd, signal, pieceSec }) {
     done = true;
     return voice;
   } finally {
+    if (pacer) clearInterval(pacer);
     for (const p of live) { try { p.kill('SIGKILL'); } catch (e) {} }
     try { fs.rmSync(stem, { recursive: true, force: true }); } catch (e) {}
     // a join that failed or was cancelled half-way leaves no half-written track behind

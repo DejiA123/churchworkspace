@@ -1404,7 +1404,14 @@ ipcMain.handle('captions:grammar', wrap(async (e, { lines, before, after, passag
   const ask = engine === 'claude'
     ? ({ system, prompt, schema, maxTokens }) => claudetext.chatJson({ system, prompt, schema, maxTokens: Math.max(8000, maxTokens || 0) })
     : engine === 'groq'
-      ? ({ system, prompt, maxTokens }) => cloudwrite.chat({ system, prompt, maxTokens: maxTokens || 2000, temperature: 0, json: true, timeoutMs: 60000 })
+      /*
+       * The biggest free model first. The writer's ladder keeps whichever model
+       * answered last, and on the live server that was gpt-oss-20b — the one
+       * measured making ten wrong "sure" fixes in eleven on a clean sermon.
+       * Proof-reading a sermon is worth the larger model; when its minute's
+       * tokens are spent the ladder carries on down as before.
+       */
+      ? ({ system, prompt, maxTokens }) => cloudwrite.chat({ system, prompt, maxTokens: maxTokens || 2000, temperature: 0, json: true, timeoutMs: 60000, prefer: ['openai/gpt-oss-120b'] })
       : ({ system, prompt, maxTokens }) => llm.chat({ system, prompt, maxTokens: Math.min(700, maxTokens || 700), temperature: 0, json: true, timeoutMs: 180000 });
   // The church's own spellings and the corrections the editor has made before (the Word Book).
   let terms = [], known = [];

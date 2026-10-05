@@ -1639,9 +1639,10 @@ let _hideTimer = null;
     const id = 'save-' + name;
     const of = (k, n) => (n > 1 ? ` part ${k + 1} of ${n}` : '');
     return {
-      making: (pc, q) => island({ id, title: `Making a ${q === 'fast' ? '720p' : '1080p'} phone copy… ${pc}%`, spin: true, sticky: true, sub: name }),
-      progress: (pc, got, total, k, n) => island({ id, title: `Getting${of(k, n)} ready… ${pc}%`, spin: true, sticky: true,
-        sub: total ? `${Math.round(got / 1048576)} of ${Math.round(total / 1048576)} MB · ${name}` : name }),
+      making: (pc, q) => island({ id, title: `Saving to your phone… ${pc}%`, spin: true, sticky: true,
+        sub: `Step 1 of 2 · making a ${q === 'fast' ? '720p' : '1080p'} copy your iPhone can save · ${name}` }),
+      progress: (pc, got, total, k, n, two) => island({ id, title: `Saving to your phone${of(k, n)}… ${pc}%`, spin: true, sticky: true,
+        sub: `${two ? 'Step 2 of 2 · ' : ''}downloading${total ? ` ${Math.round(got / 1048576)} of ${Math.round(total / 1048576)} MB` : ''} · ${name}` }),
       ready: (share, k, n) => island({ id, kind: 'good', title: `Ready to save${of(k, n)}`, sub: name, sticky: true,
         action: { label: 'Save Video', onClick: () => { islandHide(id); share(); } } }),
       done: (n) => island({ id, kind: 'good', title: n > 1 ? `All ${n} parts saved` : 'Saved', sub: 'Find it in Photos (or Files, if you chose that)', ms: 4000 }),
@@ -1660,6 +1661,7 @@ let _hideTimer = null;
    * look right (up to ~16 minutes), numbered parts only for a longer one.
    */
   const PHONE_PART_MAX = 140 * 1024 * 1024;   // the same as phonecopy.js PART_MAX
+  const MAKE_SHARE = 75;                      // of the one Save bar: making the phone copy (the download is the rest)
   async function offerDownload(p, size, ui) {
     if (!p) return;
     const name = String(p).split(/[\\/]/).pop();
@@ -1682,6 +1684,7 @@ let _hideTimer = null;
       };
       try {
         let parts = saveCache && saveCache.path === p ? saveCache.parts : null;
+        let make = 0;
         if (!parts) {
           let list = [{ path: p, size: Number(size) || 0 }];
           let needed = !size || size > PHONE_PART_MAX;
@@ -1698,10 +1701,19 @@ let _hideTimer = null;
             if (stt && stt.needed === false) needed = false;
             else if (stt && stt.needed && !(stt.hd && stt.hd.ready) && show.choose) quality = await show.choose(stt);
           }
+          /*
+           * ►► ONE BAR FOR THE WHOLE SAVE. ◄◄ "Making a phone copy… 99%" and then
+           * "Getting ready… 0%" read as two jobs, the second starting from
+           * nothing. Now it is one number, start to finish: the copy is the first
+           * MAKE_SHARE of it (on the Oracle server a 10-minute copy is a few
+           * minutes, the download of the 129 MB it makes under one), the
+           * download the rest; with no copy to make, the download is all of it.
+           */
+          make = needed ? MAKE_SHARE : 0;
           if (needed) {
             show.making(0, quality);
             const jobId = 'pc' + Date.now().toString(36);
-            const off = window.api.onJobProgress((d) => { if (d && d.jobId === jobId) show.making(Math.min(99, Math.round(d.percent || 0)), quality); });
+            const off = window.api.onJobProgress((d) => { if (d && d.jobId === jobId) show.making(Math.round((Math.min(99, d.percent || 0) * MAKE_SHARE) / 100), quality); });
             try {
               const got = await call('video:phoneCopy', { input: p, jobId, quality });
               if (got && Array.isArray(got.parts) && got.parts.length) list = got.parts;
@@ -1713,16 +1725,18 @@ let _hideTimer = null;
           const stem = name.replace(/\.[^.]+$/, '');
           parts = list.map((x, i) => ({ path: x.path, size: x.size, file: null, saved: false,
             name: list.length > 1 ? `${stem}-part${i + 1}of${list.length}.mp4` : (x.path === p ? name : stem + '.mp4') }));
-          saveCache = { path: p, parts };
-        }
+          saveCache = { path: p, parts, make };
+        } else make = saveCache.make || 0;
         const n = parts.length;
         const step = async (k) => {
           while (k < n && parts[k].saved) k++;
           if (k >= n) { saveCache = null; return show.done(n); }
           const part = parts[k];
           if (!part.file) {
-            show.progress(0, 0, part.size || 0, k, n);
-            part.file = await fetchForSaving(part.path, part.name, part.size, (pc, got, total) => show.progress(pc, got, total, k, n));
+            // where the whole save has got: the copy's share, then this part's place among the parts
+            const whole = (pc) => Math.min(99, Math.round(make + (((k + pc / 100) / n) * (100 - make))));
+            show.progress(whole(0), 0, part.size || 0, k, n, make > 0);
+            part.file = await fetchForSaving(part.path, part.name, part.size, (pc, got, total) => show.progress(whole(pc), got, total, k, n, make > 0));
           }
           if (!navigator.canShare({ files: [part.file] })) {
             show.fail('This phone cannot save it from here — opening it in the player');
@@ -1846,8 +1860,8 @@ let _hideTimer = null;
     const mb = (b) => (b >= 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : Math.max(1, Math.round(b / 1048576)) + ' MB');
     const of = (k, n) => (n > 1 ? ` part ${k + 1} of ${n}` : '');
     const ui = {
-      making: (pc, q) => go('loading', `Preparing ${pc}%`,
-        `Making a ${q === 'fast' ? '720p' : '1080p'} copy your iPhone can save. Keep the app open.`, pc),
+      making: (pc, q) => go('loading', `Saving ${pc}%`,
+        `Step 1 of 2: making a ${q === 'fast' ? '720p' : '1080p'} copy your iPhone can save. Keep the app open.`, pc),
       /* two buttons above Save: full HD, or quicker */
       choose: (stt) => new Promise((resolve) => {
         go('choose', 'Pick ↑', '');
@@ -1864,8 +1878,8 @@ let _hideTimer = null;
         });
         v.querySelector('.cv-acts').before(box);
       }),
-      progress: (pc, got, total, k, n) => go('loading', n > 1 ? `Part ${k + 1}/${n} · ${pc}%` : `Downloading ${pc}%`,
-        `Getting${of(k, n) || ' the video'} onto your phone${total ? ` — ${mb(got)} of ${mb(total)}` : '…'} Keep the app open.`, pc),
+      progress: (pc, got, total, k, n, two) => go('loading', n > 1 ? `Part ${k + 1}/${n} · ${pc}%` : `Saving ${pc}%`,
+        `${two ? 'Step 2 of 2: getting' : 'Getting'}${of(k, n) || ' the video'} onto your phone${total ? ` — ${mb(got)} of ${mb(total)}` : '…'} Keep the app open.`, pc),
       ready: (share, k, n) => {
         btn._share = share;
         go('ready', n > 1 ? `Save part ${k + 1} of ${n}` : 'Save to Photos',

@@ -299,6 +299,25 @@ function lag(aFile, bFile) {
     }
   }
 
+  /*
+   * THE BAR MOVES WHILE THE VOICE IS CLEANED. A 10:32 export sat on 73% for
+   * minutes on the server: the voice render reported nothing, the studio's
+   * bar crept ahead on its own and parked. The voice now owns the first slice
+   * of the export's progress and the picture the rest, so the numbers start
+   * low, pass through the voice's slice, and only ever go up.
+   */
+  {
+    const seenPct = [];
+    await video.exportShort(ctx, { input: LOUD, startSec: 0, endSec: DUR, preset: 'reel-9x16', denoise: 'studio', output: out('bar-clip'),
+      onProgress: (p) => seenPct.push(p) });
+    const inVoice = seenPct.filter((p) => p > 0 && p < video.VOICE_SHARE);
+    check('the export\'s bar moves while the voice is being cleaned (before the picture starts)', inVoice.length >= 3,
+      `${inVoice.length} steps under ${video.VOICE_SHARE}%: ${seenPct.slice(0, 12).join(', ')}…`);
+    check('…the picture then carries it the rest of the way', seenPct.some((p) => p >= 90), `last ${seenPct[seenPct.length - 1]}`);
+    const back = seenPct.findIndex((p, i) => i > 0 && p < seenPct[i - 1] && p < video.VOICE_SHARE);
+    check('…and it never goes back into the voice\'s slice once past it', back < 0, back < 0 ? '' : `at step ${back}: ${seenPct.slice(Math.max(0, back - 3), back + 2).join(', ')}`);
+  }
+
   // a short with a pause closed (two pieces joined) — a cut plan
   const sCut = await watch(() => video.exportShort(ctx, { input: LOUD, startSec: 1, endSec: 17, preset: 'reel-9x16', denoise: 'light',
     pieces: [{ start: 1, end: 8 }, { start: 11, end: 17 }], output: out('clean-cut') }));
