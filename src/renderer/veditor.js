@@ -1237,6 +1237,7 @@
     updateClipPlayButtons(); // the card ▶/⏸ tracks whether ITS clip is playing
     syncMusicPreview();      // the music bed follows the playhead
     syncSoundPreview();      // …and so do voiceovers and sound effects
+    syncFsControls();        // full screen's own bar, when it is showing
   }
 
   /** Real-editor behaviour: if NO main-lane clip covers the playhead (a gap, or
@@ -1557,7 +1558,9 @@
    */
   function visibleBand(ch) {
     const el = ve.refs.preview;
-    if (!el || !document.body.classList.contains('mw-cloud') || document.fullscreenElement) return { top: 0, bottom: ch };
+    // In full screen — the real one, or an iPhone's (.ve-pfull) — the picture
+    // covers the bar and the play row, so all of it is visible.
+    if (!el || !document.body.classList.contains('mw-cloud') || document.fullscreenElement || isPseudoFull()) return { top: 0, bottom: ch };
     const r = el.getBoundingClientRect();
     if (!r.height) return { top: 0, bottom: ch };
     let top = 0, bottom = ch;
@@ -1783,6 +1786,181 @@
     updateCropMask();
     updateCapOverlay(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
     renderTextOverlays();
+    syncFsControls();
+  }
+
+  /* ---------------- full screen: a player's own controls ----------------
+   * Full screen is where a short gets watched before it is exported, and the
+   * transport row is left behind underneath it — on a phone there was no way
+   * to pause, see how far in you were or go back a bit without leaving. So
+   * full screen has its own: play/pause, the time, a scrub bar you can drag,
+   * and a big ▶ in the middle while it is paused. While it plays they fade
+   * after a moment so the picture is all you see; moving the mouse or a tap
+   * brings them back, and a tap on the picture while they show puts them away.
+   */
+  const FS_IDLE_MS = 2600;
+  const fsUi = { timer: 0, raf: 0, scrub: null, down: null, p: -1, cur: '', all: '', mx: -1, my: -1 };
+  const fsOn = () => !!ve.video && isPreviewFull();
+  function fsSetIdle(on) {
+    const d = ve.refs.drop;
+    if (d.classList.contains('ve-fs-idle') !== !!on) d.classList.toggle('ve-fs-idle', !!on);
+  }
+  /** Show the controls; while it plays, they fade again after a moment of nothing. */
+  function fsWake() {
+    clearTimeout(fsUi.timer); fsUi.timer = 0;
+    if (ve.refs.drop.classList.contains('ve-fs-idle')) fsUi.wokeAt = performance.now();
+    fsSetIdle(false);
+    if (!fsOn() || !isPlaying() || fsUi.scrub) return;
+    fsUi.timer = setTimeout(() => {
+      fsUi.timer = 0;
+      if (fsOn() && isPlaying() && !fsUi.scrub) fsSetIdle(true);
+    }, FS_IDLE_MS);
+  }
+  /** The bar at time t: the fill, the knob, the two times. Writes only what changed. */
+  function fsPaint(t) {
+    const sc = ve.refs.fsScrub; if (!sc) return;
+    const end = playEnd();
+    const p = end > 0 ? Math.round(clamp(t / end, 0, 1) * 1e4) / 1e4 : 0;
+    if (p !== fsUi.p) { fsUi.p = p; sc.style.setProperty('--p', String(p)); }
+    const cur = fmt(t), all = fmt(end);
+    if (cur === fsUi.cur && all === fsUi.all) return;
+    fsUi.cur = cur; fsUi.all = all;
+    setText('#veFsCur', cur); setText('#veFsDur', all);
+    sc.setAttribute('aria-valuenow', String(Math.round(t)));
+    sc.setAttribute('aria-valuemax', String(Math.round(end)));
+    sc.setAttribute('aria-valuetext', `${cur} of ${all}`);
+  }
+  /** Keep the bar moving smoothly while it plays (timeupdate comes only ~4 times a second). */
+  function fsLoop() {
+    if (fsUi.raf) return;
+    const step = () => {
+      fsUi.raf = 0;
+      if (!fsOn() || !isPlaying()) return;
+      if (!fsUi.scrub && !ve.refs.drop.classList.contains('ve-fs-idle')) fsPaint(nowT());
+      fsUi.raf = requestAnimationFrame(step);
+    };
+    fsUi.raf = requestAnimationFrame(step);
+  }
+  /** Bring the controls up to date: shown or not, playing or paused, where the playhead is. */
+  function syncFsControls() {
+    const d = ve.refs && ve.refs.drop; if (!d) return;
+    const was = d.classList.contains('ve-fs-ui');
+    if (!fsOn()) {
+      if (was) { d.classList.remove('ve-fs-ui', 've-fs-playing', 've-fs-idle'); clearTimeout(fsUi.timer); fsUi.timer = 0; }
+      // left full screen with a finger still on the scrub bar: finish it where it was
+      const sc = fsUi.scrub;
+      if (sc) {
+        fsUi.scrub = null;
+        if (sc.raf) cancelAnimationFrame(sc.raf);
+        if (ve.refs.fsScrub) ve.refs.fsScrub.classList.remove('dragging');
+        seekTo(sc.t);
+        if (sc.wasPlaying && !isPlaying() && sc.t < playEnd() - 0.1) togglePlay();
+      }
+      return;
+    }
+    const playing = isPlaying();
+    if (!was || d.classList.contains('ve-fs-playing') !== playing) {
+      d.classList.add('ve-fs-ui');
+      d.classList.toggle('ve-fs-playing', playing);
+      for (const b of [ve.refs.fsPlay, ve.refs.fsBigPlay]) {
+        if (!b) continue;
+        b.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+        b.title = playing ? 'Pause (Space)' : 'Play (Space)';
+      }
+      fsWake();          // just paused: they stay; just started: they fade in a moment
+      if (playing) fsLoop();
+    }
+    fsPaint(fsUi.scrub ? fsUi.scrub.t : nowT());
+  }
+
+  /* -- the scrub bar: press anywhere on it, drag, let go -- */
+  function fsScrubTime(e) {
+    const r = ve.refs.fsScrub.getBoundingClientRect();
+    return clamp((e.clientX - r.left) / Math.max(1, r.width), 0, 1) * playEnd();
+  }
+  function fsScrubTo(t) {
+    const s = fsUi.scrub; if (!s) return;
+    s.t = t;
+    fsPaint(t);                       // the knob follows the finger at once…
+    if (s.raf) return;
+    s.raf = requestAnimationFrame(() => { s.raf = 0; if (fsUi.scrub === s) seekTo(s.t); });   // …the picture once a frame
+  }
+  function onFsScrubDown(e) {
+    if (!fsOn() || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    e.preventDefault(); e.stopPropagation();
+    try { ve.refs.fsScrub.setPointerCapture(e.pointerId); } catch (er) {}
+    // Hold the picture still under the finger; it carries on when you let go.
+    const wasPlaying = isPlaying();
+    if (wasPlaying) togglePlay();
+    fsUi.scrub = { id: e.pointerId, t: nowT(), wasPlaying, raf: 0 };
+    ve.refs.fsScrub.classList.add('dragging');
+    fsWake();
+    fsScrubTo(fsScrubTime(e));
+  }
+  function onFsScrubMove(e) {
+    const s = fsUi.scrub; if (!s || e.pointerId !== s.id) return;
+    e.preventDefault();
+    fsScrubTo(fsScrubTime(e));
+  }
+  function onFsScrubUp(e) {
+    const s = fsUi.scrub; if (!s || e.pointerId !== s.id) return;
+    if (s.raf) cancelAnimationFrame(s.raf);
+    fsUi.scrub = null;
+    ve.refs.fsScrub.classList.remove('dragging');
+    seekTo(s.t);
+    // let go at the very end and it stays there, rather than starting over
+    if (s.wasPlaying && !isPlaying() && s.t < playEnd() - 0.1) togglePlay();
+    syncFsControls(); fsWake();
+  }
+
+  /* -- taps and clicks on the picture itself -- */
+  const FS_NOT_PICTURE = '.ve-fs-bar, .ve-fs-bigplay, .ve-fs-exit, .ve-text-box, .ve-text-tools, .ve-cap-overlay, .ve-overlay-guide, .ve-crop-reset, .ve-novid, button, input, select';
+  function onFsPointerDown(e) {
+    if (!fsOn()) return;
+    const el = e.target;
+    fsUi.down = {
+      id: e.pointerId, x: e.clientX, y: e.clientY, at: performance.now(),
+      shown: !ve.refs.drop.classList.contains('ve-fs-idle'),
+      picture: !(el && el.closest && el.closest(FS_NOT_PICTURE)),
+      textSel: !!ve.textSel,
+    };
+    fsWake();
+  }
+  function onFsPointerUp(e) {
+    const d = fsUi.down; fsUi.down = null;
+    if (!d || d.id !== e.pointerId || !d.picture || !fsOn()) return;
+    if (ve.cropDrag && ve.cropDrag.moved) return;     // that moved the picture: a drag, not a tap
+    // a drag (framing the shot) or a long press is not a tap
+    if (Math.abs(e.clientX - d.x) > 8 || Math.abs(e.clientY - d.y) > 8 || performance.now() - d.at > 600) return;
+    // A mouse click plays and pauses, as in any desktop player — unless it was
+    // the click that let go of a selected text box.
+    if (e.pointerType === 'mouse') { if (e.button === 0 && !d.textSel) { togglePlay(); fsWake(); } return; }
+    // A finger: the press already brought the controls up; a tap while they
+    // were showing puts them away again.
+    if (d.shown && isPlaying()) { clearTimeout(fsUi.timer); fsUi.timer = 0; fsSetIdle(true); }
+  }
+  function wireFsControls() {
+    const d = ve.refs.drop, sc = ve.refs.fsScrub;
+    if (!d || !sc) return;
+    // (the tap that woke faded controls is not also a press on the button now under it)
+    const play = () => { if (performance.now() - (fsUi.wokeAt || 0) < 450) { fsWake(); return; } togglePlay(); fsWake(); };
+    ve.refs.fsPlay.addEventListener('click', play);
+    ve.refs.fsBigPlay.addEventListener('click', play);
+    sc.addEventListener('pointerdown', onFsScrubDown);
+    sc.addEventListener('pointermove', onFsScrubMove);
+    sc.addEventListener('pointerup', onFsScrubUp);
+    sc.addEventListener('pointercancel', onFsScrubUp);
+    d.addEventListener('pointerdown', onFsPointerDown);
+    d.addEventListener('pointerup', onFsPointerUp);
+    d.addEventListener('pointercancel', () => { fsUi.down = null; });
+    d.addEventListener('pointermove', (e) => {
+      if (e.pointerType !== 'mouse' || !fsOn()) return;
+      // a browser re-sends the pointer's position when what is under it changes; only a real move counts
+      if (e.clientX === fsUi.mx && e.clientY === fsUi.my) return;
+      fsUi.mx = e.clientX; fsUi.my = e.clientY;
+      fsWake();
+    });
+    document.addEventListener('keydown', () => { if (fsOn()) fsWake(); });
   }
 
   /* ======================= THE PRO TIMELINE (v2.79) =======================
@@ -2504,13 +2682,27 @@
   function onCropDown(ev) {
     if (!ve.video) return;
     if (ev.target.closest('#veCropReset')) return;
-    if (reframeOn()) takeManualFraming();
     ev.preventDefault(); ev.stopPropagation();
     const cm = ve.canvasMap; if (!cm) return;
     const w0 = cropWindow();
-    ve.cropDrag = { x0: ev.clientX, y0: ev.clientY, ox0: w0.ox, oy0: w0.oy, s: cm.s, map: cm.map };
+    ve.cropDrag = { x0: ev.clientX, y0: ev.clientY, ox0: w0.ox, oy0: w0.oy, s: cm.s, map: cm.map, moved: false };
     const move = (e) => {
       const d = ve.cropDrag; if (!d) return;
+      // A tap is not a drag. Full screen's controls come back with a tap on the
+      // picture, and that tap must not quietly switch 🎯 Auto-reframe off: the
+      // speaker is only handed over to you once the picture actually moves.
+      if (!d.moved) {
+        if (Math.abs(e.clientX - d.x0) < 4 && Math.abs(e.clientY - d.y0) < 4) return;
+        d.moved = true;
+        if (reframeOn()) {
+          takeManualFraming();
+          // the picture's scale and window are the manual framing's now (its own
+          // zoom included), not the tracker's from when the press began
+          const cm2 = ve.canvasMap, w = cropWindow();
+          if (cm2) { d.s = cm2.s; d.map = cm2.map; }
+          d.ox0 = w.ox; d.oy0 = w.oy; d.x0 = e.clientX; d.y0 = e.clientY;
+        }
+      }
       // dragging the video right reveals footage on the LEFT → the crop centre moves left
       ve.framing.offsetX = clamp(d.ox0 - (e.clientX - d.x0) / (d.s * (d.map.renderedW || 1)), 0, 1);
       ve.framing.offsetY = clamp(d.oy0 - (e.clientY - d.y0) / (d.s * (d.map.renderedH || 1)), 0, 1);
@@ -2687,6 +2879,8 @@
    */
   function overlayPreviewRect(s) {
     const fr = outputFrameRect();
+    // ⛶ Fill frame (an AI Montage cutaway): the whole frame, the picture cropped to it
+    if (s && s.cover) return { left: fr.left, top: fr.top, w: fr.w, h: fr.h, fr, map: previewMapping(), scale: 1 };
     // The box is as tall as what it SHOWS: added media keeps its own shape (a
     // portrait phone clip on a 16:9 service is the normal case), so borrowing
     // this video's ratio would draw a guide that does not match the export.
@@ -2741,12 +2935,21 @@
     const resizing = !!ev.target.closest('[data-ovresize]');
     const preSnap = snapshotState();
     const x0 = ev.clientX, y0 = ev.clientY;
-    const px0 = s.pipX != null ? s.pipX : 0.6, py0 = s.pipY != null ? s.pipY : 0.05, pw0 = s.pipW != null ? s.pipW : 0.34;
+    let px0 = s.pipX != null ? s.pipX : 0.6, py0 = s.pipY != null ? s.pipY : 0.05, pw0 = s.pipW != null ? s.pipW : 0.34;
+    const wasCover = !!s.cover;
     // Measured against the EXPORT FRAME, which is what the numbers are fractions
     // of — so a pixel of mouse movement moves the box by a pixel, whatever the
     // picture underneath is doing.
     const fr = outputFrameRect();
     const move = (e) => {
+      // A picture that fills the frame has nowhere to go; DRAGGING it means
+      // placing it yourself, so it becomes a box (as wide as the frame) to move
+      // — on a real drag only: a tap must not quietly undo the fill.
+      if (s.cover) {
+        if (Math.abs(e.clientX - x0) < 4 && Math.abs(e.clientY - y0) < 4) return;
+        s.cover = false; fitPipToFrame(s); updateOverlayTools();
+        px0 = s.pipX; py0 = s.pipY; pw0 = s.pipW;
+      }
       const dx = (e.clientX - x0) / (fr.w || 1), dy = (e.clientY - y0) / (fr.h || 1);
       if (resizing) { s.pipW = clamp(pw0 + dx, 0.05, 1); }
       else { s.pipX = px0 + dx; s.pipY = py0 + dy; }
@@ -2762,7 +2965,7 @@
     };
     const up = () => {
       document.removeEventListener('mousemove', move);
-      if (Math.abs((s.pipX || 0) - px0) > 0.001 || Math.abs((s.pipY || 0) - py0) > 0.001 || Math.abs((s.pipW || 0) - pw0) > 0.001) commitDragHistory(preSnap);
+      if (wasCover !== !!s.cover || Math.abs((s.pipX || 0) - px0) > 0.001 || Math.abs((s.pipY || 0) - py0) > 0.001 || Math.abs((s.pipW || 0) - pw0) > 0.001) commitDragHistory(preSnap);
       syncBulkOverlayFrom(s);
     };
     document.addEventListener('mousemove', move);
@@ -3241,6 +3444,58 @@
       + (failed.length ? ` (Couldn't read ${failed.join(', ')}.)` : ''), 'good', 8000);
   }
 
+  /**
+   * An AI Montage's pictures, laid on the overlay rows where the montage had
+   * them: the same moment, the same length, a cutaway filling the frame and a
+   * framed picture in its corner (montage.js renderPiece's geometry), fading in
+   * and out over a quarter second as it did. Their own sound stays off — the
+   * montage plays the shot's sound under them — but a clip that has some can
+   * have it turned on like any added video.
+   */
+  async function placeMontageOverlays(list) {
+    const vw = (ve.video.info && ve.video.info.width) || 1080, vh = (ve.video.info && ve.video.info.height) || 1920;
+    const infos = {};
+    for (const f of new Set(list.map((o) => o.file))) {
+      try { infos[f] = await window.api.video.info(f); } catch (e) { infos[f] = null; }
+    }
+    let n = 0;
+    for (const o of list.slice().sort((a, b) => a.at - b.at)) {
+      const info = infos[o.file];
+      if (!info || !info.width || !info.height) continue;      // the picture has gone since
+      const image = o.kind ? o.kind === 'image' : isImgPath(o.file);
+      const at = clamp(Number(o.at) || 0, 0, Math.max(0, dur() - 0.2));
+      const len = clamp(Number(o.seconds) || 2, 0.3, Math.max(0.3, dur() - at));
+      const from = image ? 0 : Math.max(0, Number(o.from) || 0);
+      const s = {
+        id: uid(), lane: freeLaneFor(at, at + len),
+        src: o.file, kind: image ? 'image' : 'video',
+        srcInfo: { width: info.width, height: info.height, durationSec: image ? 0 : (info.durationSec || from + len), hasAudio: !!info.hasAudio },
+        start: from, end: from + len, tlStart: at,
+        label: `${image ? 'Photo' : 'Clip'} ${++n}`,
+        color: image ? '#0aa2c0' : '#a371f7',
+        mute: true, fade: 0.25, montage: true,
+      };
+      if (o.style === 'pip') {
+        // the montage's box: up to half the width (a third on a wide frame) and a
+        // third of the height, in a 6 px white frame whose outside edge is 44 px
+        // in from its side and 11% down (montage.js renderPiece)
+        const ar = info.width / info.height;
+        const bw = Math.min(vw * (vw > vh ? 0.34 : 0.5), vh * 0.34 * ar);
+        s.pipW = bw / vw;
+        s.pipX = o.pos === 'left' ? 50 / vw : 1 - s.pipW - 50 / vw;
+        s.pipY = (Math.round(vh * 0.11) + 6) / vh;
+        s.frame = 6 / vw;
+      } else {
+        Object.assign(s, { cover: true, pipX: 0, pipY: 0, pipW: 1 });
+      }
+      ve.segments.push(s);
+      loadMediaThumb(s);
+    }
+    renderMediaLayer();
+    updateMediaLayer(nowT());
+    return n;
+  }
+
   /** A small picture of the file, painted into its clip block. */
   async function loadMediaThumb(s) {
     if (!isMedia(s) || ve.mediaThumbs[s.src]) return;
@@ -3347,6 +3602,21 @@
       ? `🌫 “${s.label}” fills the frame on a blurred copy of itself.`
       : `“${s.label}” is back on top of the video, no blur behind it.`, 'good');
   }
+  /** ⛶ Fill frame: the picture covers the whole frame, cropped to it — how the
+   *  AI Montage lays a cutaway — or back to a box that can be placed. */
+  function toggleOverlayFill(id) {
+    const s = ve.segments.find((x) => x.id === (id || ve.sel));
+    if (!s || !isMedia(s)) return window.__toast && window.__toast('Select a picture or an added video first (tap it on the timeline).', 'error');
+    pushHistory();
+    s.cover = !s.cover;
+    if (s.cover) s.bgBlur = false; else fitPipToFrame(s);
+    renderSegments(); renderMediaLayer(); renderOverlayGuide();
+    updateMediaLayer(nowT());
+    updateOverlayTools();
+    window.__toast && window.__toast(s.cover
+      ? `⛶ “${s.label}” fills the frame.`
+      : `“${s.label}” is a box again — drag it on the preview to place it.`, 'good');
+  }
   function toggleOverlaySound(id) {
     const s = ve.segments.find((x) => x.id === (id || ve.sel));
     if (!s || !isMedia(s) || s.kind !== 'video') return;
@@ -3371,6 +3641,13 @@
       const showK = !!(sk && isMedia(sk));
       kb.classList.toggle('hidden', !showK);
       kb.classList.toggle('on', showK && keyOn(sk));
+    }
+    const fb = $('#veOvFill');
+    if (fb) {
+      const sf = ve.segments.find((x) => x.id === ve.sel);
+      const showF = !!(sf && isMedia(sf));
+      fb.classList.toggle('hidden', !showF);
+      fb.classList.toggle('on', showF && !!sf.cover);
     }
     const bb = $('#veOvBlur');
     if (bb) {
@@ -3482,7 +3759,14 @@
       // …and so is how faint it is. The compositor has always honoured opacity;
       // the preview did not, so a watermark dialled down to a third still looked
       // solid right up until the file came out.
-      n.style.opacity = s.opacity != null ? String(clamp(s.opacity, 0.05, 1)) : '';
+      n.style.objectFit = s.cover ? 'cover' : '';
+      // a montage's framed picture keeps its white frame (drawn outside the box, as the export pads it)
+      n.style.outline = s.frame > 0 && !s.cover ? `${Math.max(1, Math.round(s.frame * r.fr.w))}px solid #fff` : '';
+      // …and its fade in and out (an AI Montage picture's), the compositor's ramp
+      let op = s.opacity != null ? clamp(s.opacity, 0.05, 1) : 1;
+      const fd = Math.min(Number(s.fade) || 0, (b - a) / 2);
+      if (fd > 0) op *= clamp(Math.min(t - a, b - t) / fd, 0, 1);
+      n.style.opacity = op < 1 ? String(op) : '';
       // 🎛️ a clip added after the video shows its own look
       if (isTailClip(s)) { const css = fxCss(s.fx); if (n._fxCss !== css) { n._fxCss = css; n.style.filter = css; } }
       // green screen: drawn through the key, as the export will (see drawKeyed)
@@ -3742,7 +4026,13 @@
     const g = c.getContext('2d', { willReadFrequently: true });
     try {
       g.clearRect(0, 0, w, h);
-      g.drawImage(n, 0, 0, w, h);
+      const nw = n.videoWidth || n.naturalWidth || 0, nh = n.videoHeight || n.naturalHeight || 0;
+      if (s.cover && nw && nh) {
+        // ⛶ Fill frame: the middle of the picture, cropped to the frame's shape —
+        // the export's cover crop, not the whole picture squashed into it
+        const sc = Math.max(w / nw, h / nh), sw = w / sc, sh = h / sc;
+        g.drawImage(n, (nw - sw) / 2, (nh - sh) / 2, sw, sh, 0, 0, w, h);
+      } else g.drawImage(n, 0, 0, w, h);
       const img = g.getImageData(0, 0, w, h), d = img.data;
       const k = s.key, kuv = keyUVFull(...hexRgb(k.color));
       const sim = clamp(Number(k.sim) || 0, 0, 1), blend = clamp(Number(k.blend) || 0, 0, 1);
@@ -4445,7 +4735,8 @@
     // it on the opposite side of the picture from the selected text.
     const low = (o.y || 0) < 0.5;
     bar.style.top = low ? 'auto' : '10px';
-    bar.style.bottom = low ? '10px' : 'auto';
+    // in full screen its own player bar has the bottom: sit above it
+    bar.style.bottom = low ? (isPreviewFull() ? 'calc(env(safe-area-inset-bottom) + 96px)' : '10px') : 'auto';
     $('#vtFont').value = o.font || 'Arial';
     $('#vtSize').value = String(Math.round(Math.max(1, (o.sizePct || 0.11) * previewH()) * 2) / 2);
     $('#vtColor').value = /^#[0-9a-f]{6}$/i.test(o.color || '') ? o.color : '#ffffff';
@@ -4924,6 +5215,26 @@
     else scrollCapIntoView(i);
     startEditingCap(i);
   }
+  /**
+   * Take one caption line off the lane: the block, and its words too, so
+   * changing Words per line cannot regroup it back in. One step Undo puts back.
+   */
+  function deleteCapLine(i, say) {
+    const evs = ve.capEvents || [];
+    const e = evs[i]; if (!e) return false;
+    pushHistory({ captions: true });
+    evs.splice(i, 1);
+    if (Array.isArray(ve.capWords) && ve.capWords !== evs) {
+      ve.capWords = ve.capWords.filter((w) => { const mid = (w.start + w.end) / 2; return !(mid >= e.start - 0.01 && mid <= e.end + 0.01); });
+    }
+    ve.capSel = null; ve.capEditing = null;
+    renderCapTrack(); renderCapList();
+    updateCapOverlay(ve.refs.player.currentTime || 0);
+    if (say) window.__toast && window.__toast(`Took “${String(e.text || '').slice(0, 40)}” off the captions. Undo puts it back.`, 'good');
+    return true;
+  }
+  // (a text box picked since is what is selected now, not the caption before it)
+  const capLineSelected = () => ve.activeRow === 'caption' && ve.capSel != null && !ve.textSel && capBlocksVisible() && !!ve.capEvents[ve.capSel];
   /** Save whatever caption line is being typed into right now (if any). */
   function commitCapEdit() {
     if (ve.capEditing == null) return;
@@ -5662,7 +5973,7 @@
     if (ve.tailRun) cancelAnimationFrame(ve.tailRun.raf);
     const was = !!ve.tailRun;
     ve.tailRun = null;
-    if (!quiet && was) { ve.refs.play.textContent = '▶'; updateMediaLayer(nowT()); syncMusicPreview(); }
+    if (!quiet && was) { ve.refs.play.textContent = '▶'; updateMediaLayer(nowT()); syncMusicPreview(); syncFsControls(); }
   }
   function leaveTail() { stopTailRun(true); ve.tailT = null; }
   /* iOS lets a video play with sound only from a tap; the clips that follow the
@@ -8157,7 +8468,8 @@
       const place = mode === 'source' ? pipOnSource(o) : {
         x: o.pipX != null ? o.pipX : 0.6, y: o.pipY != null ? o.pipY : 0.05, wFrac: o.pipW != null ? o.pipW : 0.34,
       };
-      return overlayWindows(s, o, clock).map((w) => Object.assign({
+      const wins = overlayWindows(s, o, clock);
+      return wins.map((w, wi) => Object.assign({
         src: o.src || ve.video.path,
         still: o.kind === 'image',
         // A picture never has sound; a second video keeps its own unless silenced.
@@ -8166,6 +8478,13 @@
         opacity: o.opacity != null ? o.opacity : 1,
         key: keyOn(o) ? { color: o.key.color, sim: o.key.sim, blend: o.key.blend } : undefined,
         bgBlur: !!o.bgBlur,
+        cover: !!o.cover,
+        frame: o.frame > 0 && !o.cover ? o.frame : undefined,
+        fade: o.fade > 0 ? o.fade : undefined,
+        // …in at its real start and out at its real end — a closed gap inside it
+        // is a join, and fading there made the picture blink
+        fadeIn: o.fade > 0 ? (wi === 0 && Math.abs(w.srcStart - o.start) < 0.02) : undefined,
+        fadeOut: o.fade > 0 ? (wi === wins.length - 1 && Math.abs(w.srcEnd - o.end) < 0.02) : undefined,
       }, place));
     });
   }
@@ -8803,7 +9122,12 @@
       // what the preview shows, and what CapCut does) — so with keyframes the
       // overlays go on AFTER the encode, on the finished export's own clock.
       const motion = motionFor(whole);
-      const overlays = motion ? [] : overlaysFor(whole, 'source');
+      // …and so do they when parts of the edit are cut out (a montage shot
+      // deleted, a pause closed, a transition): laid on before, they were timed
+      // on the cut clock over the un-cut video, and landed early or in footage
+      // that was then removed
+      const late = !!(motion || (span.cuts && span.cuts.length) || (span.xfades && span.xfades.length));
+      const overlays = late ? [] : overlaysFor(whole, 'source');
       if (overlays.length) {
         const jid = window.__newJobId();
         const n = overlays.length;
@@ -8829,7 +9153,7 @@
         label: (ve.video.path.split(/[\\/]/).pop() || 'video').replace(/\.[^.]+$/, '') + '-edited',
         jobId,
       }), J(whole, 'encode'));
-      if (motion) {
+      if (late) {
         const post = overlayPayloadFor(whole, 'source', 'out');
         if (post.length) {
           const jid = window.__newJobId();
@@ -13115,6 +13439,7 @@
     }
     const ovSndBtn = $('#veOvSound'); if (ovSndBtn) ovSndBtn.addEventListener('click', () => toggleOverlaySound());
     const ovBlurBtn = $('#veOvBlur'); if (ovBlurBtn) ovBlurBtn.addEventListener('click', () => toggleOverlayBlur());
+    const ovFillBtn = $('#veOvFill'); if (ovFillBtn) ovFillBtn.addEventListener('click', () => toggleOverlayFill());
     const cutBtn = $('#veCutOut'); if (cutBtn) cutBtn.addEventListener('click', () => cutOutOverlayBackground());
     const keyBtn = $('#veChromaKey'); if (keyBtn) keyBtn.addEventListener('click', () => openChromaKey());
     const kfBtn = $('#veKeyframes'); if (kfBtn) kfBtn.addEventListener('click', () => openKeyframes());
@@ -13134,6 +13459,7 @@
     const bigBtn = $('#veBigger'); if (bigBtn) bigBtn.addEventListener('click', () => setPreviewBig(!isPreviewBig()));
     const fullBtn = $('#veFull'); if (fullBtn) fullBtn.addEventListener('click', togglePreviewFull);
     const fsExit = $('#veFsExit'); if (fsExit) fsExit.addEventListener('click', togglePreviewFull);
+    wireFsControls();
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && isPseudoFull()) setPseudoFull(false); });
     document.addEventListener('fullscreenchange', onFullscreenChange);
     const followBtn = $('#veFollow'); if (followBtn) followBtn.addEventListener('click', () => setFollow(!ve.follow));
@@ -13182,7 +13508,8 @@
     $('#veRedo').addEventListener('click', redoVideo);
     $('#veDupClip').addEventListener('click', () => duplicateSeg());
     $('#veDelClip').addEventListener('click', () => {
-      if (ve.activeRow === 'audio' && ve.audioSel) removeAudioSeg(ve.audioSel);
+      if (capLineSelected()) deleteCapLine(ve.capSel, true);
+      else if (ve.activeRow === 'audio' && ve.audioSel) removeAudioSeg(ve.audioSel);
       else if (ve.sel) {
         const s = ve.segments.find((x) => x.id === ve.sel);
         const media = s && isMedia(s) ? s.label : null;
@@ -13712,8 +14039,8 @@
     });
     // Pressing play is you asking to watch, so following comes back on; scrolling
     // away during playback turns it off again (see the scroll listener).
-    p.addEventListener('play', () => { ve.refs.play.textContent = '⏸'; setFollow(true, true); updateClipPlayButtons(); syncMusicPreview(true); startCapTick(); });
-    p.addEventListener('pause', () => { if (ve._tailPausing || ve.tailRun) { ve._tailPausing = false; return; } ve.refs.play.textContent = '▶'; updateClipPlayButtons(); syncMusicPreview(); syncSoundPreview(); stopCapTick(); });
+    p.addEventListener('play', () => { ve.refs.play.textContent = '⏸'; setFollow(true, true); updateClipPlayButtons(); syncMusicPreview(true); startCapTick(); syncFsControls(); });
+    p.addEventListener('pause', () => { if (ve._tailPausing || ve.tailRun) { ve._tailPausing = false; return; } ve.refs.play.textContent = '▶'; updateClipPlayButtons(); syncMusicPreview(); syncSoundPreview(); stopCapTick(); syncFsControls(); });
     p.addEventListener('ended', () => { stopCapTick(); if (ve.tailT == null && hasTail()) enterTail(dur(), true); });
     // anything else moving the main video's playhead (a clip's ▶, a jump) ends the tail
     p.addEventListener('seeking', () => { if (ve.tailT != null) leaveTail(); });
@@ -13736,7 +14063,7 @@
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redoVideo() : undoVideo(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redoVideo(); return; }
       if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
-      else if ((e.key === 'Delete' || e.key === 'Backspace') && ve.activeRow === 'caption' && ve.capSel != null && capBlocksVisible()) { e.preventDefault(); ve.capEvents.splice(ve.capSel, 1); ve.capSel = null; renderCapTrack(); renderCapList(); updateCapOverlay(ve.refs.player.currentTime || 0); }
+      else if ((e.key === 'Delete' || e.key === 'Backspace') && capLineSelected()) { e.preventDefault(); deleteCapLine(ve.capSel); }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && ve.activeRow === 'audio' && ve.audioSel) { e.preventDefault(); removeAudioSeg(ve.audioSel); }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && ve.sel) { e.preventDefault(); removeSeg(ve.sel); }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && ve.textSel) { e.preventDefault(); removeTextOverlay(ve.textSel); }
@@ -13775,6 +14102,7 @@
         textLayer: $('#veTextLayer'), textTrack: $('#veTextTrack'), capTrack: $('#veCapTrack'), audioTrack: $('#veAudioTrack'),
         mediaLayer: $('#veMediaLayer'),
         gapMask: $('#veGapMask'), musicTrack: $('#veMusicTrack'), musicAudio: $('#veMusicAudio'),
+        fsScrub: $('#veFsScrub'), fsPlay: $('#veFsPlay'), fsBigPlay: $('#veFsBigPlay'),
       };
       // Load bundled caption fonts so the live preview matches the burned output.
       window.api.paths.get().then((p) => {
@@ -13899,6 +14227,13 @@
     hasVideo() { return !!ve.video; },
     /** The file the studio has open — the Cloud Studio will not delete it from under the edit. */
     sourcePath() { return (ve.video && ve.video.path) || null; },
+    /** The montage file behind the copy the studio edits (montage.js baseOf), or the open file itself. */
+    montagePath() {
+      const p = ve.video && ve.video.path; if (!p) return null;
+      // read off the path, so it holds after a reload resumes the edit too
+      const m = /^(.*)([\\/])\.montage-edit[\\/]([^\\/]+)$/.exec(p);
+      return m ? m[1] + m[2] + m[3] : p;
+    },
     /** Pinch-to-zoom on a phone (cloud-boot.js): the zoom now, the moment under a
         finger, and a zoom kept around that moment. */
     zoomLevel() { return ve.pxPerSec; },
@@ -13906,6 +14241,15 @@
     zoomAround(px, anchorT, clientX) { return zoomAround(px, anchorT, clientX); },
     /** Open a file that is already on the machine (the phone's Files viewer). */
     openPath(p) { return p ? loadVideo(p) : null; },
+    /* The phone's Caption tools (shown while a caption block is selected).
+       Each acts on the caption only — never on a clip that happens to be behind it. */
+    selectedCaption() { return capLineSelected() ? ve.capSel : -1; },
+    deleteSelectedCaption() {
+      if (capLineSelected()) return deleteCapLine(ve.capSel, true);
+      window.__toast && window.__toast('Tap a caption on the timeline first, then Delete.', 'error');
+      return false;
+    },
+    editSelectedCaption() { if (capLineSelected()) editCaption(ve.capSel); },
     /** Projects (every video worked on keeps its own — see saveProject). */
     projectId() { return ve.video ? ve.sessionId || null : null; },
     /** Whatever is on screen written to its project NOW (before switching to another). */
@@ -13931,10 +14275,31 @@
      * director's words on the text lane — every one an ordinary text box, so it
      * can be retyped, restyled, moved or deleted like any other.
      */
-    async applyMontage({ output, music, musicVolume, texts, style, captions, cuts } = {}) {
+    async applyMontage({ output, base, overlays, music, musicVolume, texts, style, captions, cuts } = {}) {
       if (!output) return false;
-      await loadVideo(output);
+      /*
+       * The montage's pictures as the studio's own clips, on an overlay row —
+       * to move, trim, resize or take off — rather than burned into the video
+       * where nobody could touch them. The video opened is the same edit made
+       * WITHOUT them (montage.js baseOf); the export puts them on. A montage
+       * made before this, with no such copy, opens as it always did.
+       */
+      const ovs = (Array.isArray(overlays) ? overlays : []).filter((o) => o && o.file && Number(o.seconds) > 0);
+      const laid = !!(base && ovs.length);
+      await loadVideo(laid ? base : output);
       if (!ve.video) return false;
+      /*
+       * The studio's frame takes the montage's own shape. It stayed on 9:16
+       * whatever the montage was, so a 16:9 montage was cropped to a 9:16 window
+       * and its framed pictures were placed against that window instead.
+       */
+      {
+        const vi = ve.video.info || {};
+        const ar = vi.width && vi.height ? vi.width / vi.height : 0;
+        const fit = ar && Object.entries(ve.presets || {}).find(([, p]) => p && p.w && p.h && Math.abs(p.w / p.h - ar) / ar < 0.02);
+        const sel = $('#veAspect');
+        if (fit && ve.aspect !== fit[0]) { ve.aspect = fit[0]; if (sel) sel.value = fit[0]; updateCropMask(); }
+      }
       /*
        * The montage's own shots, as blocks on the timeline: it is cut at every
        * place one shot gives way to the next, so each can be trimmed, split
@@ -13954,9 +14319,10 @@
         ve.sel = null;
         ve.segments.filter((x) => (x.lane || 0) === 0).sort((a, b) => a.start - b.start)
           .forEach((x, k) => { x.label = `Shot ${k + 1}`; x.seed = true; });
-        ve.history = []; ve.future = []; updateUndoRedoButtons();   // the cuts are the starting point, not edits to undo
-        renderSegments();
       }
+      if (laid) await placeMontageOverlays(ovs);
+      ve.history = []; ve.future = []; updateUndoRedoButtons();   // the montage is the starting point, not edits to undo
+      renderSegments();
       if (music && music.id) {
         await libRefresh();
         const entry = ((ve.lib && ve.lib.music) || []).find((m) => m.id === music.id) || music;
@@ -14120,7 +14486,7 @@
       },
       segmentDomCount() { return $$('#veSegments .ve-seg').length; },
       rulerTickCount() { return $$('#veRuler .ve-tick').length; },
-      segments() { return ve.segments.map((s) => ({ id: s.id, start: s.start, end: s.end, left: s.start * ve.pxPerSec, width: (s.end - s.start) * ve.pxPerSec })); },
+      segments() { return ve.segments.map((s) => ({ id: s.id, lane: s.lane || 0, start: s.start, end: s.end, left: s.start * ve.pxPerSec, width: (s.end - s.start) * ve.pxPerSec })); },
       addManual(a, b) { return addSegment(a, b, 'Manual', false); },
       addShort(a, b) { pushHistory(); const s = addSegment(a, b, 'Short', true); renderClipList(); return s; },
       // --- what Long-to-shorts is allowed to search (the timeline decides) ---
@@ -14699,6 +15065,19 @@
       timelineHeight() { return $('#veTimeline').getBoundingClientRect().height; },
       previewHeight() { return ve.refs.drop.getBoundingClientRect().height; },
       fullBtnExists() { return !!$('#veFull') && !!$('#veFsExit'); },
+      setPreviewFullHook(on) { if (!!on !== isPreviewFull()) setPseudoFull(!!on); return isPreviewFull(); },
+      /** Full screen's own controls, as they are on screen right now. */
+      fsControls() {
+        const d = ve.refs.drop, sc = ve.refs.fsScrub;
+        return {
+          ui: d.classList.contains('ve-fs-ui'), playing: d.classList.contains('ve-fs-playing'),
+          idle: d.classList.contains('ve-fs-idle'), scrubbing: !!fsUi.scrub,
+          p: parseFloat(sc.style.getPropertyValue('--p')) || 0,
+          cur: $('#veFsCur').textContent, dur: $('#veFsDur').textContent,
+          label: ve.refs.fsPlay.getAttribute('aria-label'),
+          reframe: !!($('#veAutoReframe') && $('#veAutoReframe').checked),
+        };
+      },
       // --- captions: clear all ---
       clearCapsBtnVisible() { const b = $('#veClearCaps'); return !!b && !b.classList.contains('hidden'); },
       clickClearCaps() { $('#veClearCaps').dispatchEvent(new MouseEvent('click', { bubbles: true })); return (ve.capEvents || []).length; },

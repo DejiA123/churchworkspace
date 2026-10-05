@@ -840,7 +840,7 @@ async function deleteFiles(req, res) {
     }
   } catch (e) { /* no scheduler: nothing is needed by one */ }
 
-  const deleted = [], refused = [];
+  const deleted = [], refused = [], alsoGone = [];
   let freed = 0;
   for (const p of asked) {
     const full = path.resolve(p);
@@ -859,6 +859,8 @@ async function deleteFiles(req, res) {
     // a montage's saved edit goes with it, and any copy made for saving to a phone
     try { freed += require('../main/phonecopy').removeFor(full); } catch (e) { /* none */ }
     try { const sc = full + '.montage.json'; const ss = fs.statSync(sc); fs.unlinkSync(sc); freed += ss.size; } catch (e) { /* none */ }
+    // …and the copy without its overlays that the studio edits (montage.js baseOf)
+    try { const bo = path.join(path.dirname(full), '.montage-edit', path.basename(full)); const bs = fs.statSync(bo); fs.unlinkSync(bo); freed += bs.size; alsoGone.push(bo); } catch (e) { /* none */ }
     const base = full.replace(/\.[^.\\/]+$/, '');
     for (const ext of COMPANIONS) {
       try { const c = base + ext; const cs = fs.statSync(c); fs.unlinkSync(c); freed += cs.size; } catch (e) { /* none */ }
@@ -870,7 +872,7 @@ async function deleteFiles(req, res) {
     try {
       const got = await rpc.invoke('session:autosaveGet', {});
       const v = got && got.ok && got.data && got.data.video && got.data.video.path;
-      if (v && deleted.some((d) => key(d) === key(v))) {
+      if (v && deleted.concat(alsoGone).some((d) => key(d) === key(v))) {
         await rpc.invoke('session:autosaveClear', {});
         autosaveCleared = true;
       }

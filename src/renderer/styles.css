@@ -2487,6 +2487,83 @@ body.ve-pfull .ve-preview .ve-fs-exit {
   font-size: 15px; font-weight: 700; white-space: nowrap;
 }
 
+/* ---- full screen's own player controls (see syncFsControls) ----
+   A scrim along the bottom with play/pause, the time and a scrub bar, and a big
+   ▶ in the middle while paused. They exist only in full screen (.ve-fs-ui);
+   while the short plays they fade (.ve-fs-idle), and the pointer goes too. */
+.ve-fs-bar, .ve-fs-bigplay { display: none; }
+.ve-preview.ve-fs-ui { --fs-accent: var(--ph-accent, var(--primary)); }
+.ve-preview.ve-fs-ui .ve-fs-bar {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 13;
+  display: flex; align-items: center; gap: 10px;
+  padding-top: 40px;
+  padding-bottom: calc(env(safe-area-inset-bottom) + 10px);
+  padding-left: calc(env(safe-area-inset-left) + 12px);
+  padding-right: calc(env(safe-area-inset-right) + 16px);
+  background: linear-gradient(to top, rgba(0,0,0,.72), rgba(0,0,0,.34) 58%, rgba(0,0,0,0));
+  color: #fff; transition: opacity .28s ease;
+}
+.ve-preview.ve-fs-ui .ve-fs-play {
+  flex: none; display: grid; place-items: center;
+  width: 44px; height: 44px; min-width: 0; margin: 0; padding: 0;
+  border: 0; border-radius: 50%; background: transparent; box-shadow: none;
+  color: #fff; cursor: pointer;
+}
+.ve-preview.ve-fs-ui .ve-fs-play:hover { background: rgba(255,255,255,.12); }
+.ve-preview.ve-fs-ui .ve-fs-play svg { width: 24px; height: 24px; fill: currentColor; filter: drop-shadow(0 1px 2px rgba(0,0,0,.4)); }
+.ve-fs-i-pause, .ve-preview.ve-fs-playing .ve-fs-i-play { display: none; }
+.ve-preview.ve-fs-playing .ve-fs-i-pause { display: block; }
+.ve-preview.ve-fs-ui .ve-fs-t {
+  flex: none; min-width: 34px; text-align: center;
+  font-size: 13px; font-weight: 600; line-height: 1; letter-spacing: .2px;
+  font-variant-numeric: tabular-nums; color: rgba(255,255,255,.92);
+  text-shadow: 0 1px 2px rgba(0,0,0,.5); white-space: nowrap;
+}
+/* The scrub bar: a 32px-tall target around a 4px rail, so a thumb finds it. */
+.ve-preview.ve-fs-ui .ve-fs-scrub {
+  --p: 0; position: relative; flex: 1 1 auto; min-width: 60px; height: 32px;
+  cursor: pointer; touch-action: none; outline: none;
+}
+.ve-fs-rail {
+  position: absolute; left: 0; right: 0; top: 50%; height: 4px; margin-top: -2px;
+  border-radius: 999px; background: rgba(255,255,255,.3); overflow: hidden;
+  transition: height .15s ease, margin-top .15s ease;
+}
+.ve-fs-fill {
+  position: absolute; inset: 0; background: var(--fs-accent);
+  transform-origin: 0 50%; transform: scaleX(var(--p));
+}
+.ve-fs-knob {
+  position: absolute; top: 50%; left: calc(var(--p) * 100%);
+  width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 5px rgba(0,0,0,.45);
+  transition: transform .15s ease;
+}
+.ve-fs-scrub:hover .ve-fs-rail, .ve-fs-scrub.dragging .ve-fs-rail { height: 6px; margin-top: -3px; }
+.ve-fs-scrub.dragging .ve-fs-knob { transform: scale(1.3); }
+/* The big ▶: only while paused — once it plays, it gets out of the picture. */
+.ve-preview.ve-fs-ui .ve-fs-bigplay {
+  position: absolute; left: 50%; top: 50%; z-index: 13;
+  display: grid; place-items: center;
+  width: 76px; height: 76px; min-width: 0; margin: -38px 0 0 -38px; padding: 0;
+  border-radius: 50%; border: 1px solid rgba(255,255,255,.22);
+  background: rgba(0,0,0,.48); color: #fff; cursor: pointer;
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 6px 24px rgba(0,0,0,.35);
+  transition: opacity .2s ease, transform .2s ease;
+}
+.ve-preview.ve-fs-ui .ve-fs-bigplay:hover { background: rgba(0,0,0,.62); }
+/* a play triangle looks centred a little right of the true centre */
+.ve-fs-bigplay svg { width: 32px; height: 32px; margin-left: 4px; fill: currentColor; }
+.ve-preview.ve-fs-ui.ve-fs-playing .ve-fs-bigplay { opacity: 0; transform: scale(.85); pointer-events: none; }
+.ve-preview.ve-fs-ui .ve-fs-exit { transition: opacity .28s ease; }
+.ve-preview.ve-fs-ui.ve-fs-idle .ve-fs-bar,
+.ve-preview.ve-fs-ui.ve-fs-idle .ve-fs-exit { opacity: 0; pointer-events: none; }
+.ve-preview.ve-fs-ui.ve-fs-idle, .ve-preview.ve-fs-ui.ve-fs-idle * { cursor: none !important; }
+/* Full screen is for watching: no thirds grid or "drag to move" hint every time
+   the mouse crosses the picture (dragging it still frames the short). */
+.ve-preview.ve-fs-ui .ve-crop-frame::before, .ve-preview.ve-fs-ui .ve-crop-frame::after { display: none; }
+
 /* A whole sermon is well over a thousand caption lines. Lines off screen skip
    layout and painting until they are scrolled to, so redrawing the list (a fix,
    an undo, a Words-per-line change) costs what is visible, not the whole list. */

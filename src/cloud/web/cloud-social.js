@@ -1240,7 +1240,7 @@
       : who.director === 'groq' ? 'Directed by Groq AI (free), looking at every shot. <small>A Claude key on the server gives the very best edits.</small>'
         : 'Directed by the studio’s own editor. <small>Add a Claude key on the server for AI-directed edits.</small>';
     const chips = (list, cur, key) => list.map(([v, label]) => `<button type="button" class="mt-chip${String(cur) === String(v) ? ' on' : ''}" data-mt-${key}="${attr(v)}">${esc(label)}</button>`).join('');
-    const openPath = window.VideoEditor && window.VideoEditor.currentPath ? window.VideoEditor.currentPath() : null;
+    const openPath = window.VideoEditor && (window.VideoEditor.montagePath || window.VideoEditor.currentPath) ? (window.VideoEditor.montagePath || window.VideoEditor.currentPath)() : null;
     const openIsMontage = !!openPath && /(^|[\\/])montage-[^\\/]*\.mp4$/i.test(openPath);
     p.body.innerHTML = `
       ${openIsMontage ? `<button type="button" class="me-banner" data-mt-rearrange>✏️ <span><b>Rearrange the montage that’s open</b><small>Move clips and photos, then remake it</small></span></button>` : ''}
@@ -1282,7 +1282,7 @@
   function mtWire(p) {
     const onClick = async (e) => {
       if (e.target.closest('[data-mt-rearrange]') && !MT.busy) {
-        const op = window.VideoEditor && window.VideoEditor.currentPath ? window.VideoEditor.currentPath() : null;
+        const op = window.VideoEditor && (window.VideoEditor.montagePath || window.VideoEditor.currentPath) ? (window.VideoEditor.montagePath || window.VideoEditor.currentPath)() : null;
         C.closePanel(p, true);
         return editMontage(op);
       }
@@ -1470,7 +1470,7 @@
       MT.busy = false;
       mtProgress('Opening it in the studio…', 100, ' ');
       go('studio');
-      await window.VideoEditor.applyMontage({ output: res.output, music: song, musicVolume: MT.keep ? 0.7 : 1, texts: res.texts, style: res.style || MT.style, captions: MT.caps && MT.keep, cuts: res.cuts });
+      await window.VideoEditor.applyMontage({ output: res.output, base: res.base, overlays: res.overlays, music: song, musicVolume: MT.keep ? 0.7 : 1, texts: res.texts, style: res.style || MT.style, captions: MT.caps && MT.keep, cuts: res.cuts });
       res.song = song || null;
       C.closePanel(MT.panel, true);
       mtRelease();
@@ -1662,7 +1662,7 @@
       ME.busy = false;
       show('Opening it in the studio…', 100);
       go('studio');
-      await window.VideoEditor.applyMontage({ output: res.output, texts: res.texts, style: res.style, cuts: res.cuts, music: ME.music || undefined, keepMusic: true });
+      await window.VideoEditor.applyMontage({ output: res.output, base: res.base, overlays: res.overlays, texts: res.texts, style: res.style, cuts: res.cuts, music: ME.music || undefined, keepMusic: true });
       C.closePanel(p, true);
       C.island({ kind: 'good', title: 'Montage remade', sub: `${Math.round(res.duration)}s · ${res.shots.length} shots — it’s in the studio`, ms: 4500 });
     } catch (e) {

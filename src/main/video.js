@@ -3,6 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const ff = require('./ffmpeg');
+const deepfilter = require('./deepfilter');
 
 /** Run async task factories with limited concurrency. */
 /*
@@ -407,7 +408,7 @@ async function measureSeparation(ctx, { inputArgs, cut, af, capSec = 120 } = {})
     // the same graph the export would use — including the cut plan, or a
     // gap-closing export would be compared against audio it never plays.
     if (cut && cut.chain && cut.a) {
-      args.push('-filter_complex', `${cut.chain};[${cut.a}]${af ? af + ',' : ''}${stats}[aout]`, '-map', '[aout]');
+      args.push('-filter_complex', `${cut.chain};${cut.v ? `[${cut.v}]nullsink;` : ''}[${cut.a}]${af ? af + ',' : ''}${stats}[aout]`, '-map', '[aout]');
     } else {
       args.push('-vn', '-af', (af ? af + ',' : '') + stats);
     }
@@ -473,7 +474,9 @@ function studioVoiceAf(strength, { floorDb } = {}) {
   return [
     // Sub-80Hz carries no speech at all — only rumble, mains hum and stage thumps.
     'highpass=f=80',
-    denoise,
+    // Bracketed: where the voice track is rendered on its own, DeepFilterNet
+    // takes this step's place (see deepfilter.js); the rest of the chain stays.
+    deepfilter.bracket('studio', denoise),
     // hall boxiness out, presence in
     'equalizer=f=300:t=q:w=1.2:g=-3',
     'equalizer=f=3000:t=q:w=1.0:g=3',
@@ -530,7 +533,9 @@ async function denoiseFilter(ctx, { input, denoise, startSec, endSec } = {}) {
   // 'studio' is the full voice chain, not just a noise setting — same entry
   // point, so every export path that already honours `denoise` gets it.
   if (String(denoise).toLowerCase() === 'studio') return studioVoiceAf('strong', { floorDb });
-  return noiseReductionAf(denoise, { floorDb });
+  // The ffmpeg chain is the fallback; the brackets let the voice cleaner
+  // (deepfilter.js) do this step wherever the voice track is rendered first.
+  return deepfilter.bracket(deepfilter.levelFor(denoise), noiseReductionAf(denoise, { floorDb }));
 }
 
 /**
@@ -814,13 +819,29 @@ function fillChain(srcW, srcH, W, H, fill, label = 'f') {
 const VOICE_PASS_LADDER = [2, 3, 1, 4];
 const VOICE_WANTED_GAIN_DB = 8;    // an isolation run that worked is worth far more than this
 async function renderVerifiedVoice(ctx, { inputArgs, cut, af, hasAudio, cwd, signal }) {
+  /*
+   * DeepFilterNet first, wherever it is installed: every setting, Light to
+   * Studio, goes through it (see deepfilter.js for what it replaced and why).
+   * It is deterministic, so none of the checking below is needed for it. If it
+   * is missing or fails, the ffmpeg chain carries on exactly as before.
+   */
+  if (af && hasAudio && deepfilter.splitChain(af) && deepfilter.binPath()) {
+    try {
+      const voice = await deepfilter.renderVoice(ctx, { inputArgs, cut, af, cwd, signal });
+      if (voice) return voice;
+    } catch (e) {
+      if (e && e.name === 'CancelledError') throw e;
+      console.warn('[voice] DeepFilterNet failed; using the ffmpeg chain instead: ' + ((e && e.message) || e));
+    }
+  }
   if (!af || !hasAudio || !/arnndn/.test(af)) return null;
   const joining = !!(cut && cut.chain && cut.a);
   const stem = path.join(os.tmpdir(), `cws-voice-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   const made = [];
   const render = async (chain, out) => {
     const a = [...inputArgs];
-    if (joining) a.push('-filter_complex', `${cut.chain};[${cut.a}]${chain}[aout]`, '-map', '[aout]');
+    // (the cut plan's picture goes nowhere: ffmpeg refuses a graph that leaves it dangling)
+    if (joining) a.push('-filter_complex', `${cut.chain};${cut.v ? `[${cut.v}]nullsink;` : ''}[${cut.a}]${chain}[aout]`, '-map', '[aout]');
     else a.push('-vn', '-af', chain);
     a.push('-ar', '48000', '-c:a', 'pcm_s16le', '-y', out);
     made.push(out);
@@ -900,6 +921,9 @@ async function encodeWithFallback(ctx, { inputArgs, cut, vfCore, af, dur, hasAud
       let fc = `${cut.chain};[${cut.v}]${vfCore},format=${fmt}[vout]`;
       const cleaning = !!(af && hasAudio && cut.a && !voiceTrack);
       if (cleaning) fc += `;[${cut.a}]${af}[aout]`;
+      // the checked voice plays instead of the joined sound, which then has to
+      // go somewhere: ffmpeg refuses a graph with an output left dangling
+      else if (voiceTrack && cut.a) fc += `;[${cut.a}]anullsink`;
       a.push('-filter_complex', fc, '-map', '[vout]');
       if (voiceTrack) a.push('-map', `${voiceIdx}:a`);
       else if (hasAudio && cut.a) a.push('-map', cleaning ? '[aout]' : `[${cut.a}]`);
@@ -1786,16 +1810,29 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
         + `boxblur=luma_radius=${Math.max(1, Math.round(24 / SHRINK))}:luma_power=2`
         + `:chroma_radius=${Math.max(1, Math.round(12 / SHRINK))}:chroma_power=2,`
         + `scale=${padW}:-2:flags=bilinear,crop=${padW}:${info.height},eq=brightness=-0.06`;
+      /*
+       * The voice, cleaned and checked first — as encodeWithFallback does for
+       * every other export — rather than the clean-up running inline here,
+       * where the voice cleaner (deepfilter.js) never got to it and face-tracked
+       * shorts kept the old sound. It goes in as one more input, AFTER the
+       * clip's own (its `-t` stays the output's cap, see encodeWithFallback).
+       */
+      const voice = (af && info.hasAudio) ? await renderVerifiedVoice(ctx, { inputArgs, cut, af, hasAudio: true }) : null;
+      const lastI = inputArgs.lastIndexOf('-i');
+      const ins = voice ? [...inputArgs.slice(0, lastI + 2), '-i', voice, ...inputArgs.slice(lastI + 2)] : inputArgs;
+      const voiceIdx = inputArgs.filter((x) => x === '-i').length;
       const padGraph = (fmt) => {
         let fc = cutPre + `${srcV}split=2[bgs][fgs];[bgs]${bgChain}[bg];`
           + `[bg][fgs]overlay=${P}:0,crop=${cropW}:${cropH}:x='${xe}':y=0`
           + `,scale=${p.w}:${p.h}:flags=lanczos,setsar=1${motionChain(motion, p.w, p.h) ? ',' + motionChain(motion, p.w, p.h) : ''},format=${fmt}[vout]`;
-        if (af && info.hasAudio) fc += `;${srcA}${af}[aout]`;
+        if (af && info.hasAudio && !voice) fc += `;${srcA}${af}[aout]`;
+        // with the voice playing in, the cut plan's own sound is not used
+        else if (voice && cut && cut.a) fc += `;[${cut.a}]anullsink`;
         return fc;
       };
       const padArgs = (head, fmt, codecArgs) => {
-        const a = [...head, ...inputArgs, '-filter_complex', padGraph(fmt), '-map', '[vout]'];
-        if (info.hasAudio) a.push('-map', af ? '[aout]' : mapA, '-c:a', 'aac', '-b:a', '192k'); else a.push('-an');
+        const a = [...head, ...ins, '-filter_complex', padGraph(fmt), '-map', '[vout]'];
+        if (info.hasAudio) a.push('-map', voice ? `${voiceIdx}:a` : (af ? '[aout]' : mapA), '-c:a', 'aac', '-b:a', '192k'); else a.push('-an');
         // outputFps, not a hard-coded 30: this path was halving every 60fps
         // recording exactly the way the main encode used to (see export-quality).
         a.push('-r', String(outputFps(info)), ...codecArgs, '-movflags', '+faststart', '-y', output);
@@ -1809,6 +1846,7 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
        * encode plus a verify. Same rule here, for the same reason.
        */
       const hwOk = !(cut && cut.chain);
+      try {
       if (hwOk) {
         try {
           const hw = process.platform === 'darwin'
@@ -1829,6 +1867,9 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
           { onProgress, totalDurationSec: dur });
         return output;
       } catch (e) { /* fall through to the plain clamped path below */ }
+      } finally {
+        if (voice) { try { fs.rmSync(voice, { force: true }); } catch (e) {} }
+      }
     }
     const pts = simplifyKeyframes(desired.map(([t, x]) => [t, clampN(x, 0, maxX)]));
     xExpr = buildLerpExpr(pts, Math.round(maxX / 2));
@@ -1878,6 +1919,10 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
  *   mute           drop this overlay's own sound
  *   opacity        0..1 for watermarks (default 1 = solid)
  *   key            { color '#rrggbb', sim, blend } to key out a green/blue screen
+ *   cover          fill the whole frame, cropped to fit (an AI Montage cutaway)
+ *   fade           seconds to fade in and out over (the montage's are 0.25)
+ *   frame          a white frame around the picture, as a fraction of the width
+ *                  (an AI Montage framed picture's 6 px), drawn outside its box
  * baseStart/baseEnd (optional): render only that RANGE of the base (used when a
  * short is being exported — its PiP overlays are composited into just its range;
  * tlStart is then relative to baseStart, i.e. to the output's own clock).
@@ -1941,9 +1986,11 @@ async function exportOverlayComposite(ctx, { base, overlays = [], output, baseSt
     const { olen, still } = cuts[idx];
     const tl = tlOf(o, idx);
     const tlEnd = tl + olen;
+    const cover = !!o.cover;
     const w = Math.max(2, Math.round((clampN(Number(o.wFrac) || 0.34, 0.02, 1) * BW) / 2) * 2);
-    const x = Math.round(clampN(o.x != null ? Number(o.x) : 0.62, -1, 1) * BW);
-    const y = Math.round(clampN(o.y != null ? Number(o.y) : 0.05, -1, 1) * BH);
+    const edge = !cover && Number(o.frame) > 0 ? Math.max(1, Math.round(clampN(Number(o.frame), 0, 0.05) * BW)) : 0;
+    const x = cover ? 0 : Math.round(clampN(o.x != null ? Number(o.x) : 0.62, -1, 1) * BW) - edge;
+    const y = cover ? 0 : Math.round(clampN(o.y != null ? Number(o.y) : 0.05, -1, 1) * BH) - edge;
     const op = clampN(o.opacity != null ? Number(o.opacity) : 1, 0.05, 1);
     // A picture is scaled with lanczos (it is a photo, not a moving frame) and
     // carried in RGBA so a logo's transparency survives to the overlay; footage
@@ -1955,7 +2002,7 @@ async function exportOverlayComposite(ctx, { base, overlays = [], output, baseSt
      * fills the whole frame — a landscape photo in a 9:16 short, a portrait
      * clip in a 16:9 video — instead of over whatever is underneath.
      */
-    if (o.bgBlur) {
+    if (o.bgBlur && !cover) {
       const bw = Math.max(2, Math.round(BW / 4 / 2) * 2), bh = Math.max(2, Math.round(BH / 4 / 2) * 2);
       parts.push(`[${inIdx}:v]${timing.join(',')},split[obg${idx}][ofg${idx}]`);
       parts.push(`[obg${idx}]scale=${bw}:${bh}:force_original_aspect_ratio=increase,crop=${bw}:${bh},boxblur=10:2,eq=brightness=-0.08,scale=${BW}:${BH},setsar=1[bgv${idx}]`);
@@ -1964,17 +2011,22 @@ async function exportOverlayComposite(ctx, { base, overlays = [], output, baseSt
       src = `[ofg${idx}]`;
       timing.length = 0;
     }
-    const chain = [
-      ...timing,
-      still ? `scale=${w}:-2:flags=lanczos` : `scale=${w}:-2`,
-      'setsar=1',
-    ];
+    const fit = cover
+      // the whole frame, the picture's middle — what the montage's cutaway is
+      ? `scale=${BW}:${BH}:force_original_aspect_ratio=increase${still ? ':flags=lanczos' : ''},crop=${BW}:${BH}`
+      : (still ? `scale=${w}:-2:flags=lanczos` : `scale=${w}:-2`);
+    const chain = [...timing, fit, 'setsar=1'];
+    if (edge) chain.push(`pad=iw+${2 * edge}:ih+${2 * edge}:${edge}:${edge}:white`);
     // Green screen: ffmpeg's own chromakey, the rule the preview's canvas copies
     // (veditor keyAlpha). Keyed before any fade-down so both apply.
     const key = keyOf(o.key);
     if (key) chain.push('format=yuva420p', `chromakey=color=0x${key.hex}:similarity=${key.sim.toFixed(3)}:blend=${key.blend.toFixed(3)}`);
-    if (still || op < 1 || key) chain.push('format=rgba');
+    const fade = Math.min(clampN(Number(o.fade) || 0, 0, 2), olen / 2);
+    if (still || op < 1 || key || fade > 0) chain.push('format=rgba');
     if (op < 1) chain.push(`colorchannelmixer=aa=${op.toFixed(3)}`);
+    // in and out softly rather than cut (timestamps are the output's by now)
+    if (fade > 0 && o.fadeIn !== false) chain.push(`fade=t=in:st=${tl.toFixed(3)}:d=${fade.toFixed(3)}:alpha=1`);
+    if (fade > 0 && o.fadeOut !== false) chain.push(`fade=t=out:st=${(tlEnd - fade).toFixed(3)}:d=${fade.toFixed(3)}:alpha=1`);
     parts.push(`${src}${chain.join(',')}[ov${idx}]`);
     const out = (idx === overlays.length - 1) ? 'outv' : `t${idx}`;
     // composite it onto the running base, but only during its own window
@@ -2757,6 +2809,12 @@ async function applyEdits(ctx, { input, output, edits = {}, onProgress }) {
 
   const args = ['-i', input];
   if (music) args.push('-stream_loop', '-1', '-i', music);
+  // The cleaned voice is rendered first, as for every other export (see
+  // renderVerifiedVoice) — not left to run inline, where neither the voice
+  // cleaner nor the RNNoise check can happen.
+  const voice = denoiseAf && info.hasAudio ? await renderVerifiedVoice(ctx, { inputArgs: ['-i', input], af: denoiseAf, hasAudio: true }) : null;
+  const voiceIn = music ? 2 : 1;
+  if (voice) args.push('-i', voice);
 
   let fc = `[0:v]${vf.join(',')}[v]`;
   const aOut = [];
@@ -2764,12 +2822,12 @@ async function applyEdits(ctx, { input, output, edits = {}, onProgress }) {
     const af = [];
     // Noise removal goes FIRST, on the untouched recording — before any speed
     // change or gain, so afftdn measures the room the microphone actually heard.
-    if (denoiseAf) af.push(denoiseAf);
+    if (denoiseAf && !voice) af.push(denoiseAf);
     if (speed !== 1) af.push(atempoChain(speed));
     if (vol !== 1) af.push('volume=' + vol);
     if (edits.fadeIn) af.push(`afade=t=in:st=0:d=${Number(edits.fadeIn)}`);
     if (edits.fadeOut) af.push(`afade=t=out:st=${Math.max(0, outDur - Number(edits.fadeOut)).toFixed(2)}:d=${Number(edits.fadeOut)}`);
-    fc += `;[0:a]${af.length ? af.join(',') : 'anull'}[a0]`;
+    fc += `;[${voice ? voiceIn : 0}:a]${af.length ? af.join(',') : 'anull'}[a0]`;
     aOut.push('[a0]');
   }
   if (music) {
@@ -2783,7 +2841,11 @@ async function applyEdits(ctx, { input, output, edits = {}, onProgress }) {
   args.push('-filter_complex', fc, ...map, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20');
   if (aOut.length) args.push('-c:a', 'aac', '-b:a', '192k');
   args.push('-movflags', '+faststart', '-y', output);
-  await ff.runFfmpeg(ctx.ffmpeg, args, { onProgress, totalDurationSec: outDur });
+  try {
+    await ff.runFfmpeg(ctx.ffmpeg, args, { onProgress, totalDurationSec: outDur });
+  } finally {
+    if (voice) { try { fs.rmSync(voice, { force: true }); } catch (e) {} }
+  }
   return output;
 }
 
