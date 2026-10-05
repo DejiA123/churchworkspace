@@ -1091,7 +1091,9 @@ function levelsOf(input, from, dur) {
     '-i', input, '-vn', '-ac', '1', '-ar', String(SR), '-f', 's16le', 'pipe:1'];
   return new Promise((resolve) => {
     let proc;
-    try { proc = spawn(ffmpegPath, args, { windowsHide: true }); } catch (e) { return resolve(null); }
+    // stderr is not wanted, and a pipe nobody reads fills up and stalls ffmpeg
+    // on a damaged file that complains on every frame — so it goes nowhere
+    try { proc = spawn(ffmpegPath, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }); } catch (e) { return resolve(null); }
     if (jobs) jobs.track(proc);
     const db = [];
     let sum = 0, n = 0, carry = null;

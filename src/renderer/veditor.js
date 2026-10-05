@@ -1199,7 +1199,8 @@
   /** The time under the centre line, from where the timeline is scrolled to. */
   const timeAtCentre = () => Math.max(0, (ve.refs.tlScroll.scrollLeft + centreGap() - tlPadL()) / ve.pxPerSec);
   /** A finger is on the timeline, or it is still coasting from one. */
-  const userScrolling = () => !!ve._tlTouch || (performance.now() - (ve._userScrollAt || 0)) < 180;
+  const userScrolling = () => (!!ve._tlTouch && performance.now() - (ve._tlTouchAt || 0) < 8000)
+    || (performance.now() - (ve._userScrollAt || 0)) < 180;
   function layoutCentre() {
     const sc = ve.refs.tlScroll; if (!sc) return;
     sc.style.paddingLeft = centred() ? centreGap() + 'px' : '';
@@ -1216,8 +1217,25 @@
     if (ve.centred && !sc._centreWired) {
       sc._centreWired = true;
       if (window.ResizeObserver) new ResizeObserver(() => { if (centred()) layoutCentre(); }).observe(sc);
-      sc.addEventListener('touchstart', () => { ve._tlTouch = true; }, { passive: true });
-      const lift = () => { ve._tlTouch = false; ve._userScrollAt = performance.now(); };
+      /*
+       * The lift is heard on the element the finger landed on AS WELL as here: a
+       * touch's events go to the element it started on, and a caption block
+       * under the finger is redrawn as the lane scrolls — once it is out of the
+       * page its touchend reaches neither this scroller nor the document, and a
+       * flag left on would stop the timeline following playback. (The same trap
+       * the phone's touch bridge handles with hold().) A finger is also only
+       * believed to be down while it is doing something.
+       */
+      const lift = (e) => { if (!ve._tlTouch || (e && e.touches && e.touches.length)) return; ve._tlTouch = false; ve._userScrollAt = performance.now(); };
+      sc.addEventListener('touchstart', (e) => {
+        ve._tlTouch = true; ve._tlTouchAt = performance.now();
+        const el = e.target;
+        if (el && el.addEventListener && el !== sc) {
+          el.addEventListener('touchend', lift, { passive: true, once: true });
+          el.addEventListener('touchcancel', lift, { passive: true, once: true });
+        }
+      }, { passive: true });
+      sc.addEventListener('touchmove', () => { ve._tlTouchAt = performance.now(); }, { passive: true });
       sc.addEventListener('touchend', lift, { passive: true });
       sc.addEventListener('touchcancel', lift, { passive: true });
     }
