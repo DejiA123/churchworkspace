@@ -539,18 +539,34 @@
    * that sounds nothing like it ("by" → "power") — is not a correction.
    */
   const lettersOnly = (w) => String(w || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  /** How a word starts to the ear: the silent letters some spellings start with go. */
-  const heardStart = (w) => w.replace(/^(ps|pn|kn|gn|wr)/, (m) => m[1]).replace(/^ph/, 'f').replace(/^wh/, 'w');
+  /** How a word starts to the ear: the silent letters some spellings start with go
+   *  ("who"/"whole" start with an h sound, every other wh- with a w). */
+  const heardStart = (w) => w.replace(/^(ps|pn|kn|gn|wr)/, (m) => m[1]).replace(/^ph/, 'f').replace(/^who/, 'ho').replace(/^wh/, 'w');
+  /*
+   * The first SOUND, for the "starts the same" gate. Letters lie about it in
+   * both directions: "cent" and "sent" start alike, "hour" and "our" do (the h
+   * is silent, and many accents drop it anyway), so do "eight" and "ate" — any
+   * two words that open on a vowel. Found by review: the first letter alone
+   * refused all of these ordinary homophone corrections.
+   */
+  function firstSound(w) {
+    if (/^h?[aeiouy]/.test(w)) return 'V';
+    if (/^c[eiy]/.test(w)) return 's';
+    const c = w[0];
+    return c === 'k' || c === 'q' || c === 'c' ? 'k' : c === 'z' ? 's' : c;
+  }
   /** The consonants after the first sound — what survives an accent's vowels. */
   const skeleton = (w) => w[0] + w.slice(1).replace(/[aeiouyhw]/g, '');
   const likeness = (a, b) => 1 - lev(a, b) / Math.max(a.length, b.length, 1);
   function soundAlike(x, y) {
-    const a = heardStart(lettersOnly(x)), b = heardStart(lettersOnly(y));
+    // ("eight", "night", "though": a gh before a t, or at the end, is not heard)
+    const a = heardStart(lettersOnly(x)).replace(/gh(?=t|$)/g, ''), b = heardStart(lettersOnly(y)).replace(/gh(?=t|$)/g, '');
     if (!a || !b) return false;
     if (soundsSame(a, b)) return true;
-    const first = (c) => (c === 'k' || c === 'q' ? 'c' : c === 'z' ? 's' : c);
-    if (first(a[0]) !== first(b[0])) return false;
-    return likeness(a, b) >= 0.5 || likeness(skeleton(a), skeleton(b)) >= 0.5;
+    if (firstSound(a) !== firstSound(b)) return false;
+    // a silent or dropped h is not a letter of difference
+    const bare = (w) => (/^h[aeiouy]/.test(w) ? w.slice(1) : w);
+    return likeness(a, b) >= 0.5 || likeness(bare(a), bare(b)) >= 0.5 || likeness(skeleton(a), skeleton(b)) >= 0.5;
   }
   function onlySwaps(A, B) {
     const ops = diffWords(A.join(' '), B.join(' '));

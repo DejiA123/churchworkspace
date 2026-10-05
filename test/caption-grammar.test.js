@@ -114,6 +114,19 @@ check('a change of case only (in CAPS): not a suggestion', !v('THE LORD IS GOOD'
 }
 check('an answer that adds lines of its own is not a correction', !v('AMEN', 'Amen. Let us now turn to the book of Romans').ok);
 check('Normal case keeps the AI\'s capitals', v('and i was watching', 'and I was watching', { caseMode: 'none' }).text === 'and I was watching');
+{
+  // "Keep their exact words": a fix is a sound-alike swap — however the two are SPELLED
+  // (review: the first-letter gate refused hole/whole, our/hour, ate/eight, sent/cent)
+  const ok = (a, b) => v(a, b, { mode: 'exact' }).ok;
+  for (const [a, b] of [['THE WHOLE IN', 'the hole in'], ['AN OUR LATER', 'an hour later'], ['ATE OF THEM', 'eight of them'],
+    ['NOT A SENT', 'not a cent'], ['THE AIR OF', 'the heir of'], ['DOWN THE ISLE', 'down the aisle'], ['THE KNIGHT WAS', 'the night was']]) {
+    check(`exact mode accepts the homophone "${a}" -> "${b}"`, ok(a, b));
+  }
+  for (const [a, b] of [['MIGHT NOR BY', 'might nor power'], ['LIE THOUGH IT', 'lie'], ['CHAPTER 4 VERSE', 'Philippines chapter 4 verse'],
+    ['BECOME NEW ZACCHAEUS', 'become new'], ['HIS ROD', 'his staff'], ['ON THE ROCK', 'on the house']]) {
+    check(`exact mode refuses "${a}" -> "${b}" (a word dropped, added or swapped for one that sounds nothing like it)`, !ok(a, b));
+  }
+}
 
 head('[7] The AI\'s answer is parsed defensively');
 const batch = [{ n: 3, text: 'A' }, { n: 4, text: 'B', context: true }, { n: 5, text: 'C' }];
@@ -298,6 +311,55 @@ head('[9] ☁️ The cloud ear, sent in pieces: every word once, none lost at a 
     global.fetch = real;
     check('a second chance that "hears" one word over and over adds nothing', song.words.length === 40 && song.reheard === 0,
       `${song.words.length} words, +${song.reheard}`);
+  }
+  /*
+   * The second listen is a chance to do better, never a wait (review): a key
+   * that is out of allowance answers 429 — the first one ends the second
+   * listen at once, with no waiting it out and no further tries.
+   */
+  {
+    const real = global.fetch;
+    let n = 0;
+    global.fetch = async (url, init) => {
+      n++;
+      if (n === 1) { const words = []; for (let k = 0; k * 0.5 < 20; k++) words.push({ word: 'w' + k, start: k * 0.5, end: k * 0.5 + 0.3 }); return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ words, segments: [] }) }; }
+      return { ok: false, status: 429, headers: { get: (k) => (k === 'retry-after' ? '1' : null) }, json: async () => ({}) };
+    };
+    const t0 = Date.now();
+    const lim = await cs.transcribeWords({ input: loudWav, startSec: 0, endSec: 30 });
+    global.fetch = real;
+    check('a rate-limited second listen stops at once: one extra request, no waiting', n === 2 && Date.now() - t0 < 5000 && lim.words.length === 40,
+      `${n} requests, ${Date.now() - t0} ms, ${lim.words.length} words`);
+  }
+  /*
+   * A gap longer than one window: the request never reaches the word after the
+   * gap, so a re-heard word that merely shares its text ("the") is real and kept.
+   */
+  {
+    const longWav = path.join(os.tmpdir(), 'mw-cloudgap60-' + process.pid + '.wav');
+    execFileSync(ffmpeg, ['-v', 'error', '-f', 'lavfi', '-i', 'anoisesrc=r=16000:a=0.2:c=pink', '-t', '60', '-y', longWav]);
+    const real = global.fetch;
+    let n = 0;
+    global.fetch = async () => {
+      n++;
+      const words = [];
+      if (n === 1) {
+        for (let k = 0; k * 0.5 + 0.3 <= 5.3; k++) words.push({ word: 'a' + k, start: k * 0.5, end: k * 0.5 + 0.3 });
+        words.push({ word: 'the', start: 40, end: 40.3 });
+        for (let k = 1; 40 + k * 0.5 + 0.3 <= 60; k++) words.push({ word: 'b' + k, start: 40 + k * 0.5, end: 40 + k * 0.5 + 0.3 });
+      } else {
+        // the second listen hears [4.3, 34.3]: speech all the way, its last word "the" at 34.0
+        for (let t = 5.5; t < 33.9; t += 0.5) words.push({ word: 'c' + Math.round(t * 2), start: t - 4.3, end: t - 4.3 + 0.3 });
+        words.push({ word: 'the', start: 34.0 - 4.3, end: 34.25 - 4.3 });
+      }
+      return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ words, segments: [] }) };
+    };
+    const lg = await cs.transcribeWords({ input: longWav, startSec: 0, endSec: 60 });
+    global.fetch = real;
+    try { fs.unlinkSync(longWav); } catch (e) {}
+    const the34 = lg.words.find((w) => w.text === 'the' && Math.abs(w.start - 34.0) < 0.05);
+    check('a long gap: a re-heard word that only shares its text with the word after the gap is kept', !!the34,
+      lg.words.filter((w) => w.start > 33 && w.start < 41).map((w) => `${w.text}@${w.start}`).join(' '));
   }
   // Words to the end: no second chance is asked for.
   calls.length = 0; served = 0; cutAt = Infinity; plan = [[0, 30]];

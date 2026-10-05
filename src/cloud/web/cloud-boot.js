@@ -1695,11 +1695,13 @@ let _hideTimer = null;
            * finished) is used without asking.
            */
           let quality = 'hd';
+          let ready = false;   // the copy is already made (one is started when a montage finishes)
           if (needed) {
             let stt = null;
             try { stt = await call('video:phoneCopyStatus', { input: p }); } catch (e) { /* an older studio: just make it */ }
             if (stt && stt.needed === false) needed = false;
             else if (stt && stt.needed && !(stt.hd && stt.hd.ready) && show.choose) quality = await show.choose(stt);
+            ready = !!(stt && stt[quality] && stt[quality].ready);
           }
           /*
            * ►► ONE BAR FOR THE WHOLE SAVE. ◄◄ "Making a phone copy… 99%" and then
@@ -1709,11 +1711,12 @@ let _hideTimer = null;
            * minutes, the download of the 129 MB it makes under one), the
            * download the rest; with no copy to make, the download is all of it.
            */
-          make = needed ? MAKE_SHARE : 0;
+          // (a copy already made is no copy to make: the download is the whole bar)
+          make = needed && !ready ? MAKE_SHARE : 0;
           if (needed) {
-            show.making(0, quality);
+            if (make) show.making(0, quality);
             const jobId = 'pc' + Date.now().toString(36);
-            const off = window.api.onJobProgress((d) => { if (d && d.jobId === jobId) show.making(Math.round((Math.min(99, d.percent || 0) * MAKE_SHARE) / 100), quality); });
+            const off = window.api.onJobProgress((d) => { if (make && d && d.jobId === jobId) show.making(Math.round((Math.min(99, d.percent || 0) * MAKE_SHARE) / 100), quality); });
             try {
               const got = await call('video:phoneCopy', { input: p, jobId, quality });
               if (got && Array.isArray(got.parts) && got.parts.length) list = got.parts;

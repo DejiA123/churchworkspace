@@ -936,7 +936,7 @@ function retryWaitMs(res) {
 }
 
 /** One piece to the provider, asking for word timings. Returns the verbose JSON, or throws. */
-async function postAudioWords(body, { timeoutMs = 180000 } = {}) {
+async function postAudioWords(body, { timeoutMs = 180000, retry429 = true } = {}) {
   for (let attempt = 0; ; attempt++) {
     const form = new FormData();
     form.append('file', new Blob([body], { type: 'audio/ogg' }), 'clip.ogg');
@@ -976,7 +976,7 @@ async function postAudioWords(body, { timeoutMs = 180000 } = {}) {
        * caption half the shorts in the cloud and the other half on the PC.
        */
       const wait = retryWaitMs(res);
-      if (attempt < 3 && wait > 0 && wait <= WORDS_RETRY_MAX_WAIT_MS) {
+      if (retry429 && attempt < 3 && wait > 0 && wait <= WORDS_RETRY_MAX_WAIT_MS) {
         const until = Date.now() + wait + 500;
         while (Date.now() < until) {
           if (jobCancelled()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
@@ -1080,6 +1080,11 @@ const GAP_MID_SEC = 3;          // between two words
 const GAP_CTX_SEC = 1;          // heard either side of the gap, so the model has the sentence
 const GAP_WIN_SEC = 28;         // a request covers at most this much of a gap (one Whisper window)
 const GAP_TRIES = 6;
+/* The whole second listen, at most. The words are already complete when it
+ * starts; it is a chance to do better, never a reason to keep the operator
+ * waiting (found by review: a rate-limited key could hold a finished caption
+ * at 90% for minutes, each try waiting out the allowance). */
+const GAP_BUDGET_MS = 30000;
 const GAP_LOUD_DB = 14;         // a gap this close to the speech's own level may be speech…
 const GAP_FLOOR_DB = -55;       // …and never one quieter than this, whatever the speech was
 const LEVEL_STEP = 0.25;        // the level is read in quarter seconds
@@ -1199,9 +1204,11 @@ async function hearGapsAgain({ input, from, span, words }) {
   const tries = [];
   for (const g of todo) { tries.push({ g, ctx: GAP_CTX_SEC }); if (g.tail) tries.push({ g, ctx: GAP_CTX_SEC * 4, again: true }); }
   let out = words, tailDone = false;
+  const until = Date.now() + GAP_BUDGET_MS;
   for (const { g, ctx, again } of tries.slice(0, GAP_TRIES)) {
     if (jobCancelled()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
     if (again && tailDone) continue;
+    if (Date.now() > until - 3000) break;
     const ha = Math.max(0, g.a - ctx);
     const hb = Math.min(span, Math.min(g.b, g.a + GAP_WIN_SEC) + GAP_CTX_SEC);
     if (!(hb - ha > 0.5)) continue;
@@ -1209,10 +1216,11 @@ async function hearGapsAgain({ input, from, span, words }) {
     try {
       const body = await encodeRange(input, from + ha, hb - ha, 60000);
       if (!body || !body.length) continue;
-      json = await postAudioWords(body, { timeoutMs: 60000 });
+      // no waiting out a rate limit here: that allowance belongs to the next short's first listen
+      json = await postAudioWords(body, { timeoutMs: Math.max(3000, Math.min(20000, until - Date.now())), retry429: false });
     } catch (e) {
       if (e && e.cancelled) throw e;
-      continue;                                // a second chance that fails leaves the first answer as it was
+      break;                                   // the first failure ends it: the first answer stands as it was
     }
     // only what lands INSIDE the gap — the context either side was already heard
     let got = wordsFromVerbose(json, ha).filter((w) => {
@@ -1226,7 +1234,9 @@ async function hearGapsAgain({ input, from, span, words }) {
     const before = out.filter((w) => w.end <= g.a + 0.01).pop();
     const after = out.find((w) => w.start >= g.b - 0.01);
     while (got.length && before && normWord(got[0].text) === normWord(before.text)) got = got.slice(1);
-    while (got.length && after && normWord(got[got.length - 1].text) === normWord(after.text)) got = got.slice(0, -1);
+    // (only when this request actually reached that word: a gap longer than one
+    // window ends unheard, and a real word that happens to match is not a repeat)
+    if (hb >= g.b - 0.01) while (got.length && after && normWord(got[got.length - 1].text) === normWord(after.text)) got = got.slice(0, -1);
     if (!got.length || isArtefact(got.map((w) => w.text).join(' ')) || !looksSpoken(got)) continue;
     out = out.concat(got).sort((x, y) => x.start - y.start);
     keep.added += got.length;

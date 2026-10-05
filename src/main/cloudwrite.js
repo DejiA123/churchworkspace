@@ -263,8 +263,11 @@ function ladderFrom(have, first) {
   // back on its own as soon as the provider says its bucket has refilled.
   const add = (id) => { if (id && !out.includes(id) && !limitedNow(id)) out.push(id); };
   // A job that needs the strongest reader asks for it by name, ahead of the
-  // writer's own pick (see captions:grammar) — when this account has it.
-  for (const id of (first || [])) if (has(id)) add(id);
+  // writer's own pick (see captions:grammar) — only when this account's model
+  // list is KNOWN to have it: an unknown list (a custom provider, a failed
+  // /models fetch) says yes to everything, and a Groq model id sent to some
+  // other provider is a wasted request at best.
+  if (have && have.length) for (const id of (first || [])) if (have.includes(id)) add(id);
   // An explicit choice is an instruction and is tried first, present or not:
   // the operator may know something the list does not.
   if (cfg.model) add(cfg.model);
