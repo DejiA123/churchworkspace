@@ -2934,16 +2934,22 @@
     ev.preventDefault(); ev.stopPropagation();
     const resizing = !!ev.target.closest('[data-ovresize]');
     const preSnap = snapshotState();
-    // A picture that fills the frame has nowhere to go; taking hold of it means
-    // placing it yourself, so it becomes a box (as wide as the frame) to move.
-    if (s.cover) { s.cover = false; fitPipToFrame(s); renderOverlayGuide(); updateMediaLayer(nowT()); updateOverlayTools(); }
     const x0 = ev.clientX, y0 = ev.clientY;
-    const px0 = s.pipX != null ? s.pipX : 0.6, py0 = s.pipY != null ? s.pipY : 0.05, pw0 = s.pipW != null ? s.pipW : 0.34;
+    let px0 = s.pipX != null ? s.pipX : 0.6, py0 = s.pipY != null ? s.pipY : 0.05, pw0 = s.pipW != null ? s.pipW : 0.34;
+    const wasCover = !!s.cover;
     // Measured against the EXPORT FRAME, which is what the numbers are fractions
     // of — so a pixel of mouse movement moves the box by a pixel, whatever the
     // picture underneath is doing.
     const fr = outputFrameRect();
     const move = (e) => {
+      // A picture that fills the frame has nowhere to go; DRAGGING it means
+      // placing it yourself, so it becomes a box (as wide as the frame) to move
+      // — on a real drag only: a tap must not quietly undo the fill.
+      if (s.cover) {
+        if (Math.abs(e.clientX - x0) < 4 && Math.abs(e.clientY - y0) < 4) return;
+        s.cover = false; fitPipToFrame(s); updateOverlayTools();
+        px0 = s.pipX; py0 = s.pipY; pw0 = s.pipW;
+      }
       const dx = (e.clientX - x0) / (fr.w || 1), dy = (e.clientY - y0) / (fr.h || 1);
       if (resizing) { s.pipW = clamp(pw0 + dx, 0.05, 1); }
       else { s.pipX = px0 + dx; s.pipY = py0 + dy; }
@@ -2959,7 +2965,7 @@
     };
     const up = () => {
       document.removeEventListener('mousemove', move);
-      if (Math.abs((s.pipX || 0) - px0) > 0.001 || Math.abs((s.pipY || 0) - py0) > 0.001 || Math.abs((s.pipW || 0) - pw0) > 0.001) commitDragHistory(preSnap);
+      if (wasCover !== !!s.cover || Math.abs((s.pipX || 0) - px0) > 0.001 || Math.abs((s.pipY || 0) - py0) > 0.001 || Math.abs((s.pipW || 0) - pw0) > 0.001) commitDragHistory(preSnap);
       syncBulkOverlayFrom(s);
     };
     document.addEventListener('mousemove', move);
@@ -3471,12 +3477,14 @@
       };
       if (o.style === 'pip') {
         // the montage's box: up to half the width (a third on a wide frame) and a
-        // third of the height, 44 px in from its side, 11% down
+        // third of the height, in a 6 px white frame whose outside edge is 44 px
+        // in from its side and 11% down (montage.js renderPiece)
         const ar = info.width / info.height;
         const bw = Math.min(vw * (vw > vh ? 0.34 : 0.5), vh * 0.34 * ar);
         s.pipW = bw / vw;
-        s.pipX = o.pos === 'left' ? 44 / vw : 1 - s.pipW - 44 / vw;
-        s.pipY = 0.11;
+        s.pipX = o.pos === 'left' ? 50 / vw : 1 - s.pipW - 50 / vw;
+        s.pipY = (Math.round(vh * 0.11) + 6) / vh;
+        s.frame = 6 / vw;
       } else {
         Object.assign(s, { cover: true, pipX: 0, pipY: 0, pipW: 1 });
       }
@@ -3752,6 +3760,8 @@
       // the preview did not, so a watermark dialled down to a third still looked
       // solid right up until the file came out.
       n.style.objectFit = s.cover ? 'cover' : '';
+      // a montage's framed picture keeps its white frame (drawn outside the box, as the export pads it)
+      n.style.outline = s.frame > 0 && !s.cover ? `${Math.max(1, Math.round(s.frame * r.fr.w))}px solid #fff` : '';
       // …and its fade in and out (an AI Montage picture's), the compositor's ramp
       let op = s.opacity != null ? clamp(s.opacity, 0.05, 1) : 1;
       const fd = Math.min(Number(s.fade) || 0, (b - a) / 2);
@@ -4016,7 +4026,13 @@
     const g = c.getContext('2d', { willReadFrequently: true });
     try {
       g.clearRect(0, 0, w, h);
-      g.drawImage(n, 0, 0, w, h);
+      const nw = n.videoWidth || n.naturalWidth || 0, nh = n.videoHeight || n.naturalHeight || 0;
+      if (s.cover && nw && nh) {
+        // ⛶ Fill frame: the middle of the picture, cropped to the frame's shape —
+        // the export's cover crop, not the whole picture squashed into it
+        const sc = Math.max(w / nw, h / nh), sw = w / sc, sh = h / sc;
+        g.drawImage(n, (nw - sw) / 2, (nh - sh) / 2, sw, sh, 0, 0, w, h);
+      } else g.drawImage(n, 0, 0, w, h);
       const img = g.getImageData(0, 0, w, h), d = img.data;
       const k = s.key, kuv = keyUVFull(...hexRgb(k.color));
       const sim = clamp(Number(k.sim) || 0, 0, 1), blend = clamp(Number(k.blend) || 0, 0, 1);
@@ -8452,7 +8468,8 @@
       const place = mode === 'source' ? pipOnSource(o) : {
         x: o.pipX != null ? o.pipX : 0.6, y: o.pipY != null ? o.pipY : 0.05, wFrac: o.pipW != null ? o.pipW : 0.34,
       };
-      return overlayWindows(s, o, clock).map((w) => Object.assign({
+      const wins = overlayWindows(s, o, clock);
+      return wins.map((w, wi) => Object.assign({
         src: o.src || ve.video.path,
         still: o.kind === 'image',
         // A picture never has sound; a second video keeps its own unless silenced.
@@ -8462,7 +8479,12 @@
         key: keyOn(o) ? { color: o.key.color, sim: o.key.sim, blend: o.key.blend } : undefined,
         bgBlur: !!o.bgBlur,
         cover: !!o.cover,
+        frame: o.frame > 0 && !o.cover ? o.frame : undefined,
         fade: o.fade > 0 ? o.fade : undefined,
+        // …in at its real start and out at its real end — a closed gap inside it
+        // is a join, and fading there made the picture blink
+        fadeIn: o.fade > 0 ? (wi === 0 && Math.abs(w.srcStart - o.start) < 0.02) : undefined,
+        fadeOut: o.fade > 0 ? (wi === wins.length - 1 && Math.abs(w.srcEnd - o.end) < 0.02) : undefined,
       }, place));
     });
   }
@@ -9100,7 +9122,12 @@
       // what the preview shows, and what CapCut does) — so with keyframes the
       // overlays go on AFTER the encode, on the finished export's own clock.
       const motion = motionFor(whole);
-      const overlays = motion ? [] : overlaysFor(whole, 'source');
+      // …and so do they when parts of the edit are cut out (a montage shot
+      // deleted, a pause closed, a transition): laid on before, they were timed
+      // on the cut clock over the un-cut video, and landed early or in footage
+      // that was then removed
+      const late = !!(motion || (span.cuts && span.cuts.length) || (span.xfades && span.xfades.length));
+      const overlays = late ? [] : overlaysFor(whole, 'source');
       if (overlays.length) {
         const jid = window.__newJobId();
         const n = overlays.length;
@@ -9126,7 +9153,7 @@
         label: (ve.video.path.split(/[\\/]/).pop() || 'video').replace(/\.[^.]+$/, '') + '-edited',
         jobId,
       }), J(whole, 'encode'));
-      if (motion) {
+      if (late) {
         const post = overlayPayloadFor(whole, 'source', 'out');
         if (post.length) {
           const jid = window.__newJobId();
@@ -14200,6 +14227,13 @@
     hasVideo() { return !!ve.video; },
     /** The file the studio has open — the Cloud Studio will not delete it from under the edit. */
     sourcePath() { return (ve.video && ve.video.path) || null; },
+    /** The montage file behind the copy the studio edits (montage.js baseOf), or the open file itself. */
+    montagePath() {
+      const p = ve.video && ve.video.path; if (!p) return null;
+      // read off the path, so it holds after a reload resumes the edit too
+      const m = /^(.*)([\\/])\.montage-edit[\\/]([^\\/]+)$/.exec(p);
+      return m ? m[1] + m[2] + m[3] : p;
+    },
     /** Pinch-to-zoom on a phone (cloud-boot.js): the zoom now, the moment under a
         finger, and a zoom kept around that moment. */
     zoomLevel() { return ve.pxPerSec; },
@@ -14254,6 +14288,18 @@
       const laid = !!(base && ovs.length);
       await loadVideo(laid ? base : output);
       if (!ve.video) return false;
+      /*
+       * The studio's frame takes the montage's own shape. It stayed on 9:16
+       * whatever the montage was, so a 16:9 montage was cropped to a 9:16 window
+       * and its framed pictures were placed against that window instead.
+       */
+      {
+        const vi = ve.video.info || {};
+        const ar = vi.width && vi.height ? vi.width / vi.height : 0;
+        const fit = ar && Object.entries(ve.presets || {}).find(([, p]) => p && p.w && p.h && Math.abs(p.w / p.h - ar) / ar < 0.02);
+        const sel = $('#veAspect');
+        if (fit && ve.aspect !== fit[0]) { ve.aspect = fit[0]; if (sel) sel.value = fit[0]; updateCropMask(); }
+      }
       /*
        * The montage's own shots, as blocks on the timeline: it is cut at every
        * place one shot gives way to the next, so each can be trimmed, split
@@ -14440,7 +14486,7 @@
       },
       segmentDomCount() { return $$('#veSegments .ve-seg').length; },
       rulerTickCount() { return $$('#veRuler .ve-tick').length; },
-      segments() { return ve.segments.map((s) => ({ id: s.id, start: s.start, end: s.end, left: s.start * ve.pxPerSec, width: (s.end - s.start) * ve.pxPerSec })); },
+      segments() { return ve.segments.map((s) => ({ id: s.id, lane: s.lane || 0, start: s.start, end: s.end, left: s.start * ve.pxPerSec, width: (s.end - s.start) * ve.pxPerSec })); },
       addManual(a, b) { return addSegment(a, b, 'Manual', false); },
       addShort(a, b) { pushHistory(); const s = addSegment(a, b, 'Short', true); renderClipList(); return s; },
       // --- what Long-to-shorts is allowed to search (the timeline decides) ---

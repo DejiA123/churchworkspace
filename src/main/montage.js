@@ -1421,8 +1421,10 @@ function projectOf(plan, cands, { aspect, keepAudio, style, full }, meta = {}) {
 function saveProject(output, project) {
   try { fs.writeFileSync(sidecarOf(output), JSON.stringify(project)); } catch (e) { /* the video is what matters */ }
 }
+/** The montage a path stands for: its edit copy (baseOf) maps back to the montage itself. */
+const montageOf = (p) => (p && path.basename(path.dirname(p)) === '.montage-edit' ? path.join(path.dirname(path.dirname(p)), path.basename(p)) : p);
 function loadProject(output) {
-  try { return JSON.parse(fs.readFileSync(sidecarOf(output), 'utf8')); } catch (e) { return null; }
+  try { return JSON.parse(fs.readFileSync(sidecarOf(montageOf(output)), 'utf8')); } catch (e) { return null; }
 }
 
 /** Pictures laid evenly through a shot, each clear of the next and of the hook. */

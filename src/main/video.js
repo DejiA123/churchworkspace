@@ -1921,6 +1921,8 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
  *   key            { color '#rrggbb', sim, blend } to key out a green/blue screen
  *   cover          fill the whole frame, cropped to fit (an AI Montage cutaway)
  *   fade           seconds to fade in and out over (the montage's are 0.25)
+ *   frame          a white frame around the picture, as a fraction of the width
+ *                  (an AI Montage framed picture's 6 px), drawn outside its box
  * baseStart/baseEnd (optional): render only that RANGE of the base (used when a
  * short is being exported — its PiP overlays are composited into just its range;
  * tlStart is then relative to baseStart, i.e. to the output's own clock).
@@ -1986,8 +1988,9 @@ async function exportOverlayComposite(ctx, { base, overlays = [], output, baseSt
     const tlEnd = tl + olen;
     const cover = !!o.cover;
     const w = Math.max(2, Math.round((clampN(Number(o.wFrac) || 0.34, 0.02, 1) * BW) / 2) * 2);
-    const x = cover ? 0 : Math.round(clampN(o.x != null ? Number(o.x) : 0.62, -1, 1) * BW);
-    const y = cover ? 0 : Math.round(clampN(o.y != null ? Number(o.y) : 0.05, -1, 1) * BH);
+    const edge = !cover && Number(o.frame) > 0 ? Math.max(1, Math.round(clampN(Number(o.frame), 0, 0.05) * BW)) : 0;
+    const x = cover ? 0 : Math.round(clampN(o.x != null ? Number(o.x) : 0.62, -1, 1) * BW) - edge;
+    const y = cover ? 0 : Math.round(clampN(o.y != null ? Number(o.y) : 0.05, -1, 1) * BH) - edge;
     const op = clampN(o.opacity != null ? Number(o.opacity) : 1, 0.05, 1);
     // A picture is scaled with lanczos (it is a photo, not a moving frame) and
     // carried in RGBA so a logo's transparency survives to the overlay; footage
@@ -2013,6 +2016,7 @@ async function exportOverlayComposite(ctx, { base, overlays = [], output, baseSt
       ? `scale=${BW}:${BH}:force_original_aspect_ratio=increase${still ? ':flags=lanczos' : ''},crop=${BW}:${BH}`
       : (still ? `scale=${w}:-2:flags=lanczos` : `scale=${w}:-2`);
     const chain = [...timing, fit, 'setsar=1'];
+    if (edge) chain.push(`pad=iw+${2 * edge}:ih+${2 * edge}:${edge}:${edge}:white`);
     // Green screen: ffmpeg's own chromakey, the rule the preview's canvas copies
     // (veditor keyAlpha). Keyed before any fade-down so both apply.
     const key = keyOf(o.key);
@@ -2021,7 +2025,8 @@ async function exportOverlayComposite(ctx, { base, overlays = [], output, baseSt
     if (still || op < 1 || key || fade > 0) chain.push('format=rgba');
     if (op < 1) chain.push(`colorchannelmixer=aa=${op.toFixed(3)}`);
     // in and out softly rather than cut (timestamps are the output's by now)
-    if (fade > 0) chain.push(`fade=t=in:st=${tl.toFixed(3)}:d=${fade.toFixed(3)}:alpha=1`, `fade=t=out:st=${(tlEnd - fade).toFixed(3)}:d=${fade.toFixed(3)}:alpha=1`);
+    if (fade > 0 && o.fadeIn !== false) chain.push(`fade=t=in:st=${tl.toFixed(3)}:d=${fade.toFixed(3)}:alpha=1`);
+    if (fade > 0 && o.fadeOut !== false) chain.push(`fade=t=out:st=${(tlEnd - fade).toFixed(3)}:d=${fade.toFixed(3)}:alpha=1`);
     parts.push(`${src}${chain.join(',')}[ov${idx}]`);
     const out = (idx === overlays.length - 1) ? 'outv' : `t${idx}`;
     // composite it onto the running base, but only during its own window

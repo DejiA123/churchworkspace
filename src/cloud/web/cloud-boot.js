@@ -1263,9 +1263,11 @@ let _hideTimer = null;
     deletePaths(Array.from(filesUi.chosen));
   }
   async function deletePaths(paths) {
-    const open = window.VideoEditor && window.VideoEditor.sourcePath ? window.VideoEditor.sourcePath() : null;
-    const kept = paths.filter((p) => open && p === open);
-    const go = paths.filter((p) => !(open && p === open));
+    const ed = window.VideoEditor;
+    const openNow = [ed && ed.sourcePath && ed.sourcePath(), ed && ed.montagePath && ed.montagePath()].filter(Boolean);
+    const isOpen = (p) => openNow.includes(p);
+    const kept = paths.filter(isOpen);
+    const go = paths.filter((p) => !isOpen(p));
     const rows = $$('#cloudFilesList .cf-row').filter((r) => go.includes(r.dataset.path));
     let out = { deleted: [], refused: [], freed: 0 };
     if (go.length) {
