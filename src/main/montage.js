@@ -1270,7 +1270,19 @@ async function renderPiece(ctx, s, W, H, keepAudio, out, next, { overlay = null,
   return out;
 }
 
-async function render(ctx, plan, { aspect, keepAudio, output, tmp, onProgress }) {
+/*
+ * ►► THE STUDIO GETS THE OVERLAYS AS ITS OWN CLIPS. ◄◄
+ * "I should be able to see the overlays on another line in the timeline, in
+ * case I need to adjust them myself." The finished montage has its pictures
+ * burned in — it is what Files shows and what is saved — but the studio opens
+ * the same edit WITHOUT them (baseOf) and lays each one back on an overlay row
+ * (VideoEditor.applyMontage), where it can be moved, trimmed, resized or taken
+ * off, and the studio's export puts them on. Only the shots that carry
+ * overlays are made twice; every other piece is shared through the cache.
+ */
+const baseOf = (output) => path.join(path.dirname(output), '.montage-edit', path.basename(output));
+
+async function render(ctx, plan, { aspect, keepAudio, output, base, tmp, onProgress }) {
   const { w: W, h: H } = ASPECTS[aspect] || ASPECTS['9:16'];
   /*
    * Pieces are independent, so a server with more than one CPU makes several
@@ -1279,28 +1291,45 @@ async function render(ctx, plan, { aspect, keepAudio, output, tmp, onProgress })
    */
   const n = plan.shots.length;
   const pieces = new Array(n);
+  const bare = new Array(n);      // the same shots without their overlays, for the studio
+  const jobsList = plan.shots.map((sh, i) => ({ i, shot: sh, into: pieces }));
+  if (base) {
+    plan.shots.forEach((sh, i) => {
+      if ((sh.overlays || []).length) jobsList.push({ i, shot: Object.assign({}, sh, { overlays: [] }), into: bare, tag: '-bare' });
+    });
+  }
   let next = 0, done = 0;
   const worker = async () => {
-    while (next < n) {
-      const i = next++;
+    while (next < jobsList.length) {
+      const { i, shot, into, tag = '' } = jobsList[next++];
       const t0 = Date.now();
-      const out = path.join(tmp, `shot-${String(i).padStart(3, '0')}.mp4`);
-      const key = pieceKey(plan.shots[i], plan.shots[i + 1], W, H, keepAudio);
+      const out = path.join(tmp, `shot-${String(i).padStart(3, '0')}${tag}.mp4`);
+      const key = pieceKey(shot, plan.shots[i + 1], W, H, keepAudio);
       if (!fromCache(key, out)) {
-        await renderShot(ctx, plan.shots[i], W, H, keepAudio, out, plan.shots[i + 1]);
+        await renderShot(ctx, shot, W, H, keepAudio, out, plan.shots[i + 1]);
         toCache(key, out);
       }
-      pieces[i] = out;
-      if (process.env.MW_MONTAGE_PROFILE) { const sh = plan.shots[i]; console.log('[piece]', i, sh.cand.kind, sh.cand.w + 'x' + sh.cand.h, sh.seconds.toFixed(1) + 's', sh.effect, sh.slow ? 'slow' : '', (sh.overlays || []).length ? 'overlays:' + sh.overlays.length : '', ((Date.now() - t0) / 1000).toFixed(1) + 's'); }
+      into[i] = out;
+      if (process.env.MW_MONTAGE_PROFILE) { const sh = shot; console.log('[piece]', i + tag, sh.cand.kind, sh.cand.w + 'x' + sh.cand.h, sh.seconds.toFixed(1) + 's', sh.effect, sh.slow ? 'slow' : '', (sh.overlays || []).length ? 'overlays:' + sh.overlays.length : '', ((Date.now() - t0) / 1000).toFixed(1) + 's'); }
       done++;
-      if (onProgress) onProgress(Math.round((done / n) * 95));
+      if (onProgress) onProgress(Math.round((done / jobsList.length) * 95));
     }
   };
-  const lanes = Math.max(1, Math.min(4, machine.cpus(), n));
+  const lanes = Math.max(1, Math.min(4, machine.cpus(), jobsList.length));
   await Promise.all(Array.from({ length: lanes }, worker));
-  const list = path.join(tmp, 'pieces.txt');
-  fs.writeFileSync(list, pieces.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'));
-  await ff.runFfmpeg(ctx.ffmpeg, ['-hide_banner', '-y', '-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', '-movflags', '+faststart', output]);
+  const join = async (list, out, name) => {
+    const txt = path.join(tmp, name);
+    fs.writeFileSync(txt, list.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'));
+    await ff.runFfmpeg(ctx.ffmpeg, ['-hide_banner', '-y', '-f', 'concat', '-safe', '0', '-i', txt, '-c', 'copy', '-movflags', '+faststart', out]);
+  };
+  await join(pieces, output, 'pieces.txt');
+  if (base) {
+    try { fs.rmSync(base, { force: true }); } catch (e) {}
+    if (bare.some(Boolean)) {
+      fs.mkdirSync(path.dirname(base), { recursive: true });
+      await join(pieces.map((p, i) => bare[i] || p), base, 'bare.txt');
+    }
+  }
   pruneCache();
   if (onProgress) onProgress(100);
   return output;
@@ -1468,7 +1497,7 @@ async function remake(ctx, { project, edits, output, onProgress, stage }) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mw-montage-'));
   try {
     if (stage) stage(`🎞 Remaking it — ${shots.length} shots`);
-    await render(ctx, plan, { aspect: project.aspect, keepAudio: project.keepAudio !== false, output, tmp, onProgress });
+    await render(ctx, plan, { aspect: project.aspect, keepAudio: project.keepAudio !== false, output, base: baseOf(output), tmp, onProgress });
     const cands = Object.values(C).map((c) => Object.assign({}, c, { thumbData: c.thumb }));
     saveProject(output, projectOf(plan, cands, project, plan));
     return resultOf(plan, output, project, {});
@@ -1492,7 +1521,12 @@ function resultOf(plan, output, opts, extra) {
     full: !!opts.full,
     project: true,
     cuts: plan.shots.slice(1).map((s) => s.at),
-    overlays: plan.shots.flatMap((s) => (s.overlays || []).map((o) => ({ at: round2(s.at + o.start), seconds: o.len, style: o.style, file: o.cand.file }))),
+    // the edit without its overlays, which the studio opens and lays them on (see baseOf)
+    base: fs.existsSync(baseOf(output)) ? baseOf(output) : null,
+    overlays: plan.shots.flatMap((s) => (s.overlays || []).map((o) => ({
+      at: round2(s.at + o.start), seconds: o.len, style: o.style, file: o.cand.file,
+      kind: o.cand.kind, w: o.cand.w, h: o.cand.h, from: o.from == null ? 0 : o.from, pos: o.pos || 'right',
+    }))),
     shots: plan.shots.map((s) => ({ at: s.at, seconds: s.seconds, effect: s.effect, transition: s.transition, file: s.cand.file, kind: s.cand.kind, from: s.from == null ? null : s.from })),
   }, extra);
 }
@@ -1535,7 +1569,7 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, ful
     if (onProgress) onProgress(50);
     const plan = finalise(d.plan, cands, opts, music);
     if (stage) stage(opts.full ? `🎞 Blending all ${files.length} together…` : `✂️ Cutting ${plan.shots.length} shots together…`);
-    await render(ctx, plan, { aspect: opts.aspect, keepAudio: keepAudio !== false, output, tmp, onProgress: part(50, 100) });
+    await render(ctx, plan, { aspect: opts.aspect, keepAudio: keepAudio !== false, output, base: baseOf(output), tmp, onProgress: part(50, 100) });
     // the edit itself, beside the video, so it can be rearranged later
     saveProject(output, projectOf(plan, cands, { aspect: opts.aspect, keepAudio, style: opts.style, full: opts.full }, plan));
     return resultOf(plan, output, opts, { director: d.director, model: d.model, bpm: music ? music.bpm : null });
@@ -1551,4 +1585,4 @@ function directorStatus() {
   return { director: 'rules', model: '' };
 }
 
-module.exports = { fromBrief, cleanBrief, make, remake, loadProject, sidecarOf, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };
+module.exports = { fromBrief, cleanBrief, make, remake, loadProject, sidecarOf, baseOf, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };

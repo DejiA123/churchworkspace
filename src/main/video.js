@@ -1898,6 +1898,8 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
  *   mute           drop this overlay's own sound
  *   opacity        0..1 for watermarks (default 1 = solid)
  *   key            { color '#rrggbb', sim, blend } to key out a green/blue screen
+ *   cover          fill the whole frame, cropped to fit (an AI Montage cutaway)
+ *   fade           seconds to fade in and out over (the montage's are 0.25)
  * baseStart/baseEnd (optional): render only that RANGE of the base (used when a
  * short is being exported — its PiP overlays are composited into just its range;
  * tlStart is then relative to baseStart, i.e. to the output's own clock).
@@ -1961,9 +1963,10 @@ async function exportOverlayComposite(ctx, { base, overlays = [], output, baseSt
     const { olen, still } = cuts[idx];
     const tl = tlOf(o, idx);
     const tlEnd = tl + olen;
+    const cover = !!o.cover;
     const w = Math.max(2, Math.round((clampN(Number(o.wFrac) || 0.34, 0.02, 1) * BW) / 2) * 2);
-    const x = Math.round(clampN(o.x != null ? Number(o.x) : 0.62, -1, 1) * BW);
-    const y = Math.round(clampN(o.y != null ? Number(o.y) : 0.05, -1, 1) * BH);
+    const x = cover ? 0 : Math.round(clampN(o.x != null ? Number(o.x) : 0.62, -1, 1) * BW);
+    const y = cover ? 0 : Math.round(clampN(o.y != null ? Number(o.y) : 0.05, -1, 1) * BH);
     const op = clampN(o.opacity != null ? Number(o.opacity) : 1, 0.05, 1);
     // A picture is scaled with lanczos (it is a photo, not a moving frame) and
     // carried in RGBA so a logo's transparency survives to the overlay; footage
@@ -1975,7 +1978,7 @@ async function exportOverlayComposite(ctx, { base, overlays = [], output, baseSt
      * fills the whole frame — a landscape photo in a 9:16 short, a portrait
      * clip in a 16:9 video — instead of over whatever is underneath.
      */
-    if (o.bgBlur) {
+    if (o.bgBlur && !cover) {
       const bw = Math.max(2, Math.round(BW / 4 / 2) * 2), bh = Math.max(2, Math.round(BH / 4 / 2) * 2);
       parts.push(`[${inIdx}:v]${timing.join(',')},split[obg${idx}][ofg${idx}]`);
       parts.push(`[obg${idx}]scale=${bw}:${bh}:force_original_aspect_ratio=increase,crop=${bw}:${bh},boxblur=10:2,eq=brightness=-0.08,scale=${BW}:${BH},setsar=1[bgv${idx}]`);
@@ -1984,17 +1987,20 @@ async function exportOverlayComposite(ctx, { base, overlays = [], output, baseSt
       src = `[ofg${idx}]`;
       timing.length = 0;
     }
-    const chain = [
-      ...timing,
-      still ? `scale=${w}:-2:flags=lanczos` : `scale=${w}:-2`,
-      'setsar=1',
-    ];
+    const fit = cover
+      // the whole frame, the picture's middle — what the montage's cutaway is
+      ? `scale=${BW}:${BH}:force_original_aspect_ratio=increase${still ? ':flags=lanczos' : ''},crop=${BW}:${BH}`
+      : (still ? `scale=${w}:-2:flags=lanczos` : `scale=${w}:-2`);
+    const chain = [...timing, fit, 'setsar=1'];
     // Green screen: ffmpeg's own chromakey, the rule the preview's canvas copies
     // (veditor keyAlpha). Keyed before any fade-down so both apply.
     const key = keyOf(o.key);
     if (key) chain.push('format=yuva420p', `chromakey=color=0x${key.hex}:similarity=${key.sim.toFixed(3)}:blend=${key.blend.toFixed(3)}`);
-    if (still || op < 1 || key) chain.push('format=rgba');
+    const fade = Math.min(clampN(Number(o.fade) || 0, 0, 2), olen / 2);
+    if (still || op < 1 || key || fade > 0) chain.push('format=rgba');
     if (op < 1) chain.push(`colorchannelmixer=aa=${op.toFixed(3)}`);
+    // in and out softly rather than cut (timestamps are the output's by now)
+    if (fade > 0) chain.push(`fade=t=in:st=${tl.toFixed(3)}:d=${fade.toFixed(3)}:alpha=1`, `fade=t=out:st=${(tlEnd - fade).toFixed(3)}:d=${fade.toFixed(3)}:alpha=1`);
     parts.push(`${src}${chain.join(',')}[ov${idx}]`);
     const out = (idx === overlays.length - 1) ? 'outv' : `t${idx}`;
     // composite it onto the running base, but only during its own window

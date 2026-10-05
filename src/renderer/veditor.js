@@ -2860,6 +2860,8 @@
    */
   function overlayPreviewRect(s) {
     const fr = outputFrameRect();
+    // ⛶ Fill frame (an AI Montage cutaway): the whole frame, the picture cropped to it
+    if (s && s.cover) return { left: fr.left, top: fr.top, w: fr.w, h: fr.h, fr, map: previewMapping(), scale: 1 };
     // The box is as tall as what it SHOWS: added media keeps its own shape (a
     // portrait phone clip on a 16:9 service is the normal case), so borrowing
     // this video's ratio would draw a guide that does not match the export.
@@ -2913,6 +2915,9 @@
     ev.preventDefault(); ev.stopPropagation();
     const resizing = !!ev.target.closest('[data-ovresize]');
     const preSnap = snapshotState();
+    // A picture that fills the frame has nowhere to go; taking hold of it means
+    // placing it yourself, so it becomes a box (as wide as the frame) to move.
+    if (s.cover) { s.cover = false; fitPipToFrame(s); renderOverlayGuide(); updateMediaLayer(nowT()); updateOverlayTools(); }
     const x0 = ev.clientX, y0 = ev.clientY;
     const px0 = s.pipX != null ? s.pipX : 0.6, py0 = s.pipY != null ? s.pipY : 0.05, pw0 = s.pipW != null ? s.pipW : 0.34;
     // Measured against the EXPORT FRAME, which is what the numbers are fractions
@@ -3414,6 +3419,56 @@
       + (failed.length ? ` (Couldn't read ${failed.join(', ')}.)` : ''), 'good', 8000);
   }
 
+  /**
+   * An AI Montage's pictures, laid on the overlay rows where the montage had
+   * them: the same moment, the same length, a cutaway filling the frame and a
+   * framed picture in its corner (montage.js renderPiece's geometry), fading in
+   * and out over a quarter second as it did. Their own sound stays off — the
+   * montage plays the shot's sound under them — but a clip that has some can
+   * have it turned on like any added video.
+   */
+  async function placeMontageOverlays(list) {
+    const vw = (ve.video.info && ve.video.info.width) || 1080, vh = (ve.video.info && ve.video.info.height) || 1920;
+    const infos = {};
+    for (const f of new Set(list.map((o) => o.file))) {
+      try { infos[f] = await window.api.video.info(f); } catch (e) { infos[f] = null; }
+    }
+    let n = 0;
+    for (const o of list.slice().sort((a, b) => a.at - b.at)) {
+      const info = infos[o.file];
+      if (!info || !info.width || !info.height) continue;      // the picture has gone since
+      const image = o.kind ? o.kind === 'image' : isImgPath(o.file);
+      const at = clamp(Number(o.at) || 0, 0, Math.max(0, dur() - 0.2));
+      const len = clamp(Number(o.seconds) || 2, 0.3, Math.max(0.3, dur() - at));
+      const from = image ? 0 : Math.max(0, Number(o.from) || 0);
+      const s = {
+        id: uid(), lane: freeLaneFor(at, at + len),
+        src: o.file, kind: image ? 'image' : 'video',
+        srcInfo: { width: info.width, height: info.height, durationSec: image ? 0 : (info.durationSec || from + len), hasAudio: !!info.hasAudio },
+        start: from, end: from + len, tlStart: at,
+        label: `${image ? 'Photo' : 'Clip'} ${++n}`,
+        color: image ? '#0aa2c0' : '#a371f7',
+        mute: true, fade: 0.25, montage: true,
+      };
+      if (o.style === 'pip') {
+        // the montage's box: up to half the width (a third on a wide frame) and a
+        // third of the height, 44 px in from its side, 11% down
+        const ar = info.width / info.height;
+        const bw = Math.min(vw * (vw > vh ? 0.34 : 0.5), vh * 0.34 * ar);
+        s.pipW = bw / vw;
+        s.pipX = o.pos === 'left' ? 44 / vw : 1 - s.pipW - 44 / vw;
+        s.pipY = 0.11;
+      } else {
+        Object.assign(s, { cover: true, pipX: 0, pipY: 0, pipW: 1 });
+      }
+      ve.segments.push(s);
+      loadMediaThumb(s);
+    }
+    renderMediaLayer();
+    updateMediaLayer(nowT());
+    return n;
+  }
+
   /** A small picture of the file, painted into its clip block. */
   async function loadMediaThumb(s) {
     if (!isMedia(s) || ve.mediaThumbs[s.src]) return;
@@ -3520,6 +3575,21 @@
       ? `🌫 “${s.label}” fills the frame on a blurred copy of itself.`
       : `“${s.label}” is back on top of the video, no blur behind it.`, 'good');
   }
+  /** ⛶ Fill frame: the picture covers the whole frame, cropped to it — how the
+   *  AI Montage lays a cutaway — or back to a box that can be placed. */
+  function toggleOverlayFill(id) {
+    const s = ve.segments.find((x) => x.id === (id || ve.sel));
+    if (!s || !isMedia(s)) return window.__toast && window.__toast('Select a picture or an added video first (tap it on the timeline).', 'error');
+    pushHistory();
+    s.cover = !s.cover;
+    if (s.cover) s.bgBlur = false; else fitPipToFrame(s);
+    renderSegments(); renderMediaLayer(); renderOverlayGuide();
+    updateMediaLayer(nowT());
+    updateOverlayTools();
+    window.__toast && window.__toast(s.cover
+      ? `⛶ “${s.label}” fills the frame.`
+      : `“${s.label}” is a box again — drag it on the preview to place it.`, 'good');
+  }
   function toggleOverlaySound(id) {
     const s = ve.segments.find((x) => x.id === (id || ve.sel));
     if (!s || !isMedia(s) || s.kind !== 'video') return;
@@ -3544,6 +3614,13 @@
       const showK = !!(sk && isMedia(sk));
       kb.classList.toggle('hidden', !showK);
       kb.classList.toggle('on', showK && keyOn(sk));
+    }
+    const fb = $('#veOvFill');
+    if (fb) {
+      const sf = ve.segments.find((x) => x.id === ve.sel);
+      const showF = !!(sf && isMedia(sf));
+      fb.classList.toggle('hidden', !showF);
+      fb.classList.toggle('on', showF && !!sf.cover);
     }
     const bb = $('#veOvBlur');
     if (bb) {
@@ -3655,7 +3732,12 @@
       // …and so is how faint it is. The compositor has always honoured opacity;
       // the preview did not, so a watermark dialled down to a third still looked
       // solid right up until the file came out.
-      n.style.opacity = s.opacity != null ? String(clamp(s.opacity, 0.05, 1)) : '';
+      n.style.objectFit = s.cover ? 'cover' : '';
+      // …and its fade in and out (an AI Montage picture's), the compositor's ramp
+      let op = s.opacity != null ? clamp(s.opacity, 0.05, 1) : 1;
+      const fd = Math.min(Number(s.fade) || 0, (b - a) / 2);
+      if (fd > 0) op *= clamp(Math.min(t - a, b - t) / fd, 0, 1);
+      n.style.opacity = op < 1 ? String(op) : '';
       // 🎛️ a clip added after the video shows its own look
       if (isTailClip(s)) { const css = fxCss(s.fx); if (n._fxCss !== css) { n._fxCss = css; n.style.filter = css; } }
       // green screen: drawn through the key, as the export will (see drawKeyed)
@@ -8358,6 +8440,8 @@
         opacity: o.opacity != null ? o.opacity : 1,
         key: keyOn(o) ? { color: o.key.color, sim: o.key.sim, blend: o.key.blend } : undefined,
         bgBlur: !!o.bgBlur,
+        cover: !!o.cover,
+        fade: o.fade > 0 ? o.fade : undefined,
       }, place));
     });
   }
@@ -13307,6 +13391,7 @@
     }
     const ovSndBtn = $('#veOvSound'); if (ovSndBtn) ovSndBtn.addEventListener('click', () => toggleOverlaySound());
     const ovBlurBtn = $('#veOvBlur'); if (ovBlurBtn) ovBlurBtn.addEventListener('click', () => toggleOverlayBlur());
+    const ovFillBtn = $('#veOvFill'); if (ovFillBtn) ovFillBtn.addEventListener('click', () => toggleOverlayFill());
     const cutBtn = $('#veCutOut'); if (cutBtn) cutBtn.addEventListener('click', () => cutOutOverlayBackground());
     const keyBtn = $('#veChromaKey'); if (keyBtn) keyBtn.addEventListener('click', () => openChromaKey());
     const kfBtn = $('#veKeyframes'); if (kfBtn) kfBtn.addEventListener('click', () => openKeyframes());
@@ -14135,9 +14220,18 @@
      * director's words on the text lane — every one an ordinary text box, so it
      * can be retyped, restyled, moved or deleted like any other.
      */
-    async applyMontage({ output, music, musicVolume, texts, style, captions, cuts } = {}) {
+    async applyMontage({ output, base, overlays, music, musicVolume, texts, style, captions, cuts } = {}) {
       if (!output) return false;
-      await loadVideo(output);
+      /*
+       * The montage's pictures as the studio's own clips, on an overlay row —
+       * to move, trim, resize or take off — rather than burned into the video
+       * where nobody could touch them. The video opened is the same edit made
+       * WITHOUT them (montage.js baseOf); the export puts them on. A montage
+       * made before this, with no such copy, opens as it always did.
+       */
+      const ovs = (Array.isArray(overlays) ? overlays : []).filter((o) => o && o.file && Number(o.seconds) > 0);
+      const laid = !!(base && ovs.length);
+      await loadVideo(laid ? base : output);
       if (!ve.video) return false;
       /*
        * The montage's own shots, as blocks on the timeline: it is cut at every
@@ -14158,9 +14252,10 @@
         ve.sel = null;
         ve.segments.filter((x) => (x.lane || 0) === 0).sort((a, b) => a.start - b.start)
           .forEach((x, k) => { x.label = `Shot ${k + 1}`; x.seed = true; });
-        ve.history = []; ve.future = []; updateUndoRedoButtons();   // the cuts are the starting point, not edits to undo
-        renderSegments();
       }
+      if (laid) await placeMontageOverlays(ovs);
+      ve.history = []; ve.future = []; updateUndoRedoButtons();   // the montage is the starting point, not edits to undo
+      renderSegments();
       if (music && music.id) {
         await libRefresh();
         const entry = ((ve.lib && ve.lib.music) || []).find((m) => m.id === music.id) || music;

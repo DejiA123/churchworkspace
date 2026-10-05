@@ -2417,6 +2417,7 @@ let _hideTimer = null;
     overlay: [
       { icon: 'image', label: 'Add media', press: '#veAddMedia' },
       { icon: 'overlay', label: 'To overlay', press: '#veOverlay' },
+      { icon: 'fullscreen', label: 'Fill frame', press: '#veOvFill', on: true },
       { icon: 'chroma', label: 'Chroma key', call: 'chromaKey' },
       { icon: 'eraser', label: 'Cut out', press: '#veCutOut' },
       { icon: 'volume', label: 'Sound', press: '#veOvSound' },

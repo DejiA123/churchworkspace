@@ -1470,7 +1470,7 @@
       MT.busy = false;
       mtProgress('Opening it in the studio…', 100, ' ');
       go('studio');
-      await window.VideoEditor.applyMontage({ output: res.output, music: song, musicVolume: MT.keep ? 0.7 : 1, texts: res.texts, style: res.style || MT.style, captions: MT.caps && MT.keep, cuts: res.cuts });
+      await window.VideoEditor.applyMontage({ output: res.output, base: res.base, overlays: res.overlays, music: song, musicVolume: MT.keep ? 0.7 : 1, texts: res.texts, style: res.style || MT.style, captions: MT.caps && MT.keep, cuts: res.cuts });
       res.song = song || null;
       C.closePanel(MT.panel, true);
       mtRelease();
@@ -1662,7 +1662,7 @@
       ME.busy = false;
       show('Opening it in the studio…', 100);
       go('studio');
-      await window.VideoEditor.applyMontage({ output: res.output, texts: res.texts, style: res.style, cuts: res.cuts, music: ME.music || undefined, keepMusic: true });
+      await window.VideoEditor.applyMontage({ output: res.output, base: res.base, overlays: res.overlays, texts: res.texts, style: res.style, cuts: res.cuts, music: ME.music || undefined, keepMusic: true });
       C.closePanel(p, true);
       C.island({ kind: 'good', title: 'Montage remade', sub: `${Math.round(res.duration)}s · ${res.shots.length} shots — it’s in the studio`, ms: 4500 });
     } catch (e) {
