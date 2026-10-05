@@ -81,6 +81,15 @@ function showOverlay(msg) {
   $('#overlayMsg').textContent = msg || 'Working…';
   $('#progressBar').style.width = '0%';
   { const el = $('#overlayPct'); if (el) el.textContent = '0%'; }
+  /*
+   * The progress goes ON TOP of the captions editor. It sits under the studio's
+   * sheets so a question asked mid-job can come up over it — but a job started
+   * FROM the editor (🎧 Generate captions, Save video with captions) then ran
+   * hidden behind it: the button seemed to do nothing until the editor was
+   * closed by hand. When it finishes the editor is right there, with the words.
+   */
+  const capUp = !!document.querySelector('#capModal:not(.hidden)');
+  $('#overlay').classList.toggle('on-top', capUp);
   $('#overlay').classList.remove('hidden');
 }
 /*
@@ -107,6 +116,7 @@ function setProgress(p) {
 function hideOverlay() {
   clearTimeout(_hideTimer); _hideTimer = null;
   $('#overlay').classList.add('hidden');
+  $('#overlay').classList.remove('on-top');
   setJobBatch(null);
   showCancel(null);
   const bg = $('#overlayBackground');
