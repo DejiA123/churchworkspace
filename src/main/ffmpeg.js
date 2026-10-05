@@ -118,11 +118,41 @@ function capThreads(args) {
  * they take turns, under 2 GB two may run, and a desktop is left alone. A job
  * waiting its turn can still be cancelled.
  */
+/*
+ * ►► A BIG SERVER WITH NO GPU: 'superfast', THREE CRF STEPS DOWN, A CEILING. ◄◄
+ * Measured on a 1080×1920 encode of an iPhone HEVC clip (the encode is nearly
+ * all of an export's time; decoding and scaling it were a quarter):
+ *   veryfast  crf 20   5.0 s   4.9 Mbit/s   SSIM 0.9871
+ *   superfast crf 23   2.4 s   6.3 Mbit/s   SSIM 0.9883
+ * Twice as fast and not worse to look at, for a somewhat bigger file — and the
+ * ceiling (8 Mbit/s for HD, more for 4K) keeps a busy picture from making a
+ * file too big to save straight to a phone (see phonecopy.js). A command that
+ * already sets its own bitrate keeps it. MW_ENCODE=quality turns all this off
+ * (see machine.fastEncode).
+ */
+const QUICK_FROM = /^(medium|slow|slower|veryslow|fast|faster|veryfast)$/;
 function quickPreset(out) {
   const draft = draftAls.getStore() === true;
+  // (an encode to a set bitrate — a phone copy, a chosen bitrate — gets no more
+  // bits for being quicker, so it keeps 'veryfast', which spends them better)
+  const crfAt = out.indexOf('-crf');
+  const byQuality = crfAt >= 0 && Number(out[crfAt + 1]) > 0 && !out.includes('-b:v');   // (crf 0 is lossless: left alone)
+  let swapped = false;
   for (let i = 0; i < out.length - 1; i++) {
-    if (out[i] === '-preset' && /^(medium|slow|slower|veryslow|fast|faster)$/.test(String(out[i + 1]))) out[i + 1] = draft ? 'ultrafast' : 'veryfast';
-    else if (draft && out[i] === '-crf' && Number(out[i + 1]) > 0) out[i + 1] = String(Math.max(10, Number(out[i + 1]) - 4));
+    if (out[i] !== '-preset') continue;
+    const p = String(out[i + 1]);
+    if (draft && QUICK_FROM.test(p)) out[i + 1] = 'ultrafast';
+    else if (byQuality && QUICK_FROM.test(p)) { out[i + 1] = 'superfast'; swapped = true; }
+    else if (/^(medium|slow|slower|veryslow|fast|faster)$/.test(p)) out[i + 1] = 'veryfast';
+  }
+  for (let i = 0; i < out.length - 1; i++) {
+    if (out[i] !== '-crf' || !(Number(out[i + 1]) > 0)) continue;
+    if (draft) out[i + 1] = String(Math.max(10, Number(out[i + 1]) - 4));
+    else if (swapped) out[i + 1] = String(Math.min(51, Number(out[i + 1]) + 3));
+  }
+  if (swapped && !out.some((a) => a === '-maxrate' || a === '-x264-params')) {
+    const uhd = out.some((a) => /(^|\D)(2160|3840|4096)(\D|$)/.test(String(a)));
+    out.splice(out.length - 1, 0, '-maxrate', uhd ? '30M' : '8M', '-bufsize', uhd ? '60M' : '16M');
   }
   return out;
 }
