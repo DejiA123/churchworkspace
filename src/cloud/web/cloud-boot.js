@@ -3520,6 +3520,33 @@ let _hideTimer = null;
       $('#cloudHelpModal').classList.remove('hidden');
     });
     on('#cloudHelpClose', 'click', () => $('#cloudHelpModal').classList.add('hidden'));
+    // Every sheet also puts itself away from a tap on the dimmed space above it,
+    // or a pull down by its top — never only the ✕ (something can sit over it).
+    const sheetClose = { cloudFilesModal: closeFilesModal };
+    $$('.cap-modal.cloud-sheet-modal, #cloudHelpModal').forEach((m) => {
+      const close = () => (sheetClose[m.id] ? sheetClose[m.id]() : m.classList.add('hidden'));
+      m.addEventListener('click', (e) => { if (e.target === m) close(); });
+      const box = m.querySelector('.cap-box');
+      const top = box && box.firstElementChild;
+      if (!top) return;
+      let y0 = null, dy = 0;
+      top.addEventListener('touchstart', (e) => {
+        if (e.target.closest('button')) return;
+        y0 = e.touches[0].clientY; dy = 0; box.style.transition = 'none';
+      }, { passive: true });
+      top.addEventListener('touchmove', (e) => {
+        if (y0 == null) return;
+        dy = Math.max(0, e.touches[0].clientY - y0);
+        box.style.transform = dy ? `translateY(${dy}px)` : '';
+      }, { passive: true });
+      const end = () => {
+        if (y0 == null) return;
+        y0 = null; box.style.transition = ''; box.style.transform = '';
+        if (dy > 80) close();
+      };
+      top.addEventListener('touchend', end);
+      top.addEventListener('touchcancel', end);
+    });
 
     // The studio's own "open the output folder" button, which the cloud page
     // keeps because the export path ends there.

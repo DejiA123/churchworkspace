@@ -1000,16 +1000,21 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
   /* --------------------------------------------- the studio's own modals */
 
   body.mw-cloud .cap-modal { place-items: end center; z-index: 300; }
+  /* A sheet's top — its ✕ and Select — stays below the island: the progress
+     pill of an export floats over everything, and a sheet tall enough to reach
+     under it had a ✕ that could not be tapped ("I can't come out of this
+     screen"). The island ends ~92px below the notch, more with a second line. */
+  body.mw-cloud { --sheet-max: min(88vh, calc(100dvh - env(safe-area-inset-top) - 120px)); }
   body.mw-cloud .cap-box,
   body.mw-cloud .lib-box,
   body.mw-cloud .cut-box {
     width: 100%;
     max-width: 100%;
-    max-height: 88vh;
+    max-height: var(--sheet-max);
     border-radius: 18px 18px 0 0;
     padding-bottom: env(safe-area-inset-bottom);
   }
-  body.mw-cloud .cut-box { height: 88vh; }
+  body.mw-cloud .cut-box { height: var(--sheet-max); }
 
   /* ------------------------------------------- the captions window, on a phone
    *
@@ -1260,7 +1265,7 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
   /* the gallery and the Word Book cover the sheet, as they cover the desk's window */
   body.mw-cloud #capModal .cap-style-picker, body.mw-cloud #capModal .cap-wb-panel { border-radius: 18px 18px 0 0; }
   body.mw-cloud .fx-side { align-items: flex-end; }
-  body.mw-cloud .fx-side .cap-box { width: 100%; height: auto; max-height: 88vh; border-radius: 18px 18px 0 0; }
+  body.mw-cloud .fx-side .cap-box { width: 100%; height: auto; max-height: var(--sheet-max); border-radius: 18px 18px 0 0; }
 
   /* 16px stops iOS zooming the whole page when a field takes focus. */
   body.mw-cloud input[type="text"],
@@ -1288,7 +1293,7 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
 
   .cloud-files-box, .cloud-help-box { width: 100%; }
   body.mw-cloud .cloud-sheet-modal .cloud-files-box {
-    width: 100%; max-width: 100%; max-height: 88vh;
+    width: 100%; max-width: 100%; max-height: var(--sheet-max);
     border: 0; border-top: 1px solid rgba(255,255,255,.07); border-radius: 22px 22px 0 0;
     padding-bottom: env(safe-area-inset-bottom);
     animation: cloudSheetUp .25s ease-out;
@@ -1486,7 +1491,8 @@ body.mw-cloud #toast { display: none !important; }
 .cp-scrim.on { opacity: 1; }
 .cp-panel {
   position: fixed; left: 0; right: 0; bottom: var(--kb, 0px);
-  max-height: calc(100dvh - var(--kb, 0px) - env(safe-area-inset-top) - 36px);
+  /* (its ✕ below the island, as the sheets above) */
+  max-height: calc(100dvh - var(--kb, 0px) - env(safe-area-inset-top) - 120px);
   display: flex; flex-direction: column;
   background: #141519; color: #f5f6f8;
   border-radius: 22px 22px 0 0;
