@@ -104,8 +104,10 @@ LABEL org.opencontainers.image.description="The church Video Studio, in a browse
 # the app would start, take a recording, and fail at the first probe. The app
 # prefers the bundled binary and falls back to PATH (src/main/ffmpeg.js), so on
 # x64 the npm build still wins and nothing about the encoding changes.
+# procps is pgrep, which scripts/cloud-update.sh asks before restarting: without
+# it "is something exporting?" always answered no.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 ca-certificates fontconfig tini ffmpeg libgomp1 \
+      python3 ca-certificates fontconfig tini ffmpeg libgomp1 procps \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -12,6 +12,9 @@
 
 set -euo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# One at a time: a slow build can outlast the 30 minutes until cron's next round.
+exec 9>"${TMPDIR:-/tmp}/church-cloud-update.lock"
+flock -n 9 || { [ -t 1 ] && echo "an update is already running"; exit 0; }
 stamp() { date '+%Y-%m-%d %H:%M'; }
 DOCKER="docker"; docker info >/dev/null 2>&1 || DOCKER="sudo docker"
 
@@ -52,7 +55,8 @@ fi
 # that is the middle of the night. FORCE=1 skips the wait.
 IDLE_MIN="${MW_UPDATE_IDLE_MIN:-15}"
 if [ "${FORCE:-0}" != "1" ]; then
-  if $DOCKER compose exec -T studio sh -c 'pgrep -x ffmpeg >/dev/null || pgrep -f whisper-cli >/dev/null' 2>/dev/null; then
+  # (the voice cleaner too: a long Studio-sound export spends minutes in it with no ffmpeg running)
+  if $DOCKER compose exec -T studio sh -c 'pgrep -x ffmpeg >/dev/null || pgrep -x deep-filter >/dev/null || pgrep -f whisper-cli >/dev/null' 2>/dev/null; then
     echo "$(stamp) new version waiting — something is exporting, trying again next round"
     exit 0
   fi
