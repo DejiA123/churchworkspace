@@ -1264,8 +1264,17 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
 
   /* the gallery and the Word Book cover the sheet, as they cover the desk's window */
   body.mw-cloud #capModal .cap-style-picker, body.mw-cloud #capModal .cap-wb-panel { border-radius: 18px 18px 0 0; }
-  body.mw-cloud .fx-side { align-items: flex-end; }
+  body.mw-cloud .fx-side { left: 0; align-items: flex-end; }
   body.mw-cloud .fx-side .cap-box { width: 100%; height: auto; max-height: var(--sheet-max); border-radius: 18px 18px 0 0; }
+  /* 🎛️ Video quality: a SHORT sheet, so the picture above it stays in view
+     while a slider is dragged — the whole point of a live preview. */
+  body.mw-cloud .fx-side .cap-box.fxq {
+    max-height: min(var(--sheet-max), 58vh); border: 0; border-top: 1px solid rgba(255,255,255,.07); border-radius: 22px 22px 0 0;
+    padding-bottom: env(safe-area-inset-bottom); box-shadow: 0 -20px 60px rgba(0,0,0,.55); animation: cloudSheetUp .25s ease-out;
+  }
+  body.mw-cloud .fxq-head { padding-top: 20px; }
+  body.mw-cloud .fxq-grab { display: block; position: absolute; top: 7px; left: 50%; width: 38px; height: 5px; margin-left: -19px; border-radius: 3px; background: #3a3b43; }
+  body.mw-cloud .fxq-pane { padding-bottom: 14px; }
 
   /* 16px stops iOS zooming the whole page when a field takes focus. */
   body.mw-cloud input[type="text"],

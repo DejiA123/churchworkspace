@@ -1637,41 +1637,117 @@
     </main>
   </div>
 
-  <!-- Video quality panel — docks on the RIGHT so the live preview stays visible while you adjust -->
+  <!--
+    🎛️ VIDEO QUALITY — CapCut's Filters / Adjust / Volume, on ONE clip or on ALL
+    of them. What is set here is kept ON THE CLIP: it shows on the preview the
+    moment the playhead is in that clip, and every export of it carries it. The
+    whole-video tools (speed, rotate, fades, music) make a separate copy.
+    On a phone it is a short sheet under the preview, so the picture stays in
+    view while you drag; on a computer it docks on the right.
+  -->
   <div id="fxModal" class="fx-side hidden">
-    <div class="cap-box">
-      <div class="cap-head"><h2>🎛️ Video quality</h2><button id="fxClose" class="icon-btn">✕</button></div>
-      <p class="fx-live-note">👁 Changes show <b>live on the preview</b> as you drag — nothing is saved until you export.</p>
-      <div class="fx-body">
-        <div class="fx-row"><label>Speed</label>
-          <div class="fx-speed-row">
-            <input type="number" id="fxSpeed" min="0.1" max="100" step="0.1" value="1" />
-            <span class="muted small">× (0.1–100)</span>
-            <div class="fx-speed-presets">
+    <div class="cap-box fxq" role="dialog" aria-label="Video quality">
+      <div class="fxq-head">
+        <span class="fxq-grab" aria-hidden="true"></span>
+        <h2 class="fxq-title">Video quality</h2>
+        <button id="fxReset" type="button" class="fxq-reset">Reset</button>
+        <button id="fxClose" type="button" class="fxq-done" aria-label="Done"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7"/></svg></button>
+      </div>
+      <div id="fxScope" class="fxq-scope">
+        <div class="fxq-seg" role="tablist" aria-label="Apply to">
+          <button type="button" data-fxscope="clip" class="on" role="tab">This clip</button>
+          <button type="button" data-fxscope="all" role="tab">All clips</button>
+          <i class="fxq-seg-pill" aria-hidden="true"></i>
+        </div>
+        <div class="fxq-which">
+          <button type="button" id="fxPrevClip" class="fxq-step" aria-label="Previous clip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></button>
+          <span id="fxWhich" class="fxq-which-tx">Clip 1 of 1</span>
+          <button type="button" id="fxNextClip" class="fxq-step" aria-label="Next clip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></button>
+        </div>
+      </div>
+      <div class="fxq-tabs" role="tablist">
+        <button type="button" data-fxtab="filters" class="on">Filters</button>
+        <button type="button" data-fxtab="adjust">Adjust</button>
+        <button type="button" data-fxtab="volume">Volume</button>
+        <button type="button" data-fxtab="more">Speed &amp; more</button>
+      </div>
+      <div class="fx-body fxq-body">
+        <!-- FILTERS: a picture of this very frame, through each look -->
+        <section class="fxq-pane on" data-fxpane="filters">
+          <div id="fxLooks" class="fxq-looks">
+            <button type="button" data-look="" class="on"><i></i><span>Original</span></button>
+            <button type="button" data-look="vivid"><i></i><span>Vivid</span></button>
+            <button type="button" data-look="warm"><i></i><span>Warm</span></button>
+            <button type="button" data-look="cool"><i></i><span>Cool</span></button>
+            <button type="button" data-look="bw"><i></i><span>B&amp;W</span></button>
+            <button type="button" data-look="vintage"><i></i><span>Vintage</span></button>
+          </div>
+          <select id="fxLook" class="fxq-hidden" tabindex="-1" aria-hidden="true"><option value="">None</option><option value="vivid">Vivid</option><option value="warm">Warm</option><option value="cool">Cool</option><option value="bw">Black &amp; White</option><option value="vintage">Vintage</option></select>
+        </section>
+
+        <!-- ADJUST: pick one, drag one -->
+        <section class="fxq-pane" data-fxpane="adjust">
+          <div class="fxq-tools">
+            <button type="button" data-adj="fxBri" class="on"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg></i><span>Brightness</span></button>
+            <button type="button" data-adj="fxCon"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" stroke="none"/></svg></i><span>Contrast</span></button>
+            <button type="button" data-adj="fxSat"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3.2c3.4 4.1 6 7.4 6 10.6a6 6 0 0 1-12 0c0-3.2 2.6-6.5 6-10.6z"/></svg></i><span>Saturation</span></button>
+            <button type="button" data-adj="fxSharp"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l8.5 15h-17z"/><path d="M12 9.5v4.5"/></svg></i><span>Sharpen</span></button>
+          </div>
+          <div class="fxq-slide" data-for="fxBri"><input type="range" id="fxBri" min="-0.3" max="0.3" step="0.01" value="0" aria-label="Brightness"></div>
+          <div class="fxq-slide hidden" data-for="fxCon"><input type="range" id="fxCon" min="0.5" max="1.8" step="0.01" value="1" aria-label="Contrast"></div>
+          <div class="fxq-slide hidden" data-for="fxSat"><input type="range" id="fxSat" min="0" max="2.5" step="0.02" value="1" aria-label="Saturation"></div>
+          <div class="fxq-slide hidden" data-for="fxSharp"><input type="range" id="fxSharp" min="0" max="2" step="0.05" value="0" aria-label="Sharpen"><span id="fxSharpV" class="fxq-hidden">Off</span></div>
+        </section>
+
+        <!-- VOLUME -->
+        <section class="fxq-pane" data-fxpane="volume">
+          <div class="fxq-slide fxq-slide-vol" data-for="fxVol"><input type="range" id="fxVol" min="0" max="2" step="0.05" value="1" aria-label="Volume"></div>
+          <div class="fxq-chips" id="fxVolChips">
+            <button type="button" data-vol="0">Mute</button>
+            <button type="button" data-vol="0.5">50%</button>
+            <button type="button" data-vol="1">100%</button>
+            <button type="button" data-vol="1.5">150%</button>
+            <button type="button" data-vol="2">200%</button>
+          </div>
+          <span id="fxVolV" class="fxq-hidden">100%</span>
+        </section>
+
+        <!-- SPEED & MORE: the whole video, as a new copy -->
+        <section class="fxq-pane" data-fxpane="more">
+          <p class="fxq-note">These change the <b>whole video</b> and make a new copy of it — they are not kept on the timeline.</p>
+          <div class="fxq-group">
+            <div class="fxq-label">Speed <b id="fxSpeedV">1×</b></div>
+            <div class="fxq-chips fx-speed-presets">
               <button type="button" data-speed="0.25">0.25×</button>
               <button type="button" data-speed="0.5">0.5×</button>
-              <button type="button" data-speed="1">1×</button>
+              <button type="button" data-speed="1" class="on">1×</button>
+              <button type="button" data-speed="1.5">1.5×</button>
               <button type="button" data-speed="2">2×</button>
               <button type="button" data-speed="4">4×</button>
-              <button type="button" data-speed="10">10×</button>
             </div>
+            <input type="number" id="fxSpeed" class="fxq-hidden" min="0.1" max="100" step="0.1" value="1" />
           </div>
-        </div>
-        <div class="fx-row"><label>Volume</label><input type="range" id="fxVol" min="0" max="2" step="0.05" value="1"><span id="fxVolV" class="muted small">100%</span></div>
-        <div class="fx-row"><label>Look / filter</label><select id="fxLook"><option value="">None</option><option value="vivid">Vivid</option><option value="warm">Warm</option><option value="cool">Cool</option><option value="bw">Black &amp; White</option><option value="vintage">Vintage</option></select></div>
-        <div class="fx-row"><label>Brightness</label><input type="range" id="fxBri" min="-0.3" max="0.3" step="0.02" value="0"></div>
-        <div class="fx-row"><label>Contrast</label><input type="range" id="fxCon" min="0.5" max="1.8" step="0.05" value="1"></div>
-        <div class="fx-row"><label>Saturation</label><input type="range" id="fxSat" min="0" max="2.5" step="0.05" value="1"></div>
-        <div class="fx-row"><label>Sharpness</label><input type="range" id="fxSharp" min="0" max="2" step="0.1" value="0"><span id="fxSharpV" class="muted small">Off</span></div>
-        <div class="fx-row"><label>Fade in (s)</label><input type="number" id="fxFadeIn" min="0" max="10" step="0.5" value="0"></div>
-        <div class="fx-row"><label>Fade out (s)</label><input type="number" id="fxFadeOut" min="0" max="10" step="0.5" value="0"></div>
-        <div class="fx-row"><label>Rotate</label><select id="fxRot"><option value="0">0°</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select></div>
-        <div class="fx-row"><label>Flip</label><label class="cap-inline"><input type="checkbox" id="fxFlipH"> Horizontal</label><label class="cap-inline"><input type="checkbox" id="fxFlipV"> Vertical</label></div>
-        <div class="fx-row"><label>Background music</label><button id="fxMusic" class="ghost-btn small">Choose music…</button><span id="fxMusicName" class="muted small"></span></div>
-        <div class="fx-row"><label>Music volume</label><input type="range" id="fxMusicVol" min="0" max="1" step="0.05" value="0.3"></div>
-      </div>
-      <div class="cap-foot"><span class="muted small">Exports the whole loaded video with these settings.</span>
-        <div class="cap-foot-btns"><button id="fxCancel" class="ghost-btn">Cancel</button><button id="fxApply" class="primary-btn">✨ Apply &amp; export</button></div>
+          <div class="fxq-group">
+            <div class="fxq-label">Rotate &amp; flip</div>
+            <div class="fxq-chips">
+              <button type="button" id="fxRotBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg><span id="fxRotV">0°</span></button>
+              <button type="button" id="fxFlipHBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3v18" stroke-dasharray="2 2.5"/><path d="M9 7 3 17h6zM15 7l6 10h-6z"/></svg>Mirror</button>
+              <button type="button" id="fxFlipVBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 12h18" stroke-dasharray="2 2.5"/><path d="M7 9 17 3v6zM7 15l10 6v-6z"/></svg>Flip</button>
+            </div>
+            <select id="fxRot" class="fxq-hidden" tabindex="-1" aria-hidden="true"><option value="0">0°</option><option value="90">90°</option><option value="180">180°</option><option value="270">270°</option></select>
+            <input type="checkbox" id="fxFlipH" class="fxq-hidden" tabindex="-1" aria-hidden="true"><input type="checkbox" id="fxFlipV" class="fxq-hidden" tabindex="-1" aria-hidden="true">
+          </div>
+          <div class="fxq-group fxq-row2">
+            <label class="fxq-num"><span>Fade in</span><span class="fxq-step-in"><button type="button" data-bump="fxFadeIn:-0.5">−</button><input type="number" id="fxFadeIn" min="0" max="10" step="0.5" value="0" inputmode="decimal"><em>s</em><button type="button" data-bump="fxFadeIn:0.5">+</button></span></label>
+            <label class="fxq-num"><span>Fade out</span><span class="fxq-step-in"><button type="button" data-bump="fxFadeOut:-0.5">−</button><input type="number" id="fxFadeOut" min="0" max="10" step="0.5" value="0" inputmode="decimal"><em>s</em><button type="button" data-bump="fxFadeOut:0.5">+</button></span></label>
+          </div>
+          <div class="fxq-group">
+            <div class="fxq-label">Background music</div>
+            <button id="fxMusic" type="button" class="fxq-music"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg><span id="fxMusicName">Choose music…</span></button>
+            <div class="fxq-slide fxq-slide-sm" data-for="fxMusicVol"><input type="range" id="fxMusicVol" min="0" max="1" step="0.05" value="0.3" aria-label="Music volume"></div>
+          </div>
+          <button id="fxApply" type="button" class="fxq-apply">Export whole video with these</button>
+        </section>
       </div>
     </div>
   </div>

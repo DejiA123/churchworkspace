@@ -262,7 +262,9 @@ app.whenReady().then(async () => {
     const boxesAt35 = T.textBoxDomCount();
     const trackBlocks = T.textTrackDomCount(); // both always shown on the timeline track
 
-    // live effects preview (CSS, no export)
+    // live effects preview (CSS, no export) — the look is kept on the clip under
+    // the playhead, so there has to be one
+    T.seedClip(0, 60); T.seekAndRefresh(10);
     T.applyFxPreview({ fxSpeed: 2, fxVol: 1.4, fxBri: 0.15, fxCon: 1.2, fxSat: 1.3, fxRot: 90, fxFlipH: true, fxLook: 'bw' });
     const fx = T.fxPreviewState();
     T.resetFxPreview();
@@ -294,10 +296,12 @@ app.whenReady().then(async () => {
   log(nle.hasAudioTrackEl && nle.hasTextTrackEl && nle.hasCapTrackEl && nle.hasTrackLabels === 5, 'timeline has Video/Text/Captions/Audio/Music tracks with labels', nle.hasTrackLabels + ' labels');
   log(nle.hasAddTextBtn && nle.saveButtonsRemoved && nle.hasCropResetBtn, 'Add text / crop-reset present; separate "Save with text/overlays" buttons removed (exports include them)');
   log(nle.fxSpeedIsNumberInput && Number(nle.fxSpeedMax) >= 100, 'effects speed control extended to 0.1x-100x', 'max=' + nle.fxSpeedMax);
-  log(nle.fx.playbackRate === 2 && nle.fx.volume === 0.7, 'live fx preview updates playbackRate + volume', JSON.stringify(nle.fx));
+  // 140% plays at the browser's 100% (louder is for the export); it used to play at 70%
+  log(nle.fx.playbackRate === 2 && nle.fx.volume === 1, 'live fx preview updates playbackRate + volume', JSON.stringify(nle.fx));
   log(/rotate\(90deg\)/.test(nle.fx.transform) && /scale\(-1,\s*1\)/.test(nle.fx.transform), 'live fx preview updates rotate/flip transform', nle.fx.transform);
   log(/grayscale/.test(nle.fx.filter), 'live fx preview applies the look filter (CSS)', nle.fx.filter);
-  log(nle.fxReset.playbackRate === 1 && nle.fxReset.filter === '' && !/rotate|scale\(-/.test(nle.fxReset.transform), 'closing effects resets the live preview (canvas pan/zoom transform may remain)');
+  // speed and rotate are the whole-video copy's, so they go; the clip's own look is KEPT (it is saved on the clip)
+  log(nle.fxReset.playbackRate === 1 && /grayscale/.test(nle.fxReset.filter) && !/rotate|scale\(-/.test(nle.fxReset.transform), 'closing effects resets speed/rotate but keeps the clip\'s own look');
 
   /* ---------- [E] Round 3: text editing, gap-move, linked audio, undo/redo -- */
   console.log('\n[E] Text editing, split-gap-move, linked audio split, undo/redo');

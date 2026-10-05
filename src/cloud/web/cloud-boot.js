@@ -2522,12 +2522,20 @@ let _hideTimer = null;
     open.click();
     setTimeout(() => {
       const el = $(sel);
-      const row = el && (el.closest('label, .fx-row, .ve-fill-row, div') || el);
-      if (!row) return;
+      if (!el) return;
+      // the panel has tabs: open the one this control lives on (and, for
+      // Adjust, pick the slider itself)
+      const pane = el.closest('[data-fxpane]');
+      const tab = pane && $(`#fxModal [data-fxtab="${pane.dataset.fxpane}"]`);
+      if (tab) tab.click();
+      const adj = $(`#fxModal [data-adj="${el.id}"]`);
+      if (adj) adj.click();
+      if (pane) return;
+      const row = el.closest('label, .fx-row, .ve-fill-row, div') || el;
       row.scrollIntoView({ block: 'center', behavior: 'smooth' });
       row.classList.add('cloud-flash');
       setTimeout(() => row.classList.remove('cloud-flash'), 1400);
-    }, 120);
+    }, 60);
   }
 
   /*

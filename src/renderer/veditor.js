@@ -992,7 +992,7 @@
       const tip = isMedia(s)
         ? ` title="${attr2(s.label)} — ${s.kind === 'image' ? 'a picture' : 'a second video'} on top of this one. Drag it sideways to move it, its edges to change how long it shows, and the pink box on the preview to place it in the frame."`
         : '';
-      return `<div class="ve-seg${seln}${ov}${med}${cutN ? ' ve-seg-joined' : ''}" data-id="${s.id}" data-kf="${attr2(kfSig(s))}"${tip} style="left:${left}px;width:${width}px;${laneStyle(s.lane)}border-color:${s.color};${bg}">
+      return `<div class="ve-seg${seln}${ov}${med}${cutN ? ' ve-seg-joined' : ''}${cleanFx(s.fx) ? ' has-fx' : ''}" data-id="${s.id}" data-kf="${attr2(kfSig(s))}"${tip} style="left:${left}px;width:${width}px;${laneStyle(s.lane)}border-color:${s.color};${bg}">
         <div class="ve-seg-h l" data-edge="l"></div>
         ${notches}
         <div class="ve-seg-label">${icon}${escape2(s.label)}${snd}${cutN ? ` <span class="ve-seg-joinbadge" title="${cutN} pause${cutN > 1 ? 's' : ''} removed — exports as one ${Math.round(keptDur(s))}s video">🔗 ${Math.round(keptDur(s))}s</span>` : ''}</div>
@@ -1230,6 +1230,7 @@
     if (kfFor) syncKeyframePanel();
     updateCapOverlay(t);
     updateMediaLayer(t);   // added pictures / second videos appear and go on their own windows
+    syncClipLook(t);       // 🎛️ the look of the clip under the playhead
     renderTextOverlays();
     updateClipPlayButtons(); // the card ▶/⏸ tracks whether ITS clip is playing
     syncMusicPreview();      // the music bed follows the playhead
@@ -3480,12 +3481,15 @@
       // the preview did not, so a watermark dialled down to a third still looked
       // solid right up until the file came out.
       n.style.opacity = s.opacity != null ? String(clamp(s.opacity, 0.05, 1)) : '';
+      // 🎛️ a clip added after the video shows its own look
+      if (isTailClip(s)) { const css = fxCss(s.fx); if (n._fxCss !== css) { n._fxCss = css; n.style.filter = css; } }
       // green screen: drawn through the key, as the export will (see drawKeyed)
       if (keyOn(s)) drawKeyed(n, s, r); else hideKeyed(n);
       if (n.tagName !== 'VIDEO') continue;
       const want = s.start + (t - a);
       if (Math.abs((n.currentTime || 0) - want) > 0.25) { try { n.currentTime = want; } catch (e) { /* not seekable yet */ } }
       n.muted = !!s.mute;
+      if (isTailClip(s)) n.volume = clamp(fxOf(s).vol, 0, 1);
       if (playing && n.paused) { const pr = n.play(); if (pr && pr.catch) pr.catch(() => {}); }
       else if (!playing && !n.paused) n.pause();
     }
@@ -5858,6 +5862,7 @@
     s.cuts = leftCuts;
     const right = addSegment(rightStart, origEnd, s.seed ? s.label : s.label + ' (2)', s.ai);
     right.seed = !!s.seed;
+    if (s.fx) right.fx = Object.assign({}, s.fx);   // 🎛️ both halves keep the clip's look
     if (rightCuts.length) right.cuts = rightCuts;
     splitKf(s, right, t);
     selectSeg(right.id); renderSegments();
@@ -8222,9 +8227,10 @@
    */
   function clipFootage(s) {
     const input = ve.video.path;
-    if (!hasCuts(s)) return { input, ss: s.start, ee: s.end, pieces: null };
+    const fx = fxPayload(s);   // 🎛️ the clip's look rides on its pieces
+    if (!hasCuts(s)) return { input, ss: s.start, ee: s.end, pieces: fx ? [{ start: s.start, end: s.end, fx }] : null };
     // The input is always the recording itself now, so these are its own times.
-    const pieces = keptPieces(s);
+    const pieces = keptPieces(s).map((p) => (fx ? Object.assign(p, { fx }) : p));
     // ss/ee are only used if the pieces are dropped
     return { input, ss: pieces[0].start, ee: pieces[pieces.length - 1].end, pieces };
   }
@@ -8261,7 +8267,7 @@
      * the overlay's window now really removes that stretch of it.
      */
     const { input, ss, ee, pieces } = clipFootage(s);
-    const gaps = pieces ? ` — ${cutsOf(s).length} gap${cutsOf(s).length > 1 ? 's' : ''} closed` : '';
+    const gaps = hasCuts(s) ? ` — ${cutsOf(s).length} gap${cutsOf(s).length > 1 ? 's' : ''} closed` : '';
     // 3) frame + export (tracking sees exactly the footage the export will contain)
     const fill = fillCfg(), denoise = denoiseCfg();
     const fadeIn = fadeInCfg(), fadeOut = fadeOutCfg();
@@ -8361,6 +8367,7 @@
     const main = mainClips();
     return main.flatMap((s, i) => keptPieces(s).map((p, j) => {
       const q = { start: p.start, end: p.end };
+      const fx = fxPayload(s); if (fx) q.fx = fx;   // 🎛️ this clip's look
       // a transition belongs to the join INTO this clip, so it rides on the
       // clip's first piece (the first clip has nothing before it)
       if (i > 0 && j === 0 && s.trans && s.trans.type) q.trans = { type: s.trans.type, dur: s.trans.dur };
@@ -8628,7 +8635,7 @@
        * single pass it has always been.
        */
       let input = ve.video.path, ss = span.start, ee = span.end;
-      let pieces = span.pieces.length > 1 ? span.pieces : null;
+      let pieces = span.pieces.length > 1 || span.pieces.some((p) => p.fx) ? span.pieces : null;
       // 'source': this export keeps the WHOLE picture, so the placement has to be
       // taken back out of the export frame the preview draws onto the recording
       // itself — the same conversion added text does for this path.
@@ -8679,12 +8686,13 @@
       if (tail.length) {
         const clips = [];
         for (const c of tail) {
-          if (c.kind === 'image') { clips.push({ path: c.src, durationSec: Math.max(0.5, c.end - c.start) }); continue; }
+          const fx = fxPayload(c);   // 🎛️ its own look
+          if (c.kind === 'image') { clips.push({ path: c.src, durationSec: Math.max(0.5, c.end - c.start), fx }); continue; }
           const full = (c.srcInfo && c.srcInfo.durationSec) || 0;
           let pth = c.src;
-          if (c.start > 0.05 || (full && c.end < full - 0.05)) {
+          if (fx || c.start > 0.05 || (full && c.end < full - 0.05)) {
             const jt = window.__newJobId();
-            pth = await window.__runJob(`✂️ Trimming “${c.label || 'clip'}”…`, jt, () => window.api.video.trim({ input: c.src, startSec: c.start, endSec: c.end, jobId: jt }));
+            pth = await window.__runJob(fx ? `🎛️ Grading “${c.label || 'clip'}”…` : `✂️ Trimming “${c.label || 'clip'}”…`, jt, () => window.api.video.trim({ input: c.src, startSec: c.start, endSec: c.end, fx, jobId: jt }));
           }
           clips.push({ path: pth });
         }
@@ -11725,14 +11733,252 @@
     });
   }
 
-  /* ---------------- adjust & effects ---------------- */
-  async function applyFx() {
-    document.getElementById('fxModal').classList.add('hidden');
+  /* ============ 🎛️ VIDEO QUALITY: ONE CLIP, OR ALL OF THEM ============
+   *
+   * CapCut's Filters / Adjust / Volume. What is set here is kept ON THE CLIP
+   * (s.fx) — so it moves, splits, undoes and saves with the clip, shows on the
+   * preview whenever the playhead is in it, and every export of that clip
+   * carries it (the pieces of the edited video, a short cut from it, a clip
+   * added after it; see clipFx in video.js, which reads the same numbers).
+   *
+   * "This clip" changes the one clip; "All clips" changes the setting you touch
+   * on every clip at once. Speed, rotate, fades and music still work on the
+   * WHOLE video and make a separate copy (applyFx), as they always did.
+   */
+  const FX_DEFAULT = { look: '', bri: 0, con: 1, sat: 1, sharp: 0, vol: 1 };
+  const FX_INPUTS = { fxBri: 'bri', fxCon: 'con', fxSat: 'sat', fxSharp: 'sharp', fxVol: 'vol' };
+  const FX_LOOKS = ['vivid', 'warm', 'cool', 'bw', 'vintage'];
+  const FX_LOOK_CSS = {
+    '': '', vivid: 'saturate(1.6) contrast(1.15)', warm: 'sepia(0.25) saturate(1.2) hue-rotate(-8deg)',
+    cool: 'saturate(1.1) hue-rotate(12deg)', bw: 'grayscale(1)', vintage: 'sepia(0.35) contrast(0.92) saturate(0.85) brightness(1.03)',
+  };
+  const fxOf = (s) => Object.assign({}, FX_DEFAULT, (s && s.fx) || {});
+  /** Only what differs from "no change" — null when the clip is untouched (the same rule as video.js). */
+  function cleanFx(fx) {
+    const f = Object.assign({}, FX_DEFAULT, fx || {}), o = {};
+    if (FX_LOOKS.includes(f.look)) o.look = f.look;
+    const n = (v, lo, hi, d) => { const x = Number(v); return Number.isFinite(x) ? clamp(x, lo, hi) : d; };
+    const bri = n(f.bri, -0.3, 0.3, 0), con = n(f.con, 0.5, 1.8, 1), sat = n(f.sat, 0, 2.5, 1), sharp = n(f.sharp, 0, 2, 0), vol = n(f.vol, 0, 2, 1);
+    if (Math.abs(bri) > 0.001) o.bri = +bri.toFixed(3);
+    if (Math.abs(con - 1) > 0.001) o.con = +con.toFixed(3);
+    if (Math.abs(sat - 1) > 0.001) o.sat = +sat.toFixed(3);
+    if (sharp > 0.001) o.sharp = +sharp.toFixed(2);
+    if (Math.abs(vol - 1) > 0.001) o.vol = +vol.toFixed(3);
+    return Object.keys(o).length ? o : null;
+  }
+  const fxPayload = (s) => cleanFx(s && s.fx) || undefined;
+  /** The clips a look can go on, in timeline order: the main track, then the clips after it. */
+  const fxClips = () => mainClips().concat(tailClips());
+  /** The CSS that shows a look on the preview (close to ffmpeg's eq, not pixel-identical). */
+  function fxCss(f) {
+    f = Object.assign({}, FX_DEFAULT, f || {});
+    const parts = [];
+    if (Math.abs(f.bri) > 0.001) parts.push(`brightness(${(1 + f.bri).toFixed(3)})`);
+    if (Math.abs(f.con - 1) > 0.001) parts.push(`contrast(${f.con})`);
+    if (Math.abs(f.sat - 1) > 0.001) parts.push(`saturate(${f.sat})`);
+    if (FX_LOOK_CSS[f.look]) parts.push(FX_LOOK_CSS[f.look]);
+    if (f.sharp > 0.001) parts.push('url(#fxSharpen)');
+    return parts.join(' ');
+  }
+  function setSharpKernel(sharp) {
+    const km = document.getElementById('fxSharpKernel');
+    if (!km) return;
+    const a = clamp(Number(sharp) || 0, 0, 2) * 0.4;
+    const m = `0 ${-a} 0 ${-a} ${(1 + 4 * a).toFixed(3)} ${-a} 0 ${-a} 0`;
+    if (km.getAttribute('kernelMatrix') !== m) km.setAttribute('kernelMatrix', m);
+  }
+  /** The main video shows the look of the clip under the playhead — and sounds at its volume. */
+  function syncClipLook(t) {
+    const p = ve.refs.player; if (!p || !ve.video) return;
+    const s = ve.tailT != null ? null : mainClips().find((x) => t >= x.start - 1e-3 && t < x.end);
+    const f = fxOf(s);
+    const css = fxCss(f);
+    if (ve._fxCss !== css) { ve._fxCss = css; p.style.filter = css; }
+    if (f.sharp > 0) setSharpKernel(f.sharp);
+    // a browser plays at most 100%; louder than that is for the export
+    const v = clamp(f.vol, 0, 1);
+    if (Math.abs((p.volume == null ? 1 : p.volume) - v) > 0.001) p.volume = v;
+  }
+
+  /* --- the panel --- */
+  ve.fxUi = { scope: 'clip', clipId: null, tab: 'filters', adj: 'fxBri', pushed: false };
+  const fxTarget = () => ve.segments.find((x) => x.id === ve.fxUi.clipId) || null;
+  /** Which clip "This clip" means when the panel opens: the selected one, or the one under the playhead. */
+  function fxPickClip() {
+    const list = fxClips();
+    if (!list.length) return null;
+    const sel = list.find((x) => x.id === ve.sel);
+    if (sel) return sel;
+    const t = nowT();
+    return list.find((x) => t >= tlPos(x) && t < tlPos(x) + (x.end - x.start)) || list[0];
+  }
+  /** What the controls show for a value, the way CapCut shows it: -100…100 around "no change". */
+  function fxShown(id, v) {
+    v = Number(v);
+    if (id === 'fxBri') return Math.round((v / 0.3) * 100);
+    if (id === 'fxCon') return Math.round(v >= 1 ? ((v - 1) / 0.8) * 100 : ((v - 1) / 0.5) * 100);
+    if (id === 'fxSat') return Math.round(v >= 1 ? ((v - 1) / 1.5) * 100 : (v - 1) * 100);
+    if (id === 'fxSharp') return Math.round((v / 2) * 100);
+    if (id === 'fxVol' || id === 'fxMusicVol') return Math.round(v * 100);
+    return v;
+  }
+  const fxSigned = (n) => (n > 0 ? '+' + n : String(n));
+  /** Paint a slider's fill (from its "no change" point) and the number riding on its thumb. */
+  function paintFxSlider(el) {
+    if (!el) return;
+    const min = +el.min, max = +el.max, v = +el.value;
+    const zero = el.id === 'fxBri' ? 0 : (el.id === 'fxCon' || el.id === 'fxSat') ? 1 : min;
+    const pc = (x) => ((x - min) / (max - min)) * 100;
+    const a = Math.min(pc(v), pc(zero)), b = Math.max(pc(v), pc(zero));
+    el.style.setProperty('--a', a + '%'); el.style.setProperty('--b', b + '%');
+    el.style.setProperty('--z', pc(zero) + '%');
+    const wrap = el.closest('.fxq-slide');
+    if (!wrap) return;
+    let out = wrap.querySelector('.fxq-val');
+    if (!out) { out = document.createElement('output'); out.className = 'fxq-val'; wrap.appendChild(out); }
+    const n = fxShown(el.id, v);
+    out.textContent = el.id === 'fxVol' || el.id === 'fxMusicVol' ? n + '%' : (el.id === 'fxSharp' ? String(n) : fxSigned(n));
+    wrap.style.setProperty('--p', String(pc(v) / 100));
+    wrap.style.setProperty('--zz', String(pc(zero) / 100));
+    wrap.classList.toggle('bipolar', zero !== min);
+  }
+  /** A small picture of the current frame, for the filter tiles. */
+  function fxFrameThumb() {
+    const p = ve.refs.player;
+    try {
+      if (!p || !p.videoWidth) return '';
+      const c = document.createElement('canvas');
+      const h = 120, w = Math.max(1, Math.round((p.videoWidth / p.videoHeight) * h));
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(p, 0, 0, w, h);
+      return c.toDataURL('image/jpeg', 0.8);
+    } catch (e) { return ''; }   // (a frame from another origin cannot be read — the tiles keep their colours)
+  }
+  function renderFxPanel() {
+    const m = document.getElementById('fxModal'); if (!m) return;
+    const u = ve.fxUi;
+    const list = fxClips();
+    let s = fxTarget();
+    if (!s || !list.includes(s)) { s = fxPickClip(); u.clipId = s ? s.id : null; }
+    const f = fxOf(s);
+    // who it is for
+    const many = list.length > 1;
+    m.classList.toggle('fxq-many', many);
+    m.dataset.scope = u.scope;
+    m.dataset.tab = u.tab;
+    m.querySelectorAll('[data-fxscope]').forEach((b) => b.classList.toggle('on', b.dataset.fxscope === u.scope));
+    const idx = s ? list.indexOf(s) : -1;
+    const which = document.getElementById('fxWhich');
+    if (which) which.textContent = u.scope === 'all' ? `All ${list.length} clips` : (idx >= 0 ? `Clip ${idx + 1} of ${list.length}` : 'No clip');
+    const prev = document.getElementById('fxPrevClip'), next = document.getElementById('fxNextClip');
+    if (prev) prev.disabled = u.scope === 'all' || idx <= 0;
+    if (next) next.disabled = u.scope === 'all' || idx < 0 || idx >= list.length - 1;
+    // tabs
+    m.querySelectorAll('[data-fxtab]').forEach((b) => b.classList.toggle('on', b.dataset.fxtab === u.tab));
+    m.querySelectorAll('[data-fxpane]').forEach((x) => x.classList.toggle('on', x.dataset.fxpane === u.tab));
+    // filters
+    const look = document.getElementById('fxLook'); if (look) look.value = f.look;
+    m.querySelectorAll('#fxLooks [data-look]').forEach((b) => b.classList.toggle('on', b.dataset.look === f.look));
+    // adjust + volume
+    for (const [id, k] of Object.entries(FX_INPUTS)) {
+      const el = document.getElementById(id); if (!el) continue;
+      el.value = String(f[k]);
+      paintFxSlider(el);
+    }
+    m.querySelectorAll('[data-adj]').forEach((b) => {
+      b.classList.toggle('on', b.dataset.adj === u.adj);
+      const k = FX_INPUTS[b.dataset.adj];
+      b.classList.toggle('changed', Math.abs(f[k] - FX_DEFAULT[k]) > 0.001);
+    });
+    m.querySelectorAll('.fxq-pane[data-fxpane="adjust"] .fxq-slide').forEach((x) => x.classList.toggle('hidden', x.dataset.for !== u.adj));
+    m.querySelectorAll('#fxVolChips [data-vol]').forEach((b) => b.classList.toggle('on', Math.abs(+b.dataset.vol - f.vol) < 0.001));
+    const vv = document.getElementById('fxVolV'); if (vv) vv.textContent = Math.round(f.vol * 100) + '%';
+    const reset = document.getElementById('fxReset');
+    if (reset) reset.disabled = u.tab === 'more' || !(u.scope === 'all' ? list.some((x) => cleanFx(x.fx)) : cleanFx(f));
+    paintFxMore();
+  }
+  /** The whole-video tab: chips and labels from its (unchanged) form controls. */
+  function paintFxMore() {
     const q = (id) => document.getElementById(id);
+    const sp = parseFloat((q('fxSpeed') || {}).value) || 1;
+    const spV = q('fxSpeedV'); if (spV) spV.textContent = (Math.round(sp * 100) / 100) + '×';
+    document.querySelectorAll('#fxModal .fx-speed-presets [data-speed]').forEach((b) => b.classList.toggle('on', Math.abs(+b.dataset.speed - sp) < 0.001));
+    const rot = parseInt((q('fxRot') || {}).value, 10) || 0;
+    const rv = q('fxRotV'); if (rv) rv.textContent = rot + '°';
+    const rb = q('fxRotBtn'); if (rb) rb.classList.toggle('on', rot !== 0);
+    const fh = q('fxFlipHBtn'); if (fh) fh.classList.toggle('on', !!(q('fxFlipH') || {}).checked);
+    const fv = q('fxFlipVBtn'); if (fv) fv.classList.toggle('on', !!(q('fxFlipV') || {}).checked);
+    paintFxSlider(q('fxMusicVol'));
+  }
+  /** Set one part of the look — on this clip, or on every clip. */
+  function setClipFx(key, value) {
+    const u = ve.fxUi;
+    if (!fxTarget()) { const s0 = fxPickClip(); u.clipId = s0 ? s0.id : null; }
+    const targets = u.scope === 'all' ? fxClips().concat(ve.segments.filter((x) => x.ai)) : [fxTarget()].filter(Boolean);
+    if (!targets.length) return;
+    if (!u.pushed) { pushHistory(); u.pushed = true; } else touchSession();
+    for (const s of targets) {
+      const next = cleanFx(Object.assign(fxOf(s), { [key]: value }));
+      if (next) s.fx = next; else delete s.fx;
+    }
+    syncClipLook(nowT());
+    updateMediaLayer(nowT());
+    renderFxPanel();
+    markFxBlocks();
+  }
+  /** A small badge on the timeline blocks that have a look, so you can see which ones do. */
+  function markFxBlocks() {
+    if (!ve.refs.track) return;
+    ve.refs.track.querySelectorAll('.ve-seg[data-id]').forEach((el) => {
+      const s = ve.segments.find((x) => String(x.id) === el.dataset.id);
+      el.classList.toggle('has-fx', !!(s && cleanFx(s.fx)));
+    });
+  }
+  /** Put the playhead inside the clip being changed, so the change is on screen. */
+  function fxShowClip(s) {
+    if (!s) return;
+    const a = tlPos(s), b = a + (s.end - s.start), t = nowT();
+    if (t >= a && t < b - 0.05) return;
+    seekTo(Math.min(b - 0.1, a + Math.min(1, (b - a) / 3)));
+  }
+  function openFxPanel(tab) {
+    if (!ve.video) return window.__toast && window.__toast('Open a video first.', 'error');
+    const u = ve.fxUi;
+    const s = fxPickClip();
+    u.clipId = s ? s.id : null;
+    u.pushed = false;
+    if (tab) u.tab = tab;
+    if (fxClips().length < 2) u.scope = 'clip';
+    const m = document.getElementById('fxModal');
+    m.classList.remove('hidden');
+    // this frame through each look
+    const pic = fxFrameThumb();
+    m.querySelectorAll('#fxLooks [data-look]').forEach((b) => {
+      const i = b.querySelector('i'); if (!i) return;
+      if (pic) i.style.backgroundImage = `url("${pic}")`;
+      i.style.filter = FX_LOOK_CSS[b.dataset.look] || '';
+    });
+    renderFxPanel();
+    updateFxPreview();
+  }
+  function closeFxPanel() {
+    const m = document.getElementById('fxModal'); if (m) m.classList.add('hidden');
+    ve.fxUi.pushed = false;
+    resetFxPreview();
+    markFxBlocks();
+  }
+
+  /* --- the whole-video copy: speed, rotate, flip, fades, music --- */
+  async function applyFx() {
+    closeFxPanel();
+    const q = (id) => document.getElementById(id);
+    // a look that is the same on every clip goes on the copy too; different ones
+    // per clip are the timeline's own export (they are kept on the clips)
+    const keys = fxClips().map((x) => JSON.stringify(cleanFx(x.fx)));
+    const one = keys.length && keys.every((k) => k === keys[0]) ? fxOf(fxClips()[0]) : FX_DEFAULT;
     const edits = {
-      speed: +q('fxSpeed').value, volume: +q('fxVol').value, look: q('fxLook').value,
-      brightness: +q('fxBri').value, contrast: +q('fxCon').value, saturation: +q('fxSat').value,
-      sharpen: +q('fxSharp').value,
+      speed: +q('fxSpeed').value, volume: one.vol, look: one.look,
+      brightness: one.bri, contrast: one.con, saturation: one.sat, sharpen: one.sharp,
       fadeIn: +q('fxFadeIn').value, fadeOut: +q('fxFadeOut').value, rotate: +q('fxRot').value,
       flipH: q('fxFlipH').checked, flipV: q('fxFlipV').checked,
       // Fall back to the library track, so music chosen in the 🎵 Music panel
@@ -11749,44 +11995,31 @@
       out = await appendOutroTo(null, out); // the outro goes on this too
       window.finishedFile(out);
     } catch (e) {}
-    resetFxPreview();
   }
 
-  const FX_LOOK_CSS = {
-    '': '', vivid: 'saturate(1.6) contrast(1.15)', warm: 'sepia(0.25) saturate(1.2) hue-rotate(-8deg)',
-    cool: 'saturate(1.1) hue-rotate(12deg)', bw: 'grayscale(1)', vintage: 'sepia(0.35) contrast(0.92) saturate(0.85) brightness(1.03)',
-  };
   /**
-   * Approximate live preview of the Effects panel directly on the <video>
-   * element (CSS filter/transform + playbackRate/volume) so changes are visible
-   * BEFORE exporting. This is a close visual approximation, not pixel-identical
-   * to the ffmpeg render (CSS eq math differs slightly from ffmpeg's `eq` filter).
+   * The whole-video tools shown live while the panel is open: speed and
+   * rotate/flip (CSS transform + playbackRate). The clip's own look is
+   * syncClipLook's — it stays after the panel closes, because it is kept.
    */
   function updateFxPreview() {
     const q = (id) => document.getElementById(id);
     const p = ve.refs.player; if (!p) return;
     const speed = clamp(parseFloat(q('fxSpeed').value) || 1, 0.0625, 16); // HTMLMediaElement playbackRate range
     p.playbackRate = speed;
-    p.volume = clamp(parseFloat(q('fxVol').value) / 2, 0, 1); // fxVol is 0-2 (export gain); video.volume maxes at 1
-    const bri = parseFloat(q('fxBri').value) || 0, con = parseFloat(q('fxCon').value) || 1, sat = parseFloat(q('fxSat').value) || 1;
-    const look = FX_LOOK_CSS[q('fxLook').value] || '';
-    // Sharpness: CSS has no sharpen, so drive the inline SVG convolution filter
-    // (#fxSharpen) live. amount 0..2 → kernel edge weight 0..0.8 (0 = identity).
-    const sharp = clamp(parseFloat(q('fxSharp').value) || 0, 0, 2);
-    const sv = q('fxSharpV'); if (sv) sv.textContent = sharp ? sharp.toFixed(1) + '×' : 'Off';
-    const km = document.getElementById('fxSharpKernel');
-    if (km) { const a = sharp * 0.4; km.setAttribute('kernelMatrix', `0 ${-a} 0 ${-a} ${(1 + 4 * a).toFixed(3)} ${-a} 0 ${-a} 0`); }
-    p.style.filter = `brightness(${1 + bri}) contrast(${con}) saturate(${sat}) ${look} ${sharp > 0 ? 'url(#fxSharpen)' : ''}`.replace(/\s+/g, ' ').trim();
     const rot = parseInt(q('fxRot').value, 10) || 0;
     const flipH = q('fxFlipH').checked ? -1 : 1, flipV = q('fxFlipV').checked ? -1 : 1;
     // compose with the CapCut canvas transform (pan/zoom) instead of clobbering it
     ve._fxT = (rot || flipH < 0 || flipV < 0) ? `rotate(${rot}deg) scale(${flipH},${flipV})` : '';
     setPlayerTransform();
+    paintFxMore();
+    syncClipLook(nowT());
   }
   function resetFxPreview() {
     const p = ve.refs.player; if (!p) return;
-    p.playbackRate = 1; p.volume = 1; p.style.filter = ''; ve._fxT = '';
+    p.playbackRate = 1; ve._fxT = '';
     setPlayerTransform();
+    syncClipLook(nowT());
   }
 
   /* ================= MEDIA LIBRARY: background music & outro clips =================
@@ -13058,19 +13291,49 @@
     const stripMore = $('#capStyleMore');
     if (stripMore) stripMore.addEventListener('click', () => showCapStylePicker(true));
 
-    // adjust & effects — live preview on the <video> as you tweak (approximate; ffmpeg does the real export)
-    const fxBtn = $('#veEffects'); if (fxBtn) fxBtn.addEventListener('click', () => {
-      if (!ve.video) return window.__toast && window.__toast('Open a video first.', 'error');
-      $('#fxModal').classList.remove('hidden'); updateFxPreview();
-    });
-    $('#fxClose').addEventListener('click', () => { $('#fxModal').classList.add('hidden'); resetFxPreview(); });
-    $('#fxCancel').addEventListener('click', () => { $('#fxModal').classList.add('hidden'); resetFxPreview(); });
+    // 🎛️ Video quality — kept on the clip, shown on the preview as you drag
+    const fxBtn = $('#veEffects'); if (fxBtn) fxBtn.addEventListener('click', () => openFxPanel());
+    $('#fxClose').addEventListener('click', closeFxPanel);
     $('#fxApply').addEventListener('click', applyFx);
-    $('#fxVol').addEventListener('input', () => { $('#fxVolV').textContent = Math.round($('#fxVol').value * 100) + '%'; updateFxPreview(); });
-    ['#fxSpeed', '#fxLook', '#fxBri', '#fxCon', '#fxSat', '#fxSharp', '#fxRot', '#fxFlipH', '#fxFlipV'].forEach((sel) => {
-      const el = $(sel); if (el) el.addEventListener('input', updateFxPreview);
+    $$('#fxModal [data-fxscope]').forEach((b) => b.addEventListener('click', () => { ve.fxUi.scope = b.dataset.fxscope; renderFxPanel(); }));
+    $$('#fxModal [data-fxtab]').forEach((b) => b.addEventListener('click', () => { ve.fxUi.tab = b.dataset.fxtab; renderFxPanel(); }));
+    const fxStep = (d) => {
+      const list = fxClips(); const i = list.indexOf(fxTarget());
+      const s = list[clamp(i + d, 0, list.length - 1)];
+      if (!s || i < 0) return;
+      ve.fxUi.clipId = s.id; selectSeg(s.id); fxShowClip(s); renderFxPanel();
+    };
+    $('#fxPrevClip').addEventListener('click', () => fxStep(-1));
+    $('#fxNextClip').addEventListener('click', () => fxStep(1));
+    $$('#fxLooks [data-look]').forEach((b) => b.addEventListener('click', () => { fxShowClip(fxTarget()); setClipFx('look', b.dataset.look); }));
+    $('#fxLook').addEventListener('change', (e) => setClipFx('look', e.target.value));
+    $$('#fxModal [data-adj]').forEach((b) => b.addEventListener('click', () => { ve.fxUi.adj = b.dataset.adj; renderFxPanel(); }));
+    for (const [id, k] of Object.entries(FX_INPUTS)) {
+      const el = $('#' + id); if (!el) continue;
+      el.addEventListener('input', () => { paintFxSlider(el); setClipFx(k, parseFloat(el.value)); });
+      // double-tap a slider: back to "no change"
+      el.addEventListener('dblclick', () => setClipFx(k, FX_DEFAULT[k]));
+    }
+    $$('#fxVolChips [data-vol]').forEach((b) => b.addEventListener('click', () => setClipFx('vol', +b.dataset.vol)));
+    $('#fxReset').addEventListener('click', () => {
+      const u = ve.fxUi;
+      const targets = u.scope === 'all' ? fxClips().concat(ve.segments.filter((x) => x.ai)) : [fxTarget()].filter(Boolean);
+      if (!targets.some((x) => x.fx)) return;
+      if (!u.pushed) { pushHistory(); u.pushed = true; }
+      targets.forEach((x) => { delete x.fx; });
+      syncClipLook(nowT()); updateMediaLayer(nowT()); renderFxPanel(); markFxBlocks();
     });
-    $$('.fx-speed-presets button').forEach((b) => b.addEventListener('click', () => { $('#fxSpeed').value = b.dataset.speed; updateFxPreview(); }));
+    // the whole-video tab
+    $$('#fxModal .fx-speed-presets [data-speed]').forEach((b) => b.addEventListener('click', () => { $('#fxSpeed').value = b.dataset.speed; updateFxPreview(); }));
+    $('#fxRotBtn').addEventListener('click', () => { const r = $('#fxRot'); r.value = String(((parseInt(r.value, 10) || 0) + 90) % 360); updateFxPreview(); });
+    $('#fxFlipHBtn').addEventListener('click', () => { const c = $('#fxFlipH'); c.checked = !c.checked; updateFxPreview(); });
+    $('#fxFlipVBtn').addEventListener('click', () => { const c = $('#fxFlipV'); c.checked = !c.checked; updateFxPreview(); });
+    ['#fxSpeed', '#fxRot', '#fxFlipH', '#fxFlipV'].forEach((sel) => { const el = $(sel); if (el) el.addEventListener('input', updateFxPreview); });
+    $$('#fxModal [data-bump]').forEach((b) => b.addEventListener('click', () => {
+      const [id, d] = b.dataset.bump.split(':'); const el = $('#' + id);
+      el.value = String(clamp((parseFloat(el.value) || 0) + parseFloat(d), +el.min, +el.max));
+    }));
+    $('#fxMusicVol').addEventListener('input', (e) => paintFxSlider(e.target));
     $('#fxMusic').addEventListener('click', async () => {
       try {
         const p = await window.api.dialog.openFile([{ name: 'Audio', extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac'] }]);
@@ -15046,11 +15309,25 @@
       applyFxPreview(vals) {
         const q = (id) => document.getElementById(id);
         Object.entries(vals || {}).forEach(([k, v]) => {
+          // the look is the clip's (setClipFx); the rest is the whole-video form
+          if (FX_INPUTS[k]) return setClipFx(FX_INPUTS[k], +v);
+          if (k === 'fxLook') return setClipFx('look', v);
           const el = q(k); if (!el) return;
           if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
         });
         updateFxPreview();
       },
+      /* --- 🎛️ Video quality on one clip / all clips --- */
+      openFx(tab) { openFxPanel(tab); return { scope: ve.fxUi.scope, clipId: ve.fxUi.clipId }; },
+      closeFx() { closeFxPanel(); },
+      fxScope(scope) { ve.fxUi.scope = scope; renderFxPanel(); return scope; },
+      setClipFx(key, value) { setClipFx(key, value); },
+      clipFxOf(id) { const s = ve.segments.find((x) => x.id === id); return s ? cleanFx(s.fx) : null; },
+      fxClipIds() { return fxClips().map((x) => x.id); },
+      fxPieces() { return editedPieces(); },
+      fxFootage(id) { const s = ve.segments.find((x) => x.id === id); return s ? clipFootage(s) : null; },
+      seedClip(start, end) { ve.segments.push({ id: uid(), start, end, label: 'Full video', color: COLORS[0], ai: false, seed: true }); renderSegments(); return ve.segments.length; },
+      splitAt(t) { ve._quietSplit = true; try { doSplit(mainClips().find((x) => t > x.start && t < x.end), t); } finally { ve._quietSplit = false; } return ve.segments.length; },
       fxPreviewState() {
         const p = ve.refs.player;
         return { playbackRate: p.playbackRate, volume: p.volume, filter: p.style.filter, transform: p.style.transform };
