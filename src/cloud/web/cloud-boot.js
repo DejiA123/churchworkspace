@@ -2397,6 +2397,14 @@ let _hideTimer = null;
       { icon: 'animate', label: 'Animation', call: 'textAnimation' },
       { icon: 'captions', label: 'Captions', ai: true, sheet: 'insp', tab: '#veInspTabCaptions' },
     ],
+    /* What a caption block on the timeline can do. Comes up by itself when
+     * one is tapped (see followCaptionPick) — the way CapCut swaps its tools
+     * for the thing you picked — so Delete is right there. */
+    caption: [
+      { icon: 'trash', label: 'Delete', call: 'deleteSelectedCaption' },
+      { icon: 'pen', label: 'Edit words', call: 'editSelectedCaption' },
+      { icon: 'captions', label: 'Captions', sheet: 'insp', tab: '#veInspTabCaptions' },
+    ],
     ratio: [],      // built from the desk's own list of shapes
     /* What fills the frame when the video is another shape (16:9 in a 9:16
      * short): CapCut's Canvas. Blur is the whole picture on its own colours. */
@@ -2758,6 +2766,31 @@ let _hideTimer = null;
     }
 
     for (const name of Object.keys(DOCK)) buildRow(name);
+
+    /*
+     * Tap a caption block and the Caption tools come up; let go of it (tap a
+     * clip, delete it, undo) and the dock goes back to where it was. A pick is
+     * a tap, and the lane redraws on every change, so both are listened to.
+     */
+    (function followCaptionPick() {
+      const track = $('#veCapTrack');
+      if (!track) return;
+      let had = -1, back = 'main';
+      const follow = () => {
+        const E = window.VideoEditor;
+        const now = E && E.selectedCaption ? E.selectedCaption() : -1;
+        if (now === had) return;
+        had = now;
+        const cur = dock.querySelector('.cloud-dock-row.on');
+        const curName = cur ? cur.dataset.row : 'main';
+        if (now >= 0) {
+          if (curName !== 'caption') { back = curName; showRow('caption'); }
+        } else if (curName === 'caption') showRow(back || 'main');
+      };
+      new MutationObserver(follow).observe(track, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+      document.addEventListener('pointerup', () => setTimeout(follow, 0));
+      document.addEventListener('click', () => setTimeout(follow, 0));
+    })();
 
     // How many shorts the AI has made, on the AI Shorts button.
     const list = $('#veClipList');

@@ -5097,6 +5097,25 @@
     else scrollCapIntoView(i);
     startEditingCap(i);
   }
+  /**
+   * Take one caption line off the lane: the block, and its words too, so
+   * changing Words per line cannot regroup it back in. One step Undo puts back.
+   */
+  function deleteCapLine(i, say) {
+    const evs = ve.capEvents || [];
+    const e = evs[i]; if (!e) return false;
+    pushHistory({ captions: true });
+    evs.splice(i, 1);
+    if (Array.isArray(ve.capWords) && ve.capWords !== evs) {
+      ve.capWords = ve.capWords.filter((w) => { const mid = (w.start + w.end) / 2; return !(mid >= e.start - 0.01 && mid <= e.end + 0.01); });
+    }
+    ve.capSel = null; ve.capEditing = null;
+    renderCapTrack(); renderCapList();
+    updateCapOverlay(ve.refs.player.currentTime || 0);
+    if (say) window.__toast && window.__toast(`Took “${String(e.text || '').slice(0, 40)}” off the captions. Undo puts it back.`, 'good');
+    return true;
+  }
+  const capLineSelected = () => ve.activeRow === 'caption' && ve.capSel != null && capBlocksVisible() && !!ve.capEvents[ve.capSel];
   /** Save whatever caption line is being typed into right now (if any). */
   function commitCapEdit() {
     if (ve.capEditing == null) return;
@@ -13356,7 +13375,8 @@
     $('#veRedo').addEventListener('click', redoVideo);
     $('#veDupClip').addEventListener('click', () => duplicateSeg());
     $('#veDelClip').addEventListener('click', () => {
-      if (ve.activeRow === 'audio' && ve.audioSel) removeAudioSeg(ve.audioSel);
+      if (capLineSelected()) deleteCapLine(ve.capSel, true);
+      else if (ve.activeRow === 'audio' && ve.audioSel) removeAudioSeg(ve.audioSel);
       else if (ve.sel) {
         const s = ve.segments.find((x) => x.id === ve.sel);
         const media = s && isMedia(s) ? s.label : null;
@@ -13910,7 +13930,7 @@
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redoVideo() : undoVideo(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redoVideo(); return; }
       if (e.code === 'Space') { e.preventDefault(); togglePlay(); }
-      else if ((e.key === 'Delete' || e.key === 'Backspace') && ve.activeRow === 'caption' && ve.capSel != null && capBlocksVisible()) { e.preventDefault(); ve.capEvents.splice(ve.capSel, 1); ve.capSel = null; renderCapTrack(); renderCapList(); updateCapOverlay(ve.refs.player.currentTime || 0); }
+      else if ((e.key === 'Delete' || e.key === 'Backspace') && capLineSelected()) { e.preventDefault(); deleteCapLine(ve.capSel); }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && ve.activeRow === 'audio' && ve.audioSel) { e.preventDefault(); removeAudioSeg(ve.audioSel); }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && ve.sel) { e.preventDefault(); removeSeg(ve.sel); }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && ve.textSel) { e.preventDefault(); removeTextOverlay(ve.textSel); }
@@ -14081,6 +14101,15 @@
     zoomAround(px, anchorT, clientX) { return zoomAround(px, anchorT, clientX); },
     /** Open a file that is already on the machine (the phone's Files viewer). */
     openPath(p) { return p ? loadVideo(p) : null; },
+    /* The phone's Caption tools (shown while a caption block is selected).
+       Each acts on the caption only — never on a clip that happens to be behind it. */
+    selectedCaption() { return capLineSelected() ? ve.capSel : -1; },
+    deleteSelectedCaption() {
+      if (capLineSelected()) return deleteCapLine(ve.capSel, true);
+      window.__toast && window.__toast('Tap a caption on the timeline first, then Delete.', 'error');
+      return false;
+    },
+    editSelectedCaption() { if (capLineSelected()) editCaption(ve.capSel); },
     /** Projects (every video worked on keeps its own — see saveProject). */
     projectId() { return ve.video ? ve.sessionId || null : null; },
     /** Whatever is on screen written to its project NOW (before switching to another). */
