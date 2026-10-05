@@ -663,7 +663,9 @@
     // "Fit" means everything ON the timeline — including the outro parked after
     // the footage, which is otherwise just off the right-hand edge.
     setZoom(clamp(w / Math.max(1, timelineEnd()), 0.15, 24), false);
-    if (sc) sc.scrollLeft = 0;
+    // (the centred timeline stays on its moment — setZoom keeps the line on it;
+    // a scroll to 0 there would read as a swipe, pause and jump to 0:00)
+    if (sc && !centred()) sc.scrollLeft = 0;
   }
   /* ---------------- keeping the timeline smooth ----------------
    * renderSegments() rebuilds EVERY lane plus the clip-card panel (thumbnails,
@@ -1226,7 +1228,7 @@
        * the phone's touch bridge handles with hold().) A finger is also only
        * believed to be down while it is doing something.
        */
-      const lift = (e) => { if (!ve._tlTouch || (e && e.touches && e.touches.length)) return; ve._tlTouch = false; ve._userScrollAt = performance.now(); };
+      const lift = (e) => { if (!ve._tlTouch || (e && e.touches && e.touches.length)) return; ve._tlTouch = false; ve._userScrollAt = ve._liftAt = performance.now(); };
       sc.addEventListener('touchstart', (e) => {
         ve._tlTouch = true; ve._tlTouchAt = performance.now();
         const el = e.target;
@@ -5118,6 +5120,7 @@
         if (ve.capEditing === i) return; // typing — let the caret work
         ev.stopPropagation();
         const c = ve.capEvents[i]; if (!c) return;
+        const wasSel = ve.capSel === i;
         const edge = ev.target && ev.target.dataset ? ev.target.dataset.cedge : null;
         // select in place (don't re-render — that would replace the node a
         // double-click needs to stay stable to fire). Selection is exclusive
@@ -5153,6 +5156,9 @@
           document.removeEventListener('mousemove', move);
           if (moved) { renderCapTrack(); renderCapList(); return; }
           if (edge) return;
+          // On the phone a first tap only SELECTS the line, so its trim handles can be
+          // dragged (typing turns them off); a second tap, or Edit words, types into it.
+          if (centred() && !wasSel) return;
           tapSeek(capAbs(c));  // a plain click previews the caption (on the desk; the phone keeps its place)…
           editCaption(i);      // …and drops you straight into typing it
         };
@@ -5254,6 +5260,13 @@
     if (!c || !sc) return;
     const x = capAbs(c) * ve.pxPerSec + tlPadL(), w = (c.end - c.start) * ve.pxPerSec;
     const pad = 60;
+    // On the centred timeline where it is scrolled IS where the video is: a line
+    // out of sight is brought in by going to it (a bare scroll would read as a
+    // swipe and send the picture somewhere arbitrary).
+    if (centred()) {
+      if (x - pad < sc.scrollLeft || x + w + pad > sc.scrollLeft + sc.clientWidth) seekTo(capAbs(c));
+      return;
+    }
     if (x - pad < sc.scrollLeft) sc.scrollLeft = Math.max(0, x - pad);
     else if (x + w + pad > sc.scrollLeft + sc.clientWidth) sc.scrollLeft = x + w + pad - sc.clientWidth;
   }
@@ -5343,7 +5356,8 @@
       // Retyped lines go through the same cleaner as generated ones, so a full
       // stop can't sneak back in by hand. Cleaning happens HERE and not on every
       // keystroke — stripping a character mid-word would fight the caret.
-      const txt = inChosenCase(cleanCapText(label.textContent || ''));
+      const typedTxt = cleanCapText(label.textContent || '');
+      const txt = inChosenCase(typedTxt);
       ve.capEditing = null;
       if (ve.capEvents[i]) ve.capEvents[i].text = txt;
       if (label.textContent !== txt) label.textContent = txt;
@@ -5352,7 +5366,7 @@
       renderCapTrack(); renderCapList(); updateCapOverlay(ve.refs.player.currentTime || 0);
       // A line retyped on the LANE teaches exactly as much as one retyped in the
       // window, and there is one Word Book, so it goes through the same door.
-      learnCaptionEdit(orig, txt, i);
+      learnCaptionEdit(orig, typedTxt, i);
       if (next != null && ve.capEvents[next]) { const n = next; next = null; editCaption(n); }
     };
     // live: the words on the preview change as you type, no need to commit first
@@ -6071,6 +6085,9 @@
     if (p.paused) { const pr = p.play(); if (pr && pr.catch) pr.catch(() => {}); ve.refs.play.textContent = '⏸'; } else { p.pause(); ve.refs.play.textContent = '▶'; }
   }
   function seekTo(t) {
+    // A seek of its own (Play, Back 5s, Split, a keyframe jump) ends a swipe that
+    // is still coasting — or the next coasting step would scrub straight back.
+    if (centred() && !ve._scrubbing) { ve._userScrollAt = 0; ve._actionAt = performance.now(); }
     if (hasTail() && t > dur() + 0.001) { const was = isPlaying(); return enterTail(t, was); }
     const wasTail = ve.tailRun; leaveTail();
     ve.refs.player.currentTime = clamp(t, 0, dur());
@@ -9527,10 +9544,12 @@
     }
     // clicking the video track (even empty space) makes VIDEO the active row
     ve.activeRow = 'video'; ve.audioSel = null; renderAudioSegments();
-    // the centred timeline: a tap on empty track just lets go of the selection
-    if (centred()) { if (ve.sel) selectSeg(null); return; }
+    // The centred timeline: a TAP on empty track just lets go of the selection.
+    // A long press (the phone's touch bridge sends that as its own, untrusted,
+    // mousedown) still draws a clip, as it always has — just without moving the line.
+    if (centred()) { if (ve.sel) selectSeg(null); if (ev.isTrusted) return; }
     // empty area: seek immediately; may become a drag-to-create-selection
-    seekTo(trackX(ev) / ve.pxPerSec);
+    else seekTo(trackX(ev) / ve.pxPerSec);
     ve.drag = { mode: 'maybe', x0: trackX(ev), t0: trackX(ev) / ve.pxPerSec, moved: false };
     bind(); ev.preventDefault();
   }
@@ -9681,7 +9700,8 @@
   function transformCase(t, c) {
     if (c === 'upper') return t.toUpperCase();
     if (c === 'lower') return t.toLowerCase();
-    if (c === 'title') return t.replace(/\w\S*/g, (w) => w[0].toUpperCase() + w.slice(1).toLowerCase());
+    // (\p{L}, not \w: "élan" is "Élan", not "éLan")
+    if (c === 'title') return t.replace(/[\p{L}\p{N}]\S*/gu, (w) => w[0].toUpperCase() + w.slice(1).toLowerCase());
     return t;
   }
   /**
@@ -10835,6 +10855,7 @@
       const commit = () => {
         ve._capLive = null;
         const e = ve.capEvents[+inp.dataset.i];
+        const typed = inp.value;    // as typed: the Word Book learns spellings, not the display case
         if (e && inp.value && inp.value !== inChosenCase(inp.value)) inp.value = inChosenCase(inp.value);
         if (!e || e.text === inp.value) return;
         const before = e.text;
@@ -10844,7 +10865,7 @@
         updateCapOverlay(ve.refs.player.currentTime || 0);
         // The whole point: this correction is now also made everywhere else in
         // the video, and remembered for every video after it. See the Word Book.
-        learnCaptionEdit(before, inp.value, +inp.dataset.i);
+        learnCaptionEdit(before, typed, +inp.dataset.i);
         updateGrammarSummary();
       };
       // The proof-reader's buttons commit a half-typed line before acting on it.
@@ -14047,10 +14068,15 @@
       if (centred()) {
         // A swipe IS a scrub: whatever slides under the line is what the picture
         // shows. Playing stops the moment the timeline is taken, as in CapCut.
+        // What is still coasting from a flick the operator has since overruled —
+        // Play, Back 5s, Split — is not a swipe: it would pause and scrub straight
+        // back. It is stopped where the playhead is instead.
+        const overruled = !mine && !ve._tlTouch && ve._liftAt && (ve._actionAt || 0) > ve._liftAt && performance.now() - ve._liftAt < 3000;
+        if (overruled) { setScrollLeft(ve.refs.tlScroll, Math.max(0, tlPadL() + nowT() * ve.pxPerSec - centreGap())); return; }
         if (!mine && ve.video) {
           ve._userScrollAt = performance.now();
           if (isPlaying()) { const p = ve.refs.player; if (ve.tailRun) stopTailRun(); else if (p) p.pause(); }
-          if (!ve._scrubRaf) ve._scrubRaf = requestAnimationFrame(() => { ve._scrubRaf = null; if (centred()) seekTo(timeAtCentre()); });
+          if (!ve._scrubRaf) ve._scrubRaf = requestAnimationFrame(() => { ve._scrubRaf = null; if (centred()) { ve._scrubbing = true; try { seekTo(timeAtCentre()); } finally { ve._scrubbing = false; } } });
         }
       } else if (!mine && ve.follow !== false) setFollow(false, true);
       if (!ve.video || ve._rulerRaf) return;
@@ -14128,7 +14154,7 @@
     });
     // Pressing play is you asking to watch, so following comes back on; scrolling
     // away during playback turns it off again (see the scroll listener).
-    p.addEventListener('play', () => { ve.refs.play.textContent = '⏸'; setFollow(true, true); updateClipPlayButtons(); syncMusicPreview(true); startCapTick(); syncFsControls(); });
+    p.addEventListener('play', () => { if (centred()) { ve._userScrollAt = 0; ve._actionAt = performance.now(); updatePlayhead(); } ve.refs.play.textContent = '⏸'; setFollow(true, true); updateClipPlayButtons(); syncMusicPreview(true); startCapTick(); syncFsControls(); });
     p.addEventListener('pause', () => { if (ve._tailPausing || ve.tailRun) { ve._tailPausing = false; return; } ve.refs.play.textContent = '▶'; updateClipPlayButtons(); syncMusicPreview(); syncSoundPreview(); stopCapTick(); syncFsControls(); });
     p.addEventListener('ended', () => { stopCapTick(); if (ve.tailT == null && hasTail()) enterTail(dur(), true); });
     // anything else moving the main video's playhead (a clip's ▶, a jump) ends the tail

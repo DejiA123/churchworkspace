@@ -2076,6 +2076,16 @@ let _hideTimer = null;
     '.ve-text-box', '.ve-text-resize',
     '#veCropFrame', '#veOverlayGuide', '.ve-ovg-resize', '[data-ovresize]',
   ].join(',');
+  /* A wide screen (a tablet in landscape, a laptop's browser) keeps the desk's
+   * timeline: every handle visible and draggable, the ruler a scrubber. Only the
+   * phone layout is CapCut's (cloud.css hides unselected handles there alone). */
+  const DRAG_SEL_WIDE = [
+    '.ve-seg-h', '.ve-audio-h', '.ve-cc-h', '.ve-tc-h', '[data-tedge]', '[data-cedge]',
+    '.ve-cap-edge', '[data-capedge]', '.ve-text-box', '.ve-text-resize',
+    '#veRuler', '#veCropFrame', '#veOverlayGuide', '.ve-ovg-resize', '[data-ovresize]',
+  ].join(',');
+  const phoneMq = window.matchMedia ? window.matchMedia('(max-width: 900px)') : null;
+  const phoneLayout = () => !phoneMq || phoneMq.matches;
 
   /* Things that must keep their own touch behaviour: form controls, and the
    * cut-out painter, which already listens for touch itself. */
@@ -2150,7 +2160,7 @@ let _hideTimer = null;
       if (!el || !el.closest) return;
       if (el.closest(NO_BRIDGE)) return;
 
-      if (el.closest(DRAG_SEL)) {
+      if (el.closest(phoneLayout() ? DRAG_SEL : DRAG_SEL_WIDE)) {
         dragging = true;
         e.preventDefault();        // no scroll, no synthetic click, no 300ms wait
         hold(el);
@@ -3002,7 +3012,13 @@ let _hideTimer = null;
        */
       const centre = (n) => {
         const E = window.VideoEditor;
-        if (E && E.setCentredPlayhead) { E.setCentredPlayhead(true); return; }
+        if (E && E.setCentredPlayhead) {
+          // the phone layout only — and following it when a tablet turns round
+          const set = () => E.setCentredPlayhead(phoneLayout());
+          set();
+          if (phoneMq && phoneMq.addEventListener) phoneMq.addEventListener('change', set);
+          return;
+        }
         if (n < 40) setTimeout(() => centre(n + 1), 250);
       };
       centre(0);
