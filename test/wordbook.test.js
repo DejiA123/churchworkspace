@@ -406,6 +406,30 @@ head('The built-in vocabulary knows what it should, and only that');
   }
 }
 
+head('The built-in names never pull ordinary speech (found live, by review)');
+{
+  /*
+   * The first list of extra Bible names shipped to the live studio and turned
+   * "the false prophets" into "Theophilus prophets", "raised us up" into
+   * "Erastus up" and "jars of clay" into "Jairus of clay" — the names had been
+   * checked against a dictionary of headwords (no "jars", no word pairs). The
+   * list now in the book was run over 2.1M words of real English and all 25M
+   * pairs of the 5,000 commonest words; these are the sentences that caught it.
+   */
+  const m = W.compile({ enabled: true, soundAlike: true, fixes: [], terms: [] });
+  const say = (t) => W.applyToWords(t.split(' ').map((x, i) => ({ text: x, start: i, end: i + 0.9 })), m).words.map((w) => w.text).join(' ');
+  for (const t of ['Beware of the false prophets', 'God raised us up together with Christ', 'we have this treasure in jars of clay',
+    'six stone water jars', 'nails through his wrists', 'it would have been easier', 'She named him Moses',
+    'They came to arrest this man', 'the fowls of the air', 'through the valleys', 'true famous men', 'seek league']) {
+    check(`"${t}" comes through untouched`, say(t) === t, say(t));
+  }
+  // …and the names it was added for still land
+  check('"Methabosheth" -> "Mephibosheth"', say('think about Methabosheth who') === 'think about Mephibosheth who', say('think about Methabosheth who'));
+  check('"Jehovah-Jire" -> "Jehovah Jireh"', say('but Jehovah-Jire is') === 'but Jehovah Jireh is', say('but Jehovah-Jire is'));
+  check('"Zarababel" -> "Zerubbabel"', say('Zarababel heard') === 'Zerubbabel heard', say('Zarababel heard'));
+  check('no built-in correction that a revert could turn into "the Lord" -> "Allah"', say('praise the Lord') === 'praise the Lord');
+}
+
 /* ------------------------------------------------------------------ *
  * The book on disk, and the policy that decides what goes in it.
  * ------------------------------------------------------------------ */
