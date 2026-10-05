@@ -630,7 +630,9 @@
      * the new one — two renders per zoom step, and a visible flash of empty
      * lanes in between.
      */
-    if (anchor && sc) setScrollLeft(sc, Math.max(0, anchor.t * ve.pxPerSec - anchor.x));
+    // the centred timeline zooms about the line, whatever asked (a pinch, the buttons)
+    if (centred()) setScrollLeft(sc, Math.max(0, tlPadL() + nowT() * ve.pxPerSec - centreGap()));
+    else if (anchor && sc) setScrollLeft(sc, Math.max(0, anchor.t * ve.pxPerSec - anchor.x));
     else if (centerT != null && sc) setScrollLeft(sc, Math.max(0, centerT * ve.pxPerSec - sc.clientWidth / 2));
     // Zooming rescales every lane — but only the lanes, and coalesced to one
     // render per frame, because the wheel and the slider both fire far faster
@@ -652,7 +654,7 @@
   function timeAtClientX(clientX) {
     const sc = ve.refs.tlScroll;
     if (!sc) return 0;
-    return Math.max(0, (sc.scrollLeft + clientX - sc.getBoundingClientRect().left) / ve.pxPerSec);
+    return Math.max(0, (sc.scrollLeft + clientX - sc.getBoundingClientRect().left - tlPadL()) / ve.pxPerSec);
   }
   function fitZoom() {
     if (!ve.video) return;
@@ -1182,6 +1184,47 @@
     if (ve._tlPadL == null && ve.refs.tlScroll) ve._tlPadL = parseFloat(getComputedStyle(ve.refs.tlScroll).paddingLeft) || 0;
     return ve._tlPadL || 0;
   }
+  /*
+   * ►► CAPCUT'S TIMELINE: THE PLAYHEAD STAYS IN THE MIDDLE. ◄◄
+   *
+   * On the phone (the Cloud Studio turns this on) the white line never moves:
+   * it sits in the centre of the timeline and the clips slide under it. Where
+   * you scroll to IS where the video is — a swipe scrubs the picture, playing
+   * moves the clips along under the line — and half a screen of room either
+   * side lets the very start and the very end reach it. A tap on a clip
+   * selects it without moving anything; nothing jumps.
+   */
+  const centred = () => !!ve.centred && !!ve.refs.tlScroll;
+  const centreGap = () => (ve.refs.tlScroll ? Math.round(ve.refs.tlScroll.clientWidth / 2) : 0);
+  /** The time under the centre line, from where the timeline is scrolled to. */
+  const timeAtCentre = () => Math.max(0, (ve.refs.tlScroll.scrollLeft + centreGap() - tlPadL()) / ve.pxPerSec);
+  /** A finger is on the timeline, or it is still coasting from one. */
+  const userScrolling = () => !!ve._tlTouch || (performance.now() - (ve._userScrollAt || 0)) < 180;
+  function layoutCentre() {
+    const sc = ve.refs.tlScroll; if (!sc) return;
+    sc.style.paddingLeft = centred() ? centreGap() + 'px' : '';
+    // the room after the end is a block the phone sizes (cloud-boot.js); a right
+    // padding on top would count on one browser and not another (iOS skips it)
+    sc.style.paddingRight = centred() ? '0px' : '';
+    ve._tlPadL = null;
+    if (centred()) { renderRuler(); updatePlayhead(); }
+  }
+  function setCentredPlayhead(on) {
+    ve.centred = !!on;
+    const sc = ve.refs.tlScroll; if (!sc) return;
+    sc.classList.toggle('ve-centred', ve.centred);
+    if (ve.centred && !sc._centreWired) {
+      sc._centreWired = true;
+      if (window.ResizeObserver) new ResizeObserver(() => { if (centred()) layoutCentre(); }).observe(sc);
+      sc.addEventListener('touchstart', () => { ve._tlTouch = true; }, { passive: true });
+      const lift = () => { ve._tlTouch = false; ve._userScrollAt = performance.now(); };
+      sc.addEventListener('touchend', lift, { passive: true });
+      sc.addEventListener('touchcancel', lift, { passive: true });
+    }
+    layoutCentre();
+  }
+  /** A tap's seek — which in the centred timeline is no seek at all (CapCut). */
+  function tapSeek(t) { if (!centred()) seekTo(t); }
   /* Scroll the timeline OURSELVES, and remember exactly where to — the scroll
    * listener compares against it to tell an automatic scroll from the user
    * grabbing the timeline (see setFollow). Reading scrollLeft straight back gives
@@ -1223,7 +1266,10 @@
     $('#veTime').textContent = `${fmt(t)} / ${fmt(playEnd())}`;
     // keep the playhead in view while playing — unless you've scrolled away yourself
     const sc = ve.refs.tlScroll;
-    if (sc && isPlaying() && ve.follow !== false) {
+    if (centred()) {
+      // the clips move, not the line (and never under a finger that is moving them)
+      if (!userScrolling() && Math.abs(sc.scrollLeft - (x - centreGap())) > 0.5) setScrollLeft(sc, Math.max(0, x - centreGap()));
+    } else if (sc && isPlaying() && ve.follow !== false) {
       if (x < sc.scrollLeft + 20 || x > sc.scrollLeft + sc.clientWidth - 60) setScrollLeft(sc, Math.max(0, x - 80));
     }
     updateGapMask(t);
@@ -1387,6 +1433,12 @@
   /** The per-frame work while playing. Each piece bails out cheaply when it has
    *  nothing to do, so a plain video costs a few comparisons a frame. */
   function frameTick(t) {
+    // the centred timeline glides under its line every frame, not four times a second
+    if (centred()) {
+      const x = tlPadL() + t * ve.pxPerSec;
+      ve.refs.playhead.style.left = x + 'px';
+      if (!userScrolling()) setScrollLeft(ve.refs.tlScroll, Math.max(0, x - centreGap()));
+    }
     try { updateKfPreview(t); } catch (e) {}
     try { animateTextBoxes(t); } catch (e) {}
     try {
@@ -2776,7 +2828,7 @@
     const s = ve.audio.find((x) => x.id === id); if (!s) return;
     const edge = ev.target && ev.target.dataset ? ev.target.dataset.aedge : null;
     selectAudio(id); // clicking the audio row makes it the ACTIVE row (so Split acts on audio)
-    if (!edge) seekTo(trackX(ev) / ve.pxPerSec);
+    if (!edge) tapSeek(trackX(ev) / ve.pxPerSec);
     ev.preventDefault(); ev.stopPropagation();
     const preSnap = snapshotState();
     const x0 = trackX(ev), s0 = s.start, e0 = s.end, len = e0 - s0;
@@ -5083,7 +5135,7 @@
           document.removeEventListener('mousemove', move);
           if (moved) { renderCapTrack(); renderCapList(); return; }
           if (edge) return;
-          seekTo(capAbs(c));   // a plain click previews the caption…
+          tapSeek(capAbs(c));  // a plain click previews the caption (on the desk; the phone keeps its place)…
           editCaption(i);      // …and drops you straight into typing it
         };
         document.addEventListener('mousemove', move);
@@ -5273,7 +5325,7 @@
       // Retyped lines go through the same cleaner as generated ones, so a full
       // stop can't sneak back in by hand. Cleaning happens HERE and not on every
       // keystroke — stripping a character mid-word would fight the caret.
-      const txt = cleanCapText(label.textContent || '');
+      const txt = inChosenCase(cleanCapText(label.textContent || ''));
       ve.capEditing = null;
       if (ve.capEvents[i]) ve.capEvents[i].text = txt;
       if (label.textContent !== txt) label.textContent = txt;
@@ -5287,7 +5339,7 @@
     };
     // live: the words on the preview change as you type, no need to commit first
     label.addEventListener('input', () => {
-      if (ve.capEvents[i]) ve.capEvents[i].text = (label.textContent || '').replace(/\s+/g, ' ').trim();
+      if (ve.capEvents[i]) ve.capEvents[i].text = inChosenCase((label.textContent || '').replace(/\s+/g, ' ').trim());
       updateCapOverlay(ve.refs.player.currentTime || 0);
     });
     label.addEventListener('blur', commit, { once: true });
@@ -9446,8 +9498,9 @@
     if (segEl) {
       const s = ve.segments.find((x) => x.id === segEl.dataset.id);
       selectSeg(s.id);
-      // CapCut behaviour: the playhead follows your click (so Split "just works")
-      if (!edge) seekTo(trackX(ev) / ve.pxPerSec);
+      // CapCut behaviour: the playhead follows your click (so Split "just works") —
+      // on the desk; on the phone's centred timeline a tap selects and nothing moves
+      if (!edge) tapSeek(trackX(ev) / ve.pxPerSec);
       // Snapshot BEFORE the drag, but only commit it to history if something actually moved (avoid cluttering undo with plain clicks).
       const preSnap = snapshotState();
       if (edge) ve.drag = { mode: edge === 'l' ? 'trimL' : 'trimR', id: s.id, x0: trackX(ev), s0: s.start, e0: s.end, p0: tlPos(s), lane0: s.lane || 0, preSnap };
@@ -9456,6 +9509,8 @@
     }
     // clicking the video track (even empty space) makes VIDEO the active row
     ve.activeRow = 'video'; ve.audioSel = null; renderAudioSegments();
+    // the centred timeline: a tap on empty track just lets go of the selection
+    if (centred()) { if (ve.sel) selectSeg(null); return; }
     // empty area: seek immediately; may become a drag-to-create-selection
     seekTo(trackX(ev) / ve.pxPerSec);
     ve.drag = { mode: 'maybe', x0: trackX(ev), t0: trackX(ev) / ve.pxPerSec, moved: false };
@@ -9598,6 +9653,13 @@
   }
 
   /* ---------------- auto-captions (CapCut-style) ---------------- */
+  /*
+   * A line typed by hand wears the Case that is chosen, like every generated
+   * one. "When ALL CAPS is selected and I edit a line in lowercase, the caption
+   * stays lowercase" — the typed text was saved exactly as typed. (Normal
+   * keeps what was typed: that is what Normal means.)
+   */
+  const inChosenCase = (t) => transformCase(String(t == null ? '' : t), capGroupCfg().tc);
   function transformCase(t, c) {
     if (c === 'upper') return t.toUpperCase();
     if (c === 'lower') return t.toLowerCase();
@@ -10755,6 +10817,7 @@
       const commit = () => {
         ve._capLive = null;
         const e = ve.capEvents[+inp.dataset.i];
+        if (e && inp.value && inp.value !== inChosenCase(inp.value)) inp.value = inChosenCase(inp.value);
         if (!e || e.text === inp.value) return;
         const before = e.text;
         e.text = inp.value;
@@ -10773,7 +10836,7 @@
       // picture shows what you are typing, and (if asked) the sound stops so
       // you do not miss what comes next while your hands are busy.
       inp.addEventListener('input', () => {
-        ve._capLive = { i: +inp.dataset.i, text: inp.value };
+        ve._capLive = { i: +inp.dataset.i, text: inChosenCase(inp.value) };
         updateCapOverlay(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
         capPauseForTyping();
         clearTimeout(inp._gT);
@@ -13950,10 +14013,10 @@
     libRefresh();
 
     ve.refs.track.addEventListener('mousedown', onTrackDown);
-    ve.refs.ruler.addEventListener('mousedown', (e) => { if (ve.video) seekTo(trackX(e) / ve.pxPerSec); });
+    ve.refs.ruler.addEventListener('mousedown', (e) => { if (ve.video) tapSeek(trackX(e) / ve.pxPerSec); });
     ve.refs.audioTrack.addEventListener('mousedown', (e) => {
       if (!ve.video || e.target.closest('.ve-audio-seg')) return; // empty audio area -> just move the playhead
-      seekTo(trackX(e) / ve.pxPerSec);
+      tapSeek(trackX(e) / ve.pxPerSec);
     });
     // The ruler and the caption lane only build what is near the viewport (a
     // zoomed-in sermon would otherwise be thousands of nodes), so panning has to
@@ -13963,7 +14026,15 @@
       // You just grabbed the timeline — stop dragging you back to the playhead.
       const mine = ve._autoScrollTo != null && Math.abs(ve.refs.tlScroll.scrollLeft - ve._autoScrollTo) <= 1;
       ve._autoScrollTo = null; // one scroll event per programmatic scroll
-      if (!mine && ve.follow !== false) setFollow(false, true);
+      if (centred()) {
+        // A swipe IS a scrub: whatever slides under the line is what the picture
+        // shows. Playing stops the moment the timeline is taken, as in CapCut.
+        if (!mine && ve.video) {
+          ve._userScrollAt = performance.now();
+          if (isPlaying()) { const p = ve.refs.player; if (ve.tailRun) stopTailRun(); else if (p) p.pause(); }
+          if (!ve._scrubRaf) ve._scrubRaf = requestAnimationFrame(() => { ve._scrubRaf = null; if (centred()) seekTo(timeAtCentre()); });
+        }
+      } else if (!mine && ve.follow !== false) setFollow(false, true);
       if (!ve.video || ve._rulerRaf) return;
       ve._rulerRaf = requestAnimationFrame(() => {
         ve._rulerRaf = null;
@@ -14239,6 +14310,9 @@
     zoomLevel() { return ve.pxPerSec; },
     timeAtClientX(x) { return timeAtClientX(x); },
     zoomAround(px, anchorT, clientX) { return zoomAround(px, anchorT, clientX); },
+    /** CapCut's timeline (the phone): the playhead fixed in the middle, the clips sliding under it. */
+    setCentredPlayhead(on) { setCentredPlayhead(on); },
+    centreGap() { return centred() ? centreGap() : 0; },
     /** Open a file that is already on the machine (the phone's Files viewer). */
     openPath(p) { return p ? loadVideo(p) : null; },
     /* The phone's Caption tools (shown while a caption block is selected).

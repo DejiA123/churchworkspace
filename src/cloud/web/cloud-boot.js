@@ -2058,11 +2058,20 @@ let _hideTimer = null;
    * selects (the browser's own click), and a long press lifts the clip so it
    * can be moved — the LONG_PRESS_SEL path below, which the rows contain.
    */
+  /*
+   * ►► ONLY THE SELECTED CLIP'S HANDLES. ◄◄ Every clip used to carry live trim
+   * handles at both ends, and on a montage — dozens of short clips and
+   * pictures — those strips covered much of the timeline: a finger meant to
+   * scroll landed on one and trimmed or moved a clip instead. As in CapCut,
+   * handles belong to the clip you tapped (the others do not show them,
+   * cloud.css), and everywhere else a finger scrolls. The ruler scrolls too:
+   * the timeline's own centre line is the scrubber now (setCentredPlayhead).
+   */
   const DRAG_SEL = [
-    '.ve-seg-h', '.ve-audio-h', '.ve-cc-h',
-    '.ve-cap-edge', '[data-cedge]', '[data-capedge]',
-    '.ve-text-box', '.ve-text-resize', '.ve-tc-h', '[data-tedge]',
-    '#veRuler', '#veCropFrame', '#veOverlayGuide', '.ve-ovg-resize', '[data-ovresize]',
+    '.ve-seg.sel .ve-seg-h', '.ve-audio-seg.sel .ve-audio-h', '.ve-cap-clip.sel .ve-cc-h', '.ve-text-clip.sel .ve-tc-h',
+    '.ve-cap-edge', '[data-capedge]',
+    '.ve-text-box', '.ve-text-resize',
+    '#veCropFrame', '#veOverlayGuide', '.ve-ovg-resize', '[data-ovresize]',
   ].join(',');
 
   /* Things that must keep their own touch behaviour: form controls, and the
@@ -2962,10 +2971,15 @@ let _hideTimer = null;
           if (main.length) { const r = main[0].getBoundingClientRect(); top = r.top; h = r.height; }
           const endX = Math.round(tr.right - sr.left + scroller.scrollLeft);
           add.style.left = (endX + 10) + 'px';
-          tail.style.width = (endX + 56) + 'px';
+          // half a screen past the end, so the last frame can reach the centre line
+          // (the block starts after the scroller's left padding; endX counts it)
+          const E = window.VideoEditor;
+          const padL = parseFloat(getComputedStyle(scroller).paddingLeft) || 0;
+          const gap = (E && E.centreGap) ? E.centreGap() : 0;
+          tail.style.width = Math.max(0, endX - (gap ? padL : 0) + Math.max(56, gap)) + 'px';
           add.style.top = Math.round(top - sr.top + scroller.scrollTop + (h - 34) / 2) + 'px';
         };
-        if (window.ResizeObserver) new ResizeObserver(() => requestAnimationFrame(place)).observe(track);
+        if (window.ResizeObserver) { const ro = new ResizeObserver(() => requestAnimationFrame(place)); ro.observe(track); ro.observe(scroller); }
         new MutationObserver(() => requestAnimationFrame(place)).observe(track, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
         setTimeout(place, 400);
       }
@@ -2978,6 +2992,18 @@ let _hideTimer = null;
        * the moment that was under the fingers stays under them, and moving
        * both fingers sideways pans — CapCut's feel.
        */
+      /*
+       * CapCut's timeline: the white line stays in the middle and the clips
+       * slide under it (veditor.js setCentredPlayhead). Turned on as soon as the
+       * studio is there to take it.
+       */
+      const centre = (n) => {
+        const E = window.VideoEditor;
+        if (E && E.setCentredPlayhead) { E.setCentredPlayhead(true); return; }
+        if (n < 40) setTimeout(() => centre(n + 1), 250);
+      };
+      centre(0);
+
       let pinch = null, raf = 0;
       const span = (ts) => Math.hypot(ts[0].clientX - ts[1].clientX, ts[0].clientY - ts[1].clientY);
       const midX = (ts) => (ts[0].clientX + ts[1].clientX) / 2;

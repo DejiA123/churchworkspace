@@ -751,6 +751,13 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
   body.mw-cloud #view-video.ve-pro .cloud-tl-tail { display: block; height: 10px; pointer-events: none; }
 
   body.mw-cloud #view-video.ve-pro .ve-playhead { width: 2px; background: #fff; box-shadow: 0 0 6px rgba(0,0,0,.7); }
+  /* CapCut: trim handles on the selected clip only — elsewhere a finger scrolls (cloud-boot.js DRAG_SEL) */
+  body.mw-cloud #view-video.ve-pro .ve-seg:not(.sel) .ve-seg-h,
+  body.mw-cloud #view-video.ve-pro .ve-audio-seg:not(.sel) .ve-audio-h,
+  body.mw-cloud #view-video.ve-pro .ve-cap-clip:not(.sel) .ve-cc-h,
+  body.mw-cloud #view-video.ve-pro .ve-text-clip:not(.sel) .ve-tc-h { display: none; }
+  /* the ruler is not a scrubber here: the centre line is */
+  body.mw-cloud #view-video.ve-pro .ve-tl-scroll.ve-centred .ve-ruler { cursor: default; }
   body.mw-cloud #view-video.ve-pro .ve-playhead::before { left: -5px; border-width: 6px; border-top-color: #fff; }
 
   /* --------------------------------------------------------------- dock */
