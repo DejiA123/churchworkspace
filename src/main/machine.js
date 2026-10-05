@@ -57,6 +57,17 @@ const cpus = () => measure().cpus;
 const memoryMB = () => measure().memoryMB;
 /** A machine where a careless job can run out of memory: a small container, not a desktop. */
 const small = () => memoryMB() < 2048;
+/*
+ * ►► A SERVER ENCODES ON ITS CPU, HOWEVER BIG IT IS. ◄◄
+ * small() is about MEMORY, and on a 512 MB host it also switched the encoders
+ * to their quick settings. Oracle's free Ampere machine has 24 GB, so it
+ * counted as a church desktop and got the desktop's 'medium' x264 — the
+ * setting for a PC with a fast CPU and Quick Sync — on four ARM cores with no
+ * GPU: a 60-second export took 67 s and a montage three minutes, slower than
+ * a Render-sized box. Every Cloud Studio server (MW_CLOUD_SERVER, set by
+ * src/cloud/server.js) now encodes quick; MW_ENCODE=quality keeps 'medium'.
+ */
+const fastEncode = () => small() || (process.env.MW_CLOUD_SERVER === '1' && String(process.env.MW_ENCODE || '').toLowerCase() !== 'quality');
 
 /*
  * What a speech model needs to run, in MB — whisper.cpp's own published
@@ -80,4 +91,4 @@ const ffmpegThreads = () => (small() ? Math.max(1, Math.min(2, cpus())) : 0);
 
 /** The CPU share the host really gives (0.5 = half a core); 0 when unlimited. */
 const quota = () => measure().quota || 0;
-module.exports = { quota, cpus, memoryMB, small, whisperNeedMB, fitsWhisper, ffmpegThreads, HEADROOM_MB, _reset: () => { cached = null; } };
+module.exports = { quota, cpus, memoryMB, small, fastEncode, whisperNeedMB, fitsWhisper, ffmpegThreads, HEADROOM_MB, _reset: () => { cached = null; } };

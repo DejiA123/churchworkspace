@@ -57,9 +57,11 @@ function resolveFfprobe(override) {
  */
 function capThreads(args) {
   const n = machine.ffmpegThreads();
-  if (!n || args.includes('-threads')) return args;
   const enc = args.findIndex((a, i) => (a === '-c:v' || a === '-vcodec') && /^lib(x264|x265|vpx)/.test(String(args[i + 1] || '')));
   const x264 = enc >= 0 && /^libx264/.test(String(args[enc + 1]));
+  // A big server (lots of memory, no GPU): only the quick preset, threads and look-ahead left to x264.
+  if (!n && machine.fastEncode() && x264) return quickPreset(args.slice());
+  if (!n || args.includes('-threads')) return args;
   const out = [];
   /*
    * Each input decoded on one thread (an input option: it goes before its -i).
@@ -116,6 +118,15 @@ function capThreads(args) {
  * they take turns, under 2 GB two may run, and a desktop is left alone. A job
  * waiting its turn can still be cancelled.
  */
+function quickPreset(out) {
+  const draft = draftAls.getStore() === true;
+  for (let i = 0; i < out.length - 1; i++) {
+    if (out[i] === '-preset' && /^(medium|slow|slower|veryslow|fast|faster)$/.test(String(out[i + 1]))) out[i + 1] = draft ? 'ultrafast' : 'veryfast';
+    else if (draft && out[i] === '-crf' && Number(out[i + 1]) > 0) out[i + 1] = String(Math.max(10, Number(out[i + 1]) - 4));
+  }
+  return out;
+}
+
 const ffSlots = () => {
   const mb = machine.memoryMB();
   return mb < 1024 ? 1 : mb < 2048 ? 2 : Infinity;
@@ -159,7 +170,7 @@ function ffRelease() {
  */
 const { AsyncLocalStorage } = require('async_hooks');
 const draftAls = new AsyncLocalStorage();
-const asDraft = (on, fn) => (on && machine.small() ? draftAls.run(true, fn) : fn());
+const asDraft = (on, fn) => (on && machine.fastEncode() ? draftAls.run(true, fn) : fn());
 
 function lowPriority(proc, nice = 10) {
   try { if (proc && proc.pid) require('os').setPriority(proc.pid, nice); } catch (e) {}
