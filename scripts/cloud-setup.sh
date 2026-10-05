@@ -121,6 +121,15 @@ fi
 [ -n "$MODE" ] || MODE=fixed
 envset ADDRESS "$MODE"
 if [ "$MODE" = "fixed" ]; then
+  # A new address: the old one keeps working and forwards to it (see OLD_HOSTS
+  # in docker-compose.oracle.yml), so nobody holding the old link is lost.
+  WAS="$(envget STUDIO_HOST)"
+  if [ -n "$WAS" ] && [ "$WAS" != "$HOST" ]; then
+    OLD=" $(envget OLD_HOSTS) $WAS "
+    OLD="$(echo "$OLD" | tr ' ' '\n' | grep -v -x -e '' -e "$HOST" | sort -u | tr '\n' ' ' | sed 's/ *$//')"
+    envset OLD_HOSTS "$OLD"
+    ok "The old address ($WAS) now forwards to the new one"
+  fi
   envset STUDIO_HOST "$HOST"
   envset COMPOSE_FILE docker-compose.oracle.yml   # plain `docker compose …` now means this setup
   ok "Fixed address: https://$HOST"

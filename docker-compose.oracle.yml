@@ -40,7 +40,27 @@ services:
     ports:
       - "80:80"
       - "443:443"
-    command: caddy reverse-proxy --from "${STUDIO_HOST:?put STUDIO_HOST in .env — run scripts/cloud-setup.sh}" --to studio:7390
+    # The studio at STUDIO_HOST. Addresses it used to have (OLD_HOSTS — set by
+    # cloud-setup.sh when the address changes) keep their certificate and send
+    # anyone who still opens them on to the new one, so a shared old link or a
+    # phone that has not been told yet lands in the right place.
+    environment:
+      STUDIO_HOST: "${STUDIO_HOST:?put STUDIO_HOST in .env — run scripts/cloud-setup.sh}"
+      OLD_HOSTS: "${OLD_HOSTS:-}"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        {
+          echo "$$STUDIO_HOST {"
+          echo "  reverse_proxy studio:7390"
+          echo "}"
+          for h in $$OLD_HOSTS; do
+            echo "$$h {"
+            echo "  redir https://$$STUDIO_HOST{uri}"
+            echo "}"
+          done
+        } > /tmp/Caddyfile
+        exec caddy run --config /tmp/Caddyfile --adapter caddyfile
     volumes:
       - caddy-data:/data           # the certificate, kept across restarts
       - caddy-config:/config
