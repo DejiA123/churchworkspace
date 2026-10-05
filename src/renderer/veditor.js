@@ -1237,6 +1237,7 @@
     updateClipPlayButtons(); // the card ▶/⏸ tracks whether ITS clip is playing
     syncMusicPreview();      // the music bed follows the playhead
     syncSoundPreview();      // …and so do voiceovers and sound effects
+    syncFsControls();        // full screen's own bar, when it is showing
   }
 
   /** Real-editor behaviour: if NO main-lane clip covers the playhead (a gap, or
@@ -1557,7 +1558,9 @@
    */
   function visibleBand(ch) {
     const el = ve.refs.preview;
-    if (!el || !document.body.classList.contains('mw-cloud') || document.fullscreenElement) return { top: 0, bottom: ch };
+    // In full screen — the real one, or an iPhone's (.ve-pfull) — the picture
+    // covers the bar and the play row, so all of it is visible.
+    if (!el || !document.body.classList.contains('mw-cloud') || document.fullscreenElement || isPseudoFull()) return { top: 0, bottom: ch };
     const r = el.getBoundingClientRect();
     if (!r.height) return { top: 0, bottom: ch };
     let top = 0, bottom = ch;
@@ -1783,6 +1786,169 @@
     updateCropMask();
     updateCapOverlay(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
     renderTextOverlays();
+    syncFsControls();
+  }
+
+  /* ---------------- full screen: a player's own controls ----------------
+   * Full screen is where a short gets watched before it is exported, and the
+   * transport row is left behind underneath it — on a phone there was no way
+   * to pause, see how far in you were or go back a bit without leaving. So
+   * full screen has its own: play/pause, the time, a scrub bar you can drag,
+   * and a big ▶ in the middle while it is paused. While it plays they fade
+   * after a moment so the picture is all you see; moving the mouse or a tap
+   * brings them back, and a tap on the picture while they show puts them away.
+   */
+  const FS_IDLE_MS = 2600;
+  const fsUi = { timer: 0, raf: 0, scrub: null, down: null, p: -1, cur: '', all: '', mx: -1, my: -1 };
+  const fsOn = () => !!ve.video && isPreviewFull();
+  function fsSetIdle(on) {
+    const d = ve.refs.drop;
+    if (d.classList.contains('ve-fs-idle') !== !!on) d.classList.toggle('ve-fs-idle', !!on);
+  }
+  /** Show the controls; while it plays, they fade again after a moment of nothing. */
+  function fsWake() {
+    clearTimeout(fsUi.timer); fsUi.timer = 0;
+    fsSetIdle(false);
+    if (!fsOn() || !isPlaying() || fsUi.scrub) return;
+    fsUi.timer = setTimeout(() => {
+      fsUi.timer = 0;
+      if (fsOn() && isPlaying() && !fsUi.scrub) fsSetIdle(true);
+    }, FS_IDLE_MS);
+  }
+  /** The bar at time t: the fill, the knob, the two times. Writes only what changed. */
+  function fsPaint(t) {
+    const sc = ve.refs.fsScrub; if (!sc) return;
+    const end = playEnd();
+    const p = end > 0 ? Math.round(clamp(t / end, 0, 1) * 1e4) / 1e4 : 0;
+    if (p !== fsUi.p) { fsUi.p = p; sc.style.setProperty('--p', String(p)); }
+    const cur = fmt(t), all = fmt(end);
+    if (cur === fsUi.cur && all === fsUi.all) return;
+    fsUi.cur = cur; fsUi.all = all;
+    setText('#veFsCur', cur); setText('#veFsDur', all);
+    sc.setAttribute('aria-valuenow', String(Math.round(t)));
+    sc.setAttribute('aria-valuemax', String(Math.round(end)));
+    sc.setAttribute('aria-valuetext', `${cur} of ${all}`);
+  }
+  /** Keep the bar moving smoothly while it plays (timeupdate comes only ~4 times a second). */
+  function fsLoop() {
+    if (fsUi.raf) return;
+    const step = () => {
+      fsUi.raf = 0;
+      if (!fsOn() || !isPlaying()) return;
+      if (!fsUi.scrub && !ve.refs.drop.classList.contains('ve-fs-idle')) fsPaint(nowT());
+      fsUi.raf = requestAnimationFrame(step);
+    };
+    fsUi.raf = requestAnimationFrame(step);
+  }
+  /** Bring the controls up to date: shown or not, playing or paused, where the playhead is. */
+  function syncFsControls() {
+    const d = ve.refs && ve.refs.drop; if (!d) return;
+    const was = d.classList.contains('ve-fs-ui');
+    if (!fsOn()) {
+      if (was) { d.classList.remove('ve-fs-ui', 've-fs-playing', 've-fs-idle'); clearTimeout(fsUi.timer); fsUi.timer = 0; }
+      return;
+    }
+    const playing = isPlaying();
+    if (!was || d.classList.contains('ve-fs-playing') !== playing) {
+      d.classList.add('ve-fs-ui');
+      d.classList.toggle('ve-fs-playing', playing);
+      for (const b of [ve.refs.fsPlay, ve.refs.fsBigPlay]) {
+        if (!b) continue;
+        b.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+        b.title = playing ? 'Pause (Space)' : 'Play (Space)';
+      }
+      fsWake();          // just paused: they stay; just started: they fade in a moment
+      if (playing) fsLoop();
+    }
+    fsPaint(fsUi.scrub ? fsUi.scrub.t : nowT());
+  }
+
+  /* -- the scrub bar: press anywhere on it, drag, let go -- */
+  function fsScrubTime(e) {
+    const r = ve.refs.fsScrub.getBoundingClientRect();
+    return clamp((e.clientX - r.left) / Math.max(1, r.width), 0, 1) * playEnd();
+  }
+  function fsScrubTo(t) {
+    const s = fsUi.scrub; if (!s) return;
+    s.t = t;
+    fsPaint(t);                       // the knob follows the finger at once…
+    if (s.raf) return;
+    s.raf = requestAnimationFrame(() => { s.raf = 0; if (fsUi.scrub === s) seekTo(s.t); });   // …the picture once a frame
+  }
+  function onFsScrubDown(e) {
+    if (!fsOn() || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    e.preventDefault(); e.stopPropagation();
+    try { ve.refs.fsScrub.setPointerCapture(e.pointerId); } catch (er) {}
+    // Hold the picture still under the finger; it carries on when you let go.
+    const wasPlaying = isPlaying();
+    if (wasPlaying) togglePlay();
+    fsUi.scrub = { id: e.pointerId, t: nowT(), wasPlaying, raf: 0 };
+    ve.refs.fsScrub.classList.add('dragging');
+    fsWake();
+    fsScrubTo(fsScrubTime(e));
+  }
+  function onFsScrubMove(e) {
+    const s = fsUi.scrub; if (!s || e.pointerId !== s.id) return;
+    e.preventDefault();
+    fsScrubTo(fsScrubTime(e));
+  }
+  function onFsScrubUp(e) {
+    const s = fsUi.scrub; if (!s || e.pointerId !== s.id) return;
+    if (s.raf) cancelAnimationFrame(s.raf);
+    fsUi.scrub = null;
+    ve.refs.fsScrub.classList.remove('dragging');
+    seekTo(s.t);
+    // let go at the very end and it stays there, rather than starting over
+    if (s.wasPlaying && !isPlaying() && s.t < playEnd() - 0.1) togglePlay();
+    syncFsControls(); fsWake();
+  }
+
+  /* -- taps and clicks on the picture itself -- */
+  const FS_NOT_PICTURE = '.ve-fs-bar, .ve-fs-bigplay, .ve-fs-exit, .ve-text-box, .ve-text-tools, .ve-cap-overlay, .ve-overlay-guide, .ve-crop-reset, .ve-novid, button, input, select';
+  function onFsPointerDown(e) {
+    if (!fsOn()) return;
+    const el = e.target;
+    fsUi.down = {
+      id: e.pointerId, x: e.clientX, y: e.clientY, at: performance.now(),
+      shown: !ve.refs.drop.classList.contains('ve-fs-idle'),
+      picture: !(el && el.closest && el.closest(FS_NOT_PICTURE)),
+      textSel: !!ve.textSel,
+    };
+    fsWake();
+  }
+  function onFsPointerUp(e) {
+    const d = fsUi.down; fsUi.down = null;
+    if (!d || d.id !== e.pointerId || !d.picture || !fsOn()) return;
+    // a drag (framing the shot) or a long press is not a tap
+    if (Math.abs(e.clientX - d.x) > 8 || Math.abs(e.clientY - d.y) > 8 || performance.now() - d.at > 600) return;
+    // A mouse click plays and pauses, as in any desktop player — unless it was
+    // the click that let go of a selected text box.
+    if (e.pointerType === 'mouse') { if (e.button === 0 && !d.textSel) { togglePlay(); fsWake(); } return; }
+    // A finger: the press already brought the controls up; a tap while they
+    // were showing puts them away again.
+    if (d.shown && isPlaying()) { clearTimeout(fsUi.timer); fsUi.timer = 0; fsSetIdle(true); }
+  }
+  function wireFsControls() {
+    const d = ve.refs.drop, sc = ve.refs.fsScrub;
+    if (!d || !sc) return;
+    const play = () => { togglePlay(); fsWake(); };
+    ve.refs.fsPlay.addEventListener('click', play);
+    ve.refs.fsBigPlay.addEventListener('click', play);
+    sc.addEventListener('pointerdown', onFsScrubDown);
+    sc.addEventListener('pointermove', onFsScrubMove);
+    sc.addEventListener('pointerup', onFsScrubUp);
+    sc.addEventListener('pointercancel', onFsScrubUp);
+    d.addEventListener('pointerdown', onFsPointerDown);
+    d.addEventListener('pointerup', onFsPointerUp);
+    d.addEventListener('pointercancel', () => { fsUi.down = null; });
+    d.addEventListener('pointermove', (e) => {
+      if (e.pointerType !== 'mouse' || !fsOn()) return;
+      // a browser re-sends the pointer's position when what is under it changes; only a real move counts
+      if (e.clientX === fsUi.mx && e.clientY === fsUi.my) return;
+      fsUi.mx = e.clientX; fsUi.my = e.clientY;
+      fsWake();
+    });
+    document.addEventListener('keydown', () => { if (fsOn()) fsWake(); });
   }
 
   /* ======================= THE PRO TIMELINE (v2.79) =======================
@@ -2504,13 +2670,20 @@
   function onCropDown(ev) {
     if (!ve.video) return;
     if (ev.target.closest('#veCropReset')) return;
-    if (reframeOn()) takeManualFraming();
     ev.preventDefault(); ev.stopPropagation();
     const cm = ve.canvasMap; if (!cm) return;
     const w0 = cropWindow();
-    ve.cropDrag = { x0: ev.clientX, y0: ev.clientY, ox0: w0.ox, oy0: w0.oy, s: cm.s, map: cm.map };
+    ve.cropDrag = { x0: ev.clientX, y0: ev.clientY, ox0: w0.ox, oy0: w0.oy, s: cm.s, map: cm.map, moved: false };
     const move = (e) => {
       const d = ve.cropDrag; if (!d) return;
+      // A tap is not a drag. Full screen's controls come back with a tap on the
+      // picture, and that tap must not quietly switch 🎯 Auto-reframe off: the
+      // speaker is only handed over to you once the picture actually moves.
+      if (!d.moved) {
+        if (Math.abs(e.clientX - d.x0) < 4 && Math.abs(e.clientY - d.y0) < 4) return;
+        d.moved = true;
+        if (reframeOn()) takeManualFraming();
+      }
       // dragging the video right reveals footage on the LEFT → the crop centre moves left
       ve.framing.offsetX = clamp(d.ox0 - (e.clientX - d.x0) / (d.s * (d.map.renderedW || 1)), 0, 1);
       ve.framing.offsetY = clamp(d.oy0 - (e.clientY - d.y0) / (d.s * (d.map.renderedH || 1)), 0, 1);
@@ -5662,7 +5835,7 @@
     if (ve.tailRun) cancelAnimationFrame(ve.tailRun.raf);
     const was = !!ve.tailRun;
     ve.tailRun = null;
-    if (!quiet && was) { ve.refs.play.textContent = '▶'; updateMediaLayer(nowT()); syncMusicPreview(); }
+    if (!quiet && was) { ve.refs.play.textContent = '▶'; updateMediaLayer(nowT()); syncMusicPreview(); syncFsControls(); }
   }
   function leaveTail() { stopTailRun(true); ve.tailT = null; }
   /* iOS lets a video play with sound only from a tap; the clips that follow the
@@ -13134,6 +13307,7 @@
     const bigBtn = $('#veBigger'); if (bigBtn) bigBtn.addEventListener('click', () => setPreviewBig(!isPreviewBig()));
     const fullBtn = $('#veFull'); if (fullBtn) fullBtn.addEventListener('click', togglePreviewFull);
     const fsExit = $('#veFsExit'); if (fsExit) fsExit.addEventListener('click', togglePreviewFull);
+    wireFsControls();
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && isPseudoFull()) setPseudoFull(false); });
     document.addEventListener('fullscreenchange', onFullscreenChange);
     const followBtn = $('#veFollow'); if (followBtn) followBtn.addEventListener('click', () => setFollow(!ve.follow));
@@ -13712,8 +13886,8 @@
     });
     // Pressing play is you asking to watch, so following comes back on; scrolling
     // away during playback turns it off again (see the scroll listener).
-    p.addEventListener('play', () => { ve.refs.play.textContent = '⏸'; setFollow(true, true); updateClipPlayButtons(); syncMusicPreview(true); startCapTick(); });
-    p.addEventListener('pause', () => { if (ve._tailPausing || ve.tailRun) { ve._tailPausing = false; return; } ve.refs.play.textContent = '▶'; updateClipPlayButtons(); syncMusicPreview(); syncSoundPreview(); stopCapTick(); });
+    p.addEventListener('play', () => { ve.refs.play.textContent = '⏸'; setFollow(true, true); updateClipPlayButtons(); syncMusicPreview(true); startCapTick(); syncFsControls(); });
+    p.addEventListener('pause', () => { if (ve._tailPausing || ve.tailRun) { ve._tailPausing = false; return; } ve.refs.play.textContent = '▶'; updateClipPlayButtons(); syncMusicPreview(); syncSoundPreview(); stopCapTick(); syncFsControls(); });
     p.addEventListener('ended', () => { stopCapTick(); if (ve.tailT == null && hasTail()) enterTail(dur(), true); });
     // anything else moving the main video's playhead (a clip's ▶, a jump) ends the tail
     p.addEventListener('seeking', () => { if (ve.tailT != null) leaveTail(); });
@@ -13775,6 +13949,7 @@
         textLayer: $('#veTextLayer'), textTrack: $('#veTextTrack'), capTrack: $('#veCapTrack'), audioTrack: $('#veAudioTrack'),
         mediaLayer: $('#veMediaLayer'),
         gapMask: $('#veGapMask'), musicTrack: $('#veMusicTrack'), musicAudio: $('#veMusicAudio'),
+        fsScrub: $('#veFsScrub'), fsPlay: $('#veFsPlay'), fsBigPlay: $('#veFsBigPlay'),
       };
       // Load bundled caption fonts so the live preview matches the burned output.
       window.api.paths.get().then((p) => {
@@ -14699,6 +14874,19 @@
       timelineHeight() { return $('#veTimeline').getBoundingClientRect().height; },
       previewHeight() { return ve.refs.drop.getBoundingClientRect().height; },
       fullBtnExists() { return !!$('#veFull') && !!$('#veFsExit'); },
+      setPreviewFullHook(on) { if (!!on !== isPreviewFull()) setPseudoFull(!!on); return isPreviewFull(); },
+      /** Full screen's own controls, as they are on screen right now. */
+      fsControls() {
+        const d = ve.refs.drop, sc = ve.refs.fsScrub;
+        return {
+          ui: d.classList.contains('ve-fs-ui'), playing: d.classList.contains('ve-fs-playing'),
+          idle: d.classList.contains('ve-fs-idle'), scrubbing: !!fsUi.scrub,
+          p: parseFloat(sc.style.getPropertyValue('--p')) || 0,
+          cur: $('#veFsCur').textContent, dur: $('#veFsDur').textContent,
+          label: ve.refs.fsPlay.getAttribute('aria-label'),
+          reframe: !!($('#veAutoReframe') && $('#veAutoReframe').checked),
+        };
+      },
       // --- captions: clear all ---
       clearCapsBtnVisible() { const b = $('#veClearCaps'); return !!b && !b.classList.contains('hidden'); },
       clickClearCaps() { $('#veClearCaps').dispatchEvent(new MouseEvent('click', { bubbles: true })); return (ve.capEvents || []).length; },
