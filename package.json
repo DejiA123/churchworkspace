@@ -42,6 +42,7 @@
     "test:wordhl": "node test/word-highlight.test.js",
     "test:wordhlengines": "electron test/word-highlight-engines.test.js",
     "test:studio": "node test/studio-voice.test.js",
+    "test:voiceclean": "node test/voice-cleaner.test.js",
     "test:voice": "node test/voice-intent.test.js",
     "test:voice-ear": "node test/voice-endpoint.test.js",
     "test:voice-live": "electron test/voice-listen.test.js",
@@ -82,8 +83,12 @@
     "test:closegap": "electron test/close-gap.test.js",
     "test:ux": "electron test/studio-ux.test.js",
     "test:whisper-mac": "node test/whisper-mac.test.js",
+    "fetch:deepfilter": "node scripts/fetch-deepfilter.js",
+    "predist": "node scripts/fetch-deepfilter.js --platform win32 --arch x64",
     "dist": "electron-builder --win nsis",
+    "predist:mac": "node scripts/fetch-deepfilter.js --platform darwin",
     "dist:mac": "electron-builder --mac",
+    "prepack": "node scripts/fetch-deepfilter.js",
     "pack": "electron-builder --dir",
     "test:live-cpu": "electron test/live-cpu.test.js",
     "test:vmix": "electron test/vmix-ui.test.js",
@@ -258,6 +263,10 @@
       {
         "from": "bin/whisper",
         "to": "whisper"
+      },
+      {
+        "from": "bin/deepfilter/${os}-${arch}",
+        "to": "deepfilter"
       }
     ],
     "afterPack": "build/after-pack.js",
@@ -305,6 +314,10 @@
             "!**/*.exe",
             "!**/*.dll"
           ]
+        },
+        {
+          "from": "bin/deepfilter/${os}-${arch}",
+          "to": "deepfilter"
         }
       ]
     }

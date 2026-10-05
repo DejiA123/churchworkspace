@@ -9,7 +9,8 @@ ios
 tiktok-submission
 bin/whisper
 bin/yt-dlp
-bin/rnnoise
+# a desktop checkout's voice cleaners (all platforms); the image fetches its own
+bin/deepfilter
 *.log
 *.png
 !src/cloud/web/icons/*.png

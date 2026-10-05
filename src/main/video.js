@@ -3,6 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const ff = require('./ffmpeg');
+const deepfilter = require('./deepfilter');
 
 /** Run async task factories with limited concurrency. */
 /*
@@ -473,7 +474,9 @@ function studioVoiceAf(strength, { floorDb } = {}) {
   return [
     // Sub-80Hz carries no speech at all — only rumble, mains hum and stage thumps.
     'highpass=f=80',
-    denoise,
+    // Bracketed: where the voice track is rendered on its own, DeepFilterNet
+    // takes this step's place (see deepfilter.js); the rest of the chain stays.
+    deepfilter.bracket('studio', denoise),
     // hall boxiness out, presence in
     'equalizer=f=300:t=q:w=1.2:g=-3',
     'equalizer=f=3000:t=q:w=1.0:g=3',
@@ -530,7 +533,9 @@ async function denoiseFilter(ctx, { input, denoise, startSec, endSec } = {}) {
   // 'studio' is the full voice chain, not just a noise setting — same entry
   // point, so every export path that already honours `denoise` gets it.
   if (String(denoise).toLowerCase() === 'studio') return studioVoiceAf('strong', { floorDb });
-  return noiseReductionAf(denoise, { floorDb });
+  // The ffmpeg chain is the fallback; the brackets let the voice cleaner
+  // (deepfilter.js) do this step wherever the voice track is rendered first.
+  return deepfilter.bracket(deepfilter.levelFor(denoise), noiseReductionAf(denoise, { floorDb }));
 }
 
 /**
@@ -814,6 +819,21 @@ function fillChain(srcW, srcH, W, H, fill, label = 'f') {
 const VOICE_PASS_LADDER = [2, 3, 1, 4];
 const VOICE_WANTED_GAIN_DB = 8;    // an isolation run that worked is worth far more than this
 async function renderVerifiedVoice(ctx, { inputArgs, cut, af, hasAudio, cwd, signal }) {
+  /*
+   * DeepFilterNet first, wherever it is installed: every setting, Light to
+   * Studio, goes through it (see deepfilter.js for what it replaced and why).
+   * It is deterministic, so none of the checking below is needed for it. If it
+   * is missing or fails, the ffmpeg chain carries on exactly as before.
+   */
+  if (af && hasAudio && deepfilter.splitChain(af) && deepfilter.binPath()) {
+    try {
+      const voice = await deepfilter.renderVoice(ctx, { inputArgs, cut, af, cwd, signal });
+      if (voice) return voice;
+    } catch (e) {
+      if (e && e.name === 'CancelledError') throw e;
+      console.warn('[voice] DeepFilterNet failed; using the ffmpeg chain instead: ' + ((e && e.message) || e));
+    }
+  }
   if (!af || !hasAudio || !/arnndn/.test(af)) return null;
   const joining = !!(cut && cut.chain && cut.a);
   const stem = path.join(os.tmpdir(), `cws-voice-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
@@ -2757,6 +2777,12 @@ async function applyEdits(ctx, { input, output, edits = {}, onProgress }) {
 
   const args = ['-i', input];
   if (music) args.push('-stream_loop', '-1', '-i', music);
+  // The cleaned voice is rendered first, as for every other export (see
+  // renderVerifiedVoice) — not left to run inline, where neither the voice
+  // cleaner nor the RNNoise check can happen.
+  const voice = denoiseAf && info.hasAudio ? await renderVerifiedVoice(ctx, { inputArgs: ['-i', input], af: denoiseAf, hasAudio: true }) : null;
+  const voiceIn = music ? 2 : 1;
+  if (voice) args.push('-i', voice);
 
   let fc = `[0:v]${vf.join(',')}[v]`;
   const aOut = [];
@@ -2764,12 +2790,12 @@ async function applyEdits(ctx, { input, output, edits = {}, onProgress }) {
     const af = [];
     // Noise removal goes FIRST, on the untouched recording — before any speed
     // change or gain, so afftdn measures the room the microphone actually heard.
-    if (denoiseAf) af.push(denoiseAf);
+    if (denoiseAf && !voice) af.push(denoiseAf);
     if (speed !== 1) af.push(atempoChain(speed));
     if (vol !== 1) af.push('volume=' + vol);
     if (edits.fadeIn) af.push(`afade=t=in:st=0:d=${Number(edits.fadeIn)}`);
     if (edits.fadeOut) af.push(`afade=t=out:st=${Math.max(0, outDur - Number(edits.fadeOut)).toFixed(2)}:d=${Number(edits.fadeOut)}`);
-    fc += `;[0:a]${af.length ? af.join(',') : 'anull'}[a0]`;
+    fc += `;[${voice ? voiceIn : 0}:a]${af.length ? af.join(',') : 'anull'}[a0]`;
     aOut.push('[a0]');
   }
   if (music) {
@@ -2783,7 +2809,11 @@ async function applyEdits(ctx, { input, output, edits = {}, onProgress }) {
   args.push('-filter_complex', fc, ...map, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20');
   if (aOut.length) args.push('-c:a', 'aac', '-b:a', '192k');
   args.push('-movflags', '+faststart', '-y', output);
-  await ff.runFfmpeg(ctx.ffmpeg, args, { onProgress, totalDurationSec: outDur });
+  try {
+    await ff.runFfmpeg(ctx.ffmpeg, args, { onProgress, totalDurationSec: outDur });
+  } finally {
+    if (voice) { try { fs.rmSync(voice, { force: true }); } catch (e) {} }
+  }
   return output;
 }
 

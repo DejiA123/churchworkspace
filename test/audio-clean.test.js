@@ -172,20 +172,44 @@ const db = (x) => 20 * Math.log10(Math.max(1e-9, x));
   check('the first word still starts at the same moment (< 30ms drift)',
     Math.abs(burstStart(pMax) - burstStart(base)) < 0.03, `${burstStart(base).toFixed(3)}s -> ${burstStart(pMax).toFixed(3)}s`);
 
-  /* ================= through the REAL export path ================= */
+  /* ================= through the REAL export path =================
+   * On a REAL voice. An export runs the voice cleaner (src/main/deepfilter.js),
+   * a network trained on speech, and it rightly hears two steady tones as a hum
+   * and takes them out with the room — the same reason studio-voice.test.js
+   * stopped measuring tones. The chains above are still checked on the tones,
+   * because they are the fallback and they run inline. */
+  const real = path.join(dir, 'real-noisy.mp4');
+  await ff.runFfmpeg(ffmpeg, [
+    '-f', 'lavfi', '-i', `color=c=gray:s=320x180:d=${DUR}:r=15`,
+    '-i', path.join(__dirname, 'fixtures', 'sermon-dry.flac'),
+    '-f', 'lavfi', '-i', `anoisesrc=color=white:amplitude=0.05:sample_rate=${SR}:duration=${DUR}:seed=7`,
+    '-filter_complex', `[1:a]aresample=${SR},atrim=0:${DUR},apad=whole_dur=${DUR}[v];[v][2:a]amix=inputs=2:duration=first:normalize=0[a]`,
+    '-map', '0:v', '-map', '[a]', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-b:a', '192k', '-t', String(DUR), '-y', real,
+  ], {});
+  // where the reading speaks and where it pauses, from the dry voice itself
+  const dry = pcm(path.join(__dirname, 'fixtures', 'sermon-dry.flac')).subarray(0, DUR * SR);
+  const tenths = Array.from({ length: DUR * 10 }, (_, i) => db(rms(dry, i / 10, (i + 1) / 10)));
+  const loud = [...tenths].sort((a, b) => a - b)[Math.floor(tenths.length * 0.9)];
+  const speaking = tenths.map((d, i) => (d > loud - 15 ? i : -1)).filter((i) => i >= 0);
+  const pausing = tenths.map((d, i) => (d < loud - 45 ? i : -1)).filter((i) => i >= 0);
+  const over = (p, idx) => Math.sqrt(avg(idx.map((i) => rms(p, i / 10, (i + 1) / 10) ** 2)));
+  const pr = pcm(real);
+  const rn0 = over(pr, pausing), rv0 = over(pr, speaking);
+
   const outShort = path.join(dir, 'short-clean.mp4');
-  await video.exportShort(ctx, { input: src, startSec: 0, endSec: DUR, preset: 'reel-9x16', denoise: 'strong', output: outShort });
+  await video.exportShort(ctx, { input: real, startSec: 0, endSec: DUR, preset: 'reel-9x16', denoise: 'strong', output: outShort });
   const ps = pcm(outShort);
-  check('exporting a short with noise removal ON really cleans it', noiseOf(ps) < n0 * 0.5,
-    `${db(n0).toFixed(1)} -> ${db(noiseOf(ps)).toFixed(1)} dB`);
-  check('…and the voice is still there afterwards', voiceOf(ps) >= v0 * 0.6, `${(100 * voiceOf(ps) / v0).toFixed(0)}% kept`);
+  check('exporting a short with noise removal ON really cleans it', over(ps, pausing) < rn0 * 0.5,
+    `${db(rn0).toFixed(1)} -> ${db(over(ps, pausing)).toFixed(1)} dB in the pauses`);
+  check('…and the voice is still there afterwards', over(ps, speaking) >= rv0 * 0.6,
+    `${(100 * over(ps, speaking) / rv0).toFixed(0)}% of the speech kept`);
   const si = await video.getInfo(ctx, outShort);
   check('…and the short is the right length', Math.abs(si.durationSec - DUR) < 0.3, `${si.durationSec.toFixed(2)}s`);
 
   const outPlain = path.join(dir, 'short-plain.mp4');
-  await video.exportShort(ctx, { input: src, startSec: 0, endSec: DUR, preset: 'reel-9x16', output: outPlain });
-  check('CONTROL: with the option OFF the noise is left alone', noiseOf(pcm(outPlain)) > n0 * 0.7,
-    `${db(noiseOf(pcm(outPlain))).toFixed(1)} dB vs original ${db(n0).toFixed(1)} dB`);
+  await video.exportShort(ctx, { input: real, startSec: 0, endSec: DUR, preset: 'reel-9x16', output: outPlain });
+  check('CONTROL: with the option OFF the noise is left alone', over(pcm(outPlain), pausing) > rn0 * 0.7,
+    `${db(over(pcm(outPlain), pausing)).toFixed(1)} dB vs original ${db(rn0).toFixed(1)} dB`);
 
   /* ---- the "hear the difference" sample the button plays ---- */
   const rawS = await video.audioSample(ctx, { input: src, startSec: 0, durationSec: 6, denoise: null, output: path.join(dir, 'listen-raw.m4a') });

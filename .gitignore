@@ -21,3 +21,7 @@ _base278/
 release-tmp/
 UsersdejiaAppData*/
 .claude/
+
+# The voice cleaner (DeepFilterNet), one program per platform, 27-39 MB each.
+# scripts/fetch-deepfilter.js puts them here (npm run dist does it first).
+bin/deepfilter/

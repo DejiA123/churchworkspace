@@ -25,6 +25,9 @@
 #                     covers what the cloud cannot.
 #   MediaPipe   yes — bin/ai is copied, and auto-reframe runs in the BROWSER
 #                     anyway, so the server never needs a GPU for it.
+#   voice       yes — DeepFilterNet, the network Studio sound and Remove
+#   cleaner           background noise run on, fetched for this processor and
+#                     checked against a pinned SHA-256 (src/main/deepfilter.js).
 #   NDI,        no  — they drive hardware in a building. The cloud allowlist
 #   cameras,          does not expose them and nothing in the page asks.
 #   projectors
@@ -66,6 +69,28 @@ ARG TINY_MODEL_SHA1=c78c86eb1a8faa21b369bcd33207cc90d64ae9df
 RUN curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o /src/ggml-tiny.en.bin "${TINY_MODEL_URL}" \
     && echo "${TINY_MODEL_SHA1}  /src/ggml-tiny.en.bin" | sha1sum -c -
 
+# ── the voice cleaner ────────────────────────────────────────────────────────
+# DeepFilterNet, which Studio sound and Remove background noise run on (see
+# src/main/deepfilter.js for why: on a dirty church recording it scores 1.94 on
+# PESQ where the old ffmpeg chain scored 1.22 — below the untouched audio). A
+# single program with its model built in, for this machine's processor: x86-64
+# or arm64 (Oracle's Ampere). The checksums are the ones deepfilter.js pins, so
+# a short or altered download fails the BUILD rather than reaching a sermon.
+FROM debian:bookworm-slim AS voice
+ARG DEEPFILTER_VERSION=0.5.6
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+RUN set -e; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) T=x86_64-unknown-linux-musl;  S=70775e251eee44c0f2451a1e833326cf8bcbbe304d3e7cd12851e6fce72ef7da ;; \
+      arm64) T=aarch64-unknown-linux-gnu;  S=14e02a1c0028f3ca0bdf83b62b3336e56ba0556894ef295a95e8573f06557166 ;; \
+      *) echo "no voice cleaner for $(dpkg --print-architecture)"; exit 1 ;; \
+    esac; \
+    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o /deep-filter \
+      "https://github.com/Rikorose/DeepFilterNet/releases/download/v${DEEPFILTER_VERSION}/deep-filter-${DEEPFILTER_VERSION}-${T}"; \
+    echo "${S}  /deep-filter" | sha256sum -c -; \
+    chmod +x /deep-filter
+
 # ── the studio ───────────────────────────────────────────────────────────────
 FROM node:20-bookworm-slim
 LABEL org.opencontainers.image.title="Church Work Space — Cloud Studio"
@@ -96,7 +121,15 @@ RUN npm ci --omit=dev --no-audit --no-fund
 COPY src/ ./src/
 COPY bin/ai/ ./bin/ai/
 COPY bin/fonts/ ./bin/fonts/
+# The RNNoise model: the fallback voice chain. It was never copied, so on the
+# server Studio sound fell all the way back to afftdn — the squeak.
+COPY bin/rnnoise/ ./bin/rnnoise/
 COPY legal/ ./legal/
+
+# The voice cleaner, where src/main/deepfilter.js looks for it in this image —
+# started once, so one that cannot load fails the build, not a sermon.
+COPY --from=voice /deep-filter /app/bin/deepfilter/deep-filter
+RUN /app/bin/deepfilter/deep-filter --version > /dev/null
 
 # whisper.cpp, named the way src/main/captioner.js looks for it on Linux.
 #
