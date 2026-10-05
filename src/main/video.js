@@ -1039,13 +1039,16 @@ async function probeInfo(ctx, input) {
 }
 
 /** Trim a clip to [startSec, endSec] with an accurate re-encode. */
-async function trim(ctx, { input, startSec, endSec, output, onProgress }) {
+async function trim(ctx, { input, startSec, endSec, fx, output, onProgress }) {
   const info = await getInfo(ctx, input);
   const start = Math.max(0, Number(startSec) || 0);
   const end = Math.min(info.durationSec || Number(endSec), Number(endSec));
   const dur = Math.max(0.05, end - start);
+  // the clip's own look (see clipFx), when it has one
+  const vf = fxVideo(fx), af = info.hasAudio ? fxAudio(fx) : '';
   const args = [
     '-ss', String(start), '-i', input, '-t', String(dur),
+    ...(vf ? ['-vf', `${vf},format=yuv420p`] : []), ...(af ? ['-af', af] : []),
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
     '-c:a', 'aac', '-b:a', '192k',
     '-movflags', '+faststart', '-y', output,
@@ -1204,6 +1207,49 @@ async function merge(ctx, { inputs, output, width = 1920, height = 1080, fill, o
   return output;
 }
 
+/*
+ * A CLIP'S LOOK — the studio's 🎛️ Video quality, set on one clip or on all of
+ * them (CapCut's Filters / Adjust / Volume). It rides on the clip, so every
+ * export of that clip carries it: the edited video, a short cut from it, a clip
+ * added after it. The same recipes "Apply & export" has always used.
+ *   { look: ''|vivid|warm|cool|bw|vintage, bri: -0.3..0.3, con: 0.5..1.8,
+ *     sat: 0..2.5, sharp: 0..2, vol: 0..2 }
+ */
+const LOOKS = {
+  bw: 'hue=s=0', warm: 'colorbalance=rm=0.12:gm=0.02:bm=-0.12', cool: 'colorbalance=rm=-0.12:bm=0.12',
+  vivid: 'eq=saturation=1.5:contrast=1.12', vintage: 'curves=preset=vintage',
+};
+const numIn = (v, lo, hi, d) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
+/** The look with anything left at "no change" dropped; null when nothing is changed. */
+function clipFx(fx) {
+  if (!fx || typeof fx !== 'object') return null;
+  const o = {};
+  if (LOOKS[fx.look]) o.look = fx.look;
+  const bri = numIn(fx.bri, -0.3, 0.3, 0); if (Math.abs(bri) > 0.001) o.bri = +bri.toFixed(3);
+  const con = numIn(fx.con, 0.5, 1.8, 1); if (Math.abs(con - 1) > 0.001) o.con = +con.toFixed(3);
+  const sat = numIn(fx.sat, 0, 2.5, 1); if (Math.abs(sat - 1) > 0.001) o.sat = +sat.toFixed(3);
+  const sharp = numIn(fx.sharp, 0, 2, 0); if (sharp > 0.001) o.sharp = +sharp.toFixed(2);
+  const vol = numIn(fx.vol, 0, 2, 1); if (Math.abs(vol - 1) > 0.001) o.vol = +vol.toFixed(3);
+  return Object.keys(o).length ? o : null;
+}
+/** The picture side of a look, as filter steps ('' for none). */
+function fxVideo(fx) {
+  const f = clipFx(fx); if (!f) return '';
+  const vf = [];
+  if (f.look) vf.push(LOOKS[f.look]);
+  const eq = [];
+  if (f.bri != null) eq.push('brightness=' + f.bri);
+  if (f.con != null) eq.push('contrast=' + f.con);
+  if (f.sat != null) eq.push('saturation=' + f.sat);
+  if (eq.length) vf.push('eq=' + eq.join(':'));
+  // after the grade, so it crisps the graded picture; luma only (no colour ringing)
+  if (f.sharp != null) vf.push(`unsharp=5:5:${f.sharp.toFixed(2)}:5:5:0`);
+  return vf.join(',');
+}
+/** The sound side ('' for none). */
+const fxAudio = (fx) => { const f = clipFx(fx); return f && f.vol != null ? `volume=${f.vol}` : ''; };
+const fxKey = (fx) => JSON.stringify(clipFx(fx));
+
 /**
  * Normalise the kept pieces of a clip: sorted, clamped, non-overlapping, and
  * with anything shorter than a couple of frames dropped (an empty trim range
@@ -1217,17 +1263,25 @@ function normalizePieces(pieces, durationSec) {
     const b = Math.max(0, Math.min(D, Number(p.end) || 0));
     if (b - a < 0.08) continue; // ~2 frames — below this there is nothing to keep
     const t = transitionOf(p.trans);
-    out.push(t ? { start: a, end: b, trans: t } : { start: a, end: b });
+    const q = t ? { start: a, end: b, trans: t } : { start: a, end: b };
+    const fx = clipFx(p.fx);
+    if (fx) q.fx = fx;
+    out.push(q);
   }
   out.sort((x, y) => x.start - y.start);
   // merge pieces that touch/overlap so the concat filter never sees a duplicate
-  // frame — unless the later one STARTS a transition: that join is the point
+  // frame — unless the later one STARTS a transition: that join is the point —
+  // or looks different (two halves of a split clip, one warm and one not)
   const merged = [];
   for (const p of out) {
     const last = merged[merged.length - 1];
-    if (last && !p.trans && p.start <= last.end + 0.001) last.end = Math.max(last.end, p.end);
-    else merged.push(Object.assign({}, p));
+    if (last && !p.trans && p.start <= last.end + 0.001 && fxKey(last.fx) === fxKey(p.fx)) last.end = Math.max(last.end, p.end);
+    else {
+      if (last && !p.trans && p.start < last.end) last.end = p.start;   // never the same frame twice
+      merged.push(Object.assign({}, p));
+    }
   }
+  for (let i = merged.length - 1; i >= 0; i--) if (merged[i].end - merged[i].start < 0.04) merged.splice(i, 1);
   if (merged.length) delete merged[0].trans;   // nothing comes before the first piece
   return merged;
 }
@@ -1276,22 +1330,32 @@ function transitionOf(t) {
  * `chain` ends in labels `[cutv]` (+ `[cuta]` when the source has audio) that the
  * caller feeds into its own scale/crop.
  */
-function cutPlan(pieces, { durationSec, hasAudio, fps: fpsIn } = {}) {
-  const ps = normalizePieces(pieces, durationSec);
+function cutPlan(pieces, { durationSec, hasAudio, fps: fpsIn, noFx } = {}) {
+  let ps = normalizePieces(pieces, durationSec);
   if (!ps.length) return null;
+  // (frames pulled to TRACK the speaker want the footage, not the grade)
+  if (noFx) ps = ps.map((p) => { const q = Object.assign({}, p); delete q.fx; return q; });
   const base = ps[0].start;
   const span = ps[ps.length - 1].end - base;
   const dur = ps.reduce((a, p) => a + (p.end - p.start), 0);
   const inputArgs = (input) => ['-ss', base.toFixed(3), '-i', input, '-t', span.toFixed(3)];
+  // each piece's own look (see clipFx), right after it is cut out
+  const vfx = (p) => { const f = fxVideo(p.fx); return f ? ',' + f : ''; };
+  const afx = (p) => { const f = fxAudio(p.fx); return f ? ',' + f : ''; };
+  const graded = ps.some((p) => p.fx);
   // Nothing removed → plain seek + trim, and the caller keeps its simple -vf path.
-  if (ps.length === 1) return { inputArgs, chain: null, v: '0:v', a: hasAudio ? '0:a' : null, dur, span, base, pieces: ps };
+  if (ps.length === 1 && !graded) return { inputArgs, chain: null, v: '0:v', a: hasAudio ? '0:a' : null, dur, span, base, pieces: ps };
 
   let chain = '';
   ps.forEach((p, i) => {
     const s = (p.start - base).toFixed(3), e = (p.end - base).toFixed(3);
-    chain += `[0:v]trim=start=${s}:end=${e},setpts=PTS-STARTPTS[cv${i}];`;
-    if (hasAudio) chain += `[0:a]atrim=start=${s}:end=${e},asetpts=PTS-STARTPTS[ca${i}];`;
+    chain += `[0:v]trim=start=${s}:end=${e},setpts=PTS-STARTPTS${vfx(p)}[cv${i}];`;
+    if (hasAudio) chain += `[0:a]atrim=start=${s}:end=${e},asetpts=PTS-STARTPTS${afx(p)}[ca${i}];`;
   });
+  if (ps.length === 1) {
+    chain += `[cv0]null[cutv]` + (hasAudio ? `;[ca0]anull[cuta]` : '');
+    return { inputArgs, chain, v: 'cutv', a: hasAudio ? 'cuta' : null, dur, span, base, pieces: ps };
+  }
   if (!ps.some((p) => p.trans)) {
     chain += ps.map((p, i) => (hasAudio ? `[cv${i}][ca${i}]` : `[cv${i}]`)).join('')
           + `concat=n=${ps.length}:v=1:a=${hasAudio ? 1 : 0}[cutv]` + (hasAudio ? '[cuta]' : '');
@@ -1308,8 +1372,8 @@ function cutPlan(pieces, { durationSec, hasAudio, fps: fpsIn } = {}) {
   chain = '';
   ps.forEach((p, i) => {
     const s = (p.start - base).toFixed(3), e = (p.end - base).toFixed(3);
-    chain += `[0:v]trim=start=${s}:end=${e},setpts=PTS-STARTPTS,fps=${fps},settb=AVTB,format=yuv420p[cv${i}];`;
-    if (hasAudio) chain += `[0:a]atrim=start=${s}:end=${e},asetpts=PTS-STARTPTS,aresample=48000[ca${i}];`;
+    chain += `[0:v]trim=start=${s}:end=${e},setpts=PTS-STARTPTS${vfx(p)},fps=${fps},settb=AVTB,format=yuv420p[cv${i}];`;
+    if (hasAudio) chain += `[0:a]atrim=start=${s}:end=${e},asetpts=PTS-STARTPTS${afx(p)},aresample=48000[ca${i}];`;
   });
   let v = 'cv0', a = hasAudio ? 'ca0' : null, outDur = ps[0].end - ps[0].start;
   for (let i = 1; i < ps.length; i++) {
@@ -1478,7 +1542,7 @@ const PAIR_DT = 0.034;
 
 async function extractFrames(ctx, { input, startSec, endSec, fps = 2, height = 360, outDir, pieces, pairs = false }) {
   fs.mkdirSync(outDir, { recursive: true });
-  const cut = cutPlan(pieces, { hasAudio: false });
+  const cut = cutPlan(pieces, { hasAudio: false, noFx: true });
   const dur = cut ? cut.dur : Math.max(0.3, endSec - startSec);
   const pattern = path.join(outDir, 'f_%05d.jpg');
   const pairPattern = path.join(outDir, 'q_%05d.jpg');
@@ -1531,7 +1595,7 @@ async function extractFrames(ctx, { input, startSec, endSec, fps = 2, height = 3
  */
 async function detectSceneCuts(ctx, { input, startSec, dur, pieces }) {
   try {
-    const cut = cutPlan(pieces, { hasAudio: false });
+    const cut = cutPlan(pieces, { hasAudio: false, noFx: true });
     // Each closed gap is itself a hard cut in the finished short, so scoring the
     // JOINED footage (not the original range) is what makes the crop snap at a
     // splice instead of gliding across it.
@@ -2671,11 +2735,7 @@ async function applyEdits(ctx, { input, output, edits = {}, onProgress }) {
   if (rot === 90) vf.push('transpose=1'); else if (rot === 270) vf.push('transpose=2'); else if (rot === 180) vf.push('transpose=1,transpose=1');
   if (edits.flipH) vf.push('hflip');
   if (edits.flipV) vf.push('vflip');
-  const looks = {
-    bw: 'hue=s=0', warm: 'colorbalance=rm=0.12:gm=0.02:bm=-0.12', cool: 'colorbalance=rm=-0.12:bm=0.12',
-    vivid: 'eq=saturation=1.5:contrast=1.12', vintage: 'curves=preset=vintage',
-  };
-  if (edits.look && looks[edits.look]) vf.push(looks[edits.look]);
+  if (edits.look && LOOKS[edits.look]) vf.push(LOOKS[edits.look]);
   const eq = [];
   if (edits.brightness) eq.push('brightness=' + Number(edits.brightness));
   if (edits.contrast != null && Number(edits.contrast) !== 1) eq.push('contrast=' + Number(edits.contrast));
@@ -2877,7 +2937,7 @@ const isStillImage = (p) => STILL_RE.test(String(p || ''));
  * (isCleanEncode), and anything short of clean falls through to the full
  * re-encode below, which has not changed.
  */
-async function conformClip(ctx, { path: src, W, H, fps, fill, durationSec, still, srcW, srcH, output, signal, profile, level }) {
+async function conformClip(ctx, { path: src, W, H, fps, fill, durationSec, still, srcW, srcH, fx, output, signal, profile, level }) {
   const args = [];
   if (still) args.push('-loop', '1', '-framerate', String(fps), '-t', durationSec.toFixed(2));
   args.push('-i', src);
@@ -2886,8 +2946,10 @@ async function conformClip(ctx, { path: src, W, H, fps, fill, durationSec, still
   args.push('-f', 'lavfi', '-t', String(Math.max(0.1, durationSec || 1)),
     '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
   const chain = fillChain(srcW, srcH, W, H, fill == null ? 'bars' : fill, 'cf');
-  args.push('-filter_complex', `[0:v]${chain},fps=${fps},format=yuv420p,setsar=1[v]`, '-map', '[v]');
+  const look = fxVideo(fx);
+  args.push('-filter_complex', `[0:v]${look ? look + ',' : ''}${chain},fps=${fps},format=yuv420p,setsar=1[v]`, '-map', '[v]');
   args.push('-map', still ? '1:a' : '0:a?');
+  if (!still && fxAudio(fx)) args.push('-af', fxAudio(fx));
   // No audio of its own: take the silence instead, so -map 0:a? cannot come up
   // empty and leave the piece track-less.
   // Match what the short was encoded as, so the join's decoder configuration is
@@ -2965,7 +3027,7 @@ async function appendByCopy(ctx, { input, output, list, position, fill, stillSec
       const mp4 = path.join(tmpDir, `conform-${stamp}-${i}.mp4`);
       temps.push(mp4);
       await conformClip(ctx, { path: c.path, W, H, fps, fill, durationSec: secs, still,
-        srcW: (probe && probe.width) || W, srcH: (probe && probe.height) || H, output: mp4, signal,
+        srcW: (probe && probe.width) || W, srcH: (probe && probe.height) || H, fx: c.fx, output: mp4, signal,
         profile: main.vprofile, level: main.vlevel });
       pieces.push({ file: mp4, secs });
     }
@@ -3065,9 +3127,10 @@ async function appendClips(ctx, { input, output, clips = [], position = 'end', f
       // 'bars' (letterbox) is what this always did — keep it as the default so an
       // outro that already looks right is never silently cropped instead.
       : fillChain(infos[idx].width, infos[idx].height, W, H, fill == null ? 'bars' : fill, `c${idx}`);
-    fc += `[${idx}:v]${chain},fps=${fps},format=yuv420p[v${idx}];`;
+    const look = i.main ? '' : fxVideo(i.fx), vol = i.main || !infos[idx].hasAudio ? '' : fxAudio(i.fx);
+    fc += `[${idx}:v]${look ? look + ',' : ''}${chain},fps=${fps},format=yuv420p[v${idx}];`;
     v.push(`[v${idx}]`);
-    fc += `${aLabel[idx]}aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a${idx}];`;
+    fc += `${aLabel[idx]}aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo${vol ? ',' + vol : ''}[a${idx}];`;
     a.push(`[a${idx}]`);
   });
   fc += v.map((x, idx) => x + a[idx]).join('') + `concat=n=${inputs.length}:v=1:a=1[v][a]`;
@@ -3103,4 +3166,6 @@ module.exports = {
   fillChain, fillOpts, FILL_MODES, isStillImage,
   // covering captions that arrived burned into the recording (pure, unit-tested)
   coverChain, withCover,
+  // a clip's own look — Video quality on one clip or all (pure, unit-tested)
+  LOOKS, clipFx, fxVideo, fxAudio,
 };

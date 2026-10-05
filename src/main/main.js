@@ -645,9 +645,9 @@ ipcMain.handle('video:thumbnail', wrap(async (e, { input, timeSec }) => {
   return output;
 }));
 
-ipcMain.handle('video:trim', wrap(async (e, { input, startSec, endSec, jobId }) => {
+ipcMain.handle('video:trim', wrap(async (e, { input, startSec, endSec, fx, jobId }) => {
   const output = outPath(`trim-${stamp()}.mp4`);
-  await video.trim(getCtx(), { input, startSec, endSec, output, onProgress: onProgress(e, jobId) });
+  await video.trim(getCtx(), { input, startSec, endSec, fx, output, onProgress: onProgress(e, jobId) });
   return output;
 }));
 
