@@ -32,6 +32,10 @@ services:
       MW_CLOUD_CODE: "${MW_CLOUD_CODE:?put your access code in .env — run scripts/cloud-setup.sh, or: echo MW_CLOUD_CODE=your-code-here > .env}"
       MW_CLOUD_PORT: "7390"
       MW_CLOUD_UPLOADS: "on"
+      # Optional, from .env (the setup script asks). Empty = not used.
+      GROQ_API_KEY: "${GROQ_API_KEY:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      MW_CLOUD_SOCIAL: "${MW_CLOUD_SOCIAL:-on}"
     volumes:
       - studio-data:/data          # settings, sessions, library, speech models
       - studio-media:/media        # the recordings you send up
