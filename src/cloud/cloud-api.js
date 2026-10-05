@@ -75,6 +75,8 @@ const sseClients = new Set();
 const uploads = new Map();    // id -> { name, received, total, path }
 const sockets = new Set();    // every open connection, so stop() can hang up
 let started = 0;
+let lastActive = 0;   // the last time a person did something (see /api/idle)
+const QUIET_API = new Set(['/api/idle', '/api/hello', '/api/events', '/api/status']);
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;          // an evening's editing
 const REMEMBER_TTL_MS = 30 * 24 * 60 * 60 * 1000;    // "keep me signed in"
@@ -936,6 +938,22 @@ async function handle(req, res) {
 
   if (req.method === 'OPTIONS') return send(res, 204, 'text/plain', '');
 
+  /*
+   * IS ANYONE USING IT? Asked by scripts/cloud-update.sh (from inside the box
+   * only) before it restarts the studio for a new version: a restart while
+   * someone is uploading, editing or exporting would cut them off. Anything a
+   * signed-in person does calls /api/…; the app's own keep-alives, the health
+   * check and strangers knocking do not count.
+   */
+  if (p === '/api/idle') {
+    const ip = String(req.socket.remoteAddress || '');
+    if (!/^(::ffff:)?127\.|^::1$/.test(ip)) return send(res, 404, 'text/plain', 'not found');
+    return json(res, 200, {
+      idleSec: Math.round((Date.now() - (lastActive || started || Date.now())) / 1000),
+      uploads: uploads.size, watching: sseClients.size,
+    });
+  }
+
   /* --- the app shell (open: it is a sign-in page until you sign in) ------ */
 
   if (p === '/' || p === '/index.html') {
@@ -1058,6 +1076,7 @@ async function handle(req, res) {
   /* --- everything below needs a signed-in browser ----------------------- */
 
   if (!authed(req, url)) return json(res, 401, { error: 'Sign in first.', needsAuth: true });
+  if (!QUIET_API.has(p)) lastActive = Date.now();   // a signed-in person did something
 
   // Everything from here on runs in the signed-in person's own space.
   const me = userOf(req, url);
