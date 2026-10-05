@@ -792,6 +792,7 @@
    * length rather than leaving the operator to wonder which button does what.
    */
   function updateEditedExportHint() {
+    syncCoverButton();
     const b = $('#veExportEdited'); if (!b) return;
     if (!ve.video) {
       b.disabled = true;
@@ -1129,7 +1130,8 @@
     el.innerHTML = shorts.slice().sort((a, b) => a.start - b.start).map((s) => `
       <div class="ve-clip${ve.sel === s.id ? ' sel' : ''}" data-id="${s.id}">
         <div class="ve-clip-row">
-          ${s.thumb ? `<img class="ve-clip-thumb" src="${s.thumb}" alt="" />` : `<span class="ve-clip-dot" style="background:${s.color}"></span>`}
+          ${s.thumbPick && s.thumbPick.img ? `<img class="ve-clip-thumb picked" src="${s.thumbPick.img}" alt="" title="This short's thumbnail" />`
+            : s.thumb ? `<img class="ve-clip-thumb" src="${s.thumb}" alt="" />` : `<span class="ve-clip-dot" style="background:${s.color}"></span>`}
           <div class="ve-clip-main">
             <input class="ve-clip-name" data-id="${s.id}" value="${escape2(s.label)}" title="${escape2(s.label)}" />
             <div class="ve-clip-time muted small">${fmt(s.start)} – ${fmt(s.end)} · ${Math.round(keptDur(s))}s${removedDur(s) > 0.05 ? ` <span class="ve-clip-joined" title="${cutsOf(s).length} pause${cutsOf(s).length > 1 ? 's' : ''} removed — exports as ONE video without them">🔗 −${removedDur(s).toFixed(1)}s</span>` : ''}${hasClipCaps(s) ? ' <span class="ve-clip-capped" title="Captions ready — they show on the preview and are burned in when this short exports">💬 CC</span>' : ''}${best && best.id === s.id ? ' <span class="ve-top-pick">🔥 Top pick</span>' : ''}</div>
@@ -6195,60 +6197,212 @@
    * video itself. See video.attachThumbnail.
    */
 
-  /** Which short the picker is editing, and where its slider is. */
-  function thumbSeg() { return ve._thumbSeg ? ve.segments.find((x) => x.id === ve._thumbSeg) : null; }
+  /*
+   * The picker works on the EXPORT'S clock: a short with pauses closed, or the
+   * edited video with clips deleted, is the kept pieces back to back, and the
+   * filmstrip is exactly that — so the moment you drag to is a moment that is
+   * in the file. It is stored as a SOURCE time (it survives edits around it)
+   * and turned back into the file's own time when the file is made.
+   */
+  const thPiecesOf = (kind, s) => (kind === 'video' ? editedPieces().map((p) => ({ start: p.start, end: p.end })) : keptPieces(s));
+  const thTotal = (ps) => ps.reduce((a, p) => a + (p.end - p.start), 0);
+  function thSrcAt(ps, u) {
+    let acc = 0;
+    for (const p of ps) { const len = p.end - p.start; if (u <= acc + len) return p.start + Math.max(0, u - acc); acc += len; }
+    const l = ps[ps.length - 1]; return l ? Math.max(l.start, l.end - 0.05) : 0;
+  }
+  function thOutAt(ps, t) {
+    let acc = 0;
+    for (const p of ps) { if (t >= p.start && t <= p.end) return acc + (t - p.start); acc += p.end - p.start; }
+    return null;
+  }
+  /** What the picker is choosing for: a short, or the finished video ('__video'). */
+  function thumbSeg() { return ve._th && ve._th.kind === 'short' ? ve.segments.find((x) => x.id === ve._th.id) : null; }
+  const thPickOf = (th) => (th.kind === 'video' ? ve.vthumb : (thumbSeg() || {}).thumbPick) || null;
+
+  /* A second, hidden player for the frames: the preview's own playhead is never moved. */
+  function thVideo() {
+    const pl = ve.refs.player;
+    const src = pl && (pl.currentSrc || pl.src);
+    let v = ve._thVid;
+    if (!v) {
+      v = document.createElement('video');
+      v.muted = true; v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'auto';
+      v.style.cssText = 'position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none';
+      document.body.appendChild(v);
+      ve._thVid = v;
+    }
+    if (src && v.getAttribute('src') !== src) { v.setAttribute('src', src); try { v.load(); } catch (e) {} }
+    return v;
+  }
+  function thSeek(t) {
+    const v = thVideo();
+    // one seek at a time, in order: the filmstrip and the drag share this player
+    const go = () => new Promise((res) => {
+      let done = false;
+      const fin = () => { if (done) return; done = true; v.removeEventListener('seeked', fin); res(v); };
+      const start = () => { v.addEventListener('seeked', fin); try { v.currentTime = Math.max(0, t); } catch (e) { fin(); } setTimeout(fin, 1500); };
+      if (v.readyState >= 1) start();
+      else { v.addEventListener('loadedmetadata', start, { once: true }); setTimeout(() => { if (!done) start(); }, 2500); }
+    });
+    ve._thQ = (ve._thQ || Promise.resolve()).then(go, go);
+    return ve._thQ;
+  }
+  /** Draw the frame the hidden player holds, cut to the export's shape. */
+  function thDraw(cv, w, h) {
+    const v = ve._thVid, th = ve._th;
+    if (!v || !v.videoWidth || !th) return false;
+    cv.width = Math.max(1, Math.round(w)); cv.height = Math.max(1, Math.round(h));
+    const ctx = cv.getContext('2d');
+    const vw = v.videoWidth, vh = v.videoHeight;
+    let sx, sy, sw, sh;
+    const crop = th.crop;
+    if (crop) { sw = crop.cw * vw; sh = crop.ch * vh; sx = crop.ox * vw - sw / 2; sy = crop.oy * vh - sh / 2; }
+    else {
+      const tar = cv.width / cv.height, sar = vw / vh;
+      if (sar > tar) { sh = vh; sw = vh * tar; sx = (vw - sw) / 2; sy = 0; } else { sw = vw; sh = vw / tar; sx = 0; sy = (vh - sh) / 2; }
+    }
+    try { ctx.drawImage(v, sx, sy, sw, sh, 0, 0, cv.width, cv.height); return true; } catch (e) { return false; }
+  }
+  /** The big picture: the moment at the export's time u. */
+  async function thShowAt(u) {
+    const th = ve._th; if (!th) return;
+    th.u = clamp(u, 0, Math.max(0, th.total - 0.04));
+    thPlacePick();
+    const when = $('#thumbWhen'); if (when) when.textContent = fmt(th.u);
+    const sl = $('#thumbAt'); if (sl) sl.value = String(Math.round((th.u / Math.max(0.1, th.total)) * 1000));
+    if (th.drawing) { th.pending = true; return; }
+    th.drawing = true;
+    try {
+      do {
+        th.pending = false;
+        await thSeek(thSrcAt(th.pieces, th.u));
+        if (ve._th !== th) return;
+        const big = th.bigCv || (th.bigCv = document.createElement('canvas'));
+        const H = 720, W = Math.round(H * th.ar);
+        if (thDraw(big, W, H) && th.src === 'frame') {
+          const img = $('#thumbShot'); if (img) img.src = big.toDataURL('image/jpeg', 0.86);
+          $('#thumbFrame') && $('#thumbFrame').classList.remove('empty');
+        }
+        const pc = $('#thumbPickCv'), pick = $('#thumbPick');
+        if (pc && pick) thDraw(pc, pick.clientWidth * 2, pick.clientHeight * 2);
+      } while (th.pending && ve._th === th);
+    } finally { th.drawing = false; }
+  }
+  /** The filmstrip: frames across the whole export, drawn one by one as they arrive. */
+  async function thStrip() {
+    const th = ve._th, cv = $('#thumbStripCv'), strip = $('#thumbStrip'); if (!th || !cv || !strip) return;
+    const W = strip.clientWidth || 340, H = strip.clientHeight || 56, dpr = Math.min(2, window.devicePixelRatio || 1);
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#16171b'; ctx.fillRect(0, 0, cv.width, cv.height);
+    const cellW = Math.max(18, H * th.ar), n = Math.max(4, Math.min(16, Math.ceil(W / cellW)));
+    const tmp = document.createElement('canvas');
+    for (let i = 0; i < n; i++) {
+      if (ve._th !== th) return;
+      await thSeek(thSrcAt(th.pieces, ((i + 0.5) / n) * th.total));
+      if (ve._th !== th) return;
+      if (thDraw(tmp, (W / n) * dpr, H * dpr)) ctx.drawImage(tmp, Math.round((i * W / n) * dpr), 0, Math.ceil((W / n) * dpr), cv.height);
+    }
+    thShowAt(th.u);   // the strip borrowed the player: put the chosen frame back
+  }
+  function thPlacePick() {
+    const th = ve._th, pick = $('#thumbPick'), strip = $('#thumbStrip'); if (!th || !pick || !strip) return;
+    const H = strip.clientHeight || 56;
+    pick.style.width = Math.round(Math.max(30, (H + 12) * th.ar)) + 'px';
+    const room = Math.max(0, strip.clientWidth - pick.offsetWidth);
+    pick.style.transform = `translateX(${Math.round((th.u / Math.max(0.1, th.total)) * room)}px)`;
+  }
+  function thSetSrc(src) {
+    const th = ve._th; if (!th) return;
+    th.src = src;
+    const m = $('#thumbModal'); if (!m) return;
+    m.querySelector('.thq').dataset.src = src;
+    m.querySelectorAll('[data-thsrc]').forEach((b) => b.classList.toggle('on', b.dataset.thsrc === src));
+    m.querySelectorAll('[data-thpane]').forEach((p) => p.classList.toggle('on', p.dataset.thpane === src));
+    const img = $('#thumbShot'), frame = $('#thumbFrame');
+    if (src === 'photo') {
+      if (img) img.src = th.fileUrl || '';
+      if (frame) frame.classList.toggle('empty', !th.fileUrl);
+      const tx = $('#thumbFileTx'); if (tx) tx.textContent = th.file ? 'Choose a different photo' : 'Choose a photo';
+    } else { thShowAt(th.u); }
+    const use = $('#thumbUse'); if (use) use.disabled = src === 'photo' && !th.file;
+  }
 
   async function openThumbPicker(id) {
-    const s = ve.segments.find((x) => x.id === id);
-    if (!s || !ve.video) return;
-    ve._thumbSeg = id;
-    const modal = $('#thumbModal');
-    if (!modal) return;
-    const pl = ve.refs.player;
-    ve._thumbWas = pl ? { t: pl.currentTime, playing: !pl.paused } : null;
-    if (pl && !pl.paused) pl.pause();
-    // start where they left it, or a little way in — the opening frame of a
-    // clip is the one worth avoiding
-    const at = s.thumb && s.thumb.at != null ? s.thumb.at : s.start + Math.min(3, (s.end - s.start) * 0.2);
+    if (!ve.video) return;
+    const kind = id === '__video' ? 'video' : 'short';
+    const s = kind === 'short' ? ve.segments.find((x) => x.id === id) : null;
+    if (kind === 'short' && !s) return;
+    const pieces = thPiecesOf(kind, s);
+    if (!pieces.length) return window.__toast && window.__toast('Nothing on the timeline to take a thumbnail from yet.', 'error');
+    const modal = $('#thumbModal'); if (!modal) return;
+    const total = thTotal(pieces);
+    const preset = ve.presets[ve.aspect] || { w: 9, h: 16 };
+    const info = ve.video.info || {};
+    const ar = kind === 'video' ? (info.width && info.height ? info.width / info.height : 16 / 9) : preset.w / preset.h;
+    // the short's crop is the preview's (cropWindow); a blurred/letterboxed fill shows the whole picture
+    const crop = kind === 'short' && !fillCfg() ? cropWindow() : null;
+    const th = ve._th = { kind, id, pieces, total, ar, crop, src: 'frame', u: 0, file: null, fileUrl: null };
+    const pick = thPickOf(th);
+    th.u = pick && pick.at != null ? (thOutAt(pieces, pick.at) ?? 0) : Math.min(3, total * 0.2);
+    if (pick && pick.file) { th.file = pick.file; th.fileUrl = pick.img || null; }
+    modal.querySelector('.thq').style.setProperty('--ar', `${Math.round(ar * 1000)} / 1000`);
+    const fr = $('#thumbFor');
+    if (fr) fr.textContent = kind === 'video' ? `Final video · ${fmt(total)}` : `Short · ${s.label || 'clip'} · ${fmt(total)}`;
+    const clear = $('#thumbClear'); if (clear) clear.classList.toggle('hidden', !pick);
     modal.classList.remove('hidden');
-    setThumbAt(at);
-    await showThumbFrame();
+    thSetSrc(pick && pick.file ? 'photo' : 'frame');
+    if (pick && pick.file && !th.fileUrl) {
+      try { th.fileUrl = await window.api.fs.readImageDataUrl(pick.file); if (th.src === 'photo') thSetSrc('photo'); } catch (e) {}
+    }
+    requestAnimationFrame(() => { thPlacePick(); thStrip(); });
   }
   function closeThumbPicker() {
     const modal = $('#thumbModal');
     if (modal) modal.classList.add('hidden');
-    const pl = ve.refs.player, was = ve._thumbWas;
-    ve._thumbWas = null; ve._thumbSeg = null;
-    if (!pl || !was) return;
-    try { pl.currentTime = was.t; } catch (e) {}
-    if (was.playing) pl.play().catch(() => {});
+    ve._th = null; ve._thumbSeg = null;
   }
-  /** Put the slider and the label on a source time inside the clip. */
-  function setThumbAt(at) {
-    const s = thumbSeg(); if (!s) return;
-    const span = Math.max(0.1, s.end - s.start);
-    ve._thumbAt = clamp(at, s.start, s.end);
-    const sl = $('#thumbAt'); if (sl) sl.value = String(Math.round(((ve._thumbAt - s.start) / span) * 1000));
-    const lab = $('#thumbWhen');
-    if (lab) lab.textContent = `${fmt(ve._thumbAt - s.start)} into the short  ·  ${fmt(ve._thumbAt)} in the recording`;
-  }
-  /** Show the frame at the slider's position, from the preview player itself. */
-  async function showThumbFrame() {
-    const img = $('#thumbShot'), pl = ve.refs.player;
-    if (!img || !pl) return;
-    await new Promise((res) => {
-      let done = false;
-      const fin = () => { if (done) return; done = true; pl.removeEventListener('seeked', fin); res(); };
-      pl.addEventListener('seeked', fin);
-      try { pl.currentTime = ve._thumbAt; } catch (e) { fin(); return; }
-      setTimeout(fin, 1200);
+  /** A small copy of the picture, for the clip card and the Export sheet. */
+  function thSmall(src) {
+    return new Promise((res) => {
+      if (!src) return res(null);
+      const im = new Image();
+      im.onload = () => {
+        const h = 200, w = Math.max(1, Math.round(h * (im.width / im.height)));
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        try { c.getContext('2d').drawImage(im, 0, 0, w, h); res(c.toDataURL('image/jpeg', 0.8)); } catch (e) { res(null); }
+      };
+      im.onerror = () => res(null);
+      im.src = src;
     });
-    try {
-      const c = document.createElement('canvas');
-      c.width = pl.videoWidth || 1280; c.height = pl.videoHeight || 720;
-      c.getContext('2d').drawImage(pl, 0, 0);
-      img.src = c.toDataURL('image/jpeg', 0.85);
-    } catch (e) { /* the slider still works; the preview just cannot draw */ }
+  }
+  async function thumbSave() {
+    const th = ve._th; if (!th) return;
+    let pick;
+    if (th.src === 'photo') {
+      if (!th.file) return;
+      pick = { file: th.file, img: await thSmall(th.fileUrl) };
+    } else {
+      const img = $('#thumbShot');
+      pick = { at: +thSrcAt(th.pieces, th.u).toFixed(3), img: await thSmall(img && img.src) };
+    }
+    if (th.kind === 'video') { ve.vthumb = pick; touchSession(); syncCoverButton(); }
+    else setClipThumb(thumbSeg(), pick);
+    const what = th.kind === 'video' ? 'the video' : 'this short';
+    closeThumbPicker();
+    window.__toast && window.__toast(`🖼️ Thumbnail set for ${what} — saved beside the file when you export.`, 'good', 6000);
+  }
+  function thumbRemove() {
+    const th = ve._th; if (!th) return;
+    if (th.kind === 'video') { ve.vthumb = null; touchSession(); syncCoverButton(); }
+    else setClipThumb(thumbSeg(), null);
+    closeThumbPicker();
+  }
+  function syncCoverButton() {
+    const b = $('#veVideoThumb'); if (!b) return;
+    b.disabled = !ve.video;
+    b.classList.toggle('on', !!ve.vthumb);
   }
 
   function setClipThumb(s, thumb) {
@@ -6264,16 +6418,20 @@
    * file people will actually download.
    */
   async function applyThumbTo(s, filePath) {
-    const t = s && s.thumbPick;
+    // a short carries its own; the edited video's is the timeline's (ve.vthumb)
+    const t = s && (s.id === '__edited' ? ve.vthumb : s.thumbPick);
     if (!t || !filePath) return filePath;
     try {
-      // The moment is measured in the SHORT's own clock: the operator scrubbed
-      // to a point in the clip, and the export starts at the clip's start.
-      const atSec = t.file ? 0 : Math.max(0, (t.at || s.start) - s.start);
+      // The moment is a SOURCE time; the file starts at the clip's start and
+      // has its pauses (and deleted clips) taken out, so it is mapped onto the
+      // file's own clock the same way the captions are (srcToOut).
+      const mapped = t.file ? 0 : srcToOut(s, t.at != null ? t.at : s.start);
+      const atSec = t.file ? 0 : Math.max(0, mapped != null ? mapped : (t.at || s.start) - s.start);
       const res = await window.api.video.attachThumb({ input: filePath, imagePath: t.file || null, atSec });
       if (res && res.image) {
-        window.__toast && window.__toast('🖼️ Thumbnail saved beside the short: '
+        window.__toast && window.__toast('🖼️ Thumbnail saved beside the video: '
           + String(res.image).split(/[\\/]/).pop(), 'good', 7000);
+        if (window.__thumbMade) window.__thumbMade(res.image, filePath);
       }
     } catch (e) {
       window.__toast && window.__toast('The short exported, but its thumbnail could not be written: '
@@ -6333,6 +6491,7 @@
         sounds: ve.sounds || [],
         music: ve.music || null,
         outro: ve.outro || null,
+        vthumb: ve.vthumb || null,   // 🖼️ the finished video's thumbnail
         outroAll: ve.outroAll !== false,
         pxPerSec: ve.pxPerSec,
         playhead: ve.refs.player ? (ve.refs.player.currentTime || 0) : 0,
@@ -6403,6 +6562,8 @@
     ve.sounds = Array.isArray(tl.sounds) ? tl.sounds : [];
     ve.music = tl.music || null;
     ve.outro = tl.outro || null;
+    ve.vthumb = tl.vthumb || null;
+    syncCoverButton();
     ve.outroAll = tl.outroAll !== false;
     ve.sel = tl.sel || (ve.segments[0] && ve.segments[0].id) || null;
     ve.activeRow = tl.activeRow || 'video';
@@ -8340,8 +8501,7 @@
       let out = await exportOneClip(s, null, withCaps || !!(text && text.length));
       if (withCaps) out = await autoCaptionExport(s, out, text);
       else out = await burnTextIntoShort(s, out, null, text);
-      out = await finishExport(s, out); // background music, then the outro
-      out = await applyThumbTo(s, out); // last, so the cover matches the finished file
+      out = await finishExport(s, out); // background music, the outro, then its thumbnail
       // Seen to finish, the same as a short inside a batch.
       if (window.__chainDone) await window.__chainDone(task);
       doneTask(task, out, `✅ Saved “${s.label || 'clip'}”.`);
@@ -12774,6 +12934,7 @@
     filePath = await mixSoundsInto(s, filePath);   // voiceovers and sound effects, on the export's clock
     filePath = await mixMusicInto(s, filePath);
     filePath = await appendOutroTo(s, filePath);
+    filePath = await applyThumbTo(s, filePath);     // last, so the cover is the finished file's
     return filePath;
   }
 
@@ -13370,34 +13531,40 @@
     const clipsBtn = $("#veClips"); if (clipsBtn) clipsBtn.addEventListener('click', () => openLibrary('clips'));
     const thumbCloseBtn = $('#thumbClose'); if (thumbCloseBtn) thumbCloseBtn.addEventListener('click', closeThumbPicker);
     const thumbModalEl = $('#thumbModal'); if (thumbModalEl) thumbModalEl.addEventListener('click', (e) => { if (e.target === thumbModalEl) closeThumbPicker(); });
+    $$('#thumbModal [data-thsrc]').forEach((b) => b.addEventListener('click', () => thSetSrc(b.dataset.thsrc)));
+    // drag along the filmstrip (a tap jumps there)
+    const thStripEl = $('#thumbStrip');
+    if (thStripEl) {
+      const at = (e) => {
+        const th = ve._th, pick = $('#thumbPick'); if (!th || !pick) return;
+        const r = thStripEl.getBoundingClientRect();
+        const x = clamp(e.clientX - r.left - pick.offsetWidth / 2, 0, Math.max(1, r.width - pick.offsetWidth));
+        thShowAt((x / Math.max(1, r.width - pick.offsetWidth)) * th.total);
+      };
+      thStripEl.addEventListener('pointerdown', (e) => { e.preventDefault(); try { thStripEl.setPointerCapture(e.pointerId); } catch (er) {} at(e); });
+      thStripEl.addEventListener('pointermove', (e) => { if (e.buttons || e.pointerType === 'touch') at(e); });
+    }
+    const thPickEl = $('#thumbPick');
+    if (thPickEl) thPickEl.addEventListener('keydown', (e) => {
+      const th = ve._th; if (!th) return;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); thShowAt(th.u + (e.key === 'ArrowRight' ? 1 : -1) * Math.max(0.2, th.total / 50)); }
+    });
     const thumbSlider = $('#thumbAt');
-    if (thumbSlider) thumbSlider.addEventListener('input', () => {
-      const sg = thumbSeg(); if (!sg) return;
-      setThumbAt(sg.start + ((parseFloat(thumbSlider.value) || 0) / 1000) * Math.max(0.1, sg.end - sg.start));
-      if (ve._thumbTimer) clearTimeout(ve._thumbTimer);
-      ve._thumbTimer = setTimeout(showThumbFrame, 140);   // scrubbing must not seek on every pixel
-    });
-    const thumbUseBtn = $('#thumbUse');
-    if (thumbUseBtn) thumbUseBtn.addEventListener('click', () => {
-      const sg = thumbSeg(); if (!sg) return;
-      setClipThumb(sg, { at: ve._thumbAt });
-      closeThumbPicker();
-      window.__toast && window.__toast('🖼️ That frame is this short\'s thumbnail. It is written beside the file when you export.', 'good', 7000);
-    });
+    if (thumbSlider) thumbSlider.addEventListener('input', () => { const th = ve._th; if (th) thShowAt((parseFloat(thumbSlider.value) || 0) / 1000 * th.total); });
+    const thumbUseBtn = $('#thumbUse'); if (thumbUseBtn) thumbUseBtn.addEventListener('click', thumbSave);
     const thumbFileBtn = $('#thumbFile');
     if (thumbFileBtn) thumbFileBtn.addEventListener('click', async () => {
-      const sg = thumbSeg(); if (!sg) return;
-      const f = await window.api.dialog.openFile({ filters: [{ name: 'Pictures', extensions: ['jpg', 'jpeg', 'png', 'webp'] }] }).catch(() => null);
-      if (!f) return;
-      setClipThumb(sg, { file: f });
-      closeThumbPicker();
-      window.__toast && window.__toast('🖼️ That picture is this short\'s thumbnail. It is fitted to the short\'s shape on export.', 'good', 7000);
+      const th = ve._th; if (!th) return;
+      const f = await window.api.dialog.openFile({ filters: [{ name: 'Pictures', extensions: ['jpg', 'jpeg', 'png', 'webp', 'heic'] }] }).catch(() => null);
+      if (!f || ve._th !== th) return;
+      th.file = f;
+      try { th.fileUrl = await window.api.fs.readImageDataUrl(f); } catch (e) { th.fileUrl = null; }
+      thSetSrc('photo');
     });
-    const thumbClearBtn = $('#thumbClear');
-    if (thumbClearBtn) thumbClearBtn.addEventListener('click', () => {
-      const sg = thumbSeg(); if (sg) setClipThumb(sg, null);
-      closeThumbPicker();
-    });
+    const thumbClearBtn = $('#thumbClear'); if (thumbClearBtn) thumbClearBtn.addEventListener('click', thumbRemove);
+    // on the photo tab, the empty picture is the button too
+    const thFrameEl = $('#thumbFrame'); if (thFrameEl) thFrameEl.addEventListener('click', () => { const th = ve._th; if (th && th.src === 'photo' && thumbFileBtn) thumbFileBtn.click(); });
+    const vthumbBtn = $('#veVideoThumb'); if (vthumbBtn) vthumbBtn.addEventListener('click', () => openThumbPicker('__video'));
     const saveSessBtn = $('#veSaveSession'); if (saveSessBtn) saveSessBtn.addEventListener('click', () => saveSession(false));
     const sessBtn = $('#veSessions'); if (sessBtn) sessBtn.addEventListener('click', openSessionsWindow);
     const sessCloseBtn = $('#sessClose'); if (sessCloseBtn) sessCloseBtn.addEventListener('click', closeSessionsWindow);
@@ -13873,6 +14040,9 @@
       return ve.outroAll;
     },
     chooseOutro() { openLibrary('clips'); },
+    /** 🖼️ The finished video's thumbnail — what the phone's Export sheet shows, and its row opens. */
+    coverInfo() { return ve.vthumb ? { set: true, img: ve.vthumb.img || null, photo: !!ve.vthumb.file } : { set: false }; },
+    chooseCover() { return openThumbPicker('__video'); },
     /** The phone's Chroma key tool: the selected overlay, or one under the playhead. */
     chromaKey() { return openChromaKey(); },
     /** The phone's Keyframe tool: the clip under the playhead (or the selected one). */
@@ -15153,10 +15323,13 @@
       setCover(patch) { setCover(patch); return this.coverState(); },
 
       /* ---- the short's thumbnail ---- */
-      async openThumb(id) { await openThumbPicker(id); const m = $('#thumbModal'); return { open: !!m && !m.classList.contains('hidden'), at: ve._thumbAt }; },
+      async openThumb(id) { await openThumbPicker(id); const m = $('#thumbModal'); const th = ve._th; return { open: !!m && !m.classList.contains('hidden'), at: th ? thSrcAt(th.pieces, th.u) : null, u: th ? th.u : null, total: th ? th.total : null }; },
       closeThumb() { closeThumbPicker(); const m = $('#thumbModal'); return !!m && !m.classList.contains('hidden'); },
-      thumbScrub(v) { const sl = $('#thumbAt'); if (!sl) return null; sl.value = String(v); sl.dispatchEvent(new Event('input')); return ve._thumbAt; },
-      thumbUse() { const id = ve._thumbSeg; const b = $('#thumbUse'); if (b) b.click(); return this.clipThumb(id); },
+      thumbScrub(v) { const sl = $('#thumbAt'); if (!sl) return null; sl.value = String(v); sl.dispatchEvent(new Event('input')); const th = ve._th; return th ? thSrcAt(th.pieces, th.u) : null; },
+      async thumbUse() { const th = ve._th; const id = th && th.id; await thumbSave(); return id === '__video' ? (ve.vthumb ? Object.assign({}, ve.vthumb) : null) : this.clipThumb(id); },
+      thumbState() { const th = ve._th; const img = $('#thumbShot'); return th ? { kind: th.kind, src: th.src, u: th.u, total: th.total, ar: th.ar, hasImg: !!(img && img.src && img.src.length > 100) } : null; },
+      videoThumb() { return ve.vthumb ? Object.assign({}, ve.vthumb) : null; },
+      async applyCover(file) { return applyThumbTo({ id: '__edited', start: 0, end: dur() }, file); },
       clipThumb(id) { const x = ve.segments.find((y) => y.id === id); return x && x.thumbPick ? Object.assign({}, x.thumbPick) : null; },
       setClipThumbAt(id, at) { const x = ve.segments.find((y) => y.id === id); setClipThumb(x, { at }); return this.clipThumb(id); },
       clearClipThumb(id) { const x = ve.segments.find((y) => y.id === id); setClipThumb(x, null); return this.clipThumb(id); },

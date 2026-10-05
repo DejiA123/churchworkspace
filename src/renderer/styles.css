@@ -1860,14 +1860,64 @@ button.cap-model-pick .cap-model-name { align-items: flex-start; text-align: lef
 /* ---- THUMBNAIL PICKER ----------------------------------------------------
    One frame decides whether anybody presses play, so it is chosen by looking
    at it: scrub, see it full size, take it. */
-.thumb-box { width: 640px; }
-.thumb-body { padding: 14px 18px 18px; }
-.thumb-stage { background: #000; border-radius: 10px; overflow: hidden; display: grid; place-items: center;
-  min-height: 220px; max-height: 46vh; margin: 10px 0; }
-.thumb-stage img { max-width: 100%; max-height: 46vh; display: block; }
-.thumb-body input[type=range] { width: 100%; }
-.thumb-when { text-align: center; margin-top: 2px; }
-.thumb-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+/* ===================== 🖼️ THUMBNAIL (.thq) =====================
+   CapCut's Cover: the picture big and in the video's own shape, a filmstrip
+   under it with a frame you drag, or a photo of your own. */
+.thq-modal { z-index: 320; }
+.thq {
+  --tq-bg: #141519; --tq-acc: #8b5cf6; --tq-acc2: #a78bfa; --tq-mut: #9a9ca6;
+  width: 460px; max-width: 94vw; min-width: 0; padding: 0 !important; background: var(--tq-bg) !important; color: #f5f6f8;
+  border: 1px solid rgba(255,255,255,.07) !important; border-radius: 22px !important; box-shadow: 0 30px 80px rgba(0,0,0,.6);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Roboto, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.thq button { font-family: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.thq-hidden { display: none !important; }
+.thq-head { position: relative; flex: none; display: flex; align-items: center; gap: 10px; padding: 18px 14px 6px 20px; }
+.thq-grab { display: none; }
+.thq-titles { flex: 1; min-width: 0; }
+.thq-title { margin: 0; font-size: 19px; font-weight: 800; letter-spacing: -.3px; }
+.thq-sub { display: block; margin-top: 1px; font-size: 12.5px; color: var(--tq-mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.thq-x { flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; background: #2a2b31; color: #c9cad1; }
+.thq-x svg { width: 15px; height: 15px; }
+.thq-seg { position: relative; flex: none; display: grid; grid-template-columns: 1fr 1fr; height: 36px; margin: 8px 16px 0; padding: 3px; border-radius: 11px; background: #23242a; }
+.thq-seg button { position: relative; z-index: 1; border: 0; background: none; color: var(--tq-mut); font-size: 13.5px; font-weight: 700; border-radius: 8px; transition: color .2s ease; }
+.thq-seg button.on { color: #fff; }
+.thq-seg-pill { position: absolute; z-index: 0; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px); border-radius: 8px; background: #3a3b44; box-shadow: 0 2px 8px rgba(0,0,0,.35); transition: transform .28s cubic-bezier(.3,1.2,.4,1); }
+.thq[data-src="photo"] .thq-seg-pill { transform: translateX(100%); }
+/* the picture, in the video's own shape */
+.thq-stage { flex: 1 1 auto; min-height: 0; display: grid; place-items: center; padding: 14px 16px 6px; }
+.thq-frame { position: relative; height: min(42vh, 380px); aspect-ratio: var(--ar, 9 / 16); max-width: 100%; border-radius: 14px; overflow: hidden;
+  background: #0b0b0d; box-shadow: 0 14px 34px rgba(0,0,0,.55), inset 0 0 0 1px rgba(255,255,255,.06); }
+.thq-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.thq-frame img:not([src]), .thq-frame img[src=""] { display: none; }
+.thq-empty { position: absolute; inset: 0; display: none; place-items: center; color: var(--tq-mut); font-size: 13px; font-weight: 650; }
+.thq-frame.empty .thq-empty { display: grid; }
+.thq-pane { display: none; padding: 8px 16px 4px; }
+.thq-pane.on { display: block; }
+/* the filmstrip and the frame you drag */
+.thq-strip { position: relative; height: 56px; margin: 6px 4px 0; border-radius: 10px; background: #0b0b0d; touch-action: none; user-select: none; -webkit-user-select: none; cursor: pointer; }
+.thq-strip > canvas { display: block; width: 100%; height: 100%; border-radius: 10px; opacity: .55; }
+.thq-pick { position: absolute; top: -6px; bottom: -6px; left: 0; width: 40px; border-radius: 9px; overflow: hidden; cursor: grab;
+  box-shadow: 0 0 0 3px #fff, 0 6px 18px rgba(0,0,0,.6); background: #000; transform: translateX(0); will-change: transform; }
+.thq-pick:active { cursor: grabbing; }
+.thq-pick canvas { display: block; width: 100%; height: 100%; }
+.thq-when { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin: 12px 4px 0; font-size: 12.5px; color: var(--tq-mut); }
+.thq-when span:first-child { color: #fff; font-weight: 750; font-variant-numeric: tabular-nums; }
+/* your photo */
+.thq-upload { display: flex; align-items: center; gap: 14px; width: 100%; padding: 14px; border: 1.5px dashed rgba(167,139,250,.45); border-radius: 16px;
+  background: rgba(139,92,246,.08); color: #f5f6f8; text-align: left; }
+.thq-upload i { flex: none; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 12px; background: rgba(139,92,246,.2); color: var(--tq-acc2); }
+.thq-upload svg { width: 24px; height: 24px; }
+.thq-upload b { display: block; font-size: 15px; font-weight: 750; }
+.thq-upload small { display: block; margin-top: 3px; font-size: 12.5px; line-height: 1.35; color: var(--tq-mut); }
+.thq-foot { flex: none; display: flex; gap: 10px; padding: 14px 16px 18px; }
+.thq-remove { flex: none; height: 50px; padding: 0 18px; border: 0; border-radius: 14px; background: #23242a; color: #ff8a80; font-size: 15px; font-weight: 700; }
+.thq-remove.hidden { display: none; }
+.thq-save { flex: 1; height: 50px; border: 0; border-radius: 14px; background: linear-gradient(180deg, #a78bfa, #7c3aed); color: #fff; font-size: 16px; font-weight: 750; box-shadow: 0 8px 22px rgba(124,58,237,.35); }
+.thq-save:disabled { opacity: .45; box-shadow: none; cursor: default; }
+/* a short with a thumbnail chosen shows it on its card */
+.ve-clip-thumb.picked { box-shadow: 0 0 0 2px #a78bfa; }
 /* the marker on a clip card that says this short has a chosen cover */
 .ve-clip-thumbset { color: var(--accent); }
 
