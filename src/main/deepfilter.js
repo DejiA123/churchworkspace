@@ -46,6 +46,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const ff = require('./ffmpeg');
 const jobs = require('./jobs');
+const machine = require('./machine');
 
 const VERSION = '0.5.6';
 const RELEASE_URL = `https://github.com/Rikorose/DeepFilterNet/releases/download/v${VERSION}/`;
@@ -159,24 +160,40 @@ const CHUNK_MIN_SEC = 240;
 const TAIL = 4800;
 const XF_SAMPLES = 1440;
 
-function cores() {
-  const n = (os.availableParallelism ? os.availableParallelism() : os.cpus().length) || 1;
-  return Math.max(1, Math.min(6, n - 1 || 1));
+/*
+ * HOW BIG A PIECE, HOW MANY AT ONCE. The network holds its whole input in
+ * memory — measured 158 MB for 5 minutes and 271 MB for 10 (about 45 MB plus
+ * 23 MB a minute) — so a one-hour piece is ~1.4 GB. Pieces are capped (shorter
+ * still on a small server), and only as many run at once as the CPUs this
+ * process really has (machine.cpus reads the container's quota, not the
+ * host's) and half its memory allow.
+ */
+const MB_BASE = 45, MB_PER_MIN = 23;
+const cores = () => Math.max(1, Math.min(6, (machine.cpus() || 1) - 1 || 1));
+function pieceLayout(N, pieceSec) {
+  if (pieceSec) return { per: Math.round(pieceSec * SR), lanes: cores() };
+  const capMin = machine.small() ? 8 : 30;
+  const per = Math.min(capMin * 60 * SR, Math.max(CHUNK_MIN_SEC * SR, Math.ceil(N / cores())));
+  const mb = MB_BASE + MB_PER_MIN * (per / SR / 60);
+  return { per, lanes: Math.max(1, Math.min(cores(), Math.floor((machine.memoryMB() * 0.5) / mb))) };
 }
 
-/** Run the network on one WAV, into `outDir`. Killed by Cancel like any ffmpeg. */
-function runNet(bin, { input, outDir, level, signal }) {
+/** Run the network on one WAV, into `outDir`. Killed by Cancel like any ffmpeg,
+ *  and by `live`'s owner when a sibling piece has failed. */
+function runNet(bin, { input, outDir, level, signal, live }) {
   const L = LEVELS[level] || LEVELS.medium;
   const args = ['-D', '-a', String(L.atten), ...(L.pf ? ['--pf'] : []), '-o', outDir, input];
   return new Promise((resolve, reject) => {
     let proc;
     try { proc = jobs.track(spawn(bin, args, { windowsHide: true })); } catch (e) { reject(e); return; }
     try { if (proc.pid) os.setPriority(proc.pid, 10); } catch (e) {}
+    if (live) live.add(proc);
     let err = '';
     if (signal) signal.addEventListener('abort', () => { try { proc.kill('SIGKILL'); } catch (e) {} });
     proc.stderr.on('data', (d) => { err = (err + d.toString()).slice(-4000); });
-    proc.on('error', (e) => reject(new Error('Could not start the voice cleaner: ' + e.message)));
+    proc.on('error', (e) => { if (live) live.delete(proc); reject(new Error('Could not start the voice cleaner: ' + e.message)); });
     proc.on('close', (code) => {
+      if (live) live.delete(proc);
       if (jobs.isCancelled()) return reject(new jobs.CancelledError());
       const out = path.join(outDir, path.basename(input));
       if (code === 0 && fs.existsSync(out)) resolve(out);
@@ -184,6 +201,35 @@ function runNet(bin, { input, outDir, level, signal }) {
     });
   });
 }
+
+/*
+ * THE LEVEL IT HEARS, AND THE LEVEL THAT COMES BACK. The network's result
+ * depends on how loud it is fed: measured on the hall recording, fed the words
+ * at -40 dBFS it treated part of the voice as room (intelligibility 0.72 →
+ * 0.64 on the harder recording), and its output came back 2-6 dB quieter than
+ * it went in, more the louder the input — a cleaned short sounded quieter than
+ * the same short uncleaned. So it is always fed at FEED_LUFS (quality is flat
+ * across a wide band around it) and the voice is given back exactly the
+ * loudness it had in the recording, its true peak never past -1.5 dBTP.
+ *
+ * Loudness is EBU R128's integrated loudness, gated: it reads the speech and
+ * leaves the pauses out, so taking the room away does not fool it into
+ * turning the voice up (a plain RMS percentile did, by ~3 dB). The true peak
+ * counts the overs between samples, which is what an AAC encode lands on.
+ */
+const FEED_LUFS = -28;
+/** Integrated loudness (LUFS) and true peak (dBTP) of a file, or null. */
+async function levels(ctx, file) {
+  try {
+    const log = await ff.runFfmpegCollect(ctx.ffmpeg, ['-nostats', '-i', file, '-af', 'ebur128=peak=true:framelog=quiet', '-f', 'null', '-']);
+    const tail = log.slice(log.lastIndexOf('Summary:'));
+    const I = parseFloat((/I:\s*(-?[\d.]+) LUFS/.exec(tail) || [])[1]);
+    const P = parseFloat((/Peak:\s*(-?[\d.]+|-inf) dBFS/.exec(tail) || [])[1]);
+    if (!Number.isFinite(I) || I < -69) return null;    // silence: nothing to level
+    return { loud: I, peak: Number.isFinite(P) ? P : -120 };
+  } catch (e) { return null; }
+}
+const clampDb = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 /** Samples in a 16-bit mono WAV that ffmpeg wrote (it writes a plain data chunk). */
 function wavSamples(file) {
@@ -216,22 +262,35 @@ async function renderVoice(ctx, { inputArgs, cut, af, cwd, signal, pieceSec }) {
   const stem = path.join(os.tmpdir(), `cws-dfn-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   fs.mkdirSync(stem, { recursive: true });
   const ffArgs = (head, chain, out) => [...head, '-af', chain, '-ar', String(SR), '-c:a', 'pcm_s16le', '-y', out];
+  const voice = `${stem}.wav`;
+  const live = new Set();
+  let done = false;
   try {
     /* 1. the export's own audio, up to the clean-up, as 48 kHz mono — the
-     *    network's own rate; a voice track has no use for a stereo image */
-    const pre = [parts.pre, /highpass=f=80$/.test(parts.pre) ? '' : 'highpass=f=80', 'aformat=channel_layouts=mono'].filter(Boolean).join(',');
+     *    network's own rate; a voice track has no use for a stereo image.
+     *  - first_pts=0: a WAV has no timestamps, so audio that starts after the
+     *    picture (common off a capture box) would play early by that much;
+     *    this pads it from time zero, where the picture starts.
+     *  - the fold to one channel is spelled out (an average, never above full
+     *    scale), so it is the same level on every route. */
+    const pre = ['aresample=first_pts=0', parts.pre, /highpass=f=80$/.test(parts.pre) ? '' : 'highpass=f=80',
+      'aresample=ochl=mono:rematrix_maxval=1'].filter(Boolean).join(',');
     const src = path.join(stem, 'src.wav');
     const a = [...inputArgs];
-    if (cut && cut.chain && cut.a) a.push('-filter_complex', `${cut.chain};[${cut.a}]${pre}[aout]`, '-map', '[aout]');
+    // a cut plan's picture is not wanted here, and ffmpeg refuses a graph that leaves it dangling
+    if (cut && cut.chain && cut.a) a.push('-filter_complex', `${cut.chain};${cut.v ? `[${cut.v}]nullsink;` : ''}[${cut.a}]${pre}[aout]`, '-map', '[aout]');
     else a.push('-vn', '-af', pre);
     a.push('-ar', String(SR), '-c:a', 'pcm_s16le', '-y', src);
     await ff.runFfmpeg(ctx.ffmpeg, a, { signal, cwd });
     const N = wavSamples(src);
     if (!N) return null;
+    // fed at FEED_LUFS (never pushed past -0.5 dBTP); a silent track is left as it is
+    const heard = await levels(ctx, src);
+    const feed = heard ? Math.min(clampDb(FEED_LUFS - heard.loud, -20, 24), -0.5 - heard.peak) : 0;
 
     /* 2. the network, in pieces across the cores when it is long */
     // (pieceSec: a test's way to split a short clip and listen to the joins)
-    const per = pieceSec ? Math.round(pieceSec * SR) : Math.max(CHUNK_MIN_SEC * SR, Math.ceil(N / cores()));
+    const { per, lanes } = pieceLayout(N, pieceSec);
     const bounds = [];
     for (let s = 0; s < N;) {
       let e = Math.min(N, s + per);
@@ -241,18 +300,35 @@ async function renderVoice(ctx, { inputArgs, cut, af, cwd, signal, pieceSec }) {
     }
     const outDir = path.join(stem, 'out');
     fs.mkdirSync(outDir, { recursive: true });
-    const pieces = await Promise.all(bounds.map(async ([s, e], i) => {
+    const one = async ([s, e], i) => {
       const from = Math.max(0, s - WARM_SEC * SR), to = Math.min(N, e + TAIL);
       const pad = e + TAIL - to;               // past the end of the recording: silence
       const inp = path.join(stem, `p${i}.wav`);
-      const chain = `atrim=start_sample=${from}:end_sample=${to},asetpts=N/SR/TB` + (pad > 0 ? `,apad=pad_len=${pad}` : '');
+      const chain = `atrim=start_sample=${from}:end_sample=${to},asetpts=N/SR/TB,volume=${feed.toFixed(2)}dB` + (pad > 0 ? `,apad=pad_len=${pad}` : '');
       await ff.runFfmpeg(ctx.ffmpeg, ffArgs(['-i', src], chain, inp), { signal });
-      const out = await runNet(bin, { input: inp, outDir, level: parts.level, signal });
+      // the network takes its turn with the encoders, like whisper does — on a
+      // one-CPU server it must not run beside an export
+      const out = await ff.gated(() => runNet(bin, { input: inp, outDir, level: parts.level, signal, live }));
       try { fs.rmSync(inp, { force: true }); } catch (e) {}
       // its own stretch, plus the overlap the next piece fades in over
       const keep = (e - s) + (i < bounds.length - 1 ? XF_SAMPLES : 0);
       return { file: out, skip: s - from, keep };
-    }));
+    };
+    // `lanes` at a time; the first failure stops the rest at once rather than
+    // leaving them running for minutes beside the fallback
+    const pieces = new Array(bounds.length);
+    let next = 0, failure = null;
+    const lane = async () => {
+      while (next < bounds.length && !failure) {
+        const i = next++;
+        try { pieces[i] = await one(bounds[i], i); } catch (e) {
+          if (!failure) failure = e;
+          for (const p of live) { try { p.kill('SIGKILL'); } catch (er) {} }
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(lanes, bounds.length) }, lane));
+    if (failure) throw failure;
 
     /* 3. join, trim to the exact length, and run the rest of the chain */
     const head = [];
@@ -263,14 +339,26 @@ async function renderVoice(ctx, { inputArgs, cut, af, cwd, signal, pieceSec }) {
       fc += `;[${last}][p${i}]acrossfade=ns=${XF_SAMPLES}:c1=tri:c2=tri[x${i}]`;
       last = `x${i}`;
     }
-    // back to stereo (the same voice both sides), as the track always was
-    const post = ['atrim=end_sample=' + N, parts.post, `aformat=sample_rates=${SR}:channel_layouts=stereo`].filter(Boolean).join(',');
-    fc += `;[${last}]${post}[aout]`;
-    const voice = `${stem}.wav`;
-    await ff.runFfmpeg(ctx.ffmpeg, [...head, '-filter_complex', fc, '-map', '[aout]', '-c:a', 'pcm_s16le', '-y', voice], { signal });
+    fc += `;[${last}]atrim=end_sample=${N}[aout]`;
+    const cleaned = path.join(stem, 'cleaned.wav');
+    await ff.runFfmpeg(ctx.ffmpeg, [...head, '-filter_complex', fc, '-map', '[aout]', '-c:a', 'pcm_s16le', '-y', cleaned], { signal });
+    // the voice back as loud as it was in the recording, its true peak never past -1.5 dBTP
+    const got = await levels(ctx, cleaned);
+    let makeup = heard && got ? heard.loud - got.loud : -feed;
+    if (got) makeup = Math.min(makeup, -1.5 - got.peak);
+    /* 4. back to stereo — the same voice both sides at the SAME level (a plain
+     *    mono-to-stereo conversion puts each 3 dB down) — and THEN the rest of
+     *    the chain, so Studio sound's loudness stage measures the track that
+     *    ships: run on the single channel it landed 3 dB over its -16 LUFS. */
+    const post = [`volume=${makeup.toFixed(2)}dB`, 'pan=stereo|c0=c0|c1=c0', parts.post, `aformat=sample_rates=${SR}`].filter(Boolean).join(',');
+    await ff.runFfmpeg(ctx.ffmpeg, ['-i', cleaned, '-af', post, '-c:a', 'pcm_s16le', '-y', voice], { signal });
+    done = true;
     return voice;
   } finally {
+    for (const p of live) { try { p.kill('SIGKILL'); } catch (e) {} }
     try { fs.rmSync(stem, { recursive: true, force: true }); } catch (e) {}
+    // a join that failed or was cancelled half-way leaves no half-written track behind
+    if (!done) { try { fs.rmSync(voice, { force: true }); } catch (e) {} }
   }
 }
 

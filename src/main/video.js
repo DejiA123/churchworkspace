@@ -408,7 +408,7 @@ async function measureSeparation(ctx, { inputArgs, cut, af, capSec = 120 } = {})
     // the same graph the export would use — including the cut plan, or a
     // gap-closing export would be compared against audio it never plays.
     if (cut && cut.chain && cut.a) {
-      args.push('-filter_complex', `${cut.chain};[${cut.a}]${af ? af + ',' : ''}${stats}[aout]`, '-map', '[aout]');
+      args.push('-filter_complex', `${cut.chain};${cut.v ? `[${cut.v}]nullsink;` : ''}[${cut.a}]${af ? af + ',' : ''}${stats}[aout]`, '-map', '[aout]');
     } else {
       args.push('-vn', '-af', (af ? af + ',' : '') + stats);
     }
@@ -840,7 +840,8 @@ async function renderVerifiedVoice(ctx, { inputArgs, cut, af, hasAudio, cwd, sig
   const made = [];
   const render = async (chain, out) => {
     const a = [...inputArgs];
-    if (joining) a.push('-filter_complex', `${cut.chain};[${cut.a}]${chain}[aout]`, '-map', '[aout]');
+    // (the cut plan's picture goes nowhere: ffmpeg refuses a graph that leaves it dangling)
+    if (joining) a.push('-filter_complex', `${cut.chain};${cut.v ? `[${cut.v}]nullsink;` : ''}[${cut.a}]${chain}[aout]`, '-map', '[aout]');
     else a.push('-vn', '-af', chain);
     a.push('-ar', '48000', '-c:a', 'pcm_s16le', '-y', out);
     made.push(out);
@@ -920,6 +921,9 @@ async function encodeWithFallback(ctx, { inputArgs, cut, vfCore, af, dur, hasAud
       let fc = `${cut.chain};[${cut.v}]${vfCore},format=${fmt}[vout]`;
       const cleaning = !!(af && hasAudio && cut.a && !voiceTrack);
       if (cleaning) fc += `;[${cut.a}]${af}[aout]`;
+      // the checked voice plays instead of the joined sound, which then has to
+      // go somewhere: ffmpeg refuses a graph with an output left dangling
+      else if (voiceTrack && cut.a) fc += `;[${cut.a}]anullsink`;
       a.push('-filter_complex', fc, '-map', '[vout]');
       if (voiceTrack) a.push('-map', `${voiceIdx}:a`);
       else if (hasAudio && cut.a) a.push('-map', cleaning ? '[aout]' : `[${cut.a}]`);
@@ -1806,16 +1810,29 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
         + `boxblur=luma_radius=${Math.max(1, Math.round(24 / SHRINK))}:luma_power=2`
         + `:chroma_radius=${Math.max(1, Math.round(12 / SHRINK))}:chroma_power=2,`
         + `scale=${padW}:-2:flags=bilinear,crop=${padW}:${info.height},eq=brightness=-0.06`;
+      /*
+       * The voice, cleaned and checked first — as encodeWithFallback does for
+       * every other export — rather than the clean-up running inline here,
+       * where the voice cleaner (deepfilter.js) never got to it and face-tracked
+       * shorts kept the old sound. It goes in as one more input, AFTER the
+       * clip's own (its `-t` stays the output's cap, see encodeWithFallback).
+       */
+      const voice = (af && info.hasAudio) ? await renderVerifiedVoice(ctx, { inputArgs, cut, af, hasAudio: true }) : null;
+      const lastI = inputArgs.lastIndexOf('-i');
+      const ins = voice ? [...inputArgs.slice(0, lastI + 2), '-i', voice, ...inputArgs.slice(lastI + 2)] : inputArgs;
+      const voiceIdx = inputArgs.filter((x) => x === '-i').length;
       const padGraph = (fmt) => {
         let fc = cutPre + `${srcV}split=2[bgs][fgs];[bgs]${bgChain}[bg];`
           + `[bg][fgs]overlay=${P}:0,crop=${cropW}:${cropH}:x='${xe}':y=0`
           + `,scale=${p.w}:${p.h}:flags=lanczos,setsar=1${motionChain(motion, p.w, p.h) ? ',' + motionChain(motion, p.w, p.h) : ''},format=${fmt}[vout]`;
-        if (af && info.hasAudio) fc += `;${srcA}${af}[aout]`;
+        if (af && info.hasAudio && !voice) fc += `;${srcA}${af}[aout]`;
+        // with the voice playing in, the cut plan's own sound is not used
+        else if (voice && cut && cut.a) fc += `;[${cut.a}]anullsink`;
         return fc;
       };
       const padArgs = (head, fmt, codecArgs) => {
-        const a = [...head, ...inputArgs, '-filter_complex', padGraph(fmt), '-map', '[vout]'];
-        if (info.hasAudio) a.push('-map', af ? '[aout]' : mapA, '-c:a', 'aac', '-b:a', '192k'); else a.push('-an');
+        const a = [...head, ...ins, '-filter_complex', padGraph(fmt), '-map', '[vout]'];
+        if (info.hasAudio) a.push('-map', voice ? `${voiceIdx}:a` : (af ? '[aout]' : mapA), '-c:a', 'aac', '-b:a', '192k'); else a.push('-an');
         // outputFps, not a hard-coded 30: this path was halving every 60fps
         // recording exactly the way the main encode used to (see export-quality).
         a.push('-r', String(outputFps(info)), ...codecArgs, '-movflags', '+faststart', '-y', output);
@@ -1829,6 +1846,7 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
        * encode plus a verify. Same rule here, for the same reason.
        */
       const hwOk = !(cut && cut.chain);
+      try {
       if (hwOk) {
         try {
           const hw = process.platform === 'darwin'
@@ -1849,6 +1867,9 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
           { onProgress, totalDurationSec: dur });
         return output;
       } catch (e) { /* fall through to the plain clamped path below */ }
+      } finally {
+        if (voice) { try { fs.rmSync(voice, { force: true }); } catch (e) {} }
+      }
     }
     const pts = simplifyKeyframes(desired.map(([t, x]) => [t, clampN(x, 0, maxX)]));
     xExpr = buildLerpExpr(pts, Math.round(maxX / 2));

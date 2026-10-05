@@ -2789,8 +2789,14 @@ let _hideTimer = null;
         } else if (curName === 'caption') showRow(back || 'main');
       };
       new MutationObserver(follow).observe(track, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
-      document.addEventListener('pointerup', () => setTimeout(follow, 0));
-      document.addEventListener('click', () => setTimeout(follow, 0));
+      // a tap ON the caption lane always asks again — the same caption re-tapped
+      // after Back has not changed the selection, but means "show me its tools"
+      const onTap = (e) => setTimeout(() => {
+        if (e && e.target && e.target.closest && e.target.closest('#veCapTrack')) had = -1;
+        follow();
+      }, 0);
+      document.addEventListener('pointerup', onTap);
+      document.addEventListener('click', onTap);
     })();
 
     // How many shorts the AI has made, on the AI Shorts button.

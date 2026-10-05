@@ -1808,6 +1808,7 @@
   /** Show the controls; while it plays, they fade again after a moment of nothing. */
   function fsWake() {
     clearTimeout(fsUi.timer); fsUi.timer = 0;
+    if (ve.refs.drop.classList.contains('ve-fs-idle')) fsUi.wokeAt = performance.now();
     fsSetIdle(false);
     if (!fsOn() || !isPlaying() || fsUi.scrub) return;
     fsUi.timer = setTimeout(() => {
@@ -1846,6 +1847,15 @@
     const was = d.classList.contains('ve-fs-ui');
     if (!fsOn()) {
       if (was) { d.classList.remove('ve-fs-ui', 've-fs-playing', 've-fs-idle'); clearTimeout(fsUi.timer); fsUi.timer = 0; }
+      // left full screen with a finger still on the scrub bar: finish it where it was
+      const sc = fsUi.scrub;
+      if (sc) {
+        fsUi.scrub = null;
+        if (sc.raf) cancelAnimationFrame(sc.raf);
+        if (ve.refs.fsScrub) ve.refs.fsScrub.classList.remove('dragging');
+        seekTo(sc.t);
+        if (sc.wasPlaying && !isPlaying() && sc.t < playEnd() - 0.1) togglePlay();
+      }
       return;
     }
     const playing = isPlaying();
@@ -1919,6 +1929,7 @@
   function onFsPointerUp(e) {
     const d = fsUi.down; fsUi.down = null;
     if (!d || d.id !== e.pointerId || !d.picture || !fsOn()) return;
+    if (ve.cropDrag && ve.cropDrag.moved) return;     // that moved the picture: a drag, not a tap
     // a drag (framing the shot) or a long press is not a tap
     if (Math.abs(e.clientX - d.x) > 8 || Math.abs(e.clientY - d.y) > 8 || performance.now() - d.at > 600) return;
     // A mouse click plays and pauses, as in any desktop player — unless it was
@@ -1931,7 +1942,8 @@
   function wireFsControls() {
     const d = ve.refs.drop, sc = ve.refs.fsScrub;
     if (!d || !sc) return;
-    const play = () => { togglePlay(); fsWake(); };
+    // (the tap that woke faded controls is not also a press on the button now under it)
+    const play = () => { if (performance.now() - (fsUi.wokeAt || 0) < 450) { fsWake(); return; } togglePlay(); fsWake(); };
     ve.refs.fsPlay.addEventListener('click', play);
     ve.refs.fsBigPlay.addEventListener('click', play);
     sc.addEventListener('pointerdown', onFsScrubDown);
@@ -2682,7 +2694,14 @@
       if (!d.moved) {
         if (Math.abs(e.clientX - d.x0) < 4 && Math.abs(e.clientY - d.y0) < 4) return;
         d.moved = true;
-        if (reframeOn()) takeManualFraming();
+        if (reframeOn()) {
+          takeManualFraming();
+          // the picture's scale and window are the manual framing's now (its own
+          // zoom included), not the tracker's from when the press began
+          const cm2 = ve.canvasMap, w = cropWindow();
+          if (cm2) { d.s = cm2.s; d.map = cm2.map; }
+          d.ox0 = w.ox; d.oy0 = w.oy; d.x0 = e.clientX; d.y0 = e.clientY;
+        }
       }
       // dragging the video right reveals footage on the LEFT → the crop centre moves left
       ve.framing.offsetX = clamp(d.ox0 - (e.clientX - d.x0) / (d.s * (d.map.renderedW || 1)), 0, 1);
@@ -4700,7 +4719,8 @@
     // it on the opposite side of the picture from the selected text.
     const low = (o.y || 0) < 0.5;
     bar.style.top = low ? 'auto' : '10px';
-    bar.style.bottom = low ? '10px' : 'auto';
+    // in full screen its own player bar has the bottom: sit above it
+    bar.style.bottom = low ? (isPreviewFull() ? 'calc(env(safe-area-inset-bottom) + 96px)' : '10px') : 'auto';
     $('#vtFont').value = o.font || 'Arial';
     $('#vtSize').value = String(Math.round(Math.max(1, (o.sizePct || 0.11) * previewH()) * 2) / 2);
     $('#vtColor').value = /^#[0-9a-f]{6}$/i.test(o.color || '') ? o.color : '#ffffff';
@@ -5197,7 +5217,8 @@
     if (say) window.__toast && window.__toast(`Took “${String(e.text || '').slice(0, 40)}” off the captions. Undo puts it back.`, 'good');
     return true;
   }
-  const capLineSelected = () => ve.activeRow === 'caption' && ve.capSel != null && capBlocksVisible() && !!ve.capEvents[ve.capSel];
+  // (a text box picked since is what is selected now, not the caption before it)
+  const capLineSelected = () => ve.activeRow === 'caption' && ve.capSel != null && !ve.textSel && capBlocksVisible() && !!ve.capEvents[ve.capSel];
   /** Save whatever caption line is being typed into right now (if any). */
   function commitCapEdit() {
     if (ve.capEditing == null) return;

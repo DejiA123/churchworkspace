@@ -246,6 +246,85 @@ function lag(aFile, bFile) {
   run(['-i', SPOILED, '-af', deepfilter.bracket('medium', chain), '-c:a', 'pcm_s16le', P2]);
   check('the fallback chain runs exactly as before where the cleaner is not used', md5(P1) === md5(P2));
 
+  /* ===================== THROUGH THE REAL EXPORTS =====================
+   * Found by a review before this shipped: the level depended on the route,
+   * a short with closed gaps fell back to the old chain, face-tracked shorts
+   * never reached the cleaner at all, and audio starting after the picture
+   * drifted. Each export below is watched: did the cleaner make its sound, and
+   * did any encode still carry the old clean-up inline? */
+  console.log('\n== …through the exports ==\n');
+  const ffm = require('../src/main/ffmpeg');
+  const seen = { cleaned: 0, inline: 0 };
+  const realRender = deepfilter.renderVoice, realRun = ffm.runFfmpeg;
+  deepfilter.renderVoice = async (...a) => { const v = await realRender(...a); if (v) seen.cleaned++; return v; };
+  ffm.runFfmpeg = (bin, args, o) => { if (args.some((x) => /afftdn|arnndn/.test(String(x)))) seen.inline++; return realRun(bin, args, o); };
+  const watch = async (fn) => { seen.cleaned = 0; seen.inline = 0; await fn(); return { ...seen }; };
+
+  /* Read the channels AS THEY ARE: ffmpeg's -ac 1 folds a stereo AAC track to
+   * one channel by SUMMING at 0.707 each, which reads an untouched dual-mono
+   * export 3 dB hot (an export peaking at -1 dBFS "peaked" at +2). */
+  const peakOf = (f) => {
+    const b = execFileSync(ffmpeg, ['-v', 'error', '-i', f, '-vn', '-ar', String(SR), '-f', 'f32le', '-'], { maxBuffer: 1 << 28 });
+    const p = new Float32Array(b.buffer, b.byteOffset, Math.floor(b.length / 4));
+    let m = 0; for (const v of p) m = Math.max(m, Math.abs(v)); return m;
+  };
+  /** How loud the voice is: EBU R128 integrated loudness (gated, so the pauses do not count), of the first channel. */
+  const speechDb = (f) => {
+    const r = require('child_process').spawnSync(ffmpeg, ['-hide_banner', '-nostats', '-i', f, '-vn', '-af', 'pan=mono|c0=c0,ebur128=framelog=quiet', '-f', 'null', '-'], { encoding: 'utf8' });
+    const tail = r.stderr.slice(r.stderr.lastIndexOf('Summary:'));
+    return parseFloat((/I:\s*(-?[\d.]+) LUFS/.exec(tail) || [0, 'NaN'])[1]);
+  };
+  // a loud stereo recording (voice peaking at -1 dBFS, the same on both sides), and a mono one
+  const vol = execFileSync(ffmpeg, ['-hide_banner', '-i', SPOILED, '-af', 'volumedetect', '-f', 'null', '-'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).toString();
+  const mkVid = (out, aChain) => run(['-f', 'lavfi', '-i', `testsrc2=s=1280x720:r=30:d=${DUR.toFixed(2)}`, '-i', SPOILED,
+    '-filter_complex', `[1:a]${aChain}[a]`, '-map', '0:v', '-map', '[a]', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-b:a', '256k', '-shortest', out]);
+  const peakNow = (() => { const r = require('child_process').spawnSync(ffmpeg, ['-hide_banner', '-i', SPOILED, '-af', 'volumedetect', '-f', 'null', '-'], { encoding: 'utf8' }); return parseFloat((/max_volume:\s*(-?[\d.]+)/.exec(r.stderr) || [0, '0'])[1]); })();
+  void vol;
+  const LOUD = path.join(W, 'loud-stereo.mp4'), MONO = path.join(W, 'quiet-mono.mp4');
+  mkVid(LOUD, `volume=${(-1 - peakNow).toFixed(2)}dB,pan=stereo|c0=c0|c1=c0`);
+  mkVid(MONO, 'anull');
+  const out = (n) => path.join(W, n + '.mp4');
+
+  for (const [name, src] of [['loud stereo', LOUD], ['mono', MONO]]) {
+    // the two kinds of route: a clip (-ss … -t) and the whole video (-i)
+    await video.exportShort(ctx, { input: src, startSec: 0, endSec: DUR, preset: 'reel-9x16', output: out('plain-clip') });
+    const s1 = await watch(() => video.exportShort(ctx, { input: src, startSec: 0, endSec: DUR, preset: 'reel-9x16', denoise: 'light', output: out('clean-clip') }));
+    await video.exportForPlatform(ctx, { input: src, preset: 'reel-9x16', output: out('plain-whole') });
+    const s2 = await watch(() => video.exportForPlatform(ctx, { input: src, preset: 'reel-9x16', denoise: 'light', output: out('clean-whole') }));
+    for (const [route, a, b, st] of [['a clip', 'plain-clip', 'clean-clip', s1], ['the whole video', 'plain-whole', 'clean-whole', s2]]) {
+      const d = speechDb(out(b)) - speechDb(out(a));
+      check(`${name}, ${route}: cleaned by the network`, st.cleaned === 1 && st.inline === 0, JSON.stringify(st));
+      check(`${name}, ${route}: the voice keeps its level (within 1.5 dB)`, Math.abs(d) <= 1.5, `${d >= 0 ? '+' : ''}${d.toFixed(2)} dB`);
+      check(`${name}, ${route}: nothing clips`, peakOf(out(b)) < 0.999, `peak ${(20 * Math.log10(peakOf(out(b)))).toFixed(2)} dBFS`);
+    }
+  }
+
+  // a short with a pause closed (two pieces joined) — a cut plan
+  const sCut = await watch(() => video.exportShort(ctx, { input: LOUD, startSec: 1, endSec: 17, preset: 'reel-9x16', denoise: 'light',
+    pieces: [{ start: 1, end: 8 }, { start: 11, end: 17 }], output: out('clean-cut') }));
+  check('a short with a gap closed is cleaned by the network, not the old chain', sCut.cleaned === 1 && sCut.inline === 0, JSON.stringify(sCut));
+  const cutLen = (await video.getInfo(ctx, out('clean-cut'))).durationSec;
+  check('…and it is the joined length', Math.abs(cutLen - 13) < 0.2, `${cutLen.toFixed(2)} s`);
+
+  // a face-tracked short whose speaker walks past the frame edge (the padded path)
+  const sRf = await watch(() => video.exportShortReframed(ctx, { input: LOUD, startSec: 0, endSec: 10, preset: 'reel-9x16', denoise: 'light',
+    keyframes: [{ t: 0, x: -60 }, { t: 9, x: 980 }], output: out('clean-reframed') }));
+  check('a face-tracked short (walking out of frame) is cleaned by the network', sRf.cleaned >= 1 && sRf.inline === 0, JSON.stringify(sRf));
+  const rfInfo = await video.getInfo(ctx, out('clean-reframed'));
+  check('…with its sound and its length', rfInfo.hasAudio && Math.abs(rfInfo.durationSec - 10) < 0.2, `${rfInfo.durationSec.toFixed(2)} s, audio ${rfInfo.hasAudio}`);
+
+  // sound that starts after the picture (a capture box's file): still in sync
+  const LATE = path.join(W, 'late-audio.mp4');
+  run(['-f', 'lavfi', '-i', `testsrc2=s=640x360:r=30:d=${(DUR + 0.5).toFixed(2)}`, '-itsoffset', '0.478', '-i', SPOILED,
+    '-map', '0:v', '-map', '1:a', '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', LATE]);
+  await video.exportForPlatform(ctx, { input: LATE, preset: 'reel-9x16', output: out('late-plain') });
+  await video.exportForPlatform(ctx, { input: LATE, preset: 'reel-9x16', denoise: 'medium', output: out('late-clean') });
+  // read both on the picture's clock (first_pts=0 honours where the sound starts)
+  const onClock = (f) => { const o = path.join(W, path.basename(f) + '.clock.wav'); run(['-i', f, '-vn', '-af', 'aresample=first_pts=0', '-ac', '1', '-ar', String(SR), o]); return o; };
+  const late = lag(onClock(out('late-plain')), onClock(out('late-clean')));
+  check('sound that starts after the picture stays in sync (< 2 ms)', Math.abs(late) <= 96, `${late} samples (${(late / 48).toFixed(1)} ms)`);
+  deepfilter.renderVoice = realRender; ffm.runFfmpeg = realRun;
+
   console.log(`\n${pass} PASS / ${fail} FAIL`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });
