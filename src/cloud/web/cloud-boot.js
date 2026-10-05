@@ -818,6 +818,12 @@ let _hideTimer = null;
     toast('✅ Saved on the studio machine: ' + name + ' — tap ⬇ Saved to put it on this device.', 'good', 6000);
   }
   window.finishedFile = finishedFile;
+  // 🖼️ the thumbnail written beside an export: on the Saved list too, to save to Photos
+  window.__thumbMade = (img) => {
+    if (!img || cloud.downloads.some((d) => d.path === img)) return;
+    cloud.downloads.unshift({ path: img, name: String(img).split(/[\\/]/).pop(), at: Date.now() });
+    renderDownloadCount();
+  };
 
   window.__newJobId = newJobId;
   window.__showOverlay = showOverlay;
@@ -2496,10 +2502,23 @@ let _hideTimer = null;
       box.closest('.cloud-xp-row').classList.toggle('hidden', !src);
     }
     syncEnding();
+    syncCover();
   }
   /* The ending row: the outro's own picture, its name and length, and whether
      it goes on. Read from the studio every time the sheet opens or the clip
      library closes, so it never shows a stale choice. */
+  /* The finished video's thumbnail: its picture, and what it is. */
+  function syncCover() {
+    const row = $('#cloudXpCover'); if (!row) return;
+    const ed = window.VideoEditor;
+    const c = ed && ed.coverInfo ? ed.coverInfo() : { set: false };
+    row.classList.toggle('has', !!c.set);
+    row.classList.toggle('on', !!c.set);
+    const th = row.querySelector('.cloud-xp-end-thumb i');
+    if (th) th.style.backgroundImage = c.img ? `url("${c.img}")` : '';
+    const sub = $('#cloudXpCoverSub');
+    if (sub) sub.textContent = c.set ? (c.photo ? 'Your photo' : 'A moment from the video') + ' · tap to change' : 'Choose the picture people see first';
+  }
   function syncEnding() {
     const row = $('#cloudXpEnding'); if (!row) return;
     const ed = window.VideoEditor;
@@ -2790,6 +2809,11 @@ let _hideTimer = null;
         <button type="button" class="cloud-xp-end-text" data-xp="ending-pick"><b>Ending</b><small id="cloudXpEndSub">Add your outro to the end of every short</small></button>
         <label class="cloud-switch" aria-label="Add the ending to every short"><input type="checkbox" id="cloudXpEndOn" /><span></span></label>
       </div>
+      <div class="cloud-xp-ending cloud-xp-cover" id="cloudXpCover">
+        <button type="button" class="cloud-xp-end-thumb" data-xp="cover-pick" aria-label="Choose the video's thumbnail"><i></i></button>
+        <button type="button" class="cloud-xp-end-text" data-xp="cover-pick"><b>Video thumbnail</b><small id="cloudXpCoverSub">Choose the picture people see first</small></button>
+        <span class="cloud-xp-chev" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+      </div>
       <label class="cloud-xp-row"><span>Caption the shorts as they export</span><input type="checkbox" data-mirror="#veCapExports" /></label>
       <label class="cloud-xp-row"><span>Keep editing while it exports</span><input type="checkbox" data-mirror="#veBgExport" /></label>
       <button type="button" class="cloud-xp-link" data-xp="saved">Finished files — save them to this phone</button>
@@ -2820,6 +2844,10 @@ let _hideTimer = null;
       if (ed.setOutroOn(endOn.checked) === false) endOn.checked = false;   // none yet: the library opened
       syncEnding();
     });
+    // …and the thumbnail picker closing, a new thumbnail
+    const thm = $('#thumbModal');
+    if (thm && window.MutationObserver) new MutationObserver(() => { if (thm.classList.contains('hidden')) syncCover(); })
+      .observe(thm, { attributes: true, attributeFilter: ['class'] });
     // the clip library closing is the moment a new ending may have been chosen
     const lib = $('#libModal');
     if (lib && window.MutationObserver) new MutationObserver(() => { if (lib.classList.contains('hidden')) syncEnding(); })
@@ -2828,6 +2856,7 @@ let _hideTimer = null;
       const b = e.target.closest('[data-xp]');
       if (!b || b.disabled) return;
       if (b.dataset.xp === 'ending-pick') { const ed = window.VideoEditor; if (ed && ed.chooseOutro) ed.chooseOutro(); return; }
+      if (b.dataset.xp === 'cover-pick') { const ed = window.VideoEditor; if (ed && ed.chooseCover) ed.chooseCover(); return; }
       const go = { shorts: '#veExportAll', video: '#veExportEdited', saved: '#cloudDownloads' }[b.dataset.xp];
       if (b.dataset.xp === 'more') return openSheet('insp', { tab: '#veInspTabExport' });
       closeSheet();
