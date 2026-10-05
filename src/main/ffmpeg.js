@@ -128,7 +128,7 @@ function quickPreset(out) {
 }
 
 /*
- * ►► A BIG SERVER: ONE ENCODE PER CORE, THE REST IN TURN. ◄◄
+ * ►► A BIG SERVER: TWO ENCODES PER CORE, THE REST IN TURN. ◄◄
  * Measured on Oracle's free Ampere box (4 cores, 24 GB), eight 60-second
  * exports at once: no limit, all done together at 133 s; one per core, the
  * first at 63 s but the last at 177 s — an export is several ffmpeg steps and
