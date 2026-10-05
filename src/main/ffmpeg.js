@@ -128,19 +128,19 @@ function quickPreset(out) {
 }
 
 /*
- * ►► A BIG SERVER: ONE ENCODE PER CORE, THE REST IN TURN. ◄◄
- * Measured on Oracle's free Ampere box (4 cores, 24 GB): eight people
- * exporting at once all finished together at 133 s — every encode shared the
- * four cores, so nobody had theirs any sooner than the last person. With one
- * per core and the rest queued in order, the same eight take the same time in
- * all, but the first four are done in about half of it. (A desktop keeps no
- * limit: there, one person runs everything.)
+ * ►► A BIG SERVER: TWO ENCODES PER CORE, THE REST IN TURN. ◄◄
+ * Measured on Oracle's free Ampere box (4 cores, 24 GB), eight 60-second
+ * exports at once: no limit, all done together at 133 s; one per core, the
+ * first at 63 s but the last at 177 s — an export is several ffmpeg steps and
+ * each step queued again behind everyone else's. Two per core keeps a normal
+ * crowd running at full speed together and only queues a big one, so forty
+ * people at once do not thrash four cores. (A desktop keeps no limit.)
  */
 const ffSlots = () => {
   const mb = machine.memoryMB();
   if (mb < 1024) return 1;
   if (mb < 2048) return 2;
-  return machine.fastEncode() ? Math.max(2, machine.cpus()) : Infinity;
+  return machine.fastEncode() ? Math.max(4, machine.cpus() * 2) : Infinity;
 };
 let ffRunning = 0;
 const ffQueue = [];
