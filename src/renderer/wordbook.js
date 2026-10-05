@@ -149,14 +149,24 @@
     'Genesis Exodus Leviticus Deuteronomy Joshua Samuel Nehemiah Esther Proverbs Ecclesiastes Isaiah Jeremiah Lamentations Ezekiel Daniel Hosea Obadiah Jonah Micah Nahum Habakkuk Zephaniah Haggai Zechariah Malachi Matthew Romans Corinthians Galatians Ephesians Philippians Colossians Thessalonians Timothy Titus Philemon Hebrews Peter ' +
     /* people */
     'Abraham Abram Sarah Isaac Rebekah Jacob Joseph Benjamin Judah Moses Aaron Miriam Caleb Deborah Gideon Samson Naomi David Solomon Elijah Elisha Jehoshaphat Hezekiah Josiah Nebuchadnezzar Belshazzar Mordecai Melchizedek Methuselah Bathsheba Absalom Jonathan Nathan Jezebel Gabriel Michael Zacharias Elizabeth Herod Pilate Barabbas Caiaphas Nicodemus Zacchaeus Lazarus Martha Magdalene Matthias Barnabas Stephen Philip Cornelius Ananias Sapphira Silas Priscilla Aquila Apollos Onesimus Lydia Dorcas Demas Felix Festus Agrippa Thomas Andrew Bartholomew Thaddaeus Zebedee Simeon ' +
-    /* …and the ones speech recognition gets wrong most. Measured on the live
-     * server: "Methabosheth", "Jehovah Jire", "Meshech", "Zarababel" — every
-     * one a name a sermon says and the big cloud model has rarely heard. Each
-     * name below was run against a 114,000-word English dictionary through
-     * this same matcher and kept only if it pulls NO ordinary word towards it
-     * (48 candidates did — "harmony" to Hermon, "holiday" to Huldah, "rhyme"
-     * to Rhema, "balm" to Balaam — and are left out). */
-    'Mephibosheth Zerubbabel Jireh Shaddai Nissi Rapha Shammah Tsidkenu Elyon Ebenezer Shadrach Meshach Abednego Belteshazzar Hananiah Azariah Ishmael Keturah Japheth Zebulun Naphtali Ephraim Pharaoh Jochebed Jethro Othniel Jephthah Delilah Manoah Elimelech Orpah Peninnah Hophni Phinehas Ichabod Goliath Abigail Uriah Adonijah Shimei Ahithophel Hushai Rehoboam Jeroboam Naboth Naaman Gehazi Shunammite Athaliah Uzziah Zedekiah Jehoiachin Sanballat Tobiah Ahasuerus Vashti Artaxerxes Obededom Bezalel Elihu Eliphaz Bildad Enoch Jairus Bartimaeus Eutychus Theophilus Timotheus Epaphras Epaphroditus Tychicus Onesiphorus Gamaliel Aeneas Drusilla Sosthenes Crispus Erastus Aristarchus Trophimus Berea Cenchrea Smyrna Pergamos Thyatira Joppa Tarshish Ziklag Zarephath Beersheba Arimathea Bethphage Decapolis Achaia Goshen Moriah Gibeah Mahanaim Jabbok Ephratah Shekinah Jabez ' +
+    /* …and the ones speech recognition gets wrong most ("Methabosheth",
+     * "Jehovah Jire", "Zarababel", measured on the live server). A sound-alike
+     * name is only safe if no ordinary English sounds like it, and the first
+     * list of these was NOT: it was vetted against a dictionary of headwords,
+     * which has "jar" but not "jars", and never against pairs of words — and on
+     * the live studio "the false prophets" became "Theophilus prophets",
+     * "raised us up" became "Erastus up" and "jars of clay" "Jairus of clay".
+     * Every name below has now been run through this matcher, on its own, over
+     * 2.1 million words of real English (the King James Bible and 17 other
+     * books), a 94,000-word frequency list with every inflection, and all 25
+     * million pairs of the 5,000 commonest words — and kept only if all it ever changes
+     * is itself, or another spelling of the same person (Zorobabel, Zabulon).
+     * 48 that pulled anything else are left out — Theophilus ("the false"),
+     * Erastus ("raised us"), Jairus ("jars"), Trophimus ("true famous"),
+     * Ebenezer, Shadrach, Meshach and Abednego among them. Whisper spells those
+     * right anyway, and a caption that can no longer say "jars" is too high a
+     * price. test/wordbook.test.js keeps the reviewer's examples as checks. */
+    'Mephibosheth Zerubbabel Jireh Shaddai Nissi Rapha Shammah Azariah Japheth Pharaoh Othniel Manoah Orpah Peninnah Hophni Uriah Adonijah Shimei Hushai Rehoboam Gehazi Athaliah Uzziah Tobiah Vashti Artaxerxes Obededom Elihu Enoch Eutychus Epaphroditus Aeneas Aristarchus Berea Thyatira Joppa Zarephath Achaia Goshen Moriah Gibeah Jabbok Jephthah Delilah Bezalel Arimathea Ephratah Bethphage Zedekiah Jehoiachin Elimelech Goliath Belteshazzar ' +
     /* God, and the names of God */
     'Jesus Christ Messiah Immanuel Emmanuel Yahweh Jehovah Adonai Elohim Almighty Trinity ' +
     /* places */
@@ -336,10 +346,7 @@
   function matchCase(sample, rep) {
     const s = String(sample == null ? '' : sample);
     if (isShout(s)) return String(rep).toUpperCase();
-    // (the FIRST word decides: "praise the Lord" at the start of a sentence is
-    // "Praise the Lord", while a spelling like "iPhone" is left as it was typed)
-    const r = String(rep), w0 = r.split(/\s+/)[0] || '';
-    if (/^[A-Z]/.test(s) && w0 === w0.toLowerCase()) return r.charAt(0).toUpperCase() + r.slice(1);
+    if (/^[A-Z]/.test(s) && rep === String(rep).toLowerCase()) return String(rep).charAt(0).toUpperCase() + String(rep).slice(1);
     return String(rep);
   }
 
@@ -361,19 +368,11 @@
    * Turn the stored book into lookup tables. Cheap (a few hundred entries), and
    * done once per change rather than once per word.
    */
-  /*
-   * Mishearings the app corrects on a fresh install, the way the operator's own
-   * corrections are. Kept to the ones that are wrong in a church every time.
-   * Measured on the operator's own clip of a hall chanting "Praise the Lord":
-   * Whisper Large v3 Turbo — on the live server and again here — wrote
-   * "Praise Allah", every time, with or without a church vocabulary prompt.
-   */
-  /* The names of God that are two words — the list above is split on spaces. */
+
+  /* The names of God that are two words — the list above is split on spaces.
+   * Vetted the same way ("El Elyon" pulled "lowly in", and is left out). */
   const SEED_PHRASES = ['Jehovah Jireh', 'Jehovah Nissi', 'Jehovah Rapha', 'Jehovah Shalom', 'Jehovah Shammah',
-    'Jehovah Tsidkenu', 'Jehovah Rohi', 'El Shaddai', 'El Elyon', 'El Roi', 'El Olam'];
-  const SEED_FIXES = [
-    { from: 'praise allah', to: 'praise the Lord' },
-  ];
+    'Jehovah Tsidkenu', 'Jehovah Rohi', 'El Shaddai', 'El Roi', 'El Olam'];
 
   function compile(book) {
     const b = book || {};
@@ -385,9 +384,7 @@
     // three-hour video instant enough to run while somebody is typing.
     const fixHeads = new Set();
     let maxN = 0;
-    // the operator's own first (theirs wins on the same words), then the built-in ones
-    const allFixes = (b.fixes || []).concat(b.seed !== false ? SEED_FIXES : []);
-    for (const f of allFixes) {
+    for (const f of (b.fixes || [])) {
       if (!f || f.on === false) continue;
       const from = normPhrase(f.from);
       const to = String(f.to == null ? '' : f.to).trim();
