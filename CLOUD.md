@@ -24,7 +24,7 @@ There are three places that machine can be:
 | | **1 — your own PC** | **2 — a server you rent** | **3 — Oracle always-free** |
 |---|---|---|---|
 | Does the work | the church PC | a VPS | a free ARM machine |
-| Setup | tick a box in Settings | `docker compose up` | one script |
+| Setup | tick a box in Settings | `docker compose up` | make the machine, then one command |
 | Speed | full — your GPU, your models | CPU only | 4 ARM cores, no GPU |
 | Needs the PC on | **yes** | no | no |
 | Cost | nothing | £4–40 a month | nothing |
@@ -99,69 +99,132 @@ npm run cloud -- --port 7390 --data ./cloud-data --media /srv/recordings \
   --code "your-access-code-1234"
 ```
 
-## Route 3 — free forever, PC off
+## Route 3 — free forever, PC off (Oracle Cloud)
 
 Everything on a rented host costs money **except** one: Oracle Cloud gives
 away an ARM machine permanently — 4 cores, 24 GB RAM, 200 GB of disk — which
-is more than the church PC has. It is the only free tier with enough disk and
-uptime to actually run this. Free tiers that need no card (Render, Fly trials)
-have **no disk** and **sleep when idle**, which for this app means every
-upload, every saved session and every downloaded speech model is thrown away,
-and an export cannot finish.
+is more than the church PC has, and far more than Render's paid Starter
+(half a CPU, 512 MB). It is the only free tier with enough disk and uptime to
+actually run this. Free tiers that need no card (Render, Fly trials) have **no
+disk** and **sleep when idle**.
 
-Nobody can make the account for you — it needs a card for identity
-verification (Always Free resources are not charged). Everything after that is
-one command.
+What it costs: nothing. Oracle asks for a card to prove you are a person;
+Always Free resources are never charged.
 
-1. **oracle.com/cloud/free** → sign up → Compute → Create Instance.
-2. Shape: **Ampere A1 (arm64)**, 4 OCPU / 24 GB. Image: **Ubuntu 22.04**.
-   Boot volume 200 GB. Save the SSH key it gives you, and note the public IP.
-3. On the PC, make the bundle — one file holding everything a server runs:
+### 1. Make the machine (Oracle's website, about 10 minutes)
 
-```powershell
-npm run bundle:cloud
-```
+1. **oracle.com/cloud/free** → sign up. Pick the **home region** nearest the
+   church — you cannot change it later.
+2. ☰ → **Compute → Instances → Create instance**.
+   * **Image:** Canonical **Ubuntu 22.04** (or 24.04).
+   * **Shape:** *Change shape* → **Ampere** → **VM.Standard.A1.Flex** →
+     **4 OCPUs, 24 GB memory** (all of it is free).
+   * **Networking:** keep "Assign a public IPv4 address" ticked.
+   * **SSH keys:** *Generate a key pair* → **Save private key**.
+   * **Boot volume:** *Specify a custom size* → **200 GB**.
+   * **Create.** Note the **Public IP address** when it is running.
+   * *"Out of capacity"?* Ampere machines are popular. Try another
+     Availability Domain, try again later, or upgrade the account to **Pay As
+     You Go** (Billing → Upgrade) — you are still not charged for Always Free
+     resources, it gets capacity far more easily, and Oracle stops reclaiming
+     idle free machines on PAYG accounts.
+3. **Open the web ports** (this is the step everyone misses):
+   ☰ → **Networking → Virtual cloud networks** → your VCN → **Security Lists**
+   → **Default Security List** → **Add Ingress Rules**:
+   source `0.0.0.0/0`, protocol **TCP**, destination port **80** — then again
+   for **443**.
+4. *(Recommended)* Make the IP permanent: ☰ → **Networking → Reserved public
+   IPs** → reserve one, and assign it to the instance's VNIC. The studio's
+   address is built from the IP, so a reserved IP means an address that never
+   changes.
 
-4. Send it over, and let it set itself up:
+### 2. Put the studio on it (one command)
+
+Connect: **Cloud Shell** (the `>_` icon at the top of Oracle's console — works
+from any browser, even a phone) or your own terminal:
 
 ```bash
-scp release/cloud-studio-*.tar.gz ubuntu@YOUR-IP:~/
-ssh ubuntu@YOUR-IP "tar -xzf cloud-studio-*.tar.gz && cd cloud-studio-* && bash scripts/cloud-setup.sh"
+ssh -i the-key-you-saved.key ubuntu@YOUR-PUBLIC-IP
 ```
 
-There is deliberately no `git clone` here. This project has no remote, so an
-instruction to clone it would be one nobody could follow — which is exactly what
-the first draft of this page said. The bundle is ~32 MB: it carries `src/`, the
-MediaPipe assets, the caption fonts and the lockfile, and leaves behind
-`node_modules`, the Windows installer, the tests, the Flyer Maker's 36 MB of
-stock photos (a server never opens them) and — always — your `.env`.
+Then fetch the studio from GitHub and set it up. The repository is private,
+so make a read-only token first: **github.com → Settings → Developer settings
+→ Fine-grained tokens → Generate** — only this repository, *Contents:
+Read-only*.
 
-That installs Docker, builds the studio, gives it a volume so a restart loses
-nothing, starts a Cloudflare tunnel and prints the `https://…` address and a
-generated access code. **No domain, no certificate, no open ports** — the
-tunnel dials out, so Oracle's firewall stays shut. Run it again any time; it
-reuses the code rather than signing every phone out.
+```bash
+git clone https://YOUR-TOKEN@github.com/DejiA123/churchworkspace.git
+cd churchworkspace && bash scripts/cloud-setup.sh
+```
 
-It is arm64, which is why the image installs the distro ffmpeg: the npm
-`ffprobe-static` package has no ARM build, and without that the studio would
-start and then fail on the first recording it probed.
+The script asks for two optional keys (press Enter to skip either):
+
+* a **free Groq key** (console.groq.com → API Keys) — captions, the sermon
+  scan and the ✨ AI check run on Groq's free Whisper Large and AI models.
+  Strongly recommended: it is free and much better than any model a server
+  runs on its own;
+* a **Claude key** (console.anthropic.com) — optional and paid: Claude directs
+  AI montages and proof-reads captions with the most context.
+
+Then it installs Docker, builds the studio (10–20 minutes the first time — it
+compiles the speech engine for ARM), opens the machine's own firewall, starts
+it behind **Caddy** with a real certificate, and prints:
+
+```
+  address:      https://141-147-10-20.sslip.io
+  access code:  cedar-harbour-4821-psalm
+```
+
+That address is the machine's own free name (`sslip.io` turns the IP written
+in it into the IP — no account, no domain to buy) and **it does not change**,
+so the app on everyone's home screen keeps working. Have your own domain or a
+free DuckDNS name? `STUDIO_HOST=studio.yourchurch.org bash scripts/cloud-setup.sh`
+(point its DNS at the IP first).
+
+On each iPhone: open the address in **Safari**, make a space with the access
+code, then **Share → Add to Home Screen**.
+
+### 3. It keeps itself up to date
+
+Like Render's auto-deploy: every 30 minutes the server checks GitHub, and
+when there is a new version it rebuilds and restarts — but **never in the
+middle of an export** (it waits for the next round). The log is
+`~/studio-update.log`. To update straight away: `bash scripts/cloud-update.sh`
+(add `FORCE=1` to update even while something exports). `AUTO_UPDATE=off` when
+running the setup turns it off.
+
+### Moving from Render
+
+Accounts, projects and uploads live on each server's own disk, so the Oracle
+studio starts empty: make the spaces again, and send up the recordings you
+still need (**📁 Files → ⬆ Send a video** — chunked, and it resumes if the
+signal drops). Re-add the app to each home screen from the new address. Once
+everyone has moved, delete the Render service so it stops billing.
 
 ### Getting your services onto it
 
-This is the real work of the PC-off route, and it is worth being honest that
-it is the part people underestimate. The machine starts empty; a service is
-2–4 GB. Either send one up from inside the studio (**📁 Files → ⬆ Send a
-video**, which is chunked and resumes if the signal drops), or push it from
-the PC:
+The machine starts empty; a service is 2–4 GB. Send it from the phone as
+above, or from a computer:
 
 ```bash
-scp "Thanksgiving Sunday.mp4" ubuntu@<your-ip>:/tmp/
-ssh ubuntu@<your-ip> 'docker cp /tmp/"Thanksgiving Sunday.mp4" $(docker compose -f church-work-space/docker-compose.free.yml ps -q studio):/media/'
+scp -i the-key.key "Thanksgiving Sunday.mp4" ubuntu@YOUR-IP:/tmp/
+ssh -i the-key.key ubuntu@YOUR-IP 'cd churchworkspace && docker compose cp /tmp/"Thanksgiving Sunday.mp4" studio:/media/'
 ```
 
-And expect exports to take longer than the church PC: 4 ARM cores and no Quick
-Sync. Long-to-shorts, captions and reframing all still work — they just take
-the time they take.
+### What to expect
+
+* **Speed:** 4 ARM cores, no GPU — exports are libx264 on the CPU. Several
+  times faster than Render Starter's half a CPU, and with 24 GB several
+  exports run side by side instead of queueing. Still slower than a church PC
+  with Quick Sync.
+* **Captions and AI:** with the Groq key, listening and the AI check happen on
+  Groq's free service — quick, and nothing for the server to carry.
+* **Useful commands** (in `~/churchworkspace`): `docker compose logs -f studio`
+  (what it is doing), `docker compose restart`, `docker compose down` (stop —
+  your files stay), `bash scripts/cloud-setup.sh` again to add a key.
+* **No public ports wanted?** `ADDRESS=tunnel bash scripts/cloud-setup.sh` uses
+  a Cloudflare quick tunnel instead — but its address is random and changes
+  whenever it restarts, which means re-adding the app on every phone.
 
 ## Other hosts (paid)
 

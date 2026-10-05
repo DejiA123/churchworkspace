@@ -58,7 +58,9 @@ const FILES = [
   '.dockerignore',
   'docker-compose.free.yml',
   'docker-compose.yml',
+  'docker-compose.oracle.yml',
   'scripts/cloud-setup.sh',
+  'scripts/cloud-update.sh',
   'CLOUD.md',
 ];
 

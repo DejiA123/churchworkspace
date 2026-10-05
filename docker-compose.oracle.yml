@@ -1,0 +1,54 @@
+# THE FREE-FOREVER ROUTE WITH AN ADDRESS THAT NEVER CHANGES — Oracle Cloud.
+#
+#   bash scripts/cloud-setup.sh          (does all of this, and the firewall)
+#
+# Oracle's Always Free Ampere machine has a public IP of its own, so it does
+# not need a tunnel: Caddy answers on ports 80/443 and gets a real certificate
+# for the machine's free name — <ip-with-dashes>.sslip.io (a public DNS name
+# that points at whatever IP is written in it: no account, no domain to buy).
+#
+# Why not the tunnel (docker-compose.free.yml)? Its address is random and
+# changes whenever it restarts — and an iPhone's home-screen app is tied to
+# its address, so every restart meant re-adding the app on every phone.
+# This address stays the same for as long as the machine's IP does (reserve
+# the IP in Oracle's console and it is permanent).
+#
+# Own a domain, or have a free DuckDNS name? Put it in STUDIO_HOST instead.
+
+services:
+  studio:
+    build: .
+    image: church-cloud-studio
+    restart: unless-stopped
+    environment:
+      MW_CLOUD_CODE: "${MW_CLOUD_CODE:?put your access code in .env — run scripts/cloud-setup.sh}"
+      MW_CLOUD_PORT: "7390"
+      MW_CLOUD_UPLOADS: "on"
+      # Optional, from .env (the setup script asks). Empty = not used.
+      GROQ_API_KEY: "${GROQ_API_KEY:-}"            # free: captions + scans heard by Whisper Large
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"  # paid: Claude directs montages and proof-reads captions
+      MW_CLOUD_SOCIAL: "${MW_CLOUD_SOCIAL:-on}"
+    volumes:
+      - studio-data:/data          # settings, projects, library, speech models
+      - studio-media:/media        # the recordings you send up
+    expose:
+      - "7390"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    command: caddy reverse-proxy --from "${STUDIO_HOST:?put STUDIO_HOST in .env — run scripts/cloud-setup.sh}" --to studio:7390
+    volumes:
+      - caddy-data:/data           # the certificate, kept across restarts
+      - caddy-config:/config
+    depends_on:
+      - studio
+
+volumes:
+  studio-data:
+  studio-media:
+  caddy-data:
+  caddy-config:
