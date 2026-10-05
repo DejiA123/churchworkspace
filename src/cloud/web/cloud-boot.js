@@ -730,7 +730,10 @@ let _hideTimer = null;
     const m = $('#overlayMsg'); if (m) m.textContent = msg || 'Working…';
     const b = $('#progressBar'); if (b) b.style.width = '0%';
     const n = $('#overlayPct'); if (n) n.textContent = '0%';
-    const o = $('#overlay'); if (o) o.classList.remove('hidden');
+    const o = $('#overlay');
+    // over the captions editor when the job was started from it (🎧 Generate
+    // captions, Save video with captions) — it ran hidden behind it before
+    if (o) { o.classList.toggle('on-top', !!document.querySelector('#capModal:not(.hidden)')); o.classList.remove('hidden'); }
   }
   /*
    * The bar AND the number under it. This moved only the bar, so on a phone
@@ -744,7 +747,7 @@ let _hideTimer = null;
   }
   function hideOverlay() {
     clearTimeout(_hideTimer); _hideTimer = null;
-    const o = $('#overlay'); if (o) o.classList.add('hidden');
+    const o = $('#overlay'); if (o) { o.classList.add('hidden'); o.classList.remove('on-top'); }
     setJobBatch(null);
     showCancel(null);
     const bg = $('#overlayBackground');

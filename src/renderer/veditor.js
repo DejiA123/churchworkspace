@@ -11397,6 +11397,11 @@
     revealCaptions();
     renderCapList();
     renderCapTrack();
+    // the look was chosen before listening; now the words are what matter, so
+    // the settings fold away and the new lines are in view (unless the operator
+    // keeps them open — applyCapFold remembers that)
+    applyCapFold();
+    const capList = document.getElementById('capList'); if (capList) capList.scrollTop = 0;
     maybeAutoProofread(capScopedIndexes());
   }
 

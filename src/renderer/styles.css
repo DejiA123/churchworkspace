@@ -258,6 +258,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
   position: fixed; inset: 0; background: rgba(8,10,15,.78);
   display: grid; place-items: center; z-index: 200;
 }
+/* over the captions editor when a job was started from it (see showOverlay) — under the island */
+.overlay.on-top { z-index: 2050; }
 .overlay-box { text-align: center; background: var(--panel); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 30px 40px; min-width: 320px; }
 .spinner {
