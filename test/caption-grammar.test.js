@@ -266,6 +266,39 @@ head('[9] ☁️ The cloud ear, sent in pieces: every word once, none lost at a 
   onlyFiller = false;
   check('a second chance that only hears "Thank you." adds nothing', filler.words.length === 40 && filler.reheard === 0,
     `${filler.words.length} words, +${filler.reheard}`);
+  /*
+   * …and not what Whisper invents over a SONG. Measured live on the operator's
+   * birthday clip: the second chance at 15 s of music "heard" a line of "no, no,
+   * no…" and it went onto the captions. Real word timings from that answer and
+   * from the sentence the second chance exists to recover.
+   */
+  {
+    const m = (a) => a.map(([text, start, end]) => ({ text, start, end }));
+    const TAIL = m([['The', 113.74, 114.1], ['Lord', 114.1, 114.28], ['is', 114.28, 114.5], ['my', 114.5, 114.64], ['shepherd,', 114.64, 115.22],
+      ['I', 115.22, 115.32], ['shall', 115.32, 115.46], ['not', 115.46, 115.76], ['want.', 115.76, 116.16]]);
+    const SONG = m([["You're", 28.4, 30.28], ['No,', 30.12, 30.12], ['please,', 30.12, 31.1], ['no,', 31.1, 31.44], ['no,', 31.44, 32.84], ['no,', 32.84, 33.72],
+      ['no,', 33.72, 34.26], ['no,', 34.26, 39.6], ['no,', 39.6, 42.78], ['no,', 42.78, 43.04], ['no,', 43.04, 43.9], ['no', 43.9, 43.92]]);
+    check('second chance: the recovered last sentence reads as speech', cs.looksSpoken(TAIL) === true);
+    check('second chance: "no, no, no…" over a song does not', cs.looksSpoken(SONG) === false);
+    check('second chance: a sung phrase held for seconds does not either',
+      cs.looksSpoken(m([['Happy', 1, 3.5], ['birthday', 3.5, 6.2], ['to', 6.2, 7.9], ['you', 7.9, 11]])) === false);
+    check('second chance: a short real phrase does', cs.looksSpoken(m([['Amen.', 3, 3.4]])) === true);
+  }
+  calls.length = 0; served = 0; cutAt = 20; plan = [[0, 30], [18.8, 30], [15.8, 30]];
+  {
+    // the provider "hears" a repeating word in the gap, both tries: nothing is added
+    const real = global.fetch;
+    global.fetch = async (url, init) => {
+      if (served === 0) return real(url, init);
+      calls.push({}); served++;
+      const words = []; for (let k = 0; k < 9; k++) words.push({ word: 'no,', start: 1.5 + k * 1.1, end: 2.4 + k * 1.1 });
+      return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ words, segments: [] }) };
+    };
+    const song = await cs.transcribeWords({ input: loudWav, startSec: 0, endSec: 30 });
+    global.fetch = real;
+    check('a second chance that "hears" one word over and over adds nothing', song.words.length === 40 && song.reheard === 0,
+      `${song.words.length} words, +${song.reheard}`);
+  }
   // Words to the end: no second chance is asked for.
   calls.length = 0; served = 0; cutAt = Infinity; plan = [[0, 30]];
   await cs.transcribeWords({ input: loudWav, startSec: 0, endSec: 30 });

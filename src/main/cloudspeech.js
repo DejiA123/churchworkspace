@@ -1150,6 +1150,41 @@ function gapsToHear(words, span, levels) {
 
 const normWord = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9']/g, '');
 
+/*
+ * ►► …BUT NOT WHAT WHISPER INVENTS OVER MUSIC. ◄◄
+ *
+ * A second chance at a stretch the first pass heard nothing in is also a
+ * second chance to hallucinate, and over a song it does: measured on the
+ * operator's own birthday clip, the re-heard 15 s of music came back as "No,
+ * please, no, no, no, no, no, no, no, no, no" and went onto the captions.
+ * Whisper's confidence numbers cannot tell (see READING THE ANSWER: Groq's
+ * no_speech_prob is 0.00 even for silence), so the WORDS are judged, by three
+ * things invented speech does and real speech does not:
+ *   • one word over and over — more than half of four or more;
+ *   • a crawl — real speech runs two to three words a second, the invented
+ *     line above under one;
+ *   • words held for seconds — the middle word of a real phrase is a quarter
+ *     of a second, a sung or invented one more than one.
+ * The sentence this was built to recover ("The Lord is my shepherd, I shall
+ * not want": 9 words in 2.4 s, no word twice) passes all three by a mile.
+ * A real chant of one word could fail the first — and is then simply left as
+ * the first pass heard it, which is what happened before any of this.
+ */
+function looksSpoken(words) {
+  const n = (words || []).length;
+  if (!n) return false;
+  const durs = words.map((w) => Math.max(0, (+w.end || 0) - (+w.start || 0))).sort((a, b) => a - b);
+  if (durs[Math.floor(n / 2)] > 1.0) return false;
+  if (n >= 4) {
+    const counts = new Map();
+    for (const w of words) { const k = normWord(w.text); if (k) counts.set(k, (counts.get(k) || 0) + 1); }
+    if (Math.max(0, ...counts.values()) / n > 0.5) return false;
+    const span = (+words[n - 1].end || 0) - (+words[0].start || 0);
+    if (span > 0 && n / span < 1.0) return false;
+  }
+  return true;
+}
+
 async function hearGapsAgain({ input, from, span, words }) {
   const keep = { words, added: 0 };
   if (!words.length) return keep;              // nothing heard at all: music, or silence — not a gap
@@ -1180,14 +1215,17 @@ async function hearGapsAgain({ input, from, span, words }) {
     // only what lands INSIDE the gap — the context either side was already heard
     let got = wordsFromVerbose(json, ha).filter((w) => {
       const mid = (w.start + w.end) / 2;
-      return mid > g.a + 0.2 && mid < g.b - 0.2;
+      // (a hair inside: "The" of "The Lord is my shepherd" sat 0.15 s past the
+      // last word heard, and a wider margin threw it away; a context word
+      // re-stamped into the gap is caught by its text just below)
+      return mid > g.a + 0.05 && mid < g.b - 0.05;
     });
     // the context's own edge words, re-stamped a little into the gap, are not new
     const before = out.filter((w) => w.end <= g.a + 0.01).pop();
     const after = out.find((w) => w.start >= g.b - 0.01);
     while (got.length && before && normWord(got[0].text) === normWord(before.text)) got = got.slice(1);
     while (got.length && after && normWord(got[got.length - 1].text) === normWord(after.text)) got = got.slice(0, -1);
-    if (!got.length || isArtefact(got.map((w) => w.text).join(' '))) continue;
+    if (!got.length || isArtefact(got.map((w) => w.text).join(' ')) || !looksSpoken(got)) continue;
     out = out.concat(got).sort((x, y) => x.start - y.start);
     keep.added += got.length;
     if (g.tail) tailDone = true;
@@ -1246,7 +1284,7 @@ async function transcribeSegments({ input, startSec = 0, endSec = 0 } = {}) {
 module.exports = {
   configure, state, ready, transcribe, test, cadence,
   fileReady, transcribeFile, transcribeWords, transcribeSegments, shareKey,
-  wordsFromVerbose, retryWaitMs, inSpokenOrder, gapsToHear,
+  wordsFromVerbose, retryWaitMs, inSpokenOrder, gapsToHear, looksSpoken,
   /** Was the last window handed to the PC a paced skip, or a real failure? */
   lastDecline: () => lastDecline,
   PROVIDERS, DEFAULT_PROVIDER, SAMPLE_RATE,
