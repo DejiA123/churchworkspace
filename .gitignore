@@ -10,6 +10,8 @@ Thumbs.db
 # It is a password for a public address — it must never be committed.
 .env
 .cloud-studio.env
+# Which version the server last BUILT (scripts/cloud-update.sh) — a note on that machine only.
+.cloud-built
 
 # Too big for GitHub (a file there may not exceed 100 MB). The two bundled
 # Whisper models come from huggingface.co/ggerganov/whisper.cpp — put

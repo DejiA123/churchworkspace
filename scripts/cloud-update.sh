@@ -19,7 +19,31 @@ git remote get-url origin >/dev/null 2>&1 || { echo "$(stamp) not a git checkout
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 git fetch -q origin "$BRANCH"
 LOCAL="$(git rev-parse HEAD)"; REMOTE="$(git rev-parse "origin/$BRANCH")"
-if [ "$LOCAL" = "$REMOTE" ]; then exit 0; fi
+
+# WHICH VERSION IS ACTUALLY RUNNING. Pulling and building are two steps, and a
+# build can fail (a download, a full disk) after the pull has already moved the
+# checkout on — so "the checkout is up to date" is not "the studio is". The
+# last version that built is written down (.cloud-built) and a version that did
+# not build is built again next round instead of being skipped forever. With
+# no note yet (the first run of this script), the running image is compared
+# with the checkout: an image older than the commit it should contain is one
+# whose build never finished.
+built_ok() {
+  if [ -f .cloud-built ]; then [ "$(cat .cloud-built)" = "$1" ]; return; fi
+  local img made
+  img="$($DOCKER compose images -q studio 2>/dev/null | head -n1 || true)"
+  [ -n "$img" ] || return 1
+  made="$(date -d "$($DOCKER image inspect -f '{{.Created}}' "$img" 2>/dev/null)" +%s 2>/dev/null || echo 0)"
+  [ "$made" -ge "$(git log -1 --format=%ct "$1")" ]
+}
+if [ "$LOCAL" = "$REMOTE" ] && built_ok "$LOCAL"; then
+  # Said only to a person at a terminal — cron runs this every 30 minutes into a log.
+  if [ -t 1 ]; then
+    echo "$(stamp) already up to date: $BRANCH is at ${LOCAL:0:7} here and on GitHub, and that is what is running."
+    echo "             (Work still on another branch arrives once it is merged into $BRANCH.)"
+  fi
+  exit 0
+fi
 
 # Only when nobody is using it. A restart takes ~20 seconds, but in those
 # seconds an upload would break and an open editor would lose its connection,
@@ -40,8 +64,13 @@ if [ "${FORCE:-0}" != "1" ]; then
   fi
 fi
 
-echo "$(stamp) updating ${LOCAL:0:7} -> ${REMOTE:0:7}"
-git pull -q --ff-only origin "$BRANCH"
+if [ "$LOCAL" != "$REMOTE" ]; then
+  echo "$(stamp) updating ${LOCAL:0:7} -> ${REMOTE:0:7}"
+  git pull -q --ff-only origin "$BRANCH"
+else
+  echo "$(stamp) ${REMOTE:0:7} is checked out but did not finish building last time — building it again"
+fi
 $DOCKER compose up -d --build --remove-orphans
+echo "$REMOTE" > .cloud-built
 $DOCKER image prune -f >/dev/null 2>&1 || true   # old builds take disk the recordings need
 echo "$(stamp) updated"
