@@ -270,6 +270,7 @@ contextBridge.exposeInMainWorld('api', {
     fontList: () => call('captions:fontList'),
     burn: (a) => call('captions:burn', a),
     burnTrack: (a) => call('captions:burnTrack', a),
+    trackPut: (a) => call('captions:trackPut', a),
     models: () => call('captions:models'),
     downloadModel: (a) => call('captions:downloadModel', a),
     removeModel: (a) => call('captions:removeModel', a),

@@ -2253,6 +2253,7 @@ async function burnCaptionTrack(ctx, { input, track, output, onProgress, images 
     return await burnCaptionFrames(ctx, { input, track: writeTrackFrames(track, dir), output, onProgress, images });
   } finally {
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {}
+    if (track && track.trackId) dropTrackFrames(track.trackId);
   }
 }
 
@@ -2261,11 +2262,57 @@ async function burnCaptionTrack(ctx, { input, track, output, onProgress, images 
  * lines: they all share one fully transparent image, written once however many
  * gaps there are.
  */
+/*
+ * A caption track whose pictures were sent AHEAD of the burn, a batch at a time
+ * (captions:trackPut), so a phone never holds them all at once. Each distinct
+ * picture is u<index>.png in the track's own folder; the id is the renderer's
+ * and is checked to be a plain token before it is ever part of a path.
+ */
+const TRACK_ID = /^[a-z0-9]{6,40}$/;
+function trackDir(trackId) {
+  if (!TRACK_ID.test(String(trackId || ''))) throw new Error('Bad caption track id.');
+  return path.join(os.tmpdir(), 'mw-captrack-' + trackId);
+}
+function putTrackFrames({ trackId, pngs }) {
+  const dir = trackDir(trackId);
+  fs.mkdirSync(dir, { recursive: true });
+  // tracks left behind by a page that died mid-draw go after six hours
+  try {
+    for (const d of fs.readdirSync(os.tmpdir())) {
+      if (!d.startsWith('mw-captrack-')) continue;
+      const full = path.join(os.tmpdir(), d);
+      if (Date.now() - fs.statSync(full).mtimeMs > 6 * 3600e3) fs.rmSync(full, { recursive: true, force: true });
+    }
+  } catch (e) { /* tidying is best effort */ }
+  for (const p of pngs || []) {
+    const i = Number(p && p.i);
+    if (!Number.isInteger(i) || i < 0 || !p.png) continue;
+    fs.writeFileSync(path.join(dir, `u${i}.png`), Buffer.from(p.png));
+  }
+  return true;
+}
+function dropTrackFrames(trackId) {
+  try { fs.rmSync(trackDir(trackId), { recursive: true, force: true }); } catch (e) {}
+}
+
 function writeTrackFrames(track, dir) {
   const frames = (track && track.frames) || [];
   if (!frames.length) throw new Error('No captions to burn.');
+  const sent = track.trackId ? trackDir(track.trackId) : null;
   let blank = null;
   const written = frames.map((f, i) => {
+    if (f.ref != null && sent) {
+      // the burn's frame list names every picture relative to ONE folder, so a
+      // picture sent ahead is linked into it (copied where links are refused)
+      const n = Number(f.ref) | 0;
+      const p = path.join(dir, `u${n}.png`);
+      if (!fs.existsSync(p)) {
+        const src = path.join(sent, `u${n}.png`);
+        if (!fs.existsSync(src)) throw new Error('A caption picture never reached the studio — please export again.');
+        try { fs.linkSync(src, p); } catch (e) { fs.copyFileSync(src, p); }
+      }
+      return { file: p, dur: f.dur };
+    }
     if (!f.png) {
       if (!blank) {
         blank = path.join(dir, 'gap.png');
@@ -3320,6 +3367,7 @@ async function appendClips(ctx, { input, output, clips = [], position = 'end', f
 const INFO_SHAPE = require('crypto').createHash('sha1').update(probeInfo.toString()).digest('hex').slice(0, 8);
 
 module.exports = {
+  putTrackFrames, dropTrackFrames,
   PRESETS, QUALITY, DEFAULT_QUALITY, VOICE_SHARE, qualityDef, presetSize, sourceSize, upscaleFactor, outputFps,
   setExportPrefs, getExportPrefs, allExportPrefs, loadExportPrefs, RATE_CRF, FPS_CHOICES, TRANSITIONS, transitionOf,
   SFX, makeSfx, mixSounds, saveRecording,

@@ -126,6 +126,7 @@ const ALLOWED = {
   'captions:burn': true,
   // the WYSIWYG caption track (transparent frames drawn by the renderer)
   'captions:burnTrack': true,
+  'captions:trackPut': true,
   'captions:fontList': true,
 
   // text on video

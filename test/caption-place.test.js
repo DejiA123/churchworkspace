@@ -109,6 +109,9 @@ ipcMain.handle('captions:burn', async (_e, { input, events, opts, outName }) => 
  * the same layout the preview shows and hands over a transparent track, which
  * this composites exactly the way main.js does. */
 let lastTrack = null;
+// the pictures arrive AHEAD of the burn, a batch at a time, exactly as main.js takes them
+let trackPuts = 0;
+ipcMain.handle('captions:trackPut', async (_e, a) => { trackPuts++; return ok(video.putTrackFrames(a || {})); });
 ipcMain.handle('captions:burnTrack', async (_e, { input, track, outName }) => {
   lastTrack = track;
   try {
@@ -242,6 +245,9 @@ app.whenReady().then(async () => {
     log(top > bottom * 2 && top > 1, 'the words are AT THE TOP of the video, where they were dragged',
       );
   }
+
+  log(trackPuts > 0 && lastTrack && lastTrack.trackId && lastTrack.frames.every((f) => f.png === undefined || f.png === null),
+    'the caption pictures went to the studio in batches, none inside the burn itself', `${trackPuts} batch(es)`);
 
   const newErrs = errs.filter((m) => !boot.includes(m) && !/Autofill|DevTools|source-map|No handler registered/i.test(m));
   log(newErrs.length === 0, 'no new console errors', newErrs.slice(0, 2).join(' | '));

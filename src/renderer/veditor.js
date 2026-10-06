@@ -5499,8 +5499,23 @@
     .replace(/[-_](regular|book|bold|black|extrabold|semibold|medium|light|italic)$/i, ''));
   const nameKey = (s) => flatten(s);
 
-  async function overlayFontCss() {
-    if (_ovlFontCss != null) return _ovlFontCss;
+  /*
+   * ►► ONLY THE FACES THE PICTURE USES. ◄◄
+   * Every caption frame and every text picture is drawn through an SVG whose
+   * stylesheet carried EVERY bundled font — 22 of them, 2.7 MB, each one twice
+   * under two names: about 7 MB of CSS parsed and decoded again for every one
+   * of the thousands of frames a ten-minute captioned export draws. On an
+   * iPhone that is what killed the page during "Drawing the captions" (the
+   * white screen, then "Start fresh / Continue"). Pass the families a picture
+   * actually uses and only those faces go in — one font, once.
+   */
+  async function overlayFontCss(only) {
+    if (_ovlFontCss == null) _ovlFontCss = await buildOverlayFontRules();
+    if (!only) return _ovlFontCss.map((r) => r.rule).join('');
+    const want = new Set((Array.isArray(only) ? only : [only]).filter(Boolean).map(nameKey));
+    return _ovlFontCss.filter((r) => want.has(nameKey(r.fam))).map((r) => r.rule).join('');
+  }
+  async function buildOverlayFontRules() {
     await loadCapFonts();
     const byFile = new Map();   // exact filename -> the names to register it under
     const byKey = new Map();    // normalised typeface key -> the same
@@ -5520,7 +5535,7 @@
       add(byKey, nameKey(f.name), names);
       add(byKey, nameKey(f.family), names);
     }
-    let css = '';
+    const rules = [];
     try {
       const fonts = await window.api.fonts.data();
       const seen = new Set();
@@ -5532,12 +5547,11 @@
           const fam = String(n).replace(/['"\\;{}]/g, '');
           if (seen.has(fam)) continue;   // first file wins; no duplicate faces
           seen.add(fam);
-          css += `@font-face{font-family:'${fam}';src:${src};font-weight:400 900;font-style:normal;}`;
+          rules.push({ fam, rule: `@font-face{font-family:'${fam}';src:${src};font-weight:400 900;font-style:normal;}` });
         }
       }
     } catch (e) { /* system fonts still render */ }
-    _ovlFontCss = css;
-    return css;
+    return rules;
   }
   /**
    * One overlay as absolutely-positioned HTML on an outW×outH transparent page.
@@ -5627,7 +5641,7 @@
     // rasteriser's document — without it the text box's padding is ADDED to the
     // width instead of taken out of it, the line breaks land somewhere else and
     // the export stops matching the preview. Ship the same rule with the page.
-    const css = '*{box-sizing:border-box;}' + await overlayFontCss();
+    const css = '*{box-sizing:border-box;}' + await overlayFontCss(ovs.map((o) => o.font || 'Arial'));
     const page = `position:relative;width:${outW}px;height:${outH}px;overflow:hidden;`;
     const out = [];
     for (const o of ovs) {
@@ -5788,7 +5802,7 @@
     // The app's global `* { box-sizing: border-box }` is NOT inside the
     // rasteriser's document, and without it every padded caption band measures
     // differently there than it does here.
-    const css = '*{box-sizing:border-box;margin:0;padding:0;}' + await overlayFontCss();
+    const css = '*{box-sizing:border-box;margin:0;padding:0;}' + await overlayFontCss([cfg.family, cfg.font]);
     const page = (inner) => `<div style="position:relative;width:${band.w}px;height:${band.h}px;overflow:hidden;">${inner}</div>`;
     const mk = () => { const c = document.createElement('canvas'); c.width = band.w; c.height = band.h; return c; };
     const baseCanvas = mk(), work = mk();
@@ -5797,6 +5811,49 @@
     let baseKey = null;
     let lastSaid = 0;
     const frames = [];
+    /*
+     * ►► THE PICTURES GO TO THE STUDIO AS THEY ARE DRAWN. ◄◄
+     * Every frame's PNG used to be held here until the end, then copied whole
+     * into one request — on a ten-minute captioned export hundreds of MB in a
+     * phone's page, twice. Now an identical picture is kept once (a highlight
+     * that returns to the same word, a line that sits still between arrivals),
+     * and the distinct ones leave in small batches, so the page only ever holds
+     * one batch. The desk, and a short being recorded for a server batch, keep
+     * the bytes inline as before (no streaming there, and nothing to fear).
+     */
+    let stream = !!(window.api.captions && window.api.captions.trackPut)
+      && !(window.__mwBatch && window.__mwBatch.recording && window.__mwBatch.recording());
+    let trackId = stream ? ('t' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)) : null;
+    const seenPng = new Map();   // content key -> unique index (or the bytes, inline)
+    let pending = [], pendingBytes = 0, uniques = 0, streamedAny = false;
+    const unsent = new Map();    // ref -> bytes, when the studio could not take a batch
+    const flush = async () => {
+      if (!pending.length) return;
+      const batch = pending; pending = []; pendingBytes = 0;
+      try {
+        await window.api.captions.trackPut({ trackId, pngs: batch });
+        streamedAny = true;
+      } catch (e) {
+        // A studio that does not know the call yet: carry on the old way (all in
+        // the burn) — but only if nothing has gone ahead, or the track is split.
+        if (streamedAny) throw e;
+        stream = false; trackId = null;
+        for (const it of batch) unsent.set(it.i, it.png);
+      }
+    };
+    const keep = async (png) => {
+      // FNV-1a over the bytes plus the length: identical pictures share one entry
+      let h = 2166136261;
+      for (let k = 0; k < png.length; k += 1) { h ^= png[k]; h = Math.imul(h, 16777619); }
+      const key = png.length + ':' + (h >>> 0);
+      if (seenPng.has(key)) return seenPng.get(key);
+      if (!stream) { seenPng.set(key, { png }); return seenPng.get(key); }
+      const ref = { ref: uniques++ };
+      seenPng.set(key, ref);
+      pending.push({ i: ref.ref, png }); pendingBytes += png.length;
+      if (pending.length >= 40 || pendingBytes > 6 * 1048576) await flush();
+      return ref;
+    };
     for (let i = 0; i < segs.length; i++) {
       const s = segs[i];
       const dur = s.frames / fps;
@@ -5837,7 +5894,9 @@
           png = await window.canvasToPngBytes(work);
         }
       }
-      frames.push({ png, dur });
+      const kept = await keep(png);
+      png = null;
+      frames.push(kept.png ? { png: kept.png, dur } : { ref: kept.ref, dur });
       /*
        * ►► TIME, NOT EVERY TENTH FRAME. ◄◄
        *
@@ -5859,7 +5918,9 @@
         }
       }
     }
-    return { band, fps, authorW: outW, authorH: outH, frames };
+    await flush();
+    const out = unsent.size ? frames.map((f) => (f.ref != null ? { png: unsent.get(f.ref), dur: f.dur } : f)) : frames;
+    return { band, fps, authorW: outW, authorH: outH, frames: out, trackId };
   }
 
   /**

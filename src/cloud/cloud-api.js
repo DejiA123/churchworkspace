@@ -221,6 +221,7 @@ const ALLOWED = {
   'captions:transcribe': true,
   'captions:burn': true,
   'captions:burnTrack': true,
+  'captions:trackPut': true,
   // ☁️ which ear is available, and the ✍ AI proof-reader. NOT captions:cloudKey —
   // a key is pasted at the desk, never set from the internet.
   'captions:cloud': true,

@@ -87,10 +87,13 @@ let _hideTimer = null;
    */
   function pack(payload) {
     const bins = [];
+    const seenBin = new Map();   // the same picture used by many caption frames travels once
     const swap = (v, d) => {
       if (d > 12 || v == null) return v;
       if (isBinary(v)) {
+        if (seenBin.has(v)) return { __bin: seenBin.get(v) };
         bins.push(v instanceof ArrayBuffer ? new Uint8Array(v) : new Uint8Array(v.buffer, v.byteOffset, v.byteLength));
+        seenBin.set(v, bins.length - 1);
         return { __bin: bins.length - 1 };
       }
       if (Array.isArray(v)) return v.map((x) => swap(x, d + 1));
@@ -552,6 +555,7 @@ let _hideTimer = null;
       fontList: () => call('captions:fontList'),
       burn: (a) => call('captions:burn', a),
       burnTrack: (a) => call('captions:burnTrack', a),
+      trackPut: (a) => call('captions:trackPut', a),
       models: () => call('captions:models'),
       downloadModel: (a) => call('captions:downloadModel', a),
       removeModel: (a) => call('captions:removeModel', a),

@@ -1512,6 +1512,10 @@ ipcMain.handle('captions:burn', wrap(async (e, { input, events, opts, jobId, out
  * re-encoded once instead of twice, which is a generation of quality kept as
  * well as half the time saved.
  */
+// The caption track's pictures, a batch at a time, ahead of the burn (see
+// putTrackFrames) — so the page drawing them never has to hold them all.
+ipcMain.handle('captions:trackPut', wrap(async (e, a) => video.putTrackFrames(a || {})));
+
 ipcMain.handle('captions:burnTrack', wrap(async (e, { input, track, jobId, outName, deleteInput, images }) => {
   const list = (images || []).filter((im) => im && im.png);
   const dir = list.length ? fs.mkdtempSync(path.join(app.getPath('temp'), 'mw-captxt-')) : null;
