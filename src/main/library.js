@@ -10,6 +10,7 @@
  *
  *   <userData>/library/media.json      { music: [...], clips: [...] }
  *   <userData>/library/music/<id>.<ext>
+ *   <userData>/library/music/<id>.preview.mp3  (what the phone preview plays)
  *   <userData>/library/clips/<id>.<ext>  (+ <id>.jpg thumbnail)
  *   <userData>/tools/yt-dlp[.exe]        (optional YouTube helper)
  */
@@ -76,6 +77,8 @@ function list() {
   const keep = (arr) => arr.filter((e) => {
     const ok = e && e.file && fs.existsSync(e.file);
     if (!ok) changed = true;
+    // a lost preview copy only costs the preview its shortcut: the original plays
+    if (ok && e.preview && !fs.existsSync(e.preview)) { delete e.preview; changed = true; }
     return ok;
   });
   const out = { music: keep(db.music), clips: keep(db.clips) };
@@ -128,6 +131,18 @@ async function add(ctx, video, { kind, path: srcPath, name, source, move }) {
     entry.durationLabel = still ? `0:0${STILL_SEC}` : info.durationLabel;
     if (k === 'clips') { entry.width = info.width; entry.height = info.height; entry.hasAudio = still ? false : info.hasAudio; entry.still = still; }
   } catch (e) {}
+  /*
+   * A song gets a second, browser-safe copy for the PREVIEW (video.audioPreview):
+   * the phone plays whatever it is given straight off the studio, and a .wma, an
+   * .opus on an older iPhone or a VBR mp3 without a seek table plays badly or not
+   * at all. The export never touches it — it always mixes `file`, the original.
+   * Entries made before this have no `preview` and simply keep playing `file`.
+   */
+  if (k === 'music' && video.audioPreview) {
+    const preview = path.join(root(), 'music', `${id}.preview.mp3`);
+    try { entry.preview = await video.audioPreview(ctx, { input: dest, output: preview }); }
+    catch (e) { try { fs.rmSync(preview, { force: true }); } catch (er) {} }
+  }
   if (k === 'clips') {
     try {
       const thumb = path.join(root(), 'clips', `${id}.jpg`);
@@ -150,7 +165,7 @@ function remove({ kind, id }) {
   db[k] = db[k].filter((e) => e.id !== id);
   writeDb(db);
   if (hit) {
-    for (const f of [hit.file, hit.thumb]) { try { if (f) fs.rmSync(f, { force: true }); } catch (e) {} }
+    for (const f of [hit.file, hit.thumb, hit.preview]) { try { if (f) fs.rmSync(f, { force: true }); } catch (e) {} }
   }
   return true;
 }

@@ -218,7 +218,9 @@
     "test:text-anim": "node test/text-anim.test.js",
     "test:keyframes-chroma": "node test/keyframes-chroma.test.js",
     "test:open-memory": "node test/open-memory.test.js",
-    "test:montage": "node test/montage.test.js"
+    "test:montage": "node test/montage.test.js",
+    "test:music-bed": "node test/music-bed.test.js",
+    "test:phone-music": "node test/phone-music.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",

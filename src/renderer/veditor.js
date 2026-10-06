@@ -1454,6 +1454,11 @@
     const view = document.getElementById('view-video');
     if (!view || !view.classList.contains('active')) return;
     updateCapOverlay(p.currentTime || 0);
+    // The picture has stopped to buffer ('waiting' can lag by a few tenths), or
+    // has run into a removed pause it is about to hop over: the music bed stops
+    // on this frame, not a beat later, so it never runs on past the picture.
+    const ma = ve.refs.musicAudio;
+    if (ma && !ma.paused && (p.readyState < 3 || !keptAt(p.currentTime || 0))) syncMusicPreview();
     // …and everything else that moves between timeupdates: text arrivals,
     // keyframed push-ins, green-screened media
     frameTick(p.currentTime || 0);
@@ -12736,6 +12741,7 @@
       const hit = p && ve.lib.music.find((m) => m.id === p.id);
       if (hit) ve.music = musicFrom(hit, p);
     } else if (!ve.lib.music.some((m) => m.id === ve.music.id)) { ve.music = null; }
+    if (ve.music) primeMusic(musicFile(ve.music));
     if (!ve.outro) {
       const p = readPref(LIB_KEYS.outro);
       const hit = p && ve.lib.clips.find((c) => c.id === p.id);
@@ -12748,6 +12754,8 @@
   function musicFrom(entry, pref = {}) {
     return {
       id: entry.id, name: entry.name, file: entry.file, durationSec: entry.durationSec || 0,
+      // what the PREVIEW plays (library.js) — the export always mixes `file`
+      preview: entry.preview || null,
       volume: pref.volume != null ? pref.volume : 0.25,
       fadeIn: pref.fadeIn != null ? pref.fadeIn : 1,
       fadeOut: pref.fadeOut != null ? pref.fadeOut : 1.5,
@@ -12867,6 +12875,7 @@
   }
 
   async function removeFromLibrary(kind, id) {
+    if (kind === 'music') { const e = ((ve.lib && ve.lib.music) || []).find((m) => m.id === id); if (e) forgetMusic(musicFile(e)); }
     try { await window.api.library.remove(kind, id); } catch (e) {}
     if (kind === 'music' && ve.music && ve.music.id === id) clearMusic();
     if (kind === 'clips' && ve.outro && ve.outro.id === id) clearOutro();
@@ -12879,6 +12888,7 @@
     const keep = ve.music && ve.music.id === id ? ve.music : {};
     ve.music = musicFrom(entry, keep);
     saveMusicPref();
+    primeMusic(musicFile(ve.music));
     renderLibrary(); renderMusicLane(); updateMusicButton();
     syncMusicPreview(true);
     window.__toast && window.__toast(`🎵 "${entry.name}" is now the background music — it plays under every clip you export.`, 'good');
@@ -12886,7 +12896,7 @@
   function clearMusic() {
     ve.music = null; saveMusicPref();
     stopAudition();
-    const a = ve.refs.musicAudio; if (a) { a.pause(); a.removeAttribute('src'); a.dataset.file = ''; }
+    const a = ve.refs.musicAudio; if (a) { a.pause(); a.removeAttribute('src'); a.dataset.file = ''; a.dataset.src = ''; }
     renderLibrary(); renderMusicLane(); updateMusicButton();
   }
   function useOutro(id) {
@@ -12909,8 +12919,10 @@
     if (ve._auditionId === id && !a.paused) return stopAudition();
     ve.refs.player && ve.refs.player.pause();
     ve._auditionId = id;
-    a.src = fileUrl(entry.file); a.dataset.file = entry.file;
-    a.volume = 0.7; a.currentTime = 0;
+    const src = musicSrc(entry);
+    a.src = src; a.dataset.file = entry.file; a.dataset.src = src;
+    wireMusicGain(a);   // this IS a tap — the first song can be heard at its level too
+    setMusicLevel(a, 0.7); a.currentTime = 0;
     const pr = a.play(); if (pr && pr.catch) pr.catch(() => {});
     $$('[data-musicplay]').forEach((b) => { b.textContent = b.dataset.musicplay === id ? '⏸' : '▶'; });
   }
@@ -12980,33 +12992,168 @@
   }
 
   /* ---- live music under the preview ---- */
+  /*
+   * ►► THE BED PLAYS ON THE EXPORT'S CLOCK. ◄◄
+   * Where the export's music is at the playhead — the clip being watched, and
+   * how far into ITS output we are — or null where the export has no music at
+   * all (a removed pause, a gap between clips: neither exists in the file).
+   *
+   * It used to run on the SOURCE clock and restart the song at every main-lane
+   * clip. Splitting a video into pieces — the normal way to edit — previewed the
+   * first seconds of the song again at every cut (measured: three splits, three
+   * restarts, the song at 1.9 s when the video was at 7.9 s) while the export
+   * played it straight through; every removed pause jumped it forward. Now the
+   * preview asks the export's own question (musicFor) on the export's own clock
+   * (srcToOut), so what you hear is what you get.
+   */
+  function musicClockAt(t) {
+    // a short being watched (selected, or playing from its ▶): its bed starts at ITS top
+    const short = ve.segments.find((x) => x.ai && t >= x.start && t < x.end && (x.id === ve.sel || ve._previewEnd === x.end));
+    if (short) { const o = srcToOut(short, t); return o == null ? null : { s: short, o }; }
+    const sp = editedSpan(); if (!sp) return null;
+    const whole = { id: '__edited', start: sp.start, end: sp.end, cuts: sp.cuts, xfades: sp.xfades };
+    // the clips after the video: the export adds them BEFORE the music, so the bed runs on under them
+    if (hasTail() && t >= mainEnd()) return { s: whole, o: sp.kept + (t - mainEnd()) };
+    const o = srcToOut(whole, t);
+    return o == null ? null : { s: whole, o };
+  }
   /** Where in the song the playhead is, or null when no music plays here. */
   function musicPosFor(t) {
     const m = ve.music; if (!m) return null;
-    const md = m.durationSec || 0;
-    if (m.bed) {
-      // The bed restarts with each clip, exactly as the export does.
-      const s = ve.segments.find((x) => (x.lane || 0) === 0 && t >= x.start && t < x.end);
-      const rel = t - (s ? s.start : 0);
-      return md > 0.1 ? rel % md : rel;
-    }
-    const tl = m.tlStart || 0, len = m.len || md;
-    if (t < tl || t > tl + len) return null;
-    return (m.srcStart || 0) + (t - tl);
+    const c = musicClockAt(t); if (!c) return null;
+    // the export's own rule — asked of the bare range, never of a running export's snapshot
+    const pick = musicFor({ id: c.s.id, start: c.s.start, end: c.s.end }); if (!pick) return null;
+    const md = m.durationSec || 0, pos = pick.startSec + c.o;
+    return md > 0.1 ? pos % md : pos;
   }
-  function syncMusicPreview(force) {
+  /*
+   * The picture is really MOVING: playing, and not stalled waiting for data. On
+   * a phone over mobile data the preview video buffers all the time; a song that
+   * kept playing through it ran on ahead (measured: up to 5.7 s) and was then
+   * yanked BACK when the picture caught up — repeats and jumps on every stall.
+   * The tail clock (clips after the video) has no buffering of its own.
+   */
+  const playerFlowing = (p) => !!p && !p.paused && p.readyState >= 3;
+  /** Is the footage at t in the export at all — on a main-lane clip, not in a removed pause? */
+  function keptAt(t) { return ve.segments.some((s) => (s.lane || 0) === 0 && t >= s.start && t < s.end && !cutAt(s, t)); }
+  const videoFlowing = () => !!ve.tailRun || playerFlowing(ve.refs.player);
+
+  /*
+   * ►► THE PHONE PLAYS ITS OWN COPY OF THE SONG. ◄◄
+   * Played straight off the studio, every seek of the bed was a trip back over
+   * the network (the studio sends media no-store) — and heard as a hole. The
+   * song is small (library.js keeps a 128k preview copy, ~1 MB a minute), so
+   * the phone fetches it ONCE and plays it from memory. Capped, so an hour-long
+   * recording someone filed as "music" streams as before instead of filling a
+   * phone that is already short of memory. Only the song in use is kept.
+   */
+  const MUSIC_BLOB_MAX = 40e6;
+  const musicBlobs = new Map();   // studio path → object URL (null while it downloads)
+  const musicFile = (m) => (m && (m.preview || m.file)) || '';
+  const musicSrc = (m) => { const f = musicFile(m); return musicBlobs.get(f) || fileUrl(f); };
+  function forgetMusic(file) {
+    const u = musicBlobs.get(file);
+    if (u) { try { URL.revokeObjectURL(u); } catch (e) {} }
+    musicBlobs.delete(file);
+  }
+  function primeMusic(file) {
+    if (typeof window === 'undefined' || !window.MW_FILE_URL || !file || musicBlobs.has(file) || typeof fetch !== 'function') return;
+    // one song at a time: one the element is no longer playing from goes
+    const a = ve.refs && ve.refs.musicAudio;
+    for (const [f, u] of Array.from(musicBlobs)) if (f !== file && !(a && u && a.dataset.src === u)) forgetMusic(f);
+    musicBlobs.set(file, null);
+    fetch(fileUrl(file)).then((r) => {
+      const n = Number(r.headers.get('content-length')) || 0;
+      if (!r.ok || n > MUSIC_BLOB_MAX) { try { if (r.body) r.body.cancel(); } catch (e) {} return null; }
+      return r.blob();
+    }).then((b) => {
+      if (!musicBlobs.has(file)) return;          // removed while it downloaded
+      if (b && b.size && b.size <= MUSIC_BLOB_MAX) { musicBlobs.set(file, URL.createObjectURL(b)); syncMusicPreview(); }
+      else musicBlobs.delete(file);
+    }).catch(() => musicBlobs.delete(file));
+  }
+
+  /*
+   * ►► THE IPHONE IGNORES <audio>.volume. ◄◄
+   * Apple: "the volume property is not settable in JavaScript; reading it always
+   * returns 1". So the bed set to 25% played at 100% over the sermon in every
+   * phone preview, and the slider did nothing. Where a volume written does not
+   * stick, the bed goes through a Web Audio gain instead — made inside a tap,
+   * because that is the only place iOS lets audio start. Everywhere a volume
+   * DOES stick (the desktop app, Chrome, Android) nothing changes at all.
+   */
+  let musicGain = null;   // { ac, g, el } once wired; false = not needed, or not possible here
+  function setMusicLevel(a, v) {
+    v = clamp(Number(v) || 0, 0, 1);
+    if (musicGain && musicGain.el === a) { musicGain.g.gain.value = v; return; }
+    try { a.volume = v; } catch (e) {}
+  }
+  function wireMusicGain(a) {
+    if (musicGain) { if (musicGain.ac.state !== 'running') musicGain.ac.resume().catch(() => {}); return; }
+    if (musicGain === false) return;
+    try { a.volume = 0.5; } catch (e) {}
+    if (Math.abs(a.volume - 0.5) < 0.01) { musicGain = false; return; }   // volume works: leave it be
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) { musicGain = false; return; }
+    try {
+      // iOS 17+: play through the silent switch, the way the video itself does
+      try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+      const ac = new AC(), src = ac.createMediaElementSource(a), g = ac.createGain();
+      src.connect(g); g.connect(ac.destination);
+      musicGain = { ac, g, el: a };
+      ac.resume().catch(() => {});
+    } catch (e) { musicGain = false; }
+  }
+  /*
+   * Every tap: wire the gain where it is needed, wake a context the phone
+   * suspended (a call, the screen locking), and — once — start and stop the bed
+   * right there. iOS lets a media element start only from a tap, and the bed now
+   * starts when the PICTURE does ('playing'), which on mobile data can be
+   * seconds after the tap; one play() inside a tap lifts that rule for good.
+   */
+  function musicTap() {
+    const a = ve.refs && ve.refs.musicAudio, m = ve.music;
+    if (!a || !m || !m.file) return;
+    wireMusicGain(a);
+    if (!ve._auditionId) setMusicLevel(a, m.volume);
+    if (a.dataset.unlocked || !a.paused || ve._auditionId) return;
+    a.dataset.unlocked = '1';
+    if (!a.dataset.file) { const want = musicSrc(m); a.src = want; a.dataset.file = m.file; a.dataset.src = want; }
+    const pr = a.play(); if (pr && pr.catch) pr.catch(() => {});
+    if (!videoFlowing()) a.pause();
+  }
+  // (Callers that just moved the playhead still pass `true`. The rule below is
+  // the same for every caller now — a paused song is parked exactly anyway.)
+  function syncMusicPreview() {
     const a = ve.refs.musicAudio; if (!a) return;
     if (ve._auditionId) return; // listening to a track in the library — don't fight it
     const m = ve.music;
     if (!m || !m.file) { if (!a.paused) a.pause(); return; }
-    if (a.dataset.file !== m.file) { a.src = fileUrl(m.file); a.dataset.file = m.file; }
-    a.volume = clamp(m.volume, 0, 1);
+    // a new song now; the phone's own copy of it as soon as it can swap in unheard
+    const want = musicSrc(m);
+    if (a.dataset.file !== m.file || (a.paused && a.dataset.src !== want)) { a.src = want; a.dataset.file = m.file; a.dataset.src = want; }
+    setMusicLevel(a, m.volume);
     const pos = musicPosFor(nowT());
-    if (pos == null) { if (!a.paused) a.pause(); return; }
-    // Only re-seek when it has genuinely drifted; nudging every frame stutters.
-    if (force || Math.abs((a.currentTime || 0) - pos) > 0.35) { try { a.currentTime = pos; } catch (e) {} }
-    if (isPlaying()) { if (a.paused) { const pr = a.play(); if (pr && pr.catch) pr.catch(() => {}); } }
-    else if (!a.paused) a.pause();
+    const drift = pos == null ? 0 : Math.abs((a.currentTime || 0) - pos);
+    if (pos == null || !videoFlowing()) {
+      if (!a.paused) a.pause();
+      // Parked on a new spot (a scrub, a jump): be exactly there when Play
+      // comes — unheard, the song is not playing. Merely held up (buffering,
+      // the hop over a removed pause) it stays put unless really elsewhere:
+      // stepping it back a tenth would replay that tenth when it resumes.
+      const p = ve.refs.player;
+      if (pos != null && !ve.tailRun && drift > (p && p.paused ? 0.12 : 0.35)) { try { a.currentTime = pos; } catch (e) {} }
+      return;
+    }
+    // ►► SEEK ONLY WHEN IT IS REALLY SOMEWHERE ELSE. ◄◄ A seek throws away what
+    // the element had buffered and is heard as a gap — stepped back, as a
+    // repeat. It used to be forced on every play and every seek, even 0 → 0,
+    // and that is what stuttered. A third of a second is the line, every time:
+    // a bed a fraction off the picture is inaudible (nothing in it is
+    // lip-synced), a jump never is. It also covers the hop over a removed
+    // pause, which the picture itself overshoots by up to a timeupdate (~¼ s).
+    if (drift > 0.35 || a.ended) { try { a.currentTime = pos; } catch (e) {} }
+    if (a.paused) { const pr = a.play(); if (pr && pr.catch) pr.catch(() => {}); }
   }
 
   /* ---- YouTube ---- */
@@ -13215,7 +13362,8 @@
   function syncSoundPreview() {
     const p = ve.refs.player;
     if (!p) return;
-    const t = p.currentTime || 0, playing = !p.paused;
+    // not while the picture is stalled to buffer (see videoFlowing)
+    const t = p.currentTime || 0, playing = playerFlowing(p);
     const list = ve.sounds || [];
     for (const x of list) {
       let a = soundEls.get(x.id);
@@ -14102,7 +14250,7 @@
       if (!ve.music) return;
       ve.music.volume = clamp(parseFloat(mVol.value) || 0, 0, 1);
       const vv = $('#libMusicVolV'); if (vv) vv.textContent = Math.round(ve.music.volume * 100) + '%';
-      const a = ve.refs.musicAudio; if (a && !ve._auditionId) a.volume = ve.music.volume;
+      const a = ve.refs.musicAudio; if (a && !ve._auditionId) setMusicLevel(a, ve.music.volume);
       renderMusicLane(); saveMusicPref();
     });
     const mFi = $('#libMusicFadeIn'); if (mFi) mFi.addEventListener('change', () => { if (ve.music) { ve.music.fadeIn = clamp(parseFloat(mFi.value) || 0, 0, 10); saveMusicPref(); } });
@@ -14128,6 +14276,9 @@
     }));
     // the audition player must reset its buttons when the track ends
     if (ve.refs.musicAudio) ve.refs.musicAudio.addEventListener('ended', () => { if (ve._auditionId) stopAudition(); });
+    // every play button there is (▶, a clip's ▶, full screen, the captions window,
+    // a tap on the picture) is a tap — caught on the way down (musicTap)
+    for (const ev of ['touchend', 'click']) document.addEventListener(ev, musicTap, true);
     libRefresh();
 
     ve.refs.track.addEventListener('mousedown', onTrackDown);
@@ -14239,6 +14390,9 @@
     // anything else moving the main video's playhead (a clip's ▶, a jump) ends the tail
     p.addEventListener('seeking', () => { if (ve.tailT != null) leaveTail(); });
     p.addEventListener('seeked', () => syncMusicPreview(true));
+    // the picture stalled to buffer: the song waits with it — and picks up exactly there
+    p.addEventListener('waiting', () => { syncMusicPreview(); syncSoundPreview(); });
+    p.addEventListener('playing', () => { syncMusicPreview(true); syncSoundPreview(); });
     p.addEventListener('error', () => {
       // Some other unplayable codec — fall back to building a proxy.
       if (ve.video && ve.video.path && !ve.video.proxy && !ve.video.proxying) { showPreparing($('#veNoVid'), p, ve.video.info.vcodec); makeProxyBg(ve.video.path); }
@@ -16104,6 +16258,8 @@
       },
       musicLaneWidthPx() { const b = ve.refs.musicTrack && ve.refs.musicTrack.querySelector('.ve-music-seg'); return b ? parseFloat(b.style.width) : 0; },
       musicPosAt(t) { return musicPosFor(t); },
+      musicGainValue() { return musicGain ? musicGain.g.gain.value : null; },
+      musicBlobReady() { return !!(ve.music && musicBlobs.get(musicFile(ve.music))); },
       useOutro(id) { useOutro(id); return ve.outro && { id: ve.outro.id, all: ve.outroAll }; },
       clearOutro() { clearOutro(); return ve.outro; },
       outroState() { return ve.outro ? { id: ve.outro.id, name: ve.outro.name, all: ve.outroAll !== false, durationSec: ve.outro.durationSec } : null; },

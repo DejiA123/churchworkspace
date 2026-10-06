@@ -2875,7 +2875,9 @@ async function applyEdits(ctx, { input, output, edits = {}, onProgress }) {
     aOut.push('[am]');
   }
   const map = ['-map', '[v]'];
-  if (aOut.length === 2) { fc += `;${aOut.join('')}amix=inputs=2:duration=first:dropout_transition=0[aout]`; map.push('-map', '[aout]'); }
+  // normalize=0 / level=false: the same "adding music made the sermon 6 dB
+  // quieter" trap as mixMusic — see there.
+  if (aOut.length === 2) { fc += `;${aOut.join('')}amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.97:level=false[aout]`; map.push('-map', '[aout]'); }
   else if (aOut.length === 1) { map.push('-map', aOut[0]); }
 
   args.push('-filter_complex', fc, ...map, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20');
@@ -2947,6 +2949,24 @@ async function detectSilences(ctx, { input, startSec = 0, endSec, noiseDb = -30,
   return { silences, durationSec: info.durationSec, hasAudio: true, removedSeconds: silences.reduce((a, s) => a + (s.end - s.start), 0) };
 }
 
+/*
+ * ►► DUCK UNDER THE SENTENCE, NOT UNDER EVERY WORD. ◄◄
+ * The old ducking (ratio 9, 15 ms attack, 420 ms release, keyed on the whole
+ * voice) followed every syllable: the song dropped ~13 dB on each word and
+ * leapt back up in every half-second breath. Measured on a real sermon under a
+ * steady tone, the bed moved 2.2 dB every tenth of a second on average and up
+ * to 9 dB — volunteers heard it, rightly, as "the music is choppy".
+ *
+ * Now the compressor listens only to the speech band (150 Hz-3.5 kHz — not the
+ * hum, the thumps or the hiss), with a soft knee, a gentle ratio, a 200 ms
+ * attack and a release longer than any breath. The bed settles ~10 dB under the
+ * preacher and stays there through the sentence (0.5 dB per tenth on average),
+ * and only rises again in a real pause, over a second or two. Measured with
+ * test/music-bed.test.js.
+ */
+const DUCK_KEY = 'highpass=f=150,lowpass=f=3500';
+const DUCK = 'sidechaincompress=threshold=0.02:ratio=3:attack=200:release=2000:knee=8:makeup=1';
+
 /**
  * Lay a background-music bed under a finished clip.
  *
@@ -2956,8 +2976,18 @@ async function detectSilences(ctx, { input, startSec = 0, endSec, noiseDb = -30,
  * that has already been through reframing and caption burning.
  *
  * musicStartSec picks where in the song to start; the song loops to fill a clip
- * longer than itself. `duck` drops the music while someone is speaking
+ * longer than itself. `duck` lowers the music while someone is speaking
  * (sidechaincompress) so the sermon stays intelligible under the bed.
+ *
+ * ►► THE SERMON COMES OUT AS LOUD AS IT WENT IN. ◄◄
+ * amix's default divides every input by the number of inputs, so laying a bed
+ * under the sermon quietly made the SERMON 6 dB quieter (measured on a real
+ * one: −5.8 dB RMS, even with the music at 0%). normalize=0 mixes at
+ * full strength, as mixSounds and the overlay sound already do, and the limiter
+ * runs with level=false so it only catches peaks instead of re-levelling the
+ * whole mix. The voice:music balance is what it always was — the music slider
+ * means exactly the same thing — the whole mix is simply back at the
+ * preacher's own loudness.
  */
 async function mixMusic(ctx, { input, output, musicPath, musicVolume = 0.25, musicStartSec = 0, fadeIn = 0.6, fadeOut = 1.2, duck = true, voiceVolume = 1, onProgress }) {
   if (!musicPath || !fs.existsSync(musicPath)) throw new Error('That music file could not be found.');
@@ -2968,7 +2998,26 @@ async function mixMusic(ctx, { input, output, musicPath, musicVolume = 0.25, mus
   const fo = Math.max(0, Math.min(dur / 2, Number(fadeOut) || 0));
   const start = Math.max(0, Number(musicStartSec) || 0);
 
-  const args = ['-i', input, '-ss', String(start), '-stream_loop', '-1', '-i', musicPath];
+  /*
+   * ►► A SONG THAT LOOPS MUST LOOP WITHOUT A HICCUP. ◄◄
+   * A song shorter than the clip goes round again. Looped straight from an
+   * AAC/M4A — exactly what an iPhone hands over — every restart replays the
+   * encoder's priming and padding: measured, a 19-22 ms hole of silence and a
+   * tick at 8.0 s and 16.0 s of an 8-second song (an .aac or an mp3 without a
+   * LAME header does the same). Decoded once to plain PCM first, the loop is
+   * seamless. At the song's own rate and in float: the resampling to 48 kHz
+   * then happens AFTER the loop, on one continuous stream, so not even the
+   * resampler sees a seam, and a loud master's overs are not clipped. Only when
+   * it will actually loop: a song that covers the clip is read straight from
+   * the file as it always was, with no temp file at all.
+   */
+  let song = musicPath, tmpSong = null;
+  const songInfo = await getInfo(ctx, musicPath).catch(() => null);
+  if (songInfo && songInfo.durationSec > 0 && songInfo.durationSec - start < dur + 0.05) {
+    tmpSong = path.join(os.tmpdir(), `mw-bed-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}.wav`);
+    song = tmpSong;
+  }
+  const args = ['-i', input, '-ss', String(start), '-stream_loop', '-1', '-i', song];
   // Trim the (looped) music to the clip, level it, and fade both ends.
   const mus = [
     `atrim=0:${dur.toFixed(3)}`, 'asetpts=PTS-STARTPTS',
@@ -2982,15 +3031,12 @@ async function mixMusic(ctx, { input, output, musicPath, musicVolume = 0.25, mus
   if (info.hasAudio) {
     const vv = Math.max(0, Math.min(3, Number(voiceVolume) || 1));
     const voice = `[0:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo${vv !== 1 ? `,volume=${vv.toFixed(3)}` : ''}`;
+    const mix = 'amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.97:level=false';
     if (duck) {
-      // The voice drives the compressor's sidechain, so the bed steps back the
-      // moment the preacher speaks and comes up again in the gaps.
-      fc = `${voice},asplit=2[voice][key];[1:a]${mus.join(',')}[music];`
-         + `[music][key]sidechaincompress=threshold=0.045:ratio=9:attack=15:release=420:makeup=1[ducked];`
-         + `[voice][ducked]amix=inputs=2:duration=first:dropout_transition=0,alimiter=limit=0.97[aout]`;
+      fc = `${voice},asplit=2[voice][key];[key]${DUCK_KEY}[k];[1:a]${mus.join(',')}[music];`
+         + `[music][k]${DUCK}[ducked];[voice][ducked]${mix}[aout]`;
     } else {
-      fc = `${voice}[voice];[1:a]${mus.join(',')}[music];`
-         + `[voice][music]amix=inputs=2:duration=first:dropout_transition=0,alimiter=limit=0.97[aout]`;
+      fc = `${voice}[voice];[1:a]${mus.join(',')}[music];[voice][music]${mix}[aout]`;
     }
     amap = '[aout]';
   } else {
@@ -3000,7 +3046,31 @@ async function mixMusic(ctx, { input, output, musicPath, musicVolume = 0.25, mus
 
   args.push('-filter_complex', fc, '-map', '0:v', '-map', amap,
     '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest', '-movflags', '+faststart', '-y', output);
-  await ff.runFfmpeg(ctx.ffmpeg, args, { onProgress, totalDurationSec: dur });
+  try {
+    // decoding a song takes a second or two — quick enough not to need its own bar
+    if (tmpSong) await ff.runFfmpeg(ctx.ffmpeg, ['-i', musicPath, '-map', '0:a:0', '-vn', '-c:a', 'pcm_f32le', '-y', tmpSong]);
+    await ff.runFfmpeg(ctx.ffmpeg, args, { onProgress, totalDurationSec: dur });
+  } finally {
+    // also on Cancel: a temp WAV of every song ever looped would fill the disk
+    if (tmpSong) { try { fs.rmSync(tmpSong, { force: true }); } catch (e) {} }
+  }
+  return output;
+}
+
+/**
+ * A copy of a library song that every browser plays — and seeks — exactly. For
+ * the PREVIEW only; every export keeps mixing the original file.
+ *
+ * The phone preview plays the song straight off the studio. Some of what the
+ * music picker accepts never plays in Safari at all (.wma; .ogg/.opus on older
+ * iPhones), a VBR mp3 without a seek table lands only roughly where Safari is
+ * asked to put it, and a big lossless file makes every fetch slow over mobile
+ * data. A plain 128k CBR mp3 does all of it, at ~1 MB a minute. Made at the
+ * lowest priority beside whatever is encoding (`background`), so adding a song
+ * while a sermon exports does not sit behind the export.
+ */
+async function audioPreview(ctx, { input, output }) {
+  await ff.runFfmpeg(ctx.ffmpeg, ['-i', input, '-map', '0:a:0', '-vn', '-c:a', 'libmp3lame', '-b:a', '128k', '-ar', '44100', '-ac', '2', '-y', output], { background: true });
   return output;
 }
 
@@ -3261,7 +3331,7 @@ module.exports = {
   cleanMotion, motionExpr, motionAt, motionChain, MOTION_MAX_Z, keyOf, inPreviewLane, transparentPng, writeTrackFrames, burnCaptionFrames,
   cropFirstChain, fillChain,
   simplifyKeyframes, buildLerpExpr, isCleanEncode,
-  detectSilences, mixMusic, appendClips, audioSample,
+  detectSilences, mixMusic, audioPreview, appendClips, audioSample,
   // background noise removal + background-blur fill (pure, unit-tested)
   noiseReductionAf, studioVoiceAf, noiseStrength, measureNoiseFloor, denoiseFilter, NOISE_LEVELS,
   rnnoiseModelPath, voiceIsolationAf, withVoicePasses, ffPath, measureSeparation, renderVerifiedVoice,
