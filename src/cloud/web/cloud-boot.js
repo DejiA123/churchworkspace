@@ -235,13 +235,38 @@ let _hideTimer = null;
     begin(expect) { rec.on = true; rec.steps = []; rec.expect = expect || null; },
     end() { const st = rec.steps || []; rec.on = false; rec.steps = null; rec.expect = null; return st; },
     recording: () => rec.on,
-    open: (label, total) => call('batch:open', { label, total }),
+    // remembered: a batch started from THIS phone brings its shorts down to it (showServerBatch)
+    open: (label, total) => call('batch:open', { label, total }).then((b) => { if (b && b.id) ownBatch(b.id); return b; }),
     add: (id, label, steps) => call('batch:add', { id, label, steps }),
     seal: (id) => call('batch:seal', { id }),
     list: () => call('batch:list', {}),
     cancel: (id) => call('batch:cancel', { id }),
   };
 
+  /*
+   * ►► EXPORT ALL ENDS ON THE PHONE TOO. ◄◄
+   * A batch started from this phone, finishing while the app is open, brings
+   * every short down by itself as the last part of the batch's own number
+   * (the export is the first 100 - SAVE_SHARE of it, the shorts coming down
+   * the rest), and ends on ONE tap: "N shorts on your phone · Save all". The
+   * download needs no tap — only the share sheet does. Measured: a short's
+   * download is ~25 units of work against 150-190 for making it, so 15%.
+   *
+   * Which batches are this phone's is remembered on the phone (the last 20).
+   * A batch from another phone, or one that finishes while this app is in the
+   * background (iOS stops a download there), ends as before: "N shorts ready
+   * · Save all", which fetches them when tapped.
+   */
+  const OWN_BATCHES_KEY = 'mw.cloud.ownBatches';
+  const SAVE_SHARE = 15;
+  const batchSaving = new Map();   // taskId -> 'export' | 'save'
+  const batchStops = new Map();    // taskId -> stop the bringing-down
+  function ownBatches() {
+    try { const v = JSON.parse(localStorage.getItem(OWN_BATCHES_KEY) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+  }
+  function ownBatch(id) {
+    try { localStorage.setItem(OWN_BATCHES_KEY, JSON.stringify(ownBatches().filter((x) => x !== id).concat(id).slice(-20))); } catch (e) {}
+  }
   /*
    * A batch running on the server, shown where every export is shown (the pill
    * at the top, Running now) — on this phone, on another, or after the app was
@@ -256,6 +281,7 @@ let _hideTimer = null;
       if (b.state !== 'running') return;
       tid = window.__newTask(b.label || 'Exporting on the server', { background: true });
       serverTasks.set(b.id, tid);
+      if (canSaveHere() && ownBatches().includes(b.id)) batchSaving.set(tid, 'export');
     }
     const left = b.total - b.done - b.failed;
     if (window.__setTaskBatch) window.__setTaskBatch(tid, Math.min(b.total, b.done + b.failed + 1), b.total);
@@ -269,6 +295,12 @@ let _hideTimer = null;
       return;
     }
     serverTasks.delete(b.id);
+    const outs0 = (b.items || []).filter((it) => it.state === 'done' && it.output).map((it) => it.output);
+    if (b.state === 'done' && outs0.length && batchSaving.has(tid) && document.visibilityState === 'visible' && canSaveHere()) {
+      bringBatchDown(b, tid, outs0);
+      return;
+    }
+    batchSaving.delete(tid);
     const note = b.state === 'cancelled' ? 'Stopped.'
       : `✅ ${b.done} short${b.done === 1 ? '' : 's'} exported on the server${b.failed ? ` · ${b.failed} could not be made` : ''}.`;
     if (window.__endTask) window.__endTask(tid, { ok: b.state !== 'cancelled' && b.done > 0, state: b.state === 'cancelled' ? 'stopped' : (b.done ? 'done' : 'fail'), note });
@@ -278,10 +310,46 @@ let _hideTimer = null;
       renderDownloadCount();
       island({ kind: b.failed ? 'warn' : 'good', title: `${b.done} short${b.done === 1 ? '' : 's'} ready`, sticky: !!outs.length,
         sub: b.failed ? `${b.failed} could not be made — tap Running now for why.` : 'Save them all to your Photos',
-        action: outs.length ? { label: 'Save all', onClick: () => saveAll(outs) } : undefined });
+        action: outs.length ? { label: 'Save all', onClick: () => saveAll(outs, { tapped: true }) } : undefined });
       if (typeof refreshFiles === 'function') { try { refreshFiles(); } catch (e) {} }
     }
     void left;
+  }
+  /*
+   * The end of an Export all started on this phone: every short onto it, as
+   * the last SAVE_SHARE of the batch's own number (overallPct), then one tap.
+   */
+  async function bringBatchDown(b, tid, outs) {
+    batchSaving.set(tid, 'save');
+    for (const o of outs.slice().reverse()) if (!cloud.downloads.some((d) => d.path === o)) cloud.downloads.unshift({ path: o, name: String(o).split(/[\\/]/).pop(), at: Date.now() });
+    renderDownloadCount();
+    if (window.__setTaskBatch) window.__setTaskBatch(tid, null);
+    const say = (m) => { if (window.__taskSay) window.__taskSay(tid, m); };
+    const pct = (n) => { if (window.__taskProgress) window.__taskProgress(tid, n); };
+    say('📲 Getting the shorts onto your phone…');
+    pct(0);
+    let stop = false;
+    batchStops.set(tid, () => { stop = true; });
+    let res = { got: 0, space: null };
+    try {
+      res = await prefetchShorts(outs, { stopped: () => stop, progress: (n, line) => { pct(n); if (line) say(line); } });
+    } catch (e) { /* the shorts are made; the Save all panel fetches whatever did not come down */ }
+    batchStops.delete(tid);
+    batchSaving.delete(tid);
+    const made = `${b.done} short${b.done === 1 ? '' : 's'}`;
+    const all = res.got === outs.length;
+    if (window.__endTask) {
+      window.__endTask(tid, { ok: true, state: 'done',
+        note: `✅ ${made} exported on the server${b.failed ? ` · ${b.failed} could not be made` : ''}${res.got ? ` — ${all ? 'all' : res.got} on your phone, ready to save` : ''}.` });
+    }
+    // one tap from Photos — never "saved" before they are
+    island({ kind: b.failed || res.space ? 'warn' : 'good', sticky: true,
+      title: all ? `${made} on your phone` : `${made} ready`,
+      sub: res.space ? `${res.got} on your phone — ${res.space}`
+        : b.failed ? `${b.failed} could not be made — tap Running now for why`
+        : all ? 'Tap Save all to put them in Photos' : 'Save them all to your Photos',
+      action: { label: 'Save all', onClick: () => saveAll(outs, { tapped: true }) } });
+    if (typeof refreshFiles === 'function') { try { refreshFiles(); } catch (e) {} }
   }
   cloud.serverTasks = serverTasks;
   cloud.showServerBatch = showServerBatch;
@@ -613,6 +681,14 @@ let _hideTimer = null;
    * along the bottom did.
    */
   let islandEl = null, islandCur = null, islandTimer = null;
+  /*
+   * ►► A PASSING NOTE NEVER LOSES A BUTTON. ◄◄ "Ready to save · Save Video"
+   * waits for its tap for as long as it takes — and then any note at all
+   * ("Copied", a thumbnail written) took its place, and when the note folded
+   * away the button had gone with it. Now the button is set aside while the
+   * note shows, and comes back when it goes. Only another BUTTON replaces it.
+   */
+  let islandParked = null;
   function islandMount() {
     if (islandEl) return islandEl;
     islandEl = document.createElement('div');
@@ -659,6 +735,8 @@ let _hideTimer = null;
     const el = islandMount();
     const body = el.querySelector('.ci-body');
     const msg = Object.assign({ kind: 'info' }, m);
+    if (msg.sticky && msg.action) islandParked = null;
+    else if (islandCur && islandCur.sticky && islandCur.action && el.classList.contains('on') && islandCur.id !== msg.id) islandParked = islandCur;
     /*
      * The SAME message moving on (a percentage ticking up) changes its words in
      * place — no swap, no spring. Redrawing the capsule for every percent made
@@ -714,10 +792,21 @@ let _hideTimer = null;
   }
   function islandHide(id) {
     if (!islandEl) return;
-    if (id && (!islandCur || islandCur.id !== id)) return;
+    if (id && (!islandCur || islandCur.id !== id)) {
+      if (islandParked && islandParked.id === id) islandParked = null;
+      return;
+    }
     clearTimeout(islandTimer);
+    const was = islandCur;
     islandCur = null;
     islandEl.classList.remove('on');
+    // the note has gone: the button it covered comes back (not the button itself, tapped)
+    const back = islandParked;
+    if (back && back !== was) {
+      islandParked = null;
+      clearTimeout(islandHide._back);
+      islandHide._back = setTimeout(() => { if (!islandCur) island(back); }, 280);
+    } else if (back === was) islandParked = null;
   }
   window.__island = island;
   window.__islandHide = islandHide;
@@ -727,6 +816,7 @@ let _hideTimer = null;
 
   function showOverlay(msg) {
     clearTimeout(_hideTimer); _hideTimer = null;
+    clearOverlaySave();   // the last export's "Save to Photos" card never greets the next job
     const m = $('#overlayMsg'); if (m) m.textContent = msg || 'Working…';
     const b = $('#progressBar'); if (b) b.style.width = '0%';
     const n = $('#overlayPct'); if (n) n.textContent = '0%';
@@ -747,6 +837,7 @@ let _hideTimer = null;
   }
   function hideOverlay() {
     clearTimeout(_hideTimer); _hideTimer = null;
+    clearOverlaySave();
     const o = $('#overlay'); if (o) { o.classList.add('hidden'); o.classList.remove('on-top'); }
     setJobBatch(null);
     showCancel(null);
@@ -811,11 +902,40 @@ let _hideTimer = null;
    * pull down — and the first one announces itself, because "where did it go"
    * is the question a phone always has.
    */
+  /*
+   * This one was never actually called until now: tasks.js, loaded after this
+   * file, replaced it with the desk's (toast "Saved", then shell.showItem —
+   * here, a download under a second bar of its own). The exports that run as a
+   * task now bring their file down inside their own number (deliverFile) and
+   * never come here; what does come here is the rest — the captions window's
+   * "Save video with captions", Apply effects, the tools, the bulk logo — and
+   * on a phone each of those is brought down in the SAME overlay it was made
+   * in, ending on the same "Save to Photos" button. Anywhere else (a computer's
+   * browser) it is the ordinary download it has always been.
+   */
   function finishedFile(p) {
     const name = String(p).split(/[\\/]/).pop();
     if (!cloud.downloads.some((d) => d.path === p)) cloud.downloads.unshift({ path: p, name, at: Date.now() });
     renderDownloadCount();
-    toast('✅ Saved on the studio machine: ' + name + ' — tap ⬇ Saved to put it on this device.', 'good', 6000);
+    if (canSaveHere() && /\.[A-Za-z0-9]{2,5}$/.test(name)) {
+      const jid = 'deliver_' + newJobId();
+      showOverlay('📲 Getting it onto your phone…');
+      showCancel(jid);
+      deliverFile(p, {
+        copyShare: null,
+        say: (m) => { const el = $('#overlayMsg'); if (el) el.textContent = m; },
+        progress: (pc) => setProgress(Math.min(99, pc)),
+        background: () => false,
+        stopped: () => _cancelledJobs.has(jid),
+      }).then((r) => {
+        _cancelledJobs.delete(jid);
+        hideOverlay();
+        if (r && r.show) r.show();
+      });
+      return;
+    }
+    toast('✅ Saved: ' + name, 'good');
+    setTimeout(() => offerDownload(p), 400);
   }
   window.finishedFile = finishedFile;
   // 🖼️ the thumbnail written beside an export: on the Saved list too, to save to Photos
@@ -1493,8 +1613,19 @@ let _hideTimer = null;
    * kept as a Blob (WebKit keeps those out of the page's memory) and the file
    * is put together from them.
    */
+  /*
+   * `opts.stopped()` — the export this download is the last part of was
+   * cancelled (or stopped from the jobs sheet): no new piece is asked for, the
+   * ones on their way are let go, and it ends as an AbortError, the same thing
+   * a closed share sheet is — "not saved", never "something went wrong".
+   * `opts.hold`: a Save all's file, kept on the phone until it has gone to
+   * Photos (see ONE SAVE NEVER WIPES ANOTHER).
+   */
   async function fetchForSaving(p, name, size, onPct, opts) {
     const url = downloadUrl(p);
+    const stopped = () => !!(opts && typeof opts.stopped === 'function' && opts.stopped());
+    const halt = () => { const e = new Error('Stopped'); e.name = 'AbortError'; return e; };
+    if (stopped()) throw halt();
     let total = Number(size) || 0;
     if (!total) {
       const r = await fetch(url, { headers: { Range: 'bytes=0-0' } });
@@ -1521,7 +1652,7 @@ let _hideTimer = null;
      * own storage on the phone the moment it arrives and let go, and the share
      * sheet is handed that file — a few MB of memory whatever the size.
      */
-    const disk = await diskSaver(nice, total, !(opts && opts.keep));
+    const disk = await diskSaver(nice, total, !!(opts && opts.hold));
     if (!disk && total > MEMORY_MAX) {
       const e = new Error('This phone cannot hold a video this big for saving from inside the app.');
       e.code = 'TOO_BIG';
@@ -1534,15 +1665,18 @@ let _hideTimer = null;
       for (let tries = 0; ; tries++) {
         const ac = new AbortController();
         const timer = setTimeout(() => ac.abort(), 25000);
+        // a Cancel lets go of the pieces already on their way, not only the next one
+        const watch = opts && opts.stopped ? setInterval(() => { if (stopped()) ac.abort(); }, 250) : null;
         try {
           const r = await fetch(url, { headers: { Range: `bytes=${a}-${b}` }, signal: ac.signal, cache: 'no-store' });
           if (!(r.status === 206 || (r.status === 200 && n === 1))) throw new Error('HTTP ' + r.status);
           const blob = await r.blob();
           if (blob.size !== b - a + 1) throw new Error('short piece');
-          clearTimeout(timer);
+          clearTimeout(timer); clearInterval(watch);
           return blob;
         } catch (e) {
-          clearTimeout(timer);
+          clearTimeout(timer); clearInterval(watch);
+          if (stopped()) throw halt();
           if (tries >= 5) throw e;
           await new Promise((res) => setTimeout(res, 800 * (tries + 1)));
         }
@@ -1550,6 +1684,7 @@ let _hideTimer = null;
     };
     const worker = async () => {
       while (next < n) {
+        if (stopped()) throw halt();
         const i = next++;
         const blob = await one(i);
         if (disk) await disk.write(i * CHUNK, blob); else parts[i] = blob;
@@ -1568,8 +1703,11 @@ let _hideTimer = null;
       throw e;
     }
     if (disk) {
-      const f = await disk.finish();
-      return f.type ? f : new File([f], nice, { type });
+      let f;
+      try { f = await disk.finish(); } catch (e) { disk.abort(); throw e; }
+      const file = f.type ? f : new File([f], nice, { type });
+      saveFolderOf.set(file, disk.dir);
+      return file;
     }
     return new File(parts, nice, { type });
   }
@@ -1577,12 +1715,52 @@ let _hideTimer = null;
   /* Past this, a video is only ever saved through the phone's storage. */
   const MEMORY_MAX = 150 * 1024 * 1024;
   /*
+   * ►► ONE SAVE NEVER WIPES ANOTHER. ◄◄
+   * Every save used to begin by deleting the whole 'mw-saves' folder — "one
+   * save at a time". Once an export brings its file down by itself, two of
+   * them finishing together (or a Save tapped in Files while an export is
+   * bringing its own down) is ordinary, and the second one deleted the file
+   * the first was about to hand to the share sheet.
+   *
+   * So each save writes into a folder of its own (mw-saves/<n>/<name>: the
+   * name stays the plain one the share sheet shows), and what a new save
+   * clears is only what nobody holds any more: not a folder still being
+   * written, and not one still offered behind a "Save Video" button — the
+   * last few of those are kept, so a second tap is instant. A folder is let go
+   * of when its video has gone to Photos (releaseSave), or when it is aborted.
+   */
+  const SAVE_DIR = 'mw-saves';
+  const KEEP_OFFERED = 4;
+  const liveSaves = new Set();       // folders being written, or still offered
+  const offeredSaves = [];           // the finished ones, oldest first
+  const saveFolderOf = new WeakMap(); // a File brought down -> its folder
+  let saveSeq = 0;
+  function releaseSave(file) {
+    const d = file && saveFolderOf.get(file);
+    if (!d) return;
+    liveSaves.delete(d);
+    const k = offeredSaves.indexOf(d); if (k >= 0) offeredSaves.splice(k, 1);
+  }
+  /* Is this File still readable? One kept in memory always is; one on the
+     phone's storage only while its folder has not been let go of. */
+  const saveAlive = (file) => !!file && (!saveFolderOf.has(file) || liveSaves.has(saveFolderOf.get(file)));
+  /* Clear what nobody holds. False when this browser cannot list a folder. */
+  async function sweepSaves(dir) {
+    try {
+      const gone = [];
+      for await (const key of dir.keys()) if (!liveSaves.has(key)) gone.push(key);
+      for (const key of gone) { try { await dir.removeEntry(key, { recursive: true }); } catch (e) { /* still open somewhere: next time */ } }
+      return true;
+    } catch (e) { return false; }
+  }
+  /*
    * A file in the app's private storage on the phone (the Origin Private File
    * System), written piece by piece. Through a writable stream where the
    * browser has one; otherwise from a small worker with a synchronous handle
    * (what older iPhones offer). Null when there is neither, or not the room.
    */
-  async function diskSaver(name, total, fresh = true) {
+  async function diskSaver(name, total, hold = false) {
+    let sub = null;
     try {
       if (!navigator.storage || !navigator.storage.getDirectory) return null;
       try {
@@ -1592,43 +1770,74 @@ let _hideTimer = null;
         }
       } catch (e) { if (e && e.code === 'SPACE') throw e; }
       const root = await navigator.storage.getDirectory();
-      // one save at a time: whatever an earlier one left is cleared first (a
-      // Save all keeps the other videos of the same share beside it)
-      if (fresh) { try { await root.removeEntry('mw-saves', { recursive: true }); } catch (e) {} }
-      const dir = await root.getDirectoryHandle('mw-saves', { create: true });
+      let saves = await root.getDirectoryHandle(SAVE_DIR, { create: true });
+      sub = 's' + (++saveSeq) + '-' + Date.now().toString(36);
+      liveSaves.add(sub);   // before the sweep, so a save started alongside cannot take it
+      // A browser that cannot list a folder cannot sweep one: with nothing else
+      // held it is cleared the old way, whole — or the phone would fill up.
+      if (!(await sweepSaves(saves)) && liveSaves.size === 1) {
+        try { await root.removeEntry(SAVE_DIR, { recursive: true }); } catch (e) {}
+        saves = await root.getDirectoryHandle(SAVE_DIR, { create: true });
+      }
+      const dir = await saves.getDirectoryHandle(sub, { create: true });
       const fh = await dir.getFileHandle(name, { create: true });
+      // finished: offered from now on, and only the last few are kept — unless
+      // it is HELD (a Save all's: kept until it has gone to Photos, releaseSave)
+      const offered = () => {
+        if (hold) return;
+        offeredSaves.push(sub);
+        while (offeredSaves.length > KEEP_OFFERED) liveSaves.delete(offeredSaves.shift());
+      };
+      const drop = () => { liveSaves.delete(sub); };
       if (typeof fh.createWritable === 'function') {
         const w = await fh.createWritable({ keepExistingData: false });
         let chain = Promise.resolve();
         return {
+          dir: sub,
           // one write at a time, in whatever order the pieces arrive (each at its own place)
           write: (pos, blob) => (chain = chain.then(() => w.write({ type: 'write', position: pos, data: blob }))),
-          finish: async () => { await chain; await w.close(); return fh.getFile(); },
-          abort: () => { try { w.abort(); } catch (e) {} },
+          finish: async () => { await chain; await w.close(); offered(); return fh.getFile(); },
+          abort: () => { try { w.abort(); } catch (e) {} drop(); },
         };
       }
-      const src = "let h=null;onmessage=async(e)=>{const d=e.data;try{if(d.op==='open'){const r=await navigator.storage.getDirectory();const dir=await r.getDirectoryHandle('mw-saves',{create:true});const f=await dir.getFileHandle(d.name,{create:true});h=await f.createSyncAccessHandle();h.truncate(0);}else if(d.op==='write'){h.write(new Uint8Array(await d.blob.arrayBuffer()),{at:d.pos});}else if(d.op==='close'){h.flush();h.close();h=null;}postMessage({id:d.id});}catch(err){postMessage({id:d.id,err:String((err&&err.name==='QuotaExceededError'?'quota ':'')+((err&&err.message)||err))});}};";
+      const src = "let h=null;onmessage=async(e)=>{const d=e.data;try{if(d.op==='open'){const r=await navigator.storage.getDirectory();const s=await r.getDirectoryHandle('" + SAVE_DIR + "',{create:true});const dir=await s.getDirectoryHandle(d.dir,{create:true});const f=await dir.getFileHandle(d.name,{create:true});h=await f.createSyncAccessHandle();h.truncate(0);}else if(d.op==='write'){h.write(new Uint8Array(await d.blob.arrayBuffer()),{at:d.pos});}else if(d.op==='close'){h.flush();h.close();h=null;}postMessage({id:d.id});}catch(err){postMessage({id:d.id,err:String((err&&err.name==='QuotaExceededError'?'quota ':'')+((err&&err.message)||err))});}};";
       const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
       const wk = new Worker(url);
       let seq = 0; const pend = new Map();
       wk.onmessage = (e) => { const q = pend.get(e.data.id); pend.delete(e.data.id); if (q) { if (e.data.err) q.rej(new Error(e.data.err)); else q.res(); } };
       const call = (msg) => new Promise((res, rej) => { const id = ++seq; pend.set(id, { res, rej }); wk.postMessage(Object.assign({ id }, msg)); });
-      await call({ op: 'open', name });
+      try { await call({ op: 'open', dir: sub, name }); } catch (e) { wk.terminate(); URL.revokeObjectURL(url); drop(); throw e; }
       return {
+        dir: sub,
         write: (pos, blob) => call({ op: 'write', pos, blob }),
-        finish: async () => { await call({ op: 'close' }); wk.terminate(); URL.revokeObjectURL(url); return fh.getFile(); },
-        abort: () => { try { wk.terminate(); URL.revokeObjectURL(url); } catch (e) {} },
+        finish: async () => { await call({ op: 'close' }); wk.terminate(); URL.revokeObjectURL(url); offered(); return fh.getFile(); },
+        abort: () => { try { wk.terminate(); URL.revokeObjectURL(url); } catch (e) {} drop(); },
       };
     } catch (e) {
+      if (sub) liveSaves.delete(sub);
       if (e && e.code === 'SPACE') throw e;
       return null;
     }
   }
   /*
-   * The file last brought down for saving, kept so a second tap (the share
-   * sheet closed by mistake) does not download hundreds of MB again.
+   * The files last brought down for saving, kept so a second tap (the share
+   * sheet closed by mistake, "Not now" on the card) does not download hundreds
+   * of MB again. A few of them, not one: two exports finishing together each
+   * keep their own (an entry whose file on the phone has since been let go of
+   * is simply fetched again).
    */
-  let saveCache = null;
+  const saveCache = new Map();   // path -> { parts, make }
+  function cachedSave(p) {
+    const c = saveCache.get(p);
+    if (!c) return null;
+    if (c.parts.some((x) => !x.saved && x.file && !saveAlive(x.file))) { saveCache.delete(p); return null; }
+    return c;
+  }
+  function rememberSave(p, entry) {
+    saveCache.delete(p);
+    saveCache.set(p, entry);
+    while (saveCache.size > KEEP_OFFERED) saveCache.delete(saveCache.keys().next().value);
+  }
   /*
    * How a save SHOWS itself. Out of the viewer it is the island; the viewer
    * passes its own (the Save button itself fills up, then becomes "Save to
@@ -1683,7 +1892,8 @@ let _hideTimer = null;
         show.fail('The download kept dropping. Check the signal and try again.');
       };
       try {
-        let parts = saveCache && saveCache.path === p ? saveCache.parts : null;
+        const cached = cachedSave(p);
+        let parts = cached ? cached.parts : null;
         let make = 0;
         if (!parts) {
           let list = [{ path: p, size: Number(size) || 0 }];
@@ -1712,15 +1922,23 @@ let _hideTimer = null;
            * download the rest; with no copy to make, the download is all of it.
            */
           // (a copy already made is no copy to make: the download is the whole bar)
-          make = needed && !ready ? MAKE_SHARE : 0;
+          // An export bringing its own file down says how much of ITS number the
+          // copy is (ui.makeShare — see deliverFile); a Save on its own is 75/25.
+          make = needed && !ready ? (ui && ui.makeShare != null ? ui.makeShare : MAKE_SHARE) : 0;
           if (needed) {
             if (make) show.making(0, quality);
             const jobId = 'pc' + Date.now().toString(36);
-            const off = window.api.onJobProgress((d) => { if (make && d && d.jobId === jobId) show.making(Math.round((Math.min(99, d.percent || 0) * MAKE_SHARE) / 100), quality); });
+            const off = window.api.onJobProgress((d) => { if (make && d && d.jobId === jobId) show.making(Math.round((Math.min(99, d.percent || 0) * make) / 100), quality); });
+            /*
+             * Cancel while the copy is being made: stop WAITING for it. The copy
+             * itself carries on at the studio and is kept there, so the next
+             * Save of this video finds it made and goes straight to the download.
+             */
             try {
-              const got = await call('video:phoneCopy', { input: p, jobId, quality });
+              const got = await unlessStopped(call('video:phoneCopy', { input: p, jobId, quality }), ui && ui.stopped);
               if (got && Array.isArray(got.parts) && got.parts.length) list = got.parts;
             } catch (e) {
+              if (e && e.name === 'AbortError') throw e;
               const c = new Error('The studio could not make a copy for your phone' + (e && e.message ? ' — ' + String(e.message).split('\n')[0].slice(0, 120) : '') + '. Try again.');
               c.code = 'COPY'; throw c;
             } finally { off(); }
@@ -1728,18 +1946,19 @@ let _hideTimer = null;
           const stem = name.replace(/\.[^.]+$/, '');
           parts = list.map((x, i) => ({ path: x.path, size: x.size, file: null, saved: false,
             name: list.length > 1 ? `${stem}-part${i + 1}of${list.length}.mp4` : (x.path === p ? name : stem + '.mp4') }));
-          saveCache = { path: p, parts, make };
-        } else make = saveCache.make || 0;
+          rememberSave(p, { parts, make });
+        } else make = cached.make || 0;
         const n = parts.length;
         const step = async (k) => {
           while (k < n && parts[k].saved) k++;
-          if (k >= n) { saveCache = null; return show.done(n); }
+          if (k >= n) { saveCache.delete(p); return show.done(n); }
           const part = parts[k];
           if (!part.file) {
             // where the whole save has got: the copy's share, then this part's place among the parts
             const whole = (pc) => Math.min(99, Math.round(make + (((k + pc / 100) / n) * (100 - make))));
             show.progress(whole(0), 0, part.size || 0, k, n, make > 0);
-            part.file = await fetchForSaving(part.path, part.name, part.size, (pc, got, total) => show.progress(whole(pc), got, total, k, n, make > 0));
+            part.file = await fetchForSaving(part.path, part.name, part.size, (pc, got, total) => show.progress(whole(pc), got, total, k, n, make > 0),
+              { stopped: ui && ui.stopped });
           }
           if (!navigator.canShare({ files: [part.file] })) {
             show.fail('This phone cannot save it from here — opening it in the player');
@@ -1756,7 +1975,7 @@ let _hideTimer = null;
            * leaves "Save Video" out.
            */
           const share = () => navigator.share({ files: [part.file] }).then(() => {
-            part.saved = true; part.file = null;
+            part.saved = true; releaseSave(part.file); part.file = null;
             step(k + 1).catch(failed);
           }, (e) => {
             if (e && e.name === 'AbortError') return show.cancelled(share, k, n);
@@ -1780,6 +1999,208 @@ let _hideTimer = null;
     a.click();
     a.remove();
     if (ui && ui.browser) ui.browser();
+  }
+
+  /*
+   * ►► AN EXPORT ENDS ON THE PHONE, NOT ON THE STUDIO. ◄◄
+   *
+   * Tapping Export on an iPhone used to run one bar to 100%, close it, say
+   * "Saved" — and only then start bringing the file down, under a second bar
+   * of its own in the island ("Saving to your phone… 0%"). Measured on a 20 s
+   * edit: the export's 100% at 3.6 s, "Saved" at 3.8 s, the second bar from
+   * 4.3 s. That second bar was not even meant: the desk's finishedFile, which
+   * replaced this page's, opened the file 400 ms after every export, and here
+   * "open the file" is "download it".
+   *
+   * Now the download IS the end of the export. tasks.js plans it as the last
+   * slices of the export's own chain (__deliverPlan says how much of the work it
+   * is) and runs it inside the task (__deliverFile does it), so the one number
+   * the operator is watching carries on from the encode to "on your phone" —
+   * in the overlay, or on the chip and the jobs sheet for an export sent to
+   * the background — with the same Cancel and ⇥ Run in the background.
+   *
+   * What it CANNOT do is the last step: the share sheet opens only straight
+   * after a tap, and a download has long used that tap up. So it ends on a
+   * "Save to Photos" button where the export was being watched (the overlay
+   * becomes it), or "Ready to save · Save Video" in the island for one that
+   * ran in the background. Nothing here says "Saved" until Photos has it.
+   *
+   * The desk, and a browser that cannot share files, plan nothing and deliver
+   * nothing: their exports end exactly as before.
+   */
+  const canSaveHere = () => onPhone() && !!navigator.canShare && !!navigator.share;
+  /*
+   * How big the export will roughly be — only to decide whether a phone copy
+   * will be needed (over PHONE_PART_MAX) and so how the last slices of the bar
+   * are shared out. The exports are constant-quality, so this is a guess; a
+   * wrong one changes the PACE of the end of the bar, never where it ends:
+   *   • a copy planned but not needed: the download is spread over both slices;
+   *   • a copy needed but not planned: it rides inside the download's slice,
+   *     split as a Save on its own splits it (MAKE_SHARE).
+   */
+  const KBPS_GUESS = { '480p': 2500, '720p': 4500, '1080p': 8000, '4k': 30000 };
+  window.__deliverPlan = ({ durationSec, quality } = {}) => {
+    if (!canSaveHere()) return [];
+    const bytes = (Number(durationSec) || 0) * (KBPS_GUESS[quality] || KBPS_GUESS['1080p']) * 125;
+    return bytes > PHONE_PART_MAX ? ['phonecopy', 'tophone'] : ['tophone'];
+  };
+  /**
+   * Bring a finished export onto this phone, reporting into the caller's own
+   * number. `hooks`:
+   *   copyShare   — how much of the delivery's 0-100 the phone copy is (null: MAKE_SHARE)
+   *   say(msg)    — the words under the number
+   *   progress(n) — 0-100 of the whole delivery
+   *   background()— is the export being watched, or running behind the studio?
+   *   stopped()   — Cancel / Stop was pressed
+   * Resolves with { show, ready: true } once the first (or only) part is on the
+   * phone — show() puts up the tap the share sheet needs — or with { show,
+   * ready: false } when it is not (stopped, no room, no signal: show() says so);
+   * null when this is not a phone that can save from the app.
+   */
+  function deliverFile(p, hooks) {
+    if (!p || !canSaveHere()) return Promise.resolve(null);
+    const name = String(p).split(/[\\/]/).pop();
+    if (!/\.[A-Za-z0-9]{2,5}$/.test(name)) return Promise.resolve(null);
+    const mb = (b) => Math.max(1, Math.round(b / 1048576)) + ' MB';
+    return new Promise((resolve) => {
+      let after = null, settled = false, copied = false;
+      const settle = (show, ready = false) => { if (!settled) { settled = true; resolve({ show, ready }); } };
+      // Where the save goes on once the export is over: the card where it was
+      // watched, or the island for one that ran in the background. "Keep
+      // editing" on the card hands the rest of it to the island.
+      const fin = () => after || (after = hooks.background()
+        ? islandSaveUi(name)
+        : overlaySaveUi(name, { onLater: () => { after = islandSaveUi(name); } }));
+      const share0 = () => (copied ? (hooks.copyShare != null ? hooks.copyShare : MAKE_SHARE) : 0);
+      const ui = {
+        makeShare: hooks.copyShare,
+        stopped: hooks.stopped,
+        making: (pc, q) => {
+          if (settled) return fin().making(pc, q);
+          copied = true;
+          hooks.say(`📲 Making a ${q === 'fast' ? '720p' : '1080p'} copy your iPhone can save…`);
+          hooks.progress(pc);
+        },
+        progress: (pc, got, total, k, n, two) => {
+          // a later part, after the first went to Photos: the export is long over
+          if (settled) return fin().progress(pc, got, total, k, n, two);
+          // THIS part only: the export is done when part 1 is on the phone
+          const b = share0(), part = total ? Math.min(1, got / total) : 0;
+          hooks.say(`📲 Getting it onto your phone${n > 1 ? ` (part 1 of ${n})` : ''}${total && got ? ` — ${mb(got)} of ${mb(total)}` : '…'}`);
+          hooks.progress(b + part * (100 - b));
+        },
+        ready: (share, k, n) => (settled ? fin().ready(share, k, n) : settle(() => fin().ready(share, k, n), true)),
+        cancelled: (share, k, n) => fin().cancelled(share, k, n),
+        done: (n) => fin().done(n),
+        fail: (msg) => (settled ? fin().fail(msg) : settle(() => island({ kind: 'warn', title: 'Your video is made — it could not come to the phone',
+          sub: `${msg} It’s in ⬇ Saved.`, ms: 9000 }))),
+      };
+      hooks.say('📲 Getting it onto your phone…');
+      offerDownload(p, 0, ui).catch(() => {}).then(() => settle(() => island({ kind: 'info', title: 'Not on your phone yet',
+        sub: 'Your video is made — save it from ⬇ Saved whenever you like', ms: 6000 })));
+    });
+  }
+  window.__deliverFile = deliverFile;
+
+  /*
+   * ►► THE LAST TAP, WHERE THE EXPORT WAS WATCHED. ◄◄
+   * The overlay that counted the export to 100% becomes the button that puts
+   * it in Photos — the thumb is already there, the eye is already there. The
+   * same interface as islandSaveUi and the viewer's, so offerDownload drives
+   * all three alike. Save to Photos calls the share sheet INSIDE the tap,
+   * nothing awaited first: that tap is the user activation iOS demands.
+   */
+  const OV_TICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
+  function clearOverlaySave() {
+    const o = $('#overlay'); if (!o) return;
+    o.classList.remove('ov-ready', 'ov-save');
+    o.querySelectorAll('.overlay-save-acts, .overlay-tick').forEach((x) => x.remove());
+  }
+  function overlaySaveUi(name, opts = {}) {
+    const o = $('#overlay'), box = o && o.querySelector('.overlay-box');
+    if (!o || !box) return islandSaveUi(name);
+    const mb = (b) => (b >= 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : Math.max(1, Math.round(b / 1048576)) + ' MB');
+    let share = null, acts = null;
+    // a headline and what to do next, or (while it is still coming) one line
+    const msg = (t, sub) => {
+      const m = $('#overlayMsg'); if (!m) return;
+      if (sub) m.innerHTML = `<b class="ov-title">${escHtml(t)}</b><span class="ov-sub">${escHtml(sub)}</span>`;
+      else m.textContent = t;
+    };
+    const close = () => { clearOverlaySave(); hideOverlay(); };
+    function onTap(e) {
+      const b = e.target.closest('[data-ov]'); if (!b) return;
+      if (b.dataset.ov === 'save') {
+        if (!share) return;
+        const f = share; share = null;
+        b.disabled = true;
+        b.querySelector('span').textContent = 'Opening…';
+        f();
+        return;
+      }
+      // "Not now" (or "Keep editing" while a later part comes down): the file
+      // stays on the phone, and a Save from ⬇ Saved later is instant.
+      const waiting = !!share;
+      share = null;
+      close();
+      if (opts.onLater) opts.onLater();
+      if (waiting) island({ kind: 'info', title: 'It’s in ⬇ Saved', sub: 'Save it to Photos from there whenever you like', ms: 5000 });
+    }
+    // Take the overlay over: no Cancel, no ⇥ — the export is finished.
+    const mount = () => {
+      clearTimeout(_hideTimer); _hideTimer = null;
+      o.classList.toggle('on-top', !!document.querySelector('#capModal:not(.hidden)'));
+      o.classList.remove('hidden');
+      o.classList.add('ov-save');
+      setJobBatch(null);
+      showCancel(null);
+      const bg = $('#overlayBackground'); if (bg) { bg.classList.add('hidden'); bg.onclick = null; }
+      if (!acts || !acts.isConnected) {
+        clearOverlaySave();
+        o.classList.add('ov-save');
+        const tick = document.createElement('div');
+        tick.className = 'overlay-tick';
+        tick.innerHTML = OV_TICK;
+        box.insertBefore(tick, box.firstChild);
+        acts = document.createElement('div');
+        acts.className = 'overlay-save-acts';
+        acts.innerHTML = `<button type="button" class="overlay-save" data-ov="save">${mi('download')}<span>Save to Photos</span></button>`
+          + '<button type="button" class="overlay-later" data-ov="later">Not now</button>';
+        acts.addEventListener('click', onTap);
+        box.appendChild(acts);
+      }
+      return acts;
+    };
+    const ready = (sh, title, sub, label) => {
+      share = sh;
+      const a = mount();
+      o.classList.add('ov-ready');
+      setProgress(100);
+      msg(title, sub);
+      const b = a.querySelector('[data-ov="save"]');
+      b.disabled = false;
+      b.querySelector('span').textContent = label;
+      a.querySelector('[data-ov="later"]').textContent = 'Not now';
+      try { if (navigator.vibrate) navigator.vibrate(15); } catch (e) {}
+    };
+    const busy = (pc, text) => {
+      share = null;
+      const a = mount();
+      o.classList.remove('ov-ready');
+      setProgress(pc);
+      msg(text);
+      a.querySelector('[data-ov="later"]').textContent = 'Keep editing';
+    };
+    const label = (k, n) => (n > 1 ? `Save part ${k + 1} of ${n}` : 'Save to Photos');
+    return {
+      making: (pc, q) => busy(pc, `📲 Making a ${q === 'fast' ? '720p' : '1080p'} copy your iPhone can save…`),
+      progress: (pc, got, total, k, n) => busy(pc, `📲 Getting ${n > 1 ? `part ${k + 1} of ${n}` : 'it'} onto your phone${total && got ? ` — ${mb(got)} of ${mb(total)}` : '…'}`),
+      ready: (sh, k, n) => ready(sh, n > 1 ? `Part ${k + 1} of ${n} is on your phone` : 'Your video is ready',
+        `Tap “${label(k, n)}”, then choose “Save Video”.`, label(k, n)),
+      cancelled: (sh, k, n) => ready(sh, 'Not saved yet', `Tap “${label(k, n)}”, then choose “Save Video”.`, label(k, n)),
+      done: (n) => { close(); island({ kind: 'good', title: 'Saved to Photos', sub: n > 1 ? `All ${n} parts — find them in your Photos` : 'Find it in your Photos (or Files, if you chose that)', ms: 4500 }); },
+      fail: (m) => { close(); island({ kind: 'warn', title: 'Could not save it', sub: m, ms: 8000 }); },
+    };
   }
 
   /*
@@ -1915,12 +2336,206 @@ let _hideTimer = null;
       return n;
     } catch (e) { return 0; }
   }
-  function saveAll(paths) {
-    const items = (paths || []).filter((p) => /\.(mp4|mov|m4v)$/i.test(String(p))).map((p) => ({
-      path: p, name: String(p).split(/[\\/]/).pop(), size: (findFile(p) || {}).size || 0, state: 'wait', pct: 0,
-    }));
+  /*
+   * The shorts of a Save all, brought down ahead of the tap — by an Export all
+   * started on this phone (bringBatchDown), or by an earlier Save all whose
+   * share sheet was never finished. Each is kept on the phone's storage until
+   * it has gone to Photos, so the tap that saves them is instant. Only one
+   * batch's worth is kept: a new Export all lets go of the last one's.
+   */
+  const prefetched = new Map();   // path -> [{ file, size, saved }]
+  function dropPrefetched() {
+    for (const parts of prefetched.values()) for (const x of parts) if (!x.saved) releaseSave(x.file);
+    prefetched.clear();
+  }
+  /* The parts of this short already on the phone, or null — one let go of means fetch it again. */
+  function partsOnPhone(p) {
+    const parts = prefetched.get(p);
+    if (!parts) return null;
+    if (parts.some((x) => !x.saved && !saveAlive(x.file))) { parts.forEach((x) => releaseSave(x.file)); prefetched.delete(p); return null; }
+    return parts;
+  }
+  const saveItemsOf = (paths) => (paths || []).filter((p) => /\.(mp4|mov|m4v)$/i.test(String(p))).map((p) => ({
+    path: p, name: String(p).split(/[\\/]/).pop(), size: (findFile(p) || {}).size || 0, parts: null, done: false,
+  }));
+  async function sizeItems(items) { for (const it of items) if (!it.size) it.size = await sizeOnServer(it.path); }
+  /* Wait for `work`, unless `stopped()` turns true first — then it is an AbortError. */
+  function unlessStopped(work, stopped) {
+    if (typeof stopped !== 'function') return work;
+    let poll = null;
+    const gaveUp = new Promise((resolve, reject) => {
+      poll = setInterval(() => { if (stopped()) { const e = new Error('Stopped'); e.name = 'AbortError'; reject(e); } }, 300);
+    });
+    return Promise.race([work, gaveUp]).finally(() => clearInterval(poll));
+  }
+  /*
+   * ►► ONE NUMBER FOR A WHOLE SAVE ALL. ◄◄
+   * The button read "Downloading 2 of 5 · 37%" with the fill at THAT short's
+   * 37% — so it ran to the end and back to nothing five times. It is now the
+   * whole save, weighted by bytes: a 90 MB short is three times the work of a
+   * 30 MB one. A short that needs a phone copy first is the same weight, its
+   * copy the first MAKE_SHARE of it, as for one video. A short that could not
+   * be got counts as done, so the number never waits on it.
+   */
+  function saveMeter(items) {
+    const known = items.filter((it) => it.size > 0);
+    const avg = known.length ? known.reduce((n, it) => n + it.size, 0) / known.length : 1;
+    const w = items.map((it) => (it.size > 0 ? it.size : avg));
+    const W = w.reduce((a, b) => a + b, 0) || 1;
+    const f = items.map(() => 0);
+    return {
+      set(i, v) { f[i] = Math.max(f[i], Math.max(0, Math.min(1, Number(v) || 0))); },
+      pct() { let n = 0; for (let i = 0; i < f.length; i++) n += w[i] * f[i]; return Math.min(100, Math.floor((n / W) * 100)); },
+    };
+  }
+  /**
+   * Bring one short of a Save all onto the phone: its phone copy first when it
+   * is too big for a share on its own (1080p, as for one video), then each part.
+   * `o`: meter, say(text, kind, got, total), stopped, beforePart(part) (a
+   * chance to share what is waiting before more comes down), afterPart(entry).
+   * Every file is held (not swept) until it has gone to Photos — releaseSave.
+   */
+  async function fetchShort(it, i, o) {
+    const mb = (b) => Math.max(1, Math.round(b / 1048576)) + ' MB';
+    let parts = [{ path: it.path, size: it.size }];
+    let make = 0;
+    if (!it.size || it.size > PHONE_PART_MAX) {
+      const stt = await call('video:phoneCopyStatus', { input: it.path }).catch(() => null);
+      if (!stt || stt.needed !== false) {
+        make = stt && stt.hd && stt.hd.ready ? 0 : MAKE_SHARE / 100;
+        const jobId = 'pc' + Date.now().toString(36) + i;
+        const off = window.api.onJobProgress((d) => {
+          if (!d || d.jobId !== jobId) return;
+          const pc = Math.round(d.percent || 0);
+          o.meter.set(i, (make * pc) / 100);
+          o.say(`Making a phone copy… ${pc}%`, 'copy');
+        });
+        o.say('Making a phone copy…', 'copy');
+        try {
+          const got = await unlessStopped(call('video:phoneCopy', { input: it.path, jobId }), o.stopped);
+          if (got && got.parts && got.parts.length) parts = got.parts;
+        } finally { off(); }
+      }
+    }
+    const stem = it.name.replace(/\.[^.]+$/, '');
+    for (const part of parts) if (!part.size) part.size = await sizeOnServer(part.path);   // the bundle's limit needs every size
+    const bytes = parts.reduce((n, x) => n + (x.size || 0), 0) || 1;
+    const out = [];
+    let before = 0;
+    try {
+      for (let k = 0; k < parts.length; k++) {
+        const part = parts[k];
+        const nm = parts.length > 1 ? `${stem}-part${k + 1}of${parts.length}.mp4` : (part.path === it.path ? it.name : stem + '.mp4');
+        if (o.beforePart) await o.beforePart(part);
+        o.say('Downloading…', 'down', 0, part.size || 0);
+        const file = await fetchForSaving(part.path, nm, part.size, (pc, got, tot) => {
+          o.meter.set(i, make + (1 - make) * ((before + got) / bytes));
+          o.say(`Downloading ${pc}%${tot ? ' · ' + mb(got) + ' of ' + mb(tot) : ''}`, 'down', got, tot);
+        }, { hold: true, stopped: o.stopped });
+        before += part.size || file.size;
+        const entry = { file, size: file.size, saved: false, i };
+        out.push(entry);
+        if (o.afterPart) await o.afterPart(entry);
+      }
+    } catch (e) { if (e && typeof e === 'object') e.parts = out; throw e; }
+    o.meter.set(i, 1);
+    return out;
+  }
+  /*
+   * The last 15% of an Export all started on this phone (see ►► EXPORT ALL
+   * ENDS ON THE PHONE TOO): every short onto the phone's storage, one after
+   * another, reported as one bytes-weighted number. A full phone stops it —
+   * whatever did not fit is fetched by the Save all panel when it is tapped.
+   */
+  async function prefetchShorts(paths, { stopped, progress }) {
+    const mb = (b) => Math.max(1, Math.round(b / 1048576)) + ' MB';
+    dropPrefetched();
+    const items = saveItemsOf(paths);
+    await sizeItems(items);
+    const meter = saveMeter(items);
+    const N = items.length;
+    let got = 0, space = null;
+    for (let i = 0; i < N; i++) {
+      if (stopped()) break;
+      const it = items[i];
+      try {
+        const parts = await fetchShort(it, i, {
+          meter, stopped,
+          say: (text, kind, g, t) => progress(meter.pct(), kind === 'copy'
+            ? `📲 Making a phone copy of short ${i + 1} of ${N}…`
+            : `📲 Getting short ${i + 1} of ${N} onto your phone${t && g ? ` — ${mb(g)} of ${mb(t)}` : '…'}`),
+        });
+        prefetched.set(it.path, parts);
+        got++;
+      } catch (e) {
+        ((e && e.parts) || []).forEach((x) => releaseSave(x.file));
+        meter.set(i, 1);
+        if (e && e.code === 'SPACE') { space = e.message; break; }
+        if (e && e.name === 'AbortError') break;
+      }
+      progress(meter.pct());
+    }
+    return { got, space };
+  }
+  /*
+   * The parts that can go to the share sheet straight away, in order: what is
+   * already on the phone from the first short not yet saved, up to one share's
+   * worth (PHONE_PART_MAX). Empty when the first short still has to come down.
+   */
+  function firstBundleOf(items) {
+    const b = [];
+    let bytes = 0;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it.done) continue;
+      if (!it.parts) break;
+      for (const x of it.parts) {
+        if (x.saved) continue;
+        if (b.length && bytes + x.size > PHONE_PART_MAX) return b;
+        x.i = i; b.push(x); bytes += x.size;
+      }
+    }
+    if (b.length > 1 && !navigator.canShare({ files: b.map((x) => x.file) })) return b.slice(0, 1);
+    return b;
+  }
+  /**
+   * Save all. `opts.tapped`: this call is the tap itself (an island's Save all,
+   * a button), so whatever is already on the phone goes to the share sheet in
+   * this very tap — no second "are you sure" tap for files that are ready.
+   */
+  function saveAll(paths, opts = {}) {
+    const items = saveItemsOf(paths);
     if (!items.length) return;
-    if (!(onPhone() && navigator.canShare && navigator.share)) { items.forEach((it) => offerDownload(it.path)); return; }
+    if (!canSaveHere()) { items.forEach((it) => offerDownload(it.path)); return; }
+    for (const it of items) {
+      it.parts = partsOnPhone(it.path);
+      if (it.parts && it.parts.length && it.parts.every((x) => x.saved)) it.done = true;
+    }
+    // The share sheet, FIRST — inside the tap, before anything is awaited.
+    let first = null;
+    if (opts.tapped) {
+      const fb = firstBundleOf(items);
+      if (fb.length) first = { bundle: fb, sharing: navigator.share({ files: fb.map((x) => x.file) }) };
+    }
+    const left = items.filter((it) => !it.done);
+    /*
+     * Everything was on the phone and fitted in that one share: there is no
+     * panel to show — the share sheet is the whole of it.
+     */
+    if (first && left.every((it) => it.parts && it.parts.every((x) => x.saved || first.bundle.includes(x)))) {
+      const n = left.length;
+      first.sharing.then(() => {
+        first.bundle.forEach((x) => { x.saved = true; releaseSave(x.file); });
+        left.forEach((it) => prefetched.delete(it.path));
+        island({ kind: 'good', title: n > 1 ? `All ${n} saved to Photos` : 'Saved to Photos', sub: 'Find them in your Photos', ms: 4500 });
+      }, (e) => {
+        if (e && (e.name === 'AbortError' || e.name === 'NotAllowedError')) {
+          island({ kind: 'info', title: 'Not saved yet', sub: `${n} video${n > 1 ? 's' : ''} on your phone`, sticky: true,
+            action: { label: 'Save all', onClick: () => saveAll(paths, { tapped: true }) } });
+        } else saveAll(paths);
+      });
+      return;
+    }
     const panel = openPanel({ id: 'cloudSaveAll', title: `Save ${items.length} video${items.length > 1 ? 's' : ''}`, cls: 'cp-saveall' });
     panel.body.innerHTML = '<div class="sa-list">' + items.map((it, i) => `<div class="sa-row" data-i="${i}"><span class="sa-pic" data-thumb="${escAttr(it.path)}"></span>`
       + `<span class="sa-tx"><b>${escHtml(it.name)}</b><small></small></span><i class="sa-st"></i></div>`).join('') + '</div>';
@@ -1940,22 +2555,45 @@ let _hideTimer = null;
       label.textContent = text;
       if (fill) fill.style.width = (pc == null ? (state === 'loading' ? 0 : 100) : pc) + '%';
     };
-    items.forEach((it, i) => row(i, it.size ? mb(it.size) : '', ''));
+    items.forEach((it, i) => {
+      if (it.done) row(i, 'Saved ✓', 'done');
+      else if (it.parts) row(i, 'On your phone — ready to save', 'ready');
+      else row(i, it.size ? mb(it.size) : '', '');
+    });
     go('ready', `Save all ${items.length} to Photos`);
     let onTap = null;
     btn.addEventListener('click', () => { if (btn.dataset.state === 'ready' && onTap) { const f = onTap; onTap = null; f(); } });
     const tapThen = (text) => new Promise((resolve) => { go('ready', text); onTap = resolve; try { if (navigator.vibrate) navigator.vibrate(15); } catch (e) {} });
-    const run = async () => {
-      let saved = 0;
-      let bundle = [];            // { file, i, size }
-      let bundleBytes = 0;
+    const run = async (first) => {
       const total = items.length;
+      let cur = 0;
+      let bundle = [];            // { file, i, size, saved }
+      let bundleBytes = 0;
+      // gone to Photos: let go of the files, and tick off every short now complete
+      const shared = (g) => {
+        g.forEach((b) => { b.saved = true; releaseSave(b.file); });
+        items.forEach((it, i) => {
+          if (it.done || !it.parts || !it.parts.length || !it.parts.every((x) => x.saved)) return;
+          it.done = true; prefetched.delete(it.path); row(i, 'Saved ✓', 'done');
+        });
+      };
+      if (first) {
+        go('sharing', 'Opening…');
+        try { await first.sharing; shared(first.bundle); }
+        catch (e) {
+          // closed, or not allowed: they wait for a tap below like any other
+          if (!(e && (e.name === 'AbortError' || e.name === 'NotAllowedError'))) first.bundle.forEach((b) => row(b.i, 'The share sheet would not open', 'fail'));
+        }
+      }
+      await sizeItems(items);
+      const meter = saveMeter(items);
+      items.forEach((it, i) => { if (it.done || it.parts) meter.set(i, 1); });
+      const paint = () => { const pc = meter.pct(); go('loading', `Saving ${Math.min(total, cur + 1)} of ${total} · ${pc}%`, pc); };
       // one share: needs its own tap; cancelled → the same button again
-      const flush = async (last) => {
+      const flush = async () => {
         if (!bundle.length) return;
-        let files = bundle.map((b) => b.file);
-        if (files.length > 1 && !navigator.canShare({ files })) files = null;
-        const groups = files ? [bundle] : bundle.map((b) => [b]);
+        const files = bundle.map((b) => b.file);
+        const groups = files.length > 1 && !navigator.canShare({ files }) ? bundle.map((b) => [b]) : [bundle];
         for (const g of groups) {
           const n = g.length;
           for (;;) {
@@ -1963,58 +2601,56 @@ let _hideTimer = null;
             go('sharing', 'Opening…');
             try {
               await navigator.share({ files: g.map((b) => b.file) });
+              shared(g);
               break;
             } catch (e) {
               if (!(e && e.name === 'AbortError')) { g.forEach((b) => row(b.i, 'The share sheet would not open', 'fail')); break; }
             }
           }
-          g.forEach((b) => { b.file = null; row(b.i, 'Saved ✓', 'done'); });
-          saved += new Set(g.map((b) => b.i)).size;
         }
         bundle = []; bundleBytes = 0;
-        void last;
+      };
+      const queue = async (x) => {
+        if (bundle.length && bundleBytes + x.size > PHONE_PART_MAX) await flush();
+        bundle.push(x); bundleBytes += x.size;
       };
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
-        let parts = [{ path: it.path, size: it.size }];
+        cur = i;
+        if (it.done) continue;
         try {
-          if (!it.size) { it.size = await sizeOnServer(it.path); parts[0].size = it.size; }
-          // too big for a share on its own: its phone copy (1080p), as for one video
-          if (!it.size || it.size > PHONE_PART_MAX) {
-            const stt = await call('video:phoneCopyStatus', { input: it.path }).catch(() => null);
-            if (!stt || stt.needed !== false) {
-              const jobId = 'pc' + Date.now().toString(36) + i;
-              const off = window.api.onJobProgress((d) => { if (d && d.jobId === jobId) { row(i, `Making a phone copy… ${Math.round(d.percent || 0)}%`, 'loading'); go('loading', `Preparing ${i + 1} of ${total}`, d.percent || 0); } });
-              row(i, 'Making a phone copy…', 'loading'); go('loading', `Preparing ${i + 1} of ${total}`, 0);
-              try { const got = await call('video:phoneCopy', { input: it.path, jobId }); if (got && got.parts && got.parts.length) parts = got.parts; }
-              finally { off(); }
-            }
+          if (it.parts) {
+            for (const x of it.parts) if (!x.saved) { x.i = i; await queue(x); }
+            continue;
           }
-          const stem = it.name.replace(/\.[^.]+$/, '');
-          for (let k = 0; k < parts.length; k++) {
-            const part = parts[k];
-            const nm = parts.length > 1 ? `${stem}-part${k + 1}of${parts.length}.mp4` : (part.path === it.path ? it.name : stem + '.mp4');
-            if (!part.size) part.size = await sizeOnServer(part.path);   // the bundle's limit needs every size
-            if (bundle.length && bundleBytes + (part.size || 0) > PHONE_PART_MAX) await flush();
-            row(i, 'Downloading…', 'loading');
-            const file = await fetchForSaving(part.path, nm, part.size, (pc, got, tot) => {
-              row(i, `Downloading ${pc}%${tot ? ' · ' + mb(got) + ' of ' + mb(tot) : ''}`, 'loading');
-              go('loading', `Downloading ${i + 1} of ${total} · ${pc}%`, pc);
-            }, { keep: bundle.length > 0 });
-            bundle.push({ file, i, size: file.size });
-            bundleBytes += file.size;
-            row(i, 'On your phone — ready to save', 'ready');
-          }
+          paint();
+          it.parts = await fetchShort(it, i, {
+            meter,
+            say: (text) => { row(i, text, 'loading'); paint(); },
+            // share what is waiting before the next part would make it too big for one share
+            beforePart: async (part) => { if (bundle.length && bundleBytes + (part.size || 0) > PHONE_PART_MAX) await flush(); },
+            afterPart: (x) => { bundle.push(x); bundleBytes += x.size; },
+          });
+          prefetched.set(it.path, it.parts);
+          row(i, 'On your phone — ready to save', 'ready');
         } catch (e) {
+          meter.set(i, 1);
           row(i, (e && e.code === 'SPACE') ? e.message : 'Could not get this one — the rest carry on', 'fail');
         }
       }
-      await flush(true);
+      await flush();
+      const saved = items.filter((it) => it.done).length;
       const failed = items.length - saved;
       go(failed ? 'fail' : 'done', failed ? `Saved ${saved} of ${items.length}` : `All ${items.length} saved ✓`);
       if (!failed) island({ kind: 'good', title: `All ${items.length} saved`, sub: 'Find them in your Photos', ms: 4000 });
     };
-    onTap = () => { run().catch(() => go('fail', 'Something went wrong — try again')); };
+    if (first) { run(first).catch(() => go('fail', 'Something went wrong — try again')); return; }
+    onTap = () => {
+      // already on the phone: this tap opens the share sheet for them
+      const fb = firstBundleOf(items);
+      const now = fb.length ? { bundle: fb, sharing: navigator.share({ files: fb.map((x) => x.file) }) } : null;
+      run(now).catch(() => go('fail', 'Something went wrong — try again'));
+    };
   }
 
   function findFile(p) {
@@ -3394,8 +4030,12 @@ let _hideTimer = null;
   /** The whole job's progress — for a batch, the whole batch, not this short. */
   function overallPct(t) {
     if (t.state !== 'run') return t.state === 'done' ? 100 : t.percent;
+    // an Export all from this phone: making the shorts, then bringing them down (bringBatchDown)
+    const phase = batchSaving.get(t.id);
+    if (phase === 'save') return Math.min(99, (100 - SAVE_SHARE) + (t.percent * SAVE_SHARE) / 100);
     const b = batchOf(t);
-    return b && b.n > 1 ? Math.min(99, ((b.i - 1) + t.percent / 100) / b.n * 100) : t.percent;
+    const made = b && b.n > 1 ? Math.min(99, ((b.i - 1) + t.percent / 100) / b.n * 100) : t.percent;
+    return phase === 'export' ? (made * (100 - SAVE_SHARE)) / 100 : made;
   }
   const clockOf = (ms) => {
     const s = Math.max(0, Math.round(ms / 1000));
@@ -3437,6 +4077,16 @@ let _hideTimer = null;
     renderDownloadCount();
     const n = (t.files || []).length;
     const view = { label: 'View', onClick: openJobsSheet };
+    /*
+     * ►► NEVER OVER A BUTTON SOMEBODY NEEDS. ◄◄ A job that finishes often says
+     * its own last word a moment before this runs — "Ready to save · Save
+     * Video", "3 shorts on your phone · Save all" — and this, one frame later,
+     * replaced it with "Export finished · View". The Save all button of a
+     * server batch never stayed on screen long enough to be seen. A sticky
+     * island with something to tap is the more useful of the two; the chip
+     * still says Done (or Stopped), and the jobs sheet has the rest.
+     */
+    if (islandCur && islandCur.sticky && islandCur.action) return;
     if (t.state === 'done') {
       island({ kind: 'good', title: n > 1 ? `${n} videos ready` : 'Export finished', sub: jobTitle(t), action: view, ms: 8000, id: 'job-' + t.id });
     } else if (t.state === 'fail') {
@@ -3871,6 +4521,8 @@ let _hideTimer = null;
         for (const [bid, tid] of serverTasks) {
           if (tid === taskId) { try { await window.__mwBatch.cancel(bid); } catch (e) {} return true; }
         }
+        // made already, coming down to the phone: Stop stops the download only
+        if (batchStops.has(taskId)) { batchStops.get(taskId)(); return true; }
         return stop(taskId);
       };
     }

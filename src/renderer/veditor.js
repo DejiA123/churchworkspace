@@ -8741,7 +8741,13 @@
   // Where this page shows background exports: the corner on the desk, the
   // progress pill at the top on a phone (the Cloud Studio's shell says so).
   const bgPlace = () => (typeof window.__bgPlace === 'function' && window.__bgPlace()) || 'the corner';
-  function startTask(title) {
+  /*
+   * `deliver` — { durationSec, quality } — is for a page that brings the file to
+   * the device the export was asked from (the Cloud Studio on a phone): the
+   * download becomes the last part of THIS export's number instead of a second
+   * bar after it (tasks.js, DELIVERY). The desk has no such page, and ignores it.
+   */
+  function startTask(title, deliver) {
     if (!window.__newTask) return null;
     const bg = bgExportOn();
     // Backgrounding does not add a second processor. Three encodes at once is
@@ -8751,15 +8757,34 @@
       window.__toast && window.__toast('Two exports are already running behind the studio — this one shares the same processor, '
         + 'so all three will take longer.', '', 8000);
     }
-    return window.__newTask(title, { background: bg });
+    return window.__newTask(title, { background: bg, deliver: deliver || null });
   }
+  /*
+   * Bring the finished file onto the device, as the last slice of the export's
+   * own number — where the page can (see startTask). Null when it cannot, and
+   * the export then ends exactly as it always has.
+   */
+  const deliverTask = async (task, file) => (window.__taskDeliver ? window.__taskDeliver(task, file) : null);
   /**
    * Finished. In front of the operator that means the usual toast and Explorer.
    * Behind them it must NOT: they asked to go and do something else, and a
    * window opening over the Presentation desk mid-service is the opposite of
    * what was wanted. The chip holds the file with a button instead.
+   *
+   * `saved` is what a delivery handed back: the file is already ON the phone,
+   * and the one thing left is the tap the share sheet needs (saved.show puts
+   * "Save to Photos" where the export was being watched). So no "Saved" — it
+   * is not in Photos yet — and no finishedFile, which would start a second
+   * download of the very file that has just arrived.
    */
-  function doneTask(task, file, note) {
+  function doneTask(task, file, note, saved) {
+    if (saved && typeof saved.show === 'function') {
+      const said = saved.ready ? '✅ Your video is ready — tap “Save Video” to put it in Photos.'
+        : '✅ Your video is made — save it to this phone from ⬇ Saved.';
+      if (window.__endTask) window.__endTask(task, { ok: true, file, note: said });
+      saved.show();
+      return file;
+    }
     const inBg = window.__endTask ? window.__endTask(task, { ok: true, file, note }) : false;
     if (!inBg) {
       window.finishedFile(file);
@@ -8897,7 +8922,7 @@
 
   async function exportSegment(id) {
     const s = ve.segments.find((x) => x.id === id); if (!s) return;
-    const task = startTask(`Exporting “${s.label || 'clip'}”`);
+    const task = startTask(`Exporting “${s.label || 'clip'}”`, { durationSec: Math.max(0.1, s.end - s.start), quality: qualityCfg() });
     armExport(s, task);
     /*
      * The text and the captions are the same job — pictures laid on a finished
@@ -8921,9 +8946,11 @@
       if (withCaps) out = await autoCaptionExport(s, out, text);
       else out = await burnTextIntoShort(s, out, null, text);
       out = await finishExport(s, out); // background music, the outro, then its thumbnail
+      // …and onto the phone, when that is where it was asked from
+      const saved = await deliverTask(task, out);
       // Seen to finish, the same as a short inside a batch.
       if (window.__chainDone) await window.__chainDone(task);
-      doneTask(task, out, `✅ Saved “${s.label || 'clip'}”.`);
+      doneTask(task, out, `✅ Saved “${s.label || 'clip'}”.`, saved);
     } catch (e) { failTask(task, e); } finally { disarmExport(s); }
   }
 
@@ -9189,7 +9216,7 @@
     const whole = { id: '__edited', start: span.start, end: span.end, label: 'edited', seed: true, cuts: span.cuts, xfades: span.xfades };
     // The longest export in the app — a whole service — and therefore the one
     // that most needs to be walkable-away-from.
-    const task = startTask(`Saving your edited video (${fmt(span.kept)})`);
+    const task = startTask(`Saving your edited video (${fmt(span.kept)})`, { durationSec: span.kept, quality: qualityCfg() });
     armExport(whole, task);
     /*
      * One number for this export too, on the same terms as a short. Asked up
@@ -9293,8 +9320,9 @@
       if (caps) out = await autoCaptionExport(whole, out, text, size);
       else out = await burnTextIntoShort(whole, out, size, text);
       out = await finishExport(whole, out);
+      const saved = await deliverTask(task, out);   // onto the phone it was asked from, inside the same number
       if (window.__chainDone) await window.__chainDone(task);
-      doneTask(task, out, `✅ Saved your edited video — ${fmt(span.kept)} long.`);
+      doneTask(task, out, `✅ Saved your edited video — ${fmt(span.kept)} long.`, saved);
     } catch (e) { failTask(task, e); /* the modal path already said what went wrong */
     } finally { disarmExport(whole); }
   }

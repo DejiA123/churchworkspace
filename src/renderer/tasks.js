@@ -17,7 +17,9 @@
  * shell already defines — __toast, __showOverlay, __hideOverlay, __setProgress,
  * __showCancel, __jobWasCancelled, plus window.api. They are read at CALL time,
  * never at load time, so this file can be loaded before or after the shell that
- * provides them.
+ * provides them. A shell that can bring a finished export onto the device it
+ * was asked from adds two more, __deliverPlan and __deliverFile (see DELIVERY);
+ * without them nothing is delivered and nothing changes.
  *
  * It is wrapped in an IIFE because it shares global scope with renderer.js, and
  * a bare `const toast` here would collide with the one there.
@@ -67,13 +69,18 @@
   let _fgJobId = null;             // the job the modal overlay is currently showing
   let _dockTimer = null;
 
-  /** Open a task. `background: true` starts it in the dock with no modal at all. */
+  /**
+   * Open a task. `background: true` starts it in the dock with no modal at all.
+   * `deliver` ({ durationSec, quality }) says this export will be brought onto
+   * the device it was asked from once it is made — see DELIVERY below. Nothing
+   * on the desk ever offers to, so there it is simply carried and ignored.
+   */
   function newTask(title, opts = {}) {
     const id = 'task_' + (++_taskSeq) + '_' + Date.now();
     _tasks.set(id, {
       id, title: title || 'Working…', step: '', percent: 0,
       bg: !!opts.background, state: 'run', file: null, files: [], jobId: null,
-      at: Date.now(), endedAt: 0, batch: null,
+      at: Date.now(), endedAt: 0, batch: null, deliver: opts.deliver || null,
     });
     if (opts.background) renderDock();
     return id;
@@ -106,6 +113,7 @@
   /** Close a task: 'done' keeps the chip around with the file, the rest fade it. */
   function endTask(taskId, res = {}) {
     const t = _tasks.get(taskId); if (!t) return false;
+    const held = !t.bg && holdsOverlay(t);
     t.state = res.state || (res.ok === false ? 'fail' : 'done');
     t.file = res.file || null;
     if (t.file && !t.files.includes(t.file)) t.files.push(t.file);
@@ -113,6 +121,9 @@
     t.step = res.note || t.step;
     t.percent = t.state === 'done' ? 100 : t.percent;
     for (const [j, id] of _taskOfJob) if (id === taskId) _taskOfJob.delete(j);
+    // A chain that planned its delivery kept the modal up past its last pass
+    // (see holdsOverlay). Whatever happened since, the export is over: let it go.
+    if (held) hideOverlay();
     if (!t.bg) { _tasks.delete(taskId); renderDock(); return false; }
     // A finished background export has to still be there when the operator looks
     // up — they were told to go and do something else. It waits, with the file.
@@ -159,7 +170,14 @@
     sounds:   10,   // voiceovers and sound effects: -c:v copy as well
     music:    10,   // -c:v copy, so it is cheap
     outro:    10,   // a stream-copy join since v2.71.0
+    // ── the delivery: only ever planned by a shell that brings the file to a phone ──
+    phonecopy: 60,  // the studio making a copy an iPhone can save (a video over 140 MB):
+                    // a veryfast re-encode, measured at ~0.6 of the export's own encode
+    tophone:   25,  // bringing the finished file down onto the phone, in 4 MB pieces
+                    // (a 90 s short is ~70 MB: 15-30 s on 4G, against ~70 s of encode)
   };
+  /* The slices that are the delivery rather than the making. */
+  const DELIVERY = new Set(['phonecopy', 'tophone']);
   /*
    * Attaching the cover picture is deliberately NOT in here. It is not a render —
    * it has no job, no progress and takes a moment — so giving it a slice would
@@ -202,10 +220,23 @@
    */
   const MS_PER_WEIGHT_GUESS = 700;
 
-  /** Start a task's chain. `keys` is the passes this export will run, in order. */
+  /**
+   * Start a task's chain. `keys` is the passes this export will run, in order.
+   *
+   * A task that is to be DELIVERED gets the shell's own last slices on the end
+   * (window.__deliverPlan — the Cloud Studio's: the phone copy when one will be
+   * needed, then the download). The page that knows how a file reaches the
+   * phone is the one that says how much of the work that is; this layer only
+   * makes it part of the same number. No shell that delivers, no tail — the
+   * desk's chains are exactly what they always were.
+   */
   function chainBegin(taskId, keys) {
     const t = _tasks.get(taskId); if (!t) return;
-    const steps = (keys || [])
+    let tail = [];
+    if (t.deliver && typeof window.__deliverPlan === 'function') {
+      try { tail = (window.__deliverPlan(t.deliver) || []).filter((k) => DELIVERY.has(k)); } catch (e) { tail = []; }
+    }
+    const steps = (keys || []).filter((k) => !DELIVERY.has(k)).concat(tail)
       .filter((k) => CHAIN_WEIGHTS[k] > 0)
       .map((k) => ({ key: k, weight: CHAIN_WEIGHTS[k] }));
     t.chain = steps.length
@@ -370,6 +401,99 @@
     if (!t || !t.bg) setProgress(shown);
   }
 
+  /* ======================= DELIVERY: ONTO THE PHONE =======================
+   *
+   * ►► ONE NUMBER FROM THE TAP TO "IT'S ON YOUR PHONE". ◄◄
+   *
+   * On a phone an export is not finished when the studio has written the file —
+   * it is finished when the file is in the operator's hand. It used to count to
+   * 100%, close, say "Saved" (it was not), and THEN start a second bar of its
+   * own in the island at the top: "Saving to your phone… 0%". Two jobs, two
+   * numbers, the second starting from nothing just as the first said "done".
+   *
+   * So the copy an iPhone can save (when the file is too big for the share
+   * sheet) and the download are the LAST SLICES OF THE EXPORT'S OWN CHAIN,
+   * planned up front with the rest (chainBegin) and run here, inside the task:
+   * the same overlay or chip, the same number carrying on, the same Cancel and
+   * ⇥ Run in the background. The shell does the work (window.__deliverFile);
+   * this only places its 0-100 inside the export's.
+   *
+   * Returns what the shell hands back ({ show }) — the one thing still left, the
+   * tap the share sheet insists on — or null when nothing was delivered (no
+   * such shell, nothing planned), in which case the export ends as it always did.
+   */
+  const holdsOverlay = (t) => !!(t && t.chain && t.state === 'run' && t.chain.steps.some((s) => DELIVERY.has(s.key)));
+  async function taskDeliver(taskId, file) {
+    const t = _tasks.get(taskId), c = t && t.chain;
+    if (!t || !c || !file || t.state !== 'run' || typeof window.__deliverFile !== 'function') return null;
+    const tail = c.steps.filter((s) => DELIVERY.has(s.key));
+    if (!tail.length) return null;
+    const tailW = tail.reduce((n, s) => n + s.weight, 0);
+    const copyW = tail[0].key === 'phonecopy' ? tail[0].weight : 0;
+    /*
+     * A stand-in job id, so everything that already knows how to stop a job or
+     * paint a job's creep works on this too: the overlay's ✕ Cancel, ✕ Stop on
+     * the chip (stopTask cancels t.jobId) and the ticker (which only paints the
+     * overlay for the job it is showing). Cancelling an id the server has never
+     * heard of is harmless — jobs.cancel says so.
+     */
+    const jid = 'deliver_' + taskId;
+    t.jobId = jid; _taskOfJob.set(jid, t.id);
+    const say = (msg) => {
+      if (!msg || msg === t.step) return;
+      t.step = msg;
+      if (t.bg) { scheduleDock(); return; }
+      // Words only. showOverlay would put the bar back to 0% under them.
+      const m = $('#overlayMsg'); if (m) m.textContent = msg;
+    };
+    if (!t.bg) {
+      // Synchronously, before anything is awaited: the modal is still up from
+      // the last pass (holdsOverlay), and from here on it is this one's.
+      _fgJobId = jid;
+      const o = $('#overlay');
+      if (o && o.classList.contains('hidden')) { showOverlay(''); setProgress(c.shown); }
+      showCancel(jid);
+      showBackground(taskId);
+    }
+    /*
+     * The shell reports 0-100 of the WHOLE delivery; here that becomes a place
+     * among the export's last slices. A slice is entered only when the number
+     * crosses into it — never per tick, which would throw away the pace the
+     * ticker has learned and send the creep back to the start of the slice.
+     */
+    const at = (whole) => {
+      let u = (Math.max(0, Math.min(99, Number(whole) || 0)) / 100) * tailW;
+      for (let k = 0; k < tail.length; k++) {
+        const s = tail[k];
+        if (u > s.weight && k < tail.length - 1) { u -= s.weight; continue; }
+        if (c.i < 0 || c.steps[c.i].key !== s.key) chainEnter(t, s.key);
+        // 100% means "on your phone": the last bytes arriving are 99 until the
+        // file is whole and ready (then the card or the island says so)
+        const cap = ((0.99 * c.total - c.done) / s.weight) * 100;
+        taskProgress(taskId, Math.min((u / s.weight) * 100, cap));
+        return;
+      }
+    };
+    at(0);
+    try {
+      const got = await window.__deliverFile(file, {
+        copyShare: copyW ? (copyW / tailW) * 100 : null,
+        say,
+        progress: at,
+        background: () => !!t.bg,
+        stopped: () => jobWasCancelled(jid) || t.state !== 'run',
+      });
+      return got || null;
+    } catch (e) {
+      return null;   // the video IS made — a download that failed must never fail the export
+    } finally {
+      _taskOfJob.delete(jid);
+      if (t.jobId === jid) t.jobId = null;
+      cancelledJobs().delete(jid);
+      if (_fgJobId === jid) { _fgJobId = null; showCancel(null); showBackground(null); }
+    }
+  }
+
   /**
    * Move the running chips' numbers and bars where they already are on screen.
    * Returns false if a chip is missing, which means the dock really does need
@@ -522,7 +646,13 @@
         // after the last pass, and the next pass's showOverlay cancels it (which
         // is the whole reason that clearTimeout is the first thing showOverlay
         // does). Skipping it here would leave the modal up for ever.
-        _hideTimer = setTimeout(hideOverlay, 250);
+        //
+        // The one exception is an export with its DELIVERY still ahead: the
+        // modal is where its number goes on to 100, so it is not let go between
+        // the last pass and the download (a cover picture being attached in
+        // that gap made it blink out and back). endTask closes it instead, and
+        // every such task ends through endTask, whichever way it ends.
+        if (!holdsOverlay(t)) _hideTimer = setTimeout(hideOverlay, 250);
         showCancel(null);
       } else { t.percent = chainPct(t, 100); scheduleDock(); }
       return result;
@@ -567,8 +697,18 @@
   // The background-task layer (veditor.js drives it; the Cloud Studio has its own
   // shim and simply does without, which is the behaviour it has always had).
   // "Where did it go" — the dock answers it, so this belongs with the dock.
-  window.finishedFile = finishedFile;
+  /*
+   * ►► ONLY IF THE PAGE HAS NOT SAID ALREADY. ◄◄ The Cloud Studio loads its
+   * shell (cloud-boot.js) FIRST and this file after it, so assigning here
+   * quietly replaced the phone's own finishedFile with the desk's — toast
+   * "✅ Saved", then shell.showItem 400 ms later. On a phone showItem is
+   * "put it on my phone", so every export started a second download with a
+   * second bar of its own, by accident, after the first had said 100%.
+   * Nothing defines one before this file on the desk, so there it is unchanged.
+   */
+  if (typeof window.finishedFile !== 'function') window.finishedFile = finishedFile;
   window.__newTask = newTask;
+  window.__taskDeliver = taskDeliver;
   window.__endTask = endTask;
   window.__taskSay = taskSay;
   window.__taskProgress = taskProgress;
