@@ -269,6 +269,35 @@ async function waitUp() {
       await sleep(300);
     }
 
+    console.log('\n=== [I] ▶ in the captions window keeps playing ===');
+    {
+      await page.evaluate(() => window.VideoEditor.__test.openCaptionsWindow());
+      await sleep(500);
+      await page.evaluate(() => {
+        document.getElementById('capModal').classList.remove('hidden');
+        document.querySelector('#capModal .cap-box').classList.add('folded');
+        document.getElementById('vePlayer').muted = true;
+      });
+      await sleep(300);
+      await page.locator('#capPlay').tap();
+      await sleep(1500);
+      // iPhone: the address bar folds away and the screen grows — the timeline under the window re-lays itself
+      const vp = page.viewportSize();
+      await page.setViewportSize({ width: vp.width, height: vp.height + 60 });
+      await sleep(1500);
+      await page.setViewportSize(vp);
+      await sleep(800);
+      // a scroll nobody made (the timeline under the window re-laid) is not a hand taking it
+      await page.evaluate(() => { const sc = document.getElementById('veTlScroll'); sc.scrollLeft += 150; });
+      await sleep(1200);
+      const st = await page.evaluate(() => { const p = document.getElementById('vePlayer'); return { paused: p.paused, t: p.currentTime, btn: document.getElementById('capPlay').textContent }; });
+      check(!st.paused && st.t > 3 && st.btn === '⏸', 'after five seconds it is still playing', st);
+      await page.locator('#capPlay').tap();
+      await sleep(300);
+      await page.evaluate(() => document.getElementById('capModal').classList.add('hidden'));
+      await sleep(300);
+    }
+
     console.log('\n=== [G] ＋ Add caption, after the AI made some ===');
     {
       const L0 = await page.evaluate(() => window.VideoEditor.__test.capLines());

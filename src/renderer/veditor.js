@@ -1323,6 +1323,10 @@
         }
       }, { passive: true });
       sc.addEventListener('touchmove', () => { ve._tlTouchAt = performance.now(); }, { passive: true });
+      // a mouse wheel or a grab of the scrollbar is a hand on the timeline too
+      const hand = () => { ve._tlHandAt = performance.now(); };
+      sc.addEventListener('wheel', hand, { passive: true });
+      sc.addEventListener('pointerdown', hand, { passive: true });
       sc.addEventListener('touchend', lift, { passive: true });
       sc.addEventListener('touchcancel', lift, { passive: true });
     }
@@ -10099,6 +10103,7 @@
       if (g.some((x) => x.doubt)) ev.doubt = 'differ';
       else if (g.some((x) => x.unsure)) ev.doubt = 'unsure';
       if (g.some((x) => x.unchecked)) ev.unchecked = true;
+      else if (g.every((x) => x.checked)) ev.checked = true;
       events.push(ev);
     };
     const runs = [];
@@ -11225,13 +11230,16 @@
     // Each line: its own ▶, the time, the words with the proof-reader's
     // underlines laid over them, the badge that opens its suggestions, and ✨
     // to have the AI read just this line.
-    const checkedAll = inScope.length && !nUnchecked;
-    const note = !inScope.length ? ''
+    // Said only when it is TRUE: lines from before the second listen existed
+    // (and lines typed by hand) were never heard twice, so they claim nothing.
+    const heard = inScope.filter(({ c }) => !c.manual);
+    const checkedAll = heard.length && !nUnchecked && heard.every(({ c }) => c.checked);
+    const note = !heard.length || (!checkedAll && !nUnchecked) ? ''
       : checkedAll
         ? (nDoubt
-          ? `<div class="cap-check-note warn">Heard twice by two models: they agree on ${inScope.length - nDoubt} of ${inScope.length} lines. Only <b>${nDoubt}</b> need a look (⚠ Check).</div>`
+          ? `<div class="cap-check-note warn">Heard twice by two models: they agree on ${heard.length - nDoubt} of ${heard.length} lines. Only <b>${nDoubt}</b> need a look (⚠ Check).</div>`
           : `<div class="cap-check-note good">✅ Heard twice by two models: they agree on every line.</div>`)
-        : `<div class="cap-check-note">ℹ️ ${nUnchecked === inScope.length ? 'These lines were' : nUnchecked + ' lines were'} heard once, not double-checked${ve._capCheckWhy ? ` (${escape2(ve._capCheckWhy)})` : ''} — give them a read.</div>`;
+        : `<div class="cap-check-note">ℹ️ ${nUnchecked === heard.length ? 'These lines were' : nUnchecked + ' lines were'} heard once, not double-checked${ve._capCheckWhy ? ` (${escape2(ve._capCheckWhy)})` : ''} — give them a read.</div>`;
     const tabs = note + `<div class="cap-fix-tabs" role="tablist">`
       + (nFixed || nDoubt
         ? `<button type="button" role="tab" data-capfix="all" class="${mode === 'all' ? 'on' : ''}">All lines <span>${inScope.length}</span></button>`
@@ -12412,7 +12420,7 @@
   function noteCheck(res, words, off, range) {
     const c = (res && res.check) || null;
     const ok = !!(c && c.checked);
-    if (!ok) for (const w of words) w.unchecked = true;
+    for (const w of words) { if (ok) { w.checked = true; delete w.unchecked; } else { w.unchecked = true; delete w.checked; } }
     const alt = ok && Array.isArray(c.alt) ? c.alt.map((w) => ({ text: w.text, start: w.start + off, end: w.end + off })) : [];
     const keep = range && Array.isArray(ve.capAlt)
       ? ve.capAlt.filter((w) => !(w.end > range.start + 0.02 && w.start < range.end - 0.02)) : [];
@@ -14722,7 +14730,16 @@
         // back. It is stopped where the playhead is instead.
         const overruled = !mine && !ve._tlTouch && ve._liftAt && (ve._actionAt || 0) > ve._liftAt && performance.now() - ve._liftAt < 3000;
         if (overruled) { setScrollLeft(ve.refs.tlScroll, Math.max(0, tlPadL() + nowT() * ve.pxPerSec - centreGap())); return; }
-        if (!mine && ve.video) {
+        // Only a HAND stops playback: a finger on the timeline, a flick still
+        // coasting, a wheel. A scroll nobody made — the window over the timeline
+        // (Captions) re-laying it, the screen growing as Safari's bar folds, a
+        // long video's lane redrawn — used to pause ▶ "by itself".
+        const nowMs = performance.now();
+        const byHand = ve._tlTouch || nowMs - (ve._tlTouchAt || 0) < 1500 || nowMs - (ve._liftAt || 0) < 3000
+          || nowMs - (ve._tlHandAt || 0) < 1500;
+        if (!mine && ve.video && !byHand && isPlaying()) {
+          if (ve._scrubRaf == null) setScrollLeft(ve.refs.tlScroll, Math.max(0, tlPadL() + nowT() * ve.pxPerSec - centreGap()));
+        } else if (!mine && ve.video) {
           ve._userScrollAt = performance.now();
           if (isPlaying()) { const p = ve.refs.player; if (ve.tailRun) stopTailRun(); else if (p) p.pause(); }
           if (!ve._scrubRaf) ve._scrubRaf = requestAnimationFrame(() => { ve._scrubRaf = null; if (centred()) scrubTo(timeAtCentre()); });
