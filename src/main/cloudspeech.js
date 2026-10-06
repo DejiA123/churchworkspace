@@ -314,6 +314,21 @@ let lastDecline = { paced: false, why: '', at: 0 };
 
 function provider() { return PROVIDERS[cfg.provider] || PROVIDERS[DEFAULT_PROVIDER]; }
 function modelId() { return cfg.model || provider().models[0].id; }
+/*
+ * ►► CAPTIONS ARE HEARD BY THE ACCURATE MODEL, NOT THE QUICK ONE. ◄◄
+ * Large v3 Turbo is a pruned Large v3 (4 decoder layers instead of 32): built
+ * for the live ear, where a word late is a word lost. Captions are published
+ * to the world and proof-reading them is what the operator's time goes on, so
+ * they are heard by the full Large v3 — still well under a minute for an hour
+ * on Groq, from the same free allowance. A model chosen by hand in Settings is
+ * respected; if the provider ever refuses Large v3, Turbo hears it instead.
+ */
+let captionModelRefused = false;
+function captionModelId() {
+  if (cfg.model || captionModelRefused) return modelId();
+  const full = (provider().models || []).find((m) => /whisper-large-v3$/.test(m.id));
+  return full ? full.id : modelId();
+}
 function endpoint() { return cfg.provider === 'custom' ? (cfg.url || '') : provider().url; }
 
 /**
@@ -939,8 +954,9 @@ function retryWaitMs(res) {
 async function postAudioWords(body, { timeoutMs = 180000, retry429 = true } = {}) {
   for (let attempt = 0; ; attempt++) {
     const form = new FormData();
+    const model = captionModelId();
     form.append('file', new Blob([body], { type: 'audio/ogg' }), 'clip.ogg');
-    form.append('model', modelId());
+    form.append('model', model);
     form.append('language', 'en');
     form.append('temperature', '0');
     form.append('response_format', 'verbose_json');
@@ -989,6 +1005,8 @@ async function postAudioWords(body, { timeoutMs = 180000, retry429 = true } = {}
     }
     if (res.status === 401 || res.status === 403) throw new Error('that key was refused');
     if (res.status === 413) throw new Error('that piece of audio was too big for the speech service');
+    // the accurate model refused (not offered on this key or provider): Turbo hears it, now and from here on
+    if ((res.status === 400 || res.status === 404) && model !== modelId()) { captionModelRefused = true; continue; }
     throw new Error('the speech service answered ' + res.status);
   }
 }
@@ -1034,7 +1052,7 @@ async function transcribeWords({ input, startSec = 0, endSec = 0, totalSec = 0, 
       // Remembered for state().why, so "heard on this PC instead" can say WHY.
       // Deliberately not trip(): a caption failing must not stand the live ear down.
       health.why = (e && e.message) || 'could not reach the speech service';
-      return { words: inSpokenOrder(words), doneSec, why: health.why, model: modelId() };
+      return { words: inSpokenOrder(words), doneSec, why: health.why, model: captionModelId() };
     }
     const got = wordsFromVerbose(json, ha - from);
     const lo = i === 0 ? -Infinity : a - from;
@@ -1049,7 +1067,7 @@ async function transcribeWords({ input, startSec = 0, endSec = 0, totalSec = 0, 
   // Pieces arrive in order and each is in spoken order; only the seams need tidying.
   const heard = inSpokenOrder(words);
   const back = await hearGapsAgain({ input, from, span, words: heard });
-  return { words: back.words, doneSec: span, why: '', model: modelId(), reheard: back.added };
+  return { words: back.words, doneSec: span, why: '', model: captionModelId(), reheard: back.added };
 }
 
 /*
@@ -1335,10 +1353,11 @@ async function transcribeSegments({ input, startSec = 0, endSec = 0 } = {}) {
   }
   // the same answer carries every word's timing: kept, so ✂️ Remove pauses can
   // find this clip's pauses without sending the audio back to be heard again
-  return { segs, words: wordsFromVerbose(json, 0), model: modelId() };
+  return { segs, words: wordsFromVerbose(json, 0), model: captionModelId() };
 }
 
 module.exports = {
+  captionModelId,
   configure, state, ready, transcribe, test, cadence,
   fileReady, transcribeFile, transcribeWords, transcribeSegments, shareKey,
   wordsFromVerbose, retryWaitMs, inSpokenOrder, gapsToHear, looksSpoken, freshWords,

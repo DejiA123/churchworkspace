@@ -883,7 +883,7 @@ ipcMain.handle('video:speechPauses', wrap(async (e, { input, startSec, endSec, m
     // …the same answer captions:transcribe would give for this clip.
     transcript: {
       words: book.entries, segments: book.entries, model: r.model, engine: 'cloud',
-      engineName: cloudspeech.state().providerName + ' — Whisper Large v3 Turbo',
+      engineName: cloudspeech.state().providerName + ' — Whisper ' + (/turbo/.test(cloudspeech.captionModelId()) ? 'Large v3 Turbo' : 'Large v3'),
       fixed: book.count, fixedWords: book.count ? wordbook.summarise(book.changes, 4) : '', cloudMs: Date.now() - t0,
     },
   });
@@ -1349,7 +1349,7 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, onP
     durationSec: info.durationSec, model: r.model || 'whisper-large-v3-turbo',
     fixed: book.count, fixedWords: book.count ? wordbook.summarise(book.changes, 4) : '',
     engine: pcSec > 0 ? 'mixed' : 'cloud',
-    engineName: cloudspeech.state().providerName + ' — Whisper Large v3 Turbo',
+    engineName: cloudspeech.state().providerName + ' — Whisper ' + (/turbo/.test(cloudspeech.captionModelId()) ? 'Large v3 Turbo' : 'Large v3'),
     cloudMs: Date.now() - t0,
     cloudSec: Math.round(span - pcSec), pcSec: Math.round(pcSec),
     cloudWhy: pcSec > 0 ? r.why : '',
