@@ -3576,7 +3576,6 @@ let _hideTimer = null;
         <button type="button" class="cloud-xp-end-text" data-xp="cover-pick"><b>Video thumbnail</b><small id="cloudXpCoverSub">Choose the picture people see first</small></button>
         <span class="cloud-xp-chev" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
       </div>
-      <label class="cloud-xp-row"><span>Caption the shorts as they export</span><input type="checkbox" data-mirror="#veCapExports" /></label>
       <label class="cloud-xp-row"><span>Keep editing while it exports</span><input type="checkbox" data-mirror="#veBgExport" /></label>
       <button type="button" class="cloud-xp-link" data-xp="saved">Finished files — save them to this phone</button>
       <button type="button" class="cloud-xp-link" data-xp="more">More export settings</button>`;

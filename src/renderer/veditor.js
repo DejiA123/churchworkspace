@@ -6640,7 +6640,19 @@
     } catch (e) { /* handled */ }
   }
 
-  const capExportsOn = () => { const c = $('#veCapExports'); return !!(c && c.checked); };
+  /*
+   * ►► CAPTIONS GO OUT WITH EVERY EXPORT THEY ARE IN. ◄◄
+   * There used to be a box, "Auto-caption my shorts on export" (the phone's
+   * "Caption the shorts as they export"), and it decided two things at once:
+   * whether a short with no captions was quietly transcribed while it exported,
+   * and, on Export video, whether the captions already on the timeline went in
+   * at all. Unticked, a whole service's worth of proof-read captions was left
+   * out of the file. Nobody puts captions on a video to export it without them.
+   * So there is no box: whatever lines the 💬 Captions track holds over a stretch
+   * are burned into every export of that stretch, exactly as the preview shows
+   * them — and nothing is transcribed behind the operator's back at export time
+   * (captions nobody has seen are captions nobody has checked).
+   */
   // Auto-reframe is a CROP that follows the speaker. If the operator asked for
   // the whole picture over a blurred background there is nothing to crop, so the
   // two are mutually exclusive by construction rather than by remembering to
@@ -6989,7 +7001,6 @@
           case: valOf('#capCase'), position: valOf('#capPos'), colour: valOf('#capColor'),
         },
         showOnPreview: !!(($('#veCapShow') || {}).checked),
-        autoOnExport: !!(($('#veCapExports') || {}).checked),
       },
       look: {
         aspect: ve.aspect, quality: ve.quality, fps: ve.fps || 0, bitrate: ve.bitrate || 'recommended',
@@ -7064,7 +7075,6 @@
       setVal('#capPos', c.style.position); setVal('#capColor', c.style.colour);
     }
     const capShow = $('#veCapShow'); if (capShow && c.showOnPreview != null) capShow.checked = !!c.showOnPreview;
-    const capExp = $('#veCapExports'); if (capExp && c.autoOnExport != null) capExp.checked = !!c.autoOnExport;
 
     const lk = data.look || {};
     if (lk.aspect && ve.presets[lk.aspect]) { ve.aspect = lk.aspect; setVal('#veAspect', lk.aspect); }
@@ -8762,8 +8772,7 @@
     keys.push('encode');
     if (overlays !== 'source' && overlaysFor(s).length) keys.push('overlays');
     if (captions) {
-      // Lines already on the 💬 lane need no listening — only the drawing pass.
-      if (!hasClipCaps(s)) keys.push('caption');
+      // Captions come only from the 💬 lane, so there is nothing to hear — only to draw.
       // Drawing the caption pictures here in the studio, then burning them into
       // the video, are two different pieces of work on two different machines.
       // Sharing one slice made the number fall back when the second began.
@@ -9002,7 +9011,7 @@
     // Lines already on the 💬 lane are burned as they are — that needs no speech
     // engine on this machine (they may have come from the cloud ear, or been
     // typed). Only captions still to be HEARD wait on one.
-    const withCaps = hasClipCaps(s) || (exportWantsCaps(s, capExportsOn()) && (await window.api.captions.available().catch(() => false)));
+    const withCaps = hasClipCaps(s);
     if (window.__chainBegin) {
       window.__chainBegin(task, exportPlan(s, { track: reframeOn() && !!window.FaceTrack, captions: withCaps }));
     }
@@ -9290,7 +9299,9 @@
      * this path never tracks (it keeps the recording's own shape, so there is
      * no crop window to move).
      */
-    const planCaps = capExportsOn() && (hasClipCaps(whole) || (await window.api.captions.available().catch(() => false)));
+    // The captions on the 💬 track over the kept stretch ALWAYS go in (this used
+    // to wait on the auto-caption box and dropped them when it was off).
+    const planCaps = hasClipCaps(whole);
     if (window.__chainBegin) {
       window.__chainBegin(task, exportPlan(whole, { track: false, captions: planCaps, overlays: 'source' }));
     }
@@ -9454,8 +9465,7 @@
   async function exportAll() {
     const list = shortsOf().sort((a, b) => a.start - b.start); // only Long-to-shorts output
     if (!list.length) return;
-    const capEngineOk = await window.api.captions.available().catch(() => false);
-    const withCaps = capExportsOn() && capEngineOk;
+    let capped = 0;
     const task = startTask(`Exporting ${list.length} short${list.length > 1 ? 's' : ''}`);
     /*
      * FROZEN UP FRONT, ALL OF THEM.
@@ -9544,7 +9554,8 @@
            * waiting on tracking and must be told so.
            */
           // One pass for both when both are wanted — see exportSegment.
-          const caps = hasClipCaps(s) || (exportWantsCaps(s, withCaps) && capEngineOk);
+          const caps = hasClipCaps(s);
+          if (caps) capped++;
           /*
            * The number on the chip is THIS short's, start to finish — so the
            * chain is rebuilt per short, and each one begins again at nothing.
@@ -9615,7 +9626,7 @@
       window.__hideOverlay && window.__hideOverlay();
       window.__toast && window.__toast(note, 'good', 9000);
     } else if (done) {
-      const note = `✅ Exported ${done} short${done > 1 ? 's' : ''}${withCaps ? ' with captions' : ''}${extras ? ' + ' + extras : ''} to your output folder.`
+      const note = `✅ Exported ${done} short${done > 1 ? 's' : ''}${capped ? (capped >= done ? ' with captions' : ` (${capped} with captions)`) : ''}${extras ? ' + ' + extras : ''} to your output folder.`
         + (skipped.length ? ` ${skipped.length} could not be made: ${skipped.join('; ')}.` : '')
         + (stopped ? ` The rest ${stopped.cancelled ? 'were stopped' : 'did not finish'}.` : '');
       const inBg = window.__endTask ? window.__endTask(task, { ok: true, note }) : false;
@@ -12139,8 +12150,6 @@
       ve.capOffset = 0; ve.capTarget = null;
       ve._capSource = ve.video.path; ve._capMode = 'shorts'; ve._capClipId = null;
       scope._capKey = clipCapKey(scope);
-      // A captioned short is one you meant to post with captions on.
-      const c = $('#veCapExports'); if (c) c.checked = true;
       ve.capSel = null; ve.capEditing = null;
       renderClipList();
       revealClipCaptions(scope);
@@ -12288,22 +12297,8 @@
    */
   const capLinesIn = (s) => (((F(s) && F(s).capEvents) || ve.capEvents) || []).filter((e) =>
     e && e.end > s.start + 0.02 && e.start < s.end - 0.02);
-  /*
-   * A short remembers that it HAS HAD captions (s.hadCaps, saved with the
-   * session). "Auto-caption my shorts on export" is ticked for you by
-   * 💬 Auto-caption all shorts, so without this a short whose captions the
-   * operator then REMOVED was quietly transcribed again at export and came out
-   * captioned anyway. Had them, has none now = removed on purpose: exported
-   * clean. (Captioning it again brings it straight back.)
-   */
-  const hasClipCaps = (s) => {
-    const yes = capLinesIn(s).length > 0;
-    if (yes && s && !s.hadCaps) s.hadCaps = true;
-    return yes;
-  };
-  /** Should this short's export carry captions? Its own lines always do; the
-   *  auto-caption box adds them only to a short whose captions were never removed. */
-  const exportWantsCaps = (s, autoOn) => hasClipCaps(s) || (!!autoOn && !(s && s.hadCaps));
+  /** Does this clip's export carry captions? Exactly when the 💬 track has lines over it. */
+  const hasClipCaps = (s) => capLinesIn(s).length > 0;
   const clipCapKey = (s) => `${s.start.toFixed(2)}|${s.end.toFixed(2)}`;
   async function captionAllShorts() {
     if (!ve.video) return;
@@ -12334,10 +12329,6 @@
       renderCapTrack();               // blocks appear as each short finishes
     }
     if (window.__setJobBatch) window.__setJobBatch(null);
-    if (done || skipped) {
-      // captions must actually land on the exports — flip the export toggle on
-      const c = $('#veCapExports'); if (c) c.checked = true;
-    }
     ve.capSel = null; ve.capEditing = null;
     renderCapTrack(); renderCapList(); renderClipList();
     updateCapOverlay(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
@@ -12430,64 +12421,34 @@
         out = await finishExport(s, out); // background music, then the outro
         window.finishedFile(out);
       } else {
-        let out = await burnCapsInto({
-          input: ve.video.path, events, size: (ve.video && ve.video.info) || null,
-        });
-        out = await burnTextIntoWholeVideo(out); // added text rides along here too
-        out = await finishExport(null, out); // background music, then the outro
-        window.finishedFile(out);
+        /*
+         * ►► THE WHOLE VIDEO WITH CAPTIONS IS "EXPORT VIDEO". ◄◄
+         * This used to burn the lines onto the RAW recording: every cut came
+         * back, closed pauses returned, and the edit's music, overlays, quality
+         * and ending were lost. Export video now always carries the lane's
+         * captions, so it is the one right way to save the whole edit with them.
+         */
+        await exportEditedVideo();
       }
     } catch (e) {}
   }
-  /** Silent per-short captioning used by "auto-caption my shorts on export". */
   /*
-   * `textSize` travels with the pictures for one reason: if they could not be
-   * drawn up front, the text fallback below has to re-draw them at the RIGHT
-   * frame. 💾 Export video renders at the recording's own size, not at the
-   * social preset, and defaulting would put the text on the wrong canvas.
+   * Burn the 💬 track's lines over this clip into its export. Lane times are
+   * source-absolute and the export starts at s.start; closed pauses and
+   * transitions pull them onto the export's own clock. `textSize` travels with
+   * the pictures because the text fallback must re-draw them at the RIGHT frame
+   * (Export video renders at the recording's own size, not the social preset).
    */
   async function autoCaptionExport(s, shortPath, textImages, textSize) {
-    // The timeline's 💬 Captions track already holds lines covering this clip —
-    // burn THOSE, so every retype and re-time the operator did on the lane is
-    // what ends up in the file, and whisper is not paid for twice. Lane times
-    // are source-absolute; the exported short starts at s.start.
-    if (hasClipCaps(s)) {
-      const rel = capLinesIn(s)
-        .map((e) => ({ start: Math.max(0, e.start - s.start), end: Math.min(s.end, e.end) - s.start, text: e.text }))
-        .filter((e) => e.text && e.text.trim());
-      const timed = reTimed(s) ? remapCapEventsThroughCuts(s, rel) : rel;
-      if (timed.length) {
-        return burnCapsInto({
-          input: shortPath, events: timed, label: s.label, deleteInput: true,
-          outName: `short-${(s.label || 'clip').replace(/[^\w.-]+/g, '_').slice(0, 40)}-captioned`,
-          task: taskOf(s), style: F(s) && F(s).capStyle, images: textImages,
-        });
-      }
-      // Every line fell inside a removed pause, so there are no captions to
-      // burn — but the TEXT still has to go on, and it was handed to this
-      // function instead of being burned before it. Dropping it here would lose
-      // it silently, which is the one thing worse than an extra pass.
-      return burnTextIntoShort(s, shortPath, textSize || null, textImages);
-    }
-    const j1 = window.__newJobId();
-    // A clip with pauses removed no longer matches its source range, so transcribe
-    // the exported short itself — it already has the pauses taken out, which makes
-    // the word timings right by construction (same audio, no mapping to get wrong).
-    const model = (F(s) ? F(s).capModel : capModelCfg());
-    const src = reTimed(s)
-      ? { input: shortPath, model, jobId: j1 }
-      : { input: ve.video.path, startSec: s.start, endSec: s.end, model, jobId: j1 };
-    const res = await window.__runJob(`🎧 Captioning "${s.label}" (clip only)…`, j1,
-      () => window.api.captions.transcribe(src), J(s, 'caption'));
-    const words = (res && res.words) || [];
-    // No speech in the clip: no captions, but the added text still belongs on it.
-    if (!words.length) return burnTextIntoShort(s, shortPath, textSize || null, textImages);
-    const g = (F(s) && F(s).capGroup) || capGroupCfg();
-    const events = groupWords(words, g.wpl, g.tc).filter((x) => x.text && x.text.trim());
-    // …and the same if the grouping left nothing to draw.
-    if (!events.length) return burnTextIntoShort(s, shortPath, textSize || null, textImages);
+    const rel = capLinesIn(s)
+      .map((e) => ({ start: Math.max(0, e.start - s.start), end: Math.min(s.end, e.end) - s.start, text: e.text }))
+      .filter((e) => e.text && e.text.trim());
+    const timed = reTimed(s) ? remapCapEventsThroughCuts(s, rel) : rel;
+    // Every line fell inside a removed pause: no captions to burn — but the TEXT
+    // was handed to this pass instead of having its own, so it still goes on.
+    if (!timed.length) return burnTextIntoShort(s, shortPath, textSize || null, textImages);
     return burnCapsInto({
-      input: shortPath, events, label: s.label, deleteInput: true,
+      input: shortPath, events: timed, label: s.label, deleteInput: true,
       outName: `short-${(s.label || 'clip').replace(/[^\w.-]+/g, '_').slice(0, 40)}-captioned`,
       task: taskOf(s), style: F(s) && F(s).capStyle, images: textImages,
     });
@@ -14819,7 +14780,6 @@
        * captions lane, switched on for export. Nothing said, nothing added.
        */
       if (captions) {
-        const c = $('#veCapExports'); if (c) c.checked = true;
         setTimeout(() => { generateCaptions(null).catch(() => {}); }, 300);
       }
       return true;

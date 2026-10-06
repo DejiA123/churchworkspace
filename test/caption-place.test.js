@@ -87,6 +87,13 @@ ipcMain.handle('fs:readImageDataUrl', async (_e, { path: p }) => {
   const ext = (path.extname(p).slice(1) || 'png').toLowerCase();
   return ok(`data:image/${ext === 'jpg' ? 'jpeg' : ext};base64,${b.toString('base64')}`);
 });
+// "Save with captions" for the whole video IS Export video now (the edit, not the
+// raw recording), so the edited export has to exist here too — the real one.
+ipcMain.handle('sermon:exportShort', async (_e, { input, startSec, endSec, preset, pieces, label }) => {
+  const output = path.join(WORK, `edited-${(label || 'video').replace(/[^\w.-]+/g, '_').slice(0, 30)}-${Date.now()}.mp4`);
+  await video.exportShort(ctx, { input, startSec, endSec, preset: preset || 'source', pieces, output });
+  return ok(output);
+});
 // The real burner, so the pixels below are the real thing.
 let lastOpts = null, lastBurn = null, lastBurnErr = null;
 // Mirrors main.js's captions:burn exactly — write the .ass, then burn it. The

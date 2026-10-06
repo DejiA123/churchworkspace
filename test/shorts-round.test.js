@@ -231,7 +231,7 @@ app.whenReady().then(async () => {
     const caps1 = T.clipCapEvents(ids[1]);
     return {
       caps0, caps1,
-      capExports: document.getElementById('veCapExports').checked,
+      capExports: !document.getElementById('veCapExports'),   // no box: captions always go out
       badges: document.querySelectorAll('#veClipList .ve-clip-capped').length,
       globalCaps: T.capState().events,
       // every line the lane holds, to prove none covers untouched footage
@@ -251,7 +251,7 @@ app.whenReady().then(async () => {
   log(c.caps0 && c.caps0.every((e2) => e2.start >= 2 && e2.end <= 10.01) && c.caps1 && c.caps1.every((e2) => e2.start >= 40 && e2.end <= 50.01),
     'lines are stored on the SOURCE clock inside each clip', c.caps0 && `first=${c.caps0[0].start}s`);
   log(/God is good/i.test((c.caps0 && c.caps0.map((x) => x.text).join(' ')) || ''), 'the words came through', c.caps0 && c.caps0.map((x) => x.text).join(' '));
-  log(c.capExports === true, 'captions-on-export armed automatically');
+  log(c.capExports === true, 'no captions-on-export box: captions on the lane always go out');
   log(c.badges === 2, 'both clip cards show the 💬 CC badge', `${c.badges} badges`);
   // The lines DO go on the timeline lane — that is the point, so they can be read
   // and edited. What must stay true is that they only ever cover the shorts: no
@@ -348,7 +348,6 @@ app.whenReady().then(async () => {
   burnCalls.length = 0;
   const c4 = await js(win, `
     const T = window.VideoEditor.__test;
-    document.getElementById('veCapExports').checked = true;
     await T.exportSegmentFull(T.segIds()[0]);
     return { done: true };`);
   if (c4.__error) console.error('[C3] ' + c4.__error);
@@ -377,7 +376,6 @@ app.whenReady().then(async () => {
   const d = await js(win, `
     const T = window.VideoEditor.__test;
     const rf = document.getElementById('veAutoReframe'); if (rf) rf.checked = false;
-    document.getElementById('veCapExports').checked = true;
     await T.exportSegmentFull(T.segIds()[0]);
     return { done: true };`);
   if (d.__error) console.error('[D] ' + d.__error);

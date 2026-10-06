@@ -161,13 +161,13 @@ app.whenReady().then(async () => {
   log(veTest.afterManual === 4, 'manual clip adds to timeline', veTest.afterManual + ' segments');
 
   const newUi = await win.webContents.executeJavaScript(`({
-    capExports: !!document.getElementById('veCapExports'),
+    capExports: !document.getElementById('veCapExports'),
     lenOpts: Array.from(document.getElementById('veShortLen').options).map(o => o.value),
     perClipCapBtns: document.querySelectorAll('#veClipList [data-cap]').length,
     shortsListed: window.VideoEditor.__test.shortsList().length,
     onTimeline: window.VideoEditor.__test.segments().length,
   })`);
-  log(newUi.capExports, '"auto-caption my shorts" toggle present');
+  log(newUi.capExports, 'no "auto-caption my shorts" box — captions always go out with the export');
   log(newUi.lenOpts[0] === 'auto' && newUi.lenOpts.length === 5, 'shorts length has Auto + 4 fixed options', newUi.lenOpts.join(','));
   // 3 AI clips + 1 hand-made clip are on the timeline, but a SHORT is only ever
   // Long-to-shorts output — the manual one must not appear in the panel.

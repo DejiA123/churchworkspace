@@ -199,8 +199,9 @@ app.whenReady().then(async () => {
     check('>> a plain short is just the encode <<', JSON.stringify(P.bare) === '["encode"]', JSON.stringify(P.bare));
     check('…tracking is added only when the operator waits for it',
       JSON.stringify(P.tracked) === '["track","encode"]', JSON.stringify(P.tracked));
-    check('…captions add the listening, the drawing AND the burning',
-      JSON.stringify(P.captions) === '["encode","caption","draw","burn"]', JSON.stringify(P.captions));
+    // captions come off the 💬 lane, never heard at export time: drawing + burning only
+    check('…captions add the drawing AND the burning (nothing is listened to at export)',
+      JSON.stringify(P.captions) === '["encode","draw","burn"]', JSON.stringify(P.captions));
   }
 
   /* ---------------- and now a real batch, watched ---------------- */
@@ -210,9 +211,9 @@ app.whenReady().then(async () => {
     T.setLib({ music: [{ id: 'm1', name: 'Bed', file: ${JSON.stringify(MUSIC)}, durationSec: 12 }],
                clips: [{ id: 'c1', name: 'Outro', file: ${JSON.stringify(OUTRO)}, durationSec: 3 }] });
     T.useMusic('m1'); T.useOutro('c1');
-    const capBox = document.getElementById('veCapExports');
-    if (capBox) { capBox.checked = true; capBox.dispatchEvent(new Event('change', { bubbles: true })); }
     T.addShort(0, 4); T.addShort(5, 9);
+    // captions on the lane over both shorts: they always go out with the export
+    T.setCapEvents([{ start: 0.2, end: 1.9, text: 'hello there everyone' }, { start: 5.2, end: 6.6, text: 'welcome all' }]);
     const seen = [];
     const read = () => {
       const pctEl = document.querySelector('#bgDock .bgj.run .bgj-pct');
