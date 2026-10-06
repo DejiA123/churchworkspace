@@ -11178,7 +11178,7 @@
    * and the burned-in export all change with it, because there is only one copy.
    */
   /** One line of the captions window (renderCapList, and a line added on its own). */
-  function capRowHtml(c, i, base) {
+  function capRowHtml(c, i, base, ctx) {
     return (
       `<div class="cap-row${!!c.doubt ? ' doubt' : ''}" data-row="${i}">`
       + `<button type="button" class="cap-row-play" data-play-i="${i}" title="Play this line">▶</button>`
@@ -11199,7 +11199,18 @@
         ? `<div class="cap-was"><span class="cap-was-tx" title="${escape2(c._byAi || '').replace(/"/g, '&quot;')}">${c._byAi ? '✨ AI fixed' : '✍ Fixed'} — was “${escape2(c._was)}”</span>`
           + `<button type="button" class="cap-was-back" data-was-i="${i}" title="Put this line back to what it said before">↶ Put back</button></div>`
         : '')
+      // ⚠ Check and ✍ Fixed list lines on their own: the line before and the
+      // line after come with them (drawn above and below — CSS order), and the
+      // three can be heard together, so a doubt is settled in its sentence.
+      + (ctx ? capCtxHtml(i) : '')
       + `</div>`);
+  }
+  function capCtxHtml(i) {
+    const evs = ve.capEvents || [];
+    const prev = evs[i - 1], next = evs[i + 1];
+    return (prev ? `<div class="cap-ctx cap-ctx-before" title="The line before">… ${escape2(prev.text)}</div>` : '')
+      + `<div class="cap-ctx cap-ctx-after">${next ? `<span class="cap-ctx-tx" title="The line after">${escape2(next.text)} …</span>` : '<span class="cap-ctx-tx"></span>'}`
+      + `<button type="button" class="cap-ctx-play" data-ctx-i="${i}" title="Play the line before, this line and the line after">▶ Hear it in context</button></div>`;
   }
   /** A line's box: commit, live preview, Enter, focus — its index read at the moment, never captured. */
   function wireCapInput(inp) {
@@ -11305,6 +11316,7 @@
         row.querySelectorAll('[data-doubt-use]').forEach((el) => el.setAttribute('data-doubt-use', n));
         row.querySelectorAll('[data-doubt-ok]').forEach((el) => el.setAttribute('data-doubt-ok', n));
         row.querySelectorAll('[data-was-i]').forEach((el) => el.setAttribute('data-was-i', n));
+        row.querySelectorAll('[data-ctx-i]').forEach((el) => el.setAttribute('data-ctx-i', n));
       }
     }
   }
@@ -11448,7 +11460,7 @@
         : '')
       + `<button type="button" class="cap-add-line" data-capadd title="Add a caption line at the playhead (or the next gap) and type it">＋ Add caption</button>`
       + `</div>`;
-    list.innerHTML = tabs + rows.map(({ c, i }) => capRowHtml(c, i, base)).join('');
+    list.innerHTML = tabs + rows.map(({ c, i }) => capRowHtml(c, i, base, mode !== 'all')).join('');
     const addBtn = list.querySelector('[data-capadd]');
     if (addBtn) addBtn.addEventListener('click', () => { ve.capListMode = 'all'; addCaptionHere({ inList: true }); });
     list.querySelectorAll('[data-capfix]').forEach((b) => b.addEventListener('click', () => {
@@ -11643,6 +11655,19 @@
   function capPlayLine(i) {
     const e = (ve.capEvents || [])[i]; if (!e) return;
     const a = Math.max(0, capOff() + e.start - 0.12), b = capOff() + e.end + 0.1;
+    ve._capLine = { i, a, b };
+    ve._capTypePausedAt = null;
+    ve._previewEnd = null; ve._loopSeg = null;
+    seekTo(a);
+    capPlayerPlay();
+  }
+  /** A line with the one before and the one after — to judge it in its sentence. */
+  function capPlayInContext(i) {
+    const evs = ve.capEvents || [];
+    const e = evs[i]; if (!e) return;
+    const prev = evs[i - 1], next = evs[i + 1];
+    const a = Math.max(0, capOff() + (prev && e.start - prev.start < 8 ? prev.start : e.start - 1.5) - 0.12);
+    const b = capOff() + (next && next.end - e.end < 8 ? next.end : e.end + 1.5) + 0.1;
     ve._capLine = { i, a, b };
     ve._capTypePausedAt = null;
     ve._previewEnd = null; ve._loopSeg = null;
@@ -12306,11 +12331,17 @@
       // click that blurred it would commit and redraw the list underneath the
       // button, and the click would land on nothing.
       list.addEventListener('mousedown', (e) => {
-        if (e.target.closest('.cap-row-play, .cap-g-badge, .cap-ai-line, .cap-sugg button')) e.preventDefault();
+        if (e.target.closest('.cap-row-play, .cap-g-badge, .cap-ai-line, .cap-ctx-play, .cap-sugg button')) e.preventDefault();
       });
       list.addEventListener('click', (e) => {
         const b = e.target.closest('button'); if (!b || !list.contains(b)) return;
         const d = b.dataset;
+        if (d.ctxI != null) {
+          const i = +d.ctxI, p2 = ve.refs.player;
+          if (p2 && !p2.paused && ve._capLine && ve._capLine.i === i) { p2.pause(); ve._capLine = null; capPlayerPaint(true); return; }
+          capPlayInContext(i);
+          return;
+        }
         if (d.playI != null) {
           const i = +d.playI;
           const p2 = ve.refs.player;

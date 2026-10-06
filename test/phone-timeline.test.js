@@ -267,6 +267,20 @@ async function waitUp() {
       const b = await st();
       check(b.rows === 2, '"⚠ Check" lists only the two lines worth a look', b);
       if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'check-tab.png') });
+      const ctx = await page.evaluate((L) => {
+        const row = document.querySelector('#capList .cap-row[data-row="2"]');
+        const before = row && row.querySelector('.cap-ctx-before'), after = row && row.querySelector('.cap-ctx-after .cap-ctx-tx');
+        const bb = before && before.getBoundingClientRect(), ib = row && row.querySelector('.cap-text').getBoundingClientRect();
+        return { before: before && before.textContent, after: after && after.textContent, above: !!(bb && ib && bb.bottom <= ib.top + 1), want: [L[1].text, L[3].text] };
+      }, L);
+      check(ctx.before && ctx.before.includes(ctx.want[0]) && ctx.after && ctx.after.includes(ctx.want[1]) && ctx.above,
+        'a line to check shows the line before (above it) and the line after', ctx);
+      await page.evaluate(() => { document.getElementById('vePlayer').muted = true; });
+      await page.locator('#capList .cap-row[data-row="2"] [data-ctx-i]').tap();
+      await sleep(250);
+      const heard = await page.evaluate(() => ({ t: document.getElementById('vePlayer').currentTime, paused: document.getElementById('vePlayer').paused }));
+      check(!heard.paused && heard.t >= L[1].start - 0.2 && heard.t < L[2].start, '"Hear it in context" plays from the line before', { heard, from: L[1].start });
+      await page.evaluate(() => document.getElementById('vePlayer').pause());
       const use = page.locator('#capList [data-doubt-use]');
       check(await use.count() === 1 && /I SHALL NOT WANT/.test(await page.locator('#capList .cap-doubt-tx').first().textContent()),
         'the doubtful line shows what the other ear heard, in the chosen Case');
