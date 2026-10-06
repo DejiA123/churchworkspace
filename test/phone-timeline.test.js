@@ -203,7 +203,7 @@ async function waitUp() {
       });
       await sleep(400);
       const st = () => page.evaluate(() => ({
-        tabs: document.querySelectorAll('#capList .cap-fix-tabs button').length,
+        tabs: document.querySelectorAll('#capList .cap-fix-tabs [data-capfix]').length,
         rows: document.querySelectorAll('#capList .cap-row').length,
         fixed: document.querySelectorAll('#capList .cap-row.fixed').length,
       }));
@@ -221,6 +221,36 @@ async function waitUp() {
       await page.evaluate(() => { const T = window.VideoEditor.__test; T.markCapFixed(1, null); T.markCapFixed(3, null); });
       await page.evaluate(() => document.getElementById('capModal').classList.add('hidden'));
       await sleep(400);
+    }
+
+    console.log('\n=== [G] ＋ Add caption, after the AI made some ===');
+    {
+      const L0 = await page.evaluate(() => window.VideoEditor.__test.capLines());
+      // the playhead ON the second line: the new one goes in the first gap after it
+      await page.evaluate((t) => { document.getElementById('vePlayer').currentTime = t; }, L0[1].start + 0.2);
+      await sleep(400);
+      // the phone's tool: Captions → the caption row's "Add caption" (same call)
+      await page.evaluate(() => window.VideoEditor.addCaptionHere());
+      await sleep(400);
+      const ed = await page.evaluate(() => { const l = document.querySelector('#veCapTrack .ve-cap-clip.editing .ve-cc-label'); return { editing: !!l, focused: !!l && document.activeElement === l }; });
+      check(ed.editing && ed.focused, 'a new line opens for typing at once', ed);
+      await page.evaluate(() => { const l = document.querySelector('#veCapTrack .ve-cap-clip.editing .ve-cc-label'); l.textContent = 'praise the lord'; l.dispatchEvent(new Event('input')); l.blur(); });
+      await sleep(400);
+      const L1 = await page.evaluate(() => window.VideoEditor.__test.capLines());
+      const added = L1.find((c) => c.text === 'PRAISE THE LORD');
+            check(!!added && L1.length === L0.length + 1, 'it is on the lane, in the chosen Case', L1.map((c) => c.text));
+      check(added && added.start >= L0[1].end - 0.001 && L1.every((c) => c === added || c.end <= added.start + 0.001 || c.start >= added.end - 0.001),
+        'it sits after the line the playhead was on, overlapping nothing', added);
+      await page.evaluate(() => window.VideoEditor.__test.setCapWordsPerLine(2));
+      await sleep(300);
+      check((await page.evaluate(() => window.VideoEditor.__test.capLines())).some((c) => c.text === 'PRAISE THE LORD'),
+        'changing Words per line keeps a line typed by hand');
+      await page.evaluate(() => window.VideoEditor.__test.setCapWordsPerLine(3));
+      await page.evaluate(() => { document.getElementById('veUndo').click(); document.getElementById('veUndo').click(); document.getElementById('veUndo').click(); });
+      await sleep(300);
+      check(!(await page.evaluate(() => window.VideoEditor.__test.capLines())).some((c) => c.text === 'PRAISE THE LORD'), 'Undo takes it away again');
+      await page.evaluate(() => document.getElementById('veRedo').click());
+      await sleep(200);
     }
 
     console.log('\n=== [D] what the review found ===');

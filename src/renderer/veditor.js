@@ -5504,6 +5504,58 @@
     if (say) window.__toast && window.__toast(`Took “${String(e.text || '').slice(0, 40)}” off the captions. Undo puts it back.`, 'good');
     return true;
   }
+  /*
+   * ►► ＋ ADD A CAPTION — ANY TIME, AI LINES OR NOT. ◄◄
+   * "There should be an option to manually add captions even after the AI
+   * generated a caption." A line is added AT THE PLAYHEAD: in the gap there, or,
+   * when the playhead is on a line, in the first gap after it — two seconds, or
+   * as much of the gap as there is. It opens for typing at once (inside the tap,
+   * so an iPhone brings its keyboard up), wears the chosen Case and look, shows on
+   * the lane and the picture, is one Undo away, saves with the session and is
+   * burned into the export like every other line. It is marked as typed by hand,
+   * so changing Words per line (which regroups the AI's words) keeps it.
+   */
+  const CAP_NEW_SEC = 2, CAP_NEW_MIN = 0.4;
+  function addCaptionHere(opts) {
+    if (!ve.video) return false;
+    const inList = !!(opts && opts.inList);
+    commitCapEdit();
+    if (!Array.isArray(ve.capEvents)) ve.capEvents = [];
+    const off = capOff(), D = dur();
+    const evs = ve.capEvents.map((e) => ({ a: e.start + off, b: e.end + off })).sort((x, y) => x.a - y.a);
+    let a = clamp(nowT(), 0, D);
+    // past every line the playhead is on (lines can touch end to end)
+    for (const e of evs) if (e.a <= a + 0.001 && e.b > a + 0.05) a = e.b;
+    // …and on to the first gap with room in it
+    let b = a;
+    for (;;) {
+      const next = evs.find((e) => e.a >= a - 0.001 && e.b > a + 0.05);
+      b = Math.min(a + CAP_NEW_SEC, next ? next.a : D);
+      if (b - a >= CAP_NEW_MIN || !next) break;
+      a = next.b;
+    }
+    if (b - a < CAP_NEW_MIN) {
+      window.__toast && window.__toast('💬 There is no room for another line after this point — shorten a line on the 💬 lane to make room, or move the playhead.', 'error', 6000);
+      return false;
+    }
+    pushHistory({ captions: true });
+    const line = { start: +(a - off).toFixed(3), end: +(b - off).toFixed(3), text: '', manual: true };
+    ve.capEvents.push(line);
+    ve.capEvents.sort((x, y) => x.start - y.start);
+    if (!ve._capSource) { ve._capSource = ve.video.path; ve._capMode = ve._capMode || 'full'; }
+    const i = ve.capEvents.indexOf(line);
+    ve.capSel = i; ve.activeRow = 'caption';
+    const cc = $('#veCapShow'); if (cc && !cc.checked) cc.checked = true;
+    // the picture shows the new line while it is typed
+    try { const p = ve.refs.player; if (p && Math.abs((p.currentTime || 0) - (a + 0.05)) > 0.05 && a < D) seekTo(Math.min(D, a + 0.05)); } catch (e) {}
+    renderCapTrack(); renderCapList();
+    if (inList) {
+      // in the captions window: type it right there, in its own row
+      const inp = document.querySelector(`#capList .cap-text[data-i="${i}"]`);
+      if (inp) { inp.scrollIntoView({ block: 'center' }); inp.focus(); }
+    } else editCaption(i);
+    return true;
+  }
   // (a text box picked since is what is selected now, not the caption before it)
   const capLineSelected = () => ve.activeRow === 'caption' && ve.capSel != null && !ve.textSel && capBlocksVisible() && !!ve.capEvents[ve.capSel];
   /** Save whatever caption line is being typed into right now (if any). */
@@ -5547,6 +5599,12 @@
       const typedTxt = cleanCapText(label.textContent || '');
       const txt = inChosenCase(typedTxt);
       ve.capEditing = null;
+      // a line added by hand and left empty is not a line
+      if (!txt && ve.capEvents[i] && ve.capEvents[i].manual) {
+        ve.capEvents.splice(i, 1); ve.capSel = null;
+        renderCapTrack(); renderCapList(); updateCapOverlay(ve.refs.player.currentTime || 0);
+        return;
+      }
       if (ve.capEvents[i]) ve.capEvents[i].text = txt;
       if (label.textContent !== txt) label.textContent = txt;
       label.removeAttribute('contenteditable');
@@ -5554,7 +5612,7 @@
       renderCapTrack(); renderCapList(); updateCapOverlay(ve.refs.player.currentTime || 0);
       // A line retyped on the LANE teaches exactly as much as one retyped in the
       // window, and there is one Word Book, so it goes through the same door.
-      learnCaptionEdit(orig, capGroupCfg().tc === 'upper' ? txt : typedTxt, i);
+      if (orig) learnCaptionEdit(orig, capGroupCfg().tc === 'upper' ? txt : typedTxt, i);   // a new line taught nothing
       if (next != null && ve.capEvents[next]) { const n = next; next = null; editCaption(n); }
     };
     // live: the words on the preview change as you type, no need to commit first
@@ -11019,11 +11077,12 @@
   function rebuildCapEvents(opts) {
     const g = capGroupCfg();
     const caseOnly = !!(opts && opts.caseOnly);
-    let words = ve.capWords || [];
+    // (a hand-typed line is not one of the heard words, even where the two stores are one array)
+    let words = (ve.capWords || []).filter((w) => !(w && w.manual));
     if (!words.length) {
       if (!(ve.capEvents || []).length) return;
       if (caseOnly) { pushHistory({ captions: true }); recaseCapEvents(g.tc); return; }
-      words = wordsFromEvents(ve.capEvents);
+      words = wordsFromEvents(ve.capEvents.filter((e) => !e.manual));
       if (!words.length) return;
       // The lines are about to be re-broken from an estimate, so say so once —
       // and undo puts the originals straight back.
@@ -11032,7 +11091,10 @@
         + ' a line. These captions came without word timings, so the timing inside each line is estimated — Ctrl+Z puts your lines back.', 'good', 7000);
     }
     pushHistory({ captions: true });
-    ve.capEvents = groupWords(words, g.wpl, g.tc);
+    // lines typed by hand have no words to regroup: they stay as they are
+    const manual = (ve.capEvents || []).filter((e) => e && e.manual);
+    manual.forEach((e) => { e.text = inChosenCase(e.text); });
+    ve.capEvents = groupWords(words, g.wpl, g.tc).concat(manual).sort((a, b) => a.start - b.start);
     ve.capSel = null; ve.capEditing = null;
     renderCapList();
     renderCapTrack(); // show the caption blocks on the timeline
@@ -11110,10 +11172,13 @@
            <p class="cap-empty-sub muted small">Choose the <b>look</b> and the <b>Hearing</b> model above first — they are what the
              words will be written and listened with. Then press the button and the app transcribes the speech on this PC.</p>
            <button type="button" id="capGenerate" class="cap-generate">🎧 Generate captions</button>
+           <button type="button" class="cap-add-line cap-add-empty" data-capadd>＋ Or type your own caption</button>
            <p class="cap-empty-note muted small" id="capGenNote"></p>
          </div>`;
       const gen = document.getElementById('capGenerate');
       if (gen) gen.addEventListener('click', () => generateCaptions(scope));
+      const add0 = list.querySelector('[data-capadd]');
+      if (add0) add0.addEventListener('click', () => addCaptionHere({ inList: true }));
       const note = document.getElementById('capGenNote');
       if (note && ve.video && ve.video.info) {
         const mins = ve.video.info.durationSec / 60;
@@ -11136,12 +11201,13 @@
     // Each line: its own ▶, the time, the words with the proof-reader's
     // underlines laid over them, the badge that opens its suggestions, and ✨
     // to have the AI read just this line.
-    const tabs = nFixed
-      ? `<div class="cap-fix-tabs" role="tablist">`
-        + `<button type="button" role="tab" data-capfix="all" class="${ve.capOnlyFixed ? '' : 'on'}">All lines <span>${inScope.length}</span></button>`
-        + `<button type="button" role="tab" data-capfix="fixed" class="${ve.capOnlyFixed ? 'on' : ''}">✍ Fixed <span>${nFixed}</span></button>`
-        + `</div>`
-      : '';
+    const tabs = `<div class="cap-fix-tabs" role="tablist">`
+      + (nFixed
+        ? `<button type="button" role="tab" data-capfix="all" class="${ve.capOnlyFixed ? '' : 'on'}">All lines <span>${inScope.length}</span></button>`
+          + `<button type="button" role="tab" data-capfix="fixed" class="${ve.capOnlyFixed ? 'on' : ''}">✍ Fixed <span>${nFixed}</span></button>`
+        : '')
+      + `<button type="button" class="cap-add-line" data-capadd title="Add a caption line at the playhead (or the next gap) and type it">＋ Add caption</button>`
+      + `</div>`;
     list.innerHTML = tabs + rows.map(({ c, i }) =>
       `<div class="cap-row" data-row="${i}">`
       + `<button type="button" class="cap-row-play" data-play-i="${i}" title="Play this line">▶</button>`
@@ -11156,6 +11222,8 @@
           + `<button type="button" class="cap-was-back" data-was-i="${i}" title="Put this line back to what it said before">↶ Put back</button></div>`
         : '')
       + `</div>`).join('');
+    const addBtn = list.querySelector('[data-capadd]');
+    if (addBtn) addBtn.addEventListener('click', () => { ve.capOnlyFixed = false; addCaptionHere({ inList: true }); });
     list.querySelectorAll('[data-capfix]').forEach((b) => b.addEventListener('click', () => {
       const only = b.dataset.capfix === 'fixed';
       if (only === !!ve.capOnlyFixed) return;
@@ -11182,9 +11250,17 @@
         // the video, and remembered for every video after it. See the Word Book.
         // ALL CAPS: learned shouted, so the book can give a name its own capitals
         // ("EPHESIANS" -> "Ephesians"); any other Case: learned as typed
-        learnCaptionEdit(before, capGroupCfg().tc === 'upper' ? inp.value : typed, +inp.dataset.i);
+        if (before) learnCaptionEdit(before, capGroupCfg().tc === 'upper' ? inp.value : typed, +inp.dataset.i);   // a new line taught nothing
         updateGrammarSummary();
       };
+      // a line added by hand and left empty is not a line
+      inp.addEventListener('blur', () => {
+        const e = ve.capEvents[+inp.dataset.i];
+        if (e && e.manual && !String(inp.value || '').trim() && !String(e.text || '').trim()) {
+          ve.capEvents.splice(+inp.dataset.i, 1);
+          setTimeout(() => { renderCapList(); renderCapTrack(); }, 0);
+        }
+      });
       // The proof-reader's buttons commit a half-typed line before acting on it.
       inp._commit = commit;
       inp.addEventListener('change', commit);
@@ -14167,6 +14243,7 @@
 
     // auto-captions
     const capBtn = $('#veAutoCaptions'); if (capBtn) capBtn.addEventListener('click', openCaptions);
+    const addCapBtn = $('#veAddCaption'); if (addCapBtn) addCapBtn.addEventListener('click', () => addCaptionHere());
     renderCapModels();
     // the Word Book — the words this church's captions keep getting wrong
     const wbOpenBtn = $('#capWordBook'); if (wbOpenBtn) wbOpenBtn.addEventListener('click', () => showWordBook(true));
@@ -14854,6 +14931,8 @@
       return false;
     },
     editSelectedCaption() { if (capLineSelected()) editCaption(ve.capSel); },
+    /** ＋ Add caption: a new line at the playhead (or the next gap), open for typing. */
+    addCaptionHere() { return addCaptionHere(); },
     /** Projects (every video worked on keeps its own — see saveProject). */
     projectId() { return ve.video ? ve.sessionId || null : null; },
     /** Whatever is on screen written to its project NOW (before switching to another). */

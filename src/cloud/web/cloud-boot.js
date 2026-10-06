@@ -3212,6 +3212,7 @@ let _hideTimer = null;
       { icon: 'type', label: 'Add text', press: '#veAddText' },
       { icon: 'template', label: 'Templates', call: 'textTemplates' },
       { icon: 'animate', label: 'Animation', call: 'textAnimation' },
+      { icon: 'plus', label: 'Add caption', call: 'addCaptionHere' },
       { icon: 'captions', label: 'Captions', ai: true, sheet: 'insp', tab: '#veInspTabCaptions' },
     ],
     /* What a caption block on the timeline can do. Comes up by itself when
@@ -3220,6 +3221,7 @@ let _hideTimer = null;
     caption: [
       { icon: 'trash', label: 'Delete', call: 'deleteSelectedCaption' },
       { icon: 'pen', label: 'Edit words', call: 'editSelectedCaption' },
+      { icon: 'plus', label: 'Add caption', call: 'addCaptionHere' },
       { icon: 'captions', label: 'Captions', sheet: 'insp', tab: '#veInspTabCaptions' },
     ],
     ratio: [],      // built from the desk's own list of shapes

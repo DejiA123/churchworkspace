@@ -2577,7 +2577,11 @@ body.ve-pfull .ve-preview .ve-fs-exit {
 #capList .cap-row { content-visibility: auto; contain-intrinsic-size: auto 46px; }
 /* "All lines | ✍ Fixed": every line a fix changed, in one place (renderCapList) */
 .cap-fix-tabs { position: sticky; top: 0; z-index: 2; display: flex; gap: 6px; padding: 6px 2px 8px; background: var(--panel, #0f1218); }
-.cap-fix-tabs button { width: auto; margin: 0; padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 650; cursor: pointer;
+.cap-fix-tabs button { white-space: nowrap; width: auto; margin: 0; padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 650; cursor: pointer;
   background: rgba(255,255,255,.06); color: #cbd0dc; border: 1px solid rgba(255,255,255,.08); }
 .cap-fix-tabs button span { opacity: .7; font-weight: 600; margin-left: 4px; }
 .cap-fix-tabs button.on { background: rgba(139, 92, 246, .22); color: #fff; border-color: rgba(167, 139, 250, .6); }
+/* ＋ Add caption: at the end of the list bar, any time (addCaptionHere) */
+.cap-fix-tabs .cap-add-line { margin-left: auto; background: rgba(224,128,31,.16); color: #ffd3a3; border-color: rgba(224,128,31,.55); }
+.cap-empty-state .cap-add-empty { display: block; margin: 10px auto 0; width: auto; padding: 8px 16px; border-radius: 999px; font-weight: 650; cursor: pointer;
+  background: transparent; color: #cbd0dc; border: 1px solid rgba(255,255,255,.18); }
