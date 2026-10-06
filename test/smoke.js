@@ -580,10 +580,12 @@ app.whenReady().then(async () => {
     T.seekAndRefresh(5);                                  // renders + selects it
     const shownOnSelect = T.textToolsVisible();
     const set = (elId, v) => { const el = document.getElementById(elId); el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); };
-    set('vtSize', '12');                                  // make it SMALLER (user ask)
-    const smallPx = T.textFontPx();
-    set('vtSize', '96');                                  // and much bigger
-    const bigPx = T.textFontPx();
+    // the Size number is a % of the finished picture's height, the same at any preview size
+    set('vtSize', '3');                                   // make it SMALLER (user ask)
+    const smallPct = T.textStyleOf(id).sizePct;
+    set('vtSize', '20');                                  // and much bigger
+    const bigPct = T.textStyleOf(id).sizePct;
+    const smallPx = smallPct, bigPx = bigPct;
     set('vtFont', 'Bebas Neue');
     set('vtColor', '#ffe600');
     document.getElementById('vtBold').click();            // toggle bold off (default true)
@@ -596,8 +598,8 @@ app.whenReady().then(async () => {
   })()`);
   if (style.__error) { console.error('STYLE SCRIPT ERROR:\\n' + style.__error); }
   log(style.hiddenBefore && style.shownOnSelect, 'style toolbar hidden until a text is selected, then appears', `before=${!style.hiddenBefore} onSelect=${style.shownOnSelect}`);
-  log(Math.abs(style.smallPx - 12) <= 1, 'user can make the text SMALLER (12px)', style.smallPx + 'px');
-  log(Math.abs(style.bigPx - 96) <= 1, 'user can make the text BIGGER (96px)', style.bigPx + 'px');
+  log(Math.abs(style.smallPx - 0.03) < 1e-9, 'user can make the text SMALLER (3% of the picture)', style.smallPx);
+  log(Math.abs(style.bigPx - 0.2) < 1e-9, 'user can make the text BIGGER (20% of the picture)', style.bigPx);
   log(style.st && style.st.font === 'Bebas Neue', 'font family changes', style.st && style.st.font);
   log(style.st && style.st.color === '#ffe600', 'text colour changes', style.st && style.st.color);
   log(style.st && style.st.bold === false, 'bold toggles');

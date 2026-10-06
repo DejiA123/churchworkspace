@@ -558,23 +558,62 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
     border-radius: 0;
     background: var(--ph-bg);
   }
-  /* The text style bar: a strip along the bottom of the picture, scrolled
-     sideways, instead of a centred box wider than the phone. */
+  /*
+   * ►► THE TEXT PANEL: DOCKED, STILL, AND ALL OF IT IN REACH. ◄◄
+   * It used to be a strip over the bottom of the picture, twice as wide as
+   * the phone, with Bold, Outline, the panel, the animation and Delete all
+   * off the right-hand edge — and it jumped to the top of the picture whenever
+   * a dragged title crossed the middle. Now it is a panel fixed to the bottom
+   * of the screen, over the tool dock (as CapCut's is), that slides up and
+   * never moves or resizes the picture; everything wraps onto two rows of
+   * thumb-sized controls, and the Size slider means the keyboard is rarely
+   * needed. With the keyboard up it rides on top of it.
+   */
   body.mw-cloud #view-video.ve-pro .ve-text-tools {
-    top: auto; bottom: 0; left: 0; right: 0; transform: none;
-    display: flex; flex-wrap: nowrap; align-items: center; gap: 8px;
-    max-width: none; border-radius: 0;
-    padding: 8px 10px;
-    overflow-x: auto; scrollbar-width: none;
-    background: rgba(12,13,16,.94);
-    border: 0; border-top: 1px solid var(--ph-line);
+    position: fixed; z-index: 205;
+    top: auto !important; bottom: var(--kb, 0px) !important; left: 0; right: 0; transform: none;
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 10px;
+    max-width: none; white-space: normal;
+    padding: 12px 14px calc(12px + var(--ph-safe-b, env(safe-area-inset-bottom))) 14px;
+    background: rgba(18, 19, 24, .97); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    border: 0; border-top: 1px solid var(--ph-line); border-radius: 18px 18px 0 0;
+    box-shadow: 0 -10px 30px rgba(0, 0, 0, .45);
+    animation: vtPanelIn .24s cubic-bezier(.2, .8, .2, 1);
   }
-  body.mw-cloud #view-video.ve-pro .ve-text-tools::-webkit-scrollbar { display: none; }
-  body.mw-cloud #view-video.ve-pro .ve-text-tools > * { flex: none; }
+  html.mw-kb body.mw-cloud #view-video.ve-pro .ve-text-tools { padding-bottom: 10px; border-radius: 14px 14px 0 0; }
+  @keyframes vtPanelIn { from { transform: translateY(100%); opacity: .4; } to { transform: none; opacity: 1; } }
   body.mw-cloud #view-video.ve-pro .ve-text-tools.hidden { display: none; }
-  body.mw-cloud #view-video.ve-pro .ve-text-tools select,
-  body.mw-cloud #view-video.ve-pro .ve-text-tools input[type=number] { font-size: 16px; height: 36px; }
-  body.mw-cloud #view-video.ve-pro .ve-text-tools button { height: 36px; min-width: 40px; }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools .vt-label { display: none; }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools select {
+    flex: 1 1 140px; min-width: 0; height: 44px; font-size: 16px; padding: 0 12px; border-radius: 12px;
+    background: var(--ph-panel-2, #1c1d23); color: #fff; border: 1px solid rgba(255,255,255,.08);
+  }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools .vt-size-wrap {
+    flex: 2 1 220px; display: flex; align-items: center; gap: 10px; color: #a1a6b4; font-size: 14px; font-weight: 650;
+  }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools #vtSizeRange { flex: 1 1 auto; width: auto; min-width: 90px; height: 44px; }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools input[type=number] {
+    width: 64px; height: 44px; font-size: 17px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums;
+    border-radius: 12px; background: var(--ph-panel-2, #1c1d23); color: #fff; border: 1px solid rgba(255,255,255,.08); -moz-appearance: textfield;
+  }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools input[type=number]::-webkit-inner-spin-button,
+  body.mw-cloud #view-video.ve-pro .ve-text-tools input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools .vt-unit { font-size: 15px; margin-left: -6px; }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools input[type=color] {
+    width: 44px; height: 44px; padding: 4px; border-radius: 50%; border: 2px solid rgba(255,255,255,.18); background: transparent;
+  }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools button {
+    height: 44px; min-width: 44px; padding: 0 14px; border-radius: 12px; font-size: 17px;
+    background: var(--ph-panel-2, #1c1d23); border: 1px solid rgba(255,255,255,.08);
+  }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools input[type=color]::-webkit-color-swatch { border: 0; border-radius: 50%; }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools input[type=color]:disabled { opacity: .35; }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools #vtAnim { flex: 1 1 120px; font-size: 15px; text-overflow: ellipsis; }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools #vtDelete { margin-left: auto; }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools #vtDone { background: #7c3aed; border-color: #8b5cf6; color: #fff; font-weight: 800; min-width: 56px; }
+  /* in full screen the panel sits over the full-screen player bar */
+  body.ve-pfull.mw-cloud #view-video.ve-pro .ve-text-tools { z-index: 2050; }
   body.mw-cloud #view-video.ve-pro #veResume {
     position: fixed; z-index: 60;
     top: calc(var(--ph-top) + 8px); left: 10px; right: 10px;

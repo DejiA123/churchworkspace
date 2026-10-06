@@ -200,10 +200,11 @@ app.whenReady().then(async () => {
     const look = T.textLookInFrame(o.id);
     return { min, value: el.value, shownPx: look ? look.fontFrac * T.textLookInFrame(o.id).frame.h : null, look };
   })()`);
-  check(tiny.min === '1', 'the Size field accepts anything down to 1', 'min=' + tiny.min);
-  check(tiny.shownPx != null && tiny.shownPx < 6,
-    'and 3 really draws 3-pixel text instead of being floored at 8',
-    tiny.shownPx != null ? tiny.shownPx.toFixed(2) + 'px on screen' : 'not measurable');
+  // the number is a % of the finished picture's height, so 3 is a caption-sized line at any preview size
+  check(Number(tiny.min) <= 1, 'the Size field goes down to a caption-sized line', 'min=' + tiny.min);
+  check(tiny.look && Math.abs(tiny.look.fontFrac - 0.03) < 0.006,
+    'and 3 really draws letters 3% of the picture tall',
+    tiny.look ? tiny.look.fontFrac.toFixed(4) : 'not measurable');
 
   console.log(`\n==== preview sizes agree: ${pass} PASS / ${fail} FAIL ====`);
   win.destroy();

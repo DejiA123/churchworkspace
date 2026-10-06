@@ -3831,7 +3831,12 @@ let _hideTimer = null;
         const vr = view.getBoundingClientRect();
         const pb = parseFloat(getComputedStyle(view).paddingBottom) || 0;
         const vv = window.visualViewport;
-        const limit = Math.min(dock.getBoundingClientRect().top, vv ? vv.offsetTop + vv.height : window.innerHeight);
+        // Typing in the text panel (the Size box, the words) brings the keyboard
+        // up: the panel rides on it, and the PICTURE stays exactly as it was —
+        // shrinking it under the keyboard changed the very text being sized.
+        const ae = document.activeElement;
+        const inPanel = !!(ae && ae.closest && ae.closest('#veTextTools, .ve-text-box'));
+        const limit = Math.min(dock.getBoundingClientRect().top, vv && !inPanel ? vv.offsetTop + vv.height : window.innerHeight);
         // the studio's content ends where its padding starts; it must end at the dock
         const over = Math.ceil((vr.bottom - pb) - limit);
         if (over > 1) view.style.paddingBottom = (pb + over) + 'px';

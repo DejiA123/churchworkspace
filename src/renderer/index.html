@@ -866,8 +866,9 @@
                     <option value="Poppins">Poppins</option>
                     <option value="Bangers">Bangers</option>
                   </select>
-                  <label class="vt-size-wrap" title="How big the words are, in pixels of the export frame as the preview draws it. Goes down to 1 for a small caption line and up to 300 for a title.">Size
-                    <input type="number" id="vtSize" min="1" max="300" step="0.5" />
+                  <label class="vt-size-wrap" title="How tall the letters are, as a percentage of the finished picture's height — the same number at every preview size, in full screen, with the keyboard up, and in the exported file. 11 is a title; 3 is a caption line.">Size
+                    <input type="range" id="vtSizeRange" min="1" max="30" step="0.5" aria-label="Text size" />
+                    <input type="number" id="vtSize" min="0.5" max="50" step="0.5" inputmode="decimal" enterkeyhint="done" /><span class="vt-unit">%</span>
                   </label>
                   <input type="color" id="vtColor" title="Text colour" />
                   <button id="vtBold" title="Bold">B</button>
@@ -887,6 +888,7 @@
                     <option value="zoom">Zoom</option>
                   </select>
                   <button id="vtDelete" title="Delete this text">🗑</button>
+                  <button id="vtDone" class="vt-done" title="Done">✓</button>
                 </div>
                 <div class="ve-novid" id="veNoVid">
                   <div class="ve-novid-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4"/><path d="m7.5 8.5 4.5-4.5 4.5 4.5"/><path d="M4 14v3.5A2.5 2.5 0 0 0 6.5 20h11a2.5 2.5 0 0 0 2.5-2.5V14"/></svg></div>

@@ -222,7 +222,8 @@
     "test:music-bed": "node test/music-bed.test.js",
     "test:phone-music": "node test/phone-music.test.js",
     "test:caption-track-stream": "node test/caption-track-stream.test.js",
-    "test:phone-file-picker": "node test/phone-file-picker.test.js"
+    "test:phone-file-picker": "node test/phone-file-picker.test.js",
+    "test:phone-text-panel": "node test/phone-text-panel.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",

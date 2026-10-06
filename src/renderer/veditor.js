@@ -4811,28 +4811,58 @@
   const previewH = () => { const f = outputFrameRect(); return (f && f.h) || 400; };
   function selectedTextOverlay() { return ve.textOverlays.find((o) => o.id === ve.textSel); }
   /** Show the toolbar for the selected text + mirror its current style. */
+  /*
+   * ►► THE SIZE NUMBER BELONGS TO THE TEXT, NOT TO THE SCREEN. ◄◄
+   * The Size box used to show the text's height in PREVIEW pixels — sizePct
+   * times however tall the picture happened to be drawn. The same words read
+   * 47 in the studio, 77 in full screen, 19 with the iPhone keyboard up and
+   * 15.5 sideways, and a number typed while the keyboard had shrunk the
+   * picture made the words nearly three times bigger than it said. Now the
+   * number is the text's own: how tall the letters are as a PERCENTAGE OF THE
+   * FINISHED PICTURE'S HEIGHT — exactly what is stored (sizePct), the same at
+   * every size of preview and in the file. Saved projects look exactly as they
+   * did; only the label on the number changed.
+   */
+  const TEXT_SIZE_MIN = 0.5, TEXT_SIZE_MAX = 50;
+  const textSizeShown = (o) => String(Math.round(((o && o.sizePct) || 0.11) * 200) / 2);
+  const textSizePctOf = (v) => clamp(Number(v) || 11, TEXT_SIZE_MIN, TEXT_SIZE_MAX) / 100;
+  /*
+   * ►► SHOW THE PANEL, AND CHANGE ONLY WHAT CHANGED. ◄◄
+   * This runs on every redraw of the text layer — each move of a drag, each
+   * refit, each frame a text arrives on. It used to rewrite every control and
+   * move the bar each time: the bar hopped from the bottom of the picture to
+   * the top the instant a dragged title crossed the middle, and a number being
+   * typed was snatched back while the video played. Now a control is written
+   * only when its value differs and nobody is typing in it, and the side the
+   * bar sits on is chosen once, when a text is picked.
+   */
   function updateTextTools() {
     const bar = $('#veTextTools'); if (!bar) return;
     const o = selectedTextOverlay();
-    if (!ve.video || !o) { bar.classList.add('hidden'); return; }
-    bar.classList.remove('hidden');
-    // Keep the bar OFF the text it is editing. The preview can be short (the
-    // timeline needs the height), and a bar pinned to the top swallowed every
-    // click on text placed up there — the text simply would not respond. Park
-    // it on the opposite side of the picture from the selected text.
-    const low = (o.y || 0) < 0.5;
-    bar.style.top = low ? 'auto' : '10px';
-    // in full screen its own player bar has the bottom: sit above it
-    bar.style.bottom = low ? (isPreviewFull() ? 'calc(env(safe-area-inset-bottom) + 96px)' : '10px') : 'auto';
-    $('#vtFont').value = o.font || 'Arial';
-    $('#vtSize').value = String(Math.round(Math.max(1, (o.sizePct || 0.11) * previewH()) * 2) / 2);
-    $('#vtColor').value = /^#[0-9a-f]{6}$/i.test(o.color || '') ? o.color : '#ffffff';
-    $('#vtBold').classList.toggle('on', !!o.bold);
-    const bg = $('#vtBg'); if (bg) bg.classList.toggle('on', !!o.bg);
-    const bgc = $('#vtBgColor');
-    if (bgc) { bgc.value = /^#[0-9a-f]{6}$/i.test(o.bgColor || '') ? o.bgColor : '#000000'; bgc.disabled = !o.bg; }
-    const ol = $('#vtOutline'); if (ol) ol.classList.toggle('on', !!o.outline);
-    const an = $('#vtAnim'); if (an) an.value = TEXT_ANIM_IDS.includes(o.anim) ? o.anim : 'none';
+    if (!ve.video || !o) { bar.classList.add('hidden'); bar.dataset.for = ''; return; }
+    if (bar.classList.contains('hidden')) bar.classList.remove('hidden');
+    if (bar.dataset.for !== String(o.id)) {
+      bar.dataset.for = String(o.id);
+      // Keep the bar OFF the text it is editing (the phone docks it at the
+      // bottom of the screen instead — cloud.css): the opposite side of the
+      // picture from where the text was when it was picked.
+      const low = (o.y || 0) < 0.5;
+      bar.style.top = low ? 'auto' : '10px';
+      // in full screen its own player bar has the bottom: sit above it
+      bar.style.bottom = low ? (isPreviewFull() ? 'calc(env(safe-area-inset-bottom) + 96px)' : '10px') : 'auto';
+    }
+    const put = (sel, v) => { const el = $(sel); if (el && el !== document.activeElement && el.value !== v) el.value = v; };
+    const flag = (sel, on) => { const el = $(sel); if (el && el.classList.contains('on') !== on) el.classList.toggle('on', on); };
+    put('#vtFont', o.font || 'Arial');
+    put('#vtSize', textSizeShown(o));
+    put('#vtSizeRange', textSizeShown(o));
+    put('#vtColor', /^#[0-9a-f]{6}$/i.test(o.color || '') ? o.color : '#ffffff');
+    flag('#vtBold', !!o.bold);
+    flag('#vtBg', !!o.bg);
+    flag('#vtOutline', !!o.outline);
+    put('#vtBgColor', /^#[0-9a-f]{6}$/i.test(o.bgColor || '') ? o.bgColor : '#000000');
+    const bgc = $('#vtBgColor'); if (bgc && bgc.disabled !== !o.bg) bgc.disabled = !o.bg;
+    put('#vtAnim', TEXT_ANIM_IDS.includes(o.anim) ? o.anim : 'none');
   }
   /** Change a style property on the selected text; updates the live node even mid-edit. */
   function applyTextProp(mutate) {
@@ -4915,6 +4945,7 @@
     if (ve.textEditing === id) return;
     if (ev.target.closest('[data-del]')) { ve.textSel = id; renderTextOverlays(); renderTextTrack(); return; }
     const resizing = !!ev.target.closest('[data-resize]');
+    const wasSel = ve.textSel === id;
     ve.textSel = id; renderTextOverlays(); renderTextTrack();
     ev.preventDefault(); ev.stopPropagation();
     const fr = outputFrameRect();
@@ -4931,7 +4962,10 @@
       else {
         o.x = ox0 + dx; o.y = oy0 + dy;
         // e.shiftKey (or alt) on the desk: move freely, no snapping
-        const snap = (e.altKey || e.shiftKey) ? null : snapTextBox(o, fr, box);
+        // (measured on the box as it is NOW: every move redraws the layer, and
+        // the one pressed has long been replaced — its size read as 0×0)
+        const cur = ve.refs.textLayer.querySelector(`.ve-text-box[data-id="${id}"]`) || box;
+        const snap = (e.altKey || e.shiftKey) ? null : snapTextBox(o, fr, cur);
         clampTextIntoFrame(o);
         showTextGuides(snap, fr);
       }
@@ -4942,9 +4976,11 @@
       showTextGuides(null);
       if (moved) commitDragHistory(preSnap);
       // A plain CLICK (no drag, not the resize handle) = "I want to edit this" →
-      // enter edit mode so the user can type immediately. This is what people
-      // expect: click the text, then type. (Double-click still works too.)
-      else if (!resizing) startEditingText(id);
+      // enter edit mode so the user can type immediately. (Double-click still
+      // works too.) On a touch screen the FIRST tap only picks the text — the
+      // panel comes up and the picture stays put — and a second tap types, as
+      // captions do: a keyboard nobody asked for squeezed the picture.
+      else if (!resizing && (wasSel || !window.matchMedia('(pointer: coarse)').matches)) startEditingText(id);
     };
     document.addEventListener('mousemove', move);
     document.addEventListener('mouseup', up, { once: true });
@@ -13847,13 +13883,29 @@
         vtFont.style.fontFamily = `'${String(vtFont.value).replace(/['"\\;{}]/g, '')}', system-ui, sans-serif`;
       });
     }
+    // The size, as a percentage of the finished picture's height (see
+    // textSizeShown): typed, or slid with a thumb — one undo step per slide.
     const vtSize = $('#vtSize'); if (vtSize) vtSize.addEventListener('change', () => {
-      // Down to 1, and in half-pixel steps: on a short preview the frame is only
-      // a couple of hundred pixels tall, so 8 was already a heading and there was
-      // no way to ask for a small caption-sized line at all.
-      const px = clamp(parseFloat(vtSize.value) || 22, 1, 300);
-      applyTextProp((o) => { o.sizePct = px / previewH(); });
+      applyTextProp((o) => { o.sizePct = textSizePctOf(vtSize.value); });
+      vtSize.value = textSizeShown(selectedTextOverlay());
     });
+    const vtSizeRange = $('#vtSizeRange');
+    if (vtSizeRange) {
+      let sliding = false;
+      vtSizeRange.addEventListener('input', () => {
+        const o = selectedTextOverlay(); if (!o) return;
+        if (!sliding) { sliding = true; pushHistory(); }
+        o.sizePct = textSizePctOf(vtSizeRange.value);
+        if (vtSize) vtSize.value = textSizeShown(o);
+        renderTextOverlays();
+      });
+      vtSizeRange.addEventListener('change', () => {
+        sliding = false;
+        const o = selectedTextOverlay(); if (o) clampTextIntoFrame(o);
+        renderTextOverlays();
+        if (typeof touchSession === 'function') touchSession();
+      });
+    }
     const vtColor = $('#vtColor'); if (vtColor) vtColor.addEventListener('change', () => applyTextProp((o) => { o.color = vtColor.value; }));
     const vtBold = $('#vtBold'); if (vtBold) vtBold.addEventListener('click', () => applyTextProp((o) => { o.bold = !o.bold; }));
     const vtBg = $('#vtBg'); if (vtBg) vtBg.addEventListener('click', () => applyTextProp((o) => { o.bg = !o.bg; }));
@@ -13865,6 +13917,13 @@
       if (!o.outlineColor) o.outlineColor = '#000000';
     }));
     const vtDelete = $('#vtDelete'); if (vtDelete) vtDelete.addEventListener('click', () => { if (ve.textSel) removeTextOverlay(ve.textSel); });
+    // ✓ Done: the words are as they should be — put the panel away
+    const vtDone = $('#vtDone'); if (vtDone) vtDone.addEventListener('click', () => {
+      const editing = ve.textEditing && ve.refs.textLayer.querySelector(`.ve-text-box[data-id="${ve.textEditing}"] .ve-text-content`);
+      if (editing) editing.blur();
+      ve.textSel = null; ve.textEditing = null;
+      renderTextOverlays(); renderTextTrack(); updateTextTools();
+    });
     const vtAnim = $('#vtAnim'); if (vtAnim) vtAnim.addEventListener('change', () => { if (ve.textSel) setTextAnim(ve.textSel, vtAnim.value); });
     // Clicking anywhere on the preview OUTSIDE a text box deselects the text:
     // commits any in-progress edit, hides the style toolbar, drops the drag border.
