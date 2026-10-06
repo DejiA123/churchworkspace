@@ -50,6 +50,7 @@ const KEEP_VIEW = 'view-video';
 const RENDERER_SCRIPTS = [
   'facetrack.js',    // auto-reframe — runs in THIS browser (MW_AI_BASE = /ai/)
   'caplayout.js',    // one layout module for preview and burn
+  'wordbook-english.js', // the real words the built-in names may never replace (before wordbook.js)
   'wordbook.js',     // the same-wrong-word-never-twice list
   'capgrammar.js',   // the caption proof-reader (needs wordbook.js first)
   'icons.js',        // the studio's line icons

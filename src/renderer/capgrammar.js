@@ -539,34 +539,38 @@
    * that sounds nothing like it ("by" → "power") — is not a correction.
    */
   const lettersOnly = (w) => String(w || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  /** How a word starts to the ear: the silent letters some spellings start with go
-   *  ("who"/"whole" start with an h sound, every other wh- with a w). */
-  const heardStart = (w) => w.replace(/^(ps|pn|kn|gn|wr)/, (m) => m[1]).replace(/^ph/, 'f').replace(/^who/, 'ho').replace(/^wh/, 'w');
+  /** How a word starts to the ear: the silent letters some spellings start with go. */
+  const heardStart = (w) => w.replace(/^(ps|pn|kn|gn|wr)/, (m) => m[1]).replace(/^ph/, 'f').replace(/^wh/, 'w');
   /*
-   * The first SOUND, for the "starts the same" gate. Letters lie about it in
-   * both directions: "cent" and "sent" start alike, "hour" and "our" do (the h
-   * is silent, and many accents drop it anyway), so do "eight" and "ate" — any
-   * two words that open on a vowel. Found by review: the first letter alone
-   * refused all of these ordinary homophone corrections.
+   * Homophones whose SPELLINGS start differently — the only way past the
+   * first-sound gate below, and an explicit list on purpose. A general rule
+   * was tried ("any two words that open on a vowel", a silent h, a silent gh)
+   * and a second review measured it: 707 new one-word swaps among the 400
+   * commonest words became acceptable, "HE IS RISEN" -> "HE HAS RISEN", "OUR
+   * FATHER" -> "HER FATHER", "THE HOLY SPIRIT" -> "THE ONLY SPIRIT" among them.
+   * A caption that silently says something else is worse than one the AI
+   * could not fix, so these few, and nothing looser.
    */
-  function firstSound(w) {
-    if (/^h?[aeiouy]/.test(w)) return 'V';
-    if (/^c[eiy]/.test(w)) return 's';
-    const c = w[0];
-    return c === 'k' || c === 'q' || c === 'c' ? 'k' : c === 'z' ? 's' : c;
-  }
+  const HOMOPHONES = new Set([
+    ['hour', 'our'], ['hours', 'ours'], ['heir', 'air'], ['heirs', 'airs'], ['eight', 'ate'], ['aisle', 'isle'],
+    ['cent', 'sent'], ['scent', 'sent'], ['cents', 'sense'], ['whole', 'hole'], ['wholly', 'holy'], ['one', 'won'],
+    ['eye', 'i'], ['eyes', 'is'], ['cell', 'sell'], ['site', 'sight'], ['cite', 'sight'], ['seen', 'scene'],
+  ].flatMap(([p, q]) => [p + '|' + q, q + '|' + p]));
   /** The consonants after the first sound — what survives an accent's vowels. */
   const skeleton = (w) => w[0] + w.slice(1).replace(/[aeiouyhw]/g, '');
   const likeness = (a, b) => 1 - lev(a, b) / Math.max(a.length, b.length, 1);
   function soundAlike(x, y) {
-    // ("eight", "night", "though": a gh before a t, or at the end, is not heard)
-    const a = heardStart(lettersOnly(x)).replace(/gh(?=t|$)/g, ''), b = heardStart(lettersOnly(y)).replace(/gh(?=t|$)/g, '');
-    if (!a || !b) return false;
+    const a0 = lettersOnly(x), b0 = lettersOnly(y);
+    if (!a0 || !b0) return false;
+    if (HOMOPHONES.has(a0 + '|' + b0)) return true;
+    const a = heardStart(a0), b = heardStart(b0);
     if (soundsSame(a, b)) return true;
-    if (firstSound(a) !== firstSound(b)) return false;
-    // a silent or dropped h is not a letter of difference
-    const bare = (w) => (/^h[aeiouy]/.test(w) ? w.slice(1) : w);
-    return likeness(a, b) >= 0.5 || likeness(bare(a), bare(b)) >= 0.5 || likeness(skeleton(a), skeleton(b)) >= 0.5;
+    const first = (c) => (c === 'k' || c === 'q' ? 'c' : c === 'z' ? 's' : c);
+    if (first(a[0]) !== first(b[0])) return false;
+    if (likeness(a, b) >= 0.5) return true;
+    // the consonants alone, for an accent's vowels ("face" -> "faith", "guard" -> "God") —
+    // never between two tiny words, where two letters prove nothing ("him" -> "her")
+    return Math.max(a.length, b.length) >= 4 && likeness(skeleton(a), skeleton(b)) >= 0.5;
   }
   function onlySwaps(A, B) {
     const ops = diffWords(A.join(' '), B.join(' '));

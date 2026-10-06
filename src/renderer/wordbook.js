@@ -160,13 +160,14 @@
      * 2.1 million words of real English (the King James Bible and 17 other
      * books), a 94,000-word frequency list with every inflection, and all 25
      * million pairs of the 5,000 commonest words — and kept only if all it ever changes
-     * is itself, or another spelling of the same person (Zorobabel, Zabulon).
-     * 48 that pulled anything else are left out — Theophilus ("the false"),
+     * is itself, or another spelling of the same person (Zorobabel, Bezaleel).
+     * 50 that pulled anything else are left out (Arimathea took the place
+     * Ramath, Elimelech the place Alammelech) — Theophilus ("the false"),
      * Erastus ("raised us"), Jairus ("jars"), Trophimus ("true famous"),
      * Ebenezer, Shadrach, Meshach and Abednego among them. Whisper spells those
      * right anyway, and a caption that can no longer say "jars" is too high a
      * price. test/wordbook.test.js keeps the reviewer's examples as checks. */
-    'Mephibosheth Zerubbabel Jireh Shaddai Nissi Rapha Shammah Azariah Japheth Pharaoh Othniel Manoah Orpah Peninnah Hophni Uriah Adonijah Shimei Hushai Rehoboam Gehazi Athaliah Uzziah Tobiah Vashti Artaxerxes Obededom Elihu Enoch Eutychus Epaphroditus Aeneas Aristarchus Berea Thyatira Joppa Zarephath Achaia Goshen Moriah Gibeah Jabbok Jephthah Delilah Bezalel Arimathea Ephratah Bethphage Zedekiah Jehoiachin Elimelech Goliath Belteshazzar ' +
+    'Mephibosheth Zerubbabel Jireh Shaddai Nissi Rapha Shammah Azariah Japheth Pharaoh Othniel Manoah Orpah Peninnah Hophni Uriah Adonijah Shimei Hushai Rehoboam Gehazi Athaliah Uzziah Tobiah Vashti Artaxerxes Obededom Elihu Enoch Eutychus Epaphroditus Aeneas Aristarchus Berea Thyatira Joppa Zarephath Achaia Goshen Moriah Gibeah Jabbok Jephthah Delilah Bezalel Ephratah Bethphage Zedekiah Jehoiachin Goliath Belteshazzar ' +
     /* God, and the names of God */
     'Jesus Christ Messiah Immanuel Emmanuel Yahweh Jehovah Adonai Elohim Almighty Trinity ' +
     /* places */
@@ -298,6 +299,65 @@
     return false;
   }
 
+  /* ------------------------------------------------------------------ *
+   * KNOWN WORDS — what the BUILT-IN names may never replace.
+   *
+   * COMMON_WORDS above is 1,400 words. Every other real word was fair game
+   * for the built-in Bible names, and the 25-million-pair sweep found 583 of
+   * the 100,000 commonest English words being re-spelled: "plate" -> Pilate,
+   * "divide" -> David, "sales" -> Silas, "salmon" -> Solomon, "romance" ->
+   * Romans, "manual" -> Immanuel, "the ceiling" -> Thessalonica — and real
+   * people's names too: "Simon" -> Simeon, "Steven" -> Stephen, "Pastor
+   * Watson" -> "Pastor Whitsun".
+   *
+   * So a built-in name now only replaces what is NOT a word: 79,000 English
+   * words (SCOWL, the list spell checkers use, every English spelling), 12,500
+   * common first names and surnames, and 150 hand-checked places and words
+   * ("Ibadan", "Ghanaian", "Syrian"), in wordbook-english.js. A heard
+   * word on that list is what was said. What is left for the built-in names is
+   * what whisper actually gets wrong — "Methabosheth", "Zarababel",
+   * "Ezekial". A name the operator put in the book themselves keeps the
+   * older, looser rule: they chose it, and "Wally Oak" -> "Wale Oke" is the
+   * reason they did.
+   *
+   * If the list cannot be loaded the built-in names do not sound-match at all
+   * (they still count as spelled right): a missing safety list must make the
+   * book more careful, never less.
+   * ------------------------------------------------------------------ */
+  const KNOWN = (function () {
+    let src = null;
+    try {
+      src = (typeof window !== 'undefined' && window.WordBookEnglish)
+        || (typeof require === 'function' ? require('./wordbook-english.js') : null);
+    } catch (e) { src = null; }
+    if (typeof src !== 'string' || !src) return null;
+    const set = new Set();
+    let prev = '';
+    for (const e of src.split(' ')) {
+      if (!e) continue;
+      const c = e.charCodeAt(0);
+      const k = c <= 57 ? c - 48 : c - 87;           // 0-9, then a-z for 10-35
+      prev = prev.slice(0, k) + e.slice(1);
+      set.add(prev);
+    }
+    return set;
+  }());
+
+  /** Real English or a real person's name (possessive and plural forms too). */
+  function isKnownWord(w) {
+    const n = normWord(w);
+    if (!n || isCommonWord(n)) return true;
+    if (!KNOWN) return true;
+    if (KNOWN.has(n)) return true;
+    const bare = n.replace(/'s$|s'$|'$/, (x) => (x === "s'" ? 's' : ''));
+    if (bare !== n && (KNOWN.has(bare) || isCommonWord(bare))) return true;
+    // "Watsons", "Simmonses" and the like: a known name with a plural ending
+    if (/s$/.test(n) && KNOWN.has(n.slice(0, -1))) return true;
+    // "nothin'", "shakin'", "flippin'": the word with its g dropped
+    if (/in$/.test(n) && KNOWN.has(n + 'g')) return true;
+    return false;
+  }
+
   /** Edit distance, small strings only. */
   function levenshtein(a, b) {
     a = String(a); b = String(b);
@@ -374,6 +434,18 @@
   const SEED_PHRASES = ['Jehovah Jireh', 'Jehovah Nissi', 'Jehovah Rapha', 'Jehovah Shalom', 'Jehovah Shammah',
     'Jehovah Tsidkenu', 'Jehovah Rohi', 'El Shaddai', 'El Roi', 'El Olam'];
 
+  /* Built-in names that are also everyday first names. Whisper spells these
+   * right every time, so as sound-alike targets they could only ever take
+   * someone else's name: "André" -> "Andrew", "Petri" -> "Peter", "McHale" ->
+   * "Michael". They stay in the book as spellings, just never as something to
+   * sound like. (The built-in names in the top 1,000 US first names, 1990 Census.) */
+  const SEED_SPELLED_RIGHT = new Set((
+    'Joshua Samuel Esther Isaiah Jeremiah Daniel Jonah Micah Matthew Timothy Peter Abraham Sarah Isaac Rebekah ' +
+    'Jacob Joseph Benjamin Moses Aaron Miriam Caleb Deborah Naomi David Solomon Elijah Josiah Jonathan Nathan ' +
+    'Gabriel Michael Elizabeth Martha Stephen Philip Cornelius Silas Priscilla Lydia Felix Thomas Andrew Jesus ' +
+    'Emmanuel Bethany Jordan'
+  ).toLowerCase().split(' '));
+
   function compile(book) {
     const b = book || {};
     const fixes = new Map();
@@ -401,32 +473,36 @@
     const termTexts = [];
     for (const f of (b.fixes || [])) if (f && f.on !== false && f.to) termTexts.push(String(f.to));
     for (const t of (b.terms || [])) if (t && t.text) termTexts.push(String(t.text));
+    const ownTerms = termTexts.length;   // everything before this the operator chose; after it, built in
     if (b.seed !== false) for (const t of SEED_TERMS.concat(SEED_PHRASES)) termTexts.push(t);
 
     const sound = new Map();          // key body -> [term…]
     const near = new Map();           // key body with one letter missing -> [term…]
     const seen = new Set();
     const terms = [];
-    for (const raw of termTexts) {
+    const builtIn = new Set();        // built-in names only (not also in the operator's own book)
+    termTexts.forEach((raw, idx) => {
       const text = String(raw).trim();
       const n = normPhrase(text);
-      if (!n || seen.has(n)) continue;
+      if (!n || seen.has(n)) return;
       seen.add(n);
       terms.push(text);
-      if (!isSoundTerm(n)) continue;
+      if (idx >= ownTerms) builtIn.add(text);
+      if (idx >= ownTerms && SEED_SPELLED_RIGHT.has(n)) return;
+      if (!isSoundTerm(n)) return;
       const kb = keyBody(soundKey(n));
-      if (kb.length < SOUND_MIN_KEY) continue;
+      if (kb.length < SOUND_MIN_KEY) return;
       const arr = sound.get(kb);
       if (arr) arr.push(text); else sound.set(kb, [text]);
       const addNear = (v) => { const a2 = near.get(v); if (a2) a2.push(text); else near.set(v, [text]); };
       addNear(kb);
       for (let i = 0; i < kb.length; i++) addNear(kb.slice(0, i) + kb.slice(i + 1));
-    }
+    });
     const enabled = b.enabled !== false;
     return {
       enabled,
       soundOn: enabled && b.soundAlike !== false && sound.size > 0,
-      fixes, maxN, fixHeads, sound, near, terms,
+      fixes, maxN, fixHeads, sound, near, terms, builtIn, termSet: seen,
       // The sound of a word is worked out once per distinct run of words, not
       // once per time it is said: a sermon says the same few thousand words over
       // and over, and this is what keeps a three-hour one in milliseconds.
@@ -475,6 +551,12 @@
     if (kb.length < (n === 1 ? SOUND_MIN_KEY : SOUND_MIN_KEY_MANY)) return null;
     const minSim = n === 1 ? SOUND_SIM_ONE : SOUND_SIM_MANY;
     const normJoined = joined;          // `cores` arrive normalised, so this IS the normal form
+    // A BUILT-IN name only replaces what is not a word (see KNOWN WORDS): one
+    // heard word that is not real English or a known name, or a run that is
+    // mostly made of such words.
+    const strange = ctx.strange != null ? ctx.strange
+      : cores.reduce((a, w) => a + (isKnownWord(w) ? 0 : lettersOf(w).length), 0);
+    const builtInMay = n === 1 ? strange > 0 : strange / Math.max(1, letters) >= SOUND_UNCOMMON_RATIO;
 
     let best = null;
     /* Two refusals guard every candidate:
@@ -487,7 +569,15 @@
       const nt = normPhrase(term);
       if (nt === normJoined) { best = 'stop'; return; }
       if (n > 1 && cores.indexOf(nt) >= 0) return;
+      // …nor may a run swallow a word that is ALREADY a name spelled right:
+      // "Babylon in" is Babylon then "in", not "Babylonian"; "Canaan to" is not
+      // "Canaanite". (A name that is part of the term is fine: "Jehovah Jire".)
+      if (n > 1 && m.termSet) {
+        const tw = nt.split(' ');
+        for (const c of cores) if (m.termSet.has(c) && tw.indexOf(c) < 0) return;
+      }
       if (best === 'stop') return;
+      if (!builtInMay && m.builtIn && m.builtIn.has(term)) return;
       if (!best || sim > best.sim) best = { to: term, sim };
     };
     const exact = m.sound.get(kb);
@@ -546,6 +636,7 @@
     const norms = cores.map(normWord);
     const letters = maxSound ? norms.map((w) => lettersOf(w).length) : null;
     const uncommon = maxSound ? norms.map((w, k) => (isCommonWord(w) ? 0 : letters[k])) : null;
+    const strange = maxSound ? norms.map((w, k) => (uncommon[k] && !isKnownWord(w) ? letters[k] : 0)) : null;
     for (let i = 0; i < len; i++) {
       if (!norms[i]) continue;
       const room = Math.min(top, len - i);
@@ -560,11 +651,11 @@
       }
       if (!mayFix && !maySound) continue;
       let hit = null, hitN = 0;
-      let gram = '', nLetters = 0, nUncommon = 0, broke = false;
+      let gram = '', nLetters = 0, nUncommon = 0, nStrange = 0, broke = false;
       for (let n = 1; n <= room; n++) {
         if (!norms[i + n - 1]) { broke = true; break; }   // punctuation-only token inside the run
         gram = n === 1 ? norms[i] : gram + ' ' + norms[i + n - 1];
-        if (maxSound) { nLetters += letters[i + n - 1]; nUncommon += uncommon[i + n - 1]; }
+        if (maxSound) { nLetters += letters[i + n - 1]; nUncommon += uncommon[i + n - 1]; nStrange += strange[i + n - 1]; }
         // Longest first is decided by walking forward and keeping the last hit:
         // building the phrases in one pass beats slicing a new array per length.
         if (mayFix && n <= maxFix) {
@@ -573,7 +664,35 @@
         }
         if ((!hit || hitN < n) && maySound && n <= maxSound && nUncommon
             && (n > 1 || (uncommon[i] && letters[i] >= SOUND_MIN_HEARD_LEN))) {
-          const so = lookupSound(m, norms.slice(i, i + n), { gram, letters: nLetters, uncommon: nUncommon });
+          let so = lookupSound(m, norms.slice(i, i + n), { gram, letters: nLetters, uncommon: nUncommon, strange: nStrange });
+          /*
+           * A NAME WITH ITS 's IS STILL THAT NAME. "Goliath's sword", "the
+           * Goliaths in your life", "Ezekiel's wheel" sound like the name and
+           * were replaced by it, the 's and the s thrown away ("Ezekiel wheel").
+           * The name plus its ending is left as it was said; a misspelling with
+           * one ("Ezekial's") gets the name back WITH its ending. (Found by review.)
+           * The stem goes through every gate a word on its own would, and a
+           * built-in name never takes it when the WHOLE word is real English:
+           * "debris" is not "Deborahs", "amenities" not "Ammonites".
+           */
+          if (n === 1) {
+            const suf = /^(.+?)(['’]s|s['’]|s)$/i.exec(norms[i]);
+            if (suf) {
+              const stem = suf[1];
+              const tail = (/^(.+?)(['’]s|s['’]|s)$/i.exec(cores[i]) || [])[2] || suf[2];
+              if (so && normPhrase(stem) === normPhrase(so.to)) so = null;          // the name itself, with its ending
+              else if (/['’]/.test(suf[2])) {
+                // only an apostrophe says "name + ending" for sure: a bare s is
+                // as often part of the word ("Euphrates" is not "Ephratahs")
+                // the name the STEM sounds like, given its ending back ("Ezekial's" -> "Ezekiel's")
+                const sl = lettersOf(stem).length;
+                const st = isCommonWord(stem) ? null
+                  : lookupSound(m, [stem], { gram: stem, letters: sl, uncommon: sl, strange: strange[i] && !isKnownWord(stem) ? sl : 0 });
+                if (st && !/s$/i.test(normPhrase(st.to))) so = Object.assign({}, st, { to: String(st.to) + tail });
+                else if (st) so = null;
+              }
+            }
+          }
           if (so) { hit = so; hitN = n; }
         }
       }
@@ -884,7 +1003,7 @@
     COMMON_WORDS, SEED_TERMS,
     SOUND_MIN_TERM_LEN, SOUND_MIN_HEARD_LEN, SOUND_SIM_ONE, SOUND_SIM_MANY, SOUND_NEAR_LEN, SOUND_NEAR_SIM,
     SOUND_MIN_KEY, SOUND_MIN_KEY_MANY, SOUND_UNCOMMON_RATIO,
-    normWord, normPhrase, splitAffix, lettersOf, soundKey, keyBody, isCommonWord, isSoundTerm,
+    normWord, normPhrase, splitAffix, lettersOf, soundKey, keyBody, isCommonWord, isKnownWord, isSoundTerm,
     levenshtein, similarity, smartTitle, isShout, matchCase, canonicalCase,
     compile, matcherFor, planReplacements,
     applyToWords, applyToText, applyToLines, applyAcrossLines,

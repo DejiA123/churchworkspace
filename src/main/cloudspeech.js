@@ -1186,8 +1186,16 @@ function looksSpoken(words) {
     const counts = new Map();
     for (const w of words) { const k = normWord(w.text); if (k) counts.set(k, (counts.get(k) || 0) + 1); }
     if (Math.max(0, ...counts.values()) / n > 0.5) return false;
-    const span = (+words[n - 1].end || 0) - (+words[0].start || 0);
-    if (span > 0 && n / span < 1.0) return false;
+    // the pace while SPEAKING: a pause (cheering between "He is risen!" and "He is
+    // risen indeed!", a preacher's held silence) is not slow speech
+    let spoken = 0, from = +words[0].start || 0;
+    for (let k = 1; k <= n; k++) {
+      if (k === n || (+words[k].start || 0) - (+words[k - 1].end || 0) > 1.5) {
+        spoken += Math.max(0.3, (+words[k - 1].end || 0) - from);
+        if (k < n) from = +words[k].start || 0;
+      }
+    }
+    if (n / spoken < 1.0) return false;
   }
   return true;
 }
@@ -1219,7 +1227,8 @@ async function hearGapsAgain({ input, from, span, words }) {
       // no waiting out a rate limit here: that allowance belongs to the next short's first listen
       json = await postAudioWords(body, { timeoutMs: Math.max(3000, Math.min(20000, until - Date.now())), retry429: false });
     } catch (e) {
-      if (e && e.cancelled) throw e;
+      // (Cancel kills the encode, which fails as an ordinary error: it is still a cancel)
+      if ((e && e.cancelled) || jobCancelled()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
       break;                                   // the first failure ends it: the first answer stands as it was
     }
     // only what lands INSIDE the gap — the context either side was already heard

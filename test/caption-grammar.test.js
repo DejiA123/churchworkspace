@@ -123,7 +123,12 @@ check('Normal case keeps the AI\'s capitals', v('and i was watching', 'and I was
     check(`exact mode accepts the homophone "${a}" -> "${b}"`, ok(a, b));
   }
   for (const [a, b] of [['MIGHT NOR BY', 'might nor power'], ['LIE THOUGH IT', 'lie'], ['CHAPTER 4 VERSE', 'Philippines chapter 4 verse'],
-    ['BECOME NEW ZACCHAEUS', 'become new'], ['HIS ROD', 'his staff'], ['ON THE ROCK', 'on the house']]) {
+    ['BECOME NEW ZACCHAEUS', 'become new'], ['HIS ROD', 'his staff'], ['ON THE ROCK', 'on the house'],
+    // the second review: a looser "sounds like" let these meaning-changing swaps through
+    ['THE ONE WHO LOVED US', 'the one he loved us'], ['HE IS RISEN', 'he has risen'], ['OUR FATHER', 'her father'], ['YOUR SINS', 'her sins'],
+    ['HE SAVED US', 'he saved his'], ['GIVE IT TO HIM', 'give it to it'], ['THE HOLY SPIRIT', 'the only spirit'], ['WE ALL KNOW', 'we hell know'],
+    ['SAY AMEN', 'say even'], ['YES LORD', 'is lord'], ['UNDER THE LAW', 'order the law'], ['THE WAY', 'through way'], ['MY GOD', 'might God'],
+    ['NO MAN', 'night man'], ['RIGHT NOW', 'it now'], ['TO HIM', 'to her']]) {
     check(`exact mode refuses "${a}" -> "${b}" (a word dropped, added or swapped for one that sounds nothing like it)`, !ok(a, b));
   }
 }
@@ -296,6 +301,11 @@ head('[9] ☁️ The cloud ear, sent in pieces: every word once, none lost at a 
     check('second chance: a sung phrase held for seconds does not either',
       cs.looksSpoken(m([['Happy', 1, 3.5], ['birthday', 3.5, 6.2], ['to', 6.2, 7.9], ['you', 7.9, 11]])) === false);
     check('second chance: a short real phrase does', cs.looksSpoken(m([['Amen.', 3, 3.4]])) === true);
+    // a pause inside what was recovered is not slow speech (second review)
+    check('second chance: "He is risen! … He is risen indeed!" with cheering between is speech',
+      cs.looksSpoken(m([['He', 1, 1.2], ['is', 1.2, 1.35], ['risen!', 1.35, 1.9], ['He', 7.9, 8.1], ['is', 8.1, 8.25], ['risen', 8.25, 8.7], ['indeed!', 8.7, 9.3]])) === true);
+    check('second chance: "Jesus… wept. … Lazarus… come forth" is speech',
+      cs.looksSpoken(m([['Jesus...', 0, 0.6], ['wept.', 2.0, 2.5], ['Lazarus...', 4.2, 4.9], ['come', 5.9, 6.2], ['forth', 6.2, 6.5]])) === true);
   }
   calls.length = 0; served = 0; cutAt = 20; plan = [[0, 30], [18.8, 30], [15.8, 30]];
   {
@@ -360,6 +370,27 @@ head('[9] ☁️ The cloud ear, sent in pieces: every word once, none lost at a 
     const the34 = lg.words.find((w) => w.text === 'the' && Math.abs(w.start - 34.0) < 0.05);
     check('a long gap: a re-heard word that only shares its text with the word after the gap is kept', !!the34,
       lg.words.filter((w) => w.start > 33 && w.start < 41).map((w) => `${w.text}@${w.start}`).join(' '));
+  }
+  /*
+   * Cancel while the second listen is encoding a gap: the encode is killed and
+   * fails like any error — it must still come back as a CANCEL, not as finished
+   * captions (second review).
+   */
+  {
+    const jobsMod = require('../src/main/jobs');
+    const realCancelled = jobsMod.isCancelled, real = global.fetch;
+    let n = 0, cancelled = false;
+    jobsMod.isCancelled = () => cancelled;
+    global.fetch = async () => {
+      n++;
+      if (n === 1) { const words = []; for (let k = 0; k * 0.5 < 20; k++) words.push({ word: 'w' + k, start: k * 0.5, end: k * 0.5 + 0.3 }); return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ words, segments: [] }) }; }
+      cancelled = true;                                        // Cancel pressed mid-request
+      throw new Error('socket hang up');
+    };
+    let outcome = 'finished';
+    try { await cs.transcribeWords({ input: loudWav, startSec: 0, endSec: 30 }); } catch (e) { outcome = e && e.cancelled ? 'cancelled' : 'error: ' + (e && e.message); }
+    jobsMod.isCancelled = realCancelled; global.fetch = real;
+    check('Cancel during the second listen comes back as a cancel, not as finished captions', outcome === 'cancelled', outcome);
   }
   // Words to the end: no second chance is asked for.
   calls.length = 0; served = 0; cutAt = Infinity; plan = [[0, 30]];

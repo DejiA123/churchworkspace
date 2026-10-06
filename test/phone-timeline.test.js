@@ -105,6 +105,16 @@ async function waitUp() {
     }, dx);
     const centred = (g) => Math.abs(g.x - g.half) <= 3;
 
+    // the phone runs the Word Book too ("Fix captions from book"): its built-in names must have the
+    // known-word list, or the phone could do what the server no longer does ("plate" -> "Pilate")
+    const wb = await page.evaluate(() => {
+      const W = window.WordBook, m = W.compile({ enabled: true, soundAlike: true, fixes: [], terms: [] });
+      const say = (t) => W.applyToWords(t.split(' ').map((x, i) => ({ text: x, start: i, end: i + 0.9 })), m).words.map((w) => w.text).join(' ');
+      return { list: typeof window.WordBookEnglish === 'string', plate: say('the plate was'), name: say('think about Methabosheth who') };
+    });
+    check(wb.list && wb.plate === 'the plate was' && wb.name === 'think about Mephibosheth who',
+      'the phone loads the known-word list: "plate" stays, "Methabosheth" is still fixed', wb);
+
     console.log('\n=== [A] the line stays in the middle ===');
     let g = await geo();
     check(g.centred && Math.abs(g.pad - g.half) <= 1, 'the phone timeline is centred, with half a screen of room before the start', g);
@@ -209,6 +219,26 @@ async function waitUp() {
     for (let k = 0; k < 4; k++) { await page.evaluate(() => { document.getElementById('veTlScroll').scrollLeft += 6; }); await sleep(40); }
     await sleep(800);
     check(!(await geo()).paused, 'Play during a coasting flick keeps playing');
+    await page.evaluate(() => { const p = document.getElementById('vePlayer'); p.pause(); });
+    await sleep(300);
+    // the same with the studio's own Play button, the coast stepping in the SAME frame (second review:
+    // the media 'play' event comes later, and a coasting step before it paused the video again)
+    const events = await page.evaluate(async () => {
+      const sc = document.getElementById('veTlScroll'), r = sc.getBoundingClientRect(), p = document.getElementById('vePlayer');
+      const seen = []; const on = (e) => seen.push(e.type); p.addEventListener('play', on); p.addEventListener('pause', on);
+      const t = new Touch({ identifier: 11, target: sc, clientX: r.left + 120, clientY: r.top + 60 });
+      sc.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, cancelable: true, touches: [t], changedTouches: [t], targetTouches: [t] }));
+      sc.scrollLeft += 40;
+      sc.dispatchEvent(new TouchEvent('touchend', { bubbles: true, cancelable: true, touches: [], changedTouches: [t], targetTouches: [] }));
+      await new Promise((res) => setTimeout(res, 60));
+      document.getElementById('vePlay').click();
+      sc.scrollLeft += 6; sc.dispatchEvent(new Event('scroll'));   // the coast, before 'play' arrives
+      for (let k = 0; k < 4; k++) { await new Promise((res) => requestAnimationFrame(res)); sc.scrollLeft += 6; }
+      await new Promise((res) => setTimeout(res, 600));
+      p.removeEventListener('play', on); p.removeEventListener('pause', on);
+      return { seen, paused: p.paused };
+    });
+    check(!events.paused && !events.seen.includes('pause'), 'tapping Play during a coasting flick keeps playing (no play-then-pause)', events);
     await page.evaluate(() => { const p = document.getElementById('vePlayer'); p.pause(); p.currentTime = 12; });
     await sleep(400);
     await page.evaluate(() => { const f = document.getElementById('veZoomFit'); if (f) f.click(); });
@@ -232,6 +262,17 @@ async function waitUp() {
       return { shown, moved: Math.abs(document.getElementById('vePlayer').currentTime - t0) };
     });
     check(lp.shown === 'block' && lp.moved < 0.05, 'a long press on empty track still draws a clip, without moving the line', lp);
+    const still = await page.evaluate(async () => {
+      const tk = document.getElementById('veTrack'), b = tk.getBoundingClientRect();
+      const t0 = document.getElementById('vePlayer').currentTime;
+      const x = b.left + b.width * 0.7, y = b.top + 3;
+      const mk = (type) => new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, buttons: type === 'mouseup' ? 0 : 1 });
+      tk.dispatchEvent(mk('mousedown'));                     // a long press that ends without moving (a slow tap)
+      document.dispatchEvent(mk('mouseup'));
+      await new Promise((r) => setTimeout(r, 300));
+      return Math.abs(document.getElementById('vePlayer').currentTime - t0);
+    });
+    check(still < 0.05, 'a long press that lifts without moving does not jump the video there', still);
     const wide = await open({ viewport: { width: 1280, height: 800 }, hasTouch: true });
     const wg = await wide.evaluate(() => ({ centred: document.getElementById('veTlScroll').classList.contains('ve-centred'), pad: document.getElementById('veTlScroll').style.paddingLeft }));
     check(!wg.centred && !wg.pad, 'a wide screen keeps the desk\'s timeline', wg);

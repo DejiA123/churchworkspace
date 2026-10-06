@@ -2221,6 +2221,50 @@ let _hideTimer = null;
     document.addEventListener('touchcancel', end, { capture: true });
   }
 
+  /*
+   * ►► THE CAPTIONS WINDOW'S PLAY AND PAUSE, ON AN IPHONE. ◄◄
+   *
+   * "When the video is playing I cannot pause it — the thing starts going down
+   *  and I can't pause it." Safari does not turn a tap into a click at once: it
+   * first fakes a mouse arriving, watches whether the page changes, and a tap
+   * that lands while content is moving or appearing — the list scrolling itself
+   * down to follow the voice, the captions coming and going on the picture, the
+   * lit line moving on — is taken as a hover or a scroll-stop, and the click is
+   * simply never sent. While a video plays that page never stops changing, so
+   * the longer it played the more taps on ⏸ came to nothing.
+   *
+   * So these buttons act on the finger lifting. preventDefault on the touchend
+   * tells Safari there is nothing to guess (and no click follows, so a tap is
+   * exactly one press), and the button's own click handler runs as it would
+   * from a mouse. A finger that moved is a scroll and is left alone.
+   */
+  const TAP_NOW = '#capModal .cap-player button, #capModal .cap-row-play';
+  function installTapNow() {
+    let down = null;
+    document.addEventListener('touchstart', (e) => {
+      down = null;
+      if (e.touches.length !== 1) return;
+      const b = e.target && e.target.closest ? e.target.closest(TAP_NOW) : null;
+      if (!b || b.disabled) return;
+      const t = e.touches[0];
+      down = { b, x: t.clientX, y: t.clientY, at: Date.now() };
+    }, { capture: true, passive: true });
+    document.addEventListener('touchmove', (e) => {
+      if (!down || !e.touches.length) return;
+      const t = e.touches[0];
+      if (Math.abs(t.clientX - down.x) > 10 || Math.abs(t.clientY - down.y) > 10) down = null;
+    }, { capture: true, passive: true });
+    const lift = (e) => {
+      const d = down; down = null;
+      if (!d || Date.now() - d.at > 700) return;     // a long press is not a tap
+      if (e.cancelable) e.preventDefault();
+      if (d.b.isConnected && !d.b.disabled) d.b.click();
+    };
+    document.addEventListener('touchend', lift, { capture: true, passive: false });
+    // Safari may cancel a still finger when the list under it scrolls itself; it was still a tap
+    document.addEventListener('touchcancel', lift, { capture: true, passive: false });
+  }
+
   /* ------------------------------------------------- dropping files on it */
 
   /*
@@ -3857,6 +3901,7 @@ let _hideTimer = null;
     cloud.version = version || '';
     wireCloudUi();
     installTouchBridge();
+    installTapNow();
     installDropBridge();
 
     // A service worker makes it installable and makes the shell open instantly.
