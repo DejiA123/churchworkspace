@@ -188,7 +188,7 @@
       window.__showOverlay && window.__showOverlay('Reading video…');
       const info = await window.api.video.info(path);
       ve.video = { path, info, proxy: null, proxying: false };
-      ve.segments = []; ve.sel = null; ve.filmstripUrl = null;
+      ve.segments = []; ve.sel = null; dropObjectUrl(ve.filmstripUrl); ve.filmstripUrl = null;
       ve.audio = []; ve.audioSel = null; ve.activeRow = 'video';
       ve.liveFaceCx = null; ve.liveFaceCy = null; ve._liveJump = null; ve._liveRawHist = null; resetLiveRender();
       if (window.FaceTrack && window.FaceTrack.resetLive) window.FaceTrack.resetLive(); // a new video must not inherit the old one's face/body arbitration
@@ -253,12 +253,35 @@
     }
   }
 
+  /*
+   * ►► A PICTURE PAINTED INTO MANY BLOCKS IS A SHORT LINK, NOT ITS BYTES. ◄◄
+   * The filmstrip arrives as a data: URL of ~290 KB, and every clip block on
+   * the video row carried a copy in its inline style. A montage has 150+
+   * blocks: 45 MB of style text the browser re-read whenever the lane's style
+   * was touched (1.4 s to put the film back after a pinch, measured at 4x CPU)
+   * and a 45 MB HTML string per redraw — the timeline stuttered and an iPhone
+   * came close to killing the tab. The same picture as a blob: link is one
+   * decoded image and ~60 characters per block.
+   */
+  function asObjectUrl(dataUrl) {
+    try {
+      const m = /^data:([^;,]*)(;base64)?,/.exec(dataUrl || '');
+      if (!m || !window.URL || !URL.createObjectURL) return dataUrl;
+      const body = dataUrl.slice(m[0].length);
+      const bin = m[2] ? atob(body) : decodeURIComponent(body);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return URL.createObjectURL(new Blob([bytes], { type: m[1] || 'image/jpeg' }));
+    } catch (e) { return dataUrl; }
+  }
+  function dropObjectUrl(u) { if (u && /^blob:/.test(u)) { try { URL.revokeObjectURL(u); } catch (e) {} } }
   async function loadFilmstrip(path) {
     try {
       const strip = await window.api.video.filmstrip({ input: path, count: 24 });
       const dataUrl = await window.api.fs.readImageDataUrl(strip);
       if (!ve.video || ve.video.path !== path) return; // another video was opened meanwhile
-      ve.filmstripUrl = dataUrl;
+      dropObjectUrl(ve.filmstripUrl);
+      ve.filmstripUrl = asObjectUrl(dataUrl);
       renderSegments();
     } catch (e) { /* strip optional */ }
   }
@@ -333,10 +356,18 @@
    * window the ruler has always used for its ticks — now shared, because the
    * caption lane needed it far more than the ruler did.
    */
+  /** Where the timeline is scrolled to — the value just written when the
+   *  studio scrolled it itself this frame, so drawing after a zoom does not make
+   *  the browser lay everything out early only to answer. */
+  function tlScrollX() {
+    const sc = ve.refs.tlScroll; if (!sc) return 0;
+    if (ve._frameX != null) return ve._frameX;
+    return ve._autoScrollTo != null ? ve._autoScrollTo : sc.scrollLeft;
+  }
   function visibleTimeRange(pad = 0.5) {
     const sc = ve.refs.tlScroll;
-    const viewW = (sc && sc.clientWidth) || 900;
-    const left = sc ? sc.scrollLeft - tlPadL() : 0;
+    const viewW = (sc && tlViewW()) || 900;
+    const left = sc ? tlScrollX() - tlPadL() : 0;
     return [
       Math.max(0, (left - viewW * pad) / ve.pxPerSec),
       (left + viewW * (1 + pad)) / ve.pxPerSec,
@@ -383,7 +414,8 @@
     layout();
     const D = dur(); if (!D) { ve.refs.ruler.innerHTML = ''; return; }
     const sc = ve.refs.tlScroll;
-    const viewW = (sc && sc.clientWidth) || 900;
+    const viewW = (sc && tlViewW()) || 900;
+    ve._laneDrawnAt = { left: sc ? tlScrollX() : 0, pps: ve.pxPerSec, D };
     // Pick the tick step from what's actually ON SCREEN, not from the whole
     // duration: zoomed in (e.g. while editing captions) an hour-long sermon would
     // otherwise show a single "0:00" tick and you'd lose all sense of time.
@@ -392,7 +424,7 @@
     const step = steps.find((s) => s >= raw) || 1800;
     // …and only paint the ticks near the viewport — an hour of half-second ticks
     // would be thousands of nodes.
-    const left = sc ? sc.scrollLeft - tlPadL() : 0;
+    const left = sc ? tlScrollX() - tlPadL() : 0;
     const from = Math.max(0, (left - viewW) / ve.pxPerSec);
     const to = Math.min(D, (left + viewW * 2) / ve.pxPerSec);
     let html = '';
@@ -630,6 +662,7 @@
      * the new one — two renders per zoom step, and a visible flash of empty
      * lanes in between.
      */
+    layout();   // the new width first, or a scroll past the old end is cut short
     // the centred timeline zooms about the line, whatever asked (a pinch, the buttons)
     if (centred()) setScrollLeft(sc, Math.max(0, tlPadL() + nowT() * ve.pxPerSec - centreGap()));
     else if (anchor && sc) setScrollLeft(sc, Math.max(0, anchor.t * ve.pxPerSec - anchor.x));
@@ -637,7 +670,8 @@
     // Zooming rescales every lane — but only the lanes, and coalesced to one
     // render per frame, because the wheel and the slider both fire far faster
     // than the screen refreshes.
-    renderRuler(); renderLanesSoon(); updatePlayhead();
+    // the moment under the line has not changed — only where the clips are drawn
+    renderRuler(); renderLanesSoon(); if (!centred()) updatePlayhead();
   }
   function zoomBy(factor) { setZoom(ve.pxPerSec * factor, true); }
   /*
@@ -650,6 +684,10 @@
     const sc = ve.refs.tlScroll;
     if (!sc) return setZoom(px, true);
     setZoom(px, false, { t: anchorT, x: clientX - sc.getBoundingClientRect().left });
+    // a pinch is already one call a frame: draw the lanes in this same frame,
+    // while the scroll position just set is still known — a frame later the
+    // next pinch step has restyled the timeline and reading it lays it all out
+    flushRender();
   }
   function timeAtClientX(clientX) {
     const sc = ve.refs.tlScroll;
@@ -725,6 +763,12 @@
    */
   function renderLanes() {
     cancelRenderQueue();
+    // read where the view is ONCE, before any lane writes a style — every lane
+    // culls to it, and a read after the writes lays the whole timeline out early
+    ve._frameX = null; ve._frameX = ve.refs.tlScroll ? tlScrollX() : null;
+    try { renderLanesNow(); } finally { ve._frameX = null; }
+  }
+  function renderLanesNow() {
     // Zoom and pan only move the clips — patch them in place when nothing about
     // them has actually changed (see rescaleSegBlocks).
     if (!rescaleSegBlocks()) renderSegBlocks();
@@ -1197,7 +1241,14 @@
    * selects it without moving anything; nothing jumps.
    */
   const centred = () => !!ve.centred && !!ve.refs.tlScroll;
-  const centreGap = () => (ve.refs.tlScroll ? Math.round(ve.refs.tlScroll.clientWidth / 2) : 0);
+  /** The scroller's width, read once per resize — never per frame: a read after
+   *  the frame's writes forces the browser to lay the whole timeline out early. */
+  const tlViewW = () => {
+    const sc = ve.refs.tlScroll; if (!sc) return 0;
+    if (ve._tlViewW == null) ve._tlViewW = sc.clientWidth;
+    return ve._tlViewW;
+  };
+  const centreGap = () => (ve.refs.tlScroll ? Math.round(tlViewW() / 2) : 0);
   /** The time under the centre line, from where the timeline is scrolled to. */
   const timeAtCentre = () => Math.max(0, (ve.refs.tlScroll.scrollLeft + centreGap() - tlPadL()) / ve.pxPerSec);
   /** A finger is on the timeline, or it is still coasting from one. */
@@ -1205,16 +1256,44 @@
     || (performance.now() - (ve._userScrollAt || 0)) < 180;
   function layoutCentre() {
     const sc = ve.refs.tlScroll; if (!sc) return;
+    ve._tlViewW = null;
     sc.style.paddingLeft = centred() ? centreGap() + 'px' : '';
     // the room after the end is a block the phone sizes (cloud-boot.js); a right
     // padding on top would count on one browser and not another (iOS skips it)
     sc.style.paddingRight = centred() ? '0px' : '';
     ve._tlPadL = null;
+    placeCentreLine();
     if (centred()) { renderRuler(); updatePlayhead(); }
+  }
+  /*
+   * ►► THE LINE IS PINNED, NOT CHASED. ◄◄
+   * The line used to be a child of the scroller, put back in the middle by
+   * script after every scroll. A phone scrolls on its own thread: the clips
+   * (and the line with them) moved first, the script caught up a frame or
+   * three later, and the line shivered from side to side under the finger —
+   * worst in a flick, where the screen moves 30 px a frame. CapCut's line is
+   * part of the frame, not of the film. So in the centred timeline it is
+   * moved out of the scroller into the timeline box, where nothing scrolls it
+   * sideways, and placed once per resize; only the clips move.
+   */
+  function placeCentreLine() {
+    const sc = ve.refs.tlScroll, ph = ve.refs.playhead, box = ve.refs.timeline;
+    if (!sc || !ph || !box) return;
+    if (centred()) {
+      if (ph.parentNode !== box) box.appendChild(ph);
+      ph.classList.add('ve-playhead-pinned');
+      ph.style.left = (sc.offsetLeft + centreGap()) + 'px';
+      ph.style.height = sc.offsetHeight + 'px';   // all the lanes, scrolled down or not
+    } else if (ph.parentNode !== sc) {
+      sc.appendChild(ph);
+      ph.classList.remove('ve-playhead-pinned');
+      ph.style.height = '';
+    }
   }
   function setCentredPlayhead(on) {
     ve.centred = !!on;
     const sc = ve.refs.tlScroll; if (!sc) return;
+    if (!ve.centred) placeCentreLine();
     sc.classList.toggle('ve-centred', ve.centred);
     if (ve.centred && !sc._centreWired) {
       sc._centreWired = true;
@@ -1252,7 +1331,34 @@
   /** Play, or any jump the operator asks for, overrules a flick still coasting —
    *  marked AT ONCE: the media 'play' event comes a frame later, and a coasting
    *  step in between would read as a swipe and pause it again (found by review). */
-  function overruleCoast() { if (centred()) { ve._userScrollAt = 0; ve._actionAt = performance.now(); } }
+  function overruleCoast() { ve._scrubWant = null; if (centred()) { ve._userScrollAt = 0; ve._actionAt = performance.now(); } }
+  /*
+   * ►► A SWIPE ASKS FOR ONE PICTURE AT A TIME. ◄◄
+   * Every frame of a swipe used to start a new seek — sixty a second — and each
+   * one cancelled the last before the phone had decoded it (an iPhone video
+   * holds a whole picture only every second or two, so every seek decodes from
+   * there). The picture froze until the finger stopped, and every abandoned
+   * seek was a fresh request to the server. Now the newest wish waits while a
+   * seek is under way and goes the moment it lands ('seeked'): the picture
+   * keeps up as fast as the phone can decode, and the last one is exact.
+   * The clock under the line moves every frame regardless.
+   */
+  function scrubTo(t) {
+    const p = ve.refs.player; if (!p) return;
+    $('#veTime').textContent = `${fmt(t)} / ${fmt(playEnd())}`;
+    if (p.seeking && ve.tailT == null && !(hasTail() && t > dur() + 0.001)) { ve._scrubWant = t; return; }
+    ve._scrubWant = null;
+    ve._scrubbing = true;
+    try { seekTo(t); } finally { ve._scrubbing = false; }
+    // once the swipe has rested, the sound waiting under the line is made ready for Play
+    clearTimeout(ve._scrubSettle);
+    ve._scrubSettle = setTimeout(() => { if (!isPlaying() && ve._scrubWant == null) syncMusicPreview(true, true); }, 250);
+  }
+  function scrubNext() {
+    const t = ve._scrubWant; if (t == null) return;
+    ve._scrubWant = null;
+    if (centred()) scrubTo(t);
+  }
   /** A tap's seek — which in the centred timeline is no seek at all (CapCut). */
   function tapSeek(t) { if (!centred()) seekTo(t); }
   /* Scroll the timeline OURSELVES, and remember exactly where to — the scroll
@@ -1292,7 +1398,7 @@
   function updatePlayhead() {
     const t = nowT();
     const x = tlPadL() + t * ve.pxPerSec;
-    ve.refs.playhead.style.left = x + 'px';
+    if (!centred()) ve.refs.playhead.style.left = x + 'px';
     $('#veTime').textContent = `${fmt(t)} / ${fmt(playEnd())}`;
     // keep the playhead in view while playing — unless you've scrolled away yourself
     const sc = ve.refs.tlScroll;
@@ -1471,7 +1577,6 @@
     // the centred timeline glides under its line every frame, not four times a second
     if (centred()) {
       const x = tlPadL() + t * ve.pxPerSec;
-      ve.refs.playhead.style.left = x + 'px';
       if (!userScrolling()) setScrollLeft(ve.refs.tlScroll, Math.max(0, x - centreGap()));
     }
     try { updateKfPreview(t); } catch (e) {}
@@ -2675,6 +2780,15 @@
   function updateLiveReframe() {
     if (!ve.video || !reframeOn() || !window.FaceTrack || !window.FaceTrack.detectElement) return;
     if (!$('#view-video').classList.contains('active')) return;
+    /*
+     * ►► NOTHING TO PAN, NOTHING TO WATCH. ◄◄ A phone's own upright video
+     * already IS a 9:16 frame: the crop is the whole picture and cannot move,
+     * yet the face and body models ran four times a second all through
+     * playback — each run hundreds of milliseconds on the page's only thread,
+     * and the timeline gliding under the line stalled every time.
+     */
+    const cwin = cropWindow();
+    if (cwin.cw >= 0.995 && cwin.ch >= 0.995) return;
     const p = ve.refs.player;
     if (!p || p.paused || p.readyState < 2 || liveTrackBusy) return;
     maybeAskLiveAi(p);
@@ -3590,7 +3704,7 @@
       // Even a photo goes through ffmpeg: a 6000px phone snap read straight off
       // disk would become a multi-megabyte data URL sitting in a CSS background.
       const png = await window.api.video.thumbnail(s.src, s.kind === 'image' ? 0 : Math.min(1, (s.srcInfo.durationSec || 2) / 2));
-      ve.mediaThumbs[s.src] = await window.api.fs.readImageDataUrl(png);
+      ve.mediaThumbs[s.src] = asObjectUrl(await window.api.fs.readImageDataUrl(png));
       renderSegments();
     } catch (e) { /* the block still shows its colour + name */ }
   }
@@ -3982,13 +4096,18 @@
     // The box is CENTER-anchored on (o.x, o.y) and hugs the text vertically
     // (height:auto), so the words always sit INSIDE the dashed drag border —
     // no more text spilling below the lines when the font outgrows a fixed box.
-    layer.innerHTML = visible.map((o) => `
+    const html = visible.map((o) => `
       <div class="ve-text-box${ve.textSel === o.id ? ' sel' : ''}" data-id="${o.id}" style="
         left:${(fr.left + o.x * fr.w).toFixed(2)}px; top:${(fr.top + o.y * fr.h).toFixed(2)}px; width:${(o.w * fr.w).toFixed(2)}px; transform:translate(-50%,-50%);">
         <div class="ve-text-content" style="${textLookCss(o, textFontPx(o, fr.h))}${textAnimCss(o, t, fr.h)}pointer-events:auto;outline:none;">${escape2(o.text)}</div>
         <button class="ve-text-del" data-del="${o.id}" title="Delete">✕</button>
         <div class="ve-text-resize" data-resize="${o.id}" title="Drag to resize"></div>
       </div>`).join('');
+    // the same boxes in the same places (a scrub between two texts, a timeupdate
+    // with nothing new) are not rebuilt — that was an innerHTML every frame
+    if (layer._html === html && layer.childElementCount === visible.length) { updateTextTools(); return; }
+    layer._html = html;
+    layer.innerHTML = html;
     $$('.ve-text-box', layer).forEach((box) => {
       box.addEventListener('mousedown', (e) => onTextBoxDown(e, box));
       box.addEventListener('dblclick', (e) => { e.preventDefault(); e.stopPropagation(); startEditingText(box); });
@@ -3999,6 +4118,7 @@
   /** Start editing a text box (accepts a box node OR an overlay id). Re-queries
    *  the box from the DOM so it never operates on a stale/detached node. */
   function startEditingText(boxOrId) {
+    if (ve.refs.textLayer) ve.refs.textLayer._html = null;
     const id = (typeof boxOrId === 'string') ? boxOrId : (boxOrId && boxOrId.dataset ? boxOrId.dataset.id : null);
     const o = id && ve.textOverlays.find((x) => x.id === id); if (!o) return;
     ve.textSel = id;
@@ -14413,6 +14533,7 @@
     // zoomed-in sermon would otherwise be thousands of nodes), so panning has to
     // repaint them — coalesced to one frame, and only the lanes, never the
     // Shorts panel, which cannot change by scrolling.
+    if (window.ResizeObserver) new ResizeObserver(() => { ve._tlViewW = null; }).observe(ve.refs.tlScroll);
     ve.refs.tlScroll.addEventListener('scroll', () => {
       // You just grabbed the timeline — stop dragging you back to the playhead.
       const mine = ve._autoScrollTo != null && Math.abs(ve.refs.tlScroll.scrollLeft - ve._autoScrollTo) <= 1;
@@ -14428,12 +14549,22 @@
         if (!mine && ve.video) {
           ve._userScrollAt = performance.now();
           if (isPlaying()) { const p = ve.refs.player; if (ve.tailRun) stopTailRun(); else if (p) p.pause(); }
-          if (!ve._scrubRaf) ve._scrubRaf = requestAnimationFrame(() => { ve._scrubRaf = null; if (centred()) { ve._scrubbing = true; try { seekTo(timeAtCentre()); } finally { ve._scrubbing = false; } } });
+          if (!ve._scrubRaf) ve._scrubRaf = requestAnimationFrame(() => { ve._scrubRaf = null; if (centred()) scrubTo(timeAtCentre()); });
         }
       } else if (!mine && ve.follow !== false) setFollow(false, true);
       if (!ve.video || ve._rulerRaf) return;
       ve._rulerRaf = requestAnimationFrame(() => {
         ve._rulerRaf = null;
+        /*
+         * ►► ONLY WHEN THE DRAWN STRETCH RUNS OUT. ◄◄ The ruler and the caption
+         * lane draw a screen's margin either side of what is in view, so a
+         * scroll of a few pixels shows nothing new — yet both were rebuilt on
+         * every frame of every swipe and of playback (two innerHTMLs, fresh
+         * listeners, and the layout they force). Now they are redrawn when the
+         * view has moved a quarter of a screen since the last drawing.
+         */
+        const d = ve._laneDrawnAt, sc = ve.refs.tlScroll;
+        if (d && d.pps === ve.pxPerSec && d.D === dur() && Math.abs(sc.scrollLeft - d.left) < tlViewW() / 4) return;
         renderRuler();
         if (capBlocksVisible()) renderCapTrack();
       });
@@ -14511,7 +14642,7 @@
     p.addEventListener('ended', () => { stopCapTick(); if (ve.tailT == null && hasTail()) enterTail(dur(), true); });
     // anything else moving the main video's playhead (a clip's ▶, a jump) ends the tail
     p.addEventListener('seeking', () => { if (ve.tailT != null) leaveTail(); });
-    p.addEventListener('seeked', () => syncMusicPreview(true));
+    p.addEventListener('seeked', () => { scrubNext(); if (isPlaying()) syncMusicPreview(true); });
     // the picture stalled to buffer: the song waits with it — and picks up exactly there
     p.addEventListener('waiting', () => { syncMusicPreview(); syncSoundPreview(); });
     p.addEventListener('playing', () => { syncMusicPreview(true); syncSoundPreview(); });
@@ -15198,7 +15329,7 @@
         ve.sel = ve.segments[0].id; renderSegments();
         return { count: ve.segments.length, domCount: $$('#veSegments .ve-seg').length };
       },
-      setFilmstrip(url) { ve.filmstripUrl = url; renderSegments(); },
+      setFilmstrip(url) { dropObjectUrl(ve.filmstripUrl); ve.filmstripUrl = asObjectUrl(url); renderSegments(); },
       /* ---------------- timeline performance ----------------
        * Zooming is the heaviest thing the timeline does, and "it feels laggy"
        * is not something that can be fixed by reading the code. These two hooks

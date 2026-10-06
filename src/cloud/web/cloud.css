@@ -802,6 +802,8 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
   body.mw-cloud #view-video.ve-pro .ve-cap-clip.sel .ve-cc-h::after { background: #e0801f; left: 4.5px; }
   /* the ruler is not a scrubber here: the centre line is */
   body.mw-cloud #view-video.ve-pro .ve-tl-scroll.ve-centred .ve-ruler { cursor: default; }
+  /* the centred timeline's line is pinned in the timeline box (veditor.js placeCentreLine) */
+  body.mw-cloud #view-video.ve-pro .ve-playhead.ve-playhead-pinned { bottom: auto; z-index: 5; }
   body.mw-cloud #view-video.ve-pro .ve-playhead::before { left: -5px; border-width: 6px; border-top-color: #fff; }
 
   /* --------------------------------------------------------------- dock */
@@ -1405,7 +1407,7 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
   }
   body.mw-cloud.mw-sheet .toast { bottom: calc(var(--ph-sheet) + var(--ph-tr) + 30px); }
   /* a panel is up from the bottom: messages go to the top, off its controls */
-  body.mw-cloud:has(.cap-modal:not(.hidden)) .toast { top: calc(var(--ph-top) + 8px); bottom: auto; }
+  body.mw-cloud.cloud-modal-up .toast { top: calc(var(--ph-top) + 8px); bottom: auto; }
 
   .cloud-files-box, .cloud-help-box { width: 100%; }
   body.mw-cloud .cloud-sheet-modal .cloud-files-box {
@@ -1525,7 +1527,7 @@ body.mw-cloud #toast { display: none !important; }
 @media (max-width: 900px) {
   .cloud-island { top: calc(var(--ph-top) + 8px); }
   /* a panel or a studio modal is up: the island goes up over the dimmed bar */
-  body.mw-cloud:has(.cap-modal:not(.hidden)) .cloud-island,
+  body.mw-cloud.cloud-modal-up .cloud-island,
   body.mw-cloud.mw-panel .cloud-island { top: calc(env(safe-area-inset-top) + 6px); }
 }
 

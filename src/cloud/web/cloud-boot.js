@@ -3726,6 +3726,27 @@ let _hideTimer = null;
       if (el && !el.disabled) el.click();
     });
 
+    /*
+     * ►► "A PANEL IS UP" IS A CLASS ON THE PAGE, NOT A :has(). ◄◄
+     * The toast and the island move up while a panel is open. That was
+     * body:has(.cap-modal:not(.hidden)) — and a :has() on the whole page makes
+     * the browser re-check every element on it whenever anything is added
+     * anywhere: each redraw of the timeline's ruler restyled every clip block
+     * (70 ms instead of 2 at an iPhone's pace). The panels say when they open
+     * and close; that is all the page needs to know.
+     */
+    {
+      const sync = () => document.body.classList.toggle('cloud-modal-up', !!document.querySelector('.cap-modal:not(.hidden)'));
+      const mo = new MutationObserver(sync);
+      const watch = (m) => { if (!m._mwUpWatch) { m._mwUpWatch = true; mo.observe(m, { attributes: true, attributeFilter: ['class'] }); } };
+      $$('.cap-modal').forEach(watch);
+      new MutationObserver((recs) => {
+        for (const r of recs) for (const n of r.addedNodes) if (n.nodeType === 1 && n.classList.contains('cap-modal')) watch(n);
+        sync();
+      }).observe(document.body, { childList: true });
+      sync();
+    }
+
     /* ---- pinch the timeline to zoom it ------------------------------- */
     const tl = $('#veTimeline');
     if (tl) {
@@ -3776,8 +3797,16 @@ let _hideTimer = null;
           tail.style.width = Math.max(0, endX - (gap ? padL : 0) + Math.max(56, gap)) + 'px';
           add.style.top = Math.round(top - sr.top + scroller.scrollTop + (h - 34) / 2) + 'px';
         };
-        if (window.ResizeObserver) { const ro = new ResizeObserver(() => requestAnimationFrame(place)); ro.observe(track); ro.observe(scroller); }
-        new MutationObserver(() => requestAnimationFrame(place)).observe(track, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+        // once a frame at most, however many changes asked for it
+        let placeRaf = 0;
+        const placeSoon = () => { if (!placeRaf) placeRaf = requestAnimationFrame(() => { placeRaf = 0; place(); }); };
+        // A size change is heard AFTER the browser has laid the page out, so the
+        // measuring in place() costs nothing there; done a frame later (as it
+        // was), it measured a timeline the studio had just restyled, and paid
+        // for laying all of it out again — every frame of a pinch.
+        if (window.ResizeObserver) { const ro = new ResizeObserver(() => { cancelAnimationFrame(placeRaf); placeRaf = 0; place(); }); ro.observe(track); ro.observe(scroller); }
+        // clips added, removed or moved between rows (sizes unchanged)
+        new MutationObserver(placeSoon).observe(track, { childList: true, subtree: true });
         setTimeout(place, 400);
       }
 

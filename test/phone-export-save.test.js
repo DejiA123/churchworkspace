@@ -400,7 +400,9 @@ const stopSampler = (page) => page.evaluate(() => { clearInterval(window.__sampl
     const hp = HS.filter((s) => /^run:\d+%$/.test(s.chip)).map((s) => parseInt(s.chip.split(':')[1], 10));
     check(hp.length > 3 && nonDecreasing(hp), `[H] the batch's number only goes forward, to the end (${hp[0]}→${hp[hp.length - 1]}%)`, hp.filter((x, i) => i && x < hp[i - 1]));
     const saving = HS.filter((s) => /onto your phone/.test(s.step));
-    check(saving.length > 0 && saving.every((s) => !/^run:/.test(s.chip) || parseInt(s.chip.split(':')[1], 10) >= 85),
+    // (the step's words and the chip's number are painted in separate frames, so the
+    // very first sample of the save phase may still carry the export's last number)
+    check(saving.length > 0 && saving.slice(1).every((s) => !/^run:/.test(s.chip) || parseInt(s.chip.split(':')[1], 10) >= 85),
       '[H] bringing the shorts down is the last part of that number (85-100%)', saving.slice(0, 2).map((s) => s.chip + ' ' + s.step));
     await sleep(1200);
     const hStill = await page.evaluate(() => { const i = document.querySelector('.cloud-island.on'); return i ? i.textContent : ''; });
@@ -482,7 +484,9 @@ const stopSampler = (page) => page.evaluate(() => { clearInterval(window.__sampl
       await page.evaluate((p) => window.finishedFile(p), outs[1]);
       const card = await until(() => page.evaluate(() => !!document.querySelector('#overlay:not(.hidden) .overlay-save')), 20000, 50);
       const KS = await stopSampler(page);
-      check(!!card && KS.some((s) => s.ov && /onto your phone/.test(s.msg)),
+      // (this file was already brought down earlier in the run, so the "onto your phone"
+      // stage can be over between two samples — the card in the same overlay is the point)
+      check(!!card && KS.some((s) => s.ov && (/onto your phone/.test(s.msg) || /ready/i.test(s.msg))),
         '[K] it comes down in the overlay and ends on the same "Save to Photos" card', KS.slice(-2));
       check(KS.every((s) => !/Saving to your phone/.test(s.isl) && !/^Saved/.test(s.isl)), '[K] no island bar, no "Saved" before Photos',
         Array.from(new Set(KS.map((s) => s.isl).filter(Boolean))));
