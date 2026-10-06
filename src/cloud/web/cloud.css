@@ -1145,7 +1145,7 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
   /* the two views */
   body.mw-cloud #capModal .cap-box.folded :is(.cap-controls, .cap-strip-row) { display: none; }
   body.mw-cloud #capModal .cap-box:not(.folded) :is(.cap-fix-row, .cap-player) { display: none; }
-  body.mw-cloud #capModal .cap-box:not(.folded):has(#capList .cap-row) .cap-list { display: none; }
+  body.mw-cloud #capModal .cap-box.has-rows:not(.folded) .cap-list { display: none; }
   body.mw-cloud #capModal .cap-box:not(.folded) .cap-strip-row { order: 1; }
   body.mw-cloud #capModal .cap-box:not(.folded) .cap-controls { order: 2; }
   body.mw-cloud #capModal .cap-box:not(.folded) .cap-list { order: 3; }
@@ -1188,7 +1188,7 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
   body.mw-cloud #capModal #capFine { order: 13; }
   body.mw-cloud #capModal #capFineWrap { order: 14; }
   /* no lines yet: the settings share the sheet with "Generate captions" */
-  body.mw-cloud #capModal .cap-box:not(:has(#capList .cap-row)) .cap-controls { flex: 0 1 auto; max-height: 32%; }
+  body.mw-cloud #capModal .cap-box:not(.has-rows) .cap-controls { flex: 0 1 auto; max-height: 32%; }
   body.mw-cloud #capModal .cap-controls > label:has(#capWidth) {
     grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: center; row-gap: 4px;
   }
@@ -1316,12 +1316,12 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
     body.mw-cloud #capModal #capPreview { width: 48px; height: 48px; padding: 0; font-size: 0; }
     body.mw-cloud #capModal #capPreview .mi { width: 21px; height: 21px; margin: 0; }
     body.mw-cloud #capModal #capBurn { grid-column: auto; padding: 0 8px; font-size: 14px; }
-    body.mw-cloud #capModal .cap-box:not(:has(#capList .cap-row)) .cap-controls { max-height: 26%; }
+    body.mw-cloud #capModal .cap-box:not(.has-rows) .cap-controls { max-height: 26%; }
   }
 
   /* Typing in a line with the keyboard up: the words and the player keep the
      room; the rows about the look and the Save row come back when it goes. */
-  html.mw-kb body.mw-cloud #capModal:has(#capList .cap-text:focus) :is(.cap-sum-row, .cap-controls, .cap-strip-row, .cap-fix-row, .cap-foot) { display: none; }
+  html.mw-kb body.mw-cloud #capModal.cap-typing :is(.cap-sum-row, .cap-controls, .cap-strip-row, .cap-fix-row, .cap-foot) { display: none; }
 
   /* the gallery and the Word Book cover the sheet, as they cover the desk's window */
   body.mw-cloud #capModal .cap-style-picker, body.mw-cloud #capModal .cap-wb-panel { border-radius: 18px 18px 0 0; }

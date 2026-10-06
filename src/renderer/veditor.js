@@ -5568,7 +5568,9 @@
     ve.capEvents.sort((x, y) => x.start - y.start);
     if (!ve._capSource) { ve._capSource = ve.video.path; ve._capMode = ve._capMode || 'full'; }
     const i = ve.capEvents.indexOf(line);
-    ve.capSel = i; ve.activeRow = 'caption';
+    // (in the window the line is typed in its row: selecting it on the lane behind
+    // only switched the hidden dock over and laid the page out again)
+    if (!inList) { ve.capSel = i; ve.activeRow = 'caption'; }
     const cc = $('#veCapShow'); if (cc && !cc.checked) cc.checked = true;
     // the picture shows the new line while it is typed
     try { const p = ve.refs.player; if (p && Math.abs((p.currentTime || 0) - (a + 0.05)) > 0.05 && a < D) seekTo(Math.min(D, a + 0.05)); } catch (e) {}
@@ -5578,7 +5580,7 @@
     if (inList) {
       // in the captions window: type it right there, in its own row
       const inp = document.querySelector(`#capList .cap-text[data-i="${i}"]`);
-      if (inp) { inp.scrollIntoView({ block: 'center' }); inp.focus(); }
+      if (inp) { inp.scrollIntoView({ block: 'center' }); inp.focus({ preventScroll: true }); }
     } else editCaption(i);
     return true;
   }
@@ -11283,16 +11285,36 @@
    * renumbered in place and one row goes in. Anything unusual (another tab, a
    * short's window, an empty list) falls back to the full redraw.
    */
-  const CAP_ROW_IDX = ['data-play-i', 'data-i', 'data-g-i', 'data-ai-i', 'data-doubt-use', 'data-doubt-ok', 'data-was-i'];
-  function capRowRenumber(row, from, by) {
-    const at = +row.getAttribute('data-row'); if (!(at >= from)) return;
-    const n = String(at + by);
-    row.setAttribute('data-row', n);
-    // a row is two levels deep (its buttons, and the box / notes inside their wrappers)
-    const fix = (el) => { for (const k of CAP_ROW_IDX) if (el.hasAttribute(k)) el.setAttribute(k, n); };
-    for (const ch of row.children) { fix(ch); for (const g of ch.children) fix(g); }
+  /** Every index at or past `from` in the list moves by `by`. A row is laid out
+   *  by capRowHtml: ▶, time, the box (in its field), ✍ badge, ✨ — then, only on
+   *  some, the doubt and fixed notes with their own buttons. */
+  function capListRenumber(list, from, by) {
+    const rows = list.getElementsByClassName('cap-row');
+    for (let j = rows.length - 1; j >= 0; j--) {
+      const row = rows[j];
+      const v = +row.getAttribute('data-row');
+      if (!(v >= from)) break;          // in index order: everything before is untouched
+      const n = String(v + by);
+      row.setAttribute('data-row', n);
+      const ch = row.children;
+      if (ch[0]) ch[0].setAttribute('data-play-i', n);
+      if (ch[2] && ch[2].firstElementChild) ch[2].firstElementChild.setAttribute('data-i', n);
+      if (ch[3]) ch[3].setAttribute('data-g-i', n);
+      if (ch[4]) ch[4].setAttribute('data-ai-i', n);
+      if (ch.length > 5) {
+        row.querySelectorAll('[data-doubt-use]').forEach((el) => el.setAttribute('data-doubt-use', n));
+        row.querySelectorAll('[data-doubt-ok]').forEach((el) => el.setAttribute('data-doubt-ok', n));
+        row.querySelectorAll('[data-was-i]').forEach((el) => el.setAttribute('data-was-i', n));
+      }
+    }
+  }
+  function capListMarkRows() {
+    const list = document.getElementById('capList');
+    const box = list && list.closest('.cap-box');
+    if (box) box.classList.toggle('has-rows', !!list.querySelector('.cap-row'));
   }
   function capListCounts() {
+    capListMarkRows();
     if (ve.capScope) return;
     const n = String((ve.capEvents || []).length);
     const cnt = document.getElementById('capCount');
@@ -11306,8 +11328,10 @@
     const rows = list ? list.querySelectorAll('.cap-row') : [];
     if (!capModalOpen()) return;             // opening the window draws it afresh
     if (!c || !rows.length || ve.capScope || (ve.capListMode || 'all') !== 'all') { renderCapList(); return; }
+    // the row now at index i (if any) is where the new one goes in
     let before = null;
-    for (const r of rows) { if (+r.dataset.row >= i) { if (!before) before = r; capRowRenumber(r, i, 1); } }
+    for (let j = rows.length - 1; j >= 0 && +rows[j].getAttribute('data-row') >= i; j--) before = rows[j];
+    capListRenumber(list, i, 1);
     const tmp = document.createElement('div');
     tmp.innerHTML = capRowHtml(c, i, 0);
     const row = tmp.firstElementChild;
@@ -11322,7 +11346,7 @@
     if (!capModalOpen()) return;             // opening the window draws it afresh
     if (!row || ve.capScope) { renderCapList(); return; }
     row.remove();
-    list.querySelectorAll('.cap-row').forEach((r) => capRowRenumber(r, i + 1, -1));
+    capListRenumber(list, i + 1, -1);
     capListCounts();
   }
   function renderCapList() {
@@ -11394,6 +11418,7 @@
             : ` — about ${est >= 60 ? (est / 60).toFixed(1) + ' hours' : est + ' min'} on this PC.`);
       }
       updateGrammarSummary();
+      capListMarkRows();
       capPlayerPaint(true);
       return;
     }
@@ -11455,6 +11480,7 @@
     list.scrollTop = keepScroll;
     list.querySelectorAll('.cap-text').forEach(wireCapInput);
     paintAllGrammar();
+    capListMarkRows();
     capPlayerPaint(true);
   }
 
@@ -12263,6 +12289,19 @@
     }
     const list = document.getElementById('capList');
     if (list) {
+      /*
+       * Typing in a line folds the panels away on a phone. That used to be a
+       * CSS :has(… .cap-text:focus) — which made the browser re-style every
+       * row of a whole sermon on each focus: the "little freeze" on ＋ Add
+       * caption. A class does the same for nothing.
+       */
+      const typing = () => {
+        const m = document.getElementById('capModal'); if (!m) return;
+        const a = document.activeElement;
+        m.classList.toggle('cap-typing', !!(a && a.classList && a.classList.contains('cap-text') && list.contains(a)));
+      };
+      list.addEventListener('focusin', typing);
+      list.addEventListener('focusout', () => setTimeout(typing, 0));
       // mousedown is swallowed so the line being typed in keeps its focus — a
       // click that blurred it would commit and redraw the list underneath the
       // button, and the click would land on nothing.

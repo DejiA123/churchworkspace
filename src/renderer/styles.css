@@ -2575,6 +2575,11 @@ body.ve-pfull .ve-preview .ve-fs-exit {
    layout and painting until they are scrolled to, so redrawing the list (a fix,
    an undo, a Words-per-line change) costs what is visible, not the whole list. */
 #capList .cap-row { content-visibility: auto; contain-intrinsic-size: auto 46px; }
+/* A row never grows or shrinks with the list (flex: none), and nothing inside
+   the list moves anything outside it (contain): adding one line to a whole
+   sermon lays out a third as much — no freeze on ＋ Add caption. */
+#capList .cap-row { flex: none; }
+#capList { contain: content; }
 /* "All lines | ✍ Fixed": every line a fix changed, in one place (renderCapList) */
 .cap-fix-tabs { position: sticky; top: 0; z-index: 2; display: flex; gap: 6px; padding: 6px 2px 8px; background: var(--panel, #0f1218); }
 .cap-fix-tabs button { white-space: nowrap; width: auto; margin: 0; padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 650; cursor: pointer;
@@ -2597,6 +2602,3 @@ body.ve-pfull .ve-preview .ve-fs-exit {
 .cap-doubt .cap-doubt-ok { background: rgba(34,197,94,.14); color: #bbf7d0; border: 1px solid rgba(34,197,94,.5); }
 .cap-row.doubt { box-shadow: inset 3px 0 0 #f59e0b; }
 .ve-cap-clip.doubt::before { content: ''; position: absolute; top: 3px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: #fbbf24; box-shadow: 0 0 0 1.5px rgba(0,0,0,.6); }
-/* A whole sermon is thousands of lines: the ones off screen are not laid out
-   or painted until they scroll near (Add caption, Undo and typing stay instant). */
-#capList .cap-row { content-visibility: auto; contain-intrinsic-size: auto 44px; }
