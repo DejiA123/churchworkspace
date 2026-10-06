@@ -189,6 +189,40 @@ async function waitUp() {
     console.log('\n=== [E] the chosen Case ===');
     check(await page.evaluate((ci) => window.VideoEditor.__test.capLines()[ci].text, ci) === 'MY SHEPHERD IS GOOD', 'a line typed in lower case is saved in ALL CAPS when that is chosen');
 
+    console.log('\n=== [F] every fixed line in one place ===');
+    {
+      await page.evaluate(() => window.VideoEditor.__test.openCaptionsWindow());
+      await sleep(600);
+      await page.evaluate(() => {
+        const T = window.VideoEditor.__test;
+        T.markCapFixed(1, 'WHAT TO TO', 'TO');
+        T.markCapFixed(3, 'WE WE HURT', 'WE HURT');
+        // (no speech engine on a test machine, so the window is shown by hand)
+        document.getElementById('capModal').classList.remove('hidden');
+        document.querySelector('#capModal .cap-box').classList.add('folded');   // as it is once there are lines
+      });
+      await sleep(400);
+      const st = () => page.evaluate(() => ({
+        tabs: document.querySelectorAll('#capList .cap-fix-tabs button').length,
+        rows: document.querySelectorAll('#capList .cap-row').length,
+        fixed: document.querySelectorAll('#capList .cap-row.fixed').length,
+      }));
+      const all = await st();
+      check(all.tabs === 2 && all.rows > 2 && all.fixed === 2, 'the captions window offers "All lines | ✍ Fixed" when lines were fixed', all);
+      if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'fixed-all.png') });
+      await page.locator('#capList [data-capfix="fixed"]').tap();
+      await sleep(300);
+      const only = await st();
+      check(only.rows === 2 && only.fixed === 2, '"✍ Fixed" lists only the fixed lines, with their Put back', only);
+      if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'fixed-only.png') });
+      await page.locator('#capList [data-capfix="all"]').tap();
+      await sleep(300);
+      check((await st()).rows === all.rows, '"All lines" brings the whole transcript back');
+      await page.evaluate(() => { const T = window.VideoEditor.__test; T.markCapFixed(1, null); T.markCapFixed(3, null); });
+      await page.evaluate(() => document.getElementById('capModal').classList.add('hidden'));
+      await sleep(400);
+    }
+
     console.log('\n=== [D] what the review found ===');
     await page.evaluate(() => {
       const sc = document.getElementById('veTlScroll'), r = sc.getBoundingClientRect();

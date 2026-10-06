@@ -10890,9 +10890,20 @@
   function renderCapList() {
     const all = ve.capEvents || [];
     const scope = ve.capScope;
-    const rows = all
+    const inScope = all
       .map((c, i) => ({ c, i }))
       .filter(({ c }) => !scope || (c.end > scope.start + 0.02 && c.start < scope.end - 0.02));
+    /*
+     * ►► EVERY FIXED LINE IN ONE PLACE. ◄◄
+     * A proof-read 44-minute sermon has its fixes spread over six hundred rows,
+     * and checking them meant scrolling the lot. "✍ Fixed" lists only the lines
+     * a fix changed — each with what it said before and Put back — and "All
+     * lines" goes back to the whole transcript.
+     */
+    const isFixed = (c) => c._was != null && c._was !== c.text;
+    const nFixed = inScope.filter(({ c }) => isFixed(c)).length;
+    if (!nFixed) ve.capOnlyFixed = false;
+    const rows = ve.capOnlyFixed ? inScope.filter(({ c }) => isFixed(c)) : inScope;
     document.getElementById('capCount').textContent = scope
       ? `${rows.length} caption line${rows.length === 1 ? '' : 's'} in this short`
       : all.length + ' caption lines';
@@ -10941,7 +10952,13 @@
     // Each line: its own ▶, the time, the words with the proof-reader's
     // underlines laid over them, the badge that opens its suggestions, and ✨
     // to have the AI read just this line.
-    list.innerHTML = rows.map(({ c, i }) =>
+    const tabs = nFixed
+      ? `<div class="cap-fix-tabs" role="tablist">`
+        + `<button type="button" role="tab" data-capfix="all" class="${ve.capOnlyFixed ? '' : 'on'}">All lines <span>${inScope.length}</span></button>`
+        + `<button type="button" role="tab" data-capfix="fixed" class="${ve.capOnlyFixed ? 'on' : ''}">✍ Fixed <span>${nFixed}</span></button>`
+        + `</div>`
+      : '';
+    list.innerHTML = tabs + rows.map(({ c, i }) =>
       `<div class="cap-row" data-row="${i}">`
       + `<button type="button" class="cap-row-play" data-play-i="${i}" title="Play this line">▶</button>`
       + `<span class="cap-time">${fmt(Math.max(0, c.start - base))}</span>`
@@ -10955,6 +10972,13 @@
           + `<button type="button" class="cap-was-back" data-was-i="${i}" title="Put this line back to what it said before">↶ Put back</button></div>`
         : '')
       + `</div>`).join('');
+    list.querySelectorAll('[data-capfix]').forEach((b) => b.addEventListener('click', () => {
+      const only = b.dataset.capfix === 'fixed';
+      if (only === !!ve.capOnlyFixed) return;
+      ve.capOnlyFixed = only;
+      renderCapList();
+      list.scrollTop = 0;
+    }));
     list.querySelectorAll('.cap-was-back').forEach((b) => b.addEventListener('click', () => putLineBack(+b.dataset.wasI)));
     list.querySelectorAll('.cap-was').forEach((w) => w.closest('.cap-row').classList.add('fixed'));
     list.scrollTop = keepScroll;
@@ -15502,6 +15526,8 @@
       clipCapEvents(id) { const s = ve.segments.find((x) => x.id === id); if (!s) return null; const l = capLinesIn(s); return l.length ? l.map((e) => ({ ...e })) : null; },
       /** Every line on the 💬 Captions lane, on the source's clock. */
       capLines() { return (ve.capEvents || []).map((e) => ({ start: e.start, end: e.end, text: e.text })); },
+      // a line as a fix leaves it: new words, and what it said before (null clears it)
+      markCapFixed(i, was, text) { const e = (ve.capEvents || [])[i]; if (!e) return; if (was == null) delete e._was; else { e._was = was; if (text != null) e.text = text; } renderCapList(); },
       // drive the two caption dropdowns the way a click on them does
       setCapWordsPerLine(v) { document.getElementById('capWords').value = String(v); rebuildCapEvents(); return this.capLines(); },
       setCapCase(v) { document.getElementById('capCase').value = String(v); rebuildCapEvents({ caseOnly: true }); return this.capLines(); },
