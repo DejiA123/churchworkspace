@@ -936,7 +936,7 @@ function retryWaitMs(res) {
 }
 
 /** One piece to the provider, asking for word timings. Returns the verbose JSON, or throws. */
-async function postAudioWords(body, { timeoutMs = 180000 } = {}) {
+async function postAudioWords(body, { timeoutMs = 180000, retry429 = true } = {}) {
   for (let attempt = 0; ; attempt++) {
     const form = new FormData();
     form.append('file', new Blob([body], { type: 'audio/ogg' }), 'clip.ogg');
@@ -976,7 +976,7 @@ async function postAudioWords(body, { timeoutMs = 180000 } = {}) {
        * caption half the shorts in the cloud and the other half on the PC.
        */
       const wait = retryWaitMs(res);
-      if (attempt < 3 && wait > 0 && wait <= WORDS_RETRY_MAX_WAIT_MS) {
+      if (retry429 && attempt < 3 && wait > 0 && wait <= WORDS_RETRY_MAX_WAIT_MS) {
         const until = Date.now() + wait + 500;
         while (Date.now() < until) {
           if (jobCancelled()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
@@ -1080,6 +1080,11 @@ const GAP_MID_SEC = 3;          // between two words
 const GAP_CTX_SEC = 1;          // heard either side of the gap, so the model has the sentence
 const GAP_WIN_SEC = 28;         // a request covers at most this much of a gap (one Whisper window)
 const GAP_TRIES = 6;
+/* The whole second listen, at most. The words are already complete when it
+ * starts; it is a chance to do better, never a reason to keep the operator
+ * waiting (found by review: a rate-limited key could hold a finished caption
+ * at 90% for minutes, each try waiting out the allowance). */
+const GAP_BUDGET_MS = 30000;
 const GAP_LOUD_DB = 14;         // a gap this close to the speech's own level may be speech…
 const GAP_FLOOR_DB = -55;       // …and never one quieter than this, whatever the speech was
 const LEVEL_STEP = 0.25;        // the level is read in quarter seconds
@@ -1091,7 +1096,9 @@ function levelsOf(input, from, dur) {
     '-i', input, '-vn', '-ac', '1', '-ar', String(SR), '-f', 's16le', 'pipe:1'];
   return new Promise((resolve) => {
     let proc;
-    try { proc = spawn(ffmpegPath, args, { windowsHide: true }); } catch (e) { return resolve(null); }
+    // stderr is not wanted, and a pipe nobody reads fills up and stalls ffmpeg
+    // on a damaged file that complains on every frame — so it goes nowhere
+    try { proc = spawn(ffmpegPath, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }); } catch (e) { return resolve(null); }
     if (jobs) jobs.track(proc);
     const db = [];
     let sum = 0, n = 0, carry = null;
@@ -1150,6 +1157,49 @@ function gapsToHear(words, span, levels) {
 
 const normWord = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9']/g, '');
 
+/*
+ * ►► …BUT NOT WHAT WHISPER INVENTS OVER MUSIC. ◄◄
+ *
+ * A second chance at a stretch the first pass heard nothing in is also a
+ * second chance to hallucinate, and over a song it does: measured on the
+ * operator's own birthday clip, the re-heard 15 s of music came back as "No,
+ * please, no, no, no, no, no, no, no, no, no" and went onto the captions.
+ * Whisper's confidence numbers cannot tell (see READING THE ANSWER: Groq's
+ * no_speech_prob is 0.00 even for silence), so the WORDS are judged, by three
+ * things invented speech does and real speech does not:
+ *   • one word over and over — more than half of four or more;
+ *   • a crawl — real speech runs two to three words a second, the invented
+ *     line above under one;
+ *   • words held for seconds — the middle word of a real phrase is a quarter
+ *     of a second, a sung or invented one more than one.
+ * The sentence this was built to recover ("The Lord is my shepherd, I shall
+ * not want": 9 words in 2.4 s, no word twice) passes all three by a mile.
+ * A real chant of one word could fail the first — and is then simply left as
+ * the first pass heard it, which is what happened before any of this.
+ */
+function looksSpoken(words) {
+  const n = (words || []).length;
+  if (!n) return false;
+  const durs = words.map((w) => Math.max(0, (+w.end || 0) - (+w.start || 0))).sort((a, b) => a - b);
+  if (durs[Math.floor(n / 2)] > 1.0) return false;
+  if (n >= 4) {
+    const counts = new Map();
+    for (const w of words) { const k = normWord(w.text); if (k) counts.set(k, (counts.get(k) || 0) + 1); }
+    if (Math.max(0, ...counts.values()) / n > 0.5) return false;
+    // the pace while SPEAKING: a pause (cheering between "He is risen!" and "He is
+    // risen indeed!", a preacher's held silence) is not slow speech
+    let spoken = 0, from = +words[0].start || 0;
+    for (let k = 1; k <= n; k++) {
+      if (k === n || (+words[k].start || 0) - (+words[k - 1].end || 0) > 1.5) {
+        spoken += Math.max(0.3, (+words[k - 1].end || 0) - from);
+        if (k < n) from = +words[k].start || 0;
+      }
+    }
+    if (n / spoken < 1.0) return false;
+  }
+  return true;
+}
+
 async function hearGapsAgain({ input, from, span, words }) {
   const keep = { words, added: 0 };
   if (!words.length) return keep;              // nothing heard at all: music, or silence — not a gap
@@ -1162,9 +1212,11 @@ async function hearGapsAgain({ input, from, span, words }) {
   const tries = [];
   for (const g of todo) { tries.push({ g, ctx: GAP_CTX_SEC }); if (g.tail) tries.push({ g, ctx: GAP_CTX_SEC * 4, again: true }); }
   let out = words, tailDone = false;
+  const until = Date.now() + GAP_BUDGET_MS;
   for (const { g, ctx, again } of tries.slice(0, GAP_TRIES)) {
     if (jobCancelled()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
     if (again && tailDone) continue;
+    if (Date.now() > until - 3000) break;
     const ha = Math.max(0, g.a - ctx);
     const hb = Math.min(span, Math.min(g.b, g.a + GAP_WIN_SEC) + GAP_CTX_SEC);
     if (!(hb - ha > 0.5)) continue;
@@ -1172,22 +1224,29 @@ async function hearGapsAgain({ input, from, span, words }) {
     try {
       const body = await encodeRange(input, from + ha, hb - ha, 60000);
       if (!body || !body.length) continue;
-      json = await postAudioWords(body, { timeoutMs: 60000 });
+      // no waiting out a rate limit here: that allowance belongs to the next short's first listen
+      json = await postAudioWords(body, { timeoutMs: Math.max(3000, Math.min(20000, until - Date.now())), retry429: false });
     } catch (e) {
-      if (e && e.cancelled) throw e;
-      continue;                                // a second chance that fails leaves the first answer as it was
+      // (Cancel kills the encode, which fails as an ordinary error: it is still a cancel)
+      if ((e && e.cancelled) || jobCancelled()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
+      break;                                   // the first failure ends it: the first answer stands as it was
     }
     // only what lands INSIDE the gap — the context either side was already heard
     let got = wordsFromVerbose(json, ha).filter((w) => {
       const mid = (w.start + w.end) / 2;
-      return mid > g.a + 0.2 && mid < g.b - 0.2;
+      // (a hair inside: "The" of "The Lord is my shepherd" sat 0.15 s past the
+      // last word heard, and a wider margin threw it away; a context word
+      // re-stamped into the gap is caught by its text just below)
+      return mid > g.a + 0.05 && mid < g.b - 0.05;
     });
     // the context's own edge words, re-stamped a little into the gap, are not new
     const before = out.filter((w) => w.end <= g.a + 0.01).pop();
     const after = out.find((w) => w.start >= g.b - 0.01);
     while (got.length && before && normWord(got[0].text) === normWord(before.text)) got = got.slice(1);
-    while (got.length && after && normWord(got[got.length - 1].text) === normWord(after.text)) got = got.slice(0, -1);
-    if (!got.length || isArtefact(got.map((w) => w.text).join(' '))) continue;
+    // (only when this request actually reached that word: a gap longer than one
+    // window ends unheard, and a real word that happens to match is not a repeat)
+    if (hb >= g.b - 0.01) while (got.length && after && normWord(got[got.length - 1].text) === normWord(after.text)) got = got.slice(0, -1);
+    if (!got.length || isArtefact(got.map((w) => w.text).join(' ')) || !looksSpoken(got)) continue;
     out = out.concat(got).sort((x, y) => x.start - y.start);
     keep.added += got.length;
     if (g.tail) tailDone = true;
@@ -1246,7 +1305,7 @@ async function transcribeSegments({ input, startSec = 0, endSec = 0 } = {}) {
 module.exports = {
   configure, state, ready, transcribe, test, cadence,
   fileReady, transcribeFile, transcribeWords, transcribeSegments, shareKey,
-  wordsFromVerbose, retryWaitMs, inSpokenOrder, gapsToHear,
+  wordsFromVerbose, retryWaitMs, inSpokenOrder, gapsToHear, looksSpoken,
   /** Was the last window handed to the PC a paced skip, or a real failure? */
   lastDecline: () => lastDecline,
   PROVIDERS, DEFAULT_PROVIDER, SAMPLE_RATE,

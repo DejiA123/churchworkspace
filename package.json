@@ -28,6 +28,8 @@
     "test:media-cache": "node test/media-cache.test.js",
     "test:reframe-referee": "node test/reframe-referee.test.js",
     "test:cloudsee": "node test/cloudsee.test.js",
+    "test:phone-timeline": "node test/phone-timeline.test.js",
+    "test:caption-player": "node test/caption-player.test.js",
     "test:cloud-judge": "node test/cloud-judge.test.js",
     "test:caps-imported": "electron test/caps-imported.test.js",
     "test:cover-caps": "node test/cover-caps.test.js",

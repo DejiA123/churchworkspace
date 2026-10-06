@@ -428,6 +428,42 @@ head('The built-in names never pull ordinary speech (found live, by review)');
   check('"Jehovah-Jire" -> "Jehovah Jireh"', say('but Jehovah-Jire is') === 'but Jehovah Jireh is', say('but Jehovah-Jire is'));
   check('"Zarababel" -> "Zerubbabel"', say('Zarababel heard') === 'Zerubbabel heard', say('Zarababel heard'));
   check('no built-in correction that a revert could turn into "the Lord" -> "Allah"', say('praise the Lord') === 'praise the Lord');
+  // a name keeps its 's and its plural (second review: "Goliath's sword" -> "Goliath sword", and
+  // "Ezekiel's wheel" -> "Ezekiel wheel" with the book's original names too)
+  for (const t of ["David took Goliath's sword", 'face the Goliaths in your life', "Delilah's lap", "Ezekiel's wheel", "Mephibosheth's feet", 'to Ramath and back']) {
+    check(`"${t}" keeps its ending (and its place names)`, say(t) === t, say(t));
+  }
+  check('a misspelt name with an ending gets the name back WITH it ("Ezekial\'s" -> "Ezekiel\'s")', say("Ezekial's wheel") === "Ezekiel's wheel", say("Ezekial's wheel"));
+  // …and the stem of an ordinary plural never starts a name of its own (the 25-million-pair
+  // sweep caught "plates" -> "Pilates", "clubs" -> "Calebs", "herds" -> "Herods")
+  const plurals = 'plates clubs herds herbs summons debris ribbons pilots shrubs cannons colts divides rebukes denials counters ' +
+    "minors amenities manuals gilds grips potter's simon's colt's pilot's Phillips Stevens Simmons Robbins Watson's Mitchell's";
+  const pulled = plurals.split(' ').filter((w) => say('the ' + w + ' were') !== 'the ' + w + ' were');
+  check('ordinary plurals and possessives stay as they are (plates, clubs, herds, … 30 of them)', !pulled.length,
+    pulled.map((w) => w + ' -> ' + say('the ' + w + ' were')).join(', '));
+
+  // The built-in names never replace real English, a real place or a real person's name. Before the
+  // known-word list, 583 of the 100,000 commonest English words were re-spelled ("plate" -> Pilate,
+  // "divide" -> David, "Ibadan" -> Abaddon, "Simon" -> Simeon); a sample of them stays here.
+  check('the known-word list is loaded (plate is a word, Methabosheth is not)',
+    W.isKnownWord('plate') && W.isKnownWord("Watson's") && W.isKnownWord("nothin'") && !W.isKnownWord('Methabosheth') && !W.isKnownWord('Ezekial'));
+  for (const t of ['the plate was full', 'divide it in two', 'sales were up', 'a phrase from the song', 'salmon and rice',
+    'read the manual', 'a minor key', 'the masses came', 'apples and pools', 'full assurance of faith', 'the ceiling fell',
+    'he flew to Ibadan', 'a Ghanaian pastor', 'the Syrian army', 'Simon Peter answered', 'Brother Steven prayed',
+    'Jeremy and Mitchell', 'Pastor Watson preached', 'Paul sailed to Crete', 'Plato wrote', 'Bilal sang', 'nothin like it',
+    'carefully curated', 'the romance novel', 'it applies to you', 'a herd of pigs', 'he hired them', 'André came',
+    // the King James Bible's own names and words, read aloud (the sweep found "Shallum" -> Shalom, "Pharez" -> Pharisee)
+    'Shallum the son of Jabesh', 'Pharez and Zerah', 'Dathan and Abiram', 'they served Molech', 'whom he hath predestinated',
+    // a name spelled right is never swallowed into a longer one, and place names in pairs stay put
+    'by the rivers of Babylon in tears', 'from Canaan to Egypt', 'less Russia more Ukraine', 'from Toronto run']) {
+    check(`"${t}" comes through untouched`, say(t) === t, say(t));
+  }
+  // …while the operator's OWN names keep the older rule: they chose them, and "Wally Oak" is why
+  const mine = W.compile({ enabled: true, soundAlike: true, fixes: [], terms: [{ text: 'Siloam' }] });
+  const sayMine = (t) => W.applyToWords(t.split(' ').map((x, i) => ({ text: x, start: i, end: i + 0.9 })), mine).words.map((w) => w.text).join(' ');
+  check('a name the operator added still catches a real-word mishearing ("salam" -> their "Siloam")',
+    sayMine('the pool of salam') === 'the pool of Siloam', sayMine('the pool of salam'));
+  check('…and the same word with only the built-in book is left alone', say('the pool of salam') === 'the pool of salam', say('the pool of salam'));
 }
 
 /* ------------------------------------------------------------------ *
@@ -559,9 +595,9 @@ head('The transcription pipeline actually runs it');
   check('…and tells the studio how many it fixed', /fixed: book\.count/.test(src));
   const rend = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'veditor.js'), 'utf-8');
   check('a retyped line in the captions window is learned from, WITH its neighbours',
-    /learnCaptionEdit\(before, inp\.value, \+inp\.dataset\.i\);/.test(rend));
+    /learnCaptionEdit\(before, capGroupCfg\(\)\.tc === 'upper' \? inp\.value : typed, \+inp\.dataset\.i\);/.test(rend));
   check('a retyped line on the TIMELINE is learned from as well',
-    /learnCaptionEdit\(orig, txt, i\);/.test(rend));
+    /learnCaptionEdit\(orig, capGroupCfg\(\)\.tc === 'upper' \? txt : typedTxt, i\);/.test(rend));
   check('…and the lines either side are what is handed to the learner',
     /prev: \(evs\[i - 1\] \|\| \{\}\)\.text/.test(rend) && /next: \(evs\[i \+ 1\] \|\| \{\}\)\.text/.test(rend));
   check('the studio and the main process share ONE matcher module',

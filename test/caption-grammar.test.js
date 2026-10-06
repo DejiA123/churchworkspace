@@ -114,6 +114,24 @@ check('a change of case only (in CAPS): not a suggestion', !v('THE LORD IS GOOD'
 }
 check('an answer that adds lines of its own is not a correction', !v('AMEN', 'Amen. Let us now turn to the book of Romans').ok);
 check('Normal case keeps the AI\'s capitals', v('and i was watching', 'and I was watching', { caseMode: 'none' }).text === 'and I was watching');
+{
+  // "Keep their exact words": a fix is a sound-alike swap — however the two are SPELLED
+  // (review: the first-letter gate refused hole/whole, our/hour, ate/eight, sent/cent)
+  const ok = (a, b) => v(a, b, { mode: 'exact' }).ok;
+  for (const [a, b] of [['THE WHOLE IN', 'the hole in'], ['AN OUR LATER', 'an hour later'], ['ATE OF THEM', 'eight of them'],
+    ['NOT A SENT', 'not a cent'], ['THE AIR OF', 'the heir of'], ['DOWN THE ISLE', 'down the aisle'], ['THE KNIGHT WAS', 'the night was']]) {
+    check(`exact mode accepts the homophone "${a}" -> "${b}"`, ok(a, b));
+  }
+  for (const [a, b] of [['MIGHT NOR BY', 'might nor power'], ['LIE THOUGH IT', 'lie'], ['CHAPTER 4 VERSE', 'Philippines chapter 4 verse'],
+    ['BECOME NEW ZACCHAEUS', 'become new'], ['HIS ROD', 'his staff'], ['ON THE ROCK', 'on the house'],
+    // the second review: a looser "sounds like" let these meaning-changing swaps through
+    ['THE ONE WHO LOVED US', 'the one he loved us'], ['HE IS RISEN', 'he has risen'], ['OUR FATHER', 'her father'], ['YOUR SINS', 'her sins'],
+    ['HE SAVED US', 'he saved his'], ['GIVE IT TO HIM', 'give it to it'], ['THE HOLY SPIRIT', 'the only spirit'], ['WE ALL KNOW', 'we hell know'],
+    ['SAY AMEN', 'say even'], ['YES LORD', 'is lord'], ['UNDER THE LAW', 'order the law'], ['THE WAY', 'through way'], ['MY GOD', 'might God'],
+    ['NO MAN', 'night man'], ['RIGHT NOW', 'it now'], ['TO HIM', 'to her']]) {
+    check(`exact mode refuses "${a}" -> "${b}" (a word dropped, added or swapped for one that sounds nothing like it)`, !ok(a, b));
+  }
+}
 
 head('[7] The AI\'s answer is parsed defensively');
 const batch = [{ n: 3, text: 'A' }, { n: 4, text: 'B', context: true }, { n: 5, text: 'C' }];
@@ -266,6 +284,114 @@ head('[9] ☁️ The cloud ear, sent in pieces: every word once, none lost at a 
   onlyFiller = false;
   check('a second chance that only hears "Thank you." adds nothing', filler.words.length === 40 && filler.reheard === 0,
     `${filler.words.length} words, +${filler.reheard}`);
+  /*
+   * …and not what Whisper invents over a SONG. Measured live on the operator's
+   * birthday clip: the second chance at 15 s of music "heard" a line of "no, no,
+   * no…" and it went onto the captions. Real word timings from that answer and
+   * from the sentence the second chance exists to recover.
+   */
+  {
+    const m = (a) => a.map(([text, start, end]) => ({ text, start, end }));
+    const TAIL = m([['The', 113.74, 114.1], ['Lord', 114.1, 114.28], ['is', 114.28, 114.5], ['my', 114.5, 114.64], ['shepherd,', 114.64, 115.22],
+      ['I', 115.22, 115.32], ['shall', 115.32, 115.46], ['not', 115.46, 115.76], ['want.', 115.76, 116.16]]);
+    const SONG = m([["You're", 28.4, 30.28], ['No,', 30.12, 30.12], ['please,', 30.12, 31.1], ['no,', 31.1, 31.44], ['no,', 31.44, 32.84], ['no,', 32.84, 33.72],
+      ['no,', 33.72, 34.26], ['no,', 34.26, 39.6], ['no,', 39.6, 42.78], ['no,', 42.78, 43.04], ['no,', 43.04, 43.9], ['no', 43.9, 43.92]]);
+    check('second chance: the recovered last sentence reads as speech', cs.looksSpoken(TAIL) === true);
+    check('second chance: "no, no, no…" over a song does not', cs.looksSpoken(SONG) === false);
+    check('second chance: a sung phrase held for seconds does not either',
+      cs.looksSpoken(m([['Happy', 1, 3.5], ['birthday', 3.5, 6.2], ['to', 6.2, 7.9], ['you', 7.9, 11]])) === false);
+    check('second chance: a short real phrase does', cs.looksSpoken(m([['Amen.', 3, 3.4]])) === true);
+    // a pause inside what was recovered is not slow speech (second review)
+    check('second chance: "He is risen! … He is risen indeed!" with cheering between is speech',
+      cs.looksSpoken(m([['He', 1, 1.2], ['is', 1.2, 1.35], ['risen!', 1.35, 1.9], ['He', 7.9, 8.1], ['is', 8.1, 8.25], ['risen', 8.25, 8.7], ['indeed!', 8.7, 9.3]])) === true);
+    check('second chance: "Jesus… wept. … Lazarus… come forth" is speech',
+      cs.looksSpoken(m([['Jesus...', 0, 0.6], ['wept.', 2.0, 2.5], ['Lazarus...', 4.2, 4.9], ['come', 5.9, 6.2], ['forth', 6.2, 6.5]])) === true);
+  }
+  calls.length = 0; served = 0; cutAt = 20; plan = [[0, 30], [18.8, 30], [15.8, 30]];
+  {
+    // the provider "hears" a repeating word in the gap, both tries: nothing is added
+    const real = global.fetch;
+    global.fetch = async (url, init) => {
+      if (served === 0) return real(url, init);
+      calls.push({}); served++;
+      const words = []; for (let k = 0; k < 9; k++) words.push({ word: 'no,', start: 1.5 + k * 1.1, end: 2.4 + k * 1.1 });
+      return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ words, segments: [] }) };
+    };
+    const song = await cs.transcribeWords({ input: loudWav, startSec: 0, endSec: 30 });
+    global.fetch = real;
+    check('a second chance that "hears" one word over and over adds nothing', song.words.length === 40 && song.reheard === 0,
+      `${song.words.length} words, +${song.reheard}`);
+  }
+  /*
+   * The second listen is a chance to do better, never a wait (review): a key
+   * that is out of allowance answers 429 — the first one ends the second
+   * listen at once, with no waiting it out and no further tries.
+   */
+  {
+    const real = global.fetch;
+    let n = 0;
+    global.fetch = async (url, init) => {
+      n++;
+      if (n === 1) { const words = []; for (let k = 0; k * 0.5 < 20; k++) words.push({ word: 'w' + k, start: k * 0.5, end: k * 0.5 + 0.3 }); return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ words, segments: [] }) }; }
+      return { ok: false, status: 429, headers: { get: (k) => (k === 'retry-after' ? '1' : null) }, json: async () => ({}) };
+    };
+    const t0 = Date.now();
+    const lim = await cs.transcribeWords({ input: loudWav, startSec: 0, endSec: 30 });
+    global.fetch = real;
+    check('a rate-limited second listen stops at once: one extra request, no waiting', n === 2 && Date.now() - t0 < 5000 && lim.words.length === 40,
+      `${n} requests, ${Date.now() - t0} ms, ${lim.words.length} words`);
+  }
+  /*
+   * A gap longer than one window: the request never reaches the word after the
+   * gap, so a re-heard word that merely shares its text ("the") is real and kept.
+   */
+  {
+    const longWav = path.join(os.tmpdir(), 'mw-cloudgap60-' + process.pid + '.wav');
+    execFileSync(ffmpeg, ['-v', 'error', '-f', 'lavfi', '-i', 'anoisesrc=r=16000:a=0.2:c=pink', '-t', '60', '-y', longWav]);
+    const real = global.fetch;
+    let n = 0;
+    global.fetch = async () => {
+      n++;
+      const words = [];
+      if (n === 1) {
+        for (let k = 0; k * 0.5 + 0.3 <= 5.3; k++) words.push({ word: 'a' + k, start: k * 0.5, end: k * 0.5 + 0.3 });
+        words.push({ word: 'the', start: 40, end: 40.3 });
+        for (let k = 1; 40 + k * 0.5 + 0.3 <= 60; k++) words.push({ word: 'b' + k, start: 40 + k * 0.5, end: 40 + k * 0.5 + 0.3 });
+      } else {
+        // the second listen hears [4.3, 34.3]: speech all the way, its last word "the" at 34.0
+        for (let t = 5.5; t < 33.9; t += 0.5) words.push({ word: 'c' + Math.round(t * 2), start: t - 4.3, end: t - 4.3 + 0.3 });
+        words.push({ word: 'the', start: 34.0 - 4.3, end: 34.25 - 4.3 });
+      }
+      return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ words, segments: [] }) };
+    };
+    const lg = await cs.transcribeWords({ input: longWav, startSec: 0, endSec: 60 });
+    global.fetch = real;
+    try { fs.unlinkSync(longWav); } catch (e) {}
+    const the34 = lg.words.find((w) => w.text === 'the' && Math.abs(w.start - 34.0) < 0.05);
+    check('a long gap: a re-heard word that only shares its text with the word after the gap is kept', !!the34,
+      lg.words.filter((w) => w.start > 33 && w.start < 41).map((w) => `${w.text}@${w.start}`).join(' '));
+  }
+  /*
+   * Cancel while the second listen is encoding a gap: the encode is killed and
+   * fails like any error — it must still come back as a CANCEL, not as finished
+   * captions (second review).
+   */
+  {
+    const jobsMod = require('../src/main/jobs');
+    const realCancelled = jobsMod.isCancelled, real = global.fetch;
+    let n = 0, cancelled = false;
+    jobsMod.isCancelled = () => cancelled;
+    global.fetch = async () => {
+      n++;
+      if (n === 1) { const words = []; for (let k = 0; k * 0.5 < 20; k++) words.push({ word: 'w' + k, start: k * 0.5, end: k * 0.5 + 0.3 }); return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ words, segments: [] }) }; }
+      cancelled = true;                                        // Cancel pressed mid-request
+      throw new Error('socket hang up');
+    };
+    let outcome = 'finished';
+    try { await cs.transcribeWords({ input: loudWav, startSec: 0, endSec: 30 }); } catch (e) { outcome = e && e.cancelled ? 'cancelled' : 'error: ' + (e && e.message); }
+    jobsMod.isCancelled = realCancelled; global.fetch = real;
+    check('Cancel during the second listen comes back as a cancel, not as finished captions', outcome === 'cancelled', outcome);
+  }
   // Words to the end: no second chance is asked for.
   calls.length = 0; served = 0; cutAt = Infinity; plan = [[0, 30]];
   await cs.transcribeWords({ input: loudWav, startSec: 0, endSec: 30 });

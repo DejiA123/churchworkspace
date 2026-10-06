@@ -1695,11 +1695,13 @@ let _hideTimer = null;
            * finished) is used without asking.
            */
           let quality = 'hd';
+          let ready = false;   // the copy is already made (one is started when a montage finishes)
           if (needed) {
             let stt = null;
             try { stt = await call('video:phoneCopyStatus', { input: p }); } catch (e) { /* an older studio: just make it */ }
             if (stt && stt.needed === false) needed = false;
             else if (stt && stt.needed && !(stt.hd && stt.hd.ready) && show.choose) quality = await show.choose(stt);
+            ready = !!(stt && stt[quality] && stt[quality].ready);
           }
           /*
            * ►► ONE BAR FOR THE WHOLE SAVE. ◄◄ "Making a phone copy… 99%" and then
@@ -1709,11 +1711,12 @@ let _hideTimer = null;
            * minutes, the download of the 129 MB it makes under one), the
            * download the rest; with no copy to make, the download is all of it.
            */
-          make = needed ? MAKE_SHARE : 0;
+          // (a copy already made is no copy to make: the download is the whole bar)
+          make = needed && !ready ? MAKE_SHARE : 0;
           if (needed) {
-            show.making(0, quality);
+            if (make) show.making(0, quality);
             const jobId = 'pc' + Date.now().toString(36);
-            const off = window.api.onJobProgress((d) => { if (d && d.jobId === jobId) show.making(Math.round((Math.min(99, d.percent || 0) * MAKE_SHARE) / 100), quality); });
+            const off = window.api.onJobProgress((d) => { if (make && d && d.jobId === jobId) show.making(Math.round((Math.min(99, d.percent || 0) * MAKE_SHARE) / 100), quality); });
             try {
               const got = await call('video:phoneCopy', { input: p, jobId, quality });
               if (got && Array.isArray(got.parts) && got.parts.length) list = got.parts;
@@ -2073,6 +2076,16 @@ let _hideTimer = null;
     '.ve-text-box', '.ve-text-resize',
     '#veCropFrame', '#veOverlayGuide', '.ve-ovg-resize', '[data-ovresize]',
   ].join(',');
+  /* A wide screen (a tablet in landscape, a laptop's browser) keeps the desk's
+   * timeline: every handle visible and draggable, the ruler a scrubber. Only the
+   * phone layout is CapCut's (cloud.css hides unselected handles there alone). */
+  const DRAG_SEL_WIDE = [
+    '.ve-seg-h', '.ve-audio-h', '.ve-cc-h', '.ve-tc-h', '[data-tedge]', '[data-cedge]',
+    '.ve-cap-edge', '[data-capedge]', '.ve-text-box', '.ve-text-resize',
+    '#veRuler', '#veCropFrame', '#veOverlayGuide', '.ve-ovg-resize', '[data-ovresize]',
+  ].join(',');
+  const phoneMq = window.matchMedia ? window.matchMedia('(max-width: 900px)') : null;
+  const phoneLayout = () => !phoneMq || phoneMq.matches;
 
   /* Things that must keep their own touch behaviour: form controls, and the
    * cut-out painter, which already listens for touch itself. */
@@ -2147,7 +2160,7 @@ let _hideTimer = null;
       if (!el || !el.closest) return;
       if (el.closest(NO_BRIDGE)) return;
 
-      if (el.closest(DRAG_SEL)) {
+      if (el.closest(phoneLayout() ? DRAG_SEL : DRAG_SEL_WIDE)) {
         dragging = true;
         e.preventDefault();        // no scroll, no synthetic click, no 300ms wait
         hold(el);
@@ -2206,6 +2219,50 @@ let _hideTimer = null;
     }
     document.addEventListener('touchend', end, { capture: true });
     document.addEventListener('touchcancel', end, { capture: true });
+  }
+
+  /*
+   * ►► THE CAPTIONS WINDOW'S PLAY AND PAUSE, ON AN IPHONE. ◄◄
+   *
+   * "When the video is playing I cannot pause it — the thing starts going down
+   *  and I can't pause it." Safari does not turn a tap into a click at once: it
+   * first fakes a mouse arriving, watches whether the page changes, and a tap
+   * that lands while content is moving or appearing — the list scrolling itself
+   * down to follow the voice, the captions coming and going on the picture, the
+   * lit line moving on — is taken as a hover or a scroll-stop, and the click is
+   * simply never sent. While a video plays that page never stops changing, so
+   * the longer it played the more taps on ⏸ came to nothing.
+   *
+   * So these buttons act on the finger lifting. preventDefault on the touchend
+   * tells Safari there is nothing to guess (and no click follows, so a tap is
+   * exactly one press), and the button's own click handler runs as it would
+   * from a mouse. A finger that moved is a scroll and is left alone.
+   */
+  const TAP_NOW = '#capModal .cap-player button, #capModal .cap-row-play';
+  function installTapNow() {
+    let down = null;
+    document.addEventListener('touchstart', (e) => {
+      down = null;
+      if (e.touches.length !== 1) return;
+      const b = e.target && e.target.closest ? e.target.closest(TAP_NOW) : null;
+      if (!b || b.disabled) return;
+      const t = e.touches[0];
+      down = { b, x: t.clientX, y: t.clientY, at: Date.now() };
+    }, { capture: true, passive: true });
+    document.addEventListener('touchmove', (e) => {
+      if (!down || !e.touches.length) return;
+      const t = e.touches[0];
+      if (Math.abs(t.clientX - down.x) > 10 || Math.abs(t.clientY - down.y) > 10) down = null;
+    }, { capture: true, passive: true });
+    const lift = (e) => {
+      const d = down; down = null;
+      if (!d || Date.now() - d.at > 700) return;     // a long press is not a tap
+      if (e.cancelable) e.preventDefault();
+      if (d.b.isConnected && !d.b.disabled) d.b.click();
+    };
+    document.addEventListener('touchend', lift, { capture: true, passive: false });
+    // Safari may cancel a still finger when the list under it scrolls itself; it was still a tap
+    document.addEventListener('touchcancel', lift, { capture: true, passive: false });
   }
 
   /* ------------------------------------------------- dropping files on it */
@@ -2999,7 +3056,13 @@ let _hideTimer = null;
        */
       const centre = (n) => {
         const E = window.VideoEditor;
-        if (E && E.setCentredPlayhead) { E.setCentredPlayhead(true); return; }
+        if (E && E.setCentredPlayhead) {
+          // the phone layout only — and following it when a tablet turns round
+          const set = () => E.setCentredPlayhead(phoneLayout());
+          set();
+          if (phoneMq && phoneMq.addEventListener) phoneMq.addEventListener('change', set);
+          return;
+        }
         if (n < 40) setTimeout(() => centre(n + 1), 250);
       };
       centre(0);
@@ -3838,6 +3901,7 @@ let _hideTimer = null;
     cloud.version = version || '';
     wireCloudUi();
     installTouchBridge();
+    installTapNow();
     installDropBridge();
 
     // A service worker makes it installable and makes the shell open instantly.

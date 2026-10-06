@@ -40,6 +40,7 @@ const SHELL = [
   '/r/styles.css?v=' + VERSION,
   '/r/facetrack.js?v=' + VERSION,
   '/r/caplayout.js?v=' + VERSION,
+  '/r/wordbook-english.js?v=' + VERSION,
   '/r/wordbook.js?v=' + VERSION,
   '/r/cutout.js?v=' + VERSION,
   '/r/flyerai.js?v=' + VERSION,

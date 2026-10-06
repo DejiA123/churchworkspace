@@ -1424,6 +1424,18 @@ ipcMain.handle('captions:grammar', wrap(async (e, { lines, before, after, passag
     engine, ask, terms, known, onProgress: onProgress(e, jobId),
     cancelled: () => jobs.isCancelled(), CancelledError: jobs.CancelledError,
   });
+  /*
+   * ►► ONLY CLAUDE'S "SURE" IS TRUSTED TO CHANGE A CAPTION BY ITSELF. ◄◄
+   * Measured on the live server, on sermons whose script is known: the free
+   * Groq models' "sure" fixes were wrong far more often than right — before
+   * the exact-words guard, 10 of 11; with it, 3 of the 4 that still got
+   * through ("heard" -> "hear", "Whale" -> "Whaley", "Methabosheth" ->
+   * "Methuselah"; the one right one was "Jire" -> "Jireh", which the Word Book
+   * now makes anyway). A wrong correction made silently is the worst kind,
+   * because it looks deliberate. So from the smaller readers every fix waits
+   * under its line as a suggestion; Claude's sure ones are still made at once.
+   */
+  if (engine !== 'claude') for (const f of (out.fixes || [])) f.sure = false;
   const cw = cloudwrite.state();
   out.by = engine === 'claude' ? `Claude (${claudetext.model()})` : engine === 'groq' ? `${cw.providerName}${cw.usingModel ? ' — ' + cw.usingModel : ''}` : 'the AI model on this PC';
   if (out.failedBatches && !out.fixes.length) out.why = engine === 'groq' ? (cw.why || 'the AI did not answer') : 'the AI did not answer';

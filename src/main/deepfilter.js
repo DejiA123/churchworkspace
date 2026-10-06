@@ -330,7 +330,12 @@ async function renderVoice(ctx, { inputArgs, cut, af, cwd, signal, pieceSec, onP
       await ff.runFfmpeg(ctx.ffmpeg, ffArgs(['-i', src], chain, inp), { signal });
       // the network takes its turn with the encoders, like whisper does — on a
       // one-CPU server it must not run beside an export
-      const out = await ff.gated(() => runNet(bin, { input: inp, outDir, level: parts.level, signal, live }));
+      // the network's own time, not the wait for a slot: that is what the next bar is paced by
+      const out = await ff.gated(async () => {
+        const t0 = Date.now();
+        try { return await runNet(bin, { input: inp, outDir, level: parts.level, signal, live }); }
+        finally { netSecs[i] = (Date.now() - t0) / 1000; }
+      });
       try { fs.rmSync(inp, { force: true }); } catch (e) {}
       // its own stretch, plus the overlap the next piece fades in over
       const keep = (e - s) + (i < bounds.length - 1 ? XF_SAMPLES : 0);
@@ -339,6 +344,7 @@ async function renderVoice(ctx, { inputArgs, cut, af, cwd, signal, pieceSec, onP
     // `lanes` at a time; the first failure stops the rest at once rather than
     // leaving them running for minutes beside the fallback
     const pieces = new Array(bounds.length);
+    const netSecs = new Array(bounds.length).fill(0);
     let next = 0, failure = null, finished = 0;
     // The pace: each piece hears its own audio plus the warm-up; the lanes run side by side.
     const nLanes = Math.max(1, Math.min(lanes, bounds.length));
@@ -363,9 +369,12 @@ async function renderVoice(ctx, { inputArgs, cut, af, cwd, signal, pieceSec, onP
     await Promise.all(Array.from({ length: Math.min(lanes, bounds.length) }, lane));
     if (pacer) { clearInterval(pacer); pacer = null; }
     if (failure) throw failure;
-    // what this machine actually managed, for the next export's bar
-    const took = (Date.now() - netFrom) / 1000;
-    if (took > 2) netPace = Math.max(0.2, Math.min(50, Math.max(...laneSec) / took));
+    // what the network managed on this machine, for the next export's bar —
+    // from its own running time only (a run that queued behind somebody else's
+    // export is not a slow network), and eased in so one odd run cannot swing it
+    const ran = netSecs.reduce((a, b) => a + b, 0);
+    const heardSec = bounds.reduce((a, [s0, e0]) => a + (e0 - s0 + WARM_SEC * SR) / SR, 0);
+    if (ran > 2) netPace = 0.6 * netPace + 0.4 * Math.max(0.2, Math.min(50, heardSec / ran));
     tell(PROG.net);
 
     /* 3. join, trim to the exact length, and run the rest of the chain */

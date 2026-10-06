@@ -819,7 +819,10 @@ function fillChain(srcW, srcH, W, H, fill, label = 'f') {
 const VOICE_PASS_LADDER = [2, 3, 1, 4];
 const VOICE_WANTED_GAIN_DB = 8;    // an isolation run that worked is worth far more than this
 async function renderVerifiedVoice(ctx, { inputArgs, cut, af, hasAudio, cwd, signal, onProgress, durSec }) {
-  const tell = (p) => { if (onProgress) { try { onProgress(p); } catch (e) {} } };
+  // only ever forward: if the voice cleaner fails part-way the older chain takes
+  // over and counts from its own start, and the bar must not drop back with it
+  let hi = -1;
+  const tell = (p) => { if (!onProgress || !(p > hi)) return; hi = p; try { onProgress(p); } catch (e) {} };
   /*
    * DeepFilterNet first, wherever it is installed: every setting, Light to
    * Studio, goes through it (see deepfilter.js for what it replaced and why).
