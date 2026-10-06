@@ -301,7 +301,7 @@ async function waitUp() {
     console.log('\n=== [G] ＋ Add caption, after the AI made some ===');
     {
       const L0 = await page.evaluate(() => window.VideoEditor.__test.capLines());
-      // the playhead ON the second line: the new one goes in the first gap after it
+      // the playhead ON the second line
       await page.evaluate((t) => { document.getElementById('vePlayer').currentTime = t; }, L0[1].start + 0.2);
       await sleep(400);
       // the phone's tool: Captions → the caption row's "Add caption" (same call)
@@ -314,8 +314,9 @@ async function waitUp() {
       const L1 = await page.evaluate(() => window.VideoEditor.__test.capLines());
       const added = L1.find((c) => c.text === 'PRAISE THE LORD');
             check(!!added && L1.length === L0.length + 1, 'it is on the lane, in the chosen Case', L1.map((c) => c.text));
-      check(added && added.start >= L0[1].end - 0.001 && L1.every((c) => c === added || c.end <= added.start + 0.001 || c.start >= added.end - 0.001),
-        'it sits after the line the playhead was on, overlapping nothing', added);
+      // lines that run end to end have no gap: the line under the playhead gives up its tail
+      check(added && Math.abs(added.start - Math.max(L0[1].start + 0.3, L0[1].start + 0.2)) < 0.05 && L1.every((c) => c === added || c.end <= added.start + 0.001 || c.start >= added.end - 0.001),
+        'it goes in at the playhead (not at the next gap far away), overlapping nothing', { added, was: L0[1] });
       await page.evaluate(() => window.VideoEditor.__test.setCapWordsPerLine(2));
       await sleep(300);
       check((await page.evaluate(() => window.VideoEditor.__test.capLines())).some((c) => c.text === 'PRAISE THE LORD'),

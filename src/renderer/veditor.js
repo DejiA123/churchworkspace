@@ -5520,30 +5520,50 @@
    * so changing Words per line (which regroups the AI's words) keeps it.
    */
   const CAP_NEW_SEC = 2, CAP_NEW_MIN = 0.4;
+  // a line that made room for a new one gets its time back if the new one is left empty
+  const capCutBack = new WeakMap();
   function addCaptionHere(opts) {
     if (!ve.video) return false;
     const inList = !!(opts && opts.inList);
     commitCapEdit();
     if (!Array.isArray(ve.capEvents)) ve.capEvents = [];
     const off = capOff(), D = dur();
-    const evs = ve.capEvents.map((e) => ({ a: e.start + off, b: e.end + off })).sort((x, y) => x.a - y.a);
-    let a = clamp(nowT(), 0, D);
-    // past every line the playhead is on (lines can touch end to end)
-    for (const e of evs) if (e.a <= a + 0.001 && e.b > a + 0.05) a = e.b;
-    // …and on to the first gap with room in it
-    let b = a;
-    for (;;) {
-      const next = evs.find((e) => e.a >= a - 0.001 && e.b > a + 0.05);
+    const evs = ve.capEvents.map((e) => ({ e, a: e.start + off, b: e.end + off })).sort((x, y) => x.a - y.a);
+    const t0 = clamp(nowT(), 0, D);
+    /*
+     * ►► AT THE PLAYHEAD, NOT AT THE END OF THE VIDEO. ◄◄ A sermon's auto
+     * lines run end to end, so "the next gap" could be forty minutes away —
+     * the line went in there and the video jumped. Now: a gap that starts
+     * within a breath of the playhead is used; otherwise room is made right
+     * here, by ending the line being spoken at the playhead.
+     */
+    let a = t0, b = t0, cut = null;
+    for (const x of evs) if (x.a <= a + 0.001 && x.b > a + 0.05) a = x.b;   // past lines the playhead is on
+    {
+      const next = evs.find((x) => x.a >= a - 0.001 && x.b > a + 0.05);
       b = Math.min(a + CAP_NEW_SEC, next ? next.a : D);
-      if (b - a >= CAP_NEW_MIN || !next) break;
-      a = next.b;
+    }
+    if (b - a < CAP_NEW_MIN || a - t0 > 1.5) {
+      // the line under the playhead (or the next one) gives up its tail
+      // (the LAST line the playhead is on: lines dragged by hand can overlap)
+      let L = null;
+      for (const x of evs) if (x.a <= t0 + 0.001 && x.b > t0 + 0.05) L = x;
+      if (!L) L = evs.find((x) => x.a > t0);
+      const MIN_KEEP = 0.3;
+      if (L && L.b - L.a >= MIN_KEEP + CAP_NEW_MIN) {
+        a = clamp(t0, L.a + MIN_KEEP, L.b - CAP_NEW_MIN);
+        const next = evs.find((x) => x.a > a + 0.001 && x !== L);
+        b = Math.min(next ? next.a : D, Math.max(a + CAP_NEW_SEC, Math.min(L.b, a + 4)));
+        cut = L;
+      } else if (b - a < CAP_NEW_MIN) b = a;
     }
     if (b - a < CAP_NEW_MIN) {
-      window.__toast && window.__toast('💬 There is no room for another line after this point — shorten a line on the 💬 lane to make room, or move the playhead.', 'error', 6000);
+      window.__toast && window.__toast('💬 There is no room for another line here — shorten a line on the 💬 lane to make room, or move the playhead.', 'error', 6000);
       return false;
     }
     pushHistory({ captions: true });
     const line = { start: +(a - off).toFixed(3), end: +(b - off).toFixed(3), text: '', manual: true };
+    if (cut) { capCutBack.set(line, { e: cut.e, end: cut.e.end }); cut.e.end = line.start; }
     ve.capEvents.push(line);
     ve.capEvents.sort((x, y) => x.start - y.start);
     if (!ve._capSource) { ve._capSource = ve.video.path; ve._capMode = ve._capMode || 'full'; }
@@ -5552,7 +5572,9 @@
     const cc = $('#veCapShow'); if (cc && !cc.checked) cc.checked = true;
     // the picture shows the new line while it is typed
     try { const p = ve.refs.player; if (p && Math.abs((p.currentTime || 0) - (a + 0.05)) > 0.05 && a < D) seekTo(Math.min(D, a + 0.05)); } catch (e) {}
-    renderCapTrack(); renderCapList();
+    renderCapTrack();
+    capListInsert(i);
+    if (cut) { const r = document.querySelector(`#capList .cap-row[data-row="${ve.capEvents.indexOf(cut.e)}"]`); if (r) paintGrammarRow(r); }
     if (inList) {
       // in the captions window: type it right there, in its own row
       const inp = document.querySelector(`#capList .cap-text[data-i="${i}"]`);
@@ -5605,15 +5627,18 @@
       ve.capEditing = null;
       // a line added by hand and left empty is not a line
       if (!txt && ve.capEvents[i] && ve.capEvents[i].manual) {
-        ve.capEvents.splice(i, 1); ve.capSel = null;
-        renderCapTrack(); renderCapList(); updateCapOverlay(ve.refs.player.currentTime || 0);
+        const gone = ve.capEvents.splice(i, 1)[0]; ve.capSel = null;
+        const back = capCutBack.get(gone);
+        if (back && back.e.end === gone.start && ve.capEvents.includes(back.e)) back.e.end = back.end;
+        renderCapTrack(); if (capModalOpen()) renderCapList(); updateCapOverlay(ve.refs.player.currentTime || 0);
         return;
       }
       if (ve.capEvents[i]) { if (ve.capEvents[i].text !== txt || ve.capEvents[i].doubt) settleDoubt(ve.capEvents[i]); ve.capEvents[i].text = txt; }
       if (label.textContent !== txt) label.textContent = txt;
       label.removeAttribute('contenteditable');
       el.classList.remove('editing');
-      renderCapTrack(); renderCapList(); updateCapOverlay(ve.refs.player.currentTime || 0);
+      // (the window draws itself afresh when it opens: a whole sermon's list is not rebuilt per lane edit)
+      renderCapTrack(); if (capModalOpen()) renderCapList(); updateCapOverlay(ve.refs.player.currentTime || 0);
       // A line retyped on the LANE teaches exactly as much as one retyped in the
       // window, and there is one Word Book, so it goes through the same door.
       if (orig) learnCaptionEdit(orig, capGroupCfg().tc === 'upper' ? txt : typedTxt, i);   // a new line taught nothing
@@ -11150,6 +11175,156 @@
    * to the one shared caption store — the timeline blocks, the preview overlay
    * and the burned-in export all change with it, because there is only one copy.
    */
+  /** One line of the captions window (renderCapList, and a line added on its own). */
+  function capRowHtml(c, i, base) {
+    return (
+      `<div class="cap-row${!!c.doubt ? ' doubt' : ''}" data-row="${i}">`
+      + `<button type="button" class="cap-row-play" data-play-i="${i}" title="Play this line">▶</button>`
+      + `<span class="cap-time">${fmt(Math.max(0, c.start - base))}</span>`
+      + `<div class="cap-field"><input class="cap-text" data-i="${i}" value="${String(c.text).replace(/"/g, '&quot;')}" spellcheck="false" />`
+      + `<div class="cap-hl" aria-hidden="true"></div></div>`
+      + `<button type="button" class="cap-g-badge hidden" data-g-i="${i}"></button>`
+      + `<button type="button" class="cap-ai-line" data-ai-i="${i}" title="✨ Ask the AI to proof-read just this line">✨</button>`
+      // A line the two ears disagreed on says so, with what the other one heard.
+      + (!!c.doubt
+        ? (() => { const alt = altTextFor(c);
+          return `<div class="cap-doubt"><span class="cap-doubt-tx">⚠ ${c.doubt === 'unsure' ? 'The model was unsure here' : (alt ? `The second listen heard “${escape2(alt)}”` : 'The second listen heard this differently')}</span>`
+            + (alt ? `<button type="button" class="cap-doubt-use" data-doubt-use="${i}">Use that</button>` : '')
+            + `<button type="button" class="cap-doubt-ok" data-doubt-ok="${i}">✓ It's right</button></div>`; })()
+        : '')
+      // A line a fix changed says so, and what it said before, with its own way back.
+      + (c._was != null && c._was !== c.text
+        ? `<div class="cap-was"><span class="cap-was-tx" title="${escape2(c._byAi || '').replace(/"/g, '&quot;')}">${c._byAi ? '✨ AI fixed' : '✍ Fixed'} — was “${escape2(c._was)}”</span>`
+          + `<button type="button" class="cap-was-back" data-was-i="${i}" title="Put this line back to what it said before">↶ Put back</button></div>`
+        : '')
+      + `</div>`);
+  }
+  /** A line's box: commit, live preview, Enter, focus — its index read at the moment, never captured. */
+  function wireCapInput(inp) {
+    const commit = () => {
+      ve._capLive = null;
+      const e = ve.capEvents[+inp.dataset.i];
+      const typed = inp.value;    // as typed: the Word Book learns spellings, not the display case
+      if (e && inp.value && inp.value !== inChosenCase(inp.value)) inp.value = inChosenCase(inp.value);
+      if (!e || e.text === inp.value) return;
+      const before = e.text;
+      e.text = inp.value;
+      if (e.doubt) { settleDoubt(e); setTimeout(renderCapList, 0); }   // looked at and put right
+      if (e._was != null && e._was === e.text) { delete e._was; renderCapList(); }
+      renderCapTrack(); renderClipList();
+      updateCapOverlay(ve.refs.player.currentTime || 0);
+      // The whole point: this correction is now also made everywhere else in
+      // the video, and remembered for every video after it. See the Word Book.
+      // ALL CAPS: learned shouted, so the book can give a name its own capitals
+      // ("EPHESIANS" -> "Ephesians"); any other Case: learned as typed
+      if (before) learnCaptionEdit(before, capGroupCfg().tc === 'upper' ? inp.value : typed, +inp.dataset.i);   // a new line taught nothing
+      updateGrammarSummary();
+    };
+    // a line added by hand and left empty is not a line
+    inp.addEventListener('blur', () => {
+      const e = ve.capEvents[+inp.dataset.i];
+      if (e && e.manual && !String(inp.value || '').trim() && !String(e.text || '').trim()) {
+        const at = +inp.dataset.i;
+        ve.capEvents.splice(at, 1);
+        const back = capCutBack.get(e);
+        if (back && back.e.end === e.start && ve.capEvents.includes(back.e)) back.e.end = back.end;
+        setTimeout(() => { capListRemove(at); renderCapTrack(); }, 0);
+      }
+    });
+    // The proof-reader's buttons commit a half-typed line before acting on it.
+    inp._commit = commit;
+    inp.addEventListener('change', commit);
+    // As you type: the underlines follow the words, the caption on the
+    // picture shows what you are typing, and (if asked) the sound stops so
+    // you do not miss what comes next while your hands are busy.
+    inp.addEventListener('input', () => {
+      ve._capLive = { i: +inp.dataset.i, text: inChosenCase(inp.value) };
+      updateCapOverlay(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
+      capPauseForTyping();
+      clearTimeout(inp._gT);
+      inp._gT = setTimeout(() => { const row = inp.closest('.cap-row'); if (row) paintGrammarRow(row, inp.value); }, 120);
+    });
+    inp.addEventListener('scroll', () => { const hl = inp.parentNode.querySelector('.cap-hl'); if (hl) hl.scrollLeft = inp.scrollLeft; });
+    inp.addEventListener('blur', () => { if (ve._capLive && ve._capLive.i === +inp.dataset.i) { ve._capLive = null; } });
+    // Enter commits and moves on — this is a list of lines being proof-read,
+    // not a form.
+    inp.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Enter') return;
+      ev.preventDefault();
+      const at = +inp.dataset.i;
+      commit();
+      // The list may have just been REDRAWN underneath us — a correction that
+      // also fixed other lines rebuilds them — so the next row is found by its
+      // index in the fresh DOM rather than by walking away from a dead node.
+      const here = document.querySelector(`#capList .cap-text[data-i="${at}"]`) || inp;
+      const row = here.closest('.cap-row');
+      const nx = row && row.nextElementSibling && row.nextElementSibling.querySelector('.cap-text');
+      if (nx) { nx.focus(); nx.select(); } else here.blur();
+    });
+    // Clicking a line takes the playhead to it, so you can hear what you are
+    // correcting without leaving the window. While a single line is being
+    // played (or looped), clicking another line moves the loop with you.
+    inp.addEventListener('focus', () => {
+      const i = +inp.dataset.i;
+      const e = ve.capEvents[i];
+      ve._capFocusI = i;
+      if (!e) return;
+      const p = ve.refs.player;
+      if (ve._capLine && p && !p.paused) { capPlayLine(i); return; }
+      ve._capLine = null;
+      seekTo(Math.max(0, capOff() + e.start));
+      capPlayerPaint(true);
+    });
+  }
+  /*
+   * ►► A LINE ADDED, NOT A LIST REBUILT. ◄◄ On a whole sermon the window holds
+   * thousands of rows; rebuilding them all (and proof-reading every one again)
+   * for one new empty line froze an iPhone for seconds. The rows after it are
+   * renumbered in place and one row goes in. Anything unusual (another tab, a
+   * short's window, an empty list) falls back to the full redraw.
+   */
+  const CAP_ROW_IDX = ['data-play-i', 'data-i', 'data-g-i', 'data-ai-i', 'data-doubt-use', 'data-doubt-ok', 'data-was-i'];
+  function capRowRenumber(row, from, by) {
+    const at = +row.getAttribute('data-row'); if (!(at >= from)) return;
+    const n = String(at + by);
+    row.setAttribute('data-row', n);
+    // a row is two levels deep (its buttons, and the box / notes inside their wrappers)
+    const fix = (el) => { for (const k of CAP_ROW_IDX) if (el.hasAttribute(k)) el.setAttribute(k, n); };
+    for (const ch of row.children) { fix(ch); for (const g of ch.children) fix(g); }
+  }
+  function capListCounts() {
+    if (ve.capScope) return;
+    const n = String((ve.capEvents || []).length);
+    const cnt = document.getElementById('capCount');
+    if (cnt) cnt.textContent = n + ' caption lines';
+    const tab = document.querySelector('#capList [data-capfix="all"] span');
+    if (tab) tab.textContent = n;
+  }
+  function capListInsert(i) {
+    const list = document.getElementById('capList');
+    const c = (ve.capEvents || [])[i];
+    const rows = list ? list.querySelectorAll('.cap-row') : [];
+    if (!capModalOpen()) return;             // opening the window draws it afresh
+    if (!c || !rows.length || ve.capScope || (ve.capListMode || 'all') !== 'all') { renderCapList(); return; }
+    let before = null;
+    for (const r of rows) { if (+r.dataset.row >= i) { if (!before) before = r; capRowRenumber(r, i, 1); } }
+    const tmp = document.createElement('div');
+    tmp.innerHTML = capRowHtml(c, i, 0);
+    const row = tmp.firstElementChild;
+    if (before) before.parentNode.insertBefore(row, before); else rows[rows.length - 1].parentNode.appendChild(row);
+    wireCapInput(row.querySelector('.cap-text'));
+    [row.previousElementSibling, row, row.nextElementSibling].forEach((r) => { if (r && r.classList.contains('cap-row')) paintGrammarRow(r); });
+    capListCounts();
+  }
+  function capListRemove(i) {
+    const list = document.getElementById('capList');
+    const row = list && list.querySelector(`.cap-row[data-row="${i}"]`);
+    if (!capModalOpen()) return;             // opening the window draws it afresh
+    if (!row || ve.capScope) { renderCapList(); return; }
+    row.remove();
+    list.querySelectorAll('.cap-row').forEach((r) => capRowRenumber(r, i + 1, -1));
+    capListCounts();
+  }
   function renderCapList() {
     const all = ve.capEvents || [];
     const scope = ve.capScope;
@@ -11248,27 +11423,7 @@
         : '')
       + `<button type="button" class="cap-add-line" data-capadd title="Add a caption line at the playhead (or the next gap) and type it">＋ Add caption</button>`
       + `</div>`;
-    list.innerHTML = tabs + rows.map(({ c, i }) =>
-      `<div class="cap-row${isDoubt(c) ? ' doubt' : ''}" data-row="${i}">`
-      + `<button type="button" class="cap-row-play" data-play-i="${i}" title="Play this line">▶</button>`
-      + `<span class="cap-time">${fmt(Math.max(0, c.start - base))}</span>`
-      + `<div class="cap-field"><input class="cap-text" data-i="${i}" value="${String(c.text).replace(/"/g, '&quot;')}" spellcheck="false" />`
-      + `<div class="cap-hl" aria-hidden="true"></div></div>`
-      + `<button type="button" class="cap-g-badge hidden" data-g-i="${i}"></button>`
-      + `<button type="button" class="cap-ai-line" data-ai-i="${i}" title="✨ Ask the AI to proof-read just this line">✨</button>`
-      // A line the two ears disagreed on says so, with what the other one heard.
-      + (isDoubt(c)
-        ? (() => { const alt = altTextFor(c);
-          return `<div class="cap-doubt"><span class="cap-doubt-tx">⚠ ${c.doubt === 'unsure' ? 'The model was unsure here' : (alt ? `The second listen heard “${escape2(alt)}”` : 'The second listen heard this differently')}</span>`
-            + (alt ? `<button type="button" class="cap-doubt-use" data-doubt-use="${i}">Use that</button>` : '')
-            + `<button type="button" class="cap-doubt-ok" data-doubt-ok="${i}">✓ It's right</button></div>`; })()
-        : '')
-      // A line a fix changed says so, and what it said before, with its own way back.
-      + (c._was != null && c._was !== c.text
-        ? `<div class="cap-was"><span class="cap-was-tx" title="${escape2(c._byAi || '').replace(/"/g, '&quot;')}">${c._byAi ? '✨ AI fixed' : '✍ Fixed'} — was “${escape2(c._was)}”</span>`
-          + `<button type="button" class="cap-was-back" data-was-i="${i}" title="Put this line back to what it said before">↶ Put back</button></div>`
-        : '')
-      + `</div>`).join('');
+    list.innerHTML = tabs + rows.map(({ c, i }) => capRowHtml(c, i, base)).join('');
     const addBtn = list.querySelector('[data-capadd]');
     if (addBtn) addBtn.addEventListener('click', () => { ve.capListMode = 'all'; addCaptionHere({ inList: true }); });
     list.querySelectorAll('[data-capfix]').forEach((b) => b.addEventListener('click', () => {
@@ -11298,79 +11453,7 @@
     list.querySelectorAll('.cap-was-back').forEach((b) => b.addEventListener('click', () => putLineBack(+b.dataset.wasI)));
     list.querySelectorAll('.cap-was').forEach((w) => w.closest('.cap-row').classList.add('fixed'));
     list.scrollTop = keepScroll;
-    list.querySelectorAll('.cap-text').forEach((inp) => {
-      const commit = () => {
-        ve._capLive = null;
-        const e = ve.capEvents[+inp.dataset.i];
-        const typed = inp.value;    // as typed: the Word Book learns spellings, not the display case
-        if (e && inp.value && inp.value !== inChosenCase(inp.value)) inp.value = inChosenCase(inp.value);
-        if (!e || e.text === inp.value) return;
-        const before = e.text;
-        e.text = inp.value;
-        if (e.doubt) { settleDoubt(e); setTimeout(renderCapList, 0); }   // looked at and put right
-        if (e._was != null && e._was === e.text) { delete e._was; renderCapList(); }
-        renderCapTrack(); renderClipList();
-        updateCapOverlay(ve.refs.player.currentTime || 0);
-        // The whole point: this correction is now also made everywhere else in
-        // the video, and remembered for every video after it. See the Word Book.
-        // ALL CAPS: learned shouted, so the book can give a name its own capitals
-        // ("EPHESIANS" -> "Ephesians"); any other Case: learned as typed
-        if (before) learnCaptionEdit(before, capGroupCfg().tc === 'upper' ? inp.value : typed, +inp.dataset.i);   // a new line taught nothing
-        updateGrammarSummary();
-      };
-      // a line added by hand and left empty is not a line
-      inp.addEventListener('blur', () => {
-        const e = ve.capEvents[+inp.dataset.i];
-        if (e && e.manual && !String(inp.value || '').trim() && !String(e.text || '').trim()) {
-          ve.capEvents.splice(+inp.dataset.i, 1);
-          setTimeout(() => { renderCapList(); renderCapTrack(); }, 0);
-        }
-      });
-      // The proof-reader's buttons commit a half-typed line before acting on it.
-      inp._commit = commit;
-      inp.addEventListener('change', commit);
-      // As you type: the underlines follow the words, the caption on the
-      // picture shows what you are typing, and (if asked) the sound stops so
-      // you do not miss what comes next while your hands are busy.
-      inp.addEventListener('input', () => {
-        ve._capLive = { i: +inp.dataset.i, text: inChosenCase(inp.value) };
-        updateCapOverlay(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
-        capPauseForTyping();
-        clearTimeout(inp._gT);
-        inp._gT = setTimeout(() => { const row = inp.closest('.cap-row'); if (row) paintGrammarRow(row, inp.value); }, 120);
-      });
-      inp.addEventListener('scroll', () => { const hl = inp.parentNode.querySelector('.cap-hl'); if (hl) hl.scrollLeft = inp.scrollLeft; });
-      inp.addEventListener('blur', () => { if (ve._capLive && ve._capLive.i === +inp.dataset.i) { ve._capLive = null; } });
-      // Enter commits and moves on — this is a list of lines being proof-read,
-      // not a form.
-      inp.addEventListener('keydown', (ev) => {
-        if (ev.key !== 'Enter') return;
-        ev.preventDefault();
-        const at = +inp.dataset.i;
-        commit();
-        // The list may have just been REDRAWN underneath us — a correction that
-        // also fixed other lines rebuilds them — so the next row is found by its
-        // index in the fresh DOM rather than by walking away from a dead node.
-        const here = document.querySelector(`#capList .cap-text[data-i="${at}"]`) || inp;
-        const row = here.closest('.cap-row');
-        const nx = row && row.nextElementSibling && row.nextElementSibling.querySelector('.cap-text');
-        if (nx) { nx.focus(); nx.select(); } else here.blur();
-      });
-      // Clicking a line takes the playhead to it, so you can hear what you are
-      // correcting without leaving the window. While a single line is being
-      // played (or looped), clicking another line moves the loop with you.
-      inp.addEventListener('focus', () => {
-        const i = +inp.dataset.i;
-        const e = ve.capEvents[i];
-        ve._capFocusI = i;
-        if (!e) return;
-        const p = ve.refs.player;
-        if (ve._capLine && p && !p.paused) { capPlayLine(i); return; }
-        ve._capLine = null;
-        seekTo(Math.max(0, capOff() + e.start));
-        capPlayerPaint(true);
-      });
-    });
+    list.querySelectorAll('.cap-text').forEach(wireCapInput);
     paintAllGrammar();
     capPlayerPaint(true);
   }
