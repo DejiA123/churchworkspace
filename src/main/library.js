@@ -101,6 +101,14 @@ function copyIn(kind, srcPath, id) {
  * module — passed in (rather than required) so this module stays testable and
  * free of a circular require with video.js.
  */
+/*
+ * A file sent from a phone is saved as "<when>-<its name>" (cloud-api.js
+ * receiveUpload, mobile-api.js) so two sends of "IMG_0001.mov" never collide.
+ * The stamp is the server's bookkeeping, not the song's name: "Amazing Grace",
+ * not "20261006071702-Amazing Grace" on the Music button.
+ */
+const plainName = (p) => path.basename(p, path.extname(p)).replace(/^\d{14}\.?\d*-(?=.)/, '');
+
 async function add(ctx, video, { kind, path: srcPath, name, source, move }) {
   if (!srcPath || !fs.existsSync(srcPath)) throw new Error('That file could not be found.');
   const k = kind === 'music' ? 'music' : 'clips';
@@ -117,7 +125,7 @@ async function add(ctx, video, { kind, path: srcPath, name, source, move }) {
   if (move) { try { fs.rmSync(srcPath, { force: true }); } catch (e) {} }
 
   const entry = {
-    id, name: safeName(name || path.basename(srcPath, path.extname(srcPath))),
+    id, name: safeName(name || plainName(srcPath)),
     file: dest, ext: (path.extname(dest) || '').replace(/^\./, ''),
     addedAt: Date.now(), source: source || 'file',
   };

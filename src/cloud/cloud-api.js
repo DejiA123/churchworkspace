@@ -301,19 +301,22 @@ const ALLOWED = {
 
 const MEDIA_EXT = new Set([
   '.mp4', '.mov', '.m4v', '.webm', '.mkv', '.avi',
-  '.mp3', '.m4a', '.wav', '.aac', '.ogg', '.flac',
+  '.mp3', '.m4a', '.wav', '.aac', '.ogg', '.flac', '.opus', '.wma',
   '.png', '.jpg', '.jpeg', '.gif', '.webp',
   '.ass', '.srt', '.vtt', '.json',
   '.ttf', '.otf', '.woff', '.woff2',
 ]);
 const VIDEO_EXT = new Set(['.mp4', '.mov', '.m4v', '.mkv', '.webm', '.avi']);
-const AUDIO_EXT = new Set(['.mp3', '.m4a', '.wav', '.aac', '.ogg', '.flac']);
+const AUDIO_EXT = new Set(['.mp3', '.m4a', '.wav', '.aac', '.ogg', '.flac', '.opus', '.wma']);
+// what the file chooser may list when the studio asks for something other than
+// a video (a song for the music library, a picture for a cover)
+const PICKABLE_EXT = new Set([...VIDEO_EXT, ...AUDIO_EXT, '.png', '.jpg', '.jpeg', '.gif', '.webp']);
 
 const MIME = {
   '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm',
   '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo',
   '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.wav': 'audio/wav', '.aac': 'audio/aac',
-  '.ogg': 'audio/ogg', '.flac': 'audio/flac',
+  '.ogg': 'audio/ogg', '.flac': 'audio/flac', '.opus': 'audio/ogg', '.wma': 'audio/x-ms-wma',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -912,7 +915,7 @@ function sweepPartsIn(dir) {
 let sweepTimer = null;
 
 /** Everything a signed-in browser can open. */
-function browse() {
+function browse(exts) {
   const seen = new Set();
   const d = dirsFor();
   const groups = [
@@ -921,7 +924,7 @@ function browse() {
     { key: 'videos', label: 'Videos folder', dir: d.videos },
   ];
   return groups.map((g) => {
-    const items = listDir(g.dir).filter((f) => {
+    const items = listDir(g.dir, { exts: exts || VIDEO_EXT }).filter((f) => {
       const k = process.platform === 'win32' ? f.path.toLowerCase() : f.path;
       if (seen.has(k)) return false;
       seen.add(k);
@@ -1211,7 +1214,7 @@ async function authedRoutes(req, res, url, p, me) {
   }
 
   if (p === '/api/videos') {
-    return json(res, 200, { ok: true, groups: browse(), disk: diskOf(dirsFor().output || os.tmpdir()), canDelete: !!cfg.allowUpload });
+    return json(res, 200, { ok: true, groups: browse(url.searchParams.get('all') === '1' ? PICKABLE_EXT : null), disk: diskOf(dirsFor().output || os.tmpdir()), canDelete: !!cfg.allowUpload });
   }
 
   if (p === '/api/delete' && req.method === 'POST') {

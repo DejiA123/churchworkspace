@@ -2416,3 +2416,6 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .mt-foot2 { display: flex; flex-direction: column; gap: 8px; width: 100%; }
 .mt-edit { width: 100%; height: 46px; margin: 0; border-radius: 14px; border: 1px solid var(--ph-accent, #8b5cf6); background: rgba(139, 92, 246, .14);
   color: #fff; font: 700 15px/1 inherit; cursor: pointer; }
+
+/* a song in the file chooser: no picture to show, so a note instead */
+.cf-pic.cf-pic-audio { display: grid; place-items: center; font-size: 22px; background: rgba(139, 92, 246, .14); }

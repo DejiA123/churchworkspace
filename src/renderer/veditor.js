@@ -12838,7 +12838,7 @@
     const el = $('#libMusicList'); if (!el) return;
     const list = (ve.lib && ve.lib.music) || [];
     if (!list.length) {
-      el.innerHTML = `<p class="muted small lib-empty">No music saved yet. Click <b>➕ Add music from my PC</b> — or grab a track from the <b>▶️ YouTube</b> tab.</p>`;
+      el.innerHTML = `<p class="muted small lib-empty">No music saved yet. Tap <b>➕ Add music</b> — or grab a track from the <b>▶️ YouTube</b> tab.</p>`;
       return;
     }
     el.innerHTML = list.map((m) => `
@@ -12861,7 +12861,7 @@
     const el = $('#libClipList'); if (!el) return;
     const list = (ve.lib && ve.lib.clips) || [];
     if (!list.length) {
-      el.innerHTML = `<p class="muted small lib-empty">No clips saved yet. Click <b>➕ Add a clip from my PC</b> and your outro is one tap away from then on.</p>`;
+      el.innerHTML = `<p class="muted small lib-empty">No clips saved yet. Tap <b>➕ Add a clip</b> and your outro is one tap away from then on.</p>`;
       return;
     }
     el.innerHTML = list.map((c) => `

@@ -827,7 +827,7 @@ let _hideTimer = null;
     const o = $('#overlay');
     // over the captions editor when the job was started from it (🎧 Generate
     // captions, Save video with captions) — it ran hidden behind it before
-    if (o) { o.classList.toggle('on-top', !!document.querySelector('#capModal:not(.hidden)')); o.classList.remove('hidden'); }
+    if (o) { o.classList.toggle('on-top', !!document.querySelector('#capModal:not(.hidden), #libModal:not(.hidden)')); o.classList.remove('hidden'); }
   }
   /*
    * The bar AND the number under it. This moved only the bar, so on a phone
@@ -1180,8 +1180,39 @@ let _hideTimer = null;
     return out.length ? out : null;
   }
 
+  /* What kind of file the studio asked for, so the chooser can say it: "Send
+     music from this phone" when a song was asked for, not "a video". */
+  const AUDIO_RE = /^\.(mp3|m4a|wav|aac|ogg|flac|opus|wma)$/, PIC_RE = /^\.(jpe?g|png|webp|gif|bmp|tiff?|avif|heic|heif)$/,
+    VID_RE = /^\.(mp4|mov|m4v|mkv|webm|avi|wmv|flv|3gp)$/;
+  function kindOf(exts) {
+    if (!exts) return 'video';
+    if (exts.every((e) => AUDIO_RE.test(e))) return 'music';
+    if (exts.every((e) => PIC_RE.test(e))) return 'picture';
+    if (exts.every((e) => VID_RE.test(e))) return 'video';
+    if (exts.every((e) => PIC_RE.test(e) || VID_RE.test(e))) return 'media';
+    return 'file';
+  }
+  const SEND_WHAT = { music: 'music', picture: 'a picture', video: 'a video', media: 'a video or picture', file: 'a file' };
+  const PICK_TITLE = { music: 'Choose music', picture: 'Choose a picture', video: 'Choose a video', media: 'Choose a video or picture', file: 'Choose a file' };
+  /*
+   * The extensions asked for, as an iPhone's picker reads them. Audio also gets
+   * audio/*, so every song in Files is tappable. HEIC is left out: an iPhone
+   * hands over a JPEG copy of a photo unless the page says it takes HEIC, and
+   * the studio cannot. Videos keep their plain list (a video/* family can make
+   * iOS re-compress a video from Photos).
+   */
+  function acceptFor(exts) {
+    const list = exts.filter((e) => e !== '.heic' && e !== '.heif');
+    if (list.length && list.every((e) => AUDIO_RE.test(e))) list.push('audio/*');
+    return list.join(',');
+  }
+
   function pickFiles(filters, multi) {
-    pickState = { multi: !!multi, exts: extsOf(filters) };
+    // a second ask while one is open answers the first with "nothing", instead
+    // of leaving its caller waiting for ever
+    if (pickResolve) { const r = pickResolve; pickResolve = null; r(null); }
+    const exts = extsOf(filters);
+    pickState = { multi: !!multi, exts, kind: kindOf(exts) };
     return new Promise((resolve) => {
       pickResolve = resolve;
       openFilesModal({ picking: true });
@@ -1212,19 +1243,42 @@ let _hideTimer = null;
   let filesCache = null;
   const filesUi = { selecting: false, chosen: new Set(), sure: false };
 
+  /*
+   * ►► A SHEET COMES UP OVER WHATEVER ASKED FOR IT. ◄◄
+   * "Your files" is in the page BEFORE the studio's own windows, with the same
+   * z-index as them, so when 🎵 My music (or My clips, the cover picker, the
+   * effects panel, the captions window) asked for a file, the chooser opened
+   * BEHIND it: "Add music" seemed to do nothing, and the chooser was only found
+   * after closing My music. It now goes one step above the highest window that
+   * is up — never over the sign-in gate, the full-screen viewer or the island.
+   */
+  function raiseSheet(m) {
+    if (!m) return;
+    let z = 0;
+    for (const n of $$('.cap-modal:not(.hidden), .fx-side:not(.hidden), .cp-panel, .cp-scrim')) {
+      if (n === m) continue;
+      const v = parseInt(getComputedStyle(n).zIndex, 10);
+      if (v > z && v < 2000) z = v;
+    }
+    m.style.zIndex = z ? String(Math.min(z + 2, 398)) : '';
+  }
   async function openFilesModal(opts = {}) {
     const m = $('#cloudFilesModal');
     if (!m) return;
+    raiseSheet(m);
     m.classList.remove('hidden');
     m.dataset.picking = opts.picking ? '1' : '';
+    const kind = opts.picking ? (pickState.kind || 'video') : 'video';
     const up = $('#cloudUpload span');
-    if (up) up.textContent = window.matchMedia('(max-width: 900px)').matches ? 'Send a video from this phone' : 'Send a video from this computer';
+    if (up) up.textContent = `Send ${SEND_WHAT[kind]} from ${window.matchMedia('(max-width: 900px)').matches ? 'this phone' : 'this computer'}`;
+    const title = m.querySelector('.cloud-files-title');
+    if (title) title.textContent = opts.picking ? PICK_TITLE[kind] : 'Your files';
     setSelecting(false);
     await refreshFiles();
   }
   function closeFilesModal() {
     const m = $('#cloudFilesModal');
-    if (m) { m.classList.add('hidden'); m.dataset.picking = ''; }
+    if (m) { m.classList.add('hidden'); m.dataset.picking = ''; m.style.zIndex = ''; }
     setSelecting(false);
     if (pickResolve) finishPick(null);
   }
@@ -1234,7 +1288,8 @@ let _hideTimer = null;
     if (!list) return;
     if (quiet !== true || !filesCache) list.innerHTML = '<div class="cf-loading"><i class="cf-spin"></i>Looking…</div>';
     try {
-      const res = await fetch('/api/videos', { headers: authHeaders() });
+      // picking a song or a picture lists songs and pictures too, not only videos
+      const res = await fetch('/api/videos' + (isPicking() && pickState.kind !== 'video' ? '?all=1' : ''), { headers: authHeaders() });
       if (res.status === 401) { signedOut(); return; }
       filesCache = await res.json();
     } catch (e) {
@@ -1268,7 +1323,9 @@ let _hideTimer = null;
     return `<div class="cf-row${del ? ' can-del' : ''}${filesUi.chosen.has(f.path) ? ' chosen' : ''}" data-path="${escAttr(f.path)}">`
       + `<button type="button" class="cf-main" data-act="${picking ? 'open' : 'view'}">`
       + `<span class="cf-check" aria-hidden="true">${CHECK}</span>`
-      + `<span class="cf-pic" data-thumb="${escAttr(f.path)}"></span>`
+      + (AUDIO_RE.test((/\.[^.]+$/.exec(String(f.name).toLowerCase()) || [''])[0])
+        ? '<span class="cf-pic cf-pic-audio" aria-hidden="true">🎵</span>'   // a song has no picture to ask for
+        : `<span class="cf-pic" data-thumb="${escAttr(f.path)}"></span>`)
       + `<span class="cf-tx"><b>${escHtml(f.name)}</b><small>${fmtSize(f.size)} · ${escHtml(niceWhen(f.mtime))}</small></span>`
       + '</button>'
       + (picking
@@ -1301,7 +1358,7 @@ let _hideTimer = null;
     }
     if (!any) {
       html = `<div class="cloud-files-empty"><div class="cf-empty-art">${mi('folder')}</div><b>Nothing here yet</b>`
-        + `<p>${exts ? 'Nothing of that kind, anyway. ' : ''}Send a video with the button above.</p></div>`;
+        + `<p>${exts ? 'Nothing of that kind, anyway. ' : ''}Send ${SEND_WHAT[picking ? (pickState.kind || 'video') : 'video']} with the button above.</p></div>`;
     }
     list.innerHTML = html;
     const sel = $('#cloudFilesSelect');
@@ -1558,7 +1615,7 @@ let _hideTimer = null;
       const input = document.createElement('input');
       input.type = 'file';
       if (multi) input.multiple = true;
-      if (exts && exts.length) input.accept = exts.join(',');
+      if (exts && exts.length) input.accept = acceptFor(exts);
       input.style.position = 'fixed';
       input.style.left = '-9999px';
       document.body.appendChild(input);
@@ -3580,6 +3637,12 @@ let _hideTimer = null;
       <button type="button" class="cloud-xp-link" data-xp="saved">Finished files — save them to this phone</button>
       <button type="button" class="cloud-xp-link" data-xp="more">More export settings</button>`;
     document.body.appendChild(xs);
+    // The library's "from my PC" is the desk talking; here it is this phone.
+    {
+      const where = onPhone() ? 'this phone' : 'this computer';
+      const lm = $('#libAddMusic'); if (lm) lm.textContent = `➕ Add music from ${where}`;
+      const lc = $('#libAddClip'); if (lc) lc.textContent = `➕ Add a clip from ${where}`;
+    }
     $('#cloudXpQuality').addEventListener('change', (e) => { setQuality(e.target.value); syncQualityPill(); });
     // Frame rate and bitrate: the desk's own selects, mirrored both ways
     for (const sel of xs.querySelectorAll('[data-mirror-sel]')) {
@@ -4351,7 +4414,7 @@ let _hideTimer = null;
       if (picking && chosen) finishPick(chosen);
     });
     on('#cloudUploadCancel', 'click', () => { if (currentUpload) currentUpload.cancelled = true; });
-    on('#cloudDownloads', 'click', () => { renderDownloads(); $('#cloudDownloadsModal').classList.remove('hidden'); });
+    on('#cloudDownloads', 'click', () => { renderDownloads(); raiseSheet($('#cloudDownloadsModal')); $('#cloudDownloadsModal').classList.remove('hidden'); });
     on('#cloudDownloadsClose', 'click', () => $('#cloudDownloadsModal').classList.add('hidden'));
     on('#cloudHelp', 'click', () => {
       $('#cloudHelpBody').innerHTML = HELP;
