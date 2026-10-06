@@ -1314,7 +1314,7 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, onP
    * key and no speech model of its own, captions did not work at all.)
    */
   try {
-    r = await cloudspeech.transcribeWords({ input, startSec: from, endSec: to, onProgress: (p) => prog && prog(Math.round(p * 0.9)) });
+    r = await cloudspeech.transcribeWords({ input, startSec: from, endSec: to, onProgress: (p) => prog && prog(Math.round(p * 0.6)) });
   } catch (err) {
     if (err && err.cancelled) throw new jobs.CancelledError();
     r = { words: [], doneSec: 0, why: (err && err.message) || 'could not reach the speech service' };
@@ -1336,15 +1336,37 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, onP
     const restFrom = from + r.doneSec;
     const rest = await captioner.transcribe(getCtx(), {
       input, startSec: restFrom, endSec: to, denoise, model: localModel,
-      onProgress: (p) => prog && prog(90 + Math.round(p * 0.1)),
+      onProgress: (p) => prog && prog(60 + Math.round(p * 0.4)),
     });
     pcSec = to - restFrom;
     words = words.concat((rest.words || []).map((w) => Object.assign({}, w, { start: w.start + r.doneSec, end: w.end + r.doneSec })));
   }
-  if (prog) prog(100);
   // THE WORD BOOK — the same last gate every transcription passes through.
   const book = wordbook.apply(words);
+  /*
+   * ►► THE SECOND OPINION (cloudspeech.secondOpinion). ◄◄ The same stretch
+   * heard again by the other model; every word the two do not agree on is
+   * marked `doubt`, so the studio can list only the lines worth a look. Both
+   * go through the Word Book first, so a name the book puts right is not
+   * counted as a disagreement. Only when the cloud heard ALL of it (a stretch
+   * the PC finished was heard once, and is said to be).
+   */
+  let check = { checked: false, why: pcSec > 0 ? 'part of it was heard on this server' : '' };
+  if (!pcSec && book.entries.length) {
+    check = await cloudspeech.secondOpinion({
+      input, from, to, words: [],      // compared below, after the Word Book
+      onProgress: (p) => prog && prog(60 + Math.round(p * 0.38)),
+    }).catch((e) => { if (e && e.cancelled) throw new jobs.CancelledError(); return { checked: false, why: (e && e.message) || 'the second listen failed' }; });
+  }
+  if (check.checked && Array.isArray(check.alt)) {
+    const m = wordbook.matcher();
+    const alt = m.empty ? check.alt : wordbook.engine.applyToWords(check.alt, m).words;
+    check.doubts = cloudspeech.markDisagreements(book.entries, alt);
+    check.alt = alt.map((w) => ({ text: w.text, start: w.start, end: w.end }));
+  }
+  if (prog) prog(100);
   return {
+    check,
     words: book.entries, segments: book.entries,
     durationSec: info.durationSec, model: r.model || 'whisper-large-v3-turbo',
     fixed: book.count, fixedWords: book.count ? wordbook.summarise(book.changes, 4) : '',

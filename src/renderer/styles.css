@@ -2585,3 +2585,15 @@ body.ve-pfull .ve-preview .ve-fs-exit {
 .cap-fix-tabs .cap-add-line { margin-left: auto; background: rgba(224,128,31,.16); color: #ffd3a3; border-color: rgba(224,128,31,.55); }
 .cap-empty-state .cap-add-empty { display: block; margin: 10px auto 0; width: auto; padding: 8px 16px; border-radius: 999px; font-weight: 650; cursor: pointer;
   background: transparent; color: #cbd0dc; border: 1px solid rgba(255,255,255,.18); }
+/* ⚠ a line the two listens disagreed on (renderCapList "⚠ Check") */
+.cap-check-note { margin: 2px 2px 8px; padding: 9px 12px; border-radius: 12px; font-size: 13px; line-height: 1.4; color: #cbd0dc; background: rgba(255,255,255,.05); }
+.cap-check-note.good { color: #bbf7d0; background: rgba(34,197,94,.12); }
+.cap-check-note.warn { color: #fde68a; background: rgba(245,158,11,.12); }
+.cap-fix-tabs .cap-tab-check.on { background: rgba(245,158,11,.22); border-color: rgba(245,158,11,.7); }
+.cap-doubt { flex: 1 1 100%; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 4px 72px; font-size: 12px; }
+.cap-doubt-tx { flex: 1 1 auto; min-width: 0; color: #fbbf24; }
+.cap-doubt button { width: auto; margin: 0; padding: 4px 11px; font-size: 12px; border-radius: 999px; cursor: pointer; font-weight: 650; }
+.cap-doubt .cap-doubt-use { background: rgba(245,158,11,.18); color: #fde68a; border: 1px solid rgba(245,158,11,.6); }
+.cap-doubt .cap-doubt-ok { background: rgba(34,197,94,.14); color: #bbf7d0; border: 1px solid rgba(34,197,94,.5); }
+.cap-row.doubt { box-shadow: inset 3px 0 0 #f59e0b; }
+.ve-cap-clip.doubt::before { content: ''; position: absolute; top: 3px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: #fbbf24; box-shadow: 0 0 0 1.5px rgba(0,0,0,.6); }

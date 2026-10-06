@@ -5436,7 +5436,7 @@
     const tip = dropped
       ? `${fmt(capAbs(c))} – ${fmt(capAbsEnd(c))}\n${c.text}\n(inside a removed pause — won't be in the export)`
       : `${fmt(capAbs(c))} – ${fmt(capAbsEnd(c))}\n${c.text}\n(click to edit)`;
-    return `<div class="ve-cap-clip${ve.capSel === i ? ' sel' : ''}${tiny ? ' tiny' : ''}${dropped ? ' cut' : ''}" data-i="${i}" style="left:${left}px;width:${width}px;" title="${attr2(tip)}">`
+    return `<div class="ve-cap-clip${ve.capSel === i ? ' sel' : ''}${tiny ? ' tiny' : ''}${dropped ? ' cut' : ''}${c.doubt ? ' doubt' : ''}" data-i="${i}" style="left:${left}px;width:${width}px;" title="${attr2(tip)}">`
       + (tiny ? '' : `<div class="ve-cc-h l" data-cedge="l" title="Drag to change when this caption starts"></div>`)
       + `<span class="ve-cc-label" style="font-family:'${capFontFamily()}',system-ui,sans-serif">${escape2(c.text)}</span>`
       + (tiny ? '' : `<div class="ve-cc-h r" data-cedge="r" title="Drag to keep this caption on screen longer"></div>`)
@@ -5605,7 +5605,7 @@
         renderCapTrack(); renderCapList(); updateCapOverlay(ve.refs.player.currentTime || 0);
         return;
       }
-      if (ve.capEvents[i]) ve.capEvents[i].text = txt;
+      if (ve.capEvents[i]) { if (ve.capEvents[i].text !== txt || ve.capEvents[i].doubt) settleDoubt(ve.capEvents[i]); ve.capEvents[i].text = txt; }
       if (label.textContent !== txt) label.textContent = txt;
       label.removeAttribute('contenteditable');
       el.classList.remove('editing');
@@ -7222,6 +7222,7 @@
       captions: {
         events: ve.capEvents || null,
         words: ve.capWords || null,
+        alt: ve.capAlt || null,        // what the second listen heard (the ⚠ Check list's suggestions)
         offset: ve.capOffset || 0,
         targetId: ve.capTarget ? ve.capTarget.id : null,
         source: ve._capSource || null, mode: ve._capMode || null, clipId: ve._capClipId || null,
@@ -7294,6 +7295,7 @@
 
     const c = data.captions || {};
     ve.capEvents = c.events || null;
+    ve.capAlt = Array.isArray(c.alt) ? c.alt : [];
     ve.capWords = c.words || null;
     ve.capOffset = c.offset || 0;
     ve.capTarget = c.targetId ? (ve.segments.find((x) => x.id === c.targetId) || null) : null;
@@ -10088,7 +10090,17 @@
   const CAP_GAP_BREAK_SEC = 1.2;
   function groupWords(words, wordsPerLine, textCase) {
     const events = [];
-    const push = (g) => { if (g.length) { const text = cleanCapText(transformCase(g.map((x) => x.text).join(' '), textCase)); if (text) events.push({ start: g[0].start, end: g[g.length - 1].end, text }); } };
+    const push = (g) => {
+      if (!g.length) return;
+      const text = cleanCapText(transformCase(g.map((x) => x.text).join(' '), textCase));
+      if (!text) return;
+      const ev = { start: g[0].start, end: g[g.length - 1].end, text };
+      // the second listen's verdict travels from the words to their line (noteCheck)
+      if (g.some((x) => x.doubt)) ev.doubt = 'differ';
+      else if (g.some((x) => x.unsure)) ev.doubt = 'unsure';
+      if (g.some((x) => x.unchecked)) ev.unchecked = true;
+      events.push(ev);
+    };
     const runs = [];
     let run = [];
     for (const w of words) {
@@ -11147,9 +11159,21 @@
      * lines" goes back to the whole transcript.
      */
     const isFixed = (c) => c._was != null && c._was !== c.text;
+    /*
+     * ►► ONLY THE LINES WORTH A LOOK. ◄◄ Every line was heard twice, by two
+     * different models (cloudspeech.secondOpinion). "⚠ Check" lists just the
+     * lines where they disagreed, or where the model said it was unsure — with
+     * what the other ear heard, one tap to take it, one tap to say it is right.
+     */
+    const isDoubt = (c) => !!c.doubt;
     const nFixed = inScope.filter(({ c }) => isFixed(c)).length;
-    if (!nFixed) ve.capOnlyFixed = false;
-    const rows = ve.capOnlyFixed ? inScope.filter(({ c }) => isFixed(c)) : inScope;
+    const nDoubt = inScope.filter(({ c }) => isDoubt(c)).length;
+    const nUnchecked = inScope.filter(({ c }) => c.unchecked).length;
+    if (ve.capListMode === 'fixed' && !nFixed) ve.capListMode = 'all';
+    if (ve.capListMode === 'check' && !nDoubt) ve.capListMode = 'all';
+    const mode = ve.capListMode || 'all';
+    const rows = mode === 'fixed' ? inScope.filter(({ c }) => isFixed(c))
+      : mode === 'check' ? inScope.filter(({ c }) => isDoubt(c)) : inScope;
     document.getElementById('capCount').textContent = scope
       ? `${rows.length} caption line${rows.length === 1 ? '' : 's'} in this short`
       : all.length + ' caption lines';
@@ -11201,21 +11225,36 @@
     // Each line: its own ▶, the time, the words with the proof-reader's
     // underlines laid over them, the badge that opens its suggestions, and ✨
     // to have the AI read just this line.
-    const tabs = `<div class="cap-fix-tabs" role="tablist">`
-      + (nFixed
-        ? `<button type="button" role="tab" data-capfix="all" class="${ve.capOnlyFixed ? '' : 'on'}">All lines <span>${inScope.length}</span></button>`
-          + `<button type="button" role="tab" data-capfix="fixed" class="${ve.capOnlyFixed ? 'on' : ''}">✍ Fixed <span>${nFixed}</span></button>`
+    const checkedAll = inScope.length && !nUnchecked;
+    const note = !inScope.length ? ''
+      : checkedAll
+        ? (nDoubt
+          ? `<div class="cap-check-note warn">Heard twice by two models: they agree on ${inScope.length - nDoubt} of ${inScope.length} lines. Only <b>${nDoubt}</b> need a look (⚠ Check).</div>`
+          : `<div class="cap-check-note good">✅ Heard twice by two models: they agree on every line.</div>`)
+        : `<div class="cap-check-note">ℹ️ ${nUnchecked === inScope.length ? 'These lines were' : nUnchecked + ' lines were'} heard once, not double-checked${ve._capCheckWhy ? ` (${escape2(ve._capCheckWhy)})` : ''} — give them a read.</div>`;
+    const tabs = note + `<div class="cap-fix-tabs" role="tablist">`
+      + (nFixed || nDoubt
+        ? `<button type="button" role="tab" data-capfix="all" class="${mode === 'all' ? 'on' : ''}">All lines <span>${inScope.length}</span></button>`
+          + (nDoubt ? `<button type="button" role="tab" data-capfix="check" class="cap-tab-check ${mode === 'check' ? 'on' : ''}">⚠ Check <span>${nDoubt}</span></button>` : '')
+          + (nFixed ? `<button type="button" role="tab" data-capfix="fixed" class="${mode === 'fixed' ? 'on' : ''}">✍ Fixed <span>${nFixed}</span></button>` : '')
         : '')
       + `<button type="button" class="cap-add-line" data-capadd title="Add a caption line at the playhead (or the next gap) and type it">＋ Add caption</button>`
       + `</div>`;
     list.innerHTML = tabs + rows.map(({ c, i }) =>
-      `<div class="cap-row" data-row="${i}">`
+      `<div class="cap-row${isDoubt(c) ? ' doubt' : ''}" data-row="${i}">`
       + `<button type="button" class="cap-row-play" data-play-i="${i}" title="Play this line">▶</button>`
       + `<span class="cap-time">${fmt(Math.max(0, c.start - base))}</span>`
       + `<div class="cap-field"><input class="cap-text" data-i="${i}" value="${String(c.text).replace(/"/g, '&quot;')}" spellcheck="false" />`
       + `<div class="cap-hl" aria-hidden="true"></div></div>`
       + `<button type="button" class="cap-g-badge hidden" data-g-i="${i}"></button>`
       + `<button type="button" class="cap-ai-line" data-ai-i="${i}" title="✨ Ask the AI to proof-read just this line">✨</button>`
+      // A line the two ears disagreed on says so, with what the other one heard.
+      + (isDoubt(c)
+        ? (() => { const alt = altTextFor(c);
+          return `<div class="cap-doubt"><span class="cap-doubt-tx">⚠ ${c.doubt === 'unsure' ? 'The model was unsure here' : (alt ? `The second listen heard “${escape2(alt)}”` : 'The second listen heard this differently')}</span>`
+            + (alt ? `<button type="button" class="cap-doubt-use" data-doubt-use="${i}">Use that</button>` : '')
+            + `<button type="button" class="cap-doubt-ok" data-doubt-ok="${i}">✓ It's right</button></div>`; })()
+        : '')
       // A line a fix changed says so, and what it said before, with its own way back.
       + (c._was != null && c._was !== c.text
         ? `<div class="cap-was"><span class="cap-was-tx" title="${escape2(c._byAi || '').replace(/"/g, '&quot;')}">${c._byAi ? '✨ AI fixed' : '✍ Fixed'} — was “${escape2(c._was)}”</span>`
@@ -11223,13 +11262,30 @@
         : '')
       + `</div>`).join('');
     const addBtn = list.querySelector('[data-capadd]');
-    if (addBtn) addBtn.addEventListener('click', () => { ve.capOnlyFixed = false; addCaptionHere({ inList: true }); });
+    if (addBtn) addBtn.addEventListener('click', () => { ve.capListMode = 'all'; addCaptionHere({ inList: true }); });
     list.querySelectorAll('[data-capfix]').forEach((b) => b.addEventListener('click', () => {
-      const only = b.dataset.capfix === 'fixed';
-      if (only === !!ve.capOnlyFixed) return;
-      ve.capOnlyFixed = only;
+      const m = b.dataset.capfix;
+      if (m === (ve.capListMode || 'all')) return;
+      ve.capListMode = m;
       renderCapList();
       list.scrollTop = 0;
+    }));
+    list.querySelectorAll('[data-doubt-ok]').forEach((b) => b.addEventListener('click', () => {
+      const e = ve.capEvents[+b.dataset.doubtOk]; if (!e) return;
+      settleDoubt(e);
+      renderCapList(); renderCapTrack();
+    }));
+    list.querySelectorAll('[data-doubt-use]').forEach((b) => b.addEventListener('click', () => {
+      const i = +b.dataset.doubtUse, e = ve.capEvents[i]; if (!e) return;
+      const alt = altTextFor(e); if (!alt) return;
+      pushHistory({ captions: true });
+      const before = e.text;
+      if (e._was == null) e._was = before;      // shows under ✍ Fixed, with Put back
+      e.text = alt;
+      settleDoubt(e);
+      renderCapList(); renderCapTrack(); updateCapOverlay(ve.refs.player.currentTime || 0);
+      // the same correction everywhere else, and remembered for next time
+      learnCaptionEdit(before, alt, i);
     }));
     list.querySelectorAll('.cap-was-back').forEach((b) => b.addEventListener('click', () => putLineBack(+b.dataset.wasI)));
     list.querySelectorAll('.cap-was').forEach((w) => w.closest('.cap-row').classList.add('fixed'));
@@ -11243,6 +11299,7 @@
         if (!e || e.text === inp.value) return;
         const before = e.text;
         e.text = inp.value;
+        if (e.doubt) { settleDoubt(e); setTimeout(renderCapList, 0); }   // looked at and put right
         if (e._was != null && e._was === e.text) { delete e._was; renderCapList(); }
         renderCapTrack(); renderClipList();
         updateCapOverlay(ve.refs.player.currentTime || 0);
@@ -12345,6 +12402,43 @@
     openCaptionsForShort(null);
   }
 
+  /*
+   * ►► WHAT THE SECOND LISTEN SAID (main.js cloudCaptions → check). ◄◄
+   * The words the two ears disagreed on arrive marked `doubt`; this keeps what
+   * the OTHER ear heard (on the lane's clock, replacing only this stretch), so a
+   * doubtful line can show it and take it in one tap — and marks the words of a
+   * stretch that could NOT be double-checked, so that is said, never assumed.
+   */
+  function noteCheck(res, words, off, range) {
+    const c = (res && res.check) || null;
+    const ok = !!(c && c.checked);
+    if (!ok) for (const w of words) w.unchecked = true;
+    const alt = ok && Array.isArray(c.alt) ? c.alt.map((w) => ({ text: w.text, start: w.start + off, end: w.end + off })) : [];
+    const keep = range && Array.isArray(ve.capAlt)
+      ? ve.capAlt.filter((w) => !(w.end > range.start + 0.02 && w.start < range.end - 0.02)) : [];
+    ve.capAlt = keep.concat(alt).sort((a, b) => a.start - b.start);
+    if (!ok && c && c.why) ve._capCheckWhy = c.why;
+  }
+  /** What the second listen heard over this line (or null). */
+  function altTextFor(e) {
+    const off = capOff();
+    const a = e.start + off, b = e.end + off;
+    const w = (ve.capAlt || []).filter((x) => { const m = (x.start + x.end) / 2; return m >= a - 0.12 && m <= b + 0.12; });
+    if (!w.length) return null;
+    const t = inChosenCase(cleanCapText(w.map((x) => x.text).join(' ')));
+    return t && t !== e.text ? t : null;
+  }
+  /** A line a person has looked at is settled: its words are no longer in doubt either. */
+  function settleDoubt(e) {
+    if (!e) return;
+    delete e.doubt;
+    const off = capOff();
+    if (Array.isArray(ve.capWords) && ve.capWords !== ve.capEvents) {
+      for (const w of ve.capWords) { const m = (w.start + w.end) / 2; if (m >= e.start - 0.01 && m <= e.end + 0.01) { delete w.doubt; delete w.unsure; } }
+    }
+    void off;
+  }
+
   /**
    * Actually go and listen. Called by the Generate button in the window, so the
    * style and the Hearing model have already been chosen by the time it runs.
@@ -12381,13 +12475,14 @@
     if (!words.length) return window.__toast && window.__toast('No speech was detected to caption.', 'error');
     noteBookFixes(res);
     noteHeardBy(res);
+    noteCheck(res, words, scope ? scope.start : 0, scope || null);
     commitCapEdit();
     pushHistory({ captions: true });
     if (scope) {
       const g = capGroupCfg();
       const lines = groupWords(words, g.wpl, g.tc)
         .filter((x) => x.text && x.text.trim())
-        .map((x) => ({ start: x.start + scope.start, end: x.end + scope.start, text: x.text }));
+        .map((x) => Object.assign({}, x, { start: x.start + scope.start, end: x.end + scope.start }));
       const keep = (ve.capEvents || []).filter((e) => !(e.end > scope.start + 0.02 && e.start < scope.end - 0.02));
       ve.capEvents = keep.concat(lines).sort((a, b) => a.start - b.start);
       // Keep the WORD timings too, in timeline time, replacing only this clip's
@@ -12462,11 +12557,12 @@
     if (!words.length) return 'none';
     noteBookFixes(res);
     noteHeardBy(res);
+    noteCheck(res, words, s.start, s);
     // Word times come back CLIP-RELATIVE; the lane is on the source's clock, so
     // they are shifted once here and never converted again until export.
     const lines = groupWords(words, g.wpl, g.tc)
       .filter((x) => x.text && x.text.trim())
-      .map((x) => ({ start: x.start + s.start, end: x.end + s.start, text: x.text }));
+      .map((x) => Object.assign({}, x, { start: x.start + s.start, end: x.end + s.start }));
     // Replace anything already on the lane inside this clip (a re-caption after
     // trimming shouldn't leave the old lines lying underneath the new ones).
     const keep = (ve.capEvents || []).filter((e) => !(e.end > s.start + 0.02 && e.start < s.end - 0.02));
@@ -13926,6 +14022,9 @@
   function cachedCloudWords(s) {
     const c = ve._cloudWords && ve._cloudWords.get(capWordsCacheKey(s));
     if (!c || Date.now() - c.at > 30 * 60e3) return null;
+    // Words heard once (to find the pauses) were never double-checked. Captions
+    // are published, so they are heard again — twice — rather than reused.
+    if (!(c.res && c.res.check && c.res.check.checked)) return null;
     return c.res;
   }
 
@@ -15773,6 +15872,8 @@
       /** Every line on the 💬 Captions lane, on the source's clock. */
       capLines() { return (ve.capEvents || []).map((e) => ({ start: e.start, end: e.end, text: e.text })); },
       // a line as a fix leaves it: new words, and what it said before (null clears it)
+      // a line as the second listen leaves it: in doubt, with what the other ear heard
+      markCapDoubt(i, kind, altWords) { const e = (ve.capEvents || [])[i]; if (!e) return; if (kind) e.doubt = kind; else delete e.doubt; if (altWords) ve.capAlt = altWords; renderCapList(); renderCapTrack(); },
       markCapFixed(i, was, text) { const e = (ve.capEvents || [])[i]; if (!e) return; if (was == null) delete e._was; else { e._was = was; if (text != null) e.text = text; } renderCapList(); },
       // drive the two caption dropdowns the way a click on them does
       setCapWordsPerLine(v) { document.getElementById('capWords').value = String(v); rebuildCapEvents(); return this.capLines(); },

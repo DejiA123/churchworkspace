@@ -305,7 +305,9 @@ app.whenReady().then(async () => {
   check('…and asks the cloud, not silencedetect', pauseCalls.speech === 1 && pauseCalls.silence === 0 && rp && rp.byWords === 1, JSON.stringify({ calls: pauseCalls, rp }));
   const cuts = await js(`return ${T}.cutsFor(${JSON.stringify(segId)});`);
   check('…and the pause it found becomes a cut on the short', Array.isArray(cuts) && cuts.length === 1 && cuts[0].start === 7 && cuts[0].end === 8, JSON.stringify(cuts));
-  check('…the words it heard are kept, so captioning that short next costs no second request', !!(await js(`return ${T}.cachedCloudWords(${JSON.stringify(segId)});`)));
+  // Words heard ONCE (to find the pauses) are not reused for the captions any more:
+  // captions are published, so they are heard twice by two models and compared.
+  check('…but captioning that short hears it again, twice (words heard once are never reused for captions)', !(await js(`return ${T}.cachedCloudWords(${JSON.stringify(segId)});`)));
   speechFallback = true;
   const rp2 = await js(`return await ${T}.removePauses([${JSON.stringify(segId)}]);`);
   check('no internet: it falls back to silence on this PC, and says why', pauseCalls.silence === 1 && rp2 && rp2.bySilence === 1 && /no internet/.test(rp2.why), JSON.stringify(rp2));

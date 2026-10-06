@@ -223,6 +223,52 @@ async function waitUp() {
       await sleep(400);
     }
 
+    console.log('\n=== [H] ⚠ Check: only the lines the two listens disagreed on ===');
+    {
+      await page.evaluate(() => window.VideoEditor.__test.openCaptionsWindow());
+      await sleep(500);
+      const L = await page.evaluate(() => window.VideoEditor.__test.capLines());
+      await page.evaluate((L) => {
+        const T = window.VideoEditor.__test;
+        // the other ear heard line 2 as "I SHALL NOT WANT" — over that line's own time
+        const alt = 'i shall not want'.split(' ').map((x, k) => ({ text: x, start: L[2].start + k * 0.3, end: L[2].start + k * 0.3 + 0.25 }));
+        T.markCapDoubt(2, 'differ', alt);
+        T.markCapDoubt(4, 'unsure');
+        document.getElementById('capModal').classList.remove('hidden');
+        document.querySelector('#capModal .cap-box').classList.add('folded');
+      }, L);
+      await sleep(300);
+      const st = () => page.evaluate(() => ({
+        note: (document.querySelector('#capList .cap-check-note') || {}).textContent || '',
+        check: (document.querySelector('#capList [data-capfix="check"]') || {}).textContent || '',
+        rows: document.querySelectorAll('#capList .cap-row').length,
+        doubts: document.querySelectorAll('#capList .cap-row.doubt').length,
+        laneDots: document.querySelectorAll('#veCapTrack .ve-cap-clip.doubt').length,
+      }));
+      const a = await st();
+      check(/⚠ Check\s*2/.test(a.check) && a.doubts === 2, 'the window offers "⚠ Check 2" and marks those two lines', a);
+      check(a.laneDots >= 1, 'a doubtful line is marked on the timeline lane too', a);
+      await page.locator('#capList [data-capfix="check"]').tap();
+      await sleep(300);
+      const b = await st();
+      check(b.rows === 2, '"⚠ Check" lists only the two lines worth a look', b);
+      if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'check-tab.png') });
+      const use = page.locator('#capList [data-doubt-use]');
+      check(await use.count() === 1 && /I SHALL NOT WANT/.test(await page.locator('#capList .cap-doubt-tx').first().textContent()),
+        'the doubtful line shows what the other ear heard, in the chosen Case');
+      await use.first().tap();
+      await sleep(300);
+      const after = await page.evaluate(() => window.VideoEditor.__test.capLines()[2].text);
+      check(after === 'I SHALL NOT WANT', '"Use that" takes it in one tap', after);
+      await page.locator('#capList [data-doubt-ok]').first().tap();
+      await sleep(300);
+      const c = await st();
+      check(c.doubts === 0 && !/⚠ Check/.test(c.check), '"✓ It\'s right" settles the other — nothing left to check', c);
+      await page.evaluate(() => { document.getElementById('veUndo').click(); });   // put line 2 back as it was
+      await page.evaluate(() => document.getElementById('capModal').classList.add('hidden'));
+      await sleep(300);
+    }
+
     console.log('\n=== [G] ＋ Add caption, after the AI made some ===');
     {
       const L0 = await page.evaluate(() => window.VideoEditor.__test.capLines());

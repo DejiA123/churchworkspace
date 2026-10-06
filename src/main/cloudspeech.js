@@ -323,9 +323,12 @@ function modelId() { return cfg.model || provider().models[0].id; }
  * on Groq, from the same free allowance. A model chosen by hand in Settings is
  * respected; if the provider ever refuses Large v3, Turbo hears it instead.
  */
-let captionModelRefused = false;
+// When it was last refused — for half an hour, not for ever: one odd answer must
+// not quietly put every caption from then on onto the less accurate model.
+let captionModelRefusedAt = 0;
+const CAPTION_REFUSAL_MS = 30 * 60e3;
 function captionModelId() {
-  if (cfg.model || captionModelRefused) return modelId();
+  if (cfg.model || (captionModelRefusedAt && Date.now() - captionModelRefusedAt < CAPTION_REFUSAL_MS)) return modelId();
   const full = (provider().models || []).find((m) => /whisper-large-v3$/.test(m.id));
   return full ? full.id : modelId();
 }
@@ -892,6 +895,8 @@ const jobCancelled = () => !!(jobs && jobs.isCancelled());
  *
  * Pure, so the test can pin it without a network.
  */
+const UNSURE_LOGPROB = -0.8;       // Whisper's own "I am not sure of this passage"
+const UNSURE_COMPRESSION = 2.4;    // …or the repetition of a decoder going round in circles
 function wordsFromVerbose(json, offsetSec) {
   const off = +offsetSec || 0;
   const segs = Array.isArray(json && json.segments) ? json.segments : [];
@@ -905,7 +910,13 @@ function wordsFromVerbose(json, offsetSec) {
     if (!text || !Number.isFinite(a) || !Number.isFinite(b) || b < a) continue;
     const mid = (a + b) / 2;
     if (doubted.some((s) => mid >= (+s.start || 0) - 0.01 && mid <= (+s.end || 0) + 0.01)) continue;
-    out.push({ text, start: +(a + off).toFixed(3), end: +(b + off).toFixed(3) });
+    const word = { text, start: +(a + off).toFixed(3), end: +(b + off).toFixed(3) };
+    // A passage the model itself was unsure of (its own average log-probability,
+    // or the tell-tale repetition of a decoder going round in circles) is worth
+    // a human look, whatever the second listen says.
+    const seg = segs.find((s) => s && mid >= (+s.start || 0) - 0.01 && mid <= (+s.end || 0) + 0.01);
+    if (seg && ((+seg.avg_logprob || 0) < UNSURE_LOGPROB || (+seg.compression_ratio || 0) > UNSURE_COMPRESSION)) word.unsure = true;
+    out.push(word);
   }
   return inSpokenOrder(out);
 }
@@ -951,10 +962,10 @@ function retryWaitMs(res) {
 }
 
 /** One piece to the provider, asking for word timings. Returns the verbose JSON, or throws. */
-async function postAudioWords(body, { timeoutMs = 180000, retry429 = true } = {}) {
+async function postAudioWords(body, { timeoutMs = 180000, retry429 = true, model: asked = null } = {}) {
   for (let attempt = 0; ; attempt++) {
     const form = new FormData();
-    const model = captionModelId();
+    const model = asked || captionModelId();
     form.append('file', new Blob([body], { type: 'audio/ogg' }), 'clip.ogg');
     form.append('model', model);
     form.append('language', 'en');
@@ -1006,7 +1017,7 @@ async function postAudioWords(body, { timeoutMs = 180000, retry429 = true } = {}
     if (res.status === 401 || res.status === 403) throw new Error('that key was refused');
     if (res.status === 413) throw new Error('that piece of audio was too big for the speech service');
     // the accurate model refused (not offered on this key or provider): Turbo hears it, now and from here on
-    if ((res.status === 400 || res.status === 404) && model !== modelId()) { captionModelRefused = true; continue; }
+    if ((res.status === 400 || res.status === 404) && !asked && model !== modelId()) { captionModelRefusedAt = Date.now(); continue; }
     throw new Error('the speech service answered ' + res.status);
   }
 }
@@ -1023,7 +1034,7 @@ async function postAudioWords(body, { timeoutMs = 180000, retry429 = true } = {}
  * the end means it stopped part-way — `why` says what happened — and the
  * caller hears the rest on this PC.
  */
-async function transcribeWords({ input, startSec = 0, endSec = 0, totalSec = 0, onProgress = null, chunkSec = WORDS_CHUNK_SEC } = {}) {
+async function transcribeWords({ input, startSec = 0, endSec = 0, totalSec = 0, onProgress = null, chunkSec = WORDS_CHUNK_SEC, model = null, second = false } = {}) {
   if (!fileReady() || !ffmpegPath || !input) return null;
   const from = Math.max(0, +startSec || 0);
   const to = endSec > from ? +endSec : from + Math.max(0, +totalSec || 0);
@@ -1045,7 +1056,7 @@ async function transcribeWords({ input, startSec = 0, endSec = 0, totalSec = 0, 
       const body = await encodeRange(input, ha, hb - ha, 180000);
       if (!body || !body.length) { doneSec = b - from; continue; }   // no audio track: nothing to hear
       if (onProgress) { try { onProgress(Math.round(((i + 0.3) / pieces) * 100)); } catch (e) {} }
-      json = await postAudioWords(body);
+      json = await postAudioWords(body, model ? { model } : undefined);
     } catch (e) {
       if (e && e.cancelled) throw e;
       if (jobCancelled()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
@@ -1066,8 +1077,82 @@ async function transcribeWords({ input, startSec = 0, endSec = 0, totalSec = 0, 
   }
   // Pieces arrive in order and each is in spoken order; only the seams need tidying.
   const heard = inSpokenOrder(words);
+  // a second opinion is a plain listen: only the first one fills its gaps
+  if (second) return { words: heard, doneSec: span, why: '', model: model || captionModelId() };
   const back = await hearGapsAgain({ input, from, span, words: heard });
   return { words: back.words, doneSec: span, why: '', model: captionModelId(), reheard: back.added };
+}
+
+/*
+ * ►► A SECOND, INDEPENDENT LISTEN — SO ONLY THE DOUBTFUL LINES NEED A LOOK. ◄◄
+ *
+ * No speech model is right every time, and a caption published to the world
+ * has to be. Reading every line of a sermon to find the two that are wrong is
+ * what was eating the operator's time. So the same audio is heard a second
+ * time by a DIFFERENT model (Turbo, after the full Large v3), and the two are
+ * lined up word by word. Where they agree, the line is very probably right —
+ * two independent ears rarely make the same mistake. Where they differ (a
+ * name, a number, a mumbled word, music under the voice), the words are marked
+ * `doubt`, and the studio lists just those lines, with what the other ear
+ * heard, one tap to take it. The second listen costs the same free allowance
+ * again and a few seconds; if it cannot be had, the answer says the lines
+ * were NOT double-checked, rather than letting silence read as "all clear".
+ */
+const normTok = (t) => String(t || '').toLowerCase().replace(/[’']/g, "'").replace(/[^a-z0-9']/g, '');
+const ALIGN_WIN_SEC = 45;
+/** Mark the words of `a` the other listen `b` did not hear the same. Both on one clock. */
+function markDisagreements(a, b) {
+  let doubts = 0;
+  if (!a.length) return doubts;
+  const end = Math.max(a[a.length - 1].end, b.length ? b[b.length - 1].end : 0);
+  const midOf = (w) => (w.start + w.end) / 2;
+  for (let w0 = 0; w0 < end + ALIGN_WIN_SEC; w0 += ALIGN_WIN_SEC) {
+    const A = a.filter((w) => midOf(w) >= w0 && midOf(w) < w0 + ALIGN_WIN_SEC);
+    const B = b.filter((w) => midOf(w) >= w0 && midOf(w) < w0 + ALIGN_WIN_SEC);
+    if (!A.length) continue;
+    const x = A.map((w) => normTok(w.text)), y = B.map((w) => normTok(w.text));
+    // longest common subsequence: what both ears heard, in the same order
+    const n = x.length, m = y.length;
+    const L = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) {
+      L[i][j] = x[i] && x[i] === y[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    }
+    const matched = new Uint8Array(n);
+    const missedBefore = new Uint8Array(n + 1);   // the other ear heard words here that this one did not
+    let i = 0, j = 0;
+    while (i < n && j < m) {
+      if (x[i] && x[i] === y[j]) { matched[i] = 1; i++; j++; }
+      else if (L[i + 1][j] >= L[i][j + 1]) i++;
+      else { if (y[j]) missedBefore[i] = 1; j++; }
+    }
+    for (; j < m; j++) if (y[j]) missedBefore[n] = 1;
+    for (let k = 0; k < n; k++) {
+      const off = !matched[k] && !!x[k];
+      // a word only the other ear heard sits between two this one did: the one
+      // after it carries the flag — unless a neighbour is already flagged for it
+      // (a different word in the same place is ONE doubt, not two)
+      const gap = (missedBefore[k] && (k === 0 || matched[k - 1]))
+        || (k === n - 1 && missedBefore[n] && matched[k]);
+      if (off || gap) { if (!A[k].doubt) doubts++; A[k].doubt = true; }
+    }
+  }
+  return doubts;
+}
+/** Hear [from,to] again with the OTHER model and mark where the two disagree. */
+async function secondOpinion({ input, from, to, words, onProgress = null }) {
+  const first = captionModelId();
+  const other = (provider().models || []).map((m) => m.id).find((id) => id !== first && /whisper-large-v3/.test(id));
+  if (!other) return { checked: false, why: 'no second model to compare with' };
+  let r;
+  try {
+    r = await transcribeWords({ input, startSec: from, endSec: to, onProgress, model: other, second: true });
+  } catch (e) {
+    if (e && e.cancelled) throw e;
+    return { checked: false, why: (e && e.message) || 'the second listen failed' };
+  }
+  if (!r || r.doneSec < (to - from) - 0.5) return { checked: false, why: (r && r.why) || 'the second listen stopped part-way' };
+  const doubts = words.length ? markDisagreements(words, r.words) : 0;
+  return { checked: true, model: other, alt: r.words, doubts };
 }
 
 /*
@@ -1357,7 +1442,8 @@ async function transcribeSegments({ input, startSec = 0, endSec = 0 } = {}) {
 }
 
 module.exports = {
-  captionModelId,
+  captionModelId, secondOpinion, markDisagreements,
+  _resetCaptionModel: () => { captionModelRefusedAt = 0; },
   configure, state, ready, transcribe, test, cadence,
   fileReady, transcribeFile, transcribeWords, transcribeSegments, shareKey,
   wordsFromVerbose, retryWaitMs, inSpokenOrder, gapsToHear, looksSpoken, freshWords,

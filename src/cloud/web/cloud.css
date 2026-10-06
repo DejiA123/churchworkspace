@@ -2465,3 +2465,8 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 
 /* a song in the file chooser: no picture to show, so a note instead */
 .cf-pic.cf-pic-audio { display: grid; place-items: center; font-size: 22px; background: rgba(139, 92, 246, .14); }
+@media (max-width: 900px) {
+  body.mw-cloud #capModal .cap-doubt { margin: 0 0 4px 42px; font-size: 13px; }
+  body.mw-cloud #capModal .cap-doubt button { min-height: 36px; padding: 6px 14px; font-size: 13.5px; }
+  body.mw-cloud #capModal .cap-check-note { font-size: 13.5px; }
+}
