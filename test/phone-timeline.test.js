@@ -247,6 +247,20 @@ async function waitUp() {
       }));
       const a = await st();
       check(/⚠ Check\s*2/.test(a.check) && a.doubts === 2, 'the window offers "⚠ Check 2" and marks those two lines', a);
+      // (with Fixed too, four tabs are wider than a phone — nothing may slide sideways)
+      await page.evaluate(() => window.VideoEditor.__test.markCapFixed(0, 'WAS', 'NOW'));
+      await sleep(300);
+      const wide = await page.evaluate(() => {
+        const l = document.getElementById('capList');
+        // as on a whole sermon: four-digit counts
+        l.querySelectorAll('.cap-fix-tabs [data-capfix]').forEach((b, k) => { const sp = b.lastElementChild; if (sp) sp.textContent = ['1537', '252', '1'][k]; });
+        const r = l.getBoundingClientRect();
+        const out = [...l.querySelectorAll('.cap-fix-tabs button, .cap-row')].filter((e) => { const b = e.getBoundingClientRect(); return b.right > r.right + 1 || b.left < r.left - 1; }).length;
+        return { sw: l.scrollWidth, cw: l.clientWidth, out, tabs: [...l.querySelectorAll('.cap-fix-tabs button')].map((b) => b.textContent + ':' + Math.round(b.getBoundingClientRect().right)), lw: Math.round(r.right) };
+      });
+      check(wide.sw <= wide.cw + 1 && wide.out === 0 && wide.tabs.length === 4, 'the tabs and lines all fit the phone\'s width (no sideways scroll)', wide);
+      if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'tabs-fit.png') });
+      await page.evaluate(() => window.VideoEditor.__test.markCapFixed(0, null));
       check(a.laneDots >= 1, 'a doubtful line is marked on the timeline lane too', a);
       await page.locator('#capList [data-capfix="check"]').tap();
       await sleep(300);

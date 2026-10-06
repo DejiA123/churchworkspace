@@ -2579,7 +2579,7 @@ body.ve-pfull .ve-preview .ve-fs-exit {
    the list moves anything outside it (contain): adding one line to a whole
    sermon lays out a third as much — no freeze on ＋ Add caption. */
 #capList .cap-row { flex: none; }
-#capList { contain: content; }
+#capList { contain: content; overflow-x: hidden; }
 /* "All lines | ✍ Fixed": every line a fix changed, in one place (renderCapList) */
 .cap-fix-tabs { position: sticky; top: 0; z-index: 2; display: flex; gap: 6px; padding: 6px 2px 8px; background: var(--panel, #0f1218); }
 .cap-fix-tabs button { white-space: nowrap; width: auto; margin: 0; padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 650; cursor: pointer;
