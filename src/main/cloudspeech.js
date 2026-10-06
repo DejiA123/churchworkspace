@@ -1200,6 +1200,41 @@ function looksSpoken(words) {
   return true;
 }
 
+/*
+ * ►► A GAP THAT WAS NEVER A GAP IS NOT HEARD TWICE. ◄◄
+ *
+ * Whisper now and then squashes a run of words into too little time, so a
+ * stretch it DID hear looks like three seconds with no words in it. Asked
+ * again, that stretch comes back with the same words properly stamped — and
+ * they landed BETWEEN the first copies: "WE WE HURT HURT BUT BUT THE THE HOLY",
+ * forty seconds of it, on a real 44-minute sermon. So a re-heard answer is
+ * only new speech when most of it was not already heard around the gap; and a
+ * re-heard word that merely repeats the word beside it is the same word twice.
+ * The ending this was built to recover ("The Lord is my shepherd, I shall not
+ * want" after the last word) shares at most a word with what came before it.
+ */
+function freshWords(got, heard, ha, hb) {
+  if (!got.length) return got;
+  const near = new Map();
+  for (const w of heard) {
+    const mid = (w.start + w.end) / 2;
+    if (mid < ha - 3 || mid > hb + 3) continue;
+    const k = normWord(w.text); if (k) near.set(k, (near.get(k) || 0) + 1);
+  }
+  let seen = 0;
+  const left = new Map(near);
+  for (const w of got) {
+    const k = normWord(w.text);
+    if (k && left.get(k) > 0) { seen++; left.set(k, left.get(k) - 1); }
+  }
+  if (got.length >= 2 && seen / got.length >= 0.5) return [];
+  return got.filter((w) => {
+    const k = normWord(w.text); if (!k) return true;
+    const mid = (w.start + w.end) / 2;
+    return !heard.some((h) => normWord(h.text) === k && Math.abs((h.start + h.end) / 2 - mid) < 1.2);
+  });
+}
+
 async function hearGapsAgain({ input, from, span, words }) {
   const keep = { words, added: 0 };
   if (!words.length) return keep;              // nothing heard at all: music, or silence — not a gap
@@ -1246,6 +1281,7 @@ async function hearGapsAgain({ input, from, span, words }) {
     // (only when this request actually reached that word: a gap longer than one
     // window ends unheard, and a real word that happens to match is not a repeat)
     if (hb >= g.b - 0.01) while (got.length && after && normWord(got[got.length - 1].text) === normWord(after.text)) got = got.slice(0, -1);
+    got = freshWords(got, out, ha, hb);
     if (!got.length || isArtefact(got.map((w) => w.text).join(' ')) || !looksSpoken(got)) continue;
     out = out.concat(got).sort((x, y) => x.start - y.start);
     keep.added += got.length;
@@ -1305,7 +1341,7 @@ async function transcribeSegments({ input, startSec = 0, endSec = 0 } = {}) {
 module.exports = {
   configure, state, ready, transcribe, test, cadence,
   fileReady, transcribeFile, transcribeWords, transcribeSegments, shareKey,
-  wordsFromVerbose, retryWaitMs, inSpokenOrder, gapsToHear, looksSpoken,
+  wordsFromVerbose, retryWaitMs, inSpokenOrder, gapsToHear, looksSpoken, freshWords,
   /** Was the last window handed to the PC a paced skip, or a real failure? */
   lastDecline: () => lastDecline,
   PROVIDERS, DEFAULT_PROVIDER, SAMPLE_RATE,

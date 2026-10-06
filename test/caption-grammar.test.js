@@ -306,6 +306,16 @@ head('[9] ☁️ The cloud ear, sent in pieces: every word once, none lost at a 
       cs.looksSpoken(m([['He', 1, 1.2], ['is', 1.2, 1.35], ['risen!', 1.35, 1.9], ['He', 7.9, 8.1], ['is', 8.1, 8.25], ['risen', 8.25, 8.7], ['indeed!', 8.7, 9.3]])) === true);
     check('second chance: "Jesus… wept. … Lazarus… come forth" is speech',
       cs.looksSpoken(m([['Jesus...', 0, 0.6], ['wept.', 2.0, 2.5], ['Lazarus...', 4.2, 4.9], ['come', 5.9, 6.2], ['forth', 6.2, 6.5]])) === true);
+    // A gap that was never a gap (squashed stamps): the re-heard words are the
+    // ones already there, and must not go in between them — "WE WE HURT HURT".
+    const HEARD = m([['we', 10, 10.1], ['hurt', 10.1, 10.2], ['but', 10.2, 10.3], ['the', 10.3, 10.4], ['holy', 10.4, 10.5], ['spirit', 14.2, 14.6]]);
+    const AGAIN = m([['we', 10.6, 11], ['hurt', 11, 11.6], ['but', 11.8, 12.1], ['the', 12.3, 12.5], ['holy', 12.5, 13]]);
+    check('second chance: words already heard around a false gap are not added twice',
+      cs.freshWords(AGAIN, HEARD, 9.5, 14.2).length === 0);
+    check('second chance: the recovered ending is still new speech',
+      cs.freshWords(TAIL, m([['Psalm', 112.4, 112.8], ['twenty-three.', 112.8, 113.6]]), 112.6, 116.5).length === 9);
+    check('second chance: a single re-heard word repeating its neighbour is dropped',
+      cs.freshWords(m([['amen', 20.5, 20.9]]), m([['amen', 20.0, 20.4], ['so', 24, 24.2]]), 19, 24).length === 0);
   }
   calls.length = 0; served = 0; cutAt = 20; plan = [[0, 30], [18.8, 30], [15.8, 30]];
   {
