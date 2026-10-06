@@ -683,6 +683,10 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .ve-cap-clip.cut:hover { background: #333844; }
 .ve-cap-clip:hover { background: #ef8f2b; }
 .ve-cap-clip.sel { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.85) inset, 0 0 12px rgba(224,128,31,.7); }
+/* the selected line sits ABOVE its neighbours, so a line moved onto another never vanishes under it */
+.ve-cap-clip.sel { z-index: 2; }
+/* lifted by a long press on a phone (an iPhone does not buzz, so it has to SHOW) */
+.ve-cap-clip.lifted { z-index: 4; transform: translateY(-3px) scale(1.04); box-shadow: 0 8px 18px rgba(0,0,0,.6); }
 /* The lane draws each line in the caption's OWN typeface (set per-block from the
    chosen font). Two reasons: the block shows you the look you'll get, and the
    condensed faces these captions actually use — Bebas Neue, Anton — fit far more

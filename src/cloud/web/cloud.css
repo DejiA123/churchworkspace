@@ -795,6 +795,11 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
   body.mw-cloud #view-video.ve-pro .ve-audio-seg:not(.sel) .ve-audio-h,
   body.mw-cloud #view-video.ve-pro .ve-cap-clip:not(.sel) .ve-cc-h,
   body.mw-cloud #view-video.ve-pro .ve-text-clip:not(.sel) .ve-tc-h { display: none; }
+  /* the selected caption's handles are visible white grips, so grabbing one is a deliberate act */
+  body.mw-cloud #view-video.ve-pro .ve-cap-clip.sel .ve-cc-h { width: 12px; background: #fff; opacity: 1; }
+  body.mw-cloud #view-video.ve-pro .ve-cap-clip.sel .ve-cc-h.l { border-radius: 6px 0 0 6px; }
+  body.mw-cloud #view-video.ve-pro .ve-cap-clip.sel .ve-cc-h.r { border-radius: 0 6px 6px 0; }
+  body.mw-cloud #view-video.ve-pro .ve-cap-clip.sel .ve-cc-h::after { background: #e0801f; left: 4.5px; }
   /* the ruler is not a scrubber here: the centre line is */
   body.mw-cloud #view-video.ve-pro .ve-tl-scroll.ve-centred .ve-ruler { cursor: default; }
   body.mw-cloud #view-video.ve-pro .ve-playhead::before { left: -5px; border-width: 6px; border-top-color: #fff; }

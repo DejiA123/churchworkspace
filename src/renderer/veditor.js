@@ -5180,12 +5180,23 @@
         ve.sel = null; ve.audioSel = null; ve.textSel = null;
         document.querySelectorAll('#veSegments .ve-seg.sel, #veAudioTrack .ve-audio-seg.sel, #veTextTrack .ve-text-clip.sel').forEach((n) => n.classList.remove('sel'));
         $$('.ve-cap-clip', track).forEach((n) => n.classList.toggle('sel', +n.dataset.i === i));
-        let moved = false;
+        let moved = false, preSnap = null;
         const off = capOff();
+        // the phone's long press: picked up ON PURPOSE (the touch bridge), and
+        // shown lifted — putting it back down changes nothing
+        const lifted = !!ev.mwLift;
+        // Measured against the CONTENT, not the screen: if the timeline moves
+        // under the finger, the line stays under the finger instead of running
+        // ahead of it by however far the timeline scrolled.
+        const sc = ve.refs.tlScroll, sl0 = sc ? sc.scrollLeft : 0;
         const x0 = ev.clientX, s0 = c.start, e0 = c.end;
+        if (lifted) el.classList.add('lifted');
         const move = (e) => {
-          if (Math.abs(e.clientX - x0) > 3) moved = true;
-          const dt = (e.clientX - x0) / ve.pxPerSec;
+          const dx = (e.clientX + (sc ? sc.scrollLeft : 0)) - (x0 + sl0);
+          if (!moved && Math.abs(dx) <= 3) return;            // a wobble is not a drag
+          // one Undo puts back whatever this drag did (taken on the first real move)
+          if (!moved) { moved = true; preSnap = snapshotState(true); }
+          const dt = dx / ve.pxPerSec;
           // snap in ABSOLUTE time (that's what the ruler/clips live in), store relative
           if (edge === 'l') c.start = clamp(snapT(off + s0 + dt).t - off, -off, c.end - 0.2);
           else if (edge === 'r') c.end = clamp(snapT(off + e0 + dt).t - off, c.start + 0.2, dur() - off);
@@ -5203,10 +5214,16 @@
           el.style.width = Math.max(6, (c.end - c.start) * ve.pxPerSec) + 'px';
           updateCapOverlay(ve.refs.player.currentTime || 0);
         };
-        const up = () => {
+        const up = (e) => {
           document.removeEventListener('mousemove', move);
-          if (moved) { renderCapTrack(); renderCapList(); return; }
-          if (edge) return;
+          el.classList.remove('lifted');
+          if (moved) {
+            if (preSnap && (Math.abs(c.start - s0) > 0.001 || Math.abs(c.end - e0) > 0.001)) commitDragHistory(preSnap);
+            renderCapTrack(); renderCapList(); return;
+          }
+          // a handle let go, a lift put back down, a drag a second finger ended:
+          // none of these is a tap
+          if (edge || lifted || (e && e.mwCancel)) return;
           // On the phone a first tap only SELECTS the line, so its trim handles can be
           // dragged (typing turns them off); a second tap, or Edit words, types into it.
           if (centred() && !wasSel) return;

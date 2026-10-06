@@ -2804,21 +2804,42 @@ let _hideTimer = null;
   const LONG_PRESS_SEL = '#veTrack, .ve-track, .ve-cap-track, .ve-text-track, .ve-audio-track, .ve-music-track, .ve-sfx-track';
   const LONG_PRESS_MS = 350;
   const SLOP_PX = 9;
+  /*
+   * ►► A CAPTION IS NEVER PICKED UP BY A FINGER THAT MEANT TO SCROLL. ◄◄
+   * "When my finger is on top of the captions, the caption block shortens by
+   *  itself or removes itself." A finger resting on the lane while you look
+   * (350 ms is less than a glance) lifted the line under it, and the swipe that
+   * followed dragged it under its neighbour; a swipe that began on the edge of
+   * the selected line trimmed it to a sliver. So a caption is lifted only the
+   * way CapCut does it: tap it first (it shows its handles), then hold it still
+   * for half a second while nothing is moving — and a handle is only grabbed
+   * while the timeline is still. An unselected caption is a tap or a scroll.
+   */
+  const CAP_LIFT_MS = 500;
+  const CAP_BLOCK = '.ve-cap-clip';
 
   function installTouchBridge() {
     let dragging = false;
     let pending = null;      // a long press being waited out
     let held = null;         // the element the dragging finger first touched
 
-    const mouse = (type, t, target) => {
+    const mouse = (type, t, target, mark) => {
       const ev = new MouseEvent(type, {
         bubbles: true, cancelable: true, view: window,
         clientX: t.clientX, clientY: t.clientY,
         screenX: t.screenX, screenY: t.screenY,
         button: 0, buttons: type === 'mouseup' ? 0 : 1,
       });
+      if (mark) Object.assign(ev, mark);
       (target || document).dispatchEvent(ev);
     };
+    // the timeline moving under the finger: a swipe, a coasting flick, playback following
+    let tlMovedAt = 0;
+    document.addEventListener('scroll', (e) => { if (e.target && e.target.id === 'veTlScroll') tlMovedAt = performance.now(); }, { capture: true, passive: true });
+    const tlScrollX = () => { const sc = document.getElementById('veTlScroll'); return sc ? sc.scrollLeft : 0; };
+    const playing = () => { const p = document.getElementById('vePlayer'); return !!p && !p.paused && !p.ended; };
+    /* A finger that lands while the clips are sliding is catching the timeline, not grabbing a caption. */
+    const tlBusy = () => playing() || performance.now() - tlMovedAt < 300;
 
     const cancelPending = () => {
       if (!pending) return;
@@ -2851,13 +2872,20 @@ let _hideTimer = null;
     };
 
     document.addEventListener('touchstart', (e) => {
-      if (e.touches.length !== 1) { cancelPending(); dragging = false; release(); return; }
+      if (e.touches.length !== 1) {
+        cancelPending();
+        // a second finger ends a drag where it is (a pinch is not a drag) — and
+        // SAYS so, or the studio's mousemove listener outlives the gesture
+        if (dragging) { dragging = false; release(); mouse('mouseup', e.touches[0], document, { mwCancel: true }); }
+        return;
+      }
       const t = e.touches[0];
       const el = t.target;
       if (!el || !el.closest) return;
       if (el.closest(NO_BRIDGE)) return;
+      const capLane = !!el.closest('.ve-cap-track');
 
-      if (el.closest(phoneLayout() ? DRAG_SEL : DRAG_SEL_WIDE)) {
+      if (el.closest(phoneLayout() ? DRAG_SEL : DRAG_SEL_WIDE) && !(capLane && tlBusy())) {
         dragging = true;
         e.preventDefault();        // no scroll, no synthetic click, no 300ms wait
         hold(el);
@@ -2865,22 +2893,28 @@ let _hideTimer = null;
         return;
       }
 
+      // the caption lane: an unselected line (or the empty lane) is a tap or a scroll, never a lift
+      if (capLane && !el.closest(CAP_BLOCK + '.sel')) return;
       if (el.closest(LONG_PRESS_SEL)) {
         // Hold still and this becomes a drag; move and it stays a scroll.
         // clientX/clientY by those names: mouse() reads them, and without them
         // the studio was told the press landed at the screen's left edge
         const start = { x: t.clientX, y: t.clientY, clientX: t.clientX, clientY: t.clientY, screenX: t.screenX, screenY: t.screenY };
+        const sx0 = tlScrollX();
         pending = {
           el,
           start,
           timer: setTimeout(() => {
             pending = null;
+            // the timeline moved while it was held (a coast, playback), or the
+            // block was redrawn under the finger: not a lift
+            if (capLane && (tlBusy() || Math.abs(tlScrollX() - sx0) > 1 || !el.isConnected)) return;
             dragging = true;
             // A short buzz is how a phone says "you are holding it now".
             try { if (navigator.vibrate) navigator.vibrate(12); } catch (er) {}
             hold(el);
-            mouse('mousedown', start, el);
-          }, LONG_PRESS_MS),
+            mouse('mousedown', start, el, capLane ? { mwLift: true } : null);
+          }, capLane ? CAP_LIFT_MS : LONG_PRESS_MS),
         };
       }
     }, { passive: false, capture: true });
@@ -2911,6 +2945,10 @@ let _hideTimer = null;
       if (!dragging) return;
       dragging = false;
       release();
+      // A press that became a drag is not ALSO a tap: no compatibility mouse
+      // events and no click afterwards (a caption put back down would otherwise
+      // start typing — the browser's own mousedown reads as a second tap).
+      if (e.cancelable) e.preventDefault();
       const t = (e.changedTouches && e.changedTouches[0]) || { clientX: 0, clientY: 0, screenX: 0, screenY: 0 };
       mouse('mouseup', t, document);
     }
@@ -3776,7 +3814,7 @@ let _hideTimer = null;
       tl.addEventListener('touchstart', (e) => {
         if (e.touches.length !== 2) return;
         // A first finger may have started a drag; a pinch is not one.
-        document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+        { const up = new MouseEvent('mouseup', { bubbles: true }); up.mwCancel = true; document.dispatchEvent(up); }
         const E = ed();
         if (!E || !E.zoomAround) return;
         const m = midX(e.touches);
