@@ -477,6 +477,18 @@ async function waitUp() {
       await page.mouse.click(bc.x, bc.y);
       await sleep(250);
       check(await shown(), 'tapping the caption on the preview brings its size corner');
+      {
+        // a finger on the words moves them, as it moves a text box
+        const pos0 = await page.evaluate(() => { const b = document.querySelector('#veCapOverlay .ve-cap-block'), rg = document.createRange(); rg.selectNodeContents(b); const r = rg.getBoundingClientRect(); return { x: r.left + 3, y: r.top + r.height / 2 }; });
+        const cdp = await page.context().newCDPSession(page);
+        const tp = (x, y) => [{ x, y, id: 3 }];
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: tp(pos0.x, pos0.y) });
+        for (let k = 1; k <= 6; k++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: tp(pos0.x, pos0.y - k * 12) }); await sleep(30); }
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        await sleep(300);
+        const pos1 = await page.evaluate(() => { const r = document.querySelector('#veCapOverlay .ve-cap-block').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+        check(pos0.y - pos1.y > 40, 'a finger drags the caption up the picture', { pos0, pos1 });
+      }
       const h = await page.evaluate(() => { const e = document.querySelector('#veCapOverlay [data-capscale]'); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
       check(!!h, 'the caption on the preview has a corner to grab');
       const near = await page.evaluate(() => {
@@ -484,7 +496,7 @@ async function waitUp() {
         const t = rg.getBoundingClientRect(), d = document.querySelector('#veCapOverlay [data-capscale]').getBoundingClientRect();
         return { dx: Math.round(d.left + d.width / 2 - t.right), dy: Math.round(d.top + d.height / 2 - t.bottom) };
       });
-      check(Math.abs(near.dx) <= 16 && Math.abs(near.dy) <= 16, 'the corner sits on the corner of the words, not out at the wrap edge', near);
+      check(near.dx >= 4 && near.dx <= 24 && near.dy >= 2 && near.dy <= 22, 'the corner sits just off the corner of the words, not out at the wrap edge', near);
       if (h) {
         const size = () => page.evaluate(() => parseFloat(document.getElementById('capSizePct').value) || 0);
         await page.mouse.move(h.x, h.y); await page.mouse.down();

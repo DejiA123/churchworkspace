@@ -1485,7 +1485,8 @@
     try { const rg = document.createRange(); rg.selectNodeContents(blk); r = rg.getBoundingClientRect(); } catch (e) {}
     if (!r || !r.width) return;
     const o = ov.getBoundingClientRect();
-    const x = Math.min(r.right - o.left + 6, o.width - 14), y = Math.min(r.bottom - o.top + 4, o.height - 14);
+    // just off the words' corner, so a finger on the words moves them and never grabs the corner
+    const x = Math.min(r.right - o.left + 14, o.width - 14), y = Math.min(r.bottom - o.top + 12, o.height - 14);
     h.style.left = Math.max(14, x).toFixed(1) + 'px'; h.style.top = Math.max(14, y).toFixed(1) + 'px';
   }
   function updateCapOverlay(t) {
