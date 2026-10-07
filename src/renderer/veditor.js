@@ -13766,14 +13766,22 @@
   let musicGain = null;   // { ac, g, el } once wired; false = not needed, or not possible here
   function setMusicLevel(a, v) {
     v = clamp(Number(v) || 0, 0, 1);
+    // 0% is silence, on every phone: muted is the one switch iOS always obeys
+    const mute = v <= 0.001;
+    if (a.muted !== mute) { try { a.muted = mute; } catch (e) {} }
     if (musicGain && musicGain.el === a) { musicGain.g.gain.value = v; return; }
     try { a.volume = v; } catch (e) {}
   }
   function wireMusicGain(a) {
     if (musicGain) { if (musicGain.ac.state !== 'running') musicGain.ac.resume().catch(() => {}); return; }
     if (musicGain === false) return;
-    try { a.volume = 0.5; } catch (e) {}
-    if (Math.abs(a.volume - 0.5) < 0.01) { musicGain = false; return; }   // volume works: leave it be
+    // An iPhone/iPad may even read back the volume it was given — and still play
+    // at full: there it is never trusted, the gain always carries the level.
+    const apple = /iP(hone|ad|od)/.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (!apple) {
+      try { a.volume = 0.5; } catch (e) {}
+      if (Math.abs(a.volume - 0.5) < 0.01) { musicGain = false; return; }   // volume works: leave it be
+    }
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) { musicGain = false; return; }
     try {

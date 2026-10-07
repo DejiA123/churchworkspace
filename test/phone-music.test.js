@@ -91,7 +91,7 @@ async function waitUp() {
      * counts the AudioContexts the page makes.
      */
     const open = async ({ ios } = {}) => {
-      const ctx = await browser.newContext({ ...devices['iPhone 13'] });
+      const ctx = await browser.newContext({ ...devices[ios ? 'iPhone 13' : 'Pixel 5'] });
       await ctx.addInitScript(([t, ios]) => {
         try { localStorage.setItem('mw.cloud.token', t); } catch (e) {}
         window.__acMade = 0;
@@ -257,6 +257,11 @@ async function waitUp() {
     await ios.page.evaluate(() => window.VideoEditor.__test.setMusicVolume(0.6));
     const g2 = await ios.page.evaluate(() => window.VideoEditor.__test.musicGainValue());
     check(Math.abs(g2 - 0.6) < 0.01, 'the volume slider moves it', g2);
+    await ios.page.evaluate(() => window.VideoEditor.__test.setMusicVolume(0));
+    const g0 = await ios.page.evaluate(() => ({ gain: window.VideoEditor.__test.musicGainValue(), muted: document.getElementById('veMusicAudio').muted }));
+    check(g0.gain === 0 && g0.muted, '0% is silence (gain 0 and the song muted)', g0);
+    await ios.page.evaluate(() => window.VideoEditor.__test.setMusicVolume(0.3));
+    check(!(await ios.page.evaluate(() => document.getElementById('veMusicAudio').muted)), 'and turning it back up un-mutes it');
     await tapPlay(ios.page); await tapPlay(ios.page);
     check(await ios.page.evaluate(() => window.__acMade) === 1, 'later taps reuse the same one', await ios.page.evaluate(() => window.__acMade));
   } catch (e) {
