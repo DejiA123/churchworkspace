@@ -13787,7 +13787,10 @@
     try {
       // iOS 17+: play through the silent switch, the way the video itself does
       try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
-      const ac = new AC(), src = ac.createMediaElementSource(a), g = ac.createGain();
+      // 'playback': big buffers. The default ('interactive') runs on tiny ones that
+      // an iPhone drops whenever the page is busy drawing — heard as a choppy song.
+      let ac; try { ac = new AC({ latencyHint: 'playback' }); } catch (e) { ac = new AC(); }
+      const src = ac.createMediaElementSource(a), g = ac.createGain();
       src.connect(g); g.connect(ac.destination);
       musicGain = { ac, g, el: a };
       ac.resume().catch(() => {});
@@ -13841,7 +13844,11 @@
     // a bed a fraction off the picture is inaudible (nothing in it is
     // lip-synced), a jump never is. It also covers the hop over a removed
     // pause, which the picture itself overshoots by up to a timeupdate (~¼ s).
-    if (drift > 0.35 || a.ended) { try { a.currentTime = pos; } catch (e) {} }
+    // …and never twice in a row: a phone whose song reports its time late (an
+    // iPhone through Web Audio) would otherwise be re-seeked every few frames —
+    // a stutter each time. Just after a correction only a real jump counts.
+    const recent = a._seekAt && performance.now() - a._seekAt < 3000;
+    if (a.ended || drift > (recent ? 1.5 : 0.35)) { a._seekAt = performance.now(); try { a.currentTime = pos; } catch (e) {} }
     if (a.paused) { const pr = a.play(); if (pr && pr.catch) pr.catch(() => {}); }
   }
 
