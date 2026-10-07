@@ -43,6 +43,8 @@ const ASIDE_RX = /\b(how are you|you'?re looking (?:so )?(?:good|nice|beautiful)
 const NEW_STORY_RX = /\b(i went to|one day|(?:a|some|many|two|three|few) (?:days?|weeks?|months?|years?) ago|let me tell you|there was a (?:man|woman|boy|girl|time|lady|guy)|i remember (?:when|the)|when i was|i met a|the other day)\b/i;
 
 const words = (t) => String(t || '').split(/\s+/).filter(Boolean).length;
+// opens by pointing back at something said before it
+const LEANS_RX = /^(that'?s?|this|these|those|it|he|she|they|him|her|them|which|so that|and that|but that)\b(?! is why| is how| is what)/i;
 const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 /** The sermon in sections the model can read in one go (sentence indexes). */
@@ -102,6 +104,12 @@ function vet(m, sents, [a, b], { minLen, maxLen }) {
   let from = Math.max(a, m.from), to = Math.min(b, m.to);
   if (to < from) return null;
   const dur = () => sents[to].end - sents[from].start;
+  // a start that leans on the line before it ("That exactly how God is…",
+  // "He said…") takes that line too, while it fits
+  for (let k = 0; k < 2 && from > 0 && LEANS_RX.test(sents[from].text.trim()) && sents[to].end - sents[from - 1].start <= maxLen; k++) from--;
+  // an ending with no full stop was cut mid-phrase ("…What you effect"): the
+  // sentence it belongs to is finished, while it fits
+  for (let k = 0; k < 2 && to + 1 < sents.length && !/[.!?…]["')\]]?\s*$/.test(sents[to].text.trim()) && sents[to + 1].end - sents[from].start <= maxLen * 1.05; k++) to++;
   // no opening on a filler or an aside — nor with an aside a line or two in
   // ("Let me be serious. A pastor has to… Faithful, how are you?")
   for (let k = from; k <= Math.min(to - 1, from + 2); k++) if (ASIDE_RX.test(sents[k].text)) from = k + 1;
@@ -138,7 +146,7 @@ function choose(moments, maxClips, secs, gap = 2) {
   for (const m of moments) bySec[m.sec].push(m);
   bySec.forEach((l) => l.sort((x, y) => y.strength - x.strength));
   for (const l of bySec) {
-    const best = l.find((m) => m.strength >= 5 && fits(m));
+    const best = l.find((m) => m.strength >= 4 && fits(m));
     if (best && chosen.length < maxClips) chosen.push(best);
   }
   for (const m of moments.slice().sort((x, y) => y.strength - x.strength)) {
@@ -235,6 +243,13 @@ async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, max
         if (cancelled()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
         await new Promise((r) => setTimeout(r, 250));
       }
+    }
+    // every part of a sermon has something worth a short: an empty answer is asked once more, for the best few
+    if (got && !got.length) {
+      try {
+        const again = await ask({ system, prompt: prompt + '\n\nYou returned no moments. Every part of a sermon has some. Return the 3 best moments in this part, following all the rules above.', maxTokens: 3000 });
+        got = parseMoments(again) || got;
+      } catch (e) { if (e && e.cancelled) throw e; }
     }
     if (!got) failed++;
     for (const m of got || []) {

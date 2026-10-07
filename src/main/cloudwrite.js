@@ -402,7 +402,7 @@ function textFrom(json) {
  * request, not a guarantee, so the caller still parses defensively (a model
  * that wraps JSON in a ```json fence is the norm, not the exception).
  */
-async function chat({ system, prompt, maxTokens = 1400, temperature = 0.8, json = false, timeoutMs = 30000, signal, evenIfOff = false, prefer = null } = {}) {
+async function chat({ system, prompt, maxTokens = 1400, temperature = 0.8, json = false, timeoutMs = 30000, signal, evenIfOff = false, prefer = null, effort = null } = {}) {
   // evenIfOff: other features ride on this account (the clip judge) and must not
   // stop because the operator switched the CAPTION writer off
   if (!(evenIfOff ? reachable() : ready())) return '';
@@ -422,6 +422,8 @@ async function chat({ system, prompt, maxTokens = 1400, temperature = 0.8, json 
       temperature,
       max_tokens: maxTokens,
     }, tuneFor(model));
+    // a job that is a judgement (planning a sermon's shorts) may ask a reasoning model to think harder
+    if (effort && body.reasoning_effort) body.reasoning_effort = effort;
     if (useJson) body.response_format = { type: 'json_object' };
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), timeoutMs);
