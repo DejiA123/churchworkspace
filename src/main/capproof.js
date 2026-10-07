@@ -80,9 +80,22 @@ async function proofread({ lines, before, after, passage, caseMode, mode } = {},
     const around = textAround(part[0].i, part[part.length - 1].i);
     const batch = part.map((l) => ({ n: l.i, text: l.text }));
     const { system, prompt } = capGrammar.buildAiPrompt(batch, { mode, brief, terms, known, before: around.before, after: around.after });
+    /*
+     * A batch that comes back empty is tried again after a pause. Measured on
+     * the live server: the free Groq models allow 8,000 tokens a minute, and
+     * a 12-minute stretch of sermon came back with 7 of its 10 batches failed
+     * in nine seconds — most of the sermon silently never read, while the
+     * studio said it had been. The allowance refills within the minute.
+     */
     let answer = null;
-    try { answer = await ask({ system, prompt, schema: capGrammar.FIX_SCHEMA, maxTokens: engine === 'claude' ? 16000 : 2000 }); }
-    catch (er) { if (CancelledError && er instanceof CancelledError) throw er; answer = null; }
+    const waits = engine === 'groq' ? (deps.retryWaits || [20000, 40000, 60000]) : [];
+    for (let attempt = 0; ; attempt++) {
+      try { answer = await ask({ system, prompt, schema: capGrammar.FIX_SCHEMA, maxTokens: engine === 'claude' ? 16000 : 2000 }); }
+      catch (er) { if (CancelledError && er instanceof CancelledError) throw er; answer = null; }
+      if (answer || attempt >= waits.length) break;
+      const until = Date.now() + waits[attempt];
+      while (Date.now() < until) { stop(); await new Promise((r) => setTimeout(r, 250)); }
+    }
     asked += part.length;
     const got = answer ? capGrammar.parseAiFixes(answer, batch) : null;
     if (!got) failedBatches++;

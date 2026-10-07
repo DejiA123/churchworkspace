@@ -116,6 +116,16 @@ const check = (name, ok, d) => { console.log((ok ? '  PASS ' : '  FAIL ') + name
     check('"who art in heaven" is kept against "who at a never"', g.words.map((w) => w.text).join(' ') === 'pray this, our Father, who art in heaven.', g.words.map((w) => w.text).join(' '));
   }
 
+  console.log('\n[7] a proof-reading batch the free allowance turned away is tried again');
+  {
+    const { proofread } = require(path.join(__dirname, '..', 'src', 'main', 'capproof.js'));
+    let calls = 0;
+    const flaky = async ({ prompt }) => { calls++; if (/notes|brief|NOTES/.test(prompt) && calls === 1) return null; if (calls < 4) throw new Error('429'); return '{"fixes":[]}'; };
+    const lines = Array.from({ length: 12 }, (_, i) => ({ i, text: 'the lord is my shepherd line ' + i }));
+    const r = await proofread({ lines, passage: lines, mode: 'exact', caseMode: 'normal' }, { engine: 'groq', ask: flaky, retryWaits: [5, 5, 5] });
+    check('the batch was asked again until it answered', calls >= 4 && r.failedBatches === 0, JSON.stringify({ calls, failed: r.failedBatches }));
+  }
+
   fs.rmSync(wav, { force: true });
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

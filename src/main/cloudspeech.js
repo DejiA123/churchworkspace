@@ -996,9 +996,7 @@ function wordsFromVerbose(json, offsetSec) {
   const raw = Array.isArray(json && json.words) ? json.words : [];
   const out = [];
   for (const w of raw) {
-    // (some transcripts write the Name the reverent way — "G-d", "L-rd")
-    const text = String((w && (w.word != null ? w.word : w.text)) || '').replace(/\s+/g, ' ').trim()
-      .replace(/\bG-d\b/g, 'God').replace(/\bL-rd\b/g, 'Lord');
+    const text = String((w && (w.word != null ? w.word : w.text)) || '').replace(/\s+/g, ' ').trim();
     const a = +w.start, b = +w.end;
     if (!text || !Number.isFinite(a) || !Number.isFinite(b) || b < a) continue;
     const mid = (a + b) / 2;
