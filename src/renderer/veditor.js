@@ -1473,7 +1473,20 @@
   function syncCapPicked() {
     const ov = ve.refs.capOverlay; if (!ov) return;
     const on = capPicked();
-    if (ov.classList.contains('picked') !== on) ov.classList.toggle('picked', on);
+    if (ov.classList.contains('picked') !== on) { ov.classList.toggle('picked', on); if (on) placeCapScale(); }
+  }
+  /** The size corner sits on the corner of the WORDS — not of the wrap box,
+   *  which on a short line runs far past them. Measured from what is drawn. */
+  function placeCapScale() {
+    const ov = ve.refs.capOverlay; if (!ov || !ov.classList.contains('picked')) return;
+    const h = ov.querySelector('[data-capscale]'), blk = ov.querySelector('.ve-cap-block');
+    if (!h || !blk) return;
+    let r = null;
+    try { const rg = document.createRange(); rg.selectNodeContents(blk); r = rg.getBoundingClientRect(); } catch (e) {}
+    if (!r || !r.width) return;
+    const o = ov.getBoundingClientRect();
+    const x = Math.min(r.right - o.left + 6, o.width - 14), y = Math.min(r.bottom - o.top + 4, o.height - 14);
+    h.style.left = Math.max(14, x).toFixed(1) + 'px'; h.style.top = Math.max(14, y).toFixed(1) + 'px';
   }
   function updateCapOverlay(t) {
     const ov = ve.refs.capOverlay; if (!ov) return;
@@ -1562,6 +1575,7 @@
     }
     $$('[data-capedge]', ov).forEach((h) => h.addEventListener('mousedown', onCapEdgeDown));
     $$('[data-capscale]', ov).forEach((h) => h.addEventListener('mousedown', onCapScaleDown));
+    placeCapScale();
   }
 
   /* The caption arrives in ~150ms; `timeupdate` fires about four times a second.
