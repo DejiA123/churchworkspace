@@ -1538,7 +1538,7 @@
     const L = window.CapLayout.layout(e.text, cfg, box.w, box.h);
     ve._capLayout = L;
     ov.innerHTML = window.CapLayout.html(e.text, cfg, box.w, box.h, { layout: L, state })
-      + capHandlesHtml(L);
+      + capHandlesHtml(L, box);
     const block = ov.firstElementChild;
     if (block) {
       block.classList.add('ve-cap-block');
@@ -1546,6 +1546,7 @@
       block.addEventListener('mousedown', onCapSpanDown);
     }
     $$('[data-capedge]', ov).forEach((h) => h.addEventListener('mousedown', onCapEdgeDown));
+    $$('[data-capscale]', ov).forEach((h) => h.addEventListener('mousedown', onCapScaleDown));
   }
 
   /* The caption arrives in ~150ms; `timeupdate` fires about four times a second.
@@ -1622,14 +1623,19 @@
    * you set here is what the exported file wraps to, because both sides ask
    * CapLayout the same question.
    */
-  function capHandlesHtml(L) {
+  function capHandlesHtml(L, box) {
     if (!L || !L.lines.length) return '';
     const px = (v) => (Math.round(v * 100) / 100) + 'px';
     const top = px(L.cy - L.blockH / 2), h = px(L.blockH);
     const mk = (side, x) => `<div class="ve-cap-edge ${side}" data-capedge="${side}" `
       + `style="left:${px(x)};top:${top};height:${h};" `
       + `title="Drag to set how wide the captions wrap — narrower means more lines"></div>`;
-    return mk('l', L.cx - L.blockW / 2) + mk('r', L.cx + L.blockW / 2);
+    return mk('l', L.cx - L.blockW / 2) + mk('r', L.cx + L.blockW / 2)
+      // the corner: drag out to make the words bigger, in to make them smaller (CapCut's)
+      // (kept a finger's width inside the picture: a caption as wide as the frame
+      // would otherwise have its corner cut off by the frame's edge)
+      + `<div class="ve-cap-scale" data-capscale="1" style="left:${px(Math.min(L.cx + L.blockW / 2, (box ? box.w : 1e9) - 14))};top:${px(Math.min(L.cy + L.blockH / 2, (box ? box.h : 1e9) - 14))};" `
+      + `title="Drag to make the captions bigger or smaller"></div>`;
   }
 
   /** Put the Width slider back in step after the edges are dragged on the
@@ -1717,6 +1723,46 @@
       if (now && now !== before) {
         window.__toast && window.__toast(`💬 Captions now wrap onto ${now} line${now > 1 ? 's' : ''} — exactly how they will be burned in.`, 'good', 4500);
       }
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up, { once: true });
+  }
+
+  /**
+   * ►► THE CORNER: SIZE, BY HAND. ◄◄ Drag the round handle at the caption's
+   * corner away from the words and they grow; towards them and they shrink —
+   * as CapCut does. The wrap width scales with them, so the lines break where
+   * they did. The result is the exact size (the % box under Size), which is
+   * what the export draws; picking S/M/L again goes back to the steps.
+   */
+  function onCapScaleDown(ev) {
+    const fr = canvasFrameRect(); if (!fr) return;
+    ev.preventDefault(); ev.stopPropagation();
+    const cfg = capStyleCfg();
+    const size0 = window.CapLayout.sizeFrac(cfg);
+    const w0 = window.CapLayout.widthFrac({ width: ve.capWidth });
+    // measured from the words' centre, so out = bigger whichever way the corner is pulled
+    const blk = ev.target.parentNode && ev.target.parentNode.querySelector('.ve-cap-block');
+    const br = blk ? blk.getBoundingClientRect() : null;
+    const cx = br ? br.left + br.width / 2 : ev.clientX - 60, cy = br ? br.top + br.height / 2 : ev.clientY - 20;
+    const d0 = Math.max(12, Math.hypot(ev.clientX - cx, ev.clientY - cy));
+    const pct = document.getElementById('capSizePct');
+    let moved = false;
+    const move = (e) => {
+      const d = Math.hypot(e.clientX - cx, e.clientY - cy);
+      if (Math.abs(d - d0) > 2) moved = true;
+      const k = clamp(d / d0, 0.25, 4);
+      const size = clamp(size0 * k, 0.015, 0.2);
+      if (pct) pct.value = (Math.round(size * 1000) / 10).toFixed(1);
+      ve.capWidth = clamp(w0 * (size / size0), window.CapLayout.MIN_WIDTH, window.CapLayout.MAX_WIDTH);
+      updateCapOverlay(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
+      syncCapWidthControl();
+    };
+    const up = () => {
+      document.removeEventListener('mousemove', move);
+      if (!moved) return;
+      saveCapLook();
+      try { renderCapSummary(); } catch (e) {}
     };
     document.addEventListener('mousemove', move);
     document.addEventListener('mouseup', up, { once: true });
@@ -7260,7 +7306,7 @@
         pos: ve.capPos || null, width: ve.capWidth || null,
         style: {
           id: ve.capStyleId,
-          font: valOf('#capFont'), size: valOf('#capSize'), words: valOf('#capWords'),
+          font: valOf('#capFont'), size: valOf('#capSize'), sizePct: valOf('#capSizePct'), words: valOf('#capWords'),
           case: valOf('#capCase'), position: valOf('#capPos'), colour: valOf('#capColor'),
         },
         showOnPreview: !!(($('#veCapShow') || {}).checked),
@@ -7335,6 +7381,7 @@
     if (c.style) {
       if (c.style.id) ve.capStyleId = c.style.id;
       setVal('#capStyleSel', c.style.id); setVal('#capFont', c.style.font); setVal('#capSize', c.style.size);
+      { const sp = $('#capSizePct'); if (sp) sp.value = c.style.sizePct || ''; }
       setVal('#capWords', c.style.words); setVal('#capCase', c.style.case);
       setVal('#capPos', c.style.position); setVal('#capColor', c.style.colour);
     }
@@ -14586,6 +14633,8 @@
     const capWordInk = $('#capWordColor');
     if (capWordInk) capWordInk.addEventListener('change', () => { capWordInk.dataset.touched = '1'; saveCapLook(); });
     // Style tweaks update the live overlay immediately.
+    // A size step picked is that size — not the exact figure a corner drag left behind.
+    { const cs = $('#capSize'), sp = $('#capSizePct'); if (cs && sp) cs.addEventListener('change', () => { sp.value = ''; }); }
     ['#capFont', '#capSize', '#capSizePct', '#capTracking', '#capPos', '#capColor', '#capStyleSel', '#capWordHl', '#capWordColor'].forEach((sel) => {
       const el = $(sel); if (el) el.addEventListener('change', () => updateCapOverlay(ve.refs.player.currentTime || 0));
     });

@@ -360,7 +360,7 @@ const FONT_LIST = [
   { name: 'Arial', family: 'Arial', file: null },
 ];
 const FONTS = FONT_LIST.reduce((m, f) => { m[f.name] = f.family; return m; }, {});
-const SIZE_PCT = { s: 0.045, m: 0.058, l: 0.072, xl: 0.088 };
+const SIZE_PCT = { xs: 0.036, s: 0.045, m: 0.058, l: 0.072, xl: 0.088 };
 
 /* ------------------------- how a caption line ARRIVES -------------------------
  *

@@ -2769,7 +2769,7 @@ let _hideTimer = null;
    */
   const DRAG_SEL = [
     '.ve-seg.sel .ve-seg-h', '.ve-audio-seg.sel .ve-audio-h', '.ve-cap-clip.sel .ve-cc-h', '.ve-text-clip.sel .ve-tc-h',
-    '.ve-cap-edge', '[data-capedge]',
+    '.ve-cap-edge', '[data-capedge]', '[data-capscale]',
     '.ve-text-box', '.ve-text-resize',
     '#veCropFrame', '#veOverlayGuide', '.ve-ovg-resize', '[data-ovresize]',
   ].join(',');
@@ -2778,7 +2778,7 @@ let _hideTimer = null;
    * phone layout is CapCut's (cloud.css hides unselected handles there alone). */
   const DRAG_SEL_WIDE = [
     '.ve-seg-h', '.ve-audio-h', '.ve-cc-h', '.ve-tc-h', '[data-tedge]', '[data-cedge]',
-    '.ve-cap-edge', '[data-capedge]', '.ve-text-box', '.ve-text-resize',
+    '.ve-cap-edge', '[data-capedge]', '[data-capscale]', '.ve-text-box', '.ve-text-resize',
     '#veRuler', '#veCropFrame', '#veOverlayGuide', '.ve-ovg-resize', '[data-ovresize]',
   ].join(',');
   const phoneMq = window.matchMedia ? window.matchMedia('(max-width: 900px)') : null;
@@ -2974,6 +2974,48 @@ let _hideTimer = null;
    * from a mouse. A finger that moved is a scroll and is left alone.
    */
   const TAP_NOW = '#capModal .cap-player button, #capModal .cap-row-play';
+  /*
+   * ►► ONE TAP, NOT A PICKER. ◄◄ The captions window's short choices — Size,
+   * Words per line, Position — were dropdowns, and on an iPhone a dropdown
+   * opens the system's wheel picker: a pause, then a sheet over half the
+   * screen, then another tap to close it. They are a row of buttons now (the
+   * dropdown stays underneath, hidden, and is what the studio reads, so
+   * nothing else changes). A value set from elsewhere — a saved session, the
+   * look — is shown when the window opens.
+   */
+  const CAP_CHIPS = { capSize: null, capWords: null, capPos: { center: 'Middle' } };
+  function installCapChips() {
+    const rows = [];
+    for (const id of Object.keys(CAP_CHIPS)) {
+      const sel = document.getElementById(id);
+      if (!sel || sel._chips) continue;
+      const row = document.createElement('div');
+      row.className = 'cloud-chips';
+      row.setAttribute('role', 'radiogroup');
+      for (const o of sel.options) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.dataset.v = o.value;
+        b.textContent = (CAP_CHIPS[id] && CAP_CHIPS[id][o.value]) || o.textContent;
+        b.title = o.textContent;
+        b.addEventListener('click', () => {
+          if (sel.value !== o.value) { sel.value = o.value; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+          sync();
+        });
+        row.appendChild(b);
+      }
+      const sync = () => { for (const b of row.children) b.classList.toggle('on', b.dataset.v === sel.value); };
+      sel._chips = sync;
+      sel.classList.add('cloud-chipped');
+      sel.after(row);
+      sel.addEventListener('change', sync);
+      sync();
+      rows.push(sync);
+    }
+    const modal = document.getElementById('capModal');
+    if (modal && rows.length) new MutationObserver(() => { if (!modal.classList.contains('hidden')) rows.forEach((f) => f()); })
+      .observe(modal, { attributes: true, attributeFilter: ['class'] });
+  }
+
   function installTapNow() {
     let down = null;
     document.addEventListener('touchstart', (e) => {
@@ -4694,6 +4736,7 @@ let _hideTimer = null;
     wireCloudUi();
     installTouchBridge();
     installTapNow();
+    installCapChips();
     installDropBridge();
 
     // A service worker makes it installable and makes the shell open instantly.

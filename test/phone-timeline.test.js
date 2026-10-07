@@ -450,6 +450,45 @@ async function waitUp() {
       return Math.abs(document.getElementById('vePlayer').currentTime - t0);
     });
     check(still < 0.05, 'a long press that lifts without moving does not jump the video there', still);
+    console.log('\n=== [K] caption size: one tap, XS, and the corner on the preview ===');
+    {
+      await page.evaluate(() => window.VideoEditor.__test.openCaptionsWindow());
+      await sleep(400);
+      await page.evaluate(() => { document.getElementById('capModal').classList.remove('hidden'); document.querySelector('#capModal .cap-box').classList.remove('folded'); });
+      await sleep(300);
+      const chips = await page.evaluate(() => {
+        const sel = document.getElementById('capSize'), row = sel.nextElementSibling;
+        return { hidden: getComputedStyle(sel).display === 'none', labels: row ? [...row.children].map((b) => b.textContent) : [], words: !!document.getElementById('capWords').nextElementSibling.classList.contains('cloud-chips') };
+      });
+      check(chips.hidden && chips.labels.join(' ') === 'XS S M L XL' && chips.words, 'Size is a row of buttons (XS S M L XL), no dropdown — and Words per line too', chips);
+      if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'size-chips.png') });
+      await page.locator('#capSize + .cloud-chips button[data-v="xs"]').tap();
+      await sleep(200);
+      check(await page.evaluate(() => document.getElementById('capSize').value) === 'xs', 'one tap on XS sets the extra-small size');
+      await page.evaluate(() => { document.getElementById('capModal').classList.add('hidden'); });
+      await page.evaluate(() => { const T = window.VideoEditor.__test; const L = T.capLines(); document.getElementById('vePlayer').currentTime = L[0].start + 0.3; const cc = document.getElementById('veCapShow'); if (cc && !cc.checked) cc.click(); });
+      await sleep(600);
+      const h = await page.evaluate(() => { const e = document.querySelector('#veCapOverlay [data-capscale]'); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+      check(!!h, 'the caption on the preview has a corner to grab');
+      if (h) {
+        const size = () => page.evaluate(() => parseFloat(document.getElementById('capSizePct').value) || 0);
+        await page.mouse.move(h.x, h.y); await page.mouse.down();
+        for (let k = 1; k <= 6; k++) await page.mouse.move(h.x + k * 8, h.y + k * 4);
+        await page.mouse.up(); await sleep(200);
+        const big = await size();
+        const h2 = await page.evaluate(() => { const r = document.querySelector('#veCapOverlay [data-capscale]').getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2; const at = document.elementFromPoint(x, y); const o = document.getElementById('veCapOverlay').getBoundingClientRect(); const stack = document.elementsFromPoint(x, y).slice(0, 5).map((e) => e.id || e.className || e.tagName); return { x, y, at: at && (at.className || at.tagName), ov: [o.left, o.top, o.right, o.bottom].map(Math.round), stack, op: getComputedStyle(document.querySelector('#veCapOverlay [data-capscale]')).pointerEvents }; });
+        console.log('    corner after growing:', JSON.stringify(h2));
+        await page.mouse.move(h2.x, h2.y); await page.mouse.down();
+        for (let k = 1; k <= 8; k++) await page.mouse.move(h2.x - k * 9, h2.y - k * 4);
+        await page.mouse.up(); await sleep(200);
+        const small = await size();
+        check(big > 3.6 && small < big, 'dragging the corner out makes the words bigger, and in makes them smaller', { xs: 3.6, big, small });
+        if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'size-corner.png') });
+        await page.evaluate(() => { const s = document.getElementById('capSize'); s.value = 'm'; s.dispatchEvent(new Event('change', { bubbles: true })); });
+        check(await page.evaluate(() => document.getElementById('capSizePct').value) === '', 'picking a size step again goes back to the steps');
+      }
+    }
+
     console.log('\n=== [J] "Follow the voice" survives closing the app ===');
     {
       const was = await page.evaluate(() => { const b = document.getElementById('capWordHl'); return b.checked; });

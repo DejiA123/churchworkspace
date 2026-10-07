@@ -417,6 +417,8 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
 .cloud-dock, .cloud-sheet-head, .cloud-export-sheet,
 .cloud-q, .cloud-export, .cloud-tr-extra { display: none; }
 
+/* the captions window's one-tap rows are the phone's (installCapChips); a wide screen keeps its dropdowns */
+.cloud-chips { display: none; }
 @media (max-width: 900px) {
   body.mw-cloud {
     --ph-bg: #000;
@@ -752,6 +754,8 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
   body.mw-cloud #view-video.ve-pro .ve-cap-track { height: 32px; margin-top: 5px; background: #121317; }
   body.mw-cloud #view-video.ve-pro .ve-cap-clip, body.mw-cloud #view-video.ve-pro .ve-cap-run { top: 2px; height: 28px; border-radius: 5px; }
   body.mw-cloud #view-video.ve-pro .ve-cap-edge { width: 14px; }
+  /* no hover on a phone: the size corner is always there to grab (a bigger target round it) */
+  body.mw-cloud #view-video.ve-pro .ve-cap-scale { opacity: .95; width: 20px; height: 20px; margin: -10px 0 0 -10px; }
   body.mw-cloud #view-video.ve-pro .ve-audio-track { height: 36px; margin-top: 5px; background: #121317; }
   body.mw-cloud #view-video.ve-pro .ve-music-track { height: 28px; margin-top: 5px; background: #121317; }
   /*
@@ -1170,6 +1174,13 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
     font-size: 16px; font-weight: 500; letter-spacing: 0; text-transform: none;
     border-radius: 10px;
   }
+  /* Size / Words per line / Position: a row of one-tap buttons (installCapChips) */
+  body.mw-cloud #capModal select.cloud-chipped { display: none; }
+  body.mw-cloud #capModal .cloud-chips { display: flex; gap: 3px; padding: 3px; height: 42px; box-sizing: border-box;
+    border-radius: 10px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); }
+  body.mw-cloud #capModal .cloud-chips button { flex: 1 1 0; min-width: 0; margin: 0; padding: 0 2px; border: 0; border-radius: 7px;
+    background: transparent; color: var(--ph-muted); font-size: 14px; font-weight: 650; letter-spacing: 0; text-transform: none; cursor: pointer; }
+  body.mw-cloud #capModal .cloud-chips button.on { background: #2e3240; color: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.4); }
   /* Pairs that belong together: the full-width Width slider goes after Colour,
      so Position is not left on a row by itself. */
   body.mw-cloud #capModal .cap-controls > label:has(#capFont) { order: 1; }

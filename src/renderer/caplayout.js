@@ -26,7 +26,7 @@
 window.CapLayout = (() => {
   /** Font height as a fraction of the frame height. MUST match SIZE_PCT in
    *  src/main/captioner.js — that is the .ass fallback's copy of this table. */
-  const SIZE_PCT = { s: 0.045, m: 0.058, l: 0.072, xl: 0.088 };
+  const SIZE_PCT = { xs: 0.036, s: 0.045, m: 0.058, l: 0.072, xl: 0.088 };
   /** How wide the caption block is, as a fraction of the frame — the thing the
    *  drag handles on the preview change. */
   const DEFAULT_WIDTH = 0.86;
