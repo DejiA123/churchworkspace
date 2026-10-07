@@ -119,6 +119,31 @@ const SCRIPT = {
     ok(new Set(r2.shots.map((x) => x.effect)).has('slow_zoom'), 'a cinematic edit moves with slow pushes');
   }
 
+  console.log('\nA NARRATOR, AND B-ROLL FROM THE VIDEOS THEMSELVES');
+  {
+    // the voice engine stood in for (the real one fetches its model from the internet)
+    const vox = require(path.join(ROOT, 'src/main/voiceover'));
+    const said = [];
+    vox._setEngine({ generate: async (text, o) => { said.push({ text, voice: o.voice }); return { save: async (out) => make(['-f', 'lavfi', '-i', 'sine=f=900:d=2.2'], out) }; } });
+    const out3 = path.join(WORK, 'montage-talk-voice.mp4');
+    const r3 = await montage.make(ctx, video.getInfo, { mediaPaths: [A, B], style: 'hype', lengthSec: 15, aspect: '9:16', output: out3, mode: 'talk', hear, voice: 'bf_emma', brief: 'Youth night' });
+    ok(said.length === 2 && said.every((x) => x.voice === 'bf_emma'), 'the narrator speaks an opening and a closing line, in the voice chosen', said);
+    ok(Array.isArray(r3.narrator) && r3.narrator.length === 2, 'the result says what the narrator said', r3.narrator);
+    const first = r3.words.slice(0, 3).map((w) => w.text).join(' ');
+    ok(first.toLowerCase().startsWith(said[0].text.toLowerCase().split(' ').slice(0, 3).join(' ')), 'the narrator\'s words are captioned first', first);
+    const firstSpoken = r3.words.find((w) => /never|why|your|stop/i.test(w.text));
+    ok(firstSpoken && firstSpoken.start >= 2.2, 'the speaker comes in after the narrator', firstSpoken);
+    const i3 = await video.getInfo(ctx, out3);
+    ok(Math.abs(i3.durationSec - r3.duration) < 0.4 && i3.hasAudio, 'the file is as long as the plan, with sound', { file: i3.durationSec, plan: r3.duration });
+    // the narrator really is in the sound: loud 900 Hz in the first two seconds
+    const m = /mean_volume: (-?[\d.]+)/.exec(String(require('child_process').spawnSync(ffmpeg, ['-hide_banner', '-t', '1.5', '-ss', '0.3', '-i', out3, '-af', 'bandpass=f=900:w=100,volumedetect', '-f', 'null', '-'], { encoding: 'utf8' }).stderr));
+    ok(m && +m[1] > -35, 'the narrator\'s voice is in the finished sound', m && m[1]);
+    ok(r3.overlays.length >= 1 && r3.overlays.every((o) => o.file === A || o.file === B), 'with no photos, other moments of the videos are cut in as B-roll', r3.overlays.map((o) => path.basename(o.file)));
+    vox._setEngine({ generate: async () => { throw new Error('no model here'); } });
+    const r4 = await montage.make(ctx, video.getInfo, { mediaPaths: [A], style: 'cinematic', lengthSec: 10, aspect: '9:16', output: path.join(WORK, 'm4.mp4'), mode: 'talk', hear, voice: 'am_michael' });
+    ok(!r4.narrator && /no model here/.test(r4.narratorWhy), 'a voice that cannot be made leaves the narrator out, and says why — the edit still comes', r4.narratorWhy);
+  }
+
   console.log('\nNOTHING SAID');
   let err = null;
   try {

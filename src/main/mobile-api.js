@@ -140,6 +140,8 @@ const ALLOWED = {
   'library:add': true,
   'library:remove': true,
   'library:rename': true,
+  'music:free': true,
+  'music:freeGet': true,
   'youtube:status': true,
   'youtube:search': true,
   'youtube:import': true,

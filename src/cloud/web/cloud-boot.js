@@ -527,6 +527,11 @@ let _hideTimer = null;
       remove: (kind, id) => call('library:remove', { kind, id }),
       rename: (kind, id, name) => call('library:rename', { kind, id, name }),
     },
+    /* songs that are safe to post (freemusic.js) */
+    freeMusic: {
+      list: (wait) => call('music:free', { wait: !!wait }),
+      get: (id) => call('music:freeGet', { id }),
+    },
     youtube: {
       status: () => call('youtube:status'),
       install: (a) => call('youtube:install', a || {}),

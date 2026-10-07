@@ -108,6 +108,11 @@ contextBridge.exposeInMainWorld('api', {
     remove: (kind, id) => call('library:remove', { kind, id }),
     rename: (kind, id, name) => call('library:rename', { kind, id, name }),
   },
+  /* songs that are safe to post (freemusic.js) */
+  freeMusic: {
+    list: (wait) => call('music:free', { wait: !!wait }),
+    get: (id) => call('music:freeGet', { id }),
+  },
   // Presentation Studio — the Bible, and the projector/stage output windows.
   /* 🎤 Listen — the microphone stays in the page; the model lives in main. */
   voice: {

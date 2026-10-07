@@ -106,6 +106,17 @@ async function waitUp() {
     const a = await st();
     check(/Viral Montage/.test(a.go) && a.disabled, 'the button says "Make my Viral Montage", waiting for a video', a);
     check(a.order && !a.lens.includes('Use everything') && a.caps, 'the talk edit hides Order and "Use everything", and its captions are always on', a);
+    const extra = await page.evaluate(() => ({
+      narrator: [...document.querySelectorAll('#cloudMontage .mt-sec h3')].some((h) => /Narrator/.test(h.textContent)),
+      moods: [...document.querySelectorAll('#cloudMontage [data-mt-mood]')].map((b) => b.textContent),
+      pick: !!document.querySelector('#cloudMontage [data-mt-free="auto"].on'),
+      songs: document.querySelectorAll('#cloudMontage [data-mt-free]:not([data-mt-free="auto"])').length,
+    }));
+    check(extra.narrator, 'the Viral Montage offers a narrator', extra);
+    check(extra.moods.length === 4 && extra.pick && extra.songs >= 3, 'free, safe-to-post music is on the page by mood — and "✨ Pick for me" is on by default', extra);
+    await page.locator('#cloudMontage [data-mt-mood="epic"]').tap();
+    await sleep(200);
+    check(await page.evaluate(() => [...document.querySelectorAll('#cloudMontage [data-mt-free]:not([data-mt-free="auto"])')].some((b) => /Heroic Age/.test(b.textContent))), 'a mood shows its songs (Epic: "Heroic Age"…)');
     await page.setInputFiles('#mtPick', VID);
     await sleep(800);
     const b = await st();

@@ -117,6 +117,15 @@ COPY package.json package-lock.json ./
 # Electron is a devDependency and is 200 MB of desktop app this image will never
 # open a window with — the shim is the whole point. --omit=dev leaves it out.
 RUN npm ci --omit=dev --no-audit --no-fund
+# The Viral Montage's narrator: Kokoro, a real-sounding voice run on this
+# server's own CPU (src/main/voiceover.js). Server-only — the desktop app does
+# not carry it — and optional: if it cannot be installed the build goes on and
+# montages are made without a narrator. Its model (~90 MB) is fetched the first
+# time a voice is asked for and kept in /data/kokoro. The other platforms'
+# runtime binaries are dropped (they are most of its size).
+RUN (npm install --no-save --omit=dev --no-audit --no-fund kokoro-js@1.2.1 \
+      && rm -rf node_modules/onnxruntime-node/bin/napi-v3/darwin node_modules/onnxruntime-node/bin/napi-v3/win32) \
+    || echo "kokoro-js could not be installed — the narrator will be unavailable"
 
 # The app itself. Only what a server runs: src/, the offline AI assets, the
 # caption fonts, and the licences.

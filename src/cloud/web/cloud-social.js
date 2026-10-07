@@ -1210,7 +1210,9 @@
    * the words as text boxes, so captions, restyling and export are the studio's
    * own — nothing here re-invents them.
    */
-  const MT = { items: [], song: null, songFile: null, style: 'hype', len: 30, custom: 120, aspect: '9:16', keep: true, brief: '', busy: false, order: 'ai', caps: true, mode: 'music' };
+  const MT = { items: [], song: null, songFile: null, style: 'hype', len: 30, custom: 120, aspect: '9:16', keep: true, brief: '', busy: false, order: 'ai', caps: true, mode: 'music', free: null, freeMood: null, voice: '' };
+  /* which free mood suits which style, for "✨ Pick for me" */
+  const MT_MOOD_OF = { hype: 'hype', fun: 'hype', cinematic: 'epic', worship: 'uplift', emotional: 'calm' };
   /*
    * ►► TWO KINDS OF EDIT. ◄◄ A music montage is cut from what the clips LOOK
    * like, to a song. A viral talk edit is cut from what is SAID: the AI hears
@@ -1233,7 +1235,8 @@
     let who = null, lib = null;
     try { who = await window.api.montage.status(); } catch (e) { who = null; }
     try { lib = await window.api.library.list(); } catch (e) { lib = null; }
-    MT.lib = (lib && lib.music) || [];
+    MT.lib = ((lib && lib.music) || []).filter((m) => !/^free:/.test(m.source || ''));
+    try { MT.freeList = await window.api.freeMusic.list(false); } catch (e) { MT.freeList = null; }
     MT.who = who;
     mtPaint();
   }
@@ -1272,12 +1275,19 @@
       </section>
       <section class="mt-sec"${talk ? ' hidden' : ''}><h3>Order</h3><div class="mt-row">${chips(MT_ORDERS, MT.order, 'order')}</div>
         <small class="mt-hint">${MT.order === 'mine' ? 'The clips play in this order. Hold a tile and drag it to move it — a photo goes over the video before it.' : 'The AI puts the strongest moment first and orders the rest for the story. Hold and drag a tile to set your own order.'}</small></section>
-      <section class="mt-sec"><h3>${talk ? 'Background music <small>optional — quietly under the voice</small>' : 'Music'}</h3>
+      ${talk ? `<section class="mt-sec"><h3>Narrator <small>optional — a real voice opens and closes it</small></h3>
+        ${who.voiceover && who.voiceover.installed
+    ? `<div class="mt-row"><button type="button" class="mt-chip${!MT.voice ? ' on' : ''}" data-mt-voice="">No narrator</button>${(who.voiceover.voices || []).map((v) => `<button type="button" class="mt-chip${MT.voice === v.id ? ' on' : ''}" data-mt-voice="${attr(v.id)}">🎙 ${esc(v.label)}</button>`).join('')}</div>
+        <small class="mt-hint">The AI writes a line that hooks people before the first speaker, and a closing line to follow or share; the narrator says them over B-roll. The first time takes a minute longer while the voice is set up.</small>`
+    : '<small class="mt-hint">The narrator voice is not installed on this server yet — update the server to add it.</small>'}</section>` : ''}
+      <section class="mt-sec"><h3>${talk ? 'Background music <small>quietly under the voice</small>' : 'Music'}</h3>
         <div class="mt-songs">
-          <button type="button" class="mt-chip${!MT.song && !MT.songFile ? ' on' : ''}" data-mt-song="">No music</button>
+          <button type="button" class="mt-chip${!MT.song && !MT.songFile && !MT.free ? ' on' : ''}" data-mt-song="">No music</button>
+          ${MT.freeList && MT.freeList.tracks && MT.freeList.tracks.length ? `<button type="button" class="mt-chip${MT.free === 'auto' ? ' on' : ''}" data-mt-free="auto">✨ Pick for me</button>` : ''}
           <button type="button" class="mt-chip mt-upsong${MT.songFile ? ' on' : ''}" data-mt="song">🎵 ${MT.songFile ? esc(MT.songFile.name.slice(0, 26)) : 'Add your song'}</button>
           ${MT.lib.slice(0, 12).map((m) => `<button type="button" class="mt-chip${MT.song && MT.song.id === m.id ? ' on' : ''}" data-mt-song="${attr(m.id)}">${esc(String(m.name || 'song').slice(0, 26))}</button>`).join('')}
         </div>
+        ${mtFreeShelf()}
         <label class="mt-toggle"${talk ? ' hidden' : ''}><input type="checkbox" id="mtKeep" ${MT.keep ? 'checked' : ''}/> <span>Keep the clips’ own sound${MT.song || MT.songFile ? ' under the music' : ''}</span></label>
       </section>
       <section class="mt-sec"><h3>Style</h3><div class="mt-row">${chips(MT_STYLES, MT.style, 'style')}</div></section>
@@ -1298,6 +1308,17 @@
     if (!p._wired) { p._wired = true; mtWire(p); }
   }
 
+  /* 🎁 the free shelf: songs that are safe to post (freemusic.js), by mood */
+  function mtFreeShelf() {
+    const F = MT.freeList;
+    if (!F || !F.tracks || !F.tracks.length) return '';
+    const esc = C.esc, attr = C.escAttr;
+    const mood = MT.freeMood || (F.tracks.find((t) => t.id === MT.free) || {}).mood || MT_MOOD_OF[MT.style] || 'uplift';
+    return `<div class="mt-free"><small class="mt-hint">🎁 Free songs, safe to post — no muting or copyright flags (the post credits the artist automatically):</small>
+      <div class="mt-row">${F.moods.map((m) => `<button type="button" class="mt-chip mt-mood${mood === m.id ? ' on' : ''}" data-mt-mood="${attr(m.id)}">${esc(m.name)}</button>`).join('')}</div>
+      <div class="mt-songs">${F.tracks.filter((t) => t.mood === mood).map((t) => `<button type="button" class="mt-chip${MT.free === t.id ? ' on' : ''}" data-mt-free="${attr(t.id)}">♪ ${esc(t.title)}</button>`).join('')}</div></div>`;
+  }
+
   function mtWire(p) {
     const onClick = async (e) => {
       if (e.target.closest('[data-mt-rearrange]') && !MT.busy) {
@@ -1305,13 +1326,22 @@
         C.closePanel(p, true);
         return editMontage(op);
       }
-      const b = e.target.closest('[data-mt],[data-mt-del],[data-mt-song],[data-mt-style],[data-mt-len],[data-mt-aspect],[data-mt-order],[data-mt-mode]');
+      const b = e.target.closest('[data-mt],[data-mt-del],[data-mt-song],[data-mt-style],[data-mt-len],[data-mt-aspect],[data-mt-order],[data-mt-mode],[data-mt-voice],[data-mt-free],[data-mt-mood]');
       if (!b || MT.busy || mtDrag.just) return;
       const d = b.dataset;
       if (d.mtOrder) { MT.order = d.mtOrder; return mtPaint(); }
-      if (d.mtMode) { MT.mode = d.mtMode; if (MT.mode === 'talk' && (MT.len === 'all' || MT.len === 30)) MT.len = 45; return mtPaint(); }
+      if (d.mtMode) {
+        MT.mode = d.mtMode;
+        if (MT.mode === 'talk' && (MT.len === 'all' || MT.len === 30)) MT.len = 45;
+        // a viral edit has music under it unless the operator says otherwise
+        if (MT.mode === 'talk' && !MT.song && !MT.songFile && !MT.free && MT.freeList && MT.freeList.tracks && MT.freeList.tracks.length) MT.free = 'auto';
+        return mtPaint();
+      }
       if (d.mtDel != null) { const it = MT.items.splice(+d.mtDel, 1)[0]; if (it) URL.revokeObjectURL(it.url); return mtPaint(); }
-      if (d.mtSong != null) { MT.song = d.mtSong ? MT.lib.find((m) => m.id === d.mtSong) || null : null; MT.songFile = null; return mtPaint(); }
+      if (d.mtSong != null) { MT.song = d.mtSong ? MT.lib.find((m) => m.id === d.mtSong) || null : null; MT.songFile = null; MT.free = null; return mtPaint(); }
+      if (d.mtFree) { MT.free = d.mtFree; MT.song = null; MT.songFile = null; return mtPaint(); }
+      if (d.mtMood) { MT.freeMood = d.mtMood; return mtPaint(); }
+      if (d.mtVoice != null) { MT.voice = d.mtVoice; return mtPaint(); }
       if (d.mtStyle) { MT.style = d.mtStyle; return mtPaint(); }
       if (d.mtLen) { MT.len = d.mtLen === 'all' || d.mtLen === 'custom' ? d.mtLen : +d.mtLen; return mtPaint(); }
       if (d.mtAspect) { MT.aspect = d.mtAspect; return mtPaint(); }
@@ -1470,6 +1500,21 @@
       }
       // 2) the song joins the music library, so it is on the music lane afterwards
       let song = MT.song;
+      // a free song: fetched onto the server's music library (once), credited in the post
+      let credit = '';
+      if (!MT.songFile && MT.free && MT.freeList) {
+        let id = MT.free;
+        if (id === 'auto') {
+          const pool = MT.freeList.tracks.filter((t) => t.mood === (MT_MOOD_OF[MT.style] || 'uplift'));
+          const any = pool.length ? pool : MT.freeList.tracks;
+          id = any[Math.floor(Math.random() * any.length)].id;
+        }
+        mtProgress('Getting the music…', 30);
+        try { song = await window.api.freeMusic.get(id); credit = song.credit || ''; } catch (er) {
+          C.island({ kind: 'warn', title: 'That song could not be fetched', sub: (er && er.message) || '', ms: 5000 });
+          song = null;
+        }
+      }
       if (MT.songFile) {
         mtProgress('Sending your song…', 30);
         const up = await C.uploadFile(MT.songFile, () => {});
@@ -1486,8 +1531,9 @@
         mediaPaths: paths, musicPath: song ? song.file : null, style: MT.style,
         lengthSec: MT.len === 'all' ? 0 : MT.len === 'custom' ? MT.custom : MT.len, full: MT.len === 'all',
         aspect: MT.aspect, brief: MT.brief, keepAudio: talk ? true : MT.keep, keepOrder: !talk && MT.order === 'mine', jobId,
-        mode: talk ? 'talk' : undefined,
+        mode: talk ? 'talk' : undefined, voice: talk && MT.voice ? MT.voice : undefined,
       });
+      if (credit) res.postCaption = [res.postCaption, credit].filter(Boolean).join('\n\n');
       if (off) off();
       MT.busy = false;
       mtProgress('Opening it in the studio…', 100, ' ');
@@ -1518,6 +1564,8 @@
     const p = C.openPanel({ id: 'cloudMontageDone', title: res.title || 'Your montage', cls: 'cp-montage' });
     p.body.innerHTML = `<p class="mt-lead">${mi('check')} ${C.esc(Math.round(res.duration))}s · ${res.mode === 'talk' ? C.esc(String(res.lines || 0)) + ' lines, ' : ''}${C.esc(String((res.shots || []).length))} ${res.mode === 'talk' ? 'cuts' : 'shots'}${res.bpm ? ' · cut to ' + C.esc(String(Math.round(res.bpm))) + ' BPM' : ''}</p>
       ${res.concept ? `<p class="mt-concept">${C.esc(res.concept)}</p>` : ''}
+      ${res.narrator ? `<p class="mt-concept">🎙 Narrator: “${C.esc(res.narrator.join('” … “'))}”</p>` : ''}
+      ${res.narratorWhy ? `<p class="mt-tip">🎙 The narrator was left out this time (${C.esc(res.narratorWhy)}) — the edit is complete without it.</p>` : ''}
       <p class="mt-tip">It’s open in the studio now${res.texts && res.texts.length ? ' — the words on screen are text boxes, tap one to change it' : ''}. ${res.autoCaps === 'talk' ? 'The captions are on, every word lit up as it’s said, and go into the export — tap 💬 Captions to change their look.' : res.autoCaps ? 'Captions of what’s said are being added by themselves — they go into the export.' : 'Add captions from the 💬 Captions tool.'} Change the music volume in Audio, then export as usual.</p>
       ${caption ? `<section class="mt-sec"><h3>Post caption</h3><textarea class="mt-brief" rows="4" readonly>${C.esc(caption)}</textarea>
         <button type="button" class="mt-chip on" data-mt-copy>Copy caption</button></section>` : ''}`;
