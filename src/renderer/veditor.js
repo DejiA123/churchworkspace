@@ -1461,8 +1461,23 @@
   }
 
   /** Live captions on the preview player (before any export). */
+  /*
+   * ►► THE HANDLES ONLY WHEN THE CAPTION IS PICKED. ◄◄ The size corner (and the
+   * wrap edges) show once the caption is tapped — on the preview, or its block
+   * on the 💬 lane — and go when something else is tapped, as in CapCut. A
+   * caption just playing is only words.
+   */
+  function capPicked() {
+    return !!ve._capPickedPreview || (ve.activeRow === 'caption' && ve.capSel != null && !ve.textSel);
+  }
+  function syncCapPicked() {
+    const ov = ve.refs.capOverlay; if (!ov) return;
+    const on = capPicked();
+    if (ov.classList.contains('picked') !== on) ov.classList.toggle('picked', on);
+  }
   function updateCapOverlay(t) {
     const ov = ve.refs.capOverlay; if (!ov) return;
+    syncCapPicked();
     const showCtl = $('#veCapShow');
     const evs = ve.capEvents;
     if (showCtl && !showCtl.checked) { ov.classList.add('hidden'); ve._capKey = null; return; }
@@ -1665,6 +1680,7 @@
    */
   function onCapSpanDown(ev) {
     if (ev.target && ev.target.dataset && ev.target.dataset.capedge) return; // that's a resize
+    ve._capPickedPreview = true; syncCapPicked();
     const fr = canvasFrameRect(); if (!fr) return;
     ev.preventDefault(); ev.stopPropagation();
     const start = capPosPoint(capStyleCfg().position);
@@ -5274,6 +5290,7 @@
   }
   function attr2(s) { return escape2(s).replace(/"/g, '&quot;'); }
   function renderCapTrack() {
+    try { syncCapPicked(); } catch (e) {}
     const track = ve.refs.capTrack; if (!track) return;
     if (ve.capEditing != null) return; // never clobber a caption block mid-edit
     updateCapButtons();
@@ -14633,6 +14650,12 @@
     const capWordInk = $('#capWordColor');
     if (capWordInk) capWordInk.addEventListener('change', () => { capWordInk.dataset.touched = '1'; saveCapLook(); });
     // Style tweaks update the live overlay immediately.
+    // A tap anywhere but the caption (and its handles) puts the preview's pick down.
+    document.addEventListener('pointerdown', (e) => {
+      if (!ve._capPickedPreview) return;
+      if (e.target && e.target.closest && e.target.closest('.ve-cap-block, [data-capscale], [data-capedge]')) return;
+      ve._capPickedPreview = false; syncCapPicked();
+    }, true);
     // A size step picked is that size — not the exact figure a corner drag left behind.
     { const cs = $('#capSize'), sp = $('#capSizePct'); if (cs && sp) cs.addEventListener('change', () => { sp.value = ''; }); }
     ['#capFont', '#capSize', '#capSizePct', '#capTracking', '#capPos', '#capColor', '#capStyleSel', '#capWordHl', '#capWordColor'].forEach((sel) => {
@@ -16125,6 +16148,8 @@
       // a line as a fix leaves it: new words, and what it said before (null clears it)
       // a line as the second listen leaves it: in doubt, with what the other ear heard
       markCapDoubt(i, kind, altWords) { const e = (ve.capEvents || [])[i]; if (!e) return; if (kind) e.doubt = kind; else delete e.doubt; if (altWords) ve.capAlt = altWords; renderCapList(); renderCapTrack(); },
+      capSelect(i) { ve.capSel = i; ve.activeRow = i == null ? null : 'caption'; ve.textSel = null; renderCapTrack(); },
+      capPickedShown() { syncCapPicked(); return document.getElementById('veCapOverlay').classList.contains('picked'); },
       markAllChecked() { (ve.capEvents || []).forEach((e) => { if (!e.manual) { e.checked = true; delete e.unchecked; } }); renderCapList(); },
       markCapFixed(i, was, text) { const e = (ve.capEvents || [])[i]; if (!e) return; if (was == null) delete e._was; else { e._was = was; if (text != null) e.text = text; } renderCapList(); },
       // drive the two caption dropdowns the way a click on them does

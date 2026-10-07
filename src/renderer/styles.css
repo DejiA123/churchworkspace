@@ -416,7 +416,9 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .ve-cap-scale { position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; pointer-events: auto; cursor: nwse-resize; z-index: 3;
   border-radius: 50%; background: #fff; border: 2px solid #8b5cf6; box-shadow: 0 1px 4px rgba(0,0,0,.6); opacity: 0; transition: opacity .12s; }
 .ve-cap-scale::after { content: ''; position: absolute; inset: -12px; border-radius: 50%; }
-.ve-cap-overlay:hover .ve-cap-scale, .ve-cap-scale:active { opacity: 1; }
+.ve-cap-overlay:not(.picked) .ve-cap-scale { display: none; }
+.ve-cap-overlay.picked .ve-cap-scale { opacity: 1; }
+.ve-cap-overlay.picked .ve-cap-block { outline: 1px dashed rgba(255,255,255,.6); outline-offset: 4px; }
 
 /* Blank preview while the playhead is over a timeline GAP (or all clips deleted) —
    like a real editor: no clip under the playhead = nothing to show. Sits above the

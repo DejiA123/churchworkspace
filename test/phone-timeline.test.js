@@ -468,6 +468,15 @@ async function waitUp() {
       await page.evaluate(() => { document.getElementById('capModal').classList.add('hidden'); });
       await page.evaluate(() => { const T = window.VideoEditor.__test; const L = T.capLines(); document.getElementById('vePlayer').currentTime = L[0].start + 0.3; const cc = document.getElementById('veCapShow'); if (cc && !cc.checked) cc.click(); });
       await sleep(600);
+      const shown = () => page.evaluate(() => { const e = document.querySelector('#veCapOverlay [data-capscale]'); return !!e && e.getBoundingClientRect().width > 0; });
+      await page.evaluate(() => { document.getElementById('veUndo').focus(); document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); });
+      await page.evaluate(() => { window.VideoEditor.__test.capSelect && window.VideoEditor.__test.capSelect(null); });
+      await sleep(200);
+      check(!(await shown()), 'the size corner is hidden while the caption is not picked');
+      const bc = await page.evaluate(() => { const r = document.querySelector('#veCapOverlay .ve-cap-block').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+      await page.mouse.click(bc.x, bc.y);
+      await sleep(250);
+      check(await shown(), 'tapping the caption on the preview brings its size corner');
       const h = await page.evaluate(() => { const e = document.querySelector('#veCapOverlay [data-capscale]'); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
       check(!!h, 'the caption on the preview has a corner to grab');
       if (h) {
@@ -477,7 +486,6 @@ async function waitUp() {
         await page.mouse.up(); await sleep(200);
         const big = await size();
         const h2 = await page.evaluate(() => { const r = document.querySelector('#veCapOverlay [data-capscale]').getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2; const at = document.elementFromPoint(x, y); const o = document.getElementById('veCapOverlay').getBoundingClientRect(); const stack = document.elementsFromPoint(x, y).slice(0, 5).map((e) => e.id || e.className || e.tagName); return { x, y, at: at && (at.className || at.tagName), ov: [o.left, o.top, o.right, o.bottom].map(Math.round), stack, op: getComputedStyle(document.querySelector('#veCapOverlay [data-capscale]')).pointerEvents }; });
-        console.log('    corner after growing:', JSON.stringify(h2));
         await page.mouse.move(h2.x, h2.y); await page.mouse.down();
         for (let k = 1; k <= 8; k++) await page.mouse.move(h2.x - k * 9, h2.y - k * 4);
         await page.mouse.up(); await sleep(200);
@@ -486,7 +494,32 @@ async function waitUp() {
         if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'size-corner.png') });
         await page.evaluate(() => { const s = document.getElementById('capSize'); s.value = 'm'; s.dispatchEvent(new Event('change', { bubbles: true })); });
         check(await page.evaluate(() => document.getElementById('capSizePct').value) === '', 'picking a size step again goes back to the steps');
+        await page.mouse.click(30, 620);   // somewhere else
+        await sleep(250);
+        check(!(await shown()), 'tapping anywhere else puts the corner away');
+        await page.evaluate(() => window.VideoEditor.__test.capSelect(0));
+        await sleep(200);
+        check(await shown(), 'picking the caption on the timeline brings the corner too');
+        await page.evaluate(() => window.VideoEditor.__test.capSelect(null));
       }
+    }
+
+    console.log('\n=== [L] Adjust: brightness and sharpness show live on the preview ===');
+    {
+      const opened = await page.evaluate(() => {
+        const b = [...document.querySelectorAll('#cloudDock button, #cloudDock .cloud-tool')].find((x) => /Adjust/.test(x.textContent));
+        if (!b) return false; b.click(); return true;
+      });
+      await sleep(500);
+      await page.evaluate(() => {
+        const set = (id, v) => { const r = document.getElementById(id); r.value = v; r.dispatchEvent(new Event('input', { bubbles: true })); r.dispatchEvent(new Event('change', { bubbles: true })); };
+        set('fxBri', '0.2'); set('fxSharp', '1');
+      });
+      await sleep(300);
+      const f = await page.evaluate(() => document.getElementById('vePlayer').style.filter);
+      check(opened && /brightness\(1\.2/.test(f) && /fxSharpen/.test(f), 'Adjust → Brightness and Sharpen change the preview as the slider moves', { opened, f });
+      if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'adjust.png') });
+      await page.evaluate(() => { const set = (id, v) => { const r = document.getElementById(id); r.value = v; r.dispatchEvent(new Event('input', { bubbles: true })); r.dispatchEvent(new Event('change', { bubbles: true })); }; set('fxBri', '0'); set('fxSharp', '0'); });
     }
 
     console.log('\n=== [J] "Follow the voice" survives closing the app ===');
