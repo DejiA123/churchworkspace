@@ -747,7 +747,16 @@
       options: null,
       writing: false,
       batchCaps: {},
+      music: null,          // { free: id | 'auto' } or { lib: id } — laid under the video before it posts
+      musicMood: 'uplift',
+      shelf: null, songs: [],
     };
+    // the free shelf and the operator's own songs, for the Music section
+    (async () => {
+      try { st.shelf = await window.api.freeMusic.list(false); } catch (e) { st.shelf = null; }
+      try { const l = await window.api.library.list(); st.songs = ((l && l.music) || []).filter((m) => !/^free:/.test(m.source || '')); } catch (e) { st.songs = []; }
+      if (panel.el.isConnected && st.files.length) draw();
+    })();
     const panel = C.openPanel({ id: 'csCompose', title: edit ? 'Edit post' : 'New post', cls: 'cp-compose' });
     const ensure = async () => {
       if (st.accountIds != null) return;
@@ -830,11 +839,37 @@
         + (st.options ? '<div class="cs-opts">' + st.options.map((op, i) => `<button type="button" class="cs-opt" data-c="opt" data-i="${i}"><b>${esc(op.label || 'Option ' + (i + 1))}</b><span>${esc(op.title || '')}</span></button>`).join('') + '</div>' : '');
     }
 
+    /*
+     * 🎵 MUSIC UNDER THE POST. Instagram and TikTok do not let any app add
+     * their own library songs to a post, and a popular song baked in gets a
+     * post muted or flagged — so a song that is free to post (or the
+     * operator's own) is laid under the video on the server before it goes.
+     */
+    function musicBlock() {
+      if (edit || !st.files.length || !st.files.every(isVideo)) return '';
+      const F = st.shelf;
+      const chip = (on, attrs, label) => `<button type="button" class="cs-chip${on ? ' on' : ''}" ${attrs}>${label}</button>`;
+      const m = st.music || {};
+      let html = '<div class="cs-chips">'
+        + chip(!st.music, 'data-c="mus" data-v=""', 'No music')
+        + (F && F.tracks && F.tracks.length ? chip(m.free === 'auto', 'data-c="mus" data-v="auto"', '✨ Pick a worship song for me') : '')
+        + '</div>';
+      if (F && F.tracks && F.tracks.length) {
+        html += '<div class="cs-chips">' + F.moods.map((x) => chip(st.musicMood === x.id, `data-c="musmood" data-v="${escAttr(x.id)}"`, esc(x.name))).join('') + '</div>'
+          + '<div class="cs-chips">' + F.tracks.filter((t) => t.mood === st.musicMood).map((t) => chip(m.free === t.id, `data-c="mus" data-v="${escAttr(t.id)}"`, '♪ ' + esc(t.title))).join('') + '</div>';
+      }
+      if (st.songs.length) html += '<label class="cs-label">Your songs <small>— only ones you have the rights to post</small></label><div class="cs-chips">'
+        + st.songs.slice(0, 10).map((x) => chip(m.lib === x.id, `data-c="muslib" data-v="${escAttr(x.id)}"`, '🎵 ' + esc(String(x.name || 'song').slice(0, 24)))).join('') + '</div>';
+      html += `<p class="cs-hint">${st.music ? 'Laid softly under your video — it dips whenever someone speaks. ' : ''}Free songs are safe to post (no muting or copyright flags); the artist credit is added to your caption by itself. Instagram’s and TikTok’s own song library can’t be added by any app.</p>`;
+      return html;
+    }
+
     function draw() {
       panel.setTitle(edit ? 'Edit post' : many() ? `Schedule ${st.files.length} posts` : 'New post');
       panel.body.innerHTML = '<div class="cs-form">'
         + `<section class="cs-sec"><h4>${many() ? 'Videos' : 'Video or picture'}</h4>${mediaBlock()}</section>`
         + (st.files.length ? `<section class="cs-sec">${textBlock()}</section>` : '')
+        + (musicBlock() ? `<section class="cs-sec"><h4>Music</h4>${musicBlock()}</section>` : '')
         + `<section class="cs-sec"><h4>Post to</h4>${accountsBlock()}</section>`
         + `<section class="cs-sec"><h4>When</h4>${whenBlock()}</section>`
         + '</div>';
@@ -928,6 +963,9 @@
         return draw();
       }
       if (c === 'spacing') { st.spacing = +b.dataset.h; return draw(); }
+      if (c === 'mus') { st.music = b.dataset.v ? { free: b.dataset.v } : null; return draw(); }
+      if (c === 'muslib') { st.music = { lib: b.dataset.v }; return draw(); }
+      if (c === 'musmood') { st.musicMood = b.dataset.v; return draw(); }
       if (c === 'opt') {
         const op = st.options && st.options[+b.dataset.i];
         if (op) { st.title = op.title || st.title; st.caption = op.caption || st.caption; draw(); }
@@ -966,11 +1004,40 @@
       if (b && !b.disabled) submit(b);
     });
 
+    /* the chosen song laid under each video (on the server) — the files that will post, and the caption credit */
+    async function withMusic(btn) {
+      if (!st.music || edit) return null;
+      let free = st.music.free || null;
+      if (free === 'auto') {
+        const pool = (st.shelf && st.shelf.tracks || []).filter((t) => t.mood === 'uplift');
+        const any = pool.length ? pool : (st.shelf && st.shelf.tracks) || [];
+        free = any.length ? any[Math.floor(Math.random() * any.length)].id : null;
+        if (!free) return null;
+      }
+      const out = { files: [], credit: '' };
+      for (let i = 0; i < st.files.length; i++) {
+        btn.innerHTML = `${mi('music')}Adding the music${st.files.length > 1 ? ` (${i + 1} of ${st.files.length})` : ''}…`;
+        const r = await window.api.social.withMusic({ mediaPath: st.files[i], free: free || undefined, libId: st.music.lib || undefined });
+        out.files.push(r.path);
+        out.credit = r.credit || out.credit;
+      }
+      return out;
+    }
+    const withCredit = (caption, credit) => (credit && !String(caption || '').includes(credit) ? [String(caption || '').trim(), credit].filter(Boolean).join('\n\n') : caption);
+
     async function submit(btn) {
       btn.disabled = true;
       const accs = linked().filter((a) => picked().includes(a.id));
       const platforms = Array.from(new Set(accs.map((a) => a.platform)));
       try {
+        let mus = null;
+        try { mus = await withMusic(btn); } catch (er) {
+          C.island({ kind: 'error', title: 'The music could not be added', sub: (er && er.message) || '', ms: 6000 });
+          btn.disabled = false; btn.innerHTML = `${mi('calendar')}Try again`;
+          return;
+        }
+        const fileAt = (i) => (mus ? mus.files[i] : st.files[i]);
+        const credit = mus ? mus.credit : '';
         if (edit) {
           await window.api.scheduler.update(edit.id, {
             title: st.title.trim() || titleFromFile(st.files[0]), caption: st.caption,
@@ -986,8 +1053,8 @@
             const own = st.batchCaps[f] || {};
             await window.api.scheduler.add({
               title: own.title || titleFromFile(f),
-              caption: st.caption.trim() ? st.caption : (own.caption || titleFromFile(f)),
-              mediaPaths: [f], accountIds: accs.map((a) => a.id), platforms,
+              caption: withCredit(st.caption.trim() ? st.caption : (own.caption || titleFromFile(f)), credit),
+              mediaPaths: [fileAt(i)], accountIds: accs.map((a) => a.id), platforms,
               scheduledAt: times[i].toISOString(),
             });
           }
@@ -995,8 +1062,8 @@
         } else {
           const when = chosenWhen();
           const rec = await window.api.scheduler.add({
-            title: st.title.trim() || titleFromFile(st.files[0]), caption: st.caption,
-            mediaPaths: st.files.slice(0, 1), accountIds: accs.map((a) => a.id), platforms,
+            title: st.title.trim() || titleFromFile(st.files[0]), caption: withCredit(st.caption, credit),
+            mediaPaths: [fileAt(0)], accountIds: accs.map((a) => a.id), platforms,
             scheduledAt: when.toISOString(),
           });
           if (st.quick === 'now' && rec && rec.id) postNow(rec.id);

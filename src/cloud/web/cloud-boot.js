@@ -617,6 +617,7 @@ let _hideTimer = null;
     },
     social: {
       suggestCopy: (a) => call('social:suggestCopy', a),
+      withMusic: (a) => call('social:withMusic', a),
       accounts: () => call('social:accounts'),
       setKeys: (keys) => call('social:setKeys', keys),
       linkStart: (platform) => call('social:linkStart', { platform }),

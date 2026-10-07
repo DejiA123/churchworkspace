@@ -131,6 +131,7 @@ const SOCIAL = {
   'social:unlink': true,
   'social:check': true,
   'social:suggestCopy': true,
+  'social:withMusic': true,
 };
 
 /**

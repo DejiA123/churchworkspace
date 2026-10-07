@@ -136,6 +136,25 @@ async function waitUp() {
     }, VID);
     check(st2.lines.length >= 3 && /NEVER GIVE UP|never give up/i.test(st2.lines[0]) && st2.show, 'the talk edit opens with its captions already on — no second listen', st2);
     check(st2.look === 'boxword' && st2.hl, 'in a look that lights each word up as it is said', st2);
+    // THE SCHEDULER: music under a post, laid on by the server before it goes
+    const sched = await page.evaluate(async (vid) => {
+      window.MWSocial.compose({ files: [vid] });
+      await new Promise((r) => setTimeout(r, 1200));
+      const sec = [...document.querySelectorAll('#csCompose .cs-sec h4')].find((h) => /Music/.test(h.textContent));
+      return { music: !!sec, worship: !!document.querySelector('#csCompose [data-c="mus"][data-v="auto"]'),
+        moods: document.querySelectorAll('#csCompose [data-c="musmood"]').length, hint: (document.querySelector('#csCompose .cs-sec .cs-hint') || {}).textContent || '' };
+    }, VID);
+    check(sched.music && sched.worship && sched.moods === 4, 'a new post offers Music: a worship song picked for you, or free songs by mood', sched);
+    if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'schedule-music.png') });
+    const songPath = path.join(MEDIA, 'my-song.wav');
+    execFileSync(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'sine=f=523:d=6', songPath]);
+    const mixed = await page.evaluate(async (a) => {
+      const song = await window.api.library.add('music', a.song, 'My song');
+      return window.api.social.withMusic({ mediaPath: a.vid, libId: song.id });
+    }, { vid: VID, song: songPath });
+    let ok2 = false, info = '';
+    try { info = execFileSync(require('ffprobe-static').path, ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', mixed.path], { encoding: 'utf8' }); ok2 = /video/.test(info) && /audio/.test(info); } catch (e) { info = e.message; }
+    check(mixed && mixed.path !== VID && ok2 && mixed.credit === '', 'the server lays the song under the video and posts that copy (your own song needs no credit)', { mixed, info });
   } catch (e) {
     check(false, 'the test ran to the end', e && e.message);
   } finally {

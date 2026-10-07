@@ -974,6 +974,28 @@ ipcMain.handle('library:add', wrap(async (e, { kind, path: p, name, source }) =>
   library.add(getCtx(), video, { kind, path: p, name, source })));
 ipcMain.handle('library:remove', wrap(async (e, { kind, id }) => library.remove({ kind, id })));
 ipcMain.handle('library:rename', wrap(async (e, { kind, id, name }) => library.rename({ kind, id, name })));
+/*
+ * ►► A POST WITH MUSIC, WITHOUT ADDING IT BY HAND. ◄◄ No app may attach
+ * Instagram's or TikTok's own library songs to a post it publishes (their
+ * posting APIs do not offer it), and a popular song baked in is what gets a
+ * post muted or flagged. So the scheduler lays a song that is FREE TO POST
+ * (freemusic.js) — or the operator's own — under the video here, softly and
+ * dipping under speech, and posts that copy. The credit a free song needs is
+ * handed back for the caption.
+ */
+ipcMain.handle('social:withMusic', wrap(async (e, { mediaPath, free, libId, volume, jobId } = {}) => {
+  if (!mediaPath || !fs.existsSync(mediaPath)) throw new Error('That video could not be found.');
+  let entry = null;
+  if (free) entry = await freemusic.get(getCtx(), video, library, String(free));
+  else if (libId) entry = ((library.list().music) || []).find((m) => m.id === libId) || null;
+  if (!entry || !entry.file) throw new Error('That song could not be found.');
+  const info = await video.getInfo(getCtx(), mediaPath);
+  const base = path.basename(mediaPath).replace(/\.[^.]+$/, '').replace(/[^\w.-]+/g, '_').slice(0, 50);
+  const output = outPath(`${base}-with-music-${stamp()}.mp4`);
+  const vol = Number.isFinite(+volume) ? Math.max(0.05, Math.min(1.2, +volume)) : (info.hasAudio ? 0.22 : 0.8);
+  await video.mixMusic(getCtx(), { input: mediaPath, output, musicPath: entry.file, musicVolume: vol, duck: !!info.hasAudio, fadeIn: 0.4, fadeOut: 1.5, onProgress: onProgress(e, jobId) });
+  return { path: output, song: entry.name, credit: entry.credit || freemusic.creditFor(entry) || '' };
+}));
 /* The free music shelf (freemusic.js): songs that are safe to post, credited. */
 const freemusic = require('./freemusic');
 ipcMain.handle('music:free', wrap(async (e, { wait } = {}) => freemusic.list(library, { wait: !!wait })));

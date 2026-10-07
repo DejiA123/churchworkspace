@@ -46,7 +46,10 @@ function head(url, redirects = 0) {
     const req = https.request(url, { method: 'HEAD', timeout: 8000, headers: { 'User-Agent': 'ChurchWorkSpace' } }, (res) => {
       res.resume();
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirects < 5) return resolve(head(new URL(res.headers.location, url).href, redirects + 1));
-      resolve(res.statusCode === 200 && /audio|octet/.test(String(res.headers['content-type'] || 'audio')));
+      // gone = the site says so (404/410); anything else (a block, a hiccup) is "don't know", and the song stays on the shelf
+      if (res.statusCode === 200) resolve(true);
+      else if (res.statusCode === 404 || res.statusCode === 410) resolve(false);
+      else resolve(null);
     });
     req.on('timeout', () => { req.destroy(); resolve(null); });
     req.on('error', () => resolve(null));

@@ -338,6 +338,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   social: {
     suggestCopy: (a) => call('social:suggestCopy', a),
+    withMusic: (a) => call('social:withMusic', a),
     planSchedule: (a) => call('social:planSchedule', a),
     // Who writes the captions: the free cloud model, this PC, or the rules.
     cloudState: () => call('social:cloudState'),

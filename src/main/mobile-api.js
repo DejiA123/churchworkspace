@@ -107,6 +107,7 @@ const ALLOWED = {
   'video:freezeFrame': true,
   'video:overlayComposite': true,
   'video:mixMusic': true,
+  'social:withMusic': true,
   'video:appendClips': true,
   'video:captions': true,
 
