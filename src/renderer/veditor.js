@@ -4203,6 +4203,7 @@
     const id = (typeof boxOrId === 'string') ? boxOrId : (boxOrId && boxOrId.dataset ? boxOrId.dataset.id : null);
     const o = id && ve.textOverlays.find((x) => x.id === id); if (!o) return;
     ve.textSel = id;
+    ve._textOnLane = false;
     // Re-fetch the live box; if a prior render removed it, render once (with the
     // guard cleared) and fetch again.
     let box = ve.refs.textLayer.querySelector(`.ve-text-box[data-id="${id}"]`);
@@ -5041,6 +5042,15 @@
     const bar = $('#veTextTools'); if (!bar) return;
     const o = selectedTextOverlay();
     if (!ve.video || !o) { bar.classList.add('hidden'); bar.dataset.for = ''; return; }
+    /*
+     * On a phone the panel is docked over the bottom of the screen — over the
+     * timeline. A text block picked ON THE TIMELINE is being trimmed or moved
+     * there, so the panel stays down and the block's handles stay free (as in
+     * CapCut); tapping the text on the picture brings the panel up.
+     */
+    if (ve._textOnLane && ve.textEditing !== o.id && window.matchMedia && window.matchMedia('(max-width: 900px)').matches) {
+      bar.classList.add('hidden'); bar.dataset.for = ''; return;
+    }
     if (bar.classList.contains('hidden')) bar.classList.remove('hidden');
     if (bar.dataset.for !== String(o.id)) {
       bar.dataset.for = String(o.id);
@@ -5064,6 +5074,15 @@
     put('#vtBgColor', /^#[0-9a-f]{6}$/i.test(o.bgColor || '') ? o.bgColor : '#000000');
     const bgc = $('#vtBgColor'); if (bgc && bgc.disabled !== !o.bg) bgc.disabled = !o.bg;
     put('#vtAnim', TEXT_ANIM_IDS.includes(o.anim) ? o.anim : 'none');
+  }
+  /** Repaint one text box in place — works while it is being typed in, where renderTextOverlays stands still. */
+  function paintTextLive(o) {
+    const c = ve.refs.textLayer && ve.refs.textLayer.querySelector(`.ve-text-box[data-id="${o.id}"] .ve-text-content`);
+    if (c) {
+      c.style.cssText = textLookCss(o, textFontPx(o, previewH())) + 'pointer-events:auto;outline:none;';
+      if (ve.textEditing === o.id) { c.style.cursor = 'text'; c.style.userSelect = 'text'; c.style.webkitUserSelect = 'text'; }
+    }
+    if (ve.textEditing !== o.id) renderTextOverlays();
   }
   /** Change a style property on the selected text; updates the live node even mid-edit. */
   function applyTextProp(mutate) {
@@ -5147,6 +5166,7 @@
     if (ev.target.closest('[data-del]')) { ve.textSel = id; renderTextOverlays(); renderTextTrack(); return; }
     const resizing = !!ev.target.closest('[data-resize]');
     const wasSel = ve.textSel === id;
+    ve._textOnLane = false;   // picked on the picture: the style panel comes up
     ve.textSel = id; renderTextOverlays(); renderTextTrack();
     ev.preventDefault(); ev.stopPropagation();
     const fr = outputFrameRect();
@@ -5204,6 +5224,7 @@
         ev.stopPropagation(); ev.preventDefault();
         const id = el.dataset.id, o = ve.textOverlays.find((x) => x.id === id); if (!o) return;
         const edge = ev.target && ev.target.dataset ? ev.target.dataset.tedge : null;
+        ve._textOnLane = true;   // picked on the timeline: its handles, not the style panel (updateTextTools)
         ve.textSel = id; renderTextTrack(); renderTextOverlays(); updateTextTools();
         const preSnap = snapshotState();
         const x0 = ev.clientX, s0 = o.start, e0 = o.end;
@@ -14529,7 +14550,16 @@
     }
     // The size, as a percentage of the finished picture's height (see
     // textSizeShown): typed, or slid with a thumb — one undo step per slide.
-    const vtSize = $('#vtSize'); if (vtSize) vtSize.addEventListener('change', () => {
+    const vtSize = $('#vtSize');
+    // the typed number shows as it is typed, too (one undo step when it is committed)
+    if (vtSize) vtSize.addEventListener('input', () => {
+      const o = selectedTextOverlay(); const v = parseFloat(vtSize.value);
+      if (!o || !(v > 0)) return;
+      o.sizePct = textSizePctOf(v);
+      paintTextLive(o);
+      const r = $('#vtSizeRange'); if (r) r.value = textSizeShown(o);
+    });
+    if (vtSize) vtSize.addEventListener('change', () => {
       applyTextProp((o) => { o.sizePct = textSizePctOf(vtSize.value); });
       vtSize.value = textSizeShown(selectedTextOverlay());
     });
@@ -14541,11 +14571,12 @@
         if (!sliding) { sliding = true; pushHistory(); }
         o.sizePct = textSizePctOf(vtSizeRange.value);
         if (vtSize) vtSize.value = textSizeShown(o);
-        renderTextOverlays();
+        // live, even while the words are being typed in (renderTextOverlays waits for that to end)
+        paintTextLive(o);
       });
       vtSizeRange.addEventListener('change', () => {
         sliding = false;
-        const o = selectedTextOverlay(); if (o) clampTextIntoFrame(o);
+        const o = selectedTextOverlay(); if (o) { clampTextIntoFrame(o); paintTextLive(o); }
         renderTextOverlays();
         if (typeof touchSession === 'function') touchSession();
       });

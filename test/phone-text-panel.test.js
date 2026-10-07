@@ -127,6 +127,44 @@ async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise
     await page.locator('#vtDone').tap();
     await sleep(400);
     check(!(await st()).shown, '✓ Done puts the panel away');
+    console.log('\n[6] the size changes on the picture AS IT IS SLID — even while typing in the box');
+    {
+      const bb2 = await page.locator(`.ve-text-box[data-id="${id}"]`).boundingBox();
+      await page.touchscreen.tap(bb2.x + bb2.width / 2, bb2.y + bb2.height / 2);
+      await sleep(400);
+      await page.evaluate((id) => window.VideoEditor.__test.startEditingText ? window.VideoEditor.__test.startEditingText(id) : null, id);
+      const bb3 = await page.locator(`.ve-text-box[data-id="${id}"]`).boundingBox();
+      if (!(await page.evaluate(() => !!document.querySelector('.ve-text-box .ve-text-content[contenteditable="true"]')))) { await page.touchscreen.tap(bb3.x + bb3.width / 2, bb3.y + bb3.height / 2); await sleep(400); }
+      const px = () => page.evaluate((id) => parseFloat(getComputedStyle(document.querySelector(`.ve-text-box[data-id="${id}"] .ve-text-content`)).fontSize), id);
+      const editing = await page.evaluate(() => !!document.querySelector('.ve-text-box .ve-text-content[contenteditable="true"]'));
+      const a0 = await px();
+      await page.evaluate(() => { const r = document.getElementById('vtSizeRange'); r.value = '16'; r.dispatchEvent(new Event('input', { bubbles: true })); });
+      await sleep(150);
+      const a1 = await px();
+      check(editing && a1 > a0 * 1.5, 'sliding the size while typing makes the words bigger right away (no waiting)', { editing, a0, a1 });
+      await page.evaluate(() => { const n = document.getElementById('vtSize'); n.value = '10'; n.dispatchEvent(new Event('input', { bubbles: true })); });
+      await sleep(150);
+      const a2 = await px();
+      check(a2 < a1, 'and so does typing a number in the size box', { a1, a2 });
+      await page.locator('#vtDone').tap();
+      await sleep(400);
+    }
+    console.log('\n[7] a text block picked on the TIMELINE leaves its handles free');
+    {
+      const clip = page.locator(`.ve-text-clip[data-id="${id}"]`);
+      await clip.scrollIntoViewIfNeeded().catch(() => {});
+      const cb = await clip.boundingBox();
+      await page.evaluate((id) => { const el = document.querySelector(`.ve-text-clip[data-id="${id}"]`); const r = el.getBoundingClientRect(); el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0 })); document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 })); }, id);
+      await sleep(400);
+      const lane = await st();
+      const handle = await page.evaluate((id) => { const h = document.querySelector(`.ve-text-clip[data-id="${id}"] [data-tedge="r"], .ve-text-clip[data-id="${id}"] .ve-tc-h.r, .ve-text-clip[data-id="${id}"] .ve-tc-h`); if (!h) return null; const r = h.getBoundingClientRect(); const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { hit: !!(at && (at === h || h.contains(at))), y: Math.round(r.top) }; }, id);
+      check(!lane.shown && cb, 'picking the block on the timeline does not bring the panel up over it', lane);
+      check(handle && handle.hit, 'its trim handle is there to grab — nothing on top of it', handle);
+      const bb4 = await page.locator(`.ve-text-box[data-id="${id}"]`).boundingBox();
+      await page.touchscreen.tap(bb4.x + bb4.width / 2, bb4.y + bb4.height / 2);
+      await sleep(400);
+      check((await st()).shown, 'tapping the text on the picture brings the panel up');
+    }
   } catch (e) { check(false, 'the test ran to the end', e.message); }
   finally { await browser.close(); srv.kill(); fs.rmSync(WORK, { recursive: true, force: true }); }
   console.log(`\n${pass} PASS / ${fail} FAIL`);
