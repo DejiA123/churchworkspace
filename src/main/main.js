@@ -1563,11 +1563,24 @@ ipcMain.handle('captions:grammar', wrap(async (e, { lines, before, after, passag
     try { agreed = await secondReader(out.fixes || [], lines, passage); } catch (er) { agreed = new Set(); }
   }
   if (engine !== 'claude') {
-    for (const f of (out.fixes || [])) {
+    /*
+     * Measured on the live server (12 minutes of a real sermon): of six fixes
+     * the first free reader offered, one was right ("approve" -> "approach",
+     * which the second listen had heard too) and five were wrong ("face" ->
+     * "faith", "cadaver" -> "cavalier", "pigs" -> "pits"). A suggestion is
+     * something the operator has to read and turn down — exactly the work this
+     * is meant to save. So from the free readers, a fix neither the second
+     * listen nor the second reader backs is not shown at all.
+     */
+    const second = engine === 'groq' && cloudwrite.ready();
+    out.fixes = (out.fixes || []).filter((f) => {
       const ear = heardByOtherEar(f, lines);
-      f.sure = !!(f.sure && (ear || agreed.has(f)));
-      if (f.sure) f.why = (f.why ? f.why + ' — ' : '') + (ear ? 'the second listen heard it too' : 'a second AI reader agreed');
-    }
+      const ok = ear || agreed.has(f);
+      if (second && !ok) return false;
+      f.sure = !!(f.sure && ok);
+      if (ok) f.why = (f.why ? f.why + ' — ' : '') + (ear ? 'the second listen heard it too' : 'a second AI reader agreed');
+      return true;
+    });
   }
   const cw = cloudwrite.state();
   out.by = engine === 'claude' ? `Claude (${claudetext.model()})` : engine === 'groq' ? `${cw.providerName}${cw.usingModel ? ' — ' + cw.usingModel : ''}` : 'the AI model on this PC';
@@ -1577,7 +1590,7 @@ ipcMain.handle('captions:grammar', wrap(async (e, { lines, before, after, passag
 
 /** The fixes a second, different free model agrees are what was said (a Set of the fix objects). */
 async function secondReader(fixes, lines, passage) {
-  const cand = (fixes || []).filter((f) => f && f.sure && !heardByOtherEar(f, lines)).slice(0, 30);
+  const cand = (fixes || []).filter((f) => f && !heardByOtherEar(f, lines)).slice(0, 40);
   if (!cand.length || !cloudwrite.ready()) return new Set();
   const all = Array.isArray(passage) ? passage : [];
   const textAt = (i) => { const p = all.find((x) => x && x.i === i); return p ? p.text : ''; };
