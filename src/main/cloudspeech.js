@@ -774,6 +774,92 @@ function encodeRange(input, startSec, durSec, timeoutMs) {
   });
 }
 
+/*
+ * Caption pieces go up LOSSLESS (FLAC, 16 kHz mono — exactly what Whisper hears
+ * inside). The live ear's 24 kbit Opus "voip" is right for a phrase every few
+ * seconds; for a sermon being captioned for the world, a codec's smearing of
+ * consonants is one more thing between the preacher and the right word.
+ * ~20 KB a second: a three-minute piece is under 4 MB.
+ */
+function encodeRangeLossless(input, startSec, durSec, timeoutMs) {
+  const args = ['-v', 'error',
+    ...(startSec > 0 ? ['-ss', String(startSec)] : []),
+    '-t', String(durSec),
+    '-i', input,
+    '-vn', '-ac', '1', '-ar', String(SAMPLE_RATE), '-sample_fmt', 's16',
+    '-c:a', 'flac', '-f', 'flac', 'pipe:1'];
+  return new Promise((resolve, reject) => {
+    const proc = spawn(ffmpegPath, args, { windowsHide: true });
+    if (jobs) jobs.track(proc);
+    const out = [];
+    let err = '';
+    const timer = setTimeout(() => { try { proc.kill(); } catch (e) {} reject(new Error('decode timed out')); }, timeoutMs || 90000);
+    proc.stdout.on('data', (d) => out.push(d));
+    proc.stderr.on('data', (d) => { err += d.toString().slice(0, 400); });
+    proc.on('error', (e) => { clearTimeout(timer); reject(e); });
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) return reject(new Error('ffmpeg ' + code + ' ' + err.slice(-200)));
+      resolve(Buffer.concat(out));
+    });
+  });
+}
+
+/*
+ * ►► THE CONTEXT A CAPTION PIECE IS HEARD WITH. ◄◄
+ *
+ * Measured on a real 45-minute sermon (captioned on the live server, read line
+ * by line): heard in ten-minute pieces with no context, Large v3 wrote "our
+ * Father who at a never" for "who art in heaven", "I say salt hallelujah" for
+ * "shout", "attract God on the same" for "on the scene" — and after a minute or
+ * two of fast speech it dropped ALL punctuation and capitals ("when we approach
+ * god") for minutes at a time. Turbo heard the same places the same wrong way,
+ * so a second listen could only flag them, never fix them.
+ *
+ * Whisper takes the prompt as the text that came JUST BEFORE the audio, and it
+ * continues in that style and that vocabulary. So each piece is heard with:
+ *   • a short, properly punctuated passage of the kind of thing a preacher
+ *     says (it holds the punctuation and capitals, and primes the phrases a
+ *     sermon is made of);
+ *   • the church's own names and terms from the Word Book;
+ *   • the last sentences actually heard before this piece — a sermon picks up
+ *     mid-thought at every seam.
+ * Kept inside Whisper's 224-token prompt window (≈ 800 characters).
+ */
+const CAPTION_PRIMER = 'Praise the Lord! Shout hallelujah. Our Father, who art in heaven, hallowed be Thy name. '
+  + 'The Word of God says in the book of Matthew, chapter 6, verse 9: Jesus Christ, the Holy Spirit, the Holy Ghost. Amen.';
+const PROMPT_MAX_CHARS = 780;
+function captionPrompt({ terms = [], before = '' } = {}) {
+  let p = CAPTION_PRIMER;
+  const t = (terms || []).map((x) => String(x || '').trim()).filter(Boolean).slice(0, 40);
+  if (t.length) p += ' ' + t.join(', ') + '.';
+  const tail = String(before || '').replace(/\s+/g, ' ').trim();
+  if (tail) {
+    const room = Math.max(0, PROMPT_MAX_CHARS - p.length - 1);
+    // the END of what was said: whole words, cut at the front
+    const cut = tail.length > room ? tail.slice(tail.length - room).replace(/^\S*\s/, '') : tail;
+    p += ' ' + cut;
+  }
+  return p.slice(-PROMPT_MAX_CHARS);
+}
+/*
+ * A prompted Whisper handed music or silence can write its prompt back out as
+ * if it had heard it. A stretch whose words are a run of the primer or the
+ * Word Book list (or the context sentences, said again) is the decoder falling
+ * back on its context, not the preacher: it is dropped.
+ */
+const echoNorm = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+function isCaptionPromptEcho(segText, prompt, seg) {
+  const a = echoNorm(segText), b = echoNorm(prompt);
+  if (!a || !b) return false;
+  const words = a.split(' ');
+  if (words.length < 4 || !b.includes(a)) return false;
+  // A preacher really does say "Our Father, who art in heaven": the words alone
+  // are never enough. Only a stretch Whisper itself doubted held speech at all.
+  if (!seg) return false;
+  return (+seg.no_speech_prob || 0) >= 0.3 || (+seg.avg_logprob || 0) < -0.7 || (+seg.compression_ratio || 0) > 2.4;
+}
+
 /** One chunk to the provider. Returns its words, or throws. */
 async function postAudio(body, { timeoutMs, signal, prompt }) {
   const form = new FormData();
@@ -876,7 +962,10 @@ async function transcribeFile({ input, startSec = 0, endSec = 0, maxSec = 900, p
  * Never fatal, and never silent: the caller is told how far the cloud got and
  * why it stopped, finishes the rest on this PC, and SAYS it did.
  */
-const WORDS_CHUNK_SEC = 600;
+/* Three-minute pieces (were ten): every piece is heard with the sentences
+ * before it (captionPrompt), and a long piece let Whisper drift into a minute
+ * of no punctuation. 45 minutes is 15 requests, well inside 20 a minute. */
+const WORDS_CHUNK_SEC = 180;
 const WORDS_PAD_SEC = 3;
 const WORDS_RETRY_MAX_WAIT_MS = 65e3;   // a minute's allowance refilling is worth waiting for; an hour's is not
 
@@ -942,6 +1031,18 @@ function inSpokenOrder(words) {
   return words;
 }
 
+/** The verbose answer with any segment that is only the prompt said back removed (and its words). */
+function withoutPromptEcho(json, prompt) {
+  const segs = Array.isArray(json && json.segments) ? json.segments : [];
+  const echo = segs.filter((s) => s && isCaptionPromptEcho(s.text, prompt, s));
+  if (!echo.length) return json;
+  const inEcho = (w) => { const m = ((+w.start) + (+w.end)) / 2; return echo.some((s) => m >= (+s.start || 0) - 0.01 && m <= (+s.end || 0) + 0.01); };
+  return Object.assign({}, json, {
+    segments: segs.filter((s) => !echo.includes(s)),
+    words: (Array.isArray(json.words) ? json.words : []).filter((w) => !inEcho(w)),
+  });
+}
+
 /** How long the provider says to wait, in ms, from whichever header it sent. */
 function retryWaitMs(res) {
   const h = (n) => (res && res.headers && res.headers.get(n)) || '';
@@ -962,11 +1063,13 @@ function retryWaitMs(res) {
 }
 
 /** One piece to the provider, asking for word timings. Returns the verbose JSON, or throws. */
-async function postAudioWords(body, { timeoutMs = 180000, retry429 = true, model: asked = null } = {}) {
+async function postAudioWords(body, { timeoutMs = 180000, retry429 = true, model: asked = null, prompt = '', flac = false } = {}) {
   for (let attempt = 0; ; attempt++) {
     const form = new FormData();
     const model = asked || captionModelId();
-    form.append('file', new Blob([body], { type: 'audio/ogg' }), 'clip.ogg');
+    if (flac) form.append('file', new Blob([body], { type: 'audio/flac' }), 'clip.flac');
+    else form.append('file', new Blob([body], { type: 'audio/ogg' }), 'clip.ogg');
+    if (prompt) form.append('prompt', prompt);
     form.append('model', model);
     form.append('language', 'en');
     form.append('temperature', '0');
@@ -1034,7 +1137,7 @@ async function postAudioWords(body, { timeoutMs = 180000, retry429 = true, model
  * the end means it stopped part-way — `why` says what happened — and the
  * caller hears the rest on this PC.
  */
-async function transcribeWords({ input, startSec = 0, endSec = 0, totalSec = 0, onProgress = null, chunkSec = WORDS_CHUNK_SEC, model = null, second = false } = {}) {
+async function transcribeWords({ input, startSec = 0, endSec = 0, totalSec = 0, onProgress = null, chunkSec = WORDS_CHUNK_SEC, model = null, second = false, terms = null, plain = false } = {}) {
   if (!fileReady() || !ffmpegPath || !input) return null;
   const from = Math.max(0, +startSec || 0);
   const to = endSec > from ? +endSec : from + Math.max(0, +totalSec || 0);
@@ -1051,12 +1154,17 @@ async function transcribeWords({ input, startSec = 0, endSec = 0, totalSec = 0, 
     const b = Math.min(to, a + CH);
     const ha = Math.max(from, a - WORDS_PAD_SEC);                // …and what it hears
     const hb = Math.min(to, b + WORDS_PAD_SEC);
-    let json;
+    let json, prompt = '';
     try {
-      const body = await encodeRange(input, ha, hb - ha, 180000);
+      // `plain`: the old way (Opus, no context) — kept so the two can be measured side by side
+      const body = plain ? await encodeRange(input, ha, hb - ha, 180000) : await encodeRangeLossless(input, ha, hb - ha, 180000);
       if (!body || !body.length) { doneSec = b - from; continue; }   // no audio track: nothing to hear
       if (onProgress) { try { onProgress(Math.round(((i + 0.3) / pieces) * 100)); } catch (e) {} }
-      json = await postAudioWords(body, model ? { model } : undefined);
+      if (!plain) {
+        const said = words.slice(-60).map((w) => w.text).join(' ');
+        prompt = captionPrompt({ terms: terms || [], before: said });
+      }
+      json = await postAudioWords(body, Object.assign({ prompt, flac: !plain }, model ? { model } : {}));
     } catch (e) {
       if (e && e.cancelled) throw e;
       if (jobCancelled()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
@@ -1065,7 +1173,7 @@ async function transcribeWords({ input, startSec = 0, endSec = 0, totalSec = 0, 
       health.why = (e && e.message) || 'could not reach the speech service';
       return { words: inSpokenOrder(words), doneSec, why: health.why, model: captionModelId() };
     }
-    const got = wordsFromVerbose(json, ha - from);
+    const got = wordsFromVerbose(prompt ? withoutPromptEcho(json, prompt) : json, ha - from);
     const lo = i === 0 ? -Infinity : a - from;
     const hi = i === pieces - 1 ? Infinity : b - from;
     for (const w of got) {
@@ -1079,7 +1187,7 @@ async function transcribeWords({ input, startSec = 0, endSec = 0, totalSec = 0, 
   const heard = inSpokenOrder(words);
   // a second opinion is a plain listen: only the first one fills its gaps
   if (second) return { words: heard, doneSec: span, why: '', model: model || captionModelId() };
-  const back = await hearGapsAgain({ input, from, span, words: heard });
+  const back = await hearGapsAgain({ input, from, span, words: heard, terms: plain ? null : (terms || []) });
   return { words: back.words, doneSec: span, why: '', model: captionModelId(), reheard: back.added };
 }
 
@@ -1139,13 +1247,13 @@ function markDisagreements(a, b) {
   return doubts;
 }
 /** Hear [from,to] again with the OTHER model and mark where the two disagree. */
-async function secondOpinion({ input, from, to, words, onProgress = null }) {
+async function secondOpinion({ input, from, to, words, onProgress = null, terms = null, plain = false }) {
   const first = captionModelId();
   const other = (provider().models || []).map((m) => m.id).find((id) => id !== first && /whisper-large-v3/.test(id));
   if (!other) return { checked: false, why: 'no second model to compare with' };
   let r;
   try {
-    r = await transcribeWords({ input, startSec: from, endSec: to, onProgress, model: other, second: true });
+    r = await transcribeWords({ input, startSec: from, endSec: to, onProgress, model: other, second: true, terms, plain });
   } catch (e) {
     if (e && e.cancelled) throw e;
     return { checked: false, why: (e && e.message) || 'the second listen failed' };
@@ -1338,7 +1446,7 @@ function freshWords(got, heard, ha, hb) {
   });
 }
 
-async function hearGapsAgain({ input, from, span, words }) {
+async function hearGapsAgain({ input, from, span, words, terms = null }) {   // eslint-disable-line no-unused-vars
   const keep = { words, added: 0 };
   if (!words.length) return keep;              // nothing heard at all: music, or silence — not a gap
   let levels = null;
@@ -1442,7 +1550,7 @@ async function transcribeSegments({ input, startSec = 0, endSec = 0 } = {}) {
 }
 
 module.exports = {
-  captionModelId, secondOpinion, markDisagreements,
+  captionModelId, secondOpinion, markDisagreements, captionPrompt, isCaptionPromptEcho, withoutPromptEcho, CAPTION_PRIMER,
   _resetCaptionModel: () => { captionModelRefusedAt = 0; },
   configure, state, ready, transcribe, test, cadence,
   fileReady, transcribeFile, transcribeWords, transcribeSegments, shareKey,

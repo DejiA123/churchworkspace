@@ -12649,7 +12649,8 @@
     const evs = ve.capEvents || [];
     const idx = only != null ? [only] : (o.indexes || capScopedIndexes());
     if (!idx.length) { if (!o.auto) window.__toast && window.__toast('There are no caption lines to proof-read yet.', 'error'); return null; }
-    const lines = idx.map((i) => ({ i, text: evs[i].text }));
+    // what the second listen heard on each line goes too: a fix both agree on can be made at once
+    const lines = idx.map((i) => { const alt = altTextFor(evs[i]); return alt ? { i, text: evs[i].text, alt } : { i, text: evs[i].text }; });
     // Context for the edges: a lone line is read with the lines around it.
     const lo = idx[0], hi = idx[idx.length - 1];
     const before = [lo - 2, lo - 1].filter((k) => k >= 0 && evs[k]).map((k) => ({ i: k, text: evs[k].text }));

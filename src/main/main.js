@@ -1311,11 +1311,11 @@ ipcMain.handle('captions:engineInfo', wrap(async () => {
  * `fast: true` is still honoured (the highlights scanner asks for it), but a
  * caption that is going to be BURNED onto a video never does.
  */
-ipcMain.handle('captions:transcribe', wrap(async (e, { input, startSec, endSec, fast, denoise, model, jobId }) => {
+ipcMain.handle('captions:transcribe', wrap(async (e, { input, startSec, endSec, fast, denoise, model, plain, jobId }) => {
   const prog = onProgress(e, jobId);
   const local = model === CLOUD_CAPTIONS ? undefined : model;
   if (wantsCloudCaptions(model, fast)) {
-    const r = await cloudCaptions({ input, startSec, endSec, denoise, localModel: local, onProgress: prog });
+    const r = await cloudCaptions({ input, startSec, endSec, denoise, localModel: local, plain: !!plain, onProgress: prog });
     if (r) return r;
   }
   const res = await captioner.transcribe(getCtx(), { input, startSec, endSec, fast: !!fast, denoise, model: local, onProgress: prog });
@@ -1365,7 +1365,12 @@ function wantsCloudCaptions(model, fast) {
   if (fast || model) return false;          // an explicit PC model, or a scan
   return cloudspeech.fileReady();
 }
-async function cloudCaptions({ input, startSec, endSec, denoise, localModel, onProgress: prog }) {
+/** The church's own names and spellings (the Word Book), for the speech model to expect. */
+function captionTerms() {
+  try { return (wordbook.view().terms || []).map((t) => t && (t.text || t.term)).filter(Boolean).slice(0, 40); }
+  catch (e) { return []; }
+}
+async function cloudCaptions({ input, startSec, endSec, denoise, localModel, plain = false, onProgress: prog }) {
   if (!cloudspeech.fileReady()) return null;
   const info = await video.getInfo(getCtx(), input);
   const clip = startSec != null && endSec != null;
@@ -1384,7 +1389,7 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, onP
    * key and no speech model of its own, captions did not work at all.)
    */
   try {
-    r = await cloudspeech.transcribeWords({ input, startSec: from, endSec: to, onProgress: (p) => prog && prog(Math.round(p * 0.6)) });
+    r = await cloudspeech.transcribeWords({ input, startSec: from, endSec: to, terms: captionTerms(), plain, onProgress: (p) => prog && prog(Math.round(p * 0.6)) });
   } catch (err) {
     if (err && err.cancelled) throw new jobs.CancelledError();
     r = { words: [], doneSec: 0, why: (err && err.message) || 'could not reach the speech service' };
@@ -1425,6 +1430,7 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, onP
   if (!pcSec && book.entries.length) {
     check = await cloudspeech.secondOpinion({
       input, from, to, words: [],      // compared below, after the Word Book
+      terms: captionTerms(), plain,
       onProgress: (p) => prog && prog(60 + Math.round(p * 0.38)),
     }).catch((e) => { if (e && e.cancelled) throw new jobs.CancelledError(); return { checked: false, why: (e && e.message) || 'the second listen failed' }; });
   }
@@ -1527,12 +1533,31 @@ ipcMain.handle('captions:grammar', wrap(async (e, { lines, before, after, passag
    * because it looks deliberate. So from the smaller readers every fix waits
    * under its line as a suggestion; Claude's sure ones are still made at once.
    */
-  if (engine !== 'claude') for (const f of (out.fixes || [])) f.sure = false;
+  /*
+   * …EXCEPT WHERE THE SECOND LISTEN HEARD IT TOO. A smaller reader's fix is
+   * made at once when every word it puts in is a word the OTHER speech model
+   * heard on that same line — two independent sources, the ear and the
+   * reader, agreeing. ("who at a never" -> "who art in heaven" waits unless
+   * the second ear heard "art in heaven"; "salt" -> "shout" is made if it did.)
+   */
+  if (engine !== 'claude') for (const f of (out.fixes || [])) f.sure = !!(f.sure && heardByOtherEar(f, lines));
   const cw = cloudwrite.state();
   out.by = engine === 'claude' ? `Claude (${claudetext.model()})` : engine === 'groq' ? `${cw.providerName}${cw.usingModel ? ' — ' + cw.usingModel : ''}` : 'the AI model on this PC';
   if (out.failedBatches && !out.fixes.length) out.why = engine === 'groq' ? (cw.why || 'the AI did not answer') : 'the AI did not answer';
   return out;
 }));
+
+/** Does the second speech model's hearing of this line contain every word the fix puts in? */
+function heardByOtherEar(fix, lines) {
+  const line = (lines || []).find((l) => l && l.i === fix.i);
+  if (!line || !line.alt || !fix || !fix.text) return false;
+  const tok = (t) => String(t || '').toLowerCase().replace(/[’']/g, "'").split(/[^a-z0-9']+/).filter(Boolean);
+  const had = tok(line.text), alt = new Set(tok(line.alt));
+  const left = had.slice();
+  const added = [];
+  for (const w of tok(fix.text)) { const k = left.indexOf(w); if (k >= 0) left.splice(k, 1); else added.push(w); }
+  return added.length > 0 && added.every((w) => alt.has(w));
+}
 
 /* Optional higher-accuracy speech models (one-time download, then offline). */
 ipcMain.handle('captions:models', wrap(async () => captioner.models()));
