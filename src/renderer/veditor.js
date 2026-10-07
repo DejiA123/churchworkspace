@@ -7766,6 +7766,16 @@
     let saved = null;
     try { saved = await window.api.sessions.autosaveGet(); } catch (e) { return; }
     if (!saved || !saved.video || !saved.video.path || saved.videoMissing) return;
+    /*
+     * AN EXPORT WAS CUT OFF (iOS closed the page part-way through handing the
+     * shorts over): no card to tap — the project opens by itself and the rest
+     * of the shorts go on to the server (resumeHandover, run by applySession).
+     */
+    const h = handoverGet();
+    if (h && h.batchId && h.video === saved.video.path && Date.now() - (h.at || 0) < 6 * 3600e3) {
+      window.__toast && window.__toast('↻ Picking your export back up where it stopped…', 'good', 6000);
+      try { if (await applySession(saved)) return; } catch (e) { /* fall through to the card */ }
+    }
     const tl = saved.timeline || {};
     const shorts = Array.isArray(tl.segments) ? tl.segments.filter((s) => s && s.ai).length : 0;
     const bar = $('#veResume');
@@ -10033,7 +10043,7 @@
             if (hand) { hand.sent = (hand.sent || []).concat(s.id); hand.at = Date.now(); handoverSet(hand); }
             // a breath between shorts: a phone's browser lets go of the last
             // short's pictures before the next one starts drawing
-            await new Promise((r) => setTimeout(r, 400));
+            await new Promise((r) => setTimeout(r, 1200));
             sent++; sentHere++;
             if (window.__taskSay) window.__taskSay(task, `Handed ${sent} of ${total} to the server — it is exporting them`);
           } else {

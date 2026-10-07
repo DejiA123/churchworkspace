@@ -13,7 +13,8 @@
  *
  *   [1] a page killed after the server took short 1 — but before the phone
  *       could note it (the hardest moment)
- *   [2] Continue: the rest are handed over by themselves, into the SAME batch
+ *   [2] opened again: the project opens and the rest are handed over by themselves
+ *       (no Continue to tap), into the SAME batch
  *   [3] every short reaches the server exactly once, and the export finishes
  *   [4] nothing is left over to resume afterwards
  *   [5] Start fresh on a cut-off export seals it, so the server finishes what it got
@@ -119,13 +120,11 @@ async function until(fn, ms = 120000, every = 200) {
     const bid = before && before.batchId;
     await page.close({ runBeforeUnload: false });
 
-    console.log('\n[2] opened again → Continue');
+    console.log('\n[2] opened again — no tap needed');
     page = await studio();
-    const card = await until(() => page.evaluate(() => { const b = document.getElementById('veResume'); return b && !b.classList.contains('hidden'); }), 30000);
-    check(!!card, 'the "Continue editing" card is there');
-    await page.evaluate(() => window.VideoEditor.__test.resumeClick('yes'));
     const toast = await until(() => page.evaluate(() => /Carrying on with your export/.test(document.body.textContent) ? (document.body.textContent.match(/Carrying on with your export[^.]*\./) || [''])[0] : null), 30000);
-    check(!!toast, 'it says it is carrying on with the export by itself', toast);
+    check(!!toast, 'the project opens by itself and the export carries on', toast);
+    check(await page.evaluate(() => { const b = document.getElementById('veResume'); return !b || b.classList.contains('hidden'); }), 'no "Continue editing" card to tap');
 
     console.log('\n[3] every short reaches the server exactly once');
     const fin = await until(() => page.evaluate(async (id) => {
