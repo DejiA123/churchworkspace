@@ -1717,7 +1717,7 @@ async function planWholeSermon(opts, { totalDur, OFF, snap, minLen, maxLen, idea
       contentScore: contentScoreV2(m.text, m.sents),
     };
   });
-  return { picked, meta: { sections: res.sections, found: res.found, failed: res.failed, sentences: sents.length } };
+  return { picked, meta: { sections: res.sections, found: res.found, failed: res.failed, edgesMoved: res.edgesMoved || 0, sentences: sents.length } };
 }
 
 /** Make a short human label from the clip's transcript (first few meaningful words). */

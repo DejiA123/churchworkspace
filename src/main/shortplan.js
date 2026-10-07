@@ -30,8 +30,11 @@
  * uses the loudness scan, as before).
  */
 
-const SECTION_WORDS = 2000;
-const OVERLAP_SENTS = 10;
+// About eight minutes of preaching a section: measured, sections of ~2,000
+// words came back with two moments each — eight from 45 minutes, and the core
+// point of the sermon among those left out.
+const SECTION_WORDS = 1300;
+const OVERLAP_SENTS = 8;
 
 // openings that are never the start of a thought
 const FILLER_OPEN_RX = /^(?:(?:huh|hmm+|oh|ah|uh|um|okay|ok|yes|yeah|no|alright|all right|right|amen|hallelujah|come on|you know|so|well|and|thank you|praise the lord|praise god|glory)[\s.,!?…-]*)+$/i;
@@ -64,7 +67,7 @@ function promptFor(sents, [a, b], { minLen, maxLen, idealLen }) {
 
 ${lines.join('\n')}
 
-Find EVERY moment in this part that would work as a standalone short video: a complete thought someone who never heard the rest of the sermon would understand and remember — a teaching point, a declaration, a story WITH its point, a powerful line and what leads to it. Usually 2 to 6 moments in a part this size. Do not skip a strong point because it is said quietly.
+Find EVERY moment in this part that would work as a standalone short video: a complete thought someone who never heard the rest of the sermon would understand and remember — a teaching point, a declaration, a story WITH its point, a powerful line and what leads to it. A part this size usually has 3 to 6 such moments; list them all, even the good-but-not-best ones (they are chosen from later). Do not skip a point because it is said quietly or simply — the main teaching of the sermon is often said calmly.
 
 For each moment:
 - "from": the number of the sentence where the thought STARTS. Never start on a filler ("Huh?", "Oh yes, yes", "Okay", "Amen"), on the preacher chatting with someone in the room ("How are you? You're looking so good"), on an announcement, or in the middle of a story or a list. If the line before is needed to understand it, start there.
@@ -103,8 +106,10 @@ function vet(m, sents, [a, b], { minLen, maxLen }) {
   // ("Let me be serious. A pastor has to… Faithful, how are you?")
   for (let k = from; k <= Math.min(to - 1, from + 2); k++) if (ASIDE_RX.test(sents[k].text)) from = k + 1;
   while (from < to && (FILLER_OPEN_RX.test(sents[from].text.trim()) || ASIDE_RX.test(sents[from].text) || words(sents[from].text) <= 1)) from++;
-  // no closing on the first line of something new, a filler, or a lone word
-  while (to > from && (NEW_STORY_RX.test(sents[to].text) || FILLER_OPEN_RX.test(sents[to].text.trim()) || words(sents[to].text) <= 1)) to--;
+  // no closing on the first line of something new, a filler, a lone word, or
+  // the short question that opens the NEXT point ("Where did you see Jesus?")
+  const setupQ = (t) => /\?\s*$/.test(t) && words(t) <= 7 && /^(where|what|how|who|why|when|which|do you|did you|have you|are you|is it)\b/i.test(t.trim());
+  while (to > from && (NEW_STORY_RX.test(sents[to].text) || FILLER_OPEN_RX.test(sents[to].text.trim()) || words(sents[to].text) <= 1 || setupQ(sents[to].text))) to--;
   // too long: the payoff is kept and the run-up shortened
   while (dur() > maxLen * 1.08 && from < to) from++;
   if (dur() > maxLen * 1.08) return null;
@@ -141,6 +146,68 @@ function choose(moments, maxClips, secs, gap = 2) {
     if (!chosen.includes(m) && m.strength >= 4 && fits(m)) chosen.push(m);
   }
   return chosen.sort((x, y) => x.start - y.start);
+}
+
+/*
+ * ►► THE EDGES, LOOKED AT AGAIN. ◄◄
+ * Reading eight minutes at once, the model marks the right MOMENTS but now and
+ * then stops one sentence short of the payoff (measured: "…people who have
+ * spent 30 millions on a child." — the landing, "That can be easily corrected
+ * by a supply of the healing virtue of Jesus", was the next line). So every
+ * chosen short's two edges are shown to it on their own — the lines around the
+ * start, the lines around the end, numbered — and it says where the thought
+ * really starts and where its point really lands. One call for all of them.
+ */
+function edgePrompt(items) {
+  const blocks = items.map((it) => {
+    const s = it.startLines.map(([n, t]) => `  [${n}] ${t}`).join('\n');
+    const e = it.endLines.map(([n, t]) => `  [${n}] ${t}`).join('\n');
+    return `Short ${it.id} — "${it.title}" (now starts at [${it.from}], ends at [${it.to}])\nAround the START:\n${s}\nAround the END:\n${e}`;
+  });
+  const system = 'You are the best short-form video editor for sermons. You decide exactly where a short starts and ends. You reply with JSON only.';
+  const prompt = `Each short below is a moment cut from a sermon. For each, you see the numbered sentences around where it starts and around where it ends.
+
+${blocks.join('\n\n')}
+
+For every short choose:
+- "from": the sentence where the thought really STARTS — not mid-story, not on a filler or an aside to someone in the room, and not so early that it begins with the end of the previous point.
+- "to": the sentence where its point really LANDS — the payoff that makes it worth sharing. If the point is completed one or two sentences after the current end, end there. Never end on the first line of a new story or point, or on a question that opens the next point.
+Use only the sentence numbers shown. Reply with only: {"edges":[{"id":1,"from":0,"to":0}]}`;
+  return { system, prompt };
+}
+async function refineEdges(moments, S, { ask, minLen, maxLen, retryWaits }) {
+  if (!moments.length) return 0;
+  const items = moments.map((m, k) => {
+    const sl = [], el = [];
+    for (let n = Math.max(0, m.from - 3); n <= Math.min(S.length - 1, m.from + 2); n++) sl.push([n, S[n].text]);
+    for (let n = Math.max(0, m.to - 2); n <= Math.min(S.length - 1, m.to + 4); n++) el.push([n, S[n].text]);
+    return { id: k + 1, title: m.title, from: m.from, to: m.to, startLines: sl, endLines: el, sMin: sl[0][0], sMax: sl[sl.length - 1][0], eMin: el[0][0], eMax: el[el.length - 1][0] };
+  });
+  const { system, prompt } = edgePrompt(items);
+  let j = null;
+  for (let attempt = 0; ; attempt++) {
+    let out = '';
+    try { out = await ask({ system, prompt, maxTokens: 2500 }); } catch (e) { if (e && e.cancelled) throw e; out = ''; }
+    const s = String(out || ''); const a = s.indexOf('{'), b = s.lastIndexOf('}');
+    if (a >= 0 && b > a) { try { j = JSON.parse(s.slice(a, b + 1)); } catch (e) { j = null; } }
+    if ((j && Array.isArray(j.edges)) || attempt >= retryWaits.length) break;
+    await new Promise((r) => setTimeout(r, retryWaits[attempt]));
+  }
+  if (!j || !Array.isArray(j.edges)) return 0;
+  let moved = 0;
+  for (const e of j.edges) {
+    const it = items.find((x) => x.id === Math.round(+e.id));
+    if (!it) continue;
+    const m = moments[it.id - 1];
+    const from = Math.round(+e.from), to = Math.round(+e.to);
+    if (!(from >= it.sMin && from <= it.sMax && to >= it.eMin && to <= it.eMax && to > from)) continue;
+    if (from === m.from && to === m.to) continue;
+    const v = vet({ from, to, title: m.title, point: m.point, strength: m.strength }, S, [Math.min(it.sMin, m.from), Math.max(it.eMax, m.to)], { minLen, maxLen });
+    if (!v) continue;
+    Object.assign(m, { from: v.from, to: v.to, start: v.start, end: v.end });
+    moved++;
+  }
+  return moved;
 }
 
 /**
@@ -185,11 +252,20 @@ async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, max
     const dup = uniq.find((u) => overlaps(u, m) && Math.min(u.end, m.end) - Math.max(u.start, m.start) > 0.5 * Math.min(u.end - u.start, m.end - m.start));
     if (!dup) uniq.push(m);
   }
-  const moments = choose(uniq, maxClips, secs).map((m) => Object.assign(m, {
+  const picked = choose(uniq, maxClips, secs);
+  let edgesMoved = 0;
+  try { edgesMoved = await refineEdges(picked, S, { ask, minLen, maxLen, retryWaits }); } catch (e) { if (e && e.cancelled) throw e; }
+  // an edge that moved may now touch a neighbour: the later one gives way at the seam
+  picked.sort((x, y) => x.start - y.start);
+  for (let k = 1; k < picked.length; k++) {
+    const p = picked[k - 1], m = picked[k];
+    if (m.from <= p.to) { m.from = p.to + 1; if (m.from <= m.to) m.start = S[m.from].start; }
+  }
+  const moments = picked.filter((m) => m.from <= m.to).map((m) => Object.assign(m, {
     sents: S.slice(m.from, m.to + 1),
     text: S.slice(m.from, m.to + 1).map((s) => s.text).join(' ').replace(/\s+/g, ' ').trim(),
   }));
-  return { moments, sections: secs.length, failed, found: uniq.length };
+  return { moments, sections: secs.length, failed, found: uniq.length, edgesMoved };
 }
 
-module.exports = { planShorts, sections, parseMoments, vet, choose, promptFor, _rx: { FILLER_OPEN_RX, ASIDE_RX, NEW_STORY_RX } };
+module.exports = { planShorts, sections, parseMoments, vet, choose, promptFor, refineEdges, edgePrompt, _rx: { FILLER_OPEN_RX, ASIDE_RX, NEW_STORY_RX } };

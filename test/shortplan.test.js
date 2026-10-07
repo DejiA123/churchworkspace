@@ -25,7 +25,7 @@ S[330].text = 'There is no prosperity gospel, there is only one gospel.';
 (async () => {
   console.log('\n[1] the sermon is read in overlapping sections');
   const secs = P.sections(S);
-  check('a 60-minute sermon is several sections of ~2,000 words', secs.length >= 3 && secs.length <= 6, secs.length);
+  check('a 60-minute sermon is read in sections of about eight minutes', secs.length >= 5 && secs.length <= 10, secs.length);
   check('…that overlap, so a moment on a seam is seen whole', secs.every((s, i) => i === 0 || s[0] <= secs[i - 1][1]), secs);
   check('…and cover every sentence', secs[0][0] === 0 && secs[secs.length - 1][1] === S.length - 1);
 
@@ -40,6 +40,9 @@ S[330].text = 'There is no prosperity gospel, there is only one gospel.';
   check('an aside to someone in the room is not where a short starts', c && c.from === 203, c);
   const d = P.vet({ from: 300, to: 340, title: 'x', strength: 9 }, S, sec, band);
   check('too long: the payoff is kept, the run-up shortened', d && d.to === 340 && d.end - d.start <= 150 * 1.08, d && { from: d.from, to: d.to, dur: d.end - d.start });
+  S[150].text = 'Where did you see Jesus?';
+  const q = P.vet({ from: 136, to: 150, title: 'x', strength: 7 }, S, sec, band);
+  check('an ending on the short question that opens the next point stops before it', q && q.to === 149, q);
   check('too short and not strong: left out', P.vet({ from: 50, to: 52, strength: 5 }, S, sec, band) === null);
   check('short but one of the strongest: kept', !!P.vet({ from: 330, to: 334, strength: 9 }, S, sec, band));
   check('a title is tidied ("…" quotes and the full stop go)', P.vet({ from: 330, to: 345, title: '"There is only one gospel."', strength: 9 }, S, sec, band).title === 'There is only one gospel');
@@ -51,18 +54,29 @@ S[330].text = 'There is no prosperity gospel, there is only one gospel.';
   console.log('\n[4] the whole plan: every section\'s best point first, nothing overlapping');
   const asked = [];
   let flaky = 1;
+  let edgeAsked = 0, edgeIds = 0;
   const fake = async ({ prompt }) => {
+    if (/Around the START/.test(prompt)) {
+      edgeAsked++;
+      // the payoff of "There is only one gospel" lands one sentence later than first marked
+      const ids = [...prompt.matchAll(/^Short (\d+) — "([^"]*)" \(now starts at \[(\d+)\], ends at \[(\d+)\]\)/gm)];
+      edgeIds = ids.length;
+      return JSON.stringify({ edges: ids.map((m) => ({ id: +m[1], from: +m[3], to: m[2] === 'There is only one gospel' ? +m[4] + 1 : +m[4] })) });
+    }
     asked.push(prompt.length);
     if (flaky-- > 0) return '';              // the free allowance said no once
     const nums = [...prompt.matchAll(/^\[(\d+)\]/gm)].map((m) => +m[1]);
     const lo = nums[0], hi = nums[nums.length - 1];
     const out = [];
     for (let f = lo + 3; f + 18 < hi; f += 40) out.push({ from: f, to: f + 15, title: `Moment at ${f}`, point: 'p', strength: f === 333 ? 10 : 6 + (f % 3) });
-    if (lo <= 330 && hi >= 345) out.push({ from: 330, to: 344, title: 'There is only one gospel', point: 'one gospel', strength: 10 });
+    if (lo <= 330 && hi >= 346) out.push({ from: 330, to: 344, title: 'There is only one gospel', point: 'one gospel', strength: 10 });
     return JSON.stringify({ moments: out });
   };
   const r = await P.planShorts({ sents: S, maxClips: 12, ask: fake, retryWaits: [5, 5, 5] });
   check('a section the allowance turned away is asked again', r && r.failed === 0 && asked.length === secs.length + 1, { asked: asked.length, secs: secs.length, failed: r && r.failed });
+  check('every chosen short\'s edges are looked at again, in one call', edgeAsked === 1 && edgeIds === r.moments.length, { edgeAsked, edgeIds });
+  const og = r.moments.find((m) => m.title === 'There is only one gospel');
+  check('…and an ending one sentence short of the payoff is moved onto it', og && og.to === 345 && r.edgesMoved >= 1, og && { to: og.to, moved: r.edgesMoved });
   check('12 shorts chosen', r && r.moments.length === 12, r && r.moments.length);
   const ov = r.moments.some((m, i) => i && m.start < r.moments[i - 1].end);
   check('none overlap, in order', !ov);
