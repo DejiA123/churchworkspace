@@ -757,12 +757,30 @@ ipcMain.handle('machine:info', wrap(async () => {
 const montage = require('./montage');
 const phonecopy = require('./phonecopy');
 ipcMain.handle('montage:status', wrap(async () => montage.directorStatus()));
-ipcMain.handle('montage:create', wrap(async (e, { mediaPaths, musicPath, style, lengthSec, full, aspect, brief, keepAudio, keepOrder, jobId }) => {
+/* The talk edit's ears: every word of a video, from the cloud (Groq's Whisper)
+ * or, without it, this server's own speech model — through the Word Book. */
+async function montageHear(file, durationSec, onProgress) {
+  if (cloudspeech.fileReady()) {
+    let r = null;
+    try { r = await cloudspeech.transcribeWords({ input: file, startSec: 0, endSec: durationSec, onProgress }); } catch (err) {
+      if (err && err.cancelled) throw new jobs.CancelledError();
+      r = null;
+    }
+    if (r && r.words && r.words.length && r.doneSec >= durationSec - 0.5) return wordbook.apply(r.words).entries;
+  }
+  if (captioner.isAvailable()) {
+    const r = await captioner.transcribe(getCtx(), { input: file, startSec: 0, endSec: durationSec, onProgress });
+    return wordbook.apply((r && r.words) || []).entries;
+  }
+  return [];
+}
+ipcMain.handle('montage:create', wrap(async (e, { mediaPaths, musicPath, style, lengthSec, full, aspect, brief, keepAudio, keepOrder, mode, jobId }) => {
   const output = outPath(`montage-${stamp()}.mp4`);
   let pct = 0, stageName = '';
   const tell = () => { if (jobId && e && !e.sender.isDestroyed()) e.sender.send('job:progress', { jobId, percent: pct, stage: stageName }); };
   const made = await montage.make(getCtx(), video.getInfo, {
     mediaPaths, musicPath, style, lengthSec, full, aspect, brief, keepAudio, keepOrder, output,
+    mode: mode === 'talk' ? 'talk' : undefined, hear: montageHear,
     onProgress: (p) => { pct = p; tell(); },
     stage: (name) => { stageName = name; tell(); },
     log: (m) => console.warn('[montage]', m),

@@ -1210,7 +1210,17 @@
    * the words as text boxes, so captions, restyling and export are the studio's
    * own — nothing here re-invents them.
    */
-  const MT = { items: [], song: null, songFile: null, style: 'hype', len: 30, custom: 120, aspect: '9:16', keep: true, brief: '', busy: false, order: 'ai', caps: true };
+  const MT = { items: [], song: null, songFile: null, style: 'hype', len: 30, custom: 120, aspect: '9:16', keep: true, brief: '', busy: false, order: 'ai', caps: true, mode: 'music' };
+  /*
+   * ►► TWO KINDS OF EDIT. ◄◄ A music montage is cut from what the clips LOOK
+   * like, to a song. A viral talk edit is cut from what is SAID: the AI hears
+   * every video, picks the strongest lines from any of them, puts the hook
+   * first and builds the story, then cuts it with jump zooms, a cinematic
+   * grade, B-roll from the photos and captions lit up word by word
+   * (montage.js makeTalk).
+   */
+  const MT_MODES = [['music', '🎵 Music montage'], ['talk', '🔥 Viral talk edit']];
+  const MT_TALK_LENS = [[15, '15s'], [30, '30s'], [45, '45s'], [60, '60s'], ['custom', 'Custom']];
   const MT_ORDERS = [['ai', '✨ AI decides'], ['mine', '📌 My order']];
   const MT_STYLES = [['hype', 'Hype'], ['worship', 'Worship'], ['emotional', 'Emotional'], ['cinematic', 'Cinematic'], ['fun', 'Fun']];
   const MT_LENS = [['all', 'Use everything'], [15, '15s'], [30, '30s'], [45, '45s'], [60, '60s'], ['custom', 'Custom']];
@@ -1242,40 +1252,49 @@
     const chips = (list, cur, key) => list.map(([v, label]) => `<button type="button" class="mt-chip${String(cur) === String(v) ? ' on' : ''}" data-mt-${key}="${attr(v)}">${esc(label)}</button>`).join('');
     const openPath = window.VideoEditor && (window.VideoEditor.montagePath || window.VideoEditor.currentPath) ? (window.VideoEditor.montagePath || window.VideoEditor.currentPath)() : null;
     const openIsMontage = !!openPath && /(^|[\\/])montage-[^\\/]*\.mp4$/i.test(openPath);
+    const talk = MT.mode === 'talk';
+    if (talk && MT.len === 'all') MT.len = 45;
+    const nVid = MT.items.filter((it) => it.kind === 'video').length;
+    const ready = talk ? nVid >= 1 : MT.items.length >= 2;
     p.body.innerHTML = `
+      <section class="mt-sec"><h3>What kind of edit?</h3><div class="mt-row">${chips(MT_MODES, MT.mode, 'mode')}</div>
+        <small class="mt-hint">${talk
+    ? 'Add one or more videos of someone speaking. The AI listens to every word, picks the lines that stop the scroll — from any of the videos — puts the strongest first and builds the story, then cuts it with jump zooms, a cinematic look, flashes, B-roll from your photos and captions lit up word by word.'
+    : 'Clips and photos cut to music — the AI picks the best-looking moments and cuts them on the beat.'}</small></section>
       ${openIsMontage ? `<button type="button" class="me-banner" data-mt-rearrange>✏️ <span><b>Rearrange the montage that’s open</b><small>Move clips and photos, then remake it</small></span></button>` : ''}
       <p class="mt-lead">${mi('sparkles')} ${brain}</p>
-      <section class="mt-sec"><h3>Your clips &amp; photos <small>${MT.items.length ? MT.items.length + ' added' : 'add 2 or more'}</small></h3>
+      <section class="mt-sec"><h3>${talk ? 'Your videos' : 'Your clips &amp; photos'} <small>${MT.items.length ? MT.items.length + ' added' : talk ? 'add 1 or more videos (photos become B-roll)' : 'add 2 or more'}</small></h3>
         <div class="mt-grid${MT.order === 'mine' ? ' mt-ordered' : ''}">${MT.items.map((it, i) => `<div class="mt-tile" data-i="${i}">${it.kind === 'image'
           ? `<img src="${attr(it.url)}" alt="" draggable="false" />` : (it.poster ? `<img src="${attr(it.poster)}" alt="" draggable="false" />` : '<span class="mt-load"></span>') + `<span class="mt-dur">▶${it.secs ? ' ' + Math.floor(it.secs / 60) + ':' + String(Math.round(it.secs % 60)).padStart(2, '0') : ''}</span>`}
           ${MT.order === 'mine' ? `<span class="mt-num">${i + 1}</span>` : ''}
           <button type="button" class="mt-x" data-mt-del="${i}" aria-label="Remove">✕</button></div>`).join('')}
           <button type="button" class="mt-add" data-mt="add">${mi('plus')}<span>Add</span></button></div>
       </section>
-      <section class="mt-sec"><h3>Order</h3><div class="mt-row">${chips(MT_ORDERS, MT.order, 'order')}</div>
+      <section class="mt-sec"${talk ? ' hidden' : ''}><h3>Order</h3><div class="mt-row">${chips(MT_ORDERS, MT.order, 'order')}</div>
         <small class="mt-hint">${MT.order === 'mine' ? 'The clips play in this order. Hold a tile and drag it to move it — a photo goes over the video before it.' : 'The AI puts the strongest moment first and orders the rest for the story. Hold and drag a tile to set your own order.'}</small></section>
-      <section class="mt-sec"><h3>Music</h3>
+      <section class="mt-sec"><h3>${talk ? 'Background music <small>optional — quietly under the voice</small>' : 'Music'}</h3>
         <div class="mt-songs">
           <button type="button" class="mt-chip${!MT.song && !MT.songFile ? ' on' : ''}" data-mt-song="">No music</button>
           <button type="button" class="mt-chip mt-upsong${MT.songFile ? ' on' : ''}" data-mt="song">🎵 ${MT.songFile ? esc(MT.songFile.name.slice(0, 26)) : 'Add your song'}</button>
           ${MT.lib.slice(0, 12).map((m) => `<button type="button" class="mt-chip${MT.song && MT.song.id === m.id ? ' on' : ''}" data-mt-song="${attr(m.id)}">${esc(String(m.name || 'song').slice(0, 26))}</button>`).join('')}
         </div>
-        <label class="mt-toggle"><input type="checkbox" id="mtKeep" ${MT.keep ? 'checked' : ''}/> <span>Keep the clips’ own sound${MT.song || MT.songFile ? ' under the music' : ''}</span></label>
+        <label class="mt-toggle"${talk ? ' hidden' : ''}><input type="checkbox" id="mtKeep" ${MT.keep ? 'checked' : ''}/> <span>Keep the clips’ own sound${MT.song || MT.songFile ? ' under the music' : ''}</span></label>
       </section>
       <section class="mt-sec"><h3>Style</h3><div class="mt-row">${chips(MT_STYLES, MT.style, 'style')}</div></section>
-      <section class="mt-sec"><h3>Length</h3><div class="mt-row">${chips(MT_LENS, MT.len, 'len')}</div>
+      <section class="mt-sec"><h3>Length</h3><div class="mt-row">${chips(talk ? MT_TALK_LENS : MT_LENS, MT.len, 'len')}</div>
         ${MT.len === 'custom' ? `<div class="mt-custom"><label><input type="number" id="mtMin" inputmode="numeric" min="0" max="10" value="${Math.floor(MT.custom / 60)}" /><span>min</span></label>
           <label><input type="number" id="mtSec" inputmode="numeric" min="0" max="59" step="5" value="${MT.custom % 60}" /><span>sec</span></label></div>` : ''}
-        <small class="mt-hint">${MT.len === 'custom' ? 'Any length from 8 seconds to 10 minutes — the AI builds a longer piece in sections, each rising and landing.' : MT.len === 'all' ? 'Nothing is cut out: every clip plays in full and every photo gets its moment — the AI orders them and blends them together with fades, flashes and cuts on the beat.' : 'The AI picks the best moments to fit this length.'}</small></section>
+        <small class="mt-hint">${talk ? 'About this much speech — the AI keeps every line whole, so it can land a little over or under.' : MT.len === 'custom' ? 'Any length from 8 seconds to 10 minutes — the AI builds a longer piece in sections, each rising and landing.' : MT.len === 'all' ? 'Nothing is cut out: every clip plays in full and every photo gets its moment — the AI orders them and blends them together with fades, flashes and cuts on the beat.' : 'The AI picks the best moments to fit this length.'}</small></section>
       <section class="mt-sec"><h3>Shape</h3><div class="mt-row">${chips(MT_ASPECTS.map(([v, l]) => [v, v + ' · ' + l]), MT.aspect, 'aspect')}</div></section>
       <section class="mt-sec"><h3>Words on screen</h3>
-        <label class="mt-toggle"><input type="checkbox" id="mtCaps" ${MT.caps ? 'checked' : ''}/> <span>💬 Captions of what’s said, added automatically</span></label>
-        <small class="mt-hint">The AI also writes a hook, story lines and a closing line, styled to match — tell it the story below.</small></section>
+        ${talk ? '<p class="mt-hint">💬 Captions of every word, lit up as it’s said, are always on — plus a headline hook at the top. You can restyle both in the studio.</p>'
+    : `<label class="mt-toggle"><input type="checkbox" id="mtCaps" ${MT.caps ? 'checked' : ''}/> <span>💬 Captions of what’s said, added automatically</span></label>
+        <small class="mt-hint">The AI also writes a hook, story lines and a closing line, styled to match — tell it the story below.</small>`}</section>
       <section class="mt-sec"><h3>What’s it about? <small>optional</small></h3>
         <textarea id="mtBrief" class="mt-brief" rows="2" maxlength="400" placeholder="e.g. Youth camp 2026 — three days of worship, games and baptisms">${esc(MT.brief)}</textarea></section>
       <input type="file" id="mtPick" accept="video/*,image/*" multiple hidden />
       <input type="file" id="mtSong" accept="audio/*,.mp3,.m4a,.wav,.aac" hidden />`;
-    p.foot.innerHTML = `<button type="button" class="mt-go" data-mt="go"${MT.items.length < 2 ? ' disabled' : ''}>${mi('sparkles')} Make my montage</button>`;
+    p.foot.innerHTML = `<button type="button" class="mt-go" data-mt="go"${ready ? '' : ' disabled'}>${mi('sparkles')} ${talk ? 'Make my viral edit' : 'Make my montage'}</button>`;
     if (!p._wired) { p._wired = true; mtWire(p); }
   }
 
@@ -1286,10 +1305,11 @@
         C.closePanel(p, true);
         return editMontage(op);
       }
-      const b = e.target.closest('[data-mt],[data-mt-del],[data-mt-song],[data-mt-style],[data-mt-len],[data-mt-aspect],[data-mt-order]');
+      const b = e.target.closest('[data-mt],[data-mt-del],[data-mt-song],[data-mt-style],[data-mt-len],[data-mt-aspect],[data-mt-order],[data-mt-mode]');
       if (!b || MT.busy || mtDrag.just) return;
       const d = b.dataset;
       if (d.mtOrder) { MT.order = d.mtOrder; return mtPaint(); }
+      if (d.mtMode) { MT.mode = d.mtMode; if (MT.mode === 'talk' && (MT.len === 'all' || MT.len === 30)) MT.len = 45; return mtPaint(); }
       if (d.mtDel != null) { const it = MT.items.splice(+d.mtDel, 1)[0]; if (it) URL.revokeObjectURL(it.url); return mtPaint(); }
       if (d.mtSong != null) { MT.song = d.mtSong ? MT.lib.find((m) => m.id === d.mtSong) || null : null; MT.songFile = null; return mtPaint(); }
       if (d.mtStyle) { MT.style = d.mtStyle; return mtPaint(); }
@@ -1430,7 +1450,8 @@
   }
 
   async function mtMake() {
-    if (MT.items.length < 2) return;
+    const talk = MT.mode === 'talk';
+    if (talk ? !MT.items.some((it) => it.kind === 'video') : MT.items.length < 2) return;
     MT.busy = true;
     const jobId = 'mt' + Date.now().toString(36);
     let off = null;
@@ -1464,18 +1485,21 @@
       const res = await window.api.montage.create({
         mediaPaths: paths, musicPath: song ? song.file : null, style: MT.style,
         lengthSec: MT.len === 'all' ? 0 : MT.len === 'custom' ? MT.custom : MT.len, full: MT.len === 'all',
-        aspect: MT.aspect, brief: MT.brief, keepAudio: MT.keep, keepOrder: MT.order === 'mine', jobId,
+        aspect: MT.aspect, brief: MT.brief, keepAudio: talk ? true : MT.keep, keepOrder: !talk && MT.order === 'mine', jobId,
+        mode: talk ? 'talk' : undefined,
       });
       if (off) off();
       MT.busy = false;
       mtProgress('Opening it in the studio…', 100, ' ');
       go('studio');
-      await window.VideoEditor.applyMontage({ output: res.output, base: res.base, overlays: res.overlays, music: song, musicVolume: MT.keep ? 0.7 : 1, texts: res.texts, style: res.style || MT.style, captions: MT.caps && MT.keep, cuts: res.cuts });
+      await window.VideoEditor.applyMontage(talk
+        ? { output: res.output, base: res.base, overlays: res.overlays, music: song, musicVolume: 0.16, musicDuck: true, texts: res.texts, style: res.style || MT.style, words: res.words, talk: true, cuts: res.cuts }
+        : { output: res.output, base: res.base, overlays: res.overlays, music: song, musicVolume: MT.keep ? 0.7 : 1, texts: res.texts, style: res.style || MT.style, captions: MT.caps && MT.keep, cuts: res.cuts });
       res.song = song || null;
       C.closePanel(MT.panel, true);
       mtRelease();
       MT.items = []; MT.brief = '';
-      res.autoCaps = MT.caps && MT.keep;
+      res.autoCaps = talk ? 'talk' : MT.caps && MT.keep;
       mtResult(res);
     } catch (e) {
       if (off) off();
@@ -1492,9 +1516,9 @@
     const tags = (res.hashtags || []).map((h) => '#' + h).join(' ');
     const caption = [res.postCaption, tags].filter(Boolean).join('\n\n');
     const p = C.openPanel({ id: 'cloudMontageDone', title: res.title || 'Your montage', cls: 'cp-montage' });
-    p.body.innerHTML = `<p class="mt-lead">${mi('check')} ${C.esc(Math.round(res.duration))}s · ${C.esc(String((res.shots || []).length))} shots${res.bpm ? ' · cut to ' + C.esc(String(Math.round(res.bpm))) + ' BPM' : ''}</p>
+    p.body.innerHTML = `<p class="mt-lead">${mi('check')} ${C.esc(Math.round(res.duration))}s · ${res.mode === 'talk' ? C.esc(String(res.lines || 0)) + ' lines, ' : ''}${C.esc(String((res.shots || []).length))} ${res.mode === 'talk' ? 'cuts' : 'shots'}${res.bpm ? ' · cut to ' + C.esc(String(Math.round(res.bpm))) + ' BPM' : ''}</p>
       ${res.concept ? `<p class="mt-concept">${C.esc(res.concept)}</p>` : ''}
-      <p class="mt-tip">It’s open in the studio now${res.texts && res.texts.length ? ' — the words on screen are text boxes, tap one to change it' : ''}. ${res.autoCaps ? 'Captions of what’s said are being added by themselves — they go into the export.' : 'Add captions from the 💬 Captions tool.'} Change the music volume in Audio, then export as usual.</p>
+      <p class="mt-tip">It’s open in the studio now${res.texts && res.texts.length ? ' — the words on screen are text boxes, tap one to change it' : ''}. ${res.autoCaps === 'talk' ? 'The captions are on, every word lit up as it’s said, and go into the export — tap 💬 Captions to change their look.' : res.autoCaps ? 'Captions of what’s said are being added by themselves — they go into the export.' : 'Add captions from the 💬 Captions tool.'} Change the music volume in Audio, then export as usual.</p>
       ${caption ? `<section class="mt-sec"><h3>Post caption</h3><textarea class="mt-brief" rows="4" readonly>${C.esc(caption)}</textarea>
         <button type="button" class="mt-chip on" data-mt-copy>Copy caption</button></section>` : ''}`;
     p.foot.innerHTML = `<div class="mt-foot2">${res.project ? '<button type="button" class="mt-edit" data-mt-shots>✏️ Rearrange shots &amp; photos</button>' : ''}<button type="button" class="mt-go" data-mt-ok>Start editing</button></div>`;

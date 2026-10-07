@@ -1085,6 +1085,9 @@ function effectChain(effect, W, H, dur, t0 = 0) {
     case 'slow_zoom': return sc(`1+0.09*${T}/${dur.toFixed(2)}`);
     case 'zoom_out': return sc(`1.1-0.1*${T}/${dur.toFixed(2)}`);
     case 'flash': return t0 ? '' : 'fade=t=in:st=0:d=0.18:color=white';
+    // the talk edit's jump zooms: the same speaker, framed closer, cut to on a word
+    case 'hold_in': return sc('1.12');
+    case 'hold_tight': return sc('1.24');
     default: return '';
   }
 }
@@ -1201,7 +1204,7 @@ async function renderPiece(ctx, s, W, H, keepAudio, out, next, { overlay = null,
   } else {
     args.push('-ss', String(s.from), '-t', String(s.need + 0.1), ...decodeOpts(c, W, H), '-i', c.file);
     const fx = effectChain(s.effect, W, H, effectDur || dur, t0);
-    base = `[0:v]${s.slow ? 'setpts=2.0*PTS,' : ''}${fitChain(c, W, H, s.focus, 1, 'b')}${fx ? ',' + fx : ''},fps=${FPS}`;
+    base = `[0:v]${s.slow ? 'setpts=2.0*PTS,' : ''}${fitChain(c, W, H, s.focus, 1, 'b')}${fx ? ',' + fx : ''}${s.grade ? ',' + s.grade : ''},fps=${FPS}`;
   }
   let graph;
   let nextInput = 1;
@@ -1350,7 +1353,7 @@ function pieceKey(s, next, W, H, keepAudio) {
   const c = s.cand;
   return crypto.createHash('sha1').update(JSON.stringify({
     v: 3, f: c.file, sig: fileSig(c.file), k: c.kind, w: c.w, h: c.h, a: !!c.hasAudio,
-    sec: s.seconds, from: s.from, need: s.need, e: s.effect, fo: s.focus, sl: !!s.slow, tr: s.transition, nt: next ? next.transition : null,
+    sec: s.seconds, from: s.from, need: s.need, e: s.effect, fo: s.focus, sl: !!s.slow, tr: s.transition, nt: next ? next.transition : null, gr: s.grade || null,
     ov: (s.overlays || []).map((o) => [o.cand.file, fileSig(o.cand.file), o.cand.kind, o.cand.w, o.cand.h, o.style, o.start, o.len, o.pos, o.from]),
     W, H, keepAudio: !!keepAudio, enc: encodeOpts(),
   })).digest('hex');
@@ -1409,7 +1412,7 @@ function projectOf(plan, cands, { aspect, keepAudio, style, full }, meta = {}) {
     cands: C,
     shots: plan.shots.map((s) => ({
       cid: s.cand.id, seconds: s.seconds, from: s.from == null ? null : s.from, need: s.need == null ? null : s.need,
-      effect: s.effect, focus: s.focus, slow: !!s.slow, transition: s.transition,
+      effect: s.effect, focus: s.focus, slow: !!s.slow, transition: s.transition, grade: s.grade || null,
       overlays: (s.overlays || []).map((o) => ({ cid: o.cand.id, style: o.style, start: o.start, len: o.len, pos: o.pos, from: o.from == null ? null : o.from })),
     })),
     texts: (plan.texts || []).map((t) => {
@@ -1460,7 +1463,7 @@ async function remake(ctx, { project, edits, output, onProgress, stage }) {
     const c = C[base.cid];
     if (!c || !fs.existsSync(c.file)) return;
     const sh = {
-      cand: c, seconds: base.seconds, from: base.from, need: base.need, effect: base.effect, focus: base.focus, slow: !!base.slow,
+      cand: c, seconds: base.seconds, from: base.from, need: base.need, effect: base.effect, focus: base.focus, slow: !!base.slow, grade: base.grade || null,
       transition: TRANSITIONS.includes(w.transition) ? w.transition : base.transition, overlays: [],
     };
     // the pictures on it: kept as they were, or spaced again if they changed
@@ -1533,15 +1536,333 @@ function resultOf(plan, output, opts, extra) {
   }, extra);
 }
 
+/* ===================================================== THE TALK EDIT
+ *
+ * ►► "ADD MY VIDEOS — THE AI CUTS THE BEST THINGS SAID INTO ONE VIRAL VIDEO." ◄◄
+ *
+ * The music montage above is cut from what the clips LOOK like. A preacher, a
+ * testimony, a youth leader's talk goes viral on what is SAID, so this edit is
+ * cut from the words:
+ *
+ *   1. HEAR    every video is transcribed (Groq's Whisper, then the Word Book),
+ *              and its words grouped into phrases — never a sentence cut in two.
+ *   2. CHOOSE  the director reads every phrase from every video and builds the
+ *              story: the most arresting line FIRST (the hook), then lines that
+ *              follow on from each other and rise, ending on the line people
+ *              will quote. Claude when the server has it, Groq otherwise, and a
+ *              scorer of its own (energy, length, punch words) without either.
+ *   3. MOVE    constant engagement: a long line is cut into beats of two or
+ *              three seconds at word boundaries, and each beat is framed
+ *              differently — punch in, closer, wide, a slow push — the jump
+ *              zooms of every viral talking edit. A cinematic grade on all of
+ *              it, a flash between lines on a hype edit, and any photos or
+ *              silent clips laid over as B-roll while the voice carries on.
+ *   4. WORDS   the words heard come back on the finished video's own clock, so
+ *              the studio puts captions on at once (word by word lit up) —
+ *              they go into the export — with the hook as a headline.
+ */
+const TALK_GRADES = {
+  hype: 'eq=contrast=1.08:saturation=1.2',
+  cinematic: 'eq=contrast=1.1:saturation=0.94:gamma=0.97,vignette=PI/4.6',
+  worship: 'eq=contrast=1.04:saturation=1.08:brightness=0.012',
+  emotional: 'eq=contrast=1.05:saturation=0.98,vignette=PI/5.2',
+  fun: 'eq=contrast=1.06:saturation=1.28',
+};
+/* each beat framed differently from the one before — the cycle a viral talking edit uses */
+const TALK_MOVES = {
+  hype: ['punch_in', 'hold_in', 'cut', 'hold_tight', 'slow_zoom', 'hold_in'],
+  cinematic: ['slow_zoom', 'hold_in', 'zoom_out', 'slow_zoom', 'hold_tight', 'cut'],
+  worship: ['slow_zoom', 'hold_in', 'zoom_out', 'cut'],
+  emotional: ['slow_zoom', 'hold_in', 'slow_zoom', 'hold_tight'],
+  fun: ['punch_in', 'hold_tight', 'cut', 'hold_in', 'punch_in'],
+};
+const PUNCH = /\b(never|always|god|jesus|lord|christ|holy|spirit|love|power|believe|faith|miracle|today|now|secret|truth|change|changed|why|how|stop|listen|you|your|everything|nothing|die|life|heaven|hell|grace|free|fear|pray|prayer|blessed|promise|destiny|purpose|win|victory)\b/gi;
+const FILLER_START = /^(and|so|um+|uh+|er+|like|but|okay|ok|you know)\b/i;
+const FILLER_ANY = /\b(um+|uh+|er+|erm)\b/gi;
+/* the business of a service — not what anyone shares */
+const HOUSEKEEPING = /\b(turn to|page \w+|announcement|announcements|please be seated|be seated|good morning|good evening|welcome everyone|offering|tithes?|car park|parking|microphone|can you hear me|next slide)\b/i;
+
+/** Heard words → phrases: a pause, a full stop or nine seconds ends one. */
+function phrasesOf(words) {
+  const out = [];
+  let cur = [];
+  const flush = () => {
+    if (!cur.length) return;
+    const text = cur.map((w) => String(w.text || '').trim()).filter(Boolean).join(' ').replace(/\s+([,.!?;:])/g, '$1').trim();
+    if (text) out.push({ start: cur[0].start, end: cur[cur.length - 1].end, text, words: cur });
+    cur = [];
+  };
+  for (const w of words) {
+    if (!w || !(w.end > w.start) || !String(w.text || '').trim()) continue;
+    const prev = cur[cur.length - 1];
+    if (prev && (w.start - prev.end > 0.55
+      || (cur.length >= 4 && /[.!?]["'”’)]?$/.test(String(prev.text).trim()))
+      || w.end - cur[0].start > 9)) flush();
+    cur.push(w);
+  }
+  flush();
+  // a two-word scrap joins the phrase it belongs to when they are close
+  for (let i = out.length - 1; i > 0; i--) {
+    const a = out[i - 1], b = out[i];
+    if ((b.end - b.start < 1.1 || b.words.length < 3) && b.start - a.end < 0.4 && b.end - a.start <= 10) {
+      out.splice(i - 1, 2, { start: a.start, end: b.end, text: (a.text + ' ' + b.text).trim(), words: a.words.concat(b.words) });
+    }
+  }
+  return out;
+}
+
+/** How much a phrase grabs, on its own: energy, a good length, punch words, ! and ?. */
+function phraseScore(p, loud) {
+  const len = p.end - p.start;
+  let s = 0;
+  if (loud && loud.length) {
+    const xs = loud.filter((x) => x.t >= p.start && x.t <= p.end).map((x) => x.db);
+    if (xs.length) s += clamp((xs.reduce((a, b) => a + b, 0) / xs.length + 40) / 25, 0, 1.2);
+  }
+  s += len >= 2 && len <= 7 ? 0.6 : len < 1.2 ? -0.5 : 0.2;
+  s += Math.min(0.9, ((p.text.match(PUNCH) || []).length) * 0.18);
+  if (/!/.test(p.text)) s += 0.3;
+  if (/\?/.test(p.text)) s += 0.25;
+  if (FILLER_START.test(p.text)) s -= 0.35;
+  s -= Math.min(0.9, ((p.text.match(FILLER_ANY) || []).length) * 0.45);
+  if (HOUSEKEEPING.test(p.text)) s -= 1;
+  if (p.words.length < 3) s -= 0.4;
+  return round2(s);
+}
+
+const TALK_SCHEMA = {
+  type: 'object',
+  properties: {
+    concept: { type: 'string' },
+    title: { type: 'string' },
+    hook_text: { type: 'string' },
+    post_caption: { type: 'string' },
+    hashtags: { type: 'array', items: { type: 'string' } },
+    picks: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false } },
+  },
+  required: ['concept', 'title', 'hook_text', 'post_caption', 'hashtags', 'picks'],
+  additionalProperties: false,
+};
+const TALK_SYSTEM = `You are the best short-form video editor working today. You cut sermons, testimonies and talks into clips that go viral on TikTok, Instagram Reels and YouTube Shorts — videos people watch to the end, share and quote.
+
+You are given every phrase spoken in one or more videos (id, which video, when, how loud, the words). Build ONE edit from them:
+- THE HOOK FIRST: open with the single most arresting line — a bold claim, a question, a striking promise, an emotional peak. It may come from anywhere. It must make sense with no context.
+- THEN THE STORY: lines that follow on from each other so the whole thing reads as one clear message that rises. Every line must make sense after the one before it. Never use a line that starts mid-thought or depends on something left out. Lines from different videos may be mixed and matched when they continue the same thought.
+- THE PAYOFF LAST: end on the most quotable, memorable line — the one people will put in the comments.
+- No filler, no "um", no housekeeping (announcements, greetings, "turn to page"), no repeated points.
+- Fit the length asked for. Shorter and tighter beats longer.
+Use only ids that are given, each at most once, in the order they should play.
+hook_text: a 3–7 word on-screen headline that makes people stop scrolling (not a quote of the first line).
+post_caption: the caption for the post, 1–3 short sentences, with a question or a call to share. hashtags: 5–8, no # sign.`;
+
+function talkBrief(opts, list) {
+  return `Style: ${opts.style} — ${STYLES[opts.style] || ''}\nTarget length: about ${opts.lengthSec} seconds of speech.`
+    + (opts.brief ? `\nWhat the operator says it is about: ${opts.brief}` : '')
+    + `\n\nPhrases (${list.length}):\n` + list.map((p) => `${p.id} | video ${p.vid} | ${p.start.toFixed(1)}-${p.end.toFixed(1)}s | loud ${p.score} | ${p.text}`).join('\n');
+}
+
+async function talkWithClaude(list, opts) {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  const Anthropic = require('@anthropic-ai/sdk');
+  const Client = Anthropic.default || Anthropic;
+  const client = new Client({ maxRetries: 2, timeout: 6 * 60 * 1000 });
+  const model = process.env.MW_MONTAGE_MODEL || 'claude-opus-5-5';
+  const body = {
+    model, max_tokens: 12000, thinking: { type: 'adaptive' },
+    output_config: { effort: 'high', format: { type: 'json_schema', schema: TALK_SCHEMA } },
+    system: TALK_SYSTEM,
+    messages: [{ role: 'user', content: talkBrief(opts, list) + '\n\nNow build the edit.' }],
+  };
+  let res;
+  try { res = await client.beta.messages.create(Object.assign({}, body, { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' })); } catch (e) {
+    if (e instanceof Client.BadRequestError) res = await client.messages.create(body); else throw e;
+  }
+  if (!res || res.stop_reason === 'refusal') return null;
+  const text = (res.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+  let plan = null;
+  try { plan = JSON.parse(text); } catch (e) { plan = null; }
+  return plan && Array.isArray(plan.picks) ? { plan, director: 'claude', model: res.model || model } : null;
+}
+
+async function talkWithGroq(list, opts) {
+  let cw;
+  try { cw = require('./cloudwrite'); } catch (e) { return null; }
+  if (!cw.access || !cw.access().key) return null;
+  const prompt = talkBrief(opts, list)
+    + '\n\nReply with JSON only, exactly this shape: {"concept":"","title":"","hook_text":"","post_caption":"","hashtags":[""],"picks":[{"id":"p1"}]}';
+  const text = await cw.chat({ system: TALK_SYSTEM, prompt, json: true, maxTokens: 2500, temperature: 0.5, timeoutMs: 90000, evenIfOff: true });
+  const plan = text ? cw.parseJson(text) : null;
+  return plan && Array.isArray(plan.picks) ? { plan, director: 'groq', model: (cw.state && cw.state().model) || 'groq' } : null;
+}
+
+/** Without an AI: the strongest short line first, then the best lines in the order they were said. */
+function talkByRules(list, opts) {
+  // without an AI to judge them, a line with an "um" in it or the business of the service is never used
+  const clean = list.filter((p) => !HOUSEKEEPING.test(p.text) && !(p.text.match(FILLER_ANY) || []).length);
+  if (clean.length >= 2) list = clean;
+  const hook = list.filter((p) => p.end - p.start >= 1.6 && p.end - p.start <= 6.5).sort((a, b) => b.score - a.score)[0] || list[0];
+  const rest = list.filter((p) => p !== hook).sort((a, b) => b.score - a.score);
+  const picked = [hook];
+  let total = hook.end - hook.start;
+  for (const p of rest) {
+    if (total >= opts.lengthSec) break;
+    if (p.score < 0.45) break;      // a weak line is not added just to reach the length
+    picked.push(p); total += p.end - p.start;
+  }
+  const body = picked.slice(1).sort((a, b) => a.vid - b.vid || a.start - b.start);
+  return { plan: { concept: '', title: '', hook_text: '', post_caption: '', hashtags: [], picks: [hook].concat(body).map((p) => ({ id: p.id })) }, director: 'rules', model: '' };
+}
+
+async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, onProgress, stage, log, keepAudio }) {
+  const say = (a, b) => (p) => onProgress && onProgress(Math.round(a + (b - a) * (clamp(p, 0, 100) / 100)));
+  const infos = [];
+  for (const f of files) {
+    let info = null;
+    try { info = await getInfo(ctx, f); } catch (e) { info = null; }
+    if (info && info.width && info.height) infos.push({ file: f, info, image: isImage(f) || !(info.durationSec > 0.3) });
+  }
+  const vids = infos.filter((x) => !x.image);
+  if (!vids.length) throw new Error('Add at least one video with someone speaking — the talk edit is cut from what is said.');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mw-talk-'));
+  try {
+    // 1) HEAR
+    const cands = [];
+    const phrases = [];
+    let k = 0;
+    for (let i = 0; i < vids.length; i++) {
+      const v = vids[i];
+      const D = v.info.durationSec;
+      if (stage) stage(vids.length > 1 ? `👂 Listening to video ${i + 1} of ${vids.length}…` : '👂 Listening to every word…');
+      let words = [];
+      if (v.info.hasAudio && hear) {
+        try { words = (await hear(v.file, D, say((i / vids.length) * 40, ((i + 1) / vids.length) * 40))) || []; } catch (e) { if (e instanceof jobs.CancelledError || (e && e.cancelled)) throw e; if (log) log('hear failed: ' + e.message); words = []; }
+      }
+      let loud = [];
+      if (v.info.hasAudio) { try { loud = await loudness(ctx, v.file); } catch (e) { if (e instanceof jobs.CancelledError) throw e; } }
+      const c = { id: 'v' + (i + 1), file: v.file, kind: 'video', start: 0, end: round2(D), peak: round2(D / 2), whole: true, fileDur: round2(D),
+        hasAudio: !!v.info.hasAudio, w: v.info.width, h: v.info.height, name: path.basename(v.file), spoken: words.length >= 4 };
+      try { c.thumb = await thumb(ctx, v.file, Math.min(1, D / 3), path.join(tmp, c.id + '.jpg'), false); } catch (e) { c.thumb = null; }
+      cands.push(c);
+      for (const p of phrasesOf(words)) {
+        if (p.end > D) continue;
+        p.id = 'p' + (++k); p.vid = i + 1; p.cand = c; p.score = phraseScore(p, loud);
+        phrases.push(p);
+      }
+    }
+    if (phrases.length < 2) {
+      const e = new Error('No one could be heard speaking in these videos. The talk edit is cut from what is said — choose “Music montage” for clips without speech.');
+      e.noSpeech = true;
+      throw e;
+    }
+    // the photos and silent clips become B-roll over the speaker
+    const broll = infos.filter((x) => x.image).map((x, j) => ({ id: 'i' + (j + 1), file: x.file, kind: 'image', w: x.info.width, h: x.info.height, fileDur: 0, peak: 0, name: path.basename(x.file) }))
+      .concat(cands.filter((c) => !c.spoken));
+    for (const b of broll) { if (b.kind === 'image' && !b.thumb) { try { b.thumb = await thumb(ctx, b.file, 0, path.join(tmp, b.id + '.jpg'), true); } catch (e) { b.thumb = null; } } }
+    if (onProgress) onProgress(42);
+    // 2) CHOOSE
+    const list = phrases.length > 420 ? phrases.slice().sort((a, b) => b.score - a.score).slice(0, 420).sort((a, b) => a.vid - b.vid || a.start - b.start) : phrases;
+    if (stage) stage(process.env.ANTHROPIC_API_KEY ? '🎬 Claude is picking the lines that will stop the scroll…' : '🎬 The AI is picking the lines that will stop the scroll…');
+    let d = null;
+    try { d = await talkWithClaude(list, opts); } catch (e) { if (log) log('claude: ' + e.message); }
+    if (!d) { try { d = await talkWithGroq(list, opts); } catch (e) { if (log) log('groq: ' + e.message); } }
+    if (!d) d = talkByRules(list, opts);
+    const byId = new Map(phrases.map((p) => [p.id, p]));
+    let picks = [];
+    for (const x of (d.plan.picks || [])) { const p = byId.get(String(x && x.id || '').trim()); if (p && !picks.includes(p)) picks.push(p); }
+    if (picks.length < 1) picks = talkByRules(list, opts).plan.picks.map((x) => byId.get(x.id)).filter(Boolean);
+    // the length asked for, give or take a line (the hook always stays)
+    let total = picks.reduce((n, p) => n + (p.end - p.start), 0);
+    while (picks.length > 2 && total - (picks[picks.length - 2].end - picks[picks.length - 2].start) >= opts.lengthSec * 1.15) {
+      const cut = picks.splice(picks.length - 2, 1)[0];   // the last line is the payoff: take the one before it
+      total -= cut.end - cut.start;
+    }
+    if (onProgress) onProgress(50);
+    // 3) MOVE — every line into beats, each framed differently
+    const moves = TALK_MOVES[opts.style] || TALK_MOVES.hype;
+    const grade = TALK_GRADES[opts.style] || TALK_GRADES.hype;
+    const shots = [];
+    const capWords = [];
+    let at = 0, m = 0;
+    picks.forEach((p, pi) => {
+      const ws = p.words;
+      // beats of about 2.6 s, cut between words
+      const beats = [];
+      let b0 = 0;
+      for (let j = 1; j < ws.length; j++) {
+        const lenSoFar = ws[j - 1].end - ws[b0].start;
+        const left = ws[ws.length - 1].end - ws[j].start;
+        if (lenSoFar >= 2.2 && left >= 1.1) { beats.push([b0, j - 1]); b0 = j; }
+      }
+      beats.push([b0, ws.length - 1]);
+      beats.forEach(([a, b], bi) => {
+        const first = bi === 0, last = bi === beats.length - 1;
+        const from = first ? Math.max(0, ws[a].start - 0.07) : (ws[a - 1].end + ws[a].start) / 2;
+        const to = last ? Math.min(p.cand.fileDur - 0.02, ws[b].end + 0.16) : (ws[b].end + ws[b + 1].start) / 2;
+        const need = round2(Math.max(0.4, to - from));
+        const effect = pi === 0 && bi === 0 ? 'punch_in' : moves[m++ % moves.length];
+        const transition = pi > 0 && first && (opts.style === 'hype' || opts.style === 'fun') && pi % 2 === 1 ? 'flash' : 'cut';
+        const sh = { cand: p.cand, seconds: need, from: round2(from), need, effect, focus: 'center', slow: false, transition, grade, overlays: [], at: round2(at) };
+        for (const w of ws.slice(a, b + 1)) {
+          const s0 = at + (w.start - from), s1 = at + (w.end - from);
+          capWords.push({ text: w.text, start: round2(Math.max(at, s0)), end: round2(Math.min(at + need, Math.max(s0 + 0.05, s1))) });
+        }
+        shots.push(sh);
+        at = round2(at + need);
+      });
+    });
+    shots[0].transition = 'cut';
+    // B-roll over the speaker: one picture every few beats, while the voice carries on
+    let bi = 0;
+    for (let i = 1; i < shots.length && bi < broll.length; i += 2) {
+      const sh = shots[i];
+      if (sh.seconds < 2) continue;
+      const o = broll[bi++];
+      const len = round2(Math.min(2.2, sh.seconds - 0.5));
+      sh.overlays.push({ cand: o, style: 'cutaway', start: 0.25, len, pos: i % 4 === 1 ? 'right' : 'left', from: o.kind === 'video' ? round2(clamp(o.fileDur / 2 - len / 2, 0, Math.max(0, o.fileDur - len - 0.05))) : null });
+    }
+    const duration = at;
+    const P = d.plan || {};
+    const hook = String(P.hook_text || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    const texts = hook ? [{ start: 0, end: round2(Math.min(duration, Math.max(2.4, shots[0].seconds + (shots[1] ? shots[1].seconds : 0)))), text: hook, role: 'hook' }] : [];
+    const fb = fromBrief(opts.brief);
+    const plan = {
+      concept: String(P.concept || '').slice(0, 300),
+      title: String(P.title || hook || (fb && fb.hook) || '').slice(0, 100),
+      postCaption: String(P.post_caption || (fb && fb.caption) || '').slice(0, 600),
+      hashtags: (Array.isArray(P.hashtags) ? P.hashtags : []).map((h) => String(h).replace(/^#+/, '').replace(/\s+/g, '')).filter(Boolean).slice(0, 10),
+      shots, texts, duration,
+    };
+    // 4) RENDER
+    if (stage) stage(`✂️ Cutting ${picks.length} lines into ${shots.length} beats — zooms, grade and B-roll…`);
+    await render(ctx, plan, { aspect: opts.aspect, keepAudio: true, output, base: baseOf(output), tmp, onProgress: say(50, 100) });
+    saveProject(output, projectOf(plan, cands.concat(broll), { aspect: opts.aspect, keepAudio: true, style: opts.style, full: false }, plan));
+    return resultOf(plan, output, opts, {
+      director: d.director, model: d.model, mode: 'talk', words: capWords,
+      lines: picks.length, music: !!musicPath,
+    });
+  } finally {
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+  }
+}
+
 /* --------------------------------------------------------------------- make */
 
 /**
  * The whole job. `stage(name)` says what is happening (for the phone), and
  * `onProgress(pct)` how far through the whole thing it is.
  */
-async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, full, aspect, brief, keepAudio, keepOrder, output, onProgress, stage, log }) {
+async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, full, aspect, brief, keepAudio, keepOrder, output, onProgress, stage, log, mode, hear }) {
   const files = (mediaPaths || []).filter((p) => p && fs.existsSync(p)).slice(0, 60);
   if (!files.length) throw new Error('Add some videos or pictures first.');
+  if (mode === 'talk') {
+    const topts = {
+      style: STYLES[style] ? style : 'hype',
+      lengthSec: clamp(Number(lengthSec) || 45, 10, 600),
+      aspect: ASPECTS[aspect] ? aspect : '9:16',
+      brief: cleanBrief(brief),
+    };
+    return makeTalk(ctx, getInfo, { files, opts: topts, hear, musicPath, output, onProgress, stage, log, keepAudio });
+  }
   const opts = {
     style: STYLES[style] ? style : 'hype',
     full: !!full || lengthSec === 'all' || Number(lengthSec) === 0,
@@ -1587,4 +1908,4 @@ function directorStatus() {
   return { director: 'rules', model: '' };
 }
 
-module.exports = { fromBrief, cleanBrief, make, remake, loadProject, sidecarOf, baseOf, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };
+module.exports = { phrasesOf, phraseScore, talkByRules, fromBrief, cleanBrief, make, remake, loadProject, sidecarOf, baseOf, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };

@@ -219,6 +219,8 @@
     "test:keyframes-chroma": "node test/keyframes-chroma.test.js",
     "test:open-memory": "node test/open-memory.test.js",
     "test:montage": "node test/montage.test.js",
+    "test:montage-talk": "node test/montage-talk.test.js",
+    "test:phone-montage-talk": "node test/phone-montage-talk.test.js",
     "test:music-bed": "node test/music-bed.test.js",
     "test:phone-music": "node test/phone-music.test.js",
     "test:caption-track-stream": "node test/caption-track-stream.test.js",

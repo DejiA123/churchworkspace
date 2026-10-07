@@ -15346,7 +15346,7 @@
      * director's words on the text lane — every one an ordinary text box, so it
      * can be retyped, restyled, moved or deleted like any other.
      */
-    async applyMontage({ output, base, overlays, music, musicVolume, texts, style, captions, cuts } = {}) {
+    async applyMontage({ output, base, overlays, music, musicVolume, musicDuck, texts, style, captions, cuts, words, talk } = {}) {
       if (!output) return false;
       /*
        * The montage's pictures as the studio's own clips, on an overlay row —
@@ -15397,7 +15397,7 @@
       if (music && music.id) {
         await libRefresh();
         const entry = ((ve.lib && ve.lib.music) || []).find((m) => m.id === music.id) || music;
-        ve.music = musicFrom(entry, { volume: musicVolume != null ? musicVolume : 0.85, duck: false, bed: true, fadeIn: 0.2, fadeOut: 1.5 });
+        ve.music = musicFrom(entry, { volume: musicVolume != null ? musicVolume : 0.85, duck: !!musicDuck, bed: true, fadeIn: 0.2, fadeOut: 1.5 });
         saveMusicPref();
         renderLibrary(); renderMusicLane(); updateMusicButton();
       }
@@ -15453,7 +15453,32 @@
        * (Groq's cloud Whisper when the server has it) and the lines go on the
        * captions lane, switched on for export. Nothing said, nothing added.
        */
-      if (captions) {
+      /*
+       * The talk edit brings its words: heard once on the server, already on
+       * the finished video's clock — captions straight away, no second
+       * listen, in a look that lights each word up as it is said (the look
+       * matches the edit's style; it is this video's, not saved as the
+       * operator's default).
+       */
+      if (Array.isArray(words) && words.length) {
+        ve.capWords = words.map((w) => ({ text: String(w.text || ''), start: +w.start || 0, end: +w.end || 0 })).filter((w) => w.text && w.end > w.start);
+        ve.capOffset = 0; ve.capTarget = null; ve.capScope = null;
+        ve._capSource = ve.video.path; ve._capMode = 'full';
+        if (talk) {
+          const LOOK = { hype: 'boxword', fun: 'popword', cinematic: 'spoken', worship: 'karaoke', emotional: 'karaoke' };
+          ve.capStyleId = capStyleDef(LOOK[style] || 'boxword').id;
+          const sel = $('#capStyleSel'); if (sel) sel.value = ve.capStyleId;
+          syncCapWordColor();
+          const hl = $('#capWordHl'); if (hl) hl.checked = true;
+          const wpl = $('#capWords'); if (wpl && wpl.value !== '3') { wpl.value = '3'; if (wpl._chips) wpl._chips(); }
+          try { renderCapStyleGrid(); } catch (e) {}
+        }
+        rebuildCapEvents();
+        ve.history = []; ve.future = []; updateUndoRedoButtons();   // the captions came with the edit: nothing to undo
+        const cc = $('#veCapShow'); if (cc && !cc.checked) cc.checked = true;
+        revealCaptions(true);
+        updateCapOverlay(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
+      } else if (captions) {
         setTimeout(() => { generateCaptions(null).catch(() => {}); }, 300);
       }
       return true;
