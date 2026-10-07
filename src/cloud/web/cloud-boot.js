@@ -958,6 +958,54 @@ let _hideTimer = null;
   };
 
   window.__newJobId = newJobId;
+  /*
+   * ►► THE SCREEN STAYS ON WHILE SOMETHING IS BEING MADE. ◄◄
+   * An iPhone in Low Power Mode locks itself after 30 seconds, and a locked
+   * phone puts the page to sleep mid-export. Like CapCut, the studio keeps the
+   * screen awake while an export, a montage or a save to the phone is running,
+   * and lets it sleep again the moment nothing is. Two ways at once, because
+   * each fails somewhere: the Screen Wake Lock (iOS 16.4+, home-screen apps
+   * from iOS 18.4) and, behind it, a tiny silent looping video (a playing
+   * video keeps any iPhone awake, Low Power Mode included). The video has no
+   * sound track, so it never touches the music or the editor's audio.
+   */
+  const awake = { holds: new Set(), lock: null, vid: null, timer: null };
+  const AWAKE_MP4 = 'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMrbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAB9AAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAlV0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAB9AAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAfQAAAAAAABAAAAAAHNbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAgABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABeG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAThzdGJsAAAAuHN0c2QAAAAAAAAAAQAAAKhhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABFUxhdmM2MC4zMS4xMDIgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAALmF2Y0MBQsAK/+EAFmdCwArZHsBEAAADAAQAAAMACDxImSABAAVoy4PLIAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAAApAAAAKQAAAABhzdHRzAAAAAAAAAAEAAAACAABAAAAAABRzdHNzAAAAAAAAAAEAAAABAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAACAAAAAQAAABxzdHN6AAAAAAAAAAAAAAACAAAChgAAAAoAAAAUc3RjbwAAAAAAAAABAAADWwAAAGJ1ZHRhAAAAWm1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAALWlsc3QAAAAlqXRvbwAAAB1kYXRhAAAAAQAAAABMYXZmNjAuMTYuMTAwAAAACGZyZWUAAAKYbWRhdAAAAnAGBf//bNxF6b3m2Ui3lizYINkj7u94MjY0IC0gY29yZSAxNjQgcjMxMDggMzFlMTlmOSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjMgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0wIHJlZj0zIGRlYmxvY2s9MTowOjAgYW5hbHlzZT0weDE6MHgxMTEgbWU9aGV4IHN1Ym1lPTcgcHN5PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhlZF9yZWY9MSBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTAgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTIgdGhyZWFkcz0xIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MCB3ZWlnaHRwPTAga2V5aW50PTI1MCBrZXlpbnRfbWluPTEgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD00MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAAOZYiEBb///w9FAAFPf4AAAAAGQZo4CvqA';
+  function awakeNeeded() {
+    if (awake.holds.size) return true;
+    const o = document.getElementById('overlay'); if (o && !o.classList.contains('hidden')) return true;
+    try { if ((window.__tasksList ? window.__tasksList() : []).some((t) => t.state === 'run')) return true; } catch (e) {}
+    try { if (window.MWSocial && window.MWSocial.busy && window.MWSocial.busy()) return true; } catch (e) {}
+    return false;
+  }
+  async function awakeOn() {
+    if (document.visibilityState !== 'visible') return;
+    if ('wakeLock' in navigator && !awake.lock) {
+      try { awake.lock = await navigator.wakeLock.request('screen'); awake.lock.addEventListener('release', () => { awake.lock = null; }); } catch (e) { awake.lock = null; }
+    }
+    if (!awake.vid) {
+      const v = document.createElement('video');
+      v.muted = true; v.loop = true; v.playsInline = true;
+      v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.setAttribute('aria-hidden', 'true');
+      v.style.cssText = 'position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:-1';
+      v.src = AWAKE_MP4;
+      document.body.appendChild(v);
+      awake.vid = v;
+    }
+    if (awake.vid.paused) awake.vid.play().catch(() => {});
+  }
+  function awakeOff() {
+    if (awake.lock) { try { awake.lock.release(); } catch (e) {} awake.lock = null; }
+    if (awake.vid) { try { awake.vid.pause(); awake.vid.remove(); } catch (e) {} awake.vid = null; }
+  }
+  function awakeCheck() { if (awakeNeeded()) awakeOn(); else awakeOff(); }
+  /** keepAwake(key, true|false) — hold the screen on for a piece of work. */
+  window.__keepAwake = (key, on) => { if (on) awake.holds.add(key); else awake.holds.delete(key); awakeCheck(); };
+  window.__awakeState = () => ({ needed: awakeNeeded(), lock: !!awake.lock, video: !!(awake.vid && !awake.vid.paused) });
+  // a lock is dropped whenever the app leaves the screen: take it again on return
+  document.addEventListener('visibilitychange', awakeCheck);
+  awake.timer = setInterval(awakeCheck, 2000);
+
   window.__showOverlay = showOverlay;
   window.__hideOverlay = hideOverlay;
   window.__setJobBatch = setJobBatch;
@@ -1941,6 +1989,11 @@ let _hideTimer = null;
   const PHONE_PART_MAX = 140 * 1024 * 1024;   // the same as phonecopy.js PART_MAX
   const MAKE_SHARE = 75;                      // of the one Save bar: making the phone copy (the download is the rest)
   async function offerDownload(p, size, ui) {
+    const key = 'dl' + Math.random();
+    window.__keepAwake(key, true);
+    try { return await offerDownloadInner(p, size, ui); } finally { window.__keepAwake(key, false); }
+  }
+  async function offerDownloadInner(p, size, ui) {
     if (!p) return;
     const name = String(p).split(/[\\/]/).pop();
     if (!/\.[A-Za-z0-9]{2,5}$/.test(name)) {

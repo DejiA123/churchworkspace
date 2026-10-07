@@ -1813,5 +1813,5 @@
     }
   }
 
-  window.MWSocial = { start, go, compose, openConnect, openMontage, editMontage, openProjects, openProject, view: () => S.view, _state: S, _planTimes: planTimes, _titleFromFile: titleFromFile };
+  window.MWSocial = { busy: () => !!MT.busy, start, go, compose, openConnect, openMontage, editMontage, openProjects, openProject, view: () => S.view, _state: S, _planTimes: planTimes, _titleFromFile: titleFromFile };
 })();

@@ -172,6 +172,17 @@ async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise
       check(!after.shown && free, '✓ puts the panel down and the block on the timeline can be stretched', { after, free });
       check(await page.evaluate(() => !!(window.VideoEditor.__test.textSel ? window.VideoEditor.__test.textSel() : document.querySelector('.ve-text-box.selected, .ve-text-box.sel'))), 'the text is still picked');
     }
+    console.log('\n[8] the screen stays on while something is being made');
+    {
+      const a0 = await page.evaluate(() => window.__awakeState());
+      check(!a0.needed, 'nothing running: the screen may sleep', a0);
+      const a1 = await page.evaluate(async () => { window.__keepAwake('t', true); await new Promise((r) => setTimeout(r, 300)); return Object.assign(window.__awakeState(), { el: !!document.querySelector('video[aria-hidden="true"][playsinline]') }); });
+      check(a1.needed && a1.el, 'an export holds it on (wake lock + silent looping video)', a1);
+      const a2 = await page.evaluate(async () => { window.__keepAwake('t', false); await new Promise((r) => setTimeout(r, 300)); return Object.assign(window.__awakeState(), { el: !!document.querySelector('video[aria-hidden="true"][playsinline]') }); });
+      check(!a2.needed && !a2.el && !a2.lock, 'and lets go the moment it is done', a2);
+      const a3 = await page.evaluate(() => { window.__showOverlay('Exporting…'); const st = window.__awakeState(); window.__hideOverlay(); return st; });
+      check(a3.needed, 'an export watched on the progress card counts too', a3);
+    }
   } catch (e) { check(false, 'the test ran to the end', e.message); }
   finally { await browser.close(); srv.kill(); fs.rmSync(WORK, { recursive: true, force: true }); }
   console.log(`\n${pass} PASS / ${fail} FAIL`);
