@@ -256,10 +256,19 @@ async function waitUp() {
         l.querySelectorAll('.cap-fix-tabs [data-capfix]').forEach((b, k) => { const sp = b.lastElementChild; if (sp) sp.textContent = ['1537', '252', '1'][k]; });
         const r = l.getBoundingClientRect();
         const out = [...l.querySelectorAll('.cap-fix-tabs button, .cap-row')].filter((e) => { const b = e.getBoundingClientRect(); return b.right > r.right + 1 || b.left < r.left - 1; }).length;
-        return { sw: l.scrollWidth, cw: l.clientWidth, out, tabs: [...l.querySelectorAll('.cap-fix-tabs button')].map((b) => b.textContent + ':' + Math.round(b.getBoundingClientRect().right)), lw: Math.round(r.right) };
+        const tb = l.querySelector('.cap-fix-tabs').getBoundingClientRect(), first = l.querySelector('.cap-row').getBoundingClientRect();
+        return { head: Math.round(first.top - r.top), tabsH: Math.round(tb.height), sw: l.scrollWidth, cw: l.clientWidth, out, tabs: [...l.querySelectorAll('.cap-fix-tabs button')].map((b) => b.textContent + ':' + Math.round(b.getBoundingClientRect().right)), lw: Math.round(r.right) };
       });
       check(wide.sw <= wide.cw + 1 && wide.out === 0 && wide.tabs.length === 4, 'the tabs and lines all fit the phone\'s width (no sideways scroll)', wide);
+      check(wide.tabsH <= 64 && wide.head <= 110, 'the summary and the filters take one slim line each — the lines get the room', wide);
       if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'tabs-fit.png') });
+      const sum = await page.evaluate(() => {
+        window.VideoEditor.__test.markAllChecked();
+        const n = document.querySelector('#capList .cap-check-note');
+        return n ? { text: n.textContent, h: Math.round(n.getBoundingClientRect().height), bar: !!n.querySelector('.cap-check-bar i') } : null;
+      });
+      check(sum && /Heard twice · \d+ of \d+ agree/.test(sum.text) && sum.bar && sum.h <= 24, 'what the two listens found is one slim line with a bar', sum);
+      if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'tabs-sum.png') });
       await page.evaluate(() => window.VideoEditor.__test.markCapFixed(0, null));
       check(a.laneDots >= 1, 'a doubtful line is marked on the timeline lane too', a);
       await page.locator('#capList [data-capfix="check"]').tap();

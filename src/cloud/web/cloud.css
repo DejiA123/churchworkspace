@@ -1262,8 +1262,12 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
   body.mw-cloud #capModal .cap-list { flex: 1 1 auto; min-height: 120px; padding: 10px 12px 14px; gap: 8px; overscroll-behavior: contain; }
   body.mw-cloud #capModal .cap-fix-tabs { top: -10px; margin: -10px -12px 0; padding: 10px 12px 8px; background: var(--ph-panel); }
   body.mw-cloud #capModal .cap-fix-tabs button { min-height: 38px; padding: 7px 12px; font-size: 14px; white-space: nowrap; flex: none; }
-  /* four tabs are wider than a phone: they wrap, and the list never scrolls sideways */
+  /* the list never scrolls sideways; the segmented filters shrink to fit, and
+     ＋ Add caption wraps only when it is a full pill (no filters) */
   body.mw-cloud #capModal .cap-fix-tabs { flex-wrap: wrap; row-gap: 6px; }
+  body.mw-cloud #capModal .cap-fix-tabs.seg { flex-wrap: nowrap; padding-bottom: 6px; }
+  body.mw-cloud #capModal .cap-fix-tabs .cap-seg button { flex: 1 1 auto; min-width: 0; min-height: 36px; padding: 0 7px; border: 0; font-size: 13.5px; }
+  body.mw-cloud #capModal .cap-fix-tabs .cap-add-line.cap-add-sq { flex: 0 0 auto; width: 44px; min-height: 38px; height: 38px; padding: 0; }
   body.mw-cloud #capModal #capList { overflow-x: hidden; }
   body.mw-cloud #capModal .cap-row { min-width: 0; max-width: 100%; }
   body.mw-cloud #capModal .cap-row { gap: 8px; padding: 2px; border-radius: 12px; }
@@ -2474,5 +2478,5 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 @media (max-width: 900px) {
   body.mw-cloud #capModal .cap-doubt { margin: 0 0 4px 42px; font-size: 13px; }
   body.mw-cloud #capModal .cap-doubt button { min-height: 36px; padding: 6px 14px; font-size: 13.5px; }
-  body.mw-cloud #capModal .cap-check-note { font-size: 13.5px; }
+  body.mw-cloud #capModal .cap-check-note { font-size: 13.5px; margin: 0 0 8px; }
 }

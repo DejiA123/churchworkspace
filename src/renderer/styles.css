@@ -2591,9 +2591,20 @@ body.ve-pfull .ve-preview .ve-fs-exit {
 .cap-empty-state .cap-add-empty { display: block; margin: 10px auto 0; width: auto; padding: 8px 16px; border-radius: 999px; font-weight: 650; cursor: pointer;
   background: transparent; color: #cbd0dc; border: 1px solid rgba(255,255,255,.18); }
 /* ⚠ a line the two listens disagreed on (renderCapList "⚠ Check") */
-.cap-check-note { margin: 2px 2px 8px; padding: 9px 12px; border-radius: 12px; font-size: 13px; line-height: 1.4; color: #cbd0dc; background: rgba(255,255,255,.05); }
-.cap-check-note.good { color: #bbf7d0; background: rgba(34,197,94,.12); }
-.cap-check-note.warn { color: #fde68a; background: rgba(245,158,11,.12); }
+.cap-check-note { display: flex; align-items: center; gap: 10px; margin: 0 2px 6px; font-size: 12.5px; line-height: 1.35; color: #9aa1b2; }
+.cap-check-tx { flex: 0 1 auto; min-width: 0; }
+.cap-check-bar { flex: 1 1 60px; min-width: 40px; height: 4px; border-radius: 4px; background: rgba(245,158,11,.35); overflow: hidden; }
+.cap-check-bar i { display: block; height: 100%; background: #22c55e; border-radius: 4px; }
+/* the filters as one segmented control, ＋ as a square beside it */
+.cap-fix-tabs.seg { align-items: center; gap: 8px; }
+.cap-seg { flex: 1 1 auto; min-width: 0; display: flex; gap: 2px; padding: 3px; border-radius: 12px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); }
+.cap-fix-tabs .cap-seg button { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 6px 8px; border: 0; border-radius: 9px; background: transparent; color: #9aa1b2; }
+.cap-fix-tabs .cap-seg button span { margin-left: 3px; }
+.cap-fix-tabs .cap-seg button.on { background: #2e3240; color: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.4); }
+.cap-fix-tabs .cap-seg .cap-tab-check { color: #fbbf24; }
+.cap-fix-tabs .cap-seg .cap-tab-check.on { background: rgba(245,158,11,.2); color: #fde68a; }
+.cap-fix-tabs .cap-add-line.cap-add-sq { flex: 0 0 auto; width: 40px; height: 36px; padding: 0; margin-left: 0; border-radius: 11px; display: grid; place-items: center; }
+.cap-fix-tabs .cap-add-line.cap-add-sq b { font-size: 24px; font-weight: 500; line-height: 1; color: #ffd3a3; }
 .cap-fix-tabs .cap-tab-check.on { background: rgba(245,158,11,.22); border-color: rgba(245,158,11,.7); }
 .cap-doubt { flex: 1 1 100%; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 0 0 4px 72px; font-size: 12px; }
 .cap-doubt-tx { flex: 1 1 auto; min-width: 0; color: #fbbf24; }

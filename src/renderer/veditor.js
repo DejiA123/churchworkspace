@@ -11446,19 +11446,31 @@
     // (and lines typed by hand) were never heard twice, so they claim nothing.
     const heard = inScope.filter(({ c }) => !c.manual);
     const checkedAll = heard.length && !nUnchecked && heard.every(({ c }) => c.checked);
+    /*
+     * ►► ONE SLIM LINE AND ONE BAR. ◄◄ The window is for reading captions, so
+     * what the two listens found is a single grey line with a bar (green =
+     * agreed), the filters share one segmented control, and ＋ is a square
+     * button beside it — the lines get the room. (A paragraph-sized note and a
+     * row of pills that wrapped used to take a third of a phone's list.)
+     */
+    const pct = heard.length ? Math.round(100 * (heard.length - nDoubt) / heard.length) : 0;
+    const n0 = (x) => Number(x).toLocaleString('en-US');
     const note = !heard.length || (!checkedAll && !nUnchecked) ? ''
       : checkedAll
-        ? (nDoubt
-          ? `<div class="cap-check-note warn">Heard twice by two models: they agree on ${heard.length - nDoubt} of ${heard.length} lines. Only <b>${nDoubt}</b> need a look (⚠ Check).</div>`
-          : `<div class="cap-check-note good">✅ Heard twice by two models: they agree on every line.</div>`)
-        : `<div class="cap-check-note">ℹ️ ${nUnchecked === heard.length ? 'These lines were' : nUnchecked + ' lines were'} heard once, not double-checked${ve._capCheckWhy ? ` (${escape2(ve._capCheckWhy)})` : ''} — give them a read.</div>`;
-    const tabs = note + `<div class="cap-fix-tabs" role="tablist">`
-      + (nFixed || nDoubt
-        ? `<button type="button" role="tab" data-capfix="all" class="${mode === 'all' ? 'on' : ''}">All lines <span>${inScope.length}</span></button>`
+        ? `<div class="cap-check-note ${nDoubt ? 'warn' : 'good'}" title="Every line was heard twice, by two different models">`
+          + `<span class="cap-check-tx">✓ Heard twice · ${nDoubt ? `${n0(heard.length - nDoubt)} of ${n0(heard.length)} agree` : `all ${n0(heard.length)} lines agree`}</span>`
+          + `<span class="cap-check-bar" aria-hidden="true"><i style="width:${pct}%"></i></span></div>`
+        : `<div class="cap-check-note"><span class="cap-check-tx">ℹ️ ${nUnchecked === heard.length ? 'Heard once, not double-checked' : n0(nUnchecked) + ' lines heard once, not double-checked'}${ve._capCheckWhy ? ` (${escape2(ve._capCheckWhy)})` : ''} — give them a read</span></div>`;
+    const seg = nFixed || nDoubt;
+    const tabs = note + `<div class="cap-fix-tabs${seg ? ' seg' : ''}" role="tablist">`
+      + (seg
+        ? `<div class="cap-seg">`
+          + `<button type="button" role="tab" data-capfix="all" class="${mode === 'all' ? 'on' : ''}">All lines <span>${inScope.length}</span></button>`
           + (nDoubt ? `<button type="button" role="tab" data-capfix="check" class="cap-tab-check ${mode === 'check' ? 'on' : ''}">⚠ Check <span>${nDoubt}</span></button>` : '')
           + (nFixed ? `<button type="button" role="tab" data-capfix="fixed" class="${mode === 'fixed' ? 'on' : ''}">✍ Fixed <span>${nFixed}</span></button>` : '')
+          + `</div>`
         : '')
-      + `<button type="button" class="cap-add-line" data-capadd title="Add a caption line at the playhead (or the next gap) and type it">＋ Add caption</button>`
+      + `<button type="button" class="cap-add-line${seg ? ' cap-add-sq' : ''}" data-capadd aria-label="Add caption" title="Add a caption line at the playhead and type it">${seg ? '<b aria-hidden="true">+</b>' : '＋ Add caption'}</button>`
       + `</div>`;
     list.innerHTML = tabs + rows.map(({ c, i }) => capRowHtml(c, i, base, mode !== 'all')).join('');
     const addBtn = list.querySelector('[data-capadd]');
@@ -16044,6 +16056,7 @@
       // a line as a fix leaves it: new words, and what it said before (null clears it)
       // a line as the second listen leaves it: in doubt, with what the other ear heard
       markCapDoubt(i, kind, altWords) { const e = (ve.capEvents || [])[i]; if (!e) return; if (kind) e.doubt = kind; else delete e.doubt; if (altWords) ve.capAlt = altWords; renderCapList(); renderCapTrack(); },
+      markAllChecked() { (ve.capEvents || []).forEach((e) => { if (!e.manual) { e.checked = true; delete e.unchecked; } }); renderCapList(); },
       markCapFixed(i, was, text) { const e = (ve.capEvents || [])[i]; if (!e) return; if (was == null) delete e._was; else { e._was = was; if (text != null) e.text = text; } renderCapList(); },
       // drive the two caption dropdowns the way a click on them does
       setCapWordsPerLine(v) { document.getElementById('capWords').value = String(v); rebuildCapEvents(); return this.capLines(); },
