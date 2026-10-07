@@ -991,7 +991,11 @@ ipcMain.handle('video:appendClips', wrap(async (e, { input, clips, position, fil
 
 /* ------------------------ IPC: music & clip library --------------------- */
 
-ipcMain.handle('library:list', wrap(async () => library.list()));
+ipcMain.handle('library:list', wrap(async () => {
+  // songs from before the preview was levelled get a matching copy, in the background
+  try { const r = library.relevel(getCtx(), video); if (r) r.catch(() => {}); } catch (e) {}
+  return library.list();
+}));
 ipcMain.handle('library:add', wrap(async (e, { kind, path: p, name, source }) =>
   library.add(getCtx(), video, { kind, path: p, name, source })));
 ipcMain.handle('library:remove', wrap(async (e, { kind, id }) => library.remove({ kind, id })));

@@ -13440,7 +13440,7 @@
       volume: pref.volume != null ? pref.volume : 0.25,
       fadeIn: pref.fadeIn != null ? pref.fadeIn : 1,
       fadeOut: pref.fadeOut != null ? pref.fadeOut : 1.5,
-      duck: pref.duck !== false,
+      duck: false,
       bed: pref.bed !== false,       // start the song at the top of every short
       tlStart: 0, srcStart: 0, len: entry.durationSec || 0,
     };
@@ -13938,7 +13938,8 @@
     return window.__runJob(`🎵 Adding background music to "${(s && s.label) || 'your video'}"…`, jid,
       () => window.api.video.mixMusic({
         input: filePath, musicPath: m.file, musicVolume: m.volume, musicStartSec: startSec,
-        fadeIn: m.fadeIn, fadeOut: m.fadeOut, duck: !!m.duck,
+        // no ducking: the bed sits where the slider puts it, as the preview plays it
+        fadeIn: m.fadeIn, fadeOut: m.fadeOut, duck: false,
         jobId: jid, deleteInput: true, outName: outNameFor(filePath),
       }), J(s, 'music'));
   }

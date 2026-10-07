@@ -3036,6 +3036,31 @@ const DUCK = 'sidechaincompress=threshold=0.02:ratio=3:attack=200:release=2000:k
  * means exactly the same thing — the whole mix is simply back at the
  * preacher's own loudness.
  */
+/*
+ * ►► EVERY SONG AT THE SAME LOUDNESS, SO 100% MEANS LOUD. ◄◄
+ * Songs arrive mastered anywhere from −8 to −26 LUFS: a quiet instrumental at
+ * "100%" sat far under the preacher and the slider could not bring it up. Each
+ * song is measured once (EBU R128) and brought to the level the cleaned-up
+ * sermon is (−16 LUFS), so 100% is as loud as the voice and 25% is a bed ~12 dB
+ * under it — for every song. The preview copy (audioPreview) is levelled the
+ * same way, so what the phone plays is what the export mixes.
+ */
+const MUSIC_LUFS = -16;
+const _songLevel = new Map();
+async function songGainDb(ctx, file) {
+  let key = file;
+  try { const st = fs.statSync(file); key = `${file}|${st.size}|${st.mtimeMs}`; } catch (e) { return 0; }
+  if (_songLevel.has(key)) return _songLevel.get(key);
+  let g = 0;
+  try {
+    const log = await ff.runFfmpegCollect(ctx.ffmpeg, ['-nostats', '-i', file, '-map', '0:a:0', '-af', 'ebur128=framelog=quiet', '-f', 'null', '-']);
+    const I = parseFloat((/I:\s*(-?[\d.]+) LUFS/.exec(log.slice(log.lastIndexOf('Summary:'))) || [])[1]);
+    if (Number.isFinite(I) && I > -60) g = Math.max(-20, Math.min(20, MUSIC_LUFS - I));
+  } catch (e) { if (e && e.name === 'CancelledError') throw e; }
+  _songLevel.set(key, g);
+  return g;
+}
+
 async function mixMusic(ctx, { input, output, musicPath, musicVolume = 0.25, musicStartSec = 0, fadeIn = 0.6, fadeOut = 1.2, duck = true, voiceVolume = 1, onProgress }) {
   if (!musicPath || !fs.existsSync(musicPath)) throw new Error('That music file could not be found.');
   const info = await getInfo(ctx, input);
@@ -3064,12 +3089,13 @@ async function mixMusic(ctx, { input, output, musicPath, musicVolume = 0.25, mus
     tmpSong = path.join(os.tmpdir(), `mw-bed-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}.wav`);
     song = tmpSong;
   }
+  const level = await songGainDb(ctx, musicPath);
   const args = ['-i', input, '-ss', String(start), '-stream_loop', '-1', '-i', song];
   // Trim the (looped) music to the clip, level it, and fade both ends.
   const mus = [
     `atrim=0:${dur.toFixed(3)}`, 'asetpts=PTS-STARTPTS',
     'aresample=48000', 'aformat=sample_fmts=fltp:channel_layouts=stereo',
-    `volume=${vol.toFixed(3)}`,
+    `volume=${level.toFixed(2)}dB`, `volume=${vol.toFixed(3)}`,
   ];
   if (fi > 0) mus.push(`afade=t=in:st=0:d=${fi.toFixed(2)}`);
   if (fo > 0) mus.push(`afade=t=out:st=${Math.max(0, dur - fo).toFixed(2)}:d=${fo.toFixed(2)}`);
@@ -3087,7 +3113,7 @@ async function mixMusic(ctx, { input, output, musicPath, musicVolume = 0.25, mus
     }
     amap = '[aout]';
   } else {
-    fc = `[1:a]${mus.join(',')}[aout]`;
+    fc = `[1:a]${mus.join(',')},alimiter=limit=0.97:level=false[aout]`;
     amap = '[aout]';
   }
 
@@ -3117,7 +3143,8 @@ async function mixMusic(ctx, { input, output, musicPath, musicVolume = 0.25, mus
  * while a sermon exports does not sit behind the export.
  */
 async function audioPreview(ctx, { input, output }) {
-  await ff.runFfmpeg(ctx.ffmpeg, ['-i', input, '-map', '0:a:0', '-vn', '-c:a', 'libmp3lame', '-b:a', '128k', '-ar', '44100', '-ac', '2', '-y', output], { background: true });
+  const level = await songGainDb(ctx, input);
+  await ff.runFfmpeg(ctx.ffmpeg, ['-i', input, '-map', '0:a:0', '-vn', '-af', `volume=${level.toFixed(2)}dB,alimiter=limit=0.97:level=false`, '-c:a', 'libmp3lame', '-b:a', '128k', '-ar', '44100', '-ac', '2', '-y', output], { background: true });
   return output;
 }
 
@@ -3379,7 +3406,7 @@ module.exports = {
   cleanMotion, motionExpr, motionAt, motionChain, MOTION_MAX_Z, keyOf, inPreviewLane, transparentPng, writeTrackFrames, burnCaptionFrames,
   cropFirstChain, fillChain,
   simplifyKeyframes, buildLerpExpr, isCleanEncode,
-  detectSilences, mixMusic, audioPreview, appendClips, audioSample,
+  detectSilences, mixMusic, audioPreview, songGainDb, MUSIC_LUFS, appendClips, audioSample,
   // background noise removal + background-blur fill (pure, unit-tested)
   noiseReductionAf, studioVoiceAf, noiseStrength, measureNoiseFloor, denoiseFilter, NOISE_LEVELS,
   rnnoiseModelPath, voiceIsolationAf, withVoicePasses, ffPath, measureSeparation, renderVerifiedVoice,

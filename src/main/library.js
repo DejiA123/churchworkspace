@@ -148,7 +148,7 @@ async function add(ctx, video, { kind, path: srcPath, name, source, move }) {
    */
   if (k === 'music' && video.audioPreview) {
     const preview = path.join(root(), 'music', `${id}.preview.mp3`);
-    try { entry.preview = await video.audioPreview(ctx, { input: dest, output: preview }); }
+    try { entry.preview = await video.audioPreview(ctx, { input: dest, output: preview }); entry.levelled = LEVEL_VER; }
     catch (e) { try { fs.rmSync(preview, { force: true }); } catch (er) {} }
   }
   if (k === 'clips') {
@@ -164,6 +164,35 @@ async function add(ctx, video, { kind, path: srcPath, name, source, move }) {
   db[k].unshift(entry);
   writeDb(db);
   return entry;
+}
+
+/*
+ * Songs added before the preview copy was levelled (video.songGainDb) play
+ * their preview at the song's own loudness while the export mixes it levelled:
+ * the copy is made again, once, in the background, so the two match.
+ */
+const LEVEL_VER = 1;
+const relevelling = new Map();   // library folder -> running pass (each person has their own)
+function relevel(ctx, video) {
+  const key = root();
+  if (relevelling.has(key) || !video || !video.audioPreview) return relevelling.get(key) || null;
+  if (list().music.every((e) => e.levelled === LEVEL_VER)) return null;
+  const run = (async () => {
+    for (const e of list().music) {
+      if (e.levelled === LEVEL_VER) continue;
+      const preview = path.join(root(), 'music', `${e.id}.preview.mp3`);
+      const tmp = preview + '.new.mp3';
+      try {
+        await video.audioPreview(ctx, { input: e.file, output: tmp });
+        fs.renameSync(tmp, preview);
+        const db = readDb();
+        const hit = db.music.find((x) => x.id === e.id);
+        if (hit) { hit.preview = preview; hit.levelled = LEVEL_VER; writeDb(db); }
+      } catch (er) { try { fs.rmSync(tmp, { force: true }); } catch (x) {} }
+    }
+  })().finally(() => { relevelling.delete(key); });
+  relevelling.set(key, run);
+  return run;
 }
 
 function remove({ kind, id }) {
@@ -458,7 +487,7 @@ async function ytImport(ctx, video, { url, title, onProgress }) {
 }
 
 module.exports = {
-  init, list, add, remove, rename, root, toolsDir,
+  init, list, add, remove, rename, root, toolsDir, relevel,
   ytPath, ytStatus, ytInstall, ytSearch, ytImport, looksCopyrightFree, ytAuthArgs, isBotCheck,
   MUSIC_EXT, CLIP_EXT, STILL_EXT, STILL_SEC, safeName,
 };
