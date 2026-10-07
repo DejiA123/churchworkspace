@@ -996,7 +996,9 @@ function wordsFromVerbose(json, offsetSec) {
   const raw = Array.isArray(json && json.words) ? json.words : [];
   const out = [];
   for (const w of raw) {
-    const text = String((w && (w.word != null ? w.word : w.text)) || '').replace(/\s+/g, ' ').trim();
+    // (some transcripts write the Name the reverent way — "G-d", "L-rd")
+    const text = String((w && (w.word != null ? w.word : w.text)) || '').replace(/\s+/g, ' ').trim()
+      .replace(/\bG-d\b/g, 'God').replace(/\bL-rd\b/g, 'Lord');
     const a = +w.start, b = +w.end;
     if (!text || !Number.isFinite(a) || !Number.isFinite(b) || b < a) continue;
     const mid = (a + b) / 2;
@@ -1306,6 +1308,60 @@ function dropSqueezed(words, alt) {
   return { words: out, dropped };
 }
 
+/*
+ * ►► WHERE THE CONTEXT LED THE EAR ASTRAY, THE PLAIN EAR'S WORDS. ◄◄
+ * The context-primed listen is the more accurate one sentence by sentence
+ * ("who art in heaven", the punctuation), but now and then it loses its place:
+ * measured on a real sermon, fifteen seconds ("…this is not your daughter. But
+ * please, cover this secret. Don't let anybody know.") came back as "Our
+ * father, I I that us. praying." The plain second listen heard those fifteen
+ * seconds right. So the two are compared stretch by stretch:
+ *   • a stretch where the plain ear heard at least eight words in five seconds
+ *     and the primed one barely a third as many — the primed one lost it;
+ *   • a run of five or more primed words the plain ear heard none of —
+ *     words that were not said there;
+ * and in either, the plain ear's words are used. A short difference (one to
+ * four words: "art in heaven" against "at the never") is left to the primed
+ * ear, which is usually the one that is right about it.
+ */
+const FUSE_WIN = 5, FUSE_MIN_ALT = 8, FUSE_RATIO = 0.34, FUSE_RUN = 5, FUSE_NEAR = 1.0;
+function fuseWithPlain(words, alt) {
+  if (!Array.isArray(words) || !Array.isArray(alt) || !alt.length) return { words: words || [], replaced: 0 };
+  const mid = (w) => ((+w.start) + (+w.end)) / 2;
+  const n = words.length;
+  const bad = [];      // [from, to] stretches whose words come from the plain ear
+  // 1) a stretch the primed ear lost
+  const end = Math.max(n ? +words[n - 1].end : 0, +alt[alt.length - 1].end);
+  for (let t = 0; t < end; t += 1) {
+    const q = alt.filter((w) => mid(w) >= t && mid(w) < t + FUSE_WIN).length;
+    if (q < FUSE_MIN_ALT) continue;
+    const p = words.filter((w) => mid(w) >= t && mid(w) < t + FUSE_WIN).length;
+    if (p < q * FUSE_RATIO) bad.push([t, t + FUSE_WIN]);
+  }
+  // 2) a run of words the plain ear did not hear
+  const heard = (w) => { const t = normTok(w.text), m = mid(w); return !t || alt.some((a) => normTok(a.text) === t && Math.abs(mid(a) - m) <= FUSE_NEAR); };
+  for (let i = 0; i < n;) {
+    if (heard(words[i])) { i++; continue; }
+    let j = i;
+    while (j < n && !heard(words[j])) j++;
+    if (j - i >= FUSE_RUN) bad.push([+words[i].start - 0.05, +words[j - 1].end + 0.05]);
+    i = j;
+  }
+  if (!bad.length) return { words, replaced: 0 };
+  // join overlapping stretches
+  bad.sort((a, b) => a[0] - b[0]);
+  const spans = [bad[0].slice()];
+  for (const [a, b] of bad.slice(1)) { const l = spans[spans.length - 1]; if (a <= l[1]) l[1] = Math.max(l[1], b); else spans.push([a, b]); }
+  const inSpan = (w) => spans.some(([a, b]) => mid(w) >= a && mid(w) < b);
+  const kept = words.filter((w) => !inSpan(w));
+  // the plain ear writes without capitals: the Name, "I", and a sentence's first word get theirs
+  const CAPS = { i: 'I', "i'm": "I'm", "i've": "I've", "i'll": "I'll", "i'd": "I'd", god: 'God', jesus: 'Jesus', christ: 'Christ', lord: 'Lord' };
+  const cap = (t) => { const m = /^([a-z']+)(\W*)$/.exec(t); return m && CAPS[m[1]] ? CAPS[m[1]] + m[2] : t; };
+  const taken = alt.filter((w) => inSpan(w)).map((w) => Object.assign({}, w, { text: cap(String(w.text || '')), fromPlain: true }));
+  const out = kept.concat(taken).sort((a, b) => mid(a) - mid(b));
+  return { words: inSpokenOrder(out), replaced: taken.length, spans: spans.length };
+}
+
 /** Hear [from,to] again with the OTHER model and mark where the two disagree. */
 async function secondOpinion({ input, from, to, words, onProgress = null, terms = null, plain = false }) {
   const first = captionModelId();
@@ -1612,7 +1668,7 @@ async function transcribeSegments({ input, startSec = 0, endSec = 0 } = {}) {
 }
 
 module.exports = {
-  captionModelId, secondOpinion, markDisagreements, dropSqueezed, captionPrompt, isCaptionPromptEcho, withoutPromptEcho, CAPTION_PRIMER,
+  captionModelId, secondOpinion, markDisagreements, dropSqueezed, fuseWithPlain, captionPrompt, isCaptionPromptEcho, withoutPromptEcho, CAPTION_PRIMER,
   _resetCaptionModel: () => { captionModelRefusedAt = 0; },
   configure, state, ready, transcribe, test, cadence,
   fileReady, transcribeFile, transcribeWords, transcribeSegments, shareKey,

@@ -99,6 +99,23 @@ const check = (name, ok, d) => { console.log((ok ? '  PASS ' : '  FAIL ') + name
     check('quick words the other ear heard too are kept', r3.words.length === 3 && r3.dropped === 0);
   }
 
+  console.log('\n[6] a stretch the primed ear lost comes from the plain ear; a short difference stays');
+  {
+    const W = (t, a, b) => ({ text: t, start: a, end: b });
+    const said = 'and the mother actually agreed with the father you know that i know that this is not your daughter but please cover this secret don\'t let anybody know'.split(' ');
+    const plainEar = said.map((t, k) => W(t, 250 + k * 0.6, 250 + k * 0.6 + 0.5));
+    // the real failure: fifteen seconds came back as "Our father, I I that us. praying."
+    const primed = [W('Our', 250.2, 250.4), W('father,', 258, 258.3), W('I', 261.3, 261.35), W('I', 261.4, 261.45), W('that', 261.4, 261.5), W('us.', 261.5, 261.6), W('praying.', 267, 267.02)];
+    const f = cs.fuseWithPlain(primed, plainEar);
+    const t = f.words.map((w) => w.text).join(' ');
+    check('the lost fifteen seconds are back', /this is not your daughter but please cover this secret don't let anybody know/.test(t) && !/praying/.test(t), t);
+    check('…with "I" written as "I"', /that I know/.test(t), t);
+    const ctx = [W('pray', 200, 200.3), W('this,', 200.3, 200.6), W('our', 200.6, 200.8), W('Father,', 200.8, 201.2), W('who', 201.2, 201.4), W('art', 201.4, 201.6), W('in', 201.6, 201.7), W('heaven.', 201.7, 202.2)];
+    const plain2 = [W('pray', 200, 200.3), W('this', 200.3, 200.6), W('with', 200.6, 200.7), W('our', 200.7, 200.9), W('father', 200.9, 201.2), W('who', 201.2, 201.4), W('at', 201.4, 201.6), W('a', 201.6, 201.7), W('never', 201.7, 202.2)];
+    const g = cs.fuseWithPlain(ctx, plain2);
+    check('"who art in heaven" is kept against "who at a never"', g.words.map((w) => w.text).join(' ') === 'pray this, our Father, who art in heaven.', g.words.map((w) => w.text).join(' '));
+  }
+
   fs.rmSync(wav, { force: true });
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
