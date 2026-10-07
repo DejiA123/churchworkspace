@@ -291,7 +291,7 @@ let _hideTimer = null;
     for (const it of b.items || []) if (it.state === 'done' && it.output && window.__taskAddFile) window.__taskAddFile(tid, it.output);
     if (b.state === 'running') {
       const cur = b.current;
-      const step = cur ? `On the server · ${cur.label}` : (b.received < b.total ? `Preparing on your phone… ${b.received} of ${b.total} sent` : 'Queued on the server');
+      const step = cur ? `On the server · ${cur.label}` : (b.received < b.total ? `Preparing on your phone… ${b.received} of ${b.total} sent — keep the app open until all are sent` : 'Queued on the server');
       if (window.__taskSay) window.__taskSay(tid, step + (b.sealed ? ' — you can close the app' : ''));
       // the chip's number is THIS short's, as for every export; "1 of 20" beside it is the batch
       if (window.__taskProgress) window.__taskProgress(tid, cur ? cur.pct : 0);
