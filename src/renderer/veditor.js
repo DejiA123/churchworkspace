@@ -13960,6 +13960,69 @@
     renderSoundTrack();
     return x;
   }
+  /*
+   * ►► 🎙 AI VOICE. ◄◄ Type a line — an intro, a scripture, "follow for more" —
+   * pick a voice, hear it, and it goes on the Sounds row at the playhead like
+   * a recorded voiceover (the server speaks it with Kokoro: voiceover.js).
+   */
+  const AIV = { voice: 'am_michael', speed: 1, last: null };
+  async function openAiVoice() {
+    if (!ve.video) return window.__toast && window.__toast('Open a video first.', 'error');
+    let voices = null;
+    try { voices = await window.api.audio.voices(); } catch (e) { voices = null; }
+    if (!voices || !voices.installed) return window.__toast && window.__toast('The AI voice is not installed on this server yet — update the server to add it.', 'error', 6000);
+    document.getElementById('veAiVoice')?.remove();
+    const m = document.createElement('div');
+    m.id = 'veAiVoice'; m.className = 've-aiv';
+    const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const paint = () => {
+      m.innerHTML = `<div class="ve-aiv-box" role="dialog" aria-label="AI voice">
+        <div class="ve-aiv-head"><b>🎙 AI voice</b><button type="button" class="ve-aiv-x" data-aiv="close" aria-label="Close">✕</button></div>
+        <textarea id="veAivText" rows="4" maxlength="1200" placeholder="Type what the voice should say — e.g. “This message will change the way you pray.”">${esc(AIV.text || '')}</textarea>
+        <div class="ve-aiv-row">${voices.voices.map((v) => `<button type="button" class="ve-aiv-chip${AIV.voice === v.id ? ' on' : ''}" data-aiv-voice="${v.id}">${esc(v.label)}</button>`).join('')}</div>
+        <div class="ve-aiv-row">${[[0.9, 'Calm'], [1, 'Natural'], [1.1, 'Lively']].map(([v, l]) => `<button type="button" class="ve-aiv-chip${AIV.speed === v ? ' on' : ''}" data-aiv-speed="${v}">${l}</button>`).join('')}</div>
+        <div class="ve-aiv-foot"><button type="button" class="ve-aiv-btn" data-aiv="hear">▶ Hear it</button><button type="button" class="ve-aiv-btn main" data-aiv="add">＋ Add at the playhead</button></div>
+        <small class="ve-aiv-note" id="veAivNote">A real-sounding voice, made on your server. It goes on the Sounds row — drag it, trim it, change its volume.</small>
+      </div>`;
+    };
+    paint();
+    document.body.appendChild(m);
+    const note = (t) => { const n = document.getElementById('veAivNote'); if (n) n.textContent = t; };
+    const make = async () => {
+      const text = (document.getElementById('veAivText').value || '').trim();
+      AIV.text = text;
+      if (!text) { note('Type what the voice should say first.'); return null; }
+      if (AIV.last && AIV.last.text === text && AIV.last.voice === AIV.voice && AIV.last.speed === AIV.speed) return AIV.last;
+      note('🎙 Recording the voice… (the first time takes a little longer)');
+      m.classList.add('busy');
+      try {
+        const r = await window.api.audio.say({ text, voice: AIV.voice, speed: AIV.speed });
+        AIV.last = Object.assign({ voice: AIV.voice, speed: AIV.speed }, r);
+        note('Ready — ' + (r.durationSec || 0).toFixed(1) + ' s.');
+        return AIV.last;
+      } catch (e) { note('Could not make the voice: ' + ((e && e.message) || e)); return null; }
+      finally { m.classList.remove('busy'); }
+    };
+    m.addEventListener('click', async (e) => {
+      const b = e.target.closest('button'); if (!b || m.classList.contains('busy')) return;
+      if (e.target === m || b.dataset.aiv === 'close') { m.remove(); return; }
+      if (b.dataset.aivVoice) { AIV.text = document.getElementById('veAivText').value; AIV.voice = b.dataset.aivVoice; paint(); return; }
+      if (b.dataset.aivSpeed) { AIV.text = document.getElementById('veAivText').value; AIV.speed = +b.dataset.aivSpeed; paint(); return; }
+      if (b.dataset.aiv === 'hear') {
+        const r = await make(); if (!r) return;
+        try { const a = new Audio(fileUrl(r.path)); a.play().catch(() => {}); } catch (er) {}
+        return;
+      }
+      if (b.dataset.aiv === 'add') {
+        const r = await make(); if (!r) return;
+        addSound({ path: r.path, label: 'AI voice: ' + r.text.slice(0, 24), kind: 'voice', dur: r.durationSec || 1, volume: 1 });
+        m.remove();
+        window.__toast && window.__toast('🎙 The voice is on the Sounds row at the playhead.', 'good');
+      }
+    });
+    m.addEventListener('click', (e) => { if (e.target === m) m.remove(); });
+    setTimeout(() => { const t = document.getElementById('veAivText'); if (t) t.focus(); }, 50);
+  }
   function removeSound(id) {
     if (!ve.sounds.some((x) => x.id === id)) return;
     pushHistory();
@@ -15321,6 +15384,8 @@
     editSelectedCaption() { if (capLineSelected()) editCaption(ve.capSel); },
     /** ＋ Add caption: a new line at the playhead (or the next gap), open for typing. */
     addCaptionHere() { return addCaptionHere(); },
+    /** 🎙 AI voice: type a line, it is spoken and laid on the Sounds row. */
+    aiVoice() { return openAiVoice(); },
     /** Projects (every video worked on keeps its own — see saveProject). */
     projectId() { return ve.video ? ve.sessionId || null : null; },
     /** Whatever is on screen written to its project NOW (before switching to another). */

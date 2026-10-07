@@ -87,6 +87,8 @@ const ALLOWED = {
   'video:mixSounds': true,
   'audio:sfxList': true,
   'audio:sfx': true,
+  'audio:say': true,
+  'audio:voices': true,
   'audio:saveRecording': true,
   'video:getExportPrefs': true,
   'video:audioSample': true,

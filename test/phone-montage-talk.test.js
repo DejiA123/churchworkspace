@@ -155,6 +155,26 @@ async function waitUp() {
     let ok2 = false, info = '';
     try { info = execFileSync(require('ffprobe-static').path, ['-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', mixed.path], { encoding: 'utf8' }); ok2 = /video/.test(info) && /audio/.test(info); } catch (e) { info = e.message; }
     check(mixed && mixed.path !== VID && ok2 && mixed.credit === '', 'the server lays the song under the video and posts that copy (your own song needs no credit)', { mixed, info });
+    // 🎙 AI VOICE: type a line, it lands on the Sounds row (the server's voice stood in for)
+    await page.evaluate(() => { document.getElementById('csCompose') && document.querySelector('#csCompose .cp-x, #csCompose [data-close]') && document.querySelector('#csCompose .cp-x, #csCompose [data-close]').click(); window.MWSocial.go('studio'); });
+    await sleep(800);
+    const voice = await page.evaluate(async (song) => {
+      window.api.audio.voices = async () => ({ installed: true, voices: [{ id: 'am_michael', label: 'Man · American' }, { id: 'af_heart', label: 'Woman · American' }] });
+      window.api.audio.say = async (a) => { window.__said = a; return { path: song, durationSec: 2.4, text: a.text }; };
+      const before = (window.VideoEditor.__test.sounds ? window.VideoEditor.__test.sounds() : null);
+      await window.VideoEditor.aiVoice();
+      await new Promise((r) => setTimeout(r, 300));
+      const box = document.getElementById('veAiVoice');
+      document.getElementById('veAivText').value = 'This message will change the way you pray.';
+      document.querySelector('#veAiVoice [data-aiv-voice="af_heart"]').click();
+      await new Promise((r) => setTimeout(r, 100));
+      document.querySelector('#veAiVoice [data-aiv="add"]').click();
+      await new Promise((r) => setTimeout(r, 500));
+      const lane = [...document.querySelectorAll('.ve-sfx-track *')].map((e) => e.textContent).join(' ');
+      return { opened: !!box, said: window.__said, closed: !document.getElementById('veAiVoice'), lane: /AI voice/.test(lane) };
+    }, songPath);
+    check(voice.opened && voice.said && voice.said.voice === 'af_heart' && /change the way you pray/.test(voice.said.text), 'AI voice: a typed line is sent to be spoken in the voice picked', voice);
+    check(voice.closed && voice.lane, 'and it lands on the Sounds row', voice);
   } catch (e) {
     check(false, 'the test ran to the end', e && e.message);
   } finally {

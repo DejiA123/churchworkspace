@@ -589,6 +589,8 @@ let _hideTimer = null;
     audio: {
       sfxList: () => call('audio:sfxList'),
       sfx: (kind) => call('audio:sfx', { kind }),
+      say: (a) => call('audio:say', a),
+      voices: () => call('audio:voices'),
       // the recording's bytes travel as binary (pack), not as text
       saveRecording: (a) => call('audio:saveRecording', a),
     },
@@ -3249,6 +3251,7 @@ let _hideTimer = null;
     audio: [
       { icon: 'music', label: 'Music', press: '#veMusic' },
       { icon: 'mic', label: 'Voiceover', press: '#veVoiceover' },
+      { icon: 'sparkles', label: 'AI voice', call: 'aiVoice' },
       { icon: 'sfx', label: 'Sound FX', press: '#veSfxBtn' },
       { icon: 'volume', label: 'Volume', fx: '#fxVol' },
       { icon: 'mic', label: 'Clean voice', sheet: 'insp', tab: '#veInspTabAudio' },

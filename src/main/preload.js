@@ -515,6 +515,8 @@ contextBridge.exposeInMainWorld('api', {
   audio: {
     sfxList: () => call('audio:sfxList'),
     sfx: (kind) => call('audio:sfx', { kind }),
+    say: (a) => call('audio:say', a),
+    voices: () => call('audio:voices'),
     saveRecording: (a) => call('audio:saveRecording', a),
   },
   fs: {

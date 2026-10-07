@@ -2626,3 +2626,18 @@ body.ve-pfull .ve-preview .ve-fs-exit {
 .cap-ctx-tx { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cap-ctx-play { flex: 0 0 auto; width: auto; margin: 0; padding: 3px 10px; font-size: 11.5px; border-radius: 999px; cursor: pointer; font-weight: 650;
   background: rgba(79,124,255,.12); color: #c7d2fe; border: 1px solid rgba(79,124,255,.45); }
+/* 🎙 AI voice (openAiVoice) */
+.ve-aiv { position: fixed; inset: 0; z-index: 400; background: rgba(8,10,15,.6); display: flex; align-items: flex-end; justify-content: center; }
+.ve-aiv-box { width: min(560px, 100%); background: #15161c; border: 1px solid rgba(255,255,255,.08); border-radius: 20px 20px 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); box-shadow: 0 -10px 40px rgba(0,0,0,.5); color: #fff; }
+@media (min-width: 901px) { .ve-aiv { align-items: center; } .ve-aiv-box { border-radius: 18px; } }
+.ve-aiv-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-size: 17px; }
+.ve-aiv-x { width: 36px; height: 36px; border-radius: 50%; border: 0; background: rgba(255,255,255,.08); color: #fff; cursor: pointer; }
+#veAivText { width: 100%; box-sizing: border-box; border-radius: 12px; border: 1px solid rgba(255,255,255,.12); background: #0e0f14; color: #fff; padding: 12px; font: 16px/1.4 inherit; resize: vertical; }
+.ve-aiv-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.ve-aiv-chip { border-radius: 999px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05); color: #cbd0dc; padding: 8px 13px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.ve-aiv-chip.on { background: rgba(139,92,246,.25); border-color: rgba(167,139,250,.7); color: #fff; }
+.ve-aiv-foot { display: flex; gap: 8px; margin-top: 14px; }
+.ve-aiv-btn { flex: 1; height: 46px; border-radius: 12px; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06); color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; }
+.ve-aiv-btn.main { background: linear-gradient(135deg,#8b5cf6,#6366f1); border-color: transparent; }
+.ve-aiv.busy .ve-aiv-btn { opacity: .5; }
+.ve-aiv-note { display: block; margin-top: 10px; color: #9aa1b2; font-size: 13px; }

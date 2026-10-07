@@ -936,6 +936,28 @@ ipcMain.handle('audio:sfx', wrap(async (e, { kind } = {}) => {
   if (!fs.existsSync(out) || fs.statSync(out).size < 400) await video.makeSfx(getCtx(), { kind, output: out });
   return { path: out, name: r.name, durationSec: r.dur };
 }));
+/*
+ * 🎙 AI VOICE: any line typed in the studio, spoken in a real voice (Kokoro, on
+ * this server — voiceover.js) and kept as a voiceover beside the exports.
+ */
+ipcMain.handle('audio:voices', wrap(async () => require('./voiceover').status()));
+ipcMain.handle('audio:say', wrap(async (e, { text, voice, speed } = {}) => {
+  const words = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!words) throw new Error('Type what the voice should say.');
+  if (words.length > 1200) throw new Error('That is a lot for one line — split it into a few shorter ones.');
+  const vox = require('./voiceover');
+  if (!vox.installed()) throw new Error('The AI voice is not installed on this server — update the server to add it.');
+  const tmp = path.join(require('os').tmpdir(), `mw-say-${Date.now()}.wav`);
+  const dir = path.join(ensureOutputDir(), 'Voiceovers');
+  fs.mkdirSync(dir, { recursive: true });
+  const output = path.join(dir, `ai-voice-${stamp()}.m4a`);
+  try {
+    await vox.speak(words, { voice, out: tmp, speed: Math.max(0.7, Math.min(1.3, Number(speed) || 1)) });
+    await video.saveRecording(getCtx(), { inputPath: tmp, output });
+  } finally { try { fs.unlinkSync(tmp); } catch (er) {} }
+  const info = await video.getInfo(getCtx(), output);
+  return { path: output, durationSec: info.durationSec || 0, text: words };
+}));
 ipcMain.handle('audio:saveRecording', wrap(async (e, { bytes, ext } = {}) => {
   const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || []);
   if (buf.length < 200) throw new Error('Nothing was recorded — check the microphone and try again.');
