@@ -2426,6 +2426,8 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .mt-chip.on { border-color: transparent; background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%); color: #fff;
   box-shadow: 0 6px 16px rgba(124,58,237,.35); }
 .mt-toggle { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 14px; color: var(--ph-text, #fff); }
+/* (an attribute-hidden toggle or section — the Viral Montage hides "keep the clips’ sound" and Order — must stay hidden) */
+#cloudMontage [hidden] { display: none !important; }
 .mt-toggle input { width: 20px; height: 20px; margin: 0; accent-color: #a855f7; }
 .mt-brief { width: 100%; box-sizing: border-box; margin: 0; padding: 10px 12px; font: 16px/1.4 inherit; border-radius: 12px; resize: none;
   background: var(--ph-panel-2, #1d1e24); color: var(--ph-text, #fff); border: 1px solid var(--ph-line, #2a2b32); }
