@@ -361,7 +361,7 @@ function makeCloudJudge({ cloudwrite = require('./cloudwrite') } = {}) {
         stats.calls++;
         const out = await cloudwrite.chat({
           system, prompt, temperature: 0, json: true, evenIfOff: true,
-          maxTokens: maxTokens || 3000, timeoutMs: 150000, effort: 'medium',
+          maxTokens: maxTokens || 3000, timeoutMs: 120000,
           prefer: ['openai/gpt-oss-120b', 'moonshotai/kimi-k2-instruct', 'llama-3.3-70b-versatile'],
         });
         if (!out) { stats.why = cloudwrite.state().why || 'no answer'; (stats.errors = stats.errors || []).push(stats.why); }

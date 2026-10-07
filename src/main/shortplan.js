@@ -222,12 +222,12 @@ async function refineEdges(moments, S, { ask, minLen, maxLen, retryWaits }) {
  * sents: [{start, end, text}] — the whole sermon, in order.
  * Returns { moments: [...], sections, failed } or null.
  */
-async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, maxClips = 20, ask, onProgress = null, cancelled = () => false, retryWaits = [20000, 40000, 60000] } = {}) {
+async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, maxClips = 20, ask, onProgress = null, cancelled = () => false, retryWaits = [15000, 30000] } = {}) {
   const S = (sents || []).filter((s) => s && s.text && s.end > s.start);
   if (S.length < 8 || typeof ask !== 'function') return null;
   const secs = sections(S);
   const all = [];
-  let failed = 0;
+  let failed = 0, lastGot = true;
   for (let k = 0; k < secs.length; k++) {
     if (cancelled()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
     const { system, prompt } = promptFor(S, secs[k], { minLen, maxLen, idealLen });
@@ -252,6 +252,11 @@ async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, max
       } catch (e) { if (e && e.cancelled) throw e; }
     }
     if (!got) failed++;
+    // Two sections in a row with no answer at all: the free allowance is spent
+    // (measured: a day of heavy testing left every model refusing, and the scan
+    // sat waiting fifteen minutes). Stop and let the loudness scan run now.
+    if (!got && k > 0 && !lastGot) return null;
+    lastGot = !!got;
     for (const m of got || []) {
       const v = vet(m, S, secs[k], { minLen, maxLen });
       if (v) all.push(Object.assign(v, { sec: k }));
