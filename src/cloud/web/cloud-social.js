@@ -1219,7 +1219,7 @@
    * grade, B-roll from the photos and captions lit up word by word
    * (montage.js makeTalk).
    */
-  const MT_MODES = [['music', '🎵 Music montage'], ['talk', '🔥 Viral talk edit']];
+  const MT_MODES = [['music', '🎵 AI Standard Montage'], ['talk', '🔥 Viral Montage']];
   const MT_TALK_LENS = [[15, '15s'], [30, '30s'], [45, '45s'], [60, '60s'], ['custom', 'Custom']];
   const MT_ORDERS = [['ai', '✨ AI decides'], ['mine', '📌 My order']];
   const MT_STYLES = [['hype', 'Hype'], ['worship', 'Worship'], ['emotional', 'Emotional'], ['cinematic', 'Cinematic'], ['fun', 'Fun']];
@@ -1294,7 +1294,7 @@
         <textarea id="mtBrief" class="mt-brief" rows="2" maxlength="400" placeholder="e.g. Youth camp 2026 — three days of worship, games and baptisms">${esc(MT.brief)}</textarea></section>
       <input type="file" id="mtPick" accept="video/*,image/*" multiple hidden />
       <input type="file" id="mtSong" accept="audio/*,.mp3,.m4a,.wav,.aac" hidden />`;
-    p.foot.innerHTML = `<button type="button" class="mt-go" data-mt="go"${ready ? '' : ' disabled'}>${mi('sparkles')} ${talk ? 'Make my viral edit' : 'Make my montage'}</button>`;
+    p.foot.innerHTML = `<button type="button" class="mt-go" data-mt="go"${ready ? '' : ' disabled'}>${mi('sparkles')} ${talk ? 'Make my Viral Montage' : 'Make my montage'}</button>`;
     if (!p._wired) { p._wired = true; mtWire(p); }
   }
 

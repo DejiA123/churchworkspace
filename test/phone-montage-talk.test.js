@@ -104,7 +104,7 @@ async function waitUp() {
         lens: [...document.querySelectorAll('#cloudMontage [data-mt-len]')].map((b) => b.textContent), caps: !document.getElementById('mtCaps') };
     });
     const a = await st();
-    check(/viral edit/.test(a.go) && a.disabled, 'the button says "Make my viral edit", waiting for a video', a);
+    check(/Viral Montage/.test(a.go) && a.disabled, 'the button says "Make my Viral Montage", waiting for a video', a);
     check(a.order && !a.lens.includes('Use everything') && a.caps, 'the talk edit hides Order and "Use everything", and its captions are always on', a);
     await page.setInputFiles('#mtPick', VID);
     await sleep(800);

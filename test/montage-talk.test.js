@@ -124,7 +124,7 @@ const SCRIPT = {
   try {
     await montage.make(ctx, video.getInfo, { mediaPaths: [A], style: 'hype', lengthSec: 15, output: path.join(WORK, 'm2.mp4'), mode: 'talk', hear: async () => [] });
   } catch (e) { err = e; }
-  ok(err && /Music montage/.test(err.message), 'a video with no one speaking says to use the music montage instead', err && err.message);
+  ok(err && /AI Standard Montage/.test(err.message), 'a video with no one speaking says to use the music montage instead', err && err.message);
 
   fs.rmSync(WORK, { recursive: true, force: true });
   console.log(`\n${pass} PASS / ${fail} FAIL`);
