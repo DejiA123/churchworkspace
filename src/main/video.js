@@ -2253,7 +2253,8 @@ async function burnCaptionTrack(ctx, { input, track, output, onProgress, images 
     return await burnCaptionFrames(ctx, { input, track: writeTrackFrames(track, dir), output, onProgress, images });
   } finally {
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {}
-    if (track && track.trackId) dropTrackFrames(track.trackId);
+    // a batch's track stays until the batch has made the short (a restart re-runs it)
+    if (track && track.trackId && !track.keep) dropTrackFrames(track.trackId);
   }
 }
 
@@ -2276,12 +2277,12 @@ function trackDir(trackId) {
 function putTrackFrames({ trackId, pngs }) {
   const dir = trackDir(trackId);
   fs.mkdirSync(dir, { recursive: true });
-  // tracks left behind by a page that died mid-draw go after six hours
+  // tracks left behind by a page that died mid-draw (or a batch never run) go after two days
   try {
     for (const d of fs.readdirSync(os.tmpdir())) {
       if (!d.startsWith('mw-captrack-')) continue;
       const full = path.join(os.tmpdir(), d);
-      if (Date.now() - fs.statSync(full).mtimeMs > 6 * 3600e3) fs.rmSync(full, { recursive: true, force: true });
+      if (Date.now() - fs.statSync(full).mtimeMs > 48 * 3600e3) fs.rmSync(full, { recursive: true, force: true });
     }
   } catch (e) { /* tidying is best effort */ }
   for (const p of pngs || []) {

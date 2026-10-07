@@ -234,6 +234,17 @@ async function runItem(b, it) {
   // the recipe stays on disk until the short is finished, so a restart part-way
   // through can start it again
   const steps = v8.deserialize(fs.readFileSync(it.file));
+  // caption pictures the phone sent ahead for this short: kept until it is over
+  const tracks = steps.map((st) => st && st.args && st.args.track && st.args.track.keep && st.args.track.trackId).filter(Boolean);
+  try {
+    await runSteps(b, it, steps);
+  } finally {
+    if (tracks.length) { try { const video = require('./video'); tracks.forEach((t) => video.dropTrackFrames(t)); } catch (e) {} }
+  }
+}
+
+async function runSteps(b, it, steps) {
+  const t0 = it.startedAt;
   const outs = [];
   const n = steps.length;
   for (let k = 0; k < n; k++) {

@@ -183,6 +183,18 @@ async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise
       const a3 = await page.evaluate(() => { window.__showOverlay('Exporting…'); const st = window.__awakeState(); window.__hideOverlay(); return st; });
       check(a3.needed, 'an export watched on the progress card counts too', a3);
     }
+    console.log('\n[9] a short recorded for a server batch sends its caption pictures ahead (no white screen)');
+    {
+      const r = await page.evaluate(async () => {
+        const T = window.VideoEditor.__test;
+        window.__mwBatch.begin({ width: 1080, height: 1920, durationSec: 4, hasAudio: true, fps: 24 });
+        try {
+          const tr = await T.capTrackFor([{ start: 0, end: 2, text: 'Hello church' }, { start: 2, end: 4, text: 'God is good' }], 1080, 1920, 4);
+          return { id: tr && tr.trackId, keep: tr && tr.keep, inline: tr ? tr.frames.filter((f) => f.png).length : -1, refs: tr ? tr.frames.filter((f) => f.ref != null).length : -1 };
+        } finally { window.__mwBatch.end(); }
+      });
+      check(r.id && r.keep && r.inline === 0 && r.refs > 0, 'the pictures went to the server; the recipe only names them', r);
+    }
   } catch (e) { check(false, 'the test ran to the end', e.message); }
   finally { await browser.close(); srv.kill(); fs.rmSync(WORK, { recursive: true, force: true }); }
   console.log(`\n${pass} PASS / ${fail} FAIL`);

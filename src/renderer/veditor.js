@@ -6182,8 +6182,12 @@
      * one batch. The desk, and a short being recorded for a server batch, keep
      * the bytes inline as before (no streaming there, and nothing to fear).
      */
-    let stream = !!(window.api.captions && window.api.captions.trackPut)
-      && !(window.__mwBatch && window.__mwBatch.recording && window.__mwBatch.recording());
+    // A short being recorded for a server batch streams too: it used to keep
+    // every picture inline in its recipe, and fourteen captioned shorts in a
+    // row ran an iPhone out of memory (the white screen). The server keeps the
+    // pictures until the batch has made that short (batch.js drops them).
+    const recording = !!(window.__mwBatch && window.__mwBatch.recording && window.__mwBatch.recording());
+    let stream = !!(window.api.captions && window.api.captions.trackPut);
     let trackId = stream ? ('t' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)) : null;
     const seenPng = new Map();   // content key -> unique index (or the bytes, inline)
     let pending = [], pendingBytes = 0, uniques = 0, streamedAny = false;
@@ -6281,7 +6285,7 @@
     }
     await flush();
     const out = unsent.size ? frames.map((f) => (f.ref != null ? { png: unsent.get(f.ref), dur: f.dur } : f)) : frames;
-    return { band, fps, authorW: outW, authorH: outH, frames: out, trackId };
+    return Object.assign({ band, fps, authorW: outW, authorH: outH, frames: out, trackId }, trackId && recording ? { keep: true } : {});
   }
 
   /**

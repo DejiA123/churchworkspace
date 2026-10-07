@@ -71,6 +71,21 @@ const ok = (c, m, d) => { if (c) pass++; else fail++; console.log(`  ${c ? 'PASS
   try { video.putTrackFrames({ trackId: '../../etc', pngs: [{ i: 0, png: white }] }); } catch (e) { threw = true; }
   ok(threw, 'a track id with a path in it is refused');
 
+  console.log('\n[5] a server batch\'s track is kept until the batch has made the short');
+  {
+    const id2 = 'tkeep' + Date.now().toString(36);
+    video.putTrackFrames({ trackId: id2, pngs: [{ i: 0, png: white }] });
+    const dir2 = path.join(os.tmpdir(), 'mw-captrack-' + id2);
+    const out2 = path.join(work, 'out2.mp4');
+    await video.burnCaptionTrack(ctx, { input, track: Object.assign({}, track, { trackId: id2, keep: true, frames: [{ ref: 0, dur: 3 }] }), output: out2 });
+    ok(fs.existsSync(out2) && fs.existsSync(dir2), 'the burn works and the pictures stay (a restart can re-run the short)');
+    // the batch runner drops them when the short is over
+    const batch = require(path.join(__dirname, '..', 'src', 'main', 'batch'));
+    ok(typeof batch === 'object', 'the batch runner loads');
+    video.dropTrackFrames(id2);
+    ok(!fs.existsSync(dir2), 'and they are removed once it is done');
+  }
+
   fs.rmSync(work, { recursive: true, force: true });
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
