@@ -473,7 +473,17 @@ async function chat({ system, prompt, maxTokens = 1400, temperature = 0.8, json 
     if (res.status === 400 && JSON_FAILED_RX.test(errText) && useJson) return { retryNoJson: true };
     // The model is gone: next one down.
     if ((res.status === 404 || res.status === 400) && GONE_RX.test(errText)) return { next: true, why: 'is not there any more' };
-    return { stop: true, why: 'the writing service answered ' + res.status };
+    /*
+     * Any other refusal of THIS request (a 400 the rules above do not know —
+     * measured on the live server: two of six whole-sermon reads came back
+     * "answered 400" and the whole ladder stopped there) is no reason to stop
+     * the ladder: the next model may well take it. The provider's own words go
+     * into the reason, so the next one of these can be read rather than guessed.
+     */
+    const said = (() => { try { const j = JSON.parse(errText); return (j && j.error && (j.error.message || j.error.code)) || ''; } catch (e) { return errText; } })();
+    const why = 'the writing service answered ' + res.status + (said ? ' (' + String(said).replace(/\s+/g, ' ').slice(0, 160) + ')' : '');
+    if (res.status === 400 || res.status === 413 || res.status === 422) return { next: true, why };
+    return { stop: true, why };
   };
 
   let lastWhy = '';
