@@ -7482,6 +7482,8 @@
     if (ve.refs.player && tl.playhead) { try { ve.refs.player.currentTime = tl.playhead; } catch (e) {} }
     updatePlayhead();
     updateSessionChip();
+    // an Export all that was cut off part-way picks up where it stopped
+    setTimeout(() => { resumeHandover().catch(() => {}); }, 1500);
     return true;
   }
 
@@ -7805,6 +7807,7 @@
     });
     $('#veResumeNo').addEventListener('click', () => {
       done();
+      abandonHandover().catch(() => {});
       window.api.sessions.autosaveClear().catch(() => {});
     });
   }
@@ -9818,6 +9821,8 @@
         return wait ? wait(rec.promise) : rec.promise;
       },
       begin(item) { cur = start(item); },
+      /** Is this item's prep started (running or finished, not yet taken)? */
+      has(item) { return !!cur && cur.item === item; },
       stop() { stopped = true; },
       /**
        * Is this item's prep still running — i.e. will the caller have to WAIT
@@ -9830,11 +9835,64 @@
     };
   }
 
-  async function exportAll() {
-    const list = shortsOf().sort((a, b) => a.start - b.start); // only Long-to-shorts output
-    if (!list.length) return;
+  /*
+   * ►► A HANDOVER THAT WAS CUT OFF CARRIES ON BY ITSELF. ◄◄
+   * Export all on a phone hands each short to the server in turn. Should iOS
+   * ever close the page part-way (it may, under memory pressure, whatever the
+   * page does), the shorts already handed over keep exporting on the server —
+   * and this remembers which ones they were, so opening the project again
+   * hands over the rest, into the SAME export, without sending any twice.
+   */
+  const HANDOVER_KEY = 'mw.handover';
+  function handoverGet() { try { return JSON.parse(localStorage.getItem(HANDOVER_KEY) || 'null'); } catch (e) { return null; } }
+  function handoverSet(v) { try { if (v) localStorage.setItem(HANDOVER_KEY, JSON.stringify(v)); else localStorage.removeItem(HANDOVER_KEY); } catch (e) {} }
+  /** The cut-off export will not be finished from here (Start fresh, another
+   *  video): seal it, so the server makes what it was given and says it is done. */
+  async function abandonHandover() {
+    const h = handoverGet(); if (!h || !h.batchId) return;
+    handoverSet(null);
+    try { if (window.__mwBatch && window.__mwBatch.seal) await window.__mwBatch.seal(h.batchId); } catch (e) {}
+  }
+  async function resumeHandover() {
+    const h = handoverGet();
+    if (!h || !h.batchId || !Array.isArray(h.ids) || ve._exportingAll) return false;
+    if (!ve.video) return false;
+    if (ve.video.path !== h.video) { await abandonHandover(); return false; }
+    if (Date.now() - (h.at || 0) > 24 * 3600e3) { handoverSet(null); return false; }
+    const SB = window.__mwBatch;
+    if (!SB || !SB.list) return false;
+    let b = null;
+    try { b = ((await SB.list()) || []).find((x) => x.id === h.batchId) || null; } catch (e) { return false; }
+    if (!b || b.sealed || b.cancelled || b.state !== 'running') { handoverSet(null); return false; }
+    // The server's count is the truth: a short it received just as the page
+    // died, before this phone could note it, is the next one in order.
+    const sent = new Set(h.sent || []);
+    for (const id of h.ids) { if (sent.size >= (b.received || 0)) break; if (!sent.has(id) && !(h.skipped || []).includes(id)) sent.add(id); }
+    h.sent = Array.from(sent);
+    handoverSet(h);
+    const left = h.ids.filter((id) => !sent.has(id) && ve.segments.some((x) => x.id === id));
+    window.__toast && window.__toast(`↻ Carrying on with your export — ${sent.size} of ${h.total} ${sent.size === 1 ? 'was' : 'were'} already sent; sending the other ${left.length}.`, 'good', 8000);
+    await exportAll({ resume: h });
+    return true;
+  }
+
+  async function exportAll(opts) {
+    const resume = (opts && opts.resume) || null;
+    let list = shortsOf().sort((a, b) => a.start - b.start); // only Long-to-shorts output
+    if (resume) { const had = new Set(resume.sent || []); list = list.filter((s) => resume.ids.includes(s.id) && !had.has(s.id)); }
+    if (!list.length) {
+      if (resume) { try { await window.__mwBatch.seal(resume.batchId); } catch (e) {} handoverSet(null); }
+      return;
+    }
+    if (ve._exportingAll) return;
+    ve._exportingAll = true;
+    try { return await exportAllRun(list, resume); } finally { ve._exportingAll = false; }
+  }
+  async function exportAllRun(list, resume) {
+    // the whole export's size, even when this run only finishes it off
+    const total = resume ? resume.total : list.length;
     let capped = 0;
-    const task = startTask(`Exporting ${list.length} short${list.length > 1 ? 's' : ''}`);
+    const task = startTask(`Exporting ${total} short${total > 1 ? 's' : ''}`);
     /*
      * FROZEN UP FRONT, ALL OF THEM.
      *
@@ -9894,8 +9952,16 @@
      * to look at a file the server has not made yet is exported the ordinary way.
      */
     const SB = window.__mwBatch && window.__mwBatch.supported && window.__mwBatch.supported() ? window.__mwBatch : null;
-    let sbatch = null, sent = 0;
-    if (SB) { try { sbatch = await SB.open(`Exporting ${list.length} short${list.length > 1 ? 's' : ''}`, list.length); } catch (e) { sbatch = null; } }
+    let sbatch = null, sent = resume ? (resume.sent || []).length : 0;
+    let hand = null, sentHere = 0;
+    if (SB && resume) { sbatch = { id: resume.batchId }; hand = resume; }
+    else if (SB) {
+      try { sbatch = await SB.open(`Exporting ${list.length} short${list.length > 1 ? 's' : ''}`, list.length); } catch (e) { sbatch = null; }
+      if (sbatch && sbatch.id && ve.video) {
+        hand = { batchId: sbatch.id, video: ve.video.path, ids: list.map((s) => s.id), total: list.length, sent: [], skipped: [], at: Date.now() };
+        handoverSet(hand);
+      }
+    }
     const expectFor = (s) => {
       const p = (ve.presets && ve.presets[ve.aspect]) || { w: 1080, h: 1920 };
       const q = String(qualityCfg() || '1080p');
@@ -9910,8 +9976,9 @@
         const s = list[i];
         // "Short 2 of 5" on the progress overlay, so the whole batch reads as one
         // continuous export instead of anonymous back-to-back jobs
-        if (window.__setJobBatch) window.__setJobBatch(done + 1, list.length);
-        if (window.__setTaskBatch) window.__setTaskBatch(task, done + 1, list.length);
+        const at = (resume ? (resume.sent || []).length : 0) + done + 1;
+        if (window.__setJobBatch) window.__setJobBatch(at, total);
+        if (window.__setTaskBatch) window.__setTaskBatch(task, at, total);
         try {
           /*
            * Whatever the look-ahead worked out for this clip. If it is already
@@ -9934,6 +10001,8 @@
            * last short's encode and there is nothing to wait for, so putting it
            * in the plan would reserve a third of the bar for work already done.
            */
+          // server batch: one short at a time — its tracking starts here
+          if (sbatch && !ahead.has(s)) ahead.begin(s);
           const waitingOnTracking = ahead.pendingFor(s);
           if (window.__chainBegin) {
             window.__chainBegin(task, exportPlan(s, { track: waitingOnTracking, captions: caps }));
@@ -9941,7 +10010,10 @@
           const got = await ahead.take(s, (p) => window.__runJob(
             `🎯 Tracking the speaker in "${s.label}"…`, window.__newJobId(), () => p, J(s, 'track')));
           // Start the NEXT one's tracking now, so it runs under this encode.
-          if (i + 1 < list.length) ahead.begin(list[i + 1]);
+          // Not when the server makes them: there is no encode here to hide it
+          // under, and tracking the next short WHILE this one's captions are
+          // drawn doubled what a phone holds at once (the iPhone white screen).
+          if (i + 1 < list.length && !sbatch) ahead.begin(list[i + 1]);
           const chain = async () => {
             const text = await textImagesFor(s);
             let out = await exportOneClip(s, got, caps || !!(text && text.length));
@@ -9957,8 +10029,13 @@
           }
           if (steps && steps.length) {
             await SB.add(sbatch.id, s.label, steps);
-            sent++;
-            if (window.__taskSay) window.__taskSay(task, `Handed ${sent} of ${list.length} to the server — it is exporting them`);
+            steps = null;
+            if (hand) { hand.sent = (hand.sent || []).concat(s.id); hand.at = Date.now(); handoverSet(hand); }
+            // a breath between shorts: a phone's browser lets go of the last
+            // short's pictures before the next one starts drawing
+            await new Promise((r) => setTimeout(r, 400));
+            sent++; sentHere++;
+            if (window.__taskSay) window.__taskSay(task, `Handed ${sent} of ${total} to the server — it is exporting them`);
           } else {
             const out = await chain();
             if (window.__taskAddFile) window.__taskAddFile(task, out);
@@ -9970,6 +10047,7 @@
           // Stop means stop. Anything else costs THIS short, not the other nineteen.
           if (e && (e.cancelled || /cancel/i.test(e.message || ''))) { stopped = e; break; }
           skipped.push(`“${s.label || 'a short'}”: ${(e && e.message) || e}`);
+          if (hand) { hand.skipped = (hand.skipped || []).concat(s.id); handoverSet(hand); }
           window.__toast && window.__toast(`⚠️ “${s.label || 'A short'}” could not be made — carrying on with the rest. ${(e && e.message) || ''}`, 'error', 9000);
         }
       }
@@ -9982,11 +10060,11 @@
       list.forEach(disarmExport);
     }
     if (window.__setJobBatch) window.__setJobBatch(null);
-    if (sbatch) { try { await SB.seal(sbatch.id); } catch (e) {} }
+    if (sbatch) { try { await SB.seal(sbatch.id); } catch (e) {} handoverSet(null); }
     const extras = [ve.music ? 'music' : null, (ve.outro && ve.outroAll !== false) ? 'your outro' : null].filter(Boolean).join(' + ');
     if (sent) {
       // the server has them: this phone's part is over
-      const note = `✅ ${sent} short${sent > 1 ? 's are' : ' is'} exporting on the server${done > sent ? ` (${done - sent} made here)` : ''} — you can close the app; they will be in Files.`
+      const note = `✅ ${sent} short${sent > 1 ? 's are' : ' is'} exporting on the server${done > sentHere ? ` (${done - sentHere} made here)` : ''} — you can close the app; they will be in Files.`
         + (skipped.length ? ` ${skipped.length} could not be prepared: ${skipped.join('; ')}.` : '')
         + (stopped ? ` The rest ${stopped.cancelled ? 'were stopped' : 'did not finish'}.` : '');
       if (window.__endTask) window.__endTask(task, { ok: true, note });
@@ -15764,6 +15842,8 @@
       },
       exportEditedVideo() { return exportEditedVideo(); },
       exportAll() { return exportAll(); },
+      resumeHandover() { return resumeHandover(); },
+      handover() { return handoverGet(); },
       /* --- ⇥ exports that run behind the studio --- */
       setBgExport(on) {
         const c = document.getElementById('veBgExport');

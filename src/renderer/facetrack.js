@@ -1643,8 +1643,12 @@
             const pair = await loadImage(f.pairUrl);
             const ppx = pair ? framePixels(pair) : null;
             if (ppx && ppx.gray.length === px.gray.length) measureMouths(px, ppx.gray, people);
+            if (pair) { try { pair.removeAttribute('src'); } catch (e) {} }
           }
         }
+        // let the decoded picture go now — a phone tracking a whole batch of
+        // shorts otherwise holds hundreds of them until the browser gets round to it
+        try { img.removeAttribute('src'); } catch (e) {}
       }
       // `pose0` is the untouched reading. `pose` gets swapped for the subject's
       // own body once we know who that is, and these signals are re-used across
