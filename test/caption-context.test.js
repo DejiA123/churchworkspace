@@ -80,6 +80,25 @@ const check = (name, ok, d) => { console.log((ok ? '  PASS ' : '  FAIL ') + name
   await cs.transcribeWords({ input: wav, startSec: 0, endSec: 30, plain: true });
   check('plain: Opus, no prompt', calls[0] && calls[0].name === 'clip.ogg' && !calls[0].prompt, JSON.stringify(calls[0] && { n: calls[0].name, p: calls[0].prompt }));
 
+  console.log('\n[5] words squeezed into an instant that the other ear did not hear are dropped');
+  {
+    const W = (t, a, b) => ({ text: t, start: a, end: b });
+    // the real sermon: "ask them been praying for a long time, forever."
+    const heard = [W('ask', 324.5, 324.82), W('them', 324.82, 324.98), W('been', 325, 325.02), W('praying', 325.02, 325.04), W('for', 325.04, 325.1),
+      W('a', 325.1, 325.34), W('long', 325.34, 325.46), W('time,', 325.46, 325.48), W('forever.', 325.48, 325.62)];
+    const other = [W('ask', 324.5, 324.8), W('them', 324.8, 325), W('forever.', 325.1, 325.6)];
+    const r1 = cs.dropSqueezed(heard, other);
+    check('"ask them been praying for a long time, forever" → "ask them … forever"', r1.words.map((w) => w.text).join(' ') === 'ask them forever.', r1.words.map((w) => w.text).join(' '));
+    // "do do what? what?" — instant repeats
+    const rep = [W('spirit', 112.84, 112.9), W('do', 112.9, 112.98), W('do', 112.98, 113.02), W('what?', 113, 113), W('what?', 113.02, 114.04), W('Have', 114.04, 114.18)];
+    const r2 = cs.dropSqueezed(rep, [W('spirit', 112.8, 112.9), W('do', 112.9, 113), W('what?', 113, 114)]);
+    check('"do do what? what?" → "do what?"', r2.words.map((w) => w.text).join(' ') === 'spirit do what? Have', r2.words.map((w) => w.text).join(' '));
+    // quick real words the other ear DID hear stay
+    const fast = [W('in', 10, 10.04), W('the', 10.04, 10.08), W('name', 10.08, 10.4)];
+    const r3 = cs.dropSqueezed(fast, [W('in', 10, 10.05), W('the', 10.05, 10.1), W('name', 10.1, 10.4)]);
+    check('quick words the other ear heard too are kept', r3.words.length === 3 && r3.dropped === 0);
+  }
+
   fs.rmSync(wav, { force: true });
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

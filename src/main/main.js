@@ -1437,6 +1437,11 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
   if (check.checked && Array.isArray(check.alt)) {
     const m = wordbook.matcher();
     const alt = m.empty ? check.alt : wordbook.engine.applyToWords(check.alt, m).words;
+    // words squeezed into an instant that the independent ear did not hear were never said
+    if (!plain) {
+      const sq = cloudspeech.dropSqueezed(book.entries, alt);
+      if (sq.dropped) { book.entries.length = 0; book.entries.push(...sq.words); check.squeezed = sq.dropped; }
+    }
     check.doubts = cloudspeech.markDisagreements(book.entries, alt);
     check.alt = alt.map((w) => ({ text: w.text, start: w.start, end: w.end }));
   }

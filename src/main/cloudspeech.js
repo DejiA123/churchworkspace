@@ -826,8 +826,10 @@ function encodeRangeLossless(input, startSec, durSec, timeoutMs) {
  *     mid-thought at every seam.
  * Kept inside Whisper's 224-token prompt window (≈ 800 characters).
  */
-const CAPTION_PRIMER = 'Praise the Lord! Shout hallelujah. Our Father, who art in heaven, hallowed be Thy name. '
-  + 'The Word of God says in the book of Matthew, chapter 6, verse 9: Jesus Christ, the Holy Spirit, the Holy Ghost. Amen.';
+// No numbers and no references in it: a primer that said "Matthew, chapter 6,
+// verse 9" was measured writing "verse 1, verse 1, verse 1…" into a pause.
+const CAPTION_PRIMER = 'Good morning, church. Our Father, who art in heaven, hallowed be Thy name. '
+  + 'Shout hallelujah! Jesus Christ, the Holy Spirit, the Holy Ghost, the Word of God.';
 const PROMPT_MAX_CHARS = 780;
 function captionPrompt({ terms = [], before = '' } = {}) {
   let p = CAPTION_PRIMER;
@@ -1161,7 +1163,13 @@ async function transcribeWords({ input, startSec = 0, endSec = 0, totalSec = 0, 
       if (!body || !body.length) { doneSec = b - from; continue; }   // no audio track: nothing to hear
       if (onProgress) { try { onProgress(Math.round(((i + 0.3) / pieces) * 100)); } catch (e) {} }
       if (!plain) {
-        const said = words.slice(-60).map((w) => w.text).join(' ');
+        // The sentences before go in only when they are punctuated: Whisper
+        // continues in the style it is shown, and an unpunctuated stretch
+        // handed on as context carried the same into the next piece (measured:
+        // one ran for six minutes). The primer alone restarts it properly.
+        const tail = words.slice(-60);
+        const ends = tail.filter((w) => /[.?!,]$/.test(w.text)).length;
+        const said = tail.length && ends >= Math.max(1, Math.floor(tail.length / 15)) ? tail.map((w) => w.text).join(' ') : '';
         prompt = captionPrompt({ terms: terms || [], before: said });
       }
       json = await postAudioWords(body, Object.assign({ prompt, flac: !plain }, model ? { model } : {}));
@@ -1246,6 +1254,58 @@ function markDisagreements(a, b) {
   }
   return doubts;
 }
+/*
+ * ►► WORDS THAT WERE NEVER SAID. ◄◄
+ * Whisper sometimes writes text that does not line up with any speech: the
+ * aligner then squeezes it into an instant. Measured on a real sermon: "ask
+ * them been praying for a long time, forever" — six words in under half a
+ * second, the preacher said "ask them forever"; and "do do what? what?", the
+ * second of each a few hundredths of a second long. Speech does not go that
+ * fast. A word squeezed like that (or an instant repeat of the word before) is
+ * dropped — but only when the independent second listen did not hear it there.
+ */
+const SQUEEZE_SEC = 0.06;
+function dropSqueezed(words, alt) {
+  if (!Array.isArray(words) || !words.length) return { words: words || [], dropped: 0 };
+  const dur = (w) => (+w.end) - (+w.start);
+  const n = words.length;
+  const squeezed = new Uint8Array(n);
+  // runs of two or more instant words
+  for (let i = 0; i < n;) {
+    let j = i;
+    while (j < n && dur(words[j]) <= SQUEEZE_SEC) j++;
+    if (j - i >= 2) for (let k = i; k < j; k++) squeezed[k] = 1;
+    i = j > i ? j : i + 1;
+  }
+  // three or more words at under a tenth of a second each, on average — far
+  // faster than anyone speaks (a quick preacher is ~0.2 s a word)
+  for (let i = 0; i < n; i++) {
+    let tot = 0, best = -1;
+    for (let j = i; j < n && j - i < 12; j++) {
+      tot += Math.max(0, (+words[j].end) - (+words[j].start));
+      if (j - i >= 2 && tot / (j - i + 1) < 0.1) best = j;
+    }
+    for (let k = i; k <= best; k++) squeezed[k] = 1;
+  }
+  // an instant copy of the word beside it
+  const same = (a, b) => !!a && !!b && !!normTok(a.text) && normTok(a.text) === normTok(b.text);
+  for (let i = 0; i < n; i++) if (dur(words[i]) <= SQUEEZE_SEC && (same(words[i], words[i - 1]) || same(words[i], words[i + 1]))) squeezed[i] = 1;
+  const altW = Array.isArray(alt) ? alt : [];
+  const heardThere = (w) => {
+    const t = normTok(w.text), m = ((+w.start) + (+w.end)) / 2;
+    return altW.some((a) => normTok(a.text) === t && Math.abs(((+a.start) + (+a.end)) / 2 - m) <= 0.8);
+  };
+  const out = [];
+  let dropped = 0;
+  for (let i = 0; i < n; i++) {
+    // an instant copy is never "heard there" by virtue of the word beside it
+    const repeat = dur(words[i]) <= SQUEEZE_SEC && (same(words[i], words[i - 1]) || same(words[i], words[i + 1]));
+    if (squeezed[i] && (repeat || !heardThere(words[i]))) { dropped++; continue; }
+    out.push(words[i]);
+  }
+  return { words: out, dropped };
+}
+
 /** Hear [from,to] again with the OTHER model and mark where the two disagree. */
 async function secondOpinion({ input, from, to, words, onProgress = null, terms = null, plain = false }) {
   const first = captionModelId();
@@ -1253,7 +1313,9 @@ async function secondOpinion({ input, from, to, words, onProgress = null, terms 
   if (!other) return { checked: false, why: 'no second model to compare with' };
   let r;
   try {
-    r = await transcribeWords({ input, startSec: from, endSec: to, onProgress, model: other, second: true, terms, plain });
+    // Heard WITHOUT the context (and its own model): an independent ear is the
+    // point of a second one — a prompt both share could mislead both the same way.
+    r = await transcribeWords({ input, startSec: from, endSec: to, onProgress, model: other, second: true, plain: true });
   } catch (e) {
     if (e && e.cancelled) throw e;
     return { checked: false, why: (e && e.message) || 'the second listen failed' };
@@ -1550,7 +1612,7 @@ async function transcribeSegments({ input, startSec = 0, endSec = 0 } = {}) {
 }
 
 module.exports = {
-  captionModelId, secondOpinion, markDisagreements, captionPrompt, isCaptionPromptEcho, withoutPromptEcho, CAPTION_PRIMER,
+  captionModelId, secondOpinion, markDisagreements, dropSqueezed, captionPrompt, isCaptionPromptEcho, withoutPromptEcho, CAPTION_PRIMER,
   _resetCaptionModel: () => { captionModelRefusedAt = 0; },
   configure, state, ready, transcribe, test, cadence,
   fileReady, transcribeFile, transcribeWords, transcribeSegments, shareKey,
