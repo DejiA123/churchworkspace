@@ -540,6 +540,44 @@ async function waitUp() {
       await page.evaluate(() => { const set = (id, v) => { const r = document.getElementById(id); r.value = v; r.dispatchEvent(new Event('input', { bubbles: true })); r.dispatchEvent(new Event('change', { bubbles: true })); }; set('fxBri', '0'); set('fxSharp', '0'); });
     }
 
+    console.log('\n=== [M] the captions window, calm (CapCut\'s Edit captions) ===');
+    {
+      await page.evaluate(() => {
+        window.VideoEditor.__test.openCaptionsWindow();
+        document.getElementById('capModal').classList.remove('hidden');
+        document.querySelector('#capModal .cap-box').classList.add('folded');
+      });
+      await sleep(500);
+      const vis = (sel) => { const el = document.querySelector(sel); if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(el).display !== 'none'; };
+      const look = () => page.evaluate((v) => {
+        const vis = new Function('sel', 'return (' + v + ')(sel)');
+        const box = document.querySelector('#capModal .cap-box').getBoundingClientRect();
+        const row = document.querySelector('#capList .cap-row');
+        const text = row && row.querySelector('.cap-text');
+        return {
+          title: getComputedStyle(document.getElementById('capTitle'), '::after').content,
+          sheetTop: Math.round(box.top), vh: innerHeight,
+          tools: vis('.cap-tools-btn'), style: vis('.cap-sum-row'), fix: vis('.cap-fix-row'), scrub: vis('#capPlayScrub'), loop: vis('.cap-pl-opt'),
+          play: vis('#capPlay'), save: vis('#capBurn'), rows: document.querySelectorAll('#capList .cap-row').length,
+          textBg: text ? getComputedStyle(text).backgroundColor : null,
+        };
+      }, vis.toString());
+      const a = await look();
+      check(/Edit captions/.test(a.title) && a.sheetTop > a.vh * 0.3, 'it reads "Edit captions", and the picture shows above the sheet', a);
+      check(a.tools && !a.style && !a.fix && !a.scrub && !a.loop && a.play && a.save && a.rows > 0, 'the lines, ▶ and Save — the rest is under Tools', a);
+      check(a.textBg === 'rgba(0, 0, 0, 0)', 'each line is plain words, not a box', a.textBg);
+      await page.locator('.cap-tools-btn').tap();
+      await sleep(300);
+      const b = await look();
+      check(b.style && b.fix && b.scrub && b.loop, 'Tools brings back Style & settings, the Word Book and fixes, the scrubber, speed and loop', b);
+      await page.locator('.cap-tools-btn').tap();
+      await sleep(200);
+      check(!(await look()).scrub, 'and tucks them away again');
+      await page.locator('#capClose').tap();
+      await sleep(300);
+      check(await page.evaluate(() => document.getElementById('capModal').classList.contains('hidden')), '✓ closes it');
+    }
+
     console.log('\n=== [J] "Follow the voice" survives closing the app ===');
     {
       const was = await page.evaluate(() => { const b = document.getElementById('capWordHl'); return b.checked; });

@@ -3045,6 +3045,32 @@ let _hideTimer = null;
    * look — is shown when the window opens.
    */
   const CAP_CHIPS = { capSize: null, capWords: null, capPos: { center: 'Middle' } };
+  /*
+   * The captions window, calm (cloud.css, "Edit captions"): the tools that are
+   * not the lines themselves go under one "Tools" switch, and the close button
+   * reads ✓ — the edits are kept as they are made, so closing IS done.
+   */
+  function installCapTidy() {
+    const box = document.querySelector('#capModal .cap-box');
+    const player = document.getElementById('capPlayer');
+    if (!box || !player || player.querySelector('.cap-tools-btn')) return;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'cap-tools-btn';
+    b.setAttribute('aria-expanded', 'false');
+    b.innerHTML = `${mi('sliders')}<span>Tools</span>`;
+    b.title = 'Style & settings, Word Book, fix words, grammar, replay, speed and loop';
+    b.addEventListener('click', () => {
+      const on = !box.classList.contains('cap-tools-open');
+      box.classList.toggle('cap-tools-open', on);
+      b.setAttribute('aria-expanded', String(on));
+    });
+    const time = document.getElementById('capPlayTime');
+    if (time && time.nextSibling) player.insertBefore(b, time.nextSibling); else player.appendChild(b);
+    const close = document.getElementById('capClose');
+    if (close) { close.innerHTML = mi('check'); close.setAttribute('aria-label', 'Done'); close.title = 'Done'; }
+  }
+
   function installCapChips() {
     const rows = [];
     for (const id of Object.keys(CAP_CHIPS)) {
@@ -4799,6 +4825,7 @@ let _hideTimer = null;
     installTouchBridge();
     installTapNow();
     installCapChips();
+    installCapTidy();
     installDropBridge();
 
     // A service worker makes it installable and makes the shell open instantly.

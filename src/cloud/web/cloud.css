@@ -2493,3 +2493,77 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
   body.mw-cloud #capModal .cap-doubt button { min-height: 36px; padding: 6px 14px; font-size: 13.5px; }
   body.mw-cloud #capModal .cap-check-note { font-size: 13.5px; margin: 0 0 8px; }
 }
+
+/*
+ * ►► THE CAPTIONS WINDOW, CALM (CapCut's "Edit captions"). ◄◄
+ * With lines to read, the window is the lines: the picture shows above a
+ * shorter sheet, each row is ▶ · time · words on a hairline, the line being
+ * spoken is lifted, and ✓ closes. Everything else — the look, the Word Book,
+ * fix these words, grammar, ↺ 3s, ⟲ Line, the scrubber, speed, loop, pause
+ * while typing — is one tap away under "Tools", the same controls doing the
+ * same things. Placement and paint only: no control is removed.
+ */
+@media (max-width: 900px) {
+  html:not(.mw-kb) body.mw-cloud #capModal .cap-box.folded:not(.cap-tools-open) { top: max(calc(var(--ph-top) + 6px), 40dvh); }
+  /* the picture above the sheet is seen as it is, not through a shade */
+  body.mw-cloud #capModal { background: transparent !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+  body.mw-cloud #capModal .cap-box.folded { background: #1c1c1f; border-top: 0; box-shadow: 0 -10px 30px rgba(0,0,0,.45); }
+
+  /* the head: Edit captions in the middle, undo/redo on the left, ✓ on the right */
+  body.mw-cloud #capModal .cap-box.folded .cap-head { position: relative; justify-content: flex-start; gap: 2px; height: 52px; padding: 0 8px; border-bottom: 1px solid rgba(255,255,255,.07); }
+  body.mw-cloud #capModal .cap-box.folded #capTitle { position: absolute; left: 96px; right: 96px; text-align: center; pointer-events: none; font-size: 0; }
+  body.mw-cloud #capModal .cap-box.folded #capTitle .mi { display: none; }
+  body.mw-cloud #capModal .cap-box.folded #capTitle::after { content: 'Edit captions'; font-size: 17px; font-weight: 600; color: #fff; }
+  body.mw-cloud #capModal .cap-box.folded #capClose { margin-left: auto; color: #fff; background: transparent; }
+  body.mw-cloud #capModal .cap-box.folded :is(#capUndo, #capRedo) { width: 36px; margin: 0; color: #8e8e93; background: transparent; }
+
+  /* the tools: one tap away */
+  body.mw-cloud #capModal .cap-box.folded:not(.cap-tools-open) :is(.cap-sum-row, .cap-fix-row, #capPlayBack, #capPlayLine, #capPlayScrub, #capPlayRate, .cap-pl-opt) { display: none; }
+  body.mw-cloud #capModal .cap-box.folded .cap-player { align-items: center; gap: 8px 10px; padding: 6px 12px 6px 14px; background: transparent; border-bottom: 1px solid rgba(255,255,255,.07); }
+  body.mw-cloud #capModal .cap-box.folded .cap-pl-play { width: 34px; height: 34px; box-shadow: none; }
+  body.mw-cloud #capModal .cap-box.folded .cap-pl-time { font: 500 13px/1 -apple-system, system-ui, sans-serif; font-variant-numeric: tabular-nums; color: #8e8e93; }
+  body.mw-cloud #capModal .cap-tools-btn {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px;
+    border: 0; border-radius: 999px; background: rgba(255,255,255,.08); color: #e5e5ea; font-size: 13.5px; font-weight: 600;
+  }
+  body.mw-cloud #capModal .cap-box.cap-tools-open .cap-tools-btn { background: var(--acc-soft); color: #fff; }
+  body.mw-cloud #capModal .cap-box:not(.folded) .cap-tools-btn { display: none; }
+
+  /* the lines: ▶ · time · words, on a hairline that starts where the words do */
+  body.mw-cloud #capModal .cap-box.folded .cap-list { padding: 0 0 14px; gap: 0; }
+  body.mw-cloud #capModal .cap-box.folded #capList .cap-fix-tabs { top: 0; margin: 0; padding: 7px 14px; background: #1c1c1f; border: 0; }
+  body.mw-cloud #capModal .cap-box.folded .cap-fix-tabs .cap-add-line:not(.cap-add-sq) {
+    height: 34px; min-height: 34px; padding: 0 14px; font-size: 14px; border-radius: 999px; margin-left: auto; max-width: 100%;
+  }
+  body.mw-cloud #capModal .cap-box.folded .cap-row {
+    align-items: center; gap: 6px; min-height: 54px; padding: 0 10px 0 8px; border: 0; border-radius: 0; box-shadow: none;
+    background: linear-gradient(rgba(255,255,255,.07), rgba(255,255,255,.07)) 88px 100% / calc(100% - 88px) 1px no-repeat;
+  }
+  body.mw-cloud #capModal .cap-box.folded .cap-row.now { background-color: rgba(255,255,255,.08); }
+  body.mw-cloud #capModal .cap-box.folded .cap-row-play {
+    width: 30px; height: 30px; border: 0; background: transparent; box-shadow: none; color: #8e8e93;
+  }
+  body.mw-cloud #capModal .cap-box.folded .cap-row.now .cap-row-play { color: #fff; background: transparent; }
+  body.mw-cloud #capModal .cap-box.folded .cap-row-play .mi { width: 14px; height: 14px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-time { flex: 0 0 44px; font: 500 14px/1 -apple-system, system-ui, sans-serif; font-variant-numeric: tabular-nums; color: #8e8e93; letter-spacing: 0; }
+  body.mw-cloud #capModal .cap-box.folded .cap-row.now .cap-time { color: #fff; }
+  body.mw-cloud #capModal .cap-box.folded .cap-text {
+    height: 50px; padding: 0 8px; border: 1px solid transparent; border-radius: 10px; background: transparent;
+    font-size: 17px; color: #d1d1d6; box-shadow: none;
+  }
+  body.mw-cloud #capModal .cap-box.folded .cap-row.now .cap-text { color: #fff; }
+  body.mw-cloud #capModal .cap-box.folded .cap-text:focus { background: rgba(255,255,255,.07); border-color: rgba(167,139,250,.55); box-shadow: none; color: #fff; }
+  body.mw-cloud #capModal .cap-box.folded .cap-row.fixed .cap-text { border-color: transparent; }
+  body.mw-cloud #capModal .cap-box.folded .cap-row.fixed .cap-time { color: var(--acc2); }
+  /* ✨ for one line: on the line being worked on only */
+  body.mw-cloud #capModal .cap-box.folded .cap-ai-line { display: none; }
+  body.mw-cloud #capModal .cap-box.folded .cap-row:is(.now, :focus-within) .cap-ai-line {
+    display: inline-flex; align-items: center; justify-content: center; align-self: center;
+    width: 30px; height: 30px; margin: 0; padding: 0; border: 0; background: transparent; opacity: .7; line-height: 1;
+  }
+
+  /* the bottom: one slim row */
+  body.mw-cloud #capModal .cap-box.folded .cap-foot { padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid rgba(255,255,255,.07); background: #1c1c1f; }
+  body.mw-cloud #capModal .cap-box.folded .cap-foot-btns { grid-template-columns: 52px 1fr; }
+  body.mw-cloud #capModal .cap-box.folded .cap-foot-btns button { height: 44px; font-size: 15px; border-radius: 12px; }
+}
