@@ -350,6 +350,28 @@ function makeCloudJudge({ cloudwrite = require('./cloudwrite') } = {}) {
       if (r) stats.titled = r.size;
       return r;
     }),
+    /*
+     * The whole sermon, read section by section (shortplan.js). Asked with a
+     * budget that fits the free tier's tokens-a-minute: a request bigger than
+     * the minute's allowance is refused outright, which is how the ranking and
+     * titles were measured silently doing nothing on a real sermon.
+     */
+    plan: (a) => guard(async () => {
+      const planAsk = async ({ system, prompt, maxTokens }) => {
+        stats.calls++;
+        const out = await cloudwrite.chat({
+          system, prompt, temperature: 0, json: true, evenIfOff: true,
+          maxTokens: maxTokens || 3000, timeoutMs: 120000,
+          prefer: ['openai/gpt-oss-120b', 'moonshotai/kimi-k2-instruct', 'llama-3.3-70b-versatile'],
+        });
+        if (!out) stats.why = cloudwrite.state().why || 'no answer';
+        return out;
+      };
+      const r = await require('./shortplan').planShorts({ ...a, ask: planAsk });
+      if (r) { stats.planned = r.moments.length; stats.titled = r.moments.filter((m) => m.title).length; stats.ranked = r.found; }
+      else stats.failed++;
+      return r;
+    }),
   };
 }
 

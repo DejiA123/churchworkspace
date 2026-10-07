@@ -1174,7 +1174,23 @@ async function analyzeSermon(ctx, opts = {}) {
   let editorUsed = false;
   let judgeUsed = false;
 
-  if (opts.transcribeRange && opts.contentAware !== false && candidates.length) {
+  /*
+   * ►► PLANNED FROM THE WHOLE SERMON (shortplan.js), when a strong reader is on. ◄◄
+   * Every word is heard, and the reader marks where each thought starts and
+   * where its point lands — so a strong point said quietly is not missed and
+   * no short opens on "Huh? Oh yes". If it cannot (no answer, too little
+   * speech), the loudness scan below runs exactly as it always did.
+   */
+  let planned = null;
+  if (opts.transcribeRange && opts.contentAware !== false && opts.judge && typeof opts.judge.plan === 'function' && !keep.length) {
+    try { planned = await planWholeSermon(opts, { totalDur, OFF, snap, minLen, maxLen, idealLen, maxClips }); }
+    catch (e) { if (jobs.isCancelError(e)) throw e; planned = null; }
+    if (planned) meta2.planned = planned.meta;
+  }
+  if (planned) {
+    picked = planned.picked;
+    contentUsed = true; editorUsed = true; judgeUsed = true;
+  } else if (opts.transcribeRange && opts.contentAware !== false && candidates.length) {
     // STAGE 2 — content-aware, human-like: transcribe a coverage-spread pool of the
     // best audio candidates, SNAP each to complete-sentence boundaries (clean start
     // /finish), score what's actually SAID, then re-select for coverage.
@@ -1594,7 +1610,7 @@ async function analyzeSermon(ctx, opts = {}) {
   // panel and a useless one changes nothing.
   let aiTitles = null;
   if (opts.judge && contentUsed) {
-    const titleable = picked.filter((c) => c.text);
+    const titleable = picked.filter((c) => c.text && !c.aiTitle);   // a planned short already has its title
     if (titleable.length) {
       aiTitles = await opts.judge.titles({
         clips: titleable.map((c, i) => ({ id: i + 1, text: c.text })),
@@ -1625,6 +1641,8 @@ async function analyzeSermon(ctx, opts = {}) {
       text: c.text ? c.text.replace(/\s+/g, ' ').trim() : undefined,
       cleanCut: !!c.cleanCut,
       aiScore: c.aiScore != null ? c.aiScore : undefined,
+      // the reader's one line on what this short is about (planned shorts)
+      point: c.point || undefined,
       virality: vr.virality,
       reasons: vr.reasons,
     };
@@ -1647,10 +1665,59 @@ async function analyzeSermon(ctx, opts = {}) {
       aiModel: opts.judge ? opts.judge.modelName : null,
       // clips the strong reader judged not to be shorts at all, and left out
       aiRejected: meta2.aiRejected || 0,
+      // planned from the whole sermon: how many sections were read, moments found
+      planned: meta2.planned || null,
       thresholdDb: Math.round(threshold * 10) / 10,
       baselineDb: Math.round(med * 10) / 10,
     },
   };
+}
+
+/**
+ * Hear the whole sermon (in pieces no longer than 240 s — punctuation survives
+ * a short call, not a long one), build its sentences, and let the reader plan
+ * the shorts. Returns { picked, meta } or null.
+ */
+async function planWholeSermon(opts, { totalDur, OFF, snap, minLen, maxLen, idealLen, maxClips }) {
+  const MAX_SPAN = 240;
+  const n = Math.max(1, Math.ceil(totalDur / MAX_SPAN));
+  const step = totalDur / n;
+  const parts = Array.from({ length: n }, (_, k) => ({ from: k * step, to: k === n - 1 ? totalDur : (k + 1) * step }));
+  const got = new Array(n).fill(null);
+  const CONC = Math.max(1, Math.min(4, opts.concurrency || 1));
+  let next = 0, done = 0, missing = 0;
+  await Promise.all(Array.from({ length: Math.min(CONC, n) }, async () => {
+    for (;;) {
+      jobs.throwIfCancelled();
+      const k = next++; if (k >= n) return;
+      const { from, to } = parts[k];
+      try {
+        const r = await opts.transcribeRange(from + OFF, to + OFF);
+        got[k] = ((r && r.segs) || []).map((w) => ({ start: w.start + from, end: w.end + from, text: w.text }));
+      } catch (e) { if (jobs.isCancelError(e)) throw e; got[k] = []; missing++; }
+      done++;
+      if (opts.onProgress) opts.onProgress(42 + Math.round((done / n) * 38));
+    }
+  }));
+  // a sermon half of which was never heard cannot be planned honestly
+  if (missing > n / 4) return null;
+  const sents = buildSentences([].concat(...got).sort((a, b) => a.start - b.start));
+  const res = await opts.judge.plan({
+    sents, minLen, maxLen, idealLen, maxClips,
+    onProgress: (f) => { if (opts.onProgress) opts.onProgress(80 + Math.round(f * 18)); },
+  });
+  if (!res || !res.moments || res.moments.length < Math.min(3, maxClips)) return null;
+  const picked = res.moments.map((m) => {
+    const start = snap.start(m.start, 0.6, 0.5);
+    const end = snap.end(m.end, 0.5, 0.9, 0.35, start + maxLen + 6);
+    return {
+      start, end, score: m.strength, total: m.strength, aiScore: m.strength,
+      text: m.text, sentsArr: m.sents, cleanCut: true, acousticClean: snap.startOk(m.start) && snap.endOk(m.end),
+      aiTitle: m.title || undefined, point: m.point,
+      contentScore: contentScoreV2(m.text, m.sents),
+    };
+  });
+  return { picked, meta: { sections: res.sections, found: res.found, failed: res.failed, sentences: sents.length } };
 }
 
 /** Make a short human label from the clip's transcript (first few meaningful words). */
