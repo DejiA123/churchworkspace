@@ -14596,6 +14596,15 @@
     const vtDone = $('#vtDone'); if (vtDone) vtDone.addEventListener('click', () => {
       const editing = ve.textEditing && ve.refs.textLayer.querySelector(`.ve-text-box[data-id="${ve.textEditing}"] .ve-text-content`);
       if (editing) editing.blur();
+      // Phone: the panel sits over the timeline. Done puts it down but keeps the
+      // text picked, so its block there shows its handles to stretch or move.
+      if (window.matchMedia && window.matchMedia('(max-width: 900px)').matches && ve.textSel) {
+        ve.textEditing = null; ve._textOnLane = true;
+        renderTextOverlays(); renderTextTrack(); updateTextTools();
+        const clip = document.querySelector(`.ve-text-clip[data-id="${ve.textSel}"]`);
+        if (clip && clip.scrollIntoView) clip.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        return;
+      }
       ve.textSel = null; ve.textEditing = null;
       renderTextOverlays(); renderTextTrack(); updateTextTools();
     });
@@ -14764,6 +14773,16 @@
       if (!ve._capPickedPreview) return;
       if (e.target && e.target.closest && e.target.closest('.ve-cap-block, [data-capscale], [data-capedge]')) return;
       ve._capPickedPreview = false; syncCapPicked();
+    }, true);
+    // Phone: a touch anywhere on the timeline puts the text panel down (the text
+    // stays picked), so the block under the panel can be reached and stretched.
+    document.addEventListener('pointerdown', (e) => {
+      if (!ve.textSel || ve._textOnLane || ve.textEditing) return;
+      if (!(window.matchMedia && window.matchMedia('(max-width: 900px)').matches)) return;
+      const t = e.target; if (!t || !t.closest || t.closest('#veTextTools')) return;
+      const tl = ve.refs.tlScroll || ve.refs.timeline;
+      if (!tl || !(tl.contains(t) || (ve.refs.timeline && ve.refs.timeline.contains(t)))) return;
+      ve._textOnLane = true; updateTextTools();
     }, true);
     // A size step picked is that size — not the exact figure a corner drag left behind.
     { const cs = $('#capSize'), sp = $('#capSizePct'); if (cs && sp) cs.addEventListener('change', () => { sp.value = ''; }); }

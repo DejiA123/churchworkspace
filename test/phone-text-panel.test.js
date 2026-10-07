@@ -164,6 +164,13 @@ async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise
       await page.touchscreen.tap(bb4.x + bb4.width / 2, bb4.y + bb4.height / 2);
       await sleep(400);
       check((await st()).shown, 'tapping the text on the picture brings the panel up');
+      // ✓ puts the panel down but keeps the text picked: its block's handles are free
+      await page.locator('#vtDone').tap();
+      await sleep(400);
+      const after = await st();
+      const free = await page.evaluate((id) => { const h = document.querySelector(`.ve-text-clip[data-id="${id}"] [data-tedge="r"], .ve-text-clip[data-id="${id}"] .ve-tc-h`); if (!h) return null; const r = h.getBoundingClientRect(); const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!(at && (at === h || h.contains(at))); }, id);
+      check(!after.shown && free, '✓ puts the panel down and the block on the timeline can be stretched', { after, free });
+      check(await page.evaluate(() => !!(window.VideoEditor.__test.textSel ? window.VideoEditor.__test.textSel() : document.querySelector('.ve-text-box.selected, .ve-text-box.sel'))), 'the text is still picked');
     }
   } catch (e) { check(false, 'the test ran to the end', e.message); }
   finally { await browser.close(); srv.kill(); fs.rmSync(WORK, { recursive: true, force: true }); }
