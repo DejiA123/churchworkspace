@@ -1540,12 +1540,50 @@ ipcMain.handle('captions:grammar', wrap(async (e, { lines, before, after, passag
    * reader, agreeing. ("who at a never" -> "who art in heaven" waits unless
    * the second ear heard "art in heaven"; "salt" -> "shout" is made if it did.)
    */
-  if (engine !== 'claude') for (const f of (out.fixes || [])) f.sure = !!(f.sure && heardByOtherEar(f, lines));
+  /*
+   * …OR WHERE A SECOND, DIFFERENT FREE READER AGREES. The fixes the first
+   * reader is sure of and the ear did not confirm go to another model on the
+   * same free Groq account (Kimi K2, else Llama 3.3 70B), which is shown the
+   * line as heard, the proposed fix and the lines around it, and asked one
+   * question: is this what was said? Two different readers agreeing is what
+   * makes it at once; either one in doubt and it waits as a suggestion.
+   */
+  let agreed = new Set();
+  if (engine === 'groq') {
+    try { agreed = await secondReader(out.fixes || [], lines, passage); } catch (er) { agreed = new Set(); }
+  }
+  if (engine !== 'claude') {
+    for (const f of (out.fixes || [])) {
+      const ear = heardByOtherEar(f, lines);
+      f.sure = !!(f.sure && (ear || agreed.has(f)));
+      if (f.sure) f.why = (f.why ? f.why + ' — ' : '') + (ear ? 'the second listen heard it too' : 'a second AI reader agreed');
+    }
+  }
   const cw = cloudwrite.state();
   out.by = engine === 'claude' ? `Claude (${claudetext.model()})` : engine === 'groq' ? `${cw.providerName}${cw.usingModel ? ' — ' + cw.usingModel : ''}` : 'the AI model on this PC';
   if (out.failedBatches && !out.fixes.length) out.why = engine === 'groq' ? (cw.why || 'the AI did not answer') : 'the AI did not answer';
   return out;
 }));
+
+/** The fixes a second, different free model agrees are what was said (a Set of the fix objects). */
+async function secondReader(fixes, lines, passage) {
+  const cand = (fixes || []).filter((f) => f && f.sure && !heardByOtherEar(f, lines)).slice(0, 30);
+  if (!cand.length || !cloudwrite.ready()) return new Set();
+  const all = Array.isArray(passage) ? passage : [];
+  const textAt = (i) => { const p = all.find((x) => x && x.i === i); return p ? p.text : ''; };
+  const items = cand.map((f, k) => {
+    const l = (lines || []).find((x) => x && x.i === f.i) || {};
+    return { k, before: [textAt(f.i - 2), textAt(f.i - 1)].filter(Boolean).join(' '), heard: l.text || '', proposed: f.text, after: [textAt(f.i + 1), textAt(f.i + 2)].filter(Boolean).join(' ') };
+  });
+  const system = 'You check corrections to automatic captions of a Christian sermon. Speech recognition sometimes writes a word that SOUNDS like the one spoken (e.g. "who at a never" for "who art in heaven", "salt hallelujah" for "shout hallelujah"). '
+    + 'For each item you get the caption as heard, a proposed correction and the lines around it. Say ok:true ONLY if you are confident the proposed text is what the preacher actually said: it must sound like what was heard, read naturally in context, and not change the meaning beyond fixing the mis-hearing. '
+    + 'Say ok:false if the heard text could be what was said, if the change is only style or grammar, if it guesses a name you cannot be sure of, or if you are unsure. Reply with JSON: {"verdicts":[{"k":0,"ok":true}]}.';
+  const text = await cloudwrite.chat({ system, prompt: JSON.stringify({ items }), json: true, temperature: 0, maxTokens: 1200, timeoutMs: 60000,
+    prefer: ['moonshotai/kimi-k2-instruct', 'llama-3.3-70b-versatile'] });
+  const j = cloudwrite.parseJson(text) || {};
+  const ok = new Set((Array.isArray(j.verdicts) ? j.verdicts : []).filter((v) => v && v.ok === true).map((v) => +v.k));
+  return new Set(cand.filter((f, k) => ok.has(k)));
+}
 
 /** Does the second speech model's hearing of this line contain every word the fix puts in? */
 function heardByOtherEar(fix, lines) {
