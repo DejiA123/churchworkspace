@@ -10833,10 +10833,15 @@
    * chosen look is remembered. (Both are frame fractions, so they survive a
    * different screen, a different preview size and a different export preset.) */
   function saveCapLook() {
+    const hl = document.getElementById('capWordHl'), wc = document.getElementById('capWordColor');
     try {
       localStorage.setItem(LIB_KEYS.capLook, JSON.stringify({
         pos: ve.capPos ? { x: ve.capPos.x, y: ve.capPos.y } : null,
         width: ve.capWidth,
+        // "Follow the voice", once ticked or unticked by hand, and its colour —
+        // closing the app must not switch it back off
+        wordHl: hl && hl.dataset.touched === '1' ? !!hl.checked : null,
+        wordColor: wc && wc.dataset.touched === '1' ? wc.value : null,
       }));
     } catch (e) {}
   }
@@ -10848,6 +10853,14 @@
       const v = JSON.parse(raw) || {};
       if (v.pos && Number.isFinite(v.pos.x) && Number.isFinite(v.pos.y)) ve.capPos = { x: v.pos.x, y: v.pos.y };
       if (Number.isFinite(v.width)) ve.capWidth = clamp(v.width, window.CapLayout.MIN_WIDTH, window.CapLayout.MAX_WIDTH);
+      const hl = document.getElementById('capWordHl');
+      if (hl && typeof v.wordHl === 'boolean') {
+        hl.checked = v.wordHl; hl.dataset.touched = '1';
+        const row = document.getElementById('capWordColorRow');
+        if (row) row.classList.toggle('hidden', !v.wordHl);
+      }
+      const wc = document.getElementById('capWordColor');
+      if (wc && typeof v.wordColor === 'string' && /^#[0-9a-f]{6}$/i.test(v.wordColor)) { wc.value = v.wordColor; wc.dataset.touched = '1'; }
     } catch (e) {}
   }
   const capStyleDef = (id) => CAP_STYLES.find((s) => s.id === (id || ve.capStyleId))
@@ -11056,7 +11069,11 @@
   function syncCapWordColor() {
     const def = capStyleDef();
     const wc = document.getElementById('capWordColor');
-    if (wc && def.wordColor) wc.value = def.wordColor;
+    if (wc && def.wordColor) {
+      wc.value = def.wordColor;
+      // a look picked since brings its own colour; that is what is remembered now
+      if (wc.dataset.touched === '1') { delete wc.dataset.touched; saveCapLook(); }
+    }
   }
   function setCapStyle(id) {
     ve.capStyleId = capStyleDef(id).id;
@@ -14564,7 +14581,10 @@
       // fresh window did nothing visible at all.
       const row = document.getElementById('capWordColorRow');
       if (row) row.classList.toggle('hidden', !capWordHl.checked);
+      saveCapLook();
     });
+    const capWordInk = $('#capWordColor');
+    if (capWordInk) capWordInk.addEventListener('change', () => { capWordInk.dataset.touched = '1'; saveCapLook(); });
     // Style tweaks update the live overlay immediately.
     ['#capFont', '#capSize', '#capSizePct', '#capTracking', '#capPos', '#capColor', '#capStyleSel', '#capWordHl', '#capWordColor'].forEach((sel) => {
       const el = $(sel); if (el) el.addEventListener('change', () => updateCapOverlay(ve.refs.player.currentTime || 0));

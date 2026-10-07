@@ -450,6 +450,17 @@ async function waitUp() {
       return Math.abs(document.getElementById('vePlayer').currentTime - t0);
     });
     check(still < 0.05, 'a long press that lifts without moving does not jump the video there', still);
+    console.log('\n=== [J] "Follow the voice" survives closing the app ===');
+    {
+      const was = await page.evaluate(() => { const b = document.getElementById('capWordHl'); return b.checked; });
+      await page.evaluate((want) => { const b = document.getElementById('capWordHl'); b.checked = want; b.dispatchEvent(new Event('change', { bubbles: true })); }, !was);
+      await page.reload({ waitUntil: 'load' });
+      await page.waitForFunction(() => window.VideoEditor && window.VideoEditor.openPath, null, { timeout: 30000 });
+      await sleep(800);
+      const now = await page.evaluate(() => document.getElementById('capWordHl').checked);
+      check(now === !was, 'the tick is still there after the app is closed and opened again', { was, now });
+      await page.evaluate((want) => { const b = document.getElementById('capWordHl'); b.checked = want; b.dispatchEvent(new Event('change', { bubbles: true })); }, was);
+    }
     const wide = await open({ viewport: { width: 1280, height: 800 }, hasTouch: true });
     const wg = await wide.evaluate(() => ({ centred: document.getElementById('veTlScroll').classList.contains('ve-centred'), pad: document.getElementById('veTlScroll').style.paddingLeft }));
     check(!wg.centred && !wg.pad, 'a wide screen keeps the desk\'s timeline', wg);
