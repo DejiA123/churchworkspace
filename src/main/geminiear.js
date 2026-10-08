@@ -79,6 +79,8 @@ async function pickModel(fetchImpl = fetch) { return (await models(fetchImpl))[0
 function promptFor(terms) {
   const t = (terms || []).filter(Boolean).slice(0, 40);
   return 'Transcribe this audio of a church sermon EXACTLY as spoken, word for word (verbatim). '
+    + 'The sermon is in ENGLISH (the speaker may have an African or other accent): write it in English, in the words '
+    + 'actually spoken — never translate it into any other language. '
     + 'Keep repeated words, unfinished sentences, filler words and the speaker\'s own grammar — '
     + 'do not correct, tidy, summarise or paraphrase anything, and do not add anything that was not said. '
     + 'Use normal punctuation and capital letters; write God, Jesus, Lord and Holy Spirit with capitals. '
@@ -206,9 +208,25 @@ async function ask(parts, { fetchImpl = fetch, waits = [15000, 30000, 45000], ti
 }
 const audioPart = (flac) => ({ inline_data: { mime_type: 'audio/flac', data: Buffer.from(flac).toString('base64') } });
 /** One stretch of audio → its words as text. */
+/*
+ * Measured on a real sermon: Gemini once answered a five-minute stretch in
+ * ARABIC — a translation, every word of it. The captions are in the language
+ * the studio works in (English, Latin letters); an answer mostly in another
+ * script is asked again, more firmly, and never used.
+ */
+function latinShare(text) {
+  const letters = String(text || '').match(/\p{L}/gu) || [];
+  if (!letters.length) return 1;
+  return letters.filter((c) => /[A-Za-z\u00C0-\u024F\u1E00-\u1EFF]/.test(c)).length / letters.length;
+}
 async function hear(flac, { terms = [], fetchImpl = fetch, waits, timeoutMs = 240000 } = {}) {
-  const r = await ask([audioPart(flac), { text: promptFor(terms) }], Object.assign({ fetchImpl, timeoutMs }, waits ? { waits } : {}));
+  const opt = Object.assign({ fetchImpl, timeoutMs }, waits ? { waits } : {});
+  let r = await ask([audioPart(flac), { text: promptFor(terms) }], opt);
   if (!clean(r.text) && r.finish && r.finish !== 'STOP') throw new Error('Gemini held this stretch back (' + r.finish.toLowerCase() + ')');
+  if (latinShare(r.text) < 0.9) {
+    r = await ask([audioPart(flac), { text: promptFor(terms) + ' IMPORTANT: answer in English only, in the exact English words spoken. Do not translate.' }], opt);
+    if (latinShare(r.text) < 0.9) throw new Error('Gemini answered in another language');
+  }
   return { text: clean(r.text), model: r.model, finish: r.finish };
 }
 
@@ -269,4 +287,4 @@ async function transcribeSpan({ input, from = 0, to, terms = [], chunkSec = 300,
   return { chunks: got.filter(Boolean), failed, why: failed ? why : '', model };
 }
 
-module.exports = { ready, transcribeSpan, hear, ask, audioPart, encodeFlac, pickModel, rankModel, promptFor, clean, setFfmpeg, _reset: () => { ranked = null; spent.clear(); } };
+module.exports = { ready, transcribeSpan, hear, ask, audioPart, latinShare, encodeFlac, pickModel, rankModel, promptFor, clean, setFfmpeg, _reset: () => { ranked = null; spent.clear(); } };

@@ -197,6 +197,19 @@ const F = (w, a, text, extra, opts) => fuse.fuseGemini(w, a, CH(text, extra), op
     };
     const th = await gem.hear(Buffer.from('x'), { fetchImpl: think, waits: [1] });
     ok(configs.join('|') === '{"thinkingLevel":"minimal"}|{"thinkingLevel":"low"}|null' && th.text === 'Amen.', 'minimal → low → none; its thoughts are not the transcript', { configs, th });
+    // measured: a stretch once came back translated into Arabic — asked again in English, never used
+    const tries = [];
+    const arabic = (times) => async (url, o) => {
+      tries.push(JSON.parse(o.body).contents[0].parts[1].text);
+      const t = tries.length <= times ? 'بغض النظر عن الأسباب التي جعلتك ترغب' : 'Whatever the reasons that made you want to remember the story.';
+      return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: t }] }, finishReason: 'STOP' }] }) };
+    };
+    const ar1 = await gem.hear(Buffer.from('x'), { fetchImpl: arabic(1), waits: [1] });
+    ok(ar1.text.startsWith('Whatever the reasons') && tries.length === 2 && /Do not translate/.test(tries[1]), 'an answer in another language is asked again, firmly, in English', { ar1, tries: tries.length });
+    tries.length = 0;
+    const ar2 = await gem.hear(Buffer.from('x'), { fetchImpl: arabic(2), waits: [1] }).catch((e) => e);
+    ok(ar2 instanceof Error && /another language/.test(ar2.message), '…and never used if it comes back translated again', ar2 && ar2.message);
+    ok(/never translate/.test(gem.promptFor([])) && gem.latinShare('Olúwa ṣeun Ọlọ́run, amen') === 1, 'the prompt says English; Yoruba letters count as written in English letters');
     // a stretch held back (recitation/safety) with nothing written is a failed stretch, not an empty one
     const held = await gem.hear(Buffer.from('x'), { fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ candidates: [{ finishReason: 'RECITATION' }] }) }), waits: [1] }).catch((e) => e);
     ok(held instanceof Error && /recitation/.test(held.message), 'a stretch Gemini held back is said, not taken as silence', held && held.message);

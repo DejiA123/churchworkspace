@@ -66,6 +66,39 @@ function parseJson(text) {
   try { return JSON.parse(s.slice(a, b + 1)); } catch (e) { return null; }
 }
 
+/*
+ * Only his grammar, not a mishearing: "send" / "sent", "answers" / "answer",
+ * "approach" / "approached", "an evil spirit" / "the evil spirits", "have" /
+ * "had". Measured: the proofreader suggested these despite being told not to,
+ * and a clip cannot tell such near-identical sounds apart — the re-listen
+ * then picked the tidier grammar. A caption keeps how he speaks, so these are
+ * never asked. (A word added or taken away — "do not learn", "that SHALL not
+ * be you" — is not grammar, and is asked.)
+ */
+const CLASSES = [['a', 'an', 'the', 'this', 'that'], ['is', 'are', 'was', 'were', 'be', 'being', 'been', 'am'], ['have', 'has', 'had', 'having'],
+  ['do', 'does', 'did'], ['will', 'would', 'shall', 'should', 'can', 'could'], ['he', 'she', 'they', 'it'], ['him', 'her', 'them'], ['his', 'their', 'its']];
+function inflection(a, b) {
+  if (a === b) return true;
+  const [s, t] = a.length <= b.length ? [a, b] : [b, a];
+  if (s.length >= 3 && t.startsWith(s) && ['s', 'es', 'ed', 'd', 'ing', "'s", 'n'].includes(t.slice(s.length))) return true;
+  if (a.length === b.length && a.length >= 3 && a.slice(0, -1) === b.slice(0, -1) && /[dt]/.test(a.slice(-1)) && /[dt]/.test(b.slice(-1))) return true;
+  return CLASSES.some((c) => c.includes(a) && c.includes(b));
+}
+function grammarOnly(h, l) {
+  // the words that differ, in order, on each side
+  const n = h.length, m = l.length;
+  const L = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = h[i] === l[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const dh = [], dl = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (h[i] === l[j]) { i++; j++; } else if (L[i + 1][j] >= L[i][j + 1]) dh.push(h[i++]); else dl.push(l[j++]);
+  }
+  while (i < n) dh.push(h[i++]);
+  while (j < m) dl.push(l[j++]);
+  return dh.length > 0 && dh.length === dl.length && dh.every((x, k) => inflection(x, dl[k]));
+}
+
 /** A proofreader's note → the caption words it means ([a, b] indices), or null. */
 function locate(fix, lines, words) {
   const line = lines.find((l) => l.n === Math.round(+fix.line));
@@ -73,7 +106,7 @@ function locate(fix, lines, words) {
   const h = toks(fix.heard), likely = toks(fix.likely);
   if (!h.length || h.length > 8 || !likely.length || likely.length > h.length * 3 + 3) return null;
   if (/[()[\]?]|unclear|inaudible|nothing/i.test(String(fix.likely))) return null;
-  if (h.join(' ') === likely.join(' ')) return null;
+  if (h.join(' ') === likely.join(' ') || grammarOnly(h, likely)) return null;
   // within the line (a phrase may run on into the next one)
   const lo = line.i0, hi = Math.min(words.length - 1, line.i1 + h.length);
   for (let a = lo; a <= hi - h.length + 1; a++) {
@@ -112,8 +145,9 @@ const pool = async (items, n, fn) => {
  * input/from: the recording and where the span starts in it.
  * Returns { words, unsure: [word objects], report }.
  */
-async function proofread({ words, alt, input, from = 0, windowSec = 300, batch = 8, fetchImpl, encode = gem.encodeFlac, onProgress = null } = {}) {
-  const report = { windows: 0, suspects: 0, located: 0, asked: 0, changed: 0, kept: 0, unsure: 0, why: '' };
+async function proofread({ words, alt, input, from = 0, windowSec = 300, batch = 12, fetchImpl, encode = gem.encodeFlac, onProgress = null } = {}) {
+  const report = { windows: 0, suspects: 0, located: 0, asked: 0, changed: 0, kept: 0, unsure: 0, why: '', readMs: 0, listenMs: 0 };
+  let tick = Date.now();
   const W = Array.isArray(words) ? words : [];
   if (!gem.ready() || W.length < 4) return { words: W, unsure: [], report };
   const opt = fetchImpl ? { fetchImpl } : {};
@@ -141,6 +175,7 @@ async function proofread({ words, alt, input, from = 0, windowSec = 300, batch =
     if (onProgress) { try { onProgress(done / (groups.length * 2)); } catch (e) {} }
   });
   report.suspects = fixes.length;
+  report.readMs = Date.now() - tick; tick = Date.now();
   // where they are, one per place
   const items = [];
   const taken = new Set();
@@ -189,6 +224,7 @@ async function proofread({ words, alt, input, from = 0, windowSec = 300, batch =
     heardDone++;
     if (onProgress) { try { onProgress(0.5 + heardDone / (batches.length * 2)); } catch (e) {} }
   });
+  report.listenMs = Date.now() - tick;
   // 3. what the audio confirmed goes in, in the old words' time
   const out = W.slice();
   const unsure = [];
@@ -219,4 +255,4 @@ async function proofread({ words, alt, input, from = 0, windowSec = 300, batch =
   return { words: out, unsure, report };
 }
 
-module.exports = { proofread, linesOf, locate, proofreadPrompt, relistenPrompt, parseJson };
+module.exports = { proofread, linesOf, locate, grammarOnly, proofreadPrompt, relistenPrompt, parseJson };

@@ -48,6 +48,14 @@ const TEXT = 'A number of people have read that. When you have read that, the fi
   ok(rl.locate({ line: 3, heard: 'feel', likely: '(unclear)' }, lines, words) === null && rl.locate({ line: 3, heard: 'feel of love', likely: 'feel of love' }, lines, words) === null,
     'a guess with a note in it, or no change at all: dropped');
 
+  console.log('\n[2b] his grammar is not a mishearing');
+  const T = (x) => x.toLowerCase().split(' ');
+  ok(['send them|sent them', 'answers|answer', 'an evil spirit|the evil spirits', 'else have seen|else had seen', 'will|would'].every((c) => rl.grammarOnly(T(c.split('|')[0]), T(c.split('|')[1]))),
+    'send/sent, answers/answer, an/the spirit(s), have/had, will/would: never asked');
+  ok(['if you do learn|if you do not learn', 'knee down|kneel down', 'read daddies|real daddies', "that's not be you|that shall not be you"].every((c) => !rl.grammarOnly(T(c.split('|')[0]), T(c.split('|')[1]))),
+    '…but "do NOT learn", "kneel", "real", "that SHALL not be" are asked');
+  ok(rl.locate({ line: 2, heard: 'have read that,', likely: 'had read that,' }, lines, words) === null, 'a grammar-only note is dropped before any listening');
+
   console.log('\n[3]-[5] the audio decides');
   const asked = { read: 0, listen: 0, prompts: [], clips: 0 };
   const fake = async (url, o) => {

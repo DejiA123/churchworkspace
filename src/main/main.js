@@ -1436,6 +1436,7 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
   const heard = [0, 0];
   const both = () => prog && prog(60 + Math.round(((heard[0] + heard[1]) / (thirdOn ? 2 : 1)) * 36));
   const asCancel = (e) => { if (e && e.cancelled) throw new jobs.CancelledError(); };
+  const tListen = Date.now();
   const [second, third] = await Promise.all([
     (!pcSec && book.entries.length) ? cloudspeech.secondOpinion({
       input, from, to, words: [],      // compared below, after the Word Book
@@ -1448,6 +1449,7 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
     }).catch((e) => { asCancel(e); return { chunks: [], failed: 1, why: (e && e.message) || 'the third listen failed' }; }) : null,
   ]);
   if (second) check = second;
+  const listenMs = Date.now() - tListen;
   let alt = null;
   if (check.checked && Array.isArray(check.alt)) {
     const m = wordbook.matcher();
@@ -1480,6 +1482,8 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
     relistenUnsure = pr.unsure || [];
     check.relisten = pr.report;
   }
+  // where the time went (the first hearing, the second and third together, the proofreader)
+  check.ms = { first: tListen - t0, others: listenMs, proofread: check.relisten ? (check.relisten.readMs || 0) + (check.relisten.listenMs || 0) : 0 };
   if (alt) {
     check.doubts = cloudspeech.markDisagreements(book.entries, alt);
     if (check.third && check.third.heard) {
