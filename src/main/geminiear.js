@@ -239,6 +239,8 @@ async function ask(parts, { fetchImpl = fetch, waits = [15000, 30000, 45000], ti
       // read on the WHOLE answer: the "per day" quota id comes after a long message
       // (measured: cut to 600 characters, it was never seen, and each model was waited on for 90 s)
       const daily = /per ?day|PerDay|limit: ?0\b/i.test(full);
+      // a model the key lists but may not use ("no longer available to new users"): gone for good, not until midnight
+      if (res.status === 404 && ranked) { const k = ranked.indexOf(model); if (k >= 0 && ranked.length > 1) ranked.splice(k, 1); }
       if (res.status === 404 || res.status === 403 || (res.status === 429 && daily)) { setSpent(model); next = true; continue; }
       // the key itself refused: nothing else will work either
       if (res.status === 400 || res.status === 401) throw Object.assign(new Error('Gemini refused the key (' + lastWhy + ')'), { exhausted: true });
