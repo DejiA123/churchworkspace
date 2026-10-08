@@ -7336,9 +7336,12 @@
         // the clips carry their own cuts, lanes, pip placement and per-clip
         // subject pick — they are already plain data, so they travel as-is,
         // less the "a thumbnail is being made" flag, which is about this run
+        // (nor an export's frozen copy of the clip: measured, a page killed mid-export
+        // saved it, and the short then counted as captioned from that stale copy
+        // forever after — "9 shorts captioned — 0 lines on the Captions track")
         segments: (ve.segments || []).map((s) => {
-          if (!s || !s._thumbing) return s;
-          const c = Object.assign({}, s); delete c._thumbing; return c;
+          if (!s || (!s._thumbing && !s.__snap && !s.__task)) return s;
+          const c = Object.assign({}, s); delete c._thumbing; delete c.__snap; delete c.__task; return c;
         }),
         audio: ve.audio || [],
         textOverlays: ve.textOverlays || [],
@@ -7408,7 +7411,7 @@
       ve.segments = tl.segments;
       // a session saved mid-thumbnail kept the "making one" flag, and the card
       // then waited forever for a picture nobody was making
-      for (const s of ve.segments) if (s) delete s._thumbing;
+      for (const s of ve.segments) if (s) { delete s._thumbing; delete s.__snap; delete s.__task; }
       shrinkOldThumbs(ve.segments);
     }
     if (Array.isArray(tl.audio)) ve.audio = tl.audio;
@@ -12935,7 +12938,11 @@
     if (!res) try {
       res = await window.__runJob(`${capHearsInCloud() ? '☁️' : '🎧'} Captioning "${s.label}" (${Math.round(s.end - s.start)}s clip only — never the whole video)…`, jid,
         () => window.api.captions.transcribe({ input: ve.video.path, startSec: s.start, endSec: s.end, model: capModelCfg(), jobId: jid }));
-    } catch (e) { return (e && e.cancelled) ? 'cancelled' : 'failed'; }
+    } catch (e) {
+      if (e && e.cancelled) return 'cancelled';
+      ve._capFailWhy = (e && e.message) || 'no answer';
+      return 'failed';
+    }
     const words = (res && res.words) || [];
     if (!words.length) return 'none';
     noteBookFixes(res);
@@ -13025,8 +13032,9 @@
    */
   const capLinesIn = (s) => (((F(s) && F(s).capEvents) || ve.capEvents) || []).filter((e) =>
     e && e.end > s.start + 0.02 && e.start < s.end - 0.02);
-  /** Does this clip's export carry captions? Exactly when the 💬 track has lines over it. */
-  const hasClipCaps = (s) => capLinesIn(s).length > 0;
+  /** Does this clip's export carry captions? Exactly when the 💬 track has lines over it.
+   *  (The REAL track — never an export's frozen copy, which can be stale.) */
+  const hasClipCaps = (s) => (ve.capEvents || []).some((e) => e && e.end > s.start + 0.02 && e.start < s.end - 0.02);
   const clipCapKey = (s) => `${s.start.toFixed(2)}|${s.end.toFixed(2)}`;
   async function captionAllShorts() {
     if (!ve.video) return;
@@ -13042,6 +13050,8 @@
     commitCapEdit();
     pushHistory({ captions: true });
     let done = 0, skipped = 0;
+    const failed = [], silent = [];
+    ve._capFailWhy = '';
     const fresh = [];
     for (let i = 0; i < shorts.length; i++) {
       const s = shorts[i];
@@ -13051,7 +13061,8 @@
       const r = await captionClipIntoLane(s, g);
       if (r === 'cancelled') break;   // Cancel stops the whole sweep
       if (r === 'skipped') { skipped++; continue; }
-      if (r !== 'done') continue;     // no speech / failed — don't sink the rest
+      if (r === 'failed') { failed.push(s.label || ('short ' + (i + 1))); continue; }   // don't sink the rest — but say so below
+      if (r !== 'done') { silent.push(s.label || ('short ' + (i + 1))); continue; }
       done++;
       fresh.push(s);
       renderCapTrack();               // blocks appear as each short finishes
@@ -13062,10 +13073,16 @@
     updateCapOverlay(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
     const zoomed = (done || skipped) ? revealCaptions(true) : false; // lane in view, no rival toast
     const n = (ve.capEvents || []).length;
+    // every short is accounted for: captioned, or why not
+    const missed = failed.length
+      ? ` ⚠️ ${failed.length} could not be captioned (${failed.slice(0, 3).map((l) => '“' + l + '”').join(', ')}${failed.length > 3 ? '…' : ''}): ${ve._capFailWhy || 'no answer'}. Press 💬 Auto-caption all shorts again to try just those.`
+      : '';
+    const quiet = silent.length ? ` ${silent.length} had no speech to caption.` : '';
     window.__toast && window.__toast(done || skipped
-      ? `💬 ${done + skipped === shorts.length ? 'All ' : ''}${done + skipped} short${done + skipped > 1 ? 's' : ''} captioned — ${n} line${n > 1 ? 's' : ''} on the 💬 Captions track. Click any line to retype it, drag it to re-time it.`
-        + (zoomed ? ' (Zoomed in so you can read them — press “Fit” for the whole video.)' : '')
-      : 'No speech was detected in the shorts.', done || skipped ? 'good' : 'error', 9000);
+      ? `💬 ${done + skipped === shorts.length ? 'All ' : ''}${done + skipped} short${done + skipped > 1 ? 's' : ''} captioned — ${n} line${n !== 1 ? 's' : ''} on the 💬 Captions track. Click any line to retype it, drag it to re-time it.`
+        + (zoomed ? ' (Zoomed in so you can read them — press “Fit” for the whole video.)' : '') + quiet + missed
+      : (failed.length ? `💬 The shorts could not be captioned: ${ve._capFailWhy || 'no answer'}.` : 'No speech was detected in the shorts.'),
+    done || skipped ? (failed.length ? 'error' : 'good') : 'error', failed.length ? 15000 : 9000);
     // The freshly captioned lines go to the AI proof-reader (if "auto" is on).
     if (fresh.length) {
       const idx = [];
