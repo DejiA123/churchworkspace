@@ -1463,18 +1463,24 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
   }
   // ►► THE THIRD EAR (geminiear.js + captionfuse.js): two of three decide; where
   // both Whisper ears share a mishearing, a reader picks between the hearings.
-  let unsure = [];
+  let unsure = [], agreed = null;
   if (third) {
     const t3 = await thirdEar(book.entries, alt, third).catch((e) => { asCancel(e); return { why: (e && e.message) || 'the third ear failed' }; });
     if (t3.words) { book.entries.length = 0; book.entries.push(...t3.words); }
     if (t3.altFix && alt) alt = t3.altFix(alt);
-    unsure = t3.unsure || [];
+    unsure = t3.unsure || []; agreed = t3.agreed || null;
     check.third = t3.report || { why: t3.why };
   }
   if (alt) {
     check.doubts = cloudspeech.markDisagreements(book.entries, alt);
     // what two of three ears heard, or the reader chose, is settled; what the reader could not decide is listed
     for (const w of book.entries) if (w.third === 'reader' && w.doubt) { delete w.doubt; check.doubts--; }
+    // the second ear disagreed, but Gemini heard the caption's word: two of three
+    if (agreed) {
+      let settled = 0;
+      for (const w of book.entries) if (w.doubt && agreed.has(w)) { delete w.doubt; check.doubts--; settled++; }
+      check.third.settled = settled;
+    }
     for (const w of unsure) if (!w.doubt && book.entries.includes(w)) { w.doubt = true; check.doubts++; }
     check.alt = alt.map((w) => ({ text: w.text, start: w.start, end: w.end }));
   }
@@ -1651,7 +1657,10 @@ async function thirdEar(words, alt, heard) {
     }
     return captionfuse.apply(a, ops, 'alt');
   } : null;
-  return { words: captionfuse.apply(words, pl.auto.concat(take)), unsure, altFix, report };
+  // the words Gemini confirmed (the objects themselves: they survive the replacements below)
+  const agreed = new Set([...pl.agreed].map((i) => words[i]).filter(Boolean));
+  report.texts = chunks.map((c) => ({ from: c.from, to: c.to, text: c.text }));
+  return { words: captionfuse.apply(words, pl.auto.concat(take)), unsure, agreed, altFix, report };
 }
 /** The reader's picks, by position in `items`: 'A' (the Whisper words), 'B' (Gemini's) or '?'. */
 async function refereeHearings(items) {

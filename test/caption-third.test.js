@@ -47,6 +47,16 @@ const said = (ws) => ws.map((w) => w.text).join(' ');
     ok(p3.auto.length === 0 && p3.ask.length === 0, 'a capital is not a different word', p3);
   }
 
+  console.log('\n[1b] the third ear settles a disagreement');
+  {
+    const w = WS('we give God the glory for the grace He has given to us this day');
+    const a = WS('we give God the glory for the grays He has given to us this day');
+    const p = fuse.plan(w, a, CH('We give God the glory for the grace He has given to us this day.'));
+    ok(!p.auto.length && !p.ask.length && p.agreed.has(6), 'Gemini heard "grace" like the caption: two of three, nothing to look at', [...p.agreed]);
+    const p2 = fuse.plan(w, a, CH('We give God the glory for the great grace He has given to us this day.'));
+    ok(!p2.agreed.has(6), '…but not where Gemini heard something more beside it', [...p2.agreed]);
+  }
+
   console.log('\n[2] both Whisper ears share the mishearing');
   {
     const w = WS('attract God and the presence of God came on the same that day church');
@@ -149,7 +159,7 @@ const said = (ws) => ws.map((w) => w.text).join(' ');
     const cw = require(path.join(ROOT, 'src/main/cloudwrite'));
     const SAY = {
       'whisper-large-v3': 'and the presence of God came on the same and sad peace be still',
-      'whisper-large-v3-turbo': 'and the presence of God came on the same and said peace be still',
+      'whisper-large-v3-turbo': 'and the presents of God came on the same and said peace be still',
     };
     const W = (txt) => ({
       words: txt.split(' ').map((x, i) => ({ word: x, start: 0.2 + i * 0.4, end: 0.55 + i * 0.4 })),
@@ -184,6 +194,8 @@ const said = (ws) => ws.map((w) => w.text).join(' ');
     const t = out && out.check && out.check.third;
     ok(t && t.auto === 1 && t.asked === 1 && t.reader === 1 && t.model === 'gemini-2.5-flash', 'the answer says what the third ear did', t);
     ok(out && !out.words.some((w) => w.doubt), 'what two ears (or an ear and the reader) settled is not left in doubt', out && out.words.filter((w) => w.doubt));
+    ok(t && t.settled === 1 && /presence/.test(text), '"presence" / "presents": Gemini heard the caption\'s word, so it is not listed for a look', t);
+    ok(t && Array.isArray(t.texts) && /on the scene/.test(t.texts[0].text), 'what Gemini heard comes back with the answer', t && t.texts);
 
     // the reader cannot tell: the Whisper words stay, marked for a look, Gemini's hearing offered
     global.fetch = ((real) => async (url, o) => {

@@ -88,6 +88,9 @@ function align(x, y) {
  */
 function plan(words, alt, chunks, { edge = 1.0, maxBlock = 6 } = {}) {
   const auto = [], ask = [];
+  // caption words the third ear heard the same, with nothing of its own beside
+  // them: with the main ear that is two of three, whatever the second ear said
+  const agreed = new Set();
   const A = Array.isArray(alt) ? alt : [];
   for (const c of chunks || []) {
     if (!c || !c.text) continue;
@@ -98,6 +101,11 @@ function plan(words, alt, chunks, { edge = 1.0, maxBlock = 6 } = {}) {
     const x = idx.map((i) => norm(words[i].text)), y = g.map(norm);
     const pairs = align(x, y);
     if (pairs.length < Math.min(x.length, y.length) * 0.5) continue;      // not the same stretch at all: leave it
+    for (let k = 0; k < pairs.length; k++) {
+      const [pi, gj] = pairs[k], prev = pairs[k - 1], next = pairs[k + 1];
+      const tight = (!prev || (prev[0] === pi - 1 && prev[1] === gj - 1)) && (!next || (next[0] === pi + 1 && next[1] === gj + 1));
+      if (tight) agreed.add(idx[pi]);
+    }
     // the blocks BETWEEN matches (the edges of a stretch are where the two cut differently: left alone)
     for (let k = 0; k + 1 < pairs.length; k++) {
       const [pi, gj] = pairs[k], [pi2, gj2] = pairs[k + 1];
@@ -110,7 +118,7 @@ function plan(words, alt, chunks, { edge = 1.0, maxBlock = 6 } = {}) {
       const altBlock = A.filter((w) => mid(w) > +before.end - 0.05 && mid(w) < +after.start + 0.05);
       const pN = pa.map((i) => norm(words[i].text)).filter((t) => t && !FILLER.has(t)).join(' '), gN = gb.map(norm).join(' ');
       const aN = altBlock.map((w) => norm(w.text)).filter((t) => t && !FILLER.has(t)).join(' ');
-      if (pN === gN || sameWords(pN, gN)) continue;
+      if (pN === gN || sameWords(pN, gN)) { for (const i of pa) agreed.add(i); continue; }
       // numbers ("3" / "three", "3:16" / "three sixteen") are a style both ears write their own way
       if (NUMBERISH.test(pN) || NUMBERISH.test(gN) || /\d/.test(aN)) continue;
       const op = {
@@ -126,7 +134,7 @@ function plan(words, alt, chunks, { edge = 1.0, maxBlock = 6 } = {}) {
       if (aN === pN || !aN) ask.push(op);                        // the Whisper blind spot (or no second ear here): ask
     }
   }
-  return { auto, ask };
+  return { auto, ask, agreed };
 }
 
 /** Apply ops (non-overlapping) to a copy of the words. Each changed word is marked `third`. */
