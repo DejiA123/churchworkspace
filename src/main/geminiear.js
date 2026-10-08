@@ -139,6 +139,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** What Gemini wrote, as plain words: no "[music]" notes, no "Speaker 1:" labels, no timestamps. */
 function clean(text) {
   return String(text || '')
+    // a reverent spelling some models use ("G-d", "L-rd") is not what goes on a sermon's captions
+    .replace(/\bG[-\u2010\u2011\u2012\u2013\u2014]d\b/g, 'God').replace(/\bL[-\u2010\u2011\u2012\u2013\u2014]rd\b/g, 'Lord')
     .replace(/\[[^\]]*\]/g, ' ')
     .replace(/\((?:laughter|laughs|applause|music|singing|inaudible|unintelligible|crosstalk|pause|silence|congregation[^)]*|audience[^)]*|speaking in tongues|tongues)[^)]*\)/gi, ' ')
     .replace(/\*[^*\n]{1,40}\*/g, ' ')
