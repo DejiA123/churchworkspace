@@ -7569,6 +7569,16 @@
     if (ve._sessionTimer) clearTimeout(ve._sessionTimer);
     ve._sessionTimer = setTimeout(writeAutosave, SESSION_AUTOSAVE_MS);
   }
+  /*
+   * SAVED BEFORE IT IS EXPORTED. The sweep above looks every 15 s, so a font
+   * picked and exported straight away, by a phone that then closed the app
+   * mid-export, could come back without it. Every export writes the work first.
+   */
+  function saveSessionNow() {
+    if (!ve.video) return;
+    if (ve._sessionTimer) { clearTimeout(ve._sessionTimer); ve._sessionTimer = null; }
+    writeAutosave().catch(() => {});
+  }
   async function writeAutosave() {
     ve._sessionTimer = null;
     const data = collectSession();
@@ -9386,6 +9396,7 @@
 
   async function exportSegment(id) {
     const s = ve.segments.find((x) => x.id === id); if (!s) return;
+    saveSessionNow();
     // already part of an Export all that is running: exporting it again here would replace that
     // export's frozen copy of it, and then throw it away (found by review)
     if (s.__task) return window.__toast && window.__toast(`“${s.label || 'This short'}” is already being exported by Export all — it will be in that batch.`, 'error', 7000);
@@ -9673,6 +9684,7 @@
   }
   async function exportEditedVideo() {
     if (!ve.video) return window.__toast && window.__toast('Open a video first.', 'error');
+    saveSessionNow();
     const span = editedSpan();
     if (!span) return window.__toast && window.__toast('Nothing on the timeline to export — the main track is empty.', 'error');
     const jobId = window.__newJobId();
@@ -9910,6 +9922,7 @@
     try { return await exportAllRun(list, resume); } finally { ve._exportingAll = false; }
   }
   async function exportAllRun(list, resume) {
+    saveSessionNow();
     // the whole export's size, even when this run only finishes it off
     const total = resume ? resume.total : list.length;
     let capped = 0;
@@ -15040,6 +15053,9 @@
     ['#capFont', '#capSize', '#capSizePct', '#capTracking', '#capPos', '#capColor', '#capStyleSel', '#capWordHl', '#capWordColor'].forEach((sel) => {
       const el = $(sel); if (el) el.addEventListener('change', () => updateCapOverlay(ve.refs.player.currentTime || 0));
     });
+    // the look of the captions is part of the work: saved within seconds of a change (touchSession)
+    ['#capFont', '#capSize', '#capSizePct', '#capTracking', '#capPos', '#capColor', '#capStyleSel', '#capWordHl', '#capWordColor', '#capCase', '#capWords', '#capTrans']
+      .forEach((sel) => { const el = $(sel); if (el) el.addEventListener('change', () => touchSession()); });
     // The typography controls are folded away until asked for — see the note in
     // the markup. The button says which way it is.
     const capFine = $('#capFine'), capFineWrap = $('#capFineWrap');
