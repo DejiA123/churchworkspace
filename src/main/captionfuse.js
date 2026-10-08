@@ -192,7 +192,11 @@ function fuseGemini(words, alt, chunks, { edge = 1.0, maxBlock = 12, secPerWord 
       }
       // a different word or phrase
       const fits = gb.length * secPerWord <= (room1 - room0) + 0.05;
-      if ((!twoOfThree && (pa.length > maxBlock || gb.length > maxBlock)) || !fits) { for (const i of pa) keep.add(i); stats.kept += pa.length; continue; }
+      // Gemini summing up a stretch in far fewer words (laughter, tongues, a run of repeats)
+      // is not a better hearing of it: measured, "ha ha ha ha. It's a mighty God. ha ha ha ha"
+      // came back "Hey. Is that my tig?"
+      const shrunk = pT.length >= 4 && gT.length * 2 < pT.length;
+      if ((!twoOfThree && (pa.length > maxBlock || gb.length > maxBlock || shrunk)) || !fits) { for (const i of pa) keep.add(i); stats.kept += pa.length; continue; }
       const overrule = !!altKey && altKey === pKey;          // both Whisper ears heard the caption's words
       const long = overrule && (gb.length >= 4 || pa.length >= 4);
       ops.push({ i0: pa[0], i1: pa[pa.length - 1], tokens: gb.map(display), start: t0, end: t1, long });

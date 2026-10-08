@@ -112,6 +112,12 @@ const F = (w, a, text, extra, opts) => fuse.fuseGemini(w, a, CH(text, extra), op
     ok(/Lord be with you/.test(said(r3.words)) || /Lord,? be with you/.test(said(r3.words)), 'more words than fit in the time Whisper heard: not squeezed in', said(r3.words));
   }
 
+  {
+    const w = WS('it is a mighty God ha ha ha ha it is a mighty God ha ha ha ha no liars enter the kingdom of heaven');
+    const r = F(w, w, 'It is a mighty God. Hey, is that my tig? No liars enter the kingdom of heaven.');
+    ok(/ha ha ha ha no liars/i.test(said(r.words)), 'a stretch Gemini summed up in far fewer words keeps Whisper\'s', said(r.words));
+  }
+
   console.log('\n[7] overlapping stretches');
   {
     const w = WS('one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen', 0.2, 0.5);
