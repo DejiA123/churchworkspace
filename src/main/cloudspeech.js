@@ -1375,7 +1375,8 @@ async function secondOpinion({ input, from, to, words, onProgress = null, terms 
     try { console.log('  AssemblyAI could not hear it (' + ((e && e.message) || e) + ') — Whisper hears it again instead'); } catch (er) {}
   }
   const first = captionModelId();
-  const other = (provider().models || []).map((m) => m.id).find((id) => id !== first && /whisper-large-v3/.test(id));
+  // AssemblyAI heard it first: Whisper's best model is the other ear; else the other Whisper
+  const other = notAssembly ? first : (provider().models || []).map((m) => m.id).find((id) => id !== first && /whisper-large-v3/.test(id));
   if (!other) return { checked: false, why: 'no second model to compare with' };
   let r;
   try {

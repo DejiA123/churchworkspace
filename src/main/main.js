@@ -1425,11 +1425,36 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
    * with "Cannot access 'words' before initialization": on a server with a Groq
    * key and no speech model of its own, captions did not work at all.)
    */
-  try {
-    r = await cloudspeech.transcribeWords({ input, startSec: from, endSec: to, terms: captionTerms(), plain, onProgress: (p) => prog && prog(Math.round(p * 0.6)) });
-  } catch (err) {
-    if (err && err.cancelled) throw new jobs.CancelledError();
-    r = { words: [], doneSec: 0, why: (err && err.message) || 'could not reach the speech service' };
+  /*
+   * ►► ASSEMBLYAI HEARS FIRST, when the church has its key. ◄◄ It ranks ahead
+   * of Whisper on the public speech benchmarks (~3.1% against ~4.1% of words
+   * wrong) and is trained apart from it — so Whisper (Groq) becomes the second,
+   * independent ear, and Gemini the third, as before. Not for the plain pass
+   * (`plain`), which exists to ask Whisper without context.
+   */
+  let aaiFirst = false;
+  if (!plain) {
+    try {
+      const aai = require('./assemblyear');
+      if (aai.ready()) {
+        if (prog) prog(2);
+        const audio = await geminiear.encodeFlac(input, from, span);
+        if (prog) prog(8);
+        const aw = await aai.transcribe(audio, { terms: captionTerms(), cancelled: () => jobs.isCancelled() });
+        if (aw.length) { r = { words: aw, doneSec: span, why: '' }; aaiFirst = true; if (prog) prog(60); }
+      }
+    } catch (e) {
+      if (e && e.cancelled) throw new jobs.CancelledError();
+      console.log('  AssemblyAI could not hear it (' + ((e && e.message) || e) + ') — Groq hears it');
+    }
+  }
+  if (!r) {
+    try {
+      r = await cloudspeech.transcribeWords({ input, startSec: from, endSec: to, terms: captionTerms(), plain, onProgress: (p) => prog && prog(Math.round(p * 0.6)) });
+    } catch (err) {
+      if (err && err.cancelled) throw new jobs.CancelledError();
+      r = { words: [], doneSec: 0, why: (err && err.message) || 'could not reach the speech service' };
+    }
   }
   if (!r) return null;
   let words = r.words || [];
@@ -1441,7 +1466,6 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
    * is left instead — in a minute or two, and as well as Whisper Large or
    * better. The server's model is only the last resort now.
    */
-  let aaiFirst = false;
   if (r.doneSec < span - 0.5) {
     try {
       const aai = require('./assemblyear');
