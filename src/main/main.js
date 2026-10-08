@@ -878,7 +878,8 @@ ipcMain.handle('video:detectSilence', wrap(async (e, { input, startSec, endSec, 
  */
 ipcMain.handle('video:speechPauses', wrap(async (e, { input, startSec, endSec, minSilenceSec, padSec, jobId, words }) => {
   const prog = onProgress(e, jobId);
-  if (!cloudspeech.fileReady()) return { fallback: true, why: 'no Groq key yet' };
+  const aai = require('./assemblyear');
+  if (!cloudspeech.fileReady() && !aai.ready()) return { fallback: true, why: 'no Groq key yet' };
   const from = Math.max(0, +startSec || 0), to = +endSec || 0;
   if (!(to > from + 0.5)) return { silences: [], engine: 'cloud' };
   const t0 = Date.now();
@@ -887,6 +888,22 @@ ipcMain.handle('video:speechPauses', wrap(async (e, { input, startSec, endSec, m
   if (Array.isArray(words) && words.length) {
     r = { words: words.map((w) => ({ text: w.text, start: w.start - from, end: w.end - from })), doneSec: to - from, model: cloudspeech.state().model };
   }
+  /*
+   * ASSEMBLYAI'S WORD TIMES, when the church has its key: the same ear that
+   * writes the captions says where the speech is, so a pause taken out is a
+   * pause between the very words the captions show. Groq if it cannot.
+   */
+  if (!r && aai.ready()) {
+    try {
+      if (prog) prog(5);
+      const audio = await geminiear.encodeFlac(input, from, to - from);
+      const aw = await aai.transcribe(audio, { cancelled: () => jobs.isCancelled() });
+      if (aw.length) r = { words: aw, doneSec: to - from, model: 'assemblyai' };
+    } catch (err) {
+      if (err && err.cancelled) throw new jobs.CancelledError();
+    }
+  }
+  if (!r && !cloudspeech.fileReady()) return { fallback: true, why: 'AssemblyAI could not hear it' };
   if (!r) try {
     r = await cloudspeech.transcribeWords({ input, startSec: from, endSec: to, onProgress: (p) => prog && prog(Math.round(p * 0.8)) });
   } catch (err) {
@@ -905,7 +922,7 @@ ipcMain.handle('video:speechPauses', wrap(async (e, { input, startSec, endSec, m
     // …the same answer captions:transcribe would give for this clip.
     transcript: {
       words: book.entries, segments: book.entries, model: r.model, engine: 'cloud',
-      engineName: cloudspeech.state().providerName + ' — Whisper ' + (/turbo/.test(cloudspeech.captionModelId()) ? 'Large v3 Turbo' : 'Large v3'),
+      engineName: r.model === 'assemblyai' ? 'AssemblyAI' : cloudspeech.state().providerName + ' — Whisper ' + (/turbo/.test(cloudspeech.captionModelId()) ? 'Large v3 Turbo' : 'Large v3'),
       fixed: book.count, fixedWords: book.count ? wordbook.summarise(book.changes, 4) : '', cloudMs: Date.now() - t0,
     },
   });
