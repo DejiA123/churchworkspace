@@ -221,7 +221,8 @@ const F = (w, a, text, extra, opts) => fuse.fuseGemini(w, a, CH(text, extra), op
     const span = await gem.transcribeSpan({ input: 'x', from: 0, to: 900, chunkSec: 300, encode: async () => Buffer.from('fLaC'),
       fetchImpl: fake(order), waits: [1], retryAfterMs: 1 });
     ok(span.chunks.length === 0 && span.failed === 3 && /used up/.test(span.why), 'every model used up: the rest of the span is not tried in vain', span);
-    ok(['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'].every((m) => asked.filter((x) => x === m).length <= 3) && asked.length <= 9,
+    // (flash-lite is in the list too now: its own daily allowance, after every flash)
+    ok(['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-2.5-flash-lite'].every((m) => asked.filter((x) => x === m).length <= 3) && asked.length <= 12,
       '…each model asked at most once per stretch already under way, then it stops', asked);
     gem._reset();
 
@@ -312,6 +313,7 @@ const F = (w, a, text, extra, opts) => fuse.fuseGemini(w, a, CH(text, extra), op
     console.log('\n[8b] found by review');
     const listing1 = { models: [{ name: 'models/gemini-3.6-flash', supportedGenerationMethods: ['generateContent'] }, { name: 'models/gemini-3.8-pro-preview', supportedGenerationMethods: ['generateContent'] }] };
     ok(gem.rankModel('gemini-2.0-flash') > gem.rankModel('gemini-3.8-pro-preview'), 'every flash model ranks above any pro');
+    ok(gem.rankModel('gemini-2.0-flash') > gem.rankModel('gemini-3.8-flash-lite') && gem.rankModel('gemini-2.0-flash-lite') > gem.rankModel('gemini-3.8-pro'), 'flash-lite after every flash, before pro');
     const longDaily = { error: { code: 429, message: 'You exceeded your current quota, please check your plan and billing details. ' + 'x'.repeat(520), status: 'RESOURCE_EXHAUSTED',
       details: [{ '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaMetric: 'generativelanguage.googleapis.com/generate_content_free_tier_requests', quotaId: 'GenerateRequestsPerDayPerProjectPerModel-FreeTier' }] }, { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '41s' }] } };
     let n429 = 0;

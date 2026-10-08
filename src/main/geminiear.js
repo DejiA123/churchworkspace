@@ -60,11 +60,19 @@ const isSpent = (m) => { const t = spent.get(m); if (t && Date.now() >= t) { spe
 const setSpent = (m) => spent.set(m, nextPacificMidnight());
 function rankModel(name) {
   const n = String(name || '').replace(/^models\//, '');
-  if (!/^gemini-/.test(n) || /lite|image|tts|live|audio|embed|vision|thinking-exp|learnlm/i.test(n)) return -1;
+  if (!/^gemini-/.test(n) || /image|tts|live|native-audio|embed|vision|thinking-exp|learnlm/i.test(n)) return -1;
   if (!/flash|pro/.test(n)) return -1;
   const v = parseFloat((/gemini-(\d+(?:\.\d+)?)/.exec(n) || [])[1] || '0');
-  // every flash before any pro (pro's free allowance is tiny, and it is slower), newest first, released before preview
-  return (/flash/.test(n) ? 1000 : 0) + v * 10 + (/preview|exp/.test(n) ? 0 : 1);
+  /*
+   * Every flash first, newest first, released before preview; then FLASH-LITE;
+   * pro last (its free allowance is tiny, and it is slower). Lite used to be
+   * left out altogether — and it has its own daily allowance, the biggest of
+   * the free ones: a day of exports used Flash's up, and every caption after
+   * that was Whisper's alone (measured: 7 of 129 known mistakes fixed, against
+   * 77 with Gemini). Lite hears less well than Flash, far better than nothing.
+   */
+  const base = /lite/.test(n) ? 600 : /flash/.test(n) ? 1000 : 0;
+  return base + v * 10 + (/preview|exp/.test(n) ? 0 : 1);
 }
 async function models(fetchImpl = fetch) {
   if (!ranked) {
@@ -80,7 +88,7 @@ async function models(fetchImpl = fetch) {
             .filter((m) => m.r > 0)
             .sort((a, b) => b.r - a.r)
             .map((m) => m.id)
-            .slice(0, 4);
+            .slice(0, 6);
           if (list.length) ranked = list;
         }
       } catch (e) { /* the fixed name below, this once */ }
