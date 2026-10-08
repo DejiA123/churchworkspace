@@ -35,6 +35,7 @@ services:
       # Optional, from .env (the setup script asks). Empty = not used.
       GROQ_API_KEY: "${GROQ_API_KEY:-}"
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      ASSEMBLYAI_API_KEY: "${ASSEMBLYAI_API_KEY:-}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       MW_CLOUD_SOCIAL: "${MW_CLOUD_SOCIAL:-on}"
     volumes:

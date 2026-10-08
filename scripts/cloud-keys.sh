@@ -5,6 +5,7 @@
 #   bash scripts/cloud-keys.sh            shows which keys the studio has, asks for a missing Gemini key
 #   bash scripts/cloud-keys.sh gemini     asks for the Gemini key (again)
 #   bash scripts/cloud-keys.sh groq       asks for the Groq key (again)
+#   bash scripts/cloud-keys.sh assemblyai asks for the AssemblyAI key (a second ear that is not Whisper)
 #
 # What you paste is never shown on the screen or kept in the shell's history.
 # It is checked with the service, saved in .env (readable only by you) and the
@@ -34,6 +35,7 @@ check_key() {
   local code=''
   case "$1" in
     GEMINI_API_KEY) code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "x-goog-api-key: $2" 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1' 2>/dev/null)" || true ;;
+    ASSEMBLYAI_API_KEY) code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "authorization: $2" 'https://api.assemblyai.com/v2/transcript?limit=1' 2>/dev/null)" || true ;;
     GROQ_API_KEY)   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "Authorization: Bearer $2" 'https://api.groq.com/openai/v1/models' 2>/dev/null)" || true ;;
     *) code=200 ;;
   esac
@@ -60,6 +62,9 @@ changed=0
 if [ "$WANT" = "gemini" ] || { [ -z "$WANT" ] && [ -z "$(envget GEMINI_API_KEY)" ]; }; then
   ask GEMINI_API_KEY "A free Google Gemini key (aistudio.google.com → Get API key → Create API key)" "AIza" && changed=1 || true
 fi
+if [ "$WANT" = "assemblyai" ]; then
+  ask ASSEMBLYAI_API_KEY "A free AssemblyAI key (assemblyai.com → Sign up, no card → API Keys)" "" && changed=1 || true
+fi
 if [ "$WANT" = "groq" ]; then
   ask GROQ_API_KEY "A free Groq key (console.groq.com → API Keys)" "gsk_" && changed=1 || true
 fi
@@ -79,9 +84,9 @@ fi
 echo
 echo "  The studio has:"
 if ! $DOCKER compose exec -T studio sh -c '
-  for k in GROQ_API_KEY GEMINI_API_KEY ANTHROPIC_API_KEY; do
+  for k in GROQ_API_KEY GEMINI_API_KEY ASSEMBLYAI_API_KEY ANTHROPIC_API_KEY; do
     eval v=\${$k:-}
-    case $k in GROQ_API_KEY) w="captions + scans (Whisper)";; GEMINI_API_KEY) w="the third ear that checks every caption";; *) w="Claude (paid, optional)";; esac
+    case $k in GROQ_API_KEY) w="captions + scans (Whisper)";; GEMINI_API_KEY) w="the third ear that checks every caption";; ASSEMBLYAI_API_KEY) w="a second ear that is not Whisper (free credit)";; *) w="Claude (paid, optional)";; esac
     if [ -n "$v" ]; then echo "    ✓ $k — $w"; else echo "    ✗ $k — not set ($w)"; fi
   done' 2>/dev/null; then
   warn "the studio is not running — start it with: FORCE=1 bash scripts/cloud-update.sh"

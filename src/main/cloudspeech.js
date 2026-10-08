@@ -1362,6 +1362,18 @@ function fuseWithPlain(words, alt) {
 
 /** Hear [from,to] again with the OTHER model and mark where the two disagree. */
 async function secondOpinion({ input, from, to, words, onProgress = null, terms = null, plain = false }) {
+  // an ear that is not Whisper, when the church has the free key (assemblyear.js); Whisper again otherwise
+  try {
+    const aai = require('./assemblyear');
+    if (aai.ready()) {
+      const audio = await require('./geminiear').encodeFlac(input, from, to - from);
+      const alt = await aai.transcribe(audio, { terms: terms || [], cancelled: () => !!(jobs && jobs.isCancelled && jobs.isCancelled()) });
+      if (alt.length) return { checked: true, model: 'assemblyai', alt, doubts: words.length ? markDisagreements(words, alt) : 0 };
+    }
+  } catch (e) {
+    if (e && e.cancelled) throw e;
+    try { console.log('  AssemblyAI could not hear it (' + ((e && e.message) || e) + ') — Whisper hears it again instead'); } catch (er) {}
+  }
   const first = captionModelId();
   const other = (provider().models || []).map((m) => m.id).find((id) => id !== first && /whisper-large-v3/.test(id));
   if (!other) return { checked: false, why: 'no second model to compare with' };
