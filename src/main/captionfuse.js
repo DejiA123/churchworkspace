@@ -1,37 +1,54 @@
 'use strict';
 /*
- * ►► THREE HEARINGS, ONE CAPTION. ◄◄
+ * ►► GEMINI'S WORDS, WHISPER'S TIMING. ◄◄
  *
- * The words the captions are built from (Whisper Large v3, heard with its
- * context), the second Whisper ear (Turbo, heard plain) and a third ear that is
- * not Whisper at all (geminiear.js) are lined up, a three-minute stretch at a
- * time, and every place they differ is one decision:
+ * Measured on a real 45-minute sermon (a Nigerian preacher in Ireland): two
+ * reviewers found 129 places where the Whisper captions were not what was said
+ * — "attract God on the same" (scene), "have read daddies" (real), "body-some"
+ * (burdensome), "Bigate" (Bill Gates), "He of thou shall keep" (If thou shalt
+ * keep), "the old gospel" (the whole gospel). Gemini, hearing the same audio,
+ * had the right words in 71 of them and the same mistake in only 7. Both
+ * Whisper ears made most of those mistakes TOGETHER, so two Whispers agreeing
+ * is weak evidence against a third, better ear.
  *
- *   • Gemini and the second Whisper ear heard the same thing, the main ear
- *     something else — two of three: theirs is taken.
- *   • Both Whisper ears agree and Gemini heard something else — the Whisper
- *     blind spot ("on the same" / "on the scene"). Not decided here: handed to
- *     a reader (main.js) with the sentence around it, which says which of the
- *     two was more likely said; unsure means the Whisper words stay.
- *   • Gemini left words out, or tidied the grammar into something the Whisper
- *     ears did not hear: the Whisper words stay — a caption is what was said.
+ * So the words come from Gemini, and the timing of every word from Whisper
+ * (Gemini gives none). Gemini's text is lined up word by word against the
+ * Whisper words of the same stretch:
  *
- * Pure: words in, decisions out, so it is tested without any network.
+ *   • the same word in both: Whisper's timing, Gemini's spelling/punctuation;
+ *   • a different word or phrase between two matches: Gemini's, timed across
+ *     the Whisper words it replaces;
+ *   • words Gemini left out: they stay — unless the second Whisper ear did not
+ *     hear them either (two of three: never said);
+ *   • words only Gemini heard: put in where Whisper left room for them, or
+ *     where the second Whisper ear heard them too;
+ *   • a long stretch the two do not line up on at all (Gemini skipped a
+ *     passage, or wrote one that was not said): Whisper's words stay.
+ *
+ * Every word comes back marked with where it came from (`src`): 'both' (the
+ * two agree), 'gemini' (Gemini's word, Whisper's timing), 'whisper' (kept).
+ * A long phrase where Gemini overruled BOTH Whisper ears is marked `long`, so
+ * it can be listed for a look with what Whisper heard as the alternative.
+ *
+ * Pure: words in, words out, tested without any network.
  */
 const norm = (t) => String(t || '').toLowerCase().replace(/[’']/g, "'").replace(/[^a-z0-9']/g, '');
 const mid = (w) => ((+w.start) + (+w.end)) / 2;
-const joinN = (ws) => ws.map((w) => norm(w.text)).filter(Boolean).join(' ');
 
 // sounds, not words: a verbatim ear writes them, captions leave them out
-const FILLER = new Set(['um', 'umm', 'uh', 'uhh', 'er', 'erm', 'ah', 'hmm', 'mm', 'mhm']);
+const FILLER = new Set(['um', 'umm', 'uh', 'uhh', 'er', 'erm', 'ah', 'hmm', 'mm', 'mhm', 'eh']);
+const isWord = (t) => { const n = norm(t); return !!n && !FILLER.has(n); };
+/** A Gemini word as a caption shows it: no quotation marks or brackets. */
+const display = (t) => String(t || '').replace(/["“”„«»()[\]{}]/g, '').replace(/^[-–—…]+/, '').replace(/[–—…]+$/, '');
 function tokensOf(text) {
-  return String(text || '').split(/\s+/).map((t) => t.trim()).filter((t) => t && norm(t) && !FILLER.has(norm(t)));
+  return String(text || '').split(/\s+/).map((t) => display(t.trim())).filter(isWord);
 }
 
 /*
  * The same words written another way are not a mishearing: "gonna" / "going
  * to", "I'm" / "I am", "every day" / "everyday", "okay" / "OK". Compared in a
- * spelled-out, spaceless form so a style difference never changes a caption.
+ * spelled-out, spaceless form; where that is all the difference is, the
+ * caption keeps the Whisper spelling and timing.
  */
 const SPELL = [
   [/\bgonna\b/g, 'going to'], [/\bwanna\b/g, 'want to'], [/\bgotta\b/g, 'got to'], [/\bkinda\b/g, 'kind of'],
@@ -43,25 +60,6 @@ function sameWords(a, b) {
   const f = (s) => { let t = String(s || ''); for (const [rx, to] of SPELL) t = t.replace(rx, to); return t.replace(/[^a-z0-9]/g, ''); };
   return f(a) === f(b);
 }
-// A Gemini word as it goes into a caption: the caption's own punctuation stays
-// (the sentence's ending is kept by apply()), so Gemini's commas are not brought
-// in; a capital Gemini gave only because ITS sentence started there is dropped,
-// unless the word is a name it writes with a capital anyway.
-const bare = (t) => String(t || '').replace(/^[^A-Za-z0-9']+|[^A-Za-z0-9']+$/g, '').replace(/^'+|'+$/g, '');
-const NAMES = /^(I|I'm|I've|I'll|I'd|God|God's|Jesus|Christ|Lord|Holy|Spirit|Ghost|Father|Bible|Amen|Hallelujah)$/;
-function asCaption(tok, g, j, replacedFirst, k) {
-  let t = bare(tok);
-  const startsSentence = j === 0 || /[.?!]["')\]]*$/.test(g[j - 1] || '');
-  if (startsSentence && /^[A-Z][a-z']*$/.test(t) && !NAMES.test(t)) {
-    // capitalised elsewhere mid-sentence by Gemini: a name, kept
-    const mid = g.some((x, i) => i > 0 && bare(x) === t && !/[.?!]["')\]]*$/.test(g[i - 1] || ''));
-    if (!mid) t = t.toLowerCase();
-  }
-  // where the caption's word started with a capital (its own sentence start), so does the new one
-  if (k === 0 && /^[A-Z]/.test(replacedFirst || '') && /^[a-z]/.test(t)) t = t[0].toUpperCase() + t.slice(1);
-  return t;
-}
-const NUMBERISH = /\d|\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|percent)\b/;
 
 /** LCS alignment of two token lists (normalised): pairs of [i, j] that match, in order. */
 function align(x, y) {
@@ -80,115 +78,165 @@ function align(x, y) {
   return pairs;
 }
 
-/**
- * words: the caption words [{text,start,end}] (span clock); alt: the second
- * Whisper ear's words; chunks: [{from,to,text}] from the third ear.
- * Returns { auto: [op], ask: [op] } — an op replaces words[i0..i1] (or inserts
- * before i0 when i1 < i0) with `tokens`, timed across [start, end].
+const ABBREV = /^(mr|mrs|ms|dr|st|rev|prof|vs|etc|e\.g|i\.e|a\.m|p\.m|[a-z]\.[a-z])\.$/i;
+const keyOf = (ws) => ws.map((w) => norm(w.text)).filter((t) => t && !FILLER.has(t)).join(' ');
+
+/*
+ * A match the alignment can lean on. Two hearings of different passages still
+ * share "the", "and", "of" here and there, and lining up on those stitches the
+ * two into nonsense ("the brothers and sisters of the word for today"). So a
+ * match only counts as solid ground when it is part of a run (two or more
+ * words in a row in both), or a word distinctive enough to be the same moment
+ * on its own; the matches between are part of the block around them.
  */
-function plan(words, alt, chunks, { edge = 1.0, maxBlock = 6 } = {}) {
-  const auto = [], ask = [];
-  // caption words the third ear heard the same, with nothing of its own beside
-  // them: with the main ear that is two of three, whatever the second ear said
-  const agreed = new Set();
-  const A = Array.isArray(alt) ? alt : [];
-  for (const c of chunks || []) {
-    if (!c || !c.text) continue;
-    const idx = [];
-    for (let i = 0; i < words.length; i++) { const m = mid(words[i]); if (m >= c.from + edge && m < c.to - edge) idx.push(i); }
-    if (idx.length < 4) continue;
-    const g = tokensOf(c.text);
-    const x = idx.map((i) => norm(words[i].text)), y = g.map(norm);
-    const pairs = align(x, y);
-    if (pairs.length < Math.min(x.length, y.length) * 0.5) continue;      // not the same stretch at all: leave it
-    for (let k = 0; k < pairs.length; k++) {
-      const [pi, gj] = pairs[k], prev = pairs[k - 1], next = pairs[k + 1];
-      const tight = (!prev || (prev[0] === pi - 1 && prev[1] === gj - 1)) && (!next || (next[0] === pi + 1 && next[1] === gj + 1));
-      if (tight) agreed.add(idx[pi]);
-    }
-    // the blocks BETWEEN matches (the edges of a stretch are where the two cut differently: left alone)
-    for (let k = 0; k + 1 < pairs.length; k++) {
-      const [pi, gj] = pairs[k], [pi2, gj2] = pairs[k + 1];
-      const pa = idx.slice(pi + 1, pi2), gb = g.slice(gj + 1, gj2);
-      if (!pa.length && !gb.length) continue;
-      if (pa.length > maxBlock || gb.length > maxBlock) continue;
-      const before = words[idx[pi]], after = words[idx[pi2]];
-      const t0 = pa.length ? +words[pa[0]].start : +before.end;
-      const t1 = pa.length ? +words[pa[pa.length - 1]].end : +after.start;
-      const altBlock = A.filter((w) => mid(w) > +before.end - 0.05 && mid(w) < +after.start + 0.05);
-      const pN = pa.map((i) => norm(words[i].text)).filter((t) => t && !FILLER.has(t)).join(' '), gN = gb.map(norm).join(' ');
-      const aN = altBlock.map((w) => norm(w.text)).filter((t) => t && !FILLER.has(t)).join(' ');
-      if (pN === gN || sameWords(pN, gN)) { for (const i of pa) agreed.add(i); continue; }
-      // numbers ("3" / "three", "3:16" / "three sixteen") are a style both ears write their own way
-      if (NUMBERISH.test(pN) || NUMBERISH.test(gN) || /\d/.test(aN)) continue;
-      const op = {
-        i0: pa.length ? pa[0] : idx[pi2], i1: pa.length ? pa[pa.length - 1] : idx[pi2] - 1,
-        tokens: gb.map((t, k) => asCaption(t, g, gj + 1 + k, pa.length ? words[pa[0]].text : '', k)), start: t0, end: t1,
-        whisper: pa.map((i) => words[i].text).join(' '), gemini: gb.map((t) => bare(t)).join(' '),
-        before: idx.slice(Math.max(0, pi - 7), pi + 1).map((i) => words[i].text).join(' '),
-        after: idx.slice(pi2, pi2 + 8).map((i) => words[i].text).join(' '),
-      };
-      if (!gb.length) continue;                                  // the third ear left words out: they stay
-      if (aN === gN) { auto.push(op); continue; }                // two of three
-      if (!pa.length) continue;                                  // words only Gemini heard: not on one ear's say-so
-      if (aN === pN || !aN) ask.push(op);                        // the Whisper blind spot (or no second ear here): ask
-    }
-  }
-  return { auto, ask, agreed };
+const SMALL = new Set(('the a an and or of to in on at for from is it its i you he she we they that this these those be been was were are am '
+  + 'so but all my your his her our their me him us them do did does not no yes oh as by with what if then there here have has had will '
+  + 'would can could shall should may might must just now one who which when where why how say said says go').split(' '));
+/** Is `a` what is left of `b` with some words taken out (in order)? */
+function subseq(a, b) {
+  let j = 0;
+  for (let i = 0; i < b.length && j < a.length; i++) if (b[i] === a[j]) j++;
+  return j === a.length;
+}
+function anchorsOf(pairs, x) {
+  return pairs.filter(([pi, gj], k) => {
+    const prev = pairs[k - 1], next = pairs[k + 1];
+    const run = (prev && prev[0] === pi - 1 && prev[1] === gj - 1) || (next && next[0] === pi + 1 && next[1] === gj + 1);
+    return run || (x[pi].length >= 4 && !SMALL.has(x[pi]));
+  });
 }
 
-/** Apply ops (non-overlapping) to a copy of the words. Each changed word is marked `third`. */
-function apply(words, ops, how = 'gemini') {
-  const out = words.slice();
-  const sorted = ops.slice().sort((a, b) => b.i0 - a.i0);
-  for (const op of sorted) {
+/**
+ * words: the caption words [{text,start,end}] on the span's clock; alt: the
+ * second Whisper ear's words (or null); chunks: Gemini's stretches
+ * [{ from, to, text, own0?, own1?, atStart?, atEnd? }] — [from, to) is what
+ * Gemini heard, [own0, own1) the part this stretch decides (stretches overlap
+ * a little so no word falls between two), atStart/atEnd: the span's own ends.
+ * Returns { words, stats }.
+ */
+function fuseGemini(words, alt, chunks, { edge = 1.0, maxBlock = 12, secPerWord = 0.09 } = {}) {
+  const W = Array.isArray(words) ? words : [];
+  const A = Array.isArray(alt) ? alt : [];
+  const stats = { stretches: 0, skipped: 0, same: 0, replaced: 0, inserted: 0, removed: 0, kept: 0, overruled: 0, long: 0 };
+  const retext = new Map();     // i -> Gemini's spelling of the same word
+  const ops = [];               // { i0, i1, tokens, start, end, long, trimBefore, trim }
+  const keep = new Set();       // i: Whisper's word kept where Gemini had nothing (or nothing sure)
+  const both = new Set();       // i: heard the same by Gemini
+  for (const c of chunks || []) {
+    if (!c || !c.text) continue;
+    const lo = c.atStart ? -Infinity : c.from + edge, hi = c.atEnd ? Infinity : c.to - edge;
+    const o0 = c.atStart ? -Infinity : (c.own0 != null ? c.own0 : c.from);
+    const o1 = c.atEnd ? Infinity : (c.own1 != null ? c.own1 : c.to);
+    const owns = (t) => t >= o0 && t < o1;
+    const idx = [];
+    for (let i = 0; i < W.length; i++) { const m = mid(W[i]); if (m >= lo && m < hi) idx.push(i); }
+    const g = tokensOf(c.text);
+    if (idx.length < 4 || g.length < 4) continue;
+    const x = idx.map((i) => norm(W[i].text)), y = g.map(norm);
+    const pairs = align(x, y);
+    // not the same stretch at all (Gemini answered something else): leave it to Whisper
+    if (pairs.length < Math.min(x.length, y.length) * 0.5) { stats.skipped++; continue; }
+    stats.stretches++;
+    const solid = anchorsOf(pairs, x);
+    for (const [pi, gj] of solid) {
+      const i = idx[pi];
+      if (!owns(mid(W[i]))) continue;
+      both.add(i); stats.same++;
+      if (display(g[gj]) !== W[i].text) retext.set(i, display(g[gj]));
+    }
+    // the blocks between matches; at the span's own ends, the stretch before the first / after the last too
+    const bounds = solid.slice();
+    if (c.atStart) bounds.unshift([-1, -1]);
+    if (c.atEnd) bounds.push([x.length, y.length]);
+    for (let k = 0; k + 1 < bounds.length; k++) {
+      const [pi, gj] = bounds[k], [pi2, gj2] = bounds[k + 1];
+      const pa = idx.slice(pi + 1, pi2), gb = g.slice(gj + 1, gj2);
+      if (!pa.length && !gb.length) continue;
+      const before = pi >= 0 ? W[idx[pi]] : null, after = pi2 < idx.length ? W[idx[pi2]] : null;
+      const t0 = pa.length ? +W[pa[0]].start : (before ? +before.end : null);
+      const t1 = pa.length ? +W[pa[pa.length - 1]].end : (after ? +after.start : null);
+      if (t0 == null || t1 == null) continue;
+      if (!owns(pa.length ? mid(W[pa[0]]) : t0)) continue;
+      const room0 = before ? +before.end : t0, room1 = after ? +after.start : t1;
+      // what the second ear heard here: its words between the middles of the two neighbours
+      const a0 = before ? mid(before) : t0 - 0.05, a1 = after ? mid(after) : t1 + 0.05;
+      const altKey = keyOf(A.filter((w) => mid(w) > a0 && mid(w) < a1));
+      const pKey = keyOf(pa.map((i) => W[i])), gKey = gb.map(norm).filter((t) => !FILLER.has(t)).join(' ');
+      if (pKey === gKey || sameWords(pKey, gKey)) { for (const i of pa) both.add(i); stats.same += pa.length; continue; }
+      // Gemini only LEFT OUT words here (a repeat, a stumble): the same rule as leaving out all of them
+      const pT = pKey ? pKey.split(' ') : [], gT = gKey ? gKey.split(' ') : [];
+      if (gb.length && pT.length > gT.length && subseq(gT, pT)) {
+        if (altKey === gKey && A.length && pa.length <= maxBlock) {
+          ops.push({ i0: pa[0], i1: pa[pa.length - 1], tokens: gb.map(display), start: t0, end: t1 }); stats.removed += pT.length - gT.length;
+        } else { for (const i of pa) keep.add(i); stats.kept += pa.length; }
+        continue;
+      }
+      if (!gb.length) {
+        // Gemini left them out: gone only if the second Whisper ear did not hear them either
+        if (!altKey && A.length && pa.length <= maxBlock) { ops.push({ i0: pa[0], i1: pa[pa.length - 1], tokens: [], start: t0, end: t1 }); stats.removed += pa.length; }
+        else { for (const i of pa) keep.add(i); stats.kept += pa.length; }
+        continue;
+      }
+      const twoOfThree = !!altKey && altKey === gKey;
+      if (!pa.length) {
+        // only Gemini heard these: where Whisper left room for them, or the second ear heard them too
+        if (!before || !after) continue;
+        const gap = room1 - room0;
+        if (!(twoOfThree || gap >= gb.length * 0.18) || gb.length > maxBlock * 2) continue;
+        // a dropped word under a stretched neighbour: borrow time from the word before
+        const need = gb.length * 0.18 - gap;
+        const trim = need > 0 ? Math.min(need, (+before.end - +before.start) * 0.5) : 0;
+        ops.push({ i0: idx[pi2], i1: idx[pi2] - 1, tokens: gb.map(display), start: room0 - trim, end: room1, trimBefore: trim > 0 ? idx[pi] : -1, trim });
+        stats.inserted += gb.length;
+        continue;
+      }
+      // a different word or phrase
+      const fits = gb.length * secPerWord <= (room1 - room0) + 0.05;
+      if ((!twoOfThree && (pa.length > maxBlock || gb.length > maxBlock)) || !fits) { for (const i of pa) keep.add(i); stats.kept += pa.length; continue; }
+      const overrule = !!altKey && altKey === pKey;          // both Whisper ears heard the caption's words
+      const long = overrule && (gb.length >= 4 || pa.length >= 4);
+      ops.push({ i0: pa[0], i1: pa[pa.length - 1], tokens: gb.map(display), start: t0, end: t1, long });
+      stats.replaced += gb.length;
+      if (overrule) stats.overruled++;
+      if (long) stats.long++;
+    }
+  }
+  // build: every word marked with where it came from
+  const out = W.map((w, i) => {
+    const o = Object.assign({}, w);
+    if (both.has(i)) { o.src = 'both'; if (retext.has(i)) o.text = retext.get(i); delete o.unsure; }
+    else if (keep.has(i)) o.src = 'whisper';
+    return o;
+  });
+  for (const op of ops.slice().sort((a, b) => b.i0 - a.i0)) {
+    if (op.trimBefore >= 0 && out[op.trimBefore]) out[op.trimBefore].end = +(+out[op.trimBefore].end - op.trim).toFixed(3);
     const n = op.tokens.length;
-    const lens = op.tokens.map((t) => Math.max(1, norm(t).length));
-    const total = lens.reduce((a, b) => a + b, 0);
+    const lens = op.tokens.map((t) => Math.max(1, norm(t).length) + 1);
+    const total = lens.reduce((a, b) => a + b, 0) || 1;
     const span = Math.max(0.05 * n, op.end - op.start);
     let t = op.start;
-    const last = op.i1 >= op.i0 ? out[op.i1] : null;
     const repl = op.tokens.map((tok, k) => {
       const d = span * (lens[k] / total);
-      const w = { text: tok, start: +t.toFixed(3), end: +(t + d).toFixed(3), third: op.how || how };
+      const w = { text: tok, start: +t.toFixed(3), end: +(t + d).toFixed(3), src: 'gemini' };
+      if (op.long) w.long = true;
       t += d;
       return w;
     });
-    // the sentence's own ending punctuation is kept when the replacement has none
-    if (last && repl.length && /[.?!,]$/.test(last.text) && !/[.?!,]$/.test(repl[repl.length - 1].text)) {
-      repl[repl.length - 1].text += last.text.slice(-1);
-    }
     const count = op.i1 >= op.i0 ? op.i1 - op.i0 + 1 : 0;
+    // a removed word that ended a sentence hands its full stop to the word before
+    if (!n && count) {
+      const last = out[op.i1], prev = out[op.i0 - 1];
+      const p = /[.?!]$/.exec(last.text || '');
+      if (p && prev && !/[.?!,;:]$/.test(prev.text)) prev.text += p[0];
+    }
     out.splice(op.i0, count, ...repl);
   }
-  return out;
+  // where a sentence ends, the next word starts with a capital (the two sources may disagree on where)
+  for (let i = 1; i < out.length; i++) {
+    const prev = out[i - 1].text;
+    if (/[.?!]$/.test(prev) && !ABBREV.test(prev) && /^[a-z]/.test(out[i].text)) out[i].text = out[i].text[0].toUpperCase() + out[i].text.slice(1);
+  }
+  return { words: out, stats };
 }
 
-/** The reader's question: which of two hearings was said. */
-function refereePrompt(items) {
-  const lines = items.map((it) => `${it.id}. …${it.before} [A: ${it.whisper || '(nothing)'} | B: ${it.gemini}] ${it.after}…`);
-  const system = 'You check automatic captions of Christian sermons. Two different speech recognisers heard the same moment differently. You decide which is more likely what the preacher actually said. You reply with JSON only.';
-  const prompt = `For each numbered moment, the words in brackets were heard two ways: A and B. The words around them are what was said before and after.
-
-${lines.join('\n')}
-
-Choose "A" or "B" — whichever is more likely what was actually said, given the sentence and that this is a sermon (scripture, prayer, church life). Speech recognisers mishear words that SOUND alike ("on the same" for "on the scene", "who at a never" for "who art in heaven", "salt hallelujah" for "shout hallelujah"). The preacher's own grammar can be imperfect — do not choose B just because it is more grammatical. If both are equally plausible, or you are not sure, answer "?".
-
-Reply with only: {"picks":[{"id":1,"pick":"A"}]}`;
-  return { system, prompt };
-}
-function parsePicks(text) {
-  const s = String(text || ''); const a = s.indexOf('{'), b = s.lastIndexOf('}');
-  if (a < 0 || b <= a) return null;
-  try {
-    const j = JSON.parse(s.slice(a, b + 1));
-    const m = new Map();
-    for (const p of (j && Array.isArray(j.picks) ? j.picks : [])) {
-      const id = Math.round(+p.id), pick = String(p.pick || '').trim().toUpperCase();
-      if (Number.isFinite(id) && (pick === 'A' || pick === 'B' || pick === '?')) m.set(id, pick);
-    }
-    return m;
-  } catch (e) { return null; }
-}
-
-module.exports = { plan, apply, align, tokensOf, sameWords, refereePrompt, parsePicks, norm };
+module.exports = { fuseGemini, align, tokensOf, sameWords, display, norm };

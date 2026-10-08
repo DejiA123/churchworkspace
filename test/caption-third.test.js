@@ -1,19 +1,21 @@
 'use strict';
 /*
- * A THIRD EAR THAT IS NOT WHISPER — so a mishearing both Whisper ears share
- * can still be caught (geminiear.js + captionfuse.js, wired in main.js).
+ * GEMINI'S WORDS, WHISPER'S TIMING (captionfuse.fuseGemini + geminiear.js,
+ * wired into the studio's own captions:transcribe in main.js).
  *
- * Measured on a real sermon: both Whisper ears wrote "attract God on the
- * same" where the preacher said "on the scene". Two ears that share a blind
- * spot cannot point at it; a third, different one can.
- *   [1] two of three: Gemini and the second ear agree against the first — theirs
- *   [2] both Whisper ears agree, Gemini differs — asked of a reader, not decided here
- *   [3] what Gemini left out, or only Gemini heard, never changes a caption
- *   [4] the same words written another way (gonna / going to, 3 / three, um) are not a mishearing
- *   [5] the new words keep the sentence's punctuation and sit inside the old ones' time
- *   [6] the reader's picks are read back safely
- *   [7] Gemini: the best free model is used; a model whose day is used up is set aside
- *   [8] end to end: the studio's own captions:transcribe, with fake Groq + Gemini
+ * Measured on a real 45-minute sermon: of 129 Whisper mistakes two reviewers
+ * found, Gemini had the right words in 71 and the same mistake in only 7 —
+ * most of them both Whisper ears made together. So the caption takes Gemini's
+ * words and Whisper's timing:
+ *   [1] a word both Whisper ears got wrong is Gemini's, in the old word's time
+ *   [2] the same word in both: Whisper's timing, Gemini's spelling; quotes and fillers never come in
+ *   [3] what Gemini left out stays — unless the second Whisper ear did not hear it either
+ *   [4] words only Gemini heard go in where there is room, or where the second ear heard them too
+ *   [5] the same words written another way change nothing
+ *   [6] where the two do not line up (a skipped or invented passage), Whisper stays
+ *   [7] overlapping stretches decide only their own part; the span's ends are decided too
+ *   [8] Gemini, free tier: best model, day limits, busy models, time limits, three at a time
+ *   [9] end to end through captions:transcribe, with fake Groq + Gemini
  *
  *   node test/caption-third.test.js
  */
@@ -23,99 +25,116 @@ const fuse = require(path.join(ROOT, 'src/main/captionfuse'));
 const gem = require(path.join(ROOT, 'src/main/geminiear'));
 let pass = 0, fail = 0;
 const ok = (c, m, d) => { if (c) pass++; else fail++; console.log(`  ${c ? 'PASS' : 'FAIL'} ${m}${d != null && !c ? '  -> ' + JSON.stringify(d) : ''}`); };
-/** words of `txt`, one every 0.4 s from t0 */
-const WS = (txt, t0 = 1.2) => txt.split(' ').map((x, i) => ({ text: x, start: +(t0 + i * 0.4).toFixed(2), end: +(t0 + i * 0.4 + 0.35).toFixed(2) }));
-const CH = (text) => [{ from: 0, to: 60, text }];
+/** words of `txt`, one every 0.4 s from t0 (each 0.35 s long) */
+const WS = (txt, t0 = 1.2, step = 0.4) => txt.split(' ').map((x, i) => ({ text: x, start: +(t0 + i * step).toFixed(2), end: +(t0 + i * step + 0.35).toFixed(2) }));
+const CH = (text, extra) => [Object.assign({ from: 0, to: 60, text }, extra || {})];
 const said = (ws) => ws.map((w) => w.text).join(' ');
+const F = (w, a, text, extra, opts) => fuse.fuseGemini(w, a, CH(text, extra), opts);
 
 (async () => {
-  console.log('\n[1] two of three');
+  console.log('\n[1] a mishearing both Whisper ears share');
   {
-    const w = WS('and then Jesus came on the scene and sad peace be still to the storm');
-    const a = WS('and then Jesus came on the scene and said peace be still to the storm');
-    const p = fuse.plan(w, a, CH('And then Jesus came on the scene and said, peace, be still to the storm.'));
-    ok(p.auto.length === 1 && p.auto[0].whisper === 'sad' && p.auto[0].tokens.join() === 'said', 'the word the other two agree on is taken (without Gemini\'s comma)', p);
-    ok(p.ask.length === 0, 'nothing else is asked');
-    const out = fuse.apply(w, p.auto);
-    ok(said(out) === 'and then Jesus came on the scene and said peace be still to the storm', 'the caption reads as two of three heard it', said(out));
-    const w2 = WS('and then Jesus came on the scene. And then he sad to them peace be still');
-    const a2 = WS('and then Jesus came on the scene. And then he said to them peace be still');
-    const p2 = fuse.plan(w2, a2, CH('And then Jesus came on the scene. And then he said. To them, peace, be still.'));
-    ok(p2.auto.length === 1 && p2.auto[0].tokens.join() === 'said', 'Gemini\'s own sentence breaks and capitals do not come in', p2.auto);
-    const p3 = fuse.plan(WS('so we pray that the Word may know that Jesus is Lord of all'), WS('so we pray that the Word may know that Jesus is Lord of all'),
-      CH('So we pray that the word may know that Jesus is lord of all.'));
-    ok(p3.auto.length === 0 && p3.ask.length === 0, 'a capital is not a different word', p3);
+    const w = WS('they were looking for how to attract God on the same to bring God into reality and answers');
+    const r = F(w, w, 'They were looking for how to attract God on the scene, to bring God into reality and answers.');
+    ok(/attract God on the scene, to bring God/.test(said(r.words)), 'Gemini\'s word goes in', said(r.words));
+    const nw = r.words.find((x) => x.text === 'scene,'), old = w.find((x) => x.text === 'same');
+    ok(nw && nw.start === old.start && nw.end === old.end && nw.src === 'gemini', '…in exactly the old word\'s time, marked as Gemini\'s', { nw, old });
+    ok(r.stats.overruled === 1 && !r.words.some((x) => x.long), 'one word overruling both Whisper ears is not a "long" overrule', r.stats);
+    const w2 = WS('so you have read daddies and when you have read that the first time you go to him');
+    const a2 = WS('so you have red daddies and when you have a little dad the first time you go to him');
+    const r2 = F(w2, a2, 'So you have real daddies, and when you have real dad, the first time you go to him.');
+    ok(said(r2.words) === 'So you have real daddies, and when you have real dad, the first time you go to him.', 'three different hearings: Gemini\'s', said(r2.words));
   }
 
-  console.log('\n[1b] the third ear settles a disagreement');
+  console.log('\n[2] the same words');
   {
-    const w = WS('we give God the glory for the grace He has given to us this day');
-    const a = WS('we give God the glory for the grays He has given to us this day');
-    const p = fuse.plan(w, a, CH('We give God the glory for the grace He has given to us this day.'));
-    ok(!p.auto.length && !p.ask.length && p.agreed.has(6), 'Gemini heard "grace" like the caption: two of three, nothing to look at', [...p.agreed]);
-    const p2 = fuse.plan(w, a, CH('We give God the glory for the great grace He has given to us this day.'));
-    ok(!p2.agreed.has(6), '…but not where Gemini heard something more beside it', [...p2.agreed]);
+    const w = WS('and he said go to your mom first and let me know what your mom said');
+    const r = F(w, w, '"And he said, “Go to your mom first, and let me know what your mom said.”" Um, uh.');
+    ok(said(r.words) === 'And he said, Go to your mom first, and let me know what your mom said.', 'Gemini\'s spelling and punctuation, without quotation marks or fillers', said(r.words));
+    ok(r.words.every((x, i) => x.start === w[i].start && x.end === w[i].end && x.src === 'both'), '…every word keeps Whisper\'s timing, marked as heard by both');
+    const w3 = WS('a passage the model was unsure of is heard the same by Gemini here');
+    w3.forEach((x) => { x.unsure = true; });
+    ok(F(w3, w3, 'A passage the model was unsure of is heard the same by Gemini here.').words.every((x) => !x.unsure), 'Whisper\'s own doubt is settled where Gemini heard the same');
   }
 
-  console.log('\n[2] both Whisper ears share the mishearing');
+  console.log('\n[3] what Gemini left out');
   {
-    const w = WS('attract God and the presence of God came on the same that day church');
-    const a = WS('attract God and the presence of God came on the same that day church');
-    const p = fuse.plan(w, a, CH('Attract God, and the presence of God came on the scene that day, church.'));
-    ok(p.auto.length === 0 && p.ask.length === 1, 'not decided on one ear\'s say-so: one question for the reader', p);
-    const q = p.ask[0] || {};
-    ok(q.whisper === 'same' && q.gemini === 'scene', '…the two hearings, side by side', q);
-    ok(/came on the$/.test(q.before) && /^that day/.test(q.after), '…with the sentence around them', q);
-    const { prompt } = fuse.refereePrompt([Object.assign({ id: 1 }, q)]);
-    ok(/\[A: same \| B: scene\]/.test(prompt) && /not sure, answer "\?"/.test(prompt), 'the reader sees A and B and may say it cannot tell', prompt.slice(0, 200));
+    const w = WS('so so we we are going to pray right now for the nation of Nigeria today amen');
+    const r = F(w, w, 'So we are going to pray right now for the nation of Nigeria today, amen.', { atStart: true });
+    ok(/^so so we we are/i.test(said(r.words)) && r.stats.kept >= 2, 'repeated words both Whisper ears heard stay', [said(r.words), r.stats]);
+    const a1 = w.filter((x, i) => i !== 1 && i !== 3);
+    ok(/^So we are going/.test(said(F(w, a1, 'So we are going to pray right now for the nation of Nigeria today, amen.', { atStart: true }).words)), '…repeats the second ear did not hear either are gone',
+      said(F(w, a1, 'So we are going to pray right now for the nation of Nigeria today, amen.', { atStart: true }).words));
+    const w2 = WS('and run after them ask them praying for forever say wow this is my child');
+    const a2 = w2.filter((x) => x.text !== 'praying' && x.text !== 'for');      // the second ear: the same moments, without them
+    const r2 = F(w2, a2, 'And run after them, ask them forever, say, wow, this is my child.');
+    ok(!/praying/.test(said(r2.words)) && r2.stats.removed === 2, 'words neither Gemini nor the second ear heard are gone', said(r2.words));
+    const w3 = WS('we serve a living God praying. and he hears us when we pray');
+    const a3 = w3.filter((x) => x.text !== 'praying.');
+    ok(said(F(w3, a3, 'We serve a living God and He hears us when we pray.').words).startsWith('We serve a living God. And'), '…a removed word that ended a sentence hands back its full stop',
+      said(F(w3, a3, 'We serve a living God and He hears us when we pray.').words));
   }
 
-  console.log('\n[3] Gemini\'s omissions and additions');
+  console.log('\n[4] words only Gemini heard');
   {
-    const w = WS('so so we we are going to pray right now for the nation of Nigeria today');
-    const a = WS('so so we we are going to pray right now for the nation of Nigeria today');
-    const p = fuse.plan(w, a, CH('So we are going to pray right now for the nation of Nigeria today.'));
-    ok(!p.auto.length && !p.ask.length, 'repeated words Gemini tidied away stay in the caption', p);
-    const w2 = WS('we are going to pray now for the nation of Nigeria today amen');
-    const p2 = fuse.plan(w2, w2, CH('We are going to pray right now for the great nation of Nigeria today, amen.'));
-    ok(!p2.auto.length && !p2.ask.length, 'words only Gemini heard are not added', p2);
+    const w = WS('you may have a you have to approach him as a father with joy');
+    // the second ear heard "problem" in the moment Whisper stretched "a" over
+    const a = w.slice(0, 3).concat([{ text: 'a', start: 2.4, end: 2.6 }, { text: 'problem', start: 2.6, end: 2.95 }], w.slice(4));
+    const r = F(w, a, 'You may have a problem. You have to approach him as a father with joy.');
+    const p = r.words.find((x) => x.text === 'problem.');
+    const before = r.words[r.words.indexOf(p) - 1], after = r.words[r.words.indexOf(p) + 1];
+    ok(p && p.start >= before.end - 1e-6 && p.end <= after.start + 1e-6 && p.end > p.start, 'a word Whisper dropped (the second ear heard it) goes in, between its neighbours', { before, p, after });
+    const w2 = WS('telling them as are making the ark the corner piece must be gold');
+    const r2 = F(w2, w2, 'Telling them, as you are making the ark, the corner piece must be gold.');
+    ok(!/as you are/.test(said(r2.words)), 'no room in Whisper\'s timing and no second ear: not added', said(r2.words));
+    const w3 = WS('the Lord is my shepherd').concat(WS('I shall not want for anything at all', 4.0));
+    const r3 = F(w3, w3, 'The Lord is my shepherd, the Lord God, I shall not want for anything at all.');
+    ok(/shepherd, the Lord God, I shall/.test(said(r3.words)), 'where Whisper left a gap, words only Gemini heard fill it', said(r3.words));
   }
 
-  console.log('\n[4] the same words, written another way');
+  console.log('\n[5] the same words, written another way');
   {
-    const w = WS('we are gonna read John 3 16 today and um it is every day that God loves');
-    const p = fuse.plan(w, w, CH('We are going to read John three sixteen today and it\'s everyday that God loves.'));
-    ok(!p.auto.length && !p.ask.length, 'gonna / going to, 3 16 / three sixteen, it is / it\'s, every day / everyday: nothing changes', p);
-    ok(fuse.tokensOf('Um, so uh the Lord').join(' ') === 'so the Lord', 'fillers are not words to line up');
+    const w = WS('we are gonna read it now and it is every day that God loves us all');
+    const r = F(w, w, "We are going to read it now and it's everyday that God loves us all.");
+    ok(/gonna read/.test(said(r.words)) && /it is every day/.test(said(r.words)), 'gonna / going to, it is / it\'s, every day / everyday: Whisper\'s stays', said(r.words));
   }
 
-  console.log('\n[5] timing and punctuation');
+  console.log('\n[6] where the two do not line up');
   {
-    const w = WS('he said that the Lord is my shepherd I shall not want.');
-    const a = WS('he said that the Lord is my shepherd I shall not won.');
-    const g = 'He said that the Lord is my shepherd, I shall not want.';
-    // the change at the very end of a stretch is left alone (two ears cut there differently)…
-    ok(!fuse.plan(w, a, CH(g)).auto.length, 'nothing at the edge of a stretch is touched');
-    const w2 = WS('my God is a shepherd who heard me in my time of need and He is good');
-    const a2 = WS('my God is a shepherd who hold me in my time of need and He is good');
-    const p = fuse.plan(w2, a2, CH('My God is a shepherd who hold me in my time of need, and He is good.'));
-    const out = fuse.apply(w2, p.auto);
-    const nw = out.find((x) => x.text === 'hold');
-    const old = w2.find((x) => x.text === 'heard');
-    ok(nw && nw.start === old.start && nw.end === old.end && nw.third === 'gemini', 'the new word sits exactly in the old one\'s time, marked', { nw, old });
-    const w3 = WS('and the Lord said go up to the mountain and pray, and he went');
-    const out3 = fuse.apply(w3, [{ i0: 10, i1: 10, tokens: ['play'], start: w3[10].start, end: w3[10].end }]);
-    ok(out3[10].text === 'play,', 'a replaced word keeps the comma that ended it', out3[10]);
+    const w = WS('and the Lord said to Moses go down to Egypt and tell Pharaoh let my people go');
+    const r = F(w, w, 'Thank you for watching. Please like and subscribe to our channel for more.');
+    ok(said(r.words) === said(w) && r.stats.skipped === 1, 'an answer that is not this stretch at all changes nothing', r.stats);
+    const w2 = WS('first we pray then we worship and the pastor reads the word for today and then we give');
+    const r2 = F(w2, w2, 'First we pray, then we worship, and the brothers and sisters of the choir come forward to sing three songs from the hymn book before the offering, and then we give.');
+    ok(/the pastor reads the word for today/.test(said(r2.words)), 'a long passage only Gemini wrote does not replace what Whisper heard', said(r2.words));
+    const w3 = WS('the grace of our Lord', 1.2, 0.4).concat(WS('be with you', 3.2, 0.3));
+    const r3 = F(w3, w3, 'The grace of our Lord Jesus Christ and the love of God and the fellowship be with you.');
+    ok(/Lord be with you/.test(said(r3.words)) || /Lord,? be with you/.test(said(r3.words)), 'more words than fit in the time Whisper heard: not squeezed in', said(r3.words));
   }
 
-  console.log('\n[6] the reader\'s answer');
+  console.log('\n[7] overlapping stretches');
   {
-    const m = fuse.parsePicks('thinking… {"picks":[{"id":1,"pick":"B"},{"id":"2","pick":"a"},{"id":3,"pick":"maybe"},{"id":4,"pick":"?"}]}');
-    ok(m && m.get(1) === 'B' && m.get(2) === 'A' && !m.has(3) && m.get(4) === '?', 'A, B and ? are read; anything else is ignored', m && [...m]);
-    ok(fuse.parsePicks('no json here') === null, 'no answer is no answer (nothing changes)');
+    const w = WS('one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen', 0.2, 0.5);
+    const words = w.map((x) => Object.assign({}, x, { text: x.text.replace('seven', 'heaven') }));
+    const chunks = [
+      { from: 0, to: 5.5, own0: 0, own1: 4, atStart: true, text: 'One two three four five six seven eight nine ten eleven' },
+      { from: 2.5, to: 8.3, own0: 4, own1: 8.3, atEnd: true, text: 'Six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen' },
+    ];
+    const r = fuse.fuseGemini(words, words, chunks);
+    ok(said(r.words).split(' ').filter((t) => /^seven/i.test(t)).length === 1 && !/heaven/.test(said(r.words)), 'a word in both stretches is decided once', said(r.words));
+    const w2 = WS('father who art in heaven hallowed be thy name thy kingdom come', 0.1);
+    const r2 = fuse.fuseGemini(WS('farther who art in heaven hallowed be thy name thy kingdom come', 0.1), w2, [{ from: 0, to: 30, atStart: true, atEnd: true, text: 'Father, who art in heaven, hallowed be thy name, thy kingdom come.' }]);
+    ok(said(r2.words).startsWith('Father, who art') && said(r2.words).endsWith('kingdom come.'), 'the first and last words of a span are decided too', said(r2.words));
   }
 
-  console.log('\n[7] Gemini, free tier');
+  console.log('\n[7b] a long overrule is listed');
+  {
+    const w = WS('he said to me go and sell all you have and give to the poor and follow');
+    const r = F(w, w, 'He said to me, go and tell all the people you see to give to the poor and follow.');
+    ok(r.words.some((x) => x.long) && r.stats.long === 1, 'Gemini overruling BOTH Whisper ears on a long phrase is marked for a look', r.stats);
+  }
+
+  console.log('\n[8] Gemini, free tier');
   {
     process.env.GEMINI_API_KEY = 'test-gemini';
     const order = ['gemini-2.0-flash', 'gemini-2.5-pro', 'gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-flash-preview-tts'];
@@ -137,7 +156,7 @@ const said = (ws) => ws.map((w) => w.text).join(' ');
     ok(r.text === 'Good morning church.', 'labels and [music] notes are not words', r.text);
     gem._reset(); asked.length = 0;
     const span = await gem.transcribeSpan({ input: 'x', from: 0, to: 900, chunkSec: 300, encode: async () => Buffer.from('fLaC'),
-      fetchImpl: fake(order), waits: [1] });
+      fetchImpl: fake(order), waits: [1], retryAfterMs: 1 });
     ok(span.chunks.length === 0 && span.failed === 3 && /used up/.test(span.why), 'every model used up: the rest of the span is not tried in vain', span);
     ok(['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'].every((m) => asked.filter((x) => x === m).length <= 3) && asked.length <= 9,
       '…each model asked at most once per stretch already under way, then it stops', asked);
@@ -179,13 +198,44 @@ const said = (ws) => ws.map((w) => w.text).join(' ');
       return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: 'part ' + me }] }, finishReason: 'STOP' }] }) };
     };
     const enc = async (input, a) => Buffer.from(String(a));
-    const sp = await gem.transcribeSpan({ input: 'x', from: 100, to: 1600, chunkSec: 300, encode: enc, fetchImpl: slow, waits: [1] });
+    const heardAt = [];
+    const enc2 = async (input, a, d) => { heardAt.push([a, +(a + d).toFixed(3)]); return Buffer.from(String(a)); };
+    const sp = await gem.transcribeSpan({ input: 'x', from: 100, to: 1600, chunkSec: 300, encode: enc2, fetchImpl: slow, waits: [1] });
     ok(most === 3 && sp.chunks.length === 5 && sp.failed === 0, 'a 25-minute span: five stretches, three at a time', { most, n: sp.chunks.length });
-    ok(sp.chunks.every((c, i) => c.from === i * 300 && c.to === Math.min(1500, (i + 1) * 300)), '…in order, on the span\'s clock', sp.chunks);
+    ok(sp.chunks.every((c, i) => c.own0 === i * 300 && c.own1 === Math.min(1500, (i + 1) * 300)), '…in order, each deciding its own five minutes on the span\'s clock', sp.chunks);
+    ok(sp.chunks.every((c, i) => c.from === Math.max(0, c.own0 - 6) && c.to === Math.min(1500, c.own1 + 6)) && sp.chunks[0].atStart && sp.chunks[4].atEnd && !sp.chunks[2].atStart,
+      '…heard 6 s past its edges (no word falls between two stretches)', sp.chunks.map((c) => [c.from, c.to, c.atStart, c.atEnd]));
+    ok(heardAt.some(([a, b]) => a === 394 && b === 706), '…the audio sent is that wider window', heardAt);
+    gem._reset();
+
+    // "high demand": one short wait, then another model hears that stretch
+    const seenBusy = [];
+    const busyFetch = async (url) => {
+      if (/\/models\?/.test(url)) return { ok: true, status: 200, json: async () => listing };
+      const model = decodeURIComponent((/models\/([^:]+):generateContent/.exec(url) || [])[1] || '');
+      seenBusy.push(model);
+      if (model === 'gemini-2.5-flash') return { ok: false, status: 503, json: async () => ({ error: { code: 503, message: 'This model is currently experiencing high demand.' } }) };
+      return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: 'heard by ' + model }] }, finishReason: 'STOP' }] }) };
+    };
+    const hb = await gem.hear(Buffer.from('x'), { fetchImpl: busyFetch, waits: [1] });
+    ok(hb.model !== 'gemini-2.5-flash' && seenBusy.filter((m) => m === 'gemini-2.5-flash').length === 2, 'a busy model: waited once, then the next model heard it', seenBusy);
+    gem._reset();
+
+    // a stretch that failed for a passing reason is asked once more at the end
+    let calls = 0;
+    const flaky = async (url) => {
+      if (/\/models\?/.test(url)) return { ok: true, status: 200, json: async () => ({ models: [{ name: 'models/gemini-2.5-flash', supportedGenerationMethods: ['generateContent'] }] }) };
+      calls++;
+      if (calls === 2 || calls === 3) return { ok: false, status: 500, json: async () => ({ error: { message: 'internal' } }) };
+      return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: 'ok ' + calls }] }, finishReason: 'STOP' }] }) };
+    };
+    const fl = await gem.transcribeSpan({ input: 'x', from: 0, to: 600, chunkSec: 300, encode: enc, fetchImpl: flaky, waits: [1], together: 1, retryAfterMs: 1 });
+    ok(fl.chunks.length === 2 && fl.failed === 0 && !fl.why, 'a stretch that failed is heard again at the end: nothing missing', fl);
     gem._reset();
   }
 
-  console.log('\n[8] end to end: captions:transcribe with three ears');
+
+  console.log('\n[9] end to end: captions:transcribe, Gemini\'s words with Whisper\'s timing');
   {
     const os = require('os'), fs = require('fs');
     const INPUT = path.join(__dirname, 'fixtures', 'sermon-dry.flac');
@@ -198,64 +248,54 @@ const said = (ws) => ws.map((w) => w.text).join(' ');
     require(path.join(ROOT, 'src/main/main.js'));
     await new Promise((r) => setTimeout(r, 600));
     const cs = require(path.join(ROOT, 'src/main/cloudspeech'));
-    const cw = require(path.join(ROOT, 'src/main/cloudwrite'));
-    const SAY = {
-      'whisper-large-v3': 'and the presence of God came on the same and sad peace be still',
-      'whisper-large-v3-turbo': 'and the presents of God came on the same and said peace be still',
+    let SAY = {
+      'whisper-large-v3': 'and the presence of God came on the same and sad peace be still today',
+      'whisper-large-v3-turbo': 'and the presents of God came on the same and said peace be still today',
     };
+    let GEM = 'And the presence of God came on the scene and said, peace, be still today.';
     const W = (txt) => ({
       words: txt.split(' ').map((x, i) => ({ word: x, start: 0.2 + i * 0.4, end: 0.55 + i * 0.4 })),
       segments: [{ start: 0.2, end: 0.2 + txt.split(' ').length * 0.4, text: txt, avg_logprob: -0.2, no_speech_prob: 0, compression_ratio: 1.2 }],
     });
-    const seen = { gemini: 0, reader: 0, prompt: '' };
+    const seen = { gemini: 0, reader: 0 };
     global.fetch = async (url, o) => {
       url = String(url);
       if (/generativelanguage/.test(url) && /\/models\?/.test(url)) return { ok: true, status: 200, json: async () => ({ models: [{ name: 'models/gemini-2.5-flash', supportedGenerationMethods: ['generateContent'] }] }) };
-      if (/generativelanguage/.test(url)) {
-        seen.gemini++;
-        return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: 'And the presence of God came on the scene, and said, peace, be still.' }] } }] }) };
-      }
-      if (/chat\/completions/.test(url)) {
-        seen.reader++; seen.prompt = JSON.parse(o.body).messages.map((m) => m.content).join('\n');
-        return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ choices: [{ message: { content: '{"picks":[{"id":1,"pick":"B"}]}' } }] }) };
-      }
-      if (/\/models$/.test(url)) return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ data: [{ id: 'openai/gpt-oss-120b' }] }) };
+      if (/generativelanguage/.test(url)) { seen.gemini++; return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: GEM }] }, finishReason: 'STOP' }] }) }; }
+      if (/chat\/completions/.test(url)) { seen.reader++; return { ok: false, status: 500, headers: { get: () => null }, json: async () => ({}) }; }
       const m = o.body.get('model');
       return { ok: true, status: 200, headers: { get: () => null }, json: async () => W(SAY[m]) };
     };
     process.env.GEMINI_API_KEY = 'test-gemini';
     gem._reset();
     cs.configure({ on: true, provider: 'groq', key: 'gsk_test' });
-    cw.configure({ on: true, provider: 'groq', key: 'gsk_test' });
-    const res = await rpc.invoke('captions:transcribe', { input: INPUT, startSec: 0, endSec: 6, model: 'cloud' });
-    const out = res && res.ok !== undefined ? res.data : res;
+    const run = async () => { const res = await rpc.invoke('captions:transcribe', { input: INPUT, startSec: 0, endSec: 6, model: 'cloud' }); return res && res.ok !== undefined ? res.data : res; };
+    const out = await run();
     const text = out && out.words.map((w) => w.text).join(' ');
-    ok(seen.gemini === 1, 'Gemini heard the clip once', seen);
-    ok(/came on the scene and said,? peace be still/.test(text), 'the caption: "came on the scene and said" — both mishearings put right', text);
-    ok(seen.reader === 1 && /\[A: same \| B: scene\]/.test(seen.prompt), 'the shared Whisper mishearing was put to the reader', seen.prompt.slice(0, 300));
+    ok(seen.gemini === 1 && seen.reader === 0, 'Gemini heard the clip once; no other AI was asked', seen);
+    ok(text === 'And the presence of God came on the scene and said, peace, be still today.', 'the caption is Gemini\'s: "on the scene", "said"', text);
+    const sc = out && out.words.find((w) => w.text === 'scene');
+    ok(sc && Math.abs(sc.start - (0.2 + 8 * 0.4)) < 0.01, '…with Whisper\'s timing', sc);
     const t = out && out.check && out.check.third;
-    ok(t && t.auto === 1 && t.asked === 1 && t.reader === 1 && t.model === 'gemini-2.5-flash', 'the answer says what the third ear did', t);
-    ok(out && !out.words.some((w) => w.doubt), 'what two ears (or an ear and the reader) settled is not left in doubt', out && out.words.filter((w) => w.doubt));
-    ok(t && t.settled === 1 && /presence/.test(text), '"presence" / "presents": Gemini heard the caption\'s word, so it is not listed for a look', t);
+    ok(t && t.model === 'gemini-2.5-flash' && t.heard === 1 && t.replaced === 3 && t.stretches === 1, 'the answer says what the third ear did', t);
+    ok(out && !out.words.some((w) => w.doubt) && t.settled >= 1, 'nothing Gemini settled is left listed for a look (presence/presents, sad/said)', out && out.words.filter((w) => w.doubt));
     ok(t && Array.isArray(t.texts) && /on the scene/.test(t.texts[0].text), 'what Gemini heard comes back with the answer', t && t.texts);
+    ok(out && / \+ Google Gemini 2\.5 Flash$/.test(out.engineName), 'and the answer names both ears', out && out.engineName);
 
-    // the reader cannot tell: the Whisper words stay, marked for a look, Gemini's hearing offered
-    global.fetch = ((real) => async (url, o) => {
-      if (/chat\/completions/.test(String(url))) return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ choices: [{ message: { content: '{"picks":[{"id":1,"pick":"?"}]}' } }] }) };
-      return real(url, o);
-    })(global.fetch);
-    const res2 = await rpc.invoke('captions:transcribe', { input: INPUT, startSec: 0, endSec: 6, model: 'cloud' });
-    const out2 = res2 && res2.ok !== undefined ? res2.data : res2;
+    // Gemini overrules BOTH Whisper ears on a long phrase: its words, listed for a look with Whisper's hearing offered
+    SAY = { 'whisper-large-v3': 'and he said go and sell all you have and give to the poor today', 'whisper-large-v3-turbo': 'and he said go and sell all you have and give to the poor today' };
+    GEM = 'And he said, go and tell all the people you see to give to the poor today.';
+    const out2 = await run();
     const d = out2 && out2.words.filter((w) => w.doubt).map((w) => w.text);
-    ok(out2 && /on the same/.test(out2.words.map((w) => w.text).join(' ')), 'unsure: the words both Whisper ears heard stay', out2 && out2.words.map((w) => w.text).join(' '));
-    ok(d && d.join() === 'same', '…marked as worth a look', d);
-    ok(out2 && out2.check.alt.some((w) => w.text === 'scene'), '…with Gemini\'s hearing as the one-tap alternative', out2 && out2.check.alt.map((w) => w.text).join(' '));
+    ok(out2 && /go and tell all the people you see to give/.test(out2.words.map((w) => w.text).join(' ')), 'a long overrule: Gemini\'s words', out2 && out2.words.map((w) => w.text).join(' '));
+    ok(d && d.length >= 4 && d.includes('tell'), '…listed for a look', d);
+    ok(out2 && out2.check.alt.some((w) => w.text === 'sell'), '…with what Whisper heard as the one-tap alternative', out2 && out2.check.alt.map((w) => w.text).join(' '));
 
     // no Gemini key: exactly the captions there were before
+    SAY = { 'whisper-large-v3': 'and the presence of God came on the same and sad peace be still today', 'whisper-large-v3-turbo': 'and the presents of God came on the same and said peace be still today' };
     delete process.env.GEMINI_API_KEY; seen.gemini = 0;
-    const res3 = await rpc.invoke('captions:transcribe', { input: INPUT, startSec: 0, endSec: 6, model: 'cloud' });
-    const out3 = res3 && res3.ok !== undefined ? res3.data : res3;
-    ok(seen.gemini === 0 && out3 && !out3.check.third && /on the same/.test(out3.words.map((w) => w.text).join(' ')), 'no key: no third ear, nothing else changes', out3 && out3.check);
+    const out3 = await run();
+    ok(seen.gemini === 0 && out3 && !out3.check.third && /on the same/.test(out3.words.map((w) => w.text).join(' ')) && !/Gemini/.test(out3.engineName), 'no key: no third ear, nothing else changes', out3 && out3.check);
     try { fs.rmSync(WORK, { recursive: true, force: true }); } catch (e) {}
   }
 

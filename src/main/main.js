@@ -903,7 +903,8 @@ ipcMain.handle('video:speechPauses', wrap(async (e, { input, startSec, endSec, m
     // …the same answer captions:transcribe would give for this clip.
     transcript: {
       words: book.entries, segments: book.entries, model: r.model, engine: 'cloud',
-      engineName: cloudspeech.state().providerName + ' — Whisper ' + (/turbo/.test(cloudspeech.captionModelId()) ? 'Large v3 Turbo' : 'Large v3'),
+      engineName: cloudspeech.state().providerName + ' — Whisper ' + (/turbo/.test(cloudspeech.captionModelId()) ? 'Large v3 Turbo' : 'Large v3')
+      + (check.third && check.third.heard ? ' + Google ' + prettyGemini(check.third.model) : ''),
       fixed: book.count, fixedWords: book.count ? wordbook.summarise(book.changes, 4) : '', cloudMs: Date.now() - t0,
     },
   });
@@ -1461,27 +1462,24 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
       }
     }
   }
-  // ►► THE THIRD EAR (geminiear.js + captionfuse.js): two of three decide; where
-  // both Whisper ears share a mishearing, a reader picks between the hearings.
-  let unsure = [], agreed = null;
+  // ►► THE THIRD EAR (geminiear.js + captionfuse.js): Gemini's words, Whisper's timing.
   if (third) {
-    const t3 = await thirdEar(book.entries, alt, third).catch((e) => { asCancel(e); return { why: (e && e.message) || 'the third ear failed' }; });
+    const t3 = thirdEar(book.entries, alt, third);
     if (t3.words) { book.entries.length = 0; book.entries.push(...t3.words); }
-    if (t3.altFix && alt) alt = t3.altFix(alt);
-    unsure = t3.unsure || []; agreed = t3.agreed || null;
-    check.third = t3.report || { why: t3.why };
+    check.third = t3.report;
   }
   if (alt) {
     check.doubts = cloudspeech.markDisagreements(book.entries, alt);
-    // what two of three ears heard, or the reader chose, is settled; what the reader could not decide is listed
-    for (const w of book.entries) if (w.third === 'reader' && w.doubt) { delete w.doubt; check.doubts--; }
-    // the second ear disagreed, but Gemini heard the caption's word: two of three
-    if (agreed) {
+    if (check.third && check.third.heard) {
+      // what Gemini heard (with the caption's Whisper, or instead of it) is not listed for a look —
+      // except a long phrase where it overruled BOTH Whisper ears: listed, with Whisper's hearing offered
       let settled = 0;
-      for (const w of book.entries) if (w.doubt && agreed.has(w)) { delete w.doubt; check.doubts--; settled++; }
+      for (const w of book.entries) {
+        if (w.long) { if (!w.doubt) { w.doubt = true; check.doubts++; } }
+        else if (w.doubt && (w.src === 'both' || w.src === 'gemini')) { delete w.doubt; check.doubts--; settled++; }
+      }
       check.third.settled = settled;
     }
-    for (const w of unsure) if (!w.doubt && book.entries.includes(w)) { w.doubt = true; check.doubts++; }
     check.alt = alt.map((w) => ({ text: w.text, start: w.start, end: w.end }));
   }
   if (prog) prog(100);
@@ -1491,7 +1489,8 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
     durationSec: info.durationSec, model: r.model || 'whisper-large-v3-turbo',
     fixed: book.count, fixedWords: book.count ? wordbook.summarise(book.changes, 4) : '',
     engine: pcSec > 0 ? 'mixed' : 'cloud',
-    engineName: cloudspeech.state().providerName + ' — Whisper ' + (/turbo/.test(cloudspeech.captionModelId()) ? 'Large v3 Turbo' : 'Large v3'),
+    engineName: cloudspeech.state().providerName + ' — Whisper ' + (/turbo/.test(cloudspeech.captionModelId()) ? 'Large v3 Turbo' : 'Large v3')
+      + (check.third && check.third.heard ? ' + Google ' + prettyGemini(check.third.model) : ''),
     cloudMs: Date.now() - t0,
     cloudSec: Math.round(span - pcSec), pcSec: Math.round(pcSec),
     cloudWhy: pcSec > 0 ? r.why : '',
@@ -1623,64 +1622,27 @@ ipcMain.handle('captions:grammar', wrap(async (e, { lines, before, after, passag
 }));
 
 /*
- * ►► THE THIRD EAR, DECIDED. ◄◄ Gemini's hearing (through the Word Book like
- * the others) lined up against the caption words and the second ear's:
- *   • Gemini and the second ear agree against the first: theirs, automatically.
- *   • Both Whisper ears agree, Gemini heard something else: a reader (free
- *     Groq) sees the sentence both ways and picks; when it cannot tell, the
- *     Whisper words stay, marked as worth a look, with Gemini's hearing offered
- *     as the one-tap alternative.
+ * ►► THE THIRD EAR (captionfuse.fuseGemini). ◄◄ Gemini's hearing, through the
+ * Word Book like the others, becomes the caption's words; Whisper keeps the
+ * timing of every word, and its words stay wherever Gemini was silent or the
+ * two could not be lined up. Measured on a real sermon: of 129 Whisper
+ * mistakes two reviewers found, Gemini had the right words in 71 and the same
+ * mistake in only 7.
  */
-async function thirdEar(words, alt, heard) {
+function thirdEar(words, alt, heard) {
   const chunks = (heard && heard.chunks) || [];
-  const report = { model: (heard && heard.model) || '', heard: chunks.length, failed: (heard && heard.failed) || 0, why: (heard && heard.why) || '', auto: 0, asked: 0, reader: 0, unsure: 0 };
+  const report = { model: (heard && heard.model) || '', heard: chunks.length, failed: (heard && heard.failed) || 0, why: (heard && heard.why) || '' };
   if (!chunks.length) return { report };
   const m = wordbook.matcher();
   const booked = m.empty ? chunks : chunks.map((c) => Object.assign({}, c, { text: wordbook.engine.applyToText(c.text, m).text }));
-  const pl = captionfuse.plan(words, alt, booked);
-  report.auto = pl.auto.length; report.asked = pl.ask.length;
-  const picks = await refereeHearings(pl.ask.slice(0, 120));
-  const take = pl.ask.filter((op, k) => picks.get(k) === 'B');
-  const doubt = pl.ask.filter((op, k) => picks.get(k) !== 'B' && picks.get(k) !== 'A');
-  report.reader = take.length; report.unsure = doubt.length;
-  if (picks.why) report.readerWhy = picks.why;
-  for (const op of pl.auto) op.how = 'two';
-  for (const op of take) op.how = 'reader';
-  const unsure = [];
-  for (const op of doubt) for (let i = op.i0; i <= op.i1; i++) if (words[i]) unsure.push(words[i]);
-  // the alternative offered on an unsure line is Gemini's hearing, not the Whisper one it agreed with
-  const altFix = doubt.length ? (a) => {
-    const ops = [];
-    for (const op of doubt) {
-      const ix = []; a.forEach((w, i) => { const mm = (w.start + w.end) / 2; if (mm >= op.start - 0.05 && mm <= op.end + 0.05) ix.push(i); });
-      if (ix.length && ix[ix.length - 1] - ix[0] + 1 === ix.length) ops.push({ i0: ix[0], i1: ix[ix.length - 1], tokens: op.tokens, start: op.start, end: op.end });
-    }
-    return captionfuse.apply(a, ops, 'alt');
-  } : null;
-  // the words Gemini confirmed (the objects themselves: they survive the replacements below)
-  const agreed = new Set([...pl.agreed].map((i) => words[i]).filter(Boolean));
-  report.texts = chunks.map((c) => ({ from: c.from, to: c.to, text: c.text }));
-  return { words: captionfuse.apply(words, pl.auto.concat(take)), unsure, agreed, altFix, report };
+  const f = captionfuse.fuseGemini(words, alt, booked);
+  Object.assign(report, f.stats);
+  report.texts = chunks.map((c) => ({ from: c.own0 != null ? c.own0 : c.from, to: c.own1 != null ? c.own1 : c.to, text: c.text }));
+  return { words: f.words, report };
 }
-/** The reader's picks, by position in `items`: 'A' (the Whisper words), 'B' (Gemini's) or '?'. */
-async function refereeHearings(items) {
-  const picks = new Map();
-  if (!items.length) return picks;
-  for (let b = 0; b < items.length; b += 30) {
-    const batch = items.slice(b, b + 30).map((it, k) => Object.assign({}, it, { id: k + 1 }));
-    const { system, prompt } = captionfuse.refereePrompt(batch);
-    let got = null;
-    for (let attempt = 0; attempt < 2 && !got; attempt++) {
-      if (attempt) await new Promise((r) => setTimeout(r, 20000));
-      const text = await cloudwrite.chat({ system, prompt, json: true, temperature: 0, maxTokens: 3000, timeoutMs: 90000,
-        evenIfOff: true, prefer: ['openai/gpt-oss-120b'] }).catch(() => '');
-      got = captionfuse.parsePicks(text);
-      if (got && !got.size && batch.length) got = null;
-    }
-    if (!got) { picks.why = 'the reader did not answer'; continue; }
-    for (const [id, pick] of got) if (id >= 1 && id <= batch.length) picks.set(b + id - 1, pick);
-  }
-  return picks;
+/** "gemini-3.8-flash" → "Gemini 3.8 Flash" */
+function prettyGemini(id) {
+  return String(id || 'Gemini').replace(/^gemini-/i, 'Gemini ').replace(/-/g, ' ').replace(/\b([a-z])/g, (c) => c.toUpperCase());
 }
 
 /** The fixes a second, different free model agrees are what was said (a Set of the fix objects). */

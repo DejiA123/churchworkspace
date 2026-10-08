@@ -133,9 +133,12 @@ function thinkingFor(model) {
 async function hear(flac, { terms = [], fetchImpl = fetch, waits = [15000, 30000, 45000], timeoutMs = 240000 } = {}) {
   const data = Buffer.from(flac).toString('base64');
   let lastWhy = '';
+  const busy = new Set();          // models too busy for THIS stretch ("high demand"): the next one hears it
   for (;;) {
-    const model = await pickModel(fetchImpl);
-    if (!model) throw Object.assign(new Error('the free Gemini allowance is used up for today' + (lastWhy ? ' (' + lastWhy + ')' : '')), { exhausted: true });
+    const open = await models(fetchImpl);
+    const model = open.find((m) => !busy.has(m));
+    if (!open.length) throw Object.assign(new Error('the free Gemini allowance is used up for today' + (lastWhy ? ' (' + lastWhy + ')' : '')), { exhausted: true });
+    if (!model) throw new Error('Gemini is busy right now (' + lastWhy + ')');
     const body = {
       contents: [{ role: 'user', parts: [
         { inline_data: { mime_type: 'audio/flac', data } },
@@ -184,11 +187,16 @@ async function hear(flac, { terms = [], fetchImpl = fetch, waits = [15000, 30000
       // not open to this key, gone, or the day's allowance used up: the next model
       const daily = /per ?day|PerDay|limit: ?0\b/i.test(said);
       if (res.status === 404 || res.status === 403 || (res.status === 429 && daily)) { spent.add(model); next = true; continue; }
-      if ((res.status === 429 || res.status >= 500) && attempt < waits.length) {
+      if (res.status === 429 && attempt < waits.length) {
         const hint = +((/"retryDelay":"(\d+)/.exec(said) || [])[1] || 0) * 1000;
         await sleep(hint > 0 ? Math.min(60000, hint + 1000) : waits[attempt]); continue;
       }
       if (res.status === 429) { spent.add(model); next = true; continue; }
+      // overloaded ("high demand") or failing: one short wait, then another model hears this stretch
+      if (res.status >= 500) {
+        if (attempt < 1 && waits.length) { await sleep(waits[0]); continue; }
+        busy.add(model); next = true; continue;
+      }
       throw new Error('Gemini answered ' + lastWhy);
     }
   }
@@ -199,26 +207,35 @@ async function hear(flac, { terms = [], fetchImpl = fetch, waits = [15000, 30000
  * the Whisper ears: [{ from, to, text }] on the span's own clock. A stretch
  * Gemini could not hear is left out (and counted), never guessed.
  */
-async function transcribeSpan({ input, from = 0, to, terms = [], chunkSec = 300, onProgress = null, fetchImpl = fetch, waits, encode = encodeFlac, together = 3 } = {}) {
+async function transcribeSpan({ input, from = 0, to, terms = [], chunkSec = 300, pad = 6, onProgress = null, fetchImpl = fetch, waits, encode = encodeFlac, together = 3, retryAfterMs = 20000 } = {}) {
   if (!ready() || !input || !(to > from)) return null;
   const n = Math.max(1, Math.ceil((to - from) / chunkSec - 1e-6));
   const got = new Array(n).fill(null);
-  let failed = 0, why = '', model = '', done = 0, nextI = 0, stop = false, cancel = null;
+  const failedAt = [];
+  let why = '', model = '', done = 0, nextI = 0, stop = false, cancel = null;
+  /*
+   * Each stretch is heard a few seconds past its own edges (`pad`) and decides
+   * only its own part [own0, own1): Gemini and Whisper cut a word at an edge
+   * differently, so without the overlap the words at every edge would never
+   * be checked.
+   */
+  const hearOne = async (i) => {
+    const a = from + i * chunkSec, b = Math.min(to, a + chunkSec);
+    const ha = Math.max(from, a - pad), hb = Math.min(to, b + pad);
+    const flac = await encode(input, ha, hb - ha);
+    const r = await hear(flac, Object.assign({ terms, fetchImpl }, waits ? { waits } : {}));
+    model = r.model;
+    got[i] = { from: ha - from, to: hb - from, own0: a - from, own1: b - from, atStart: ha <= from, atEnd: hb >= to, text: r.text };
+  };
   // a few stretches at once (well inside the free tier's per-minute limit), so
   // the third ear takes about as long as the second
   const worker = async () => {
     while (!stop && !cancel && nextI < n) {
       const i = nextI++;
-      const a = from + i * chunkSec, b = Math.min(to, a + chunkSec);
-      try {
-        const flac = await encode(input, a, b - a);
-        const r = await hear(flac, Object.assign({ terms, fetchImpl }, waits ? { waits } : {}));
-        model = r.model;
-        got[i] = { from: a - from, to: b - from, text: r.text };
-      } catch (e) {
+      try { await hearOne(i); } catch (e) {
         if (e && e.cancelled) { cancel = e; break; }
         why = (e && e.message) || 'no answer';
-        failed++;
+        failedAt.push(i);
         if (e && e.exhausted) stop = true;
       }
       done++;
@@ -227,8 +244,19 @@ async function transcribeSpan({ input, from = 0, to, terms = [], chunkSec = 300,
   };
   await Promise.all(Array.from({ length: Math.max(1, Math.min(together, n)) }, worker));
   if (cancel) throw cancel;
-  failed += n - nextI;          // never asked: the day's allowance ran out first
-  return { chunks: got.filter(Boolean), failed, why, model };
+  // a stretch that failed for a passing reason (busy, no answer) is asked once more
+  if (!stop && failedAt.length) {
+    await sleep(retryAfterMs);
+    for (const i of failedAt.splice(0)) {
+      try { await hearOne(i); } catch (e) {
+        if (e && e.cancelled) throw e;
+        why = (e && e.message) || 'no answer'; failedAt.push(i);
+        if (e && e.exhausted) break;
+      }
+    }
+  }
+  const failed = got.filter((c) => !c).length;
+  return { chunks: got.filter(Boolean), failed, why: failed ? why : '', model };
 }
 
 module.exports = { ready, transcribeSpan, hear, pickModel, rankModel, promptFor, clean, setFfmpeg, _reset: () => { ranked = null; spent.clear(); } };
