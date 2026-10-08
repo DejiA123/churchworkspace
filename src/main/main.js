@@ -1476,8 +1476,8 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
     if (!plain) {
       const fz = cloudspeech.fuseWithPlain(book.entries, alt);
       const sq = cloudspeech.dropSqueezed(fz.words, alt);
-      if (fz.replaced || sq.dropped) {
-        book.entries.length = 0; book.entries.push(...sq.words);
+      if ((fz.replaced || sq.dropped) && sq.words !== book.entries) {
+        const kept = sq.words.slice(); book.entries.length = 0; book.entries.push(...kept);
         check.squeezed = sq.dropped; check.fromPlain = fz.replaced;
       }
     }
@@ -1487,7 +1487,9 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
   let relistenUnsure = [];
   if (third) {
     const gp = await geminiPass({ words: book.entries, alt, heard: third, input, from, prog });
-    book.entries.length = 0; book.entries.push(...gp.words);
+    // (when Gemini heard nothing, gp.words IS book.entries: emptying one emptied both — measured on
+    // the live server with Gemini's day used up, every caption came back with no words at all)
+    if (gp.words !== book.entries) { const kept = gp.words.slice(); book.entries.length = 0; book.entries.push(...kept); }
     check.third = gp.third;
     if (gp.relisten) check.relisten = gp.relisten;
     relistenUnsure = gp.unsure;

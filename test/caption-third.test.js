@@ -342,6 +342,24 @@ const F = (w, a, text, extra, opts) => fuse.fuseGemini(w, a, CH(text, extra), op
       ok(out4 && / \+ Google Gemini 2\.5 Flash$/.test(out4.engineName || '') && out4.check && out4.check.third.heard === 1, '…and the answer names both', out4 && out4.engineName);
     }
 
+    // a Gemini key, but Gemini's day is used up: Whisper's words, every one of them (measured live:
+    // a bug here once handed back NO words at all whenever Gemini could not be heard)
+    {
+      const before = global.fetch;
+      global.fetch = async (url, o) => {
+        if (/generativelanguage/.test(String(url)) && !/\/models\?/.test(String(url))) {
+          return { ok: false, status: 429, json: async () => ({ error: { message: 'Quota exceeded, quotaId: GenerateRequestsPerDayPerProjectPerModel-FreeTier' } }) };
+        }
+        return before(url, o);
+      };
+      gem._reset();
+      const out5 = await run();
+      global.fetch = before; gem._reset();
+      const t5 = out5 && out5.words.map((w) => w.text).join(' ');
+      ok(out5 && out5.words.length === 15 && /he said go and sell all you have and give to the poor today/.test(t5), 'Gemini used up: the captions are Whisper\'s — all 15 words, none lost', t5);
+      ok(out5 && out5.check.third && out5.check.third.heard === 0 && /used up/.test(out5.check.third.why) && !/Gemini/.test(out5.engineName), '…and the answer says Gemini could not be heard, and why', out5 && out5.check.third);
+    }
+
     // no Gemini key: exactly the captions there were before
     SAY = { 'whisper-large-v3': 'and the presence of God came on the same and sad peace be still today', 'whisper-large-v3-turbo': 'and the presents of God came on the same and said peace be still today' };
     delete process.env.GEMINI_API_KEY; seen.gemini = 0;
