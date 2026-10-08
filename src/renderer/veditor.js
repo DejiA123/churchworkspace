@@ -15559,14 +15559,15 @@
     // away during playback turns it off again (see the scroll listener).
     // (p._nudging: the phone drawing the first frame of a paused preview — cloud-boot.js installFirstFrame)
     p.addEventListener('play', () => { if (p._nudging) return; if (centred()) { overruleCoast(); updatePlayhead(); } ve.refs.play.textContent = '⏸'; setFollow(true, true); updateClipPlayButtons(); syncMusicPreview(true); startCapTick(); syncFsControls(); });
-    p.addEventListener('pause', () => { if (p._nudging) return; if (ve._tailPausing || ve.tailRun) { ve._tailPausing = false; return; } ve.refs.play.textContent = '▶'; updateClipPlayButtons(); syncMusicPreview(); syncSoundPreview(); stopCapTick(); syncFsControls(); });
+    // (a nudge's pause still silences the song: the music must never be left playing on its own)
+    p.addEventListener('pause', () => { if (p._nudging) { syncMusicPreview(); syncSoundPreview(); return; } if (ve._tailPausing || ve.tailRun) { ve._tailPausing = false; return; } ve.refs.play.textContent = '▶'; updateClipPlayButtons(); syncMusicPreview(); syncSoundPreview(); stopCapTick(); syncFsControls(); });
     p.addEventListener('ended', () => { stopCapTick(); if (ve.tailT == null && hasTail()) enterTail(dur(), true); });
     // anything else moving the main video's playhead (a clip's ▶, a jump) ends the tail
     p.addEventListener('seeking', () => { if (ve.tailT != null) leaveTail(); });
-    p.addEventListener('seeked', () => { scrubNext(); if (isPlaying()) syncMusicPreview(true); });
+    p.addEventListener('seeked', () => { scrubNext(); if (isPlaying() && !p._nudging) syncMusicPreview(true); });
     // the picture stalled to buffer: the song waits with it — and picks up exactly there
     p.addEventListener('waiting', () => { syncMusicPreview(); syncSoundPreview(); });
-    p.addEventListener('playing', () => { syncMusicPreview(true); syncSoundPreview(); });
+    p.addEventListener('playing', () => { if (p._nudging) return; syncMusicPreview(true); syncSoundPreview(); });
     p.addEventListener('error', () => {
       // Some other unplayable codec — fall back to building a proxy.
       if (ve.video && ve.video.path && !ve.video.proxy && !ve.video.proxying) { showPreparing($('#veNoVid'), p, ve.video.info.vcodec); makeProxyBg(ve.video.path); }

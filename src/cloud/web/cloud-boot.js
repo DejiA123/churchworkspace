@@ -3410,7 +3410,9 @@ let _hideTimer = null;
       const done = () => {
         try { v.pause(); if (Math.abs(v.currentTime - at) > 0.05) v.currentTime = at; } catch (e) {}
         v.muted = wasMuted; busy = false;
-        setTimeout(() => { v._nudging = false; }, 0);   // after the pause event has been seen
+        setTimeout(() => { v._nudging = false; }, 400);   // after the pause/playing events have been seen
+        // and the song is never left playing by itself
+        try { const m = document.getElementById('veMusicAudio'); if (m && !m.paused) m.pause(); } catch (e) {}
       };
       if (p && p.then) p.then(() => requestAnimationFrame(done), done); else done();
     };
