@@ -1562,8 +1562,12 @@ let _hideTimer = null;
       const del = canDelete && (g.key === 'output' || g.key === 'uploads');
       if (del) anyDel = true;
       const total = files.reduce((n, f) => n + (Number(f.size) || 0), 0);
+      // finished exports: every video to Photos in one go (the same Save all as an Export all ends on)
+      const vids = !picking && g.key === 'output' ? files.filter((f) => /\.(mp4|mov|m4v)$/i.test(f.name)) : [];
+      const saveAllBtn = vids.length > 1
+        ? `<button type="button" class="cv-act cv-save sa-all cf-saveall" data-saveall="output">${mi('download')}<span>Save all ${vids.length} to Photos</span></button>` : '';
       html += `<section class="cloud-files-group"><h4 class="cloud-files-head"><span>${escHtml(g.label)}</span><small>${files.length} · ${fmtSize(total)}</small></h4>`
-        + files.map((f) => fileRow(f, del, picking)).join('') + '</section>';
+        + saveAllBtn + files.map((f) => fileRow(f, del, picking)).join('') + '</section>';
     }
     if (!any) {
       html = `<div class="cloud-files-empty"><div class="cf-empty-art">${mi('folder')}</div><b>Nothing here yet</b>`
@@ -1627,6 +1631,15 @@ let _hideTimer = null;
     if (tx) tx.textContent = filesUi.sure && n ? `Delete ${n === 1 ? 'it' : 'all ' + n} for good?` : n > 1 ? `Delete ${n}` : 'Delete';
   }
   function onFilesClick(e) {
+    const sa = e.target.closest('[data-saveall]');
+    if (sa && !filesUi.selecting) {
+      const g = ((filesCache && filesCache.groups) || []).find((x) => x.key === sa.dataset.saveall);
+      const paths = ((g && g.files) || []).filter((f) => /\.(mp4|mov|m4v)$/i.test(f.name)).map((f) => f.path);
+      if (!paths.length) return;
+      closeFilesModal();
+      saveAll(paths, { tapped: true });
+      return;
+    }
     const b = e.target.closest('[data-act]');
     const row = b && b.closest('.cf-row');
     if (!row) return;

@@ -2595,3 +2595,6 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .cloud-pickr-row.on { background: #2e3240; }
 .cloud-pickr-row.on::after { content: '✓'; margin-left: 12px; color: #a78bfa; font-family: system-ui, -apple-system, sans-serif; font-weight: 700; }
 .cloud-pickr-row:disabled { opacity: .45; }
+
+/* Your files: Save all the finished exports to Photos (renderFiles) */
+.cloud-files-group .cf-saveall { display: flex; align-items: center; justify-content: center; gap: 8px; width: calc(100% - 8px); margin: 4px 4px 10px; min-height: 48px; }
