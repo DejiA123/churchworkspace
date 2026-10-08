@@ -118,7 +118,19 @@ function clean(text) {
  * up is set aside and the next one asked, and when none is left the error
  * says so (`exhausted`), so the rest of the span is not tried in vain.
  */
-async function hear(flac, { terms = [], fetchImpl = fetch, waits = [15000, 30000, 45000] } = {}) {
+// Scripture read aloud is not a hazard: the free tier's default filters must
+// never blank out a stretch of a sermon.
+const SAFETY = ['HARM_CATEGORY_HARASSMENT', 'HARM_CATEGORY_HATE_SPEECH', 'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'HARM_CATEGORY_DANGEROUS_CONTENT']
+  .map((category) => ({ category, threshold: 'BLOCK_NONE' }));
+// A transcription is not a puzzle: as little "thinking" as each model allows
+// (it costs time, and counts against the answer's length). Tried in order; a
+// setting a model refuses is dropped for the next, and at worst left out.
+function thinkingFor(model) {
+  if (/2\.5-flash/.test(model)) return [{ thinkingBudget: 0 }];
+  if (/gemini-([3-9]|\d\d)/.test(model)) return [{ thinkingLevel: 'minimal' }, { thinkingLevel: 'low' }];
+  return [];
+}
+async function hear(flac, { terms = [], fetchImpl = fetch, waits = [15000, 30000, 45000], timeoutMs = 240000 } = {}) {
   const data = Buffer.from(flac).toString('base64');
   let lastWhy = '';
   for (;;) {
@@ -129,32 +141,44 @@ async function hear(flac, { terms = [], fetchImpl = fetch, waits = [15000, 30000
         { inline_data: { mime_type: 'audio/flac', data } },
         { text: promptFor(terms) },
       ] }],
-      generationConfig: { temperature: 0, maxOutputTokens: 8192 },
+      generationConfig: { temperature: 0, maxOutputTokens: 16384 },
+      safetySettings: SAFETY,
     };
-    // a transcription is not a puzzle: no thinking budget where the model takes one
-    if (/2\.5-flash/.test(model)) body.generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    const thinking = thinkingFor(model);
+    if (thinking.length) body.generationConfig.thinkingConfig = thinking.shift();
     let next = false;
     for (let attempt = 0; !next; attempt++) {
       if (cancelled()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
-      let res;
+      let res, j = null;
+      // never waits for ever: a request that hangs is given up and tried again
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), timeoutMs);
       try {
         res = await fetchImpl(`${API}/models/${encodeURIComponent(model)}:generateContent`, {
-          method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key() }, body: JSON.stringify(body),
+          method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key() }, body: JSON.stringify(body), signal: ac.signal,
         });
+        if (res.ok) j = await res.json();
       } catch (e) {
-        if (attempt >= waits.length) throw new Error('could not reach Gemini');
+        res = null;
+      } finally { clearTimeout(timer); }
+      if (!res || (res.ok && !j)) {
+        if (attempt >= waits.length) throw new Error('could not reach Gemini (no answer in time)');
         await sleep(waits[attempt]); continue;
       }
       if (res.ok) {
-        const j = await res.json();
         const c = j && j.candidates && j.candidates[0];
-        const text = c && c.content && Array.isArray(c.content.parts) ? c.content.parts.map((p) => p.text || '').join('') : '';
-        return { text: clean(text), model };
+        const text = c && c.content && Array.isArray(c.content.parts) ? c.content.parts.filter((p) => !p.thought).map((p) => p.text || '').join('') : '';
+        const why = String((c && c.finishReason) || (j && j.promptFeedback && j.promptFeedback.blockReason) || '');
+        if (!clean(text) && why && why !== 'STOP') throw new Error('Gemini held this stretch back (' + why.toLowerCase() + ')');
+        return { text: clean(text), model, finish: why };
       }
       let said = '';
-      try { const j = await res.json(); said = JSON.stringify((j && j.error) || j || '').slice(0, 600); } catch (e) {}
-      // a thinking setting this model does not take: once without it
-      if (res.status === 400 && body.generationConfig.thinkingConfig) { delete body.generationConfig.thinkingConfig; continue; }
+      try { const e = await res.json(); said = JSON.stringify((e && e.error) || e || '').slice(0, 600); } catch (e) {}
+      // a thinking setting this model does not take: the next one, or none
+      if (res.status === 400 && body.generationConfig.thinkingConfig) {
+        if (thinking.length) body.generationConfig.thinkingConfig = thinking.shift(); else delete body.generationConfig.thinkingConfig;
+        continue;
+      }
       const msg = (/"message":"([^"]*)/.exec(said) || [])[1] || '';
       lastWhy = res.status + (msg ? ' ' + msg.slice(0, 120) : '');
       // not open to this key, gone, or the day's allowance used up: the next model
@@ -175,27 +199,36 @@ async function hear(flac, { terms = [], fetchImpl = fetch, waits = [15000, 30000
  * the Whisper ears: [{ from, to, text }] on the span's own clock. A stretch
  * Gemini could not hear is left out (and counted), never guessed.
  */
-async function transcribeSpan({ input, from = 0, to, terms = [], chunkSec = 300, onProgress = null, fetchImpl = fetch, waits, encode = encodeFlac } = {}) {
+async function transcribeSpan({ input, from = 0, to, terms = [], chunkSec = 300, onProgress = null, fetchImpl = fetch, waits, encode = encodeFlac, together = 3 } = {}) {
   if (!ready() || !input || !(to > from)) return null;
-  const out = [];
-  let failed = 0, why = '', model = '';
   const n = Math.max(1, Math.ceil((to - from) / chunkSec - 1e-6));
-  for (let i = 0; i < n; i++) {
-    const a = from + i * chunkSec, b = Math.min(to, a + chunkSec);
-    try {
-      const flac = await encode(input, a, b - a);
-      const r = await hear(flac, Object.assign({ terms, fetchImpl }, waits ? { waits } : {}));
-      model = r.model;
-      out.push({ from: a - from, to: b - from, text: r.text });
-    } catch (e) {
-      if (e && e.cancelled) throw e;
-      why = (e && e.message) || 'no answer';
-      if (e && e.exhausted) { failed += n - i; break; }
-      failed++;
+  const got = new Array(n).fill(null);
+  let failed = 0, why = '', model = '', done = 0, nextI = 0, stop = false, cancel = null;
+  // a few stretches at once (well inside the free tier's per-minute limit), so
+  // the third ear takes about as long as the second
+  const worker = async () => {
+    while (!stop && !cancel && nextI < n) {
+      const i = nextI++;
+      const a = from + i * chunkSec, b = Math.min(to, a + chunkSec);
+      try {
+        const flac = await encode(input, a, b - a);
+        const r = await hear(flac, Object.assign({ terms, fetchImpl }, waits ? { waits } : {}));
+        model = r.model;
+        got[i] = { from: a - from, to: b - from, text: r.text };
+      } catch (e) {
+        if (e && e.cancelled) { cancel = e; break; }
+        why = (e && e.message) || 'no answer';
+        failed++;
+        if (e && e.exhausted) stop = true;
+      }
+      done++;
+      if (onProgress) { try { onProgress(done / n); } catch (e) {} }
     }
-    if (onProgress) { try { onProgress((i + 1) / n); } catch (e) {} }
-  }
-  return { chunks: out, failed, why, model };
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(together, n)) }, worker));
+  if (cancel) throw cancel;
+  failed += n - nextI;          // never asked: the day's allowance ran out first
+  return { chunks: got.filter(Boolean), failed, why, model };
 }
 
 module.exports = { ready, transcribeSpan, hear, pickModel, rankModel, promptFor, clean, setFfmpeg, _reset: () => { ranked = null; spent.clear(); } };

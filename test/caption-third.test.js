@@ -139,7 +139,49 @@ const said = (ws) => ws.map((w) => w.text).join(' ');
     const span = await gem.transcribeSpan({ input: 'x', from: 0, to: 900, chunkSec: 300, encode: async () => Buffer.from('fLaC'),
       fetchImpl: fake(order), waits: [1] });
     ok(span.chunks.length === 0 && span.failed === 3 && /used up/.test(span.why), 'every model used up: the rest of the span is not tried in vain', span);
-    ok(asked.length <= 4, '…one ask per model, then it stops', asked);
+    ok(['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'].every((m) => asked.filter((x) => x === m).length <= 3) && asked.length <= 9,
+      '…each model asked at most once per stretch already under way, then it stops', asked);
+    gem._reset();
+
+    // a request that hangs is given up (and the stretch counted), never waited on for ever
+    const hang = async (url, o) => {
+      if (/\/models\?/.test(url)) return { ok: true, status: 200, json: async () => listing };
+      return new Promise((resolve, reject) => o.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))));
+    };
+    const t0 = process.hrtime.bigint();
+    const hung = await gem.hear(Buffer.from('x'), { fetchImpl: hang, waits: [1], timeoutMs: 200 }).catch((e) => e);
+    ok(hung instanceof Error && /no answer in time/.test(hung.message) && Number(process.hrtime.bigint() - t0) / 1e6 < 2000, 'a hung request gives up after its time limit', hung && hung.message);
+    gem._reset();
+
+    // newer models: as little thinking as they allow; a setting refused is stepped down, then left out
+    process.env.MW_GEMINI_MODEL = 'gemini-3-flash';
+    const configs = [];
+    const think = async (url, o) => {
+      const b = JSON.parse(o.body); configs.push(JSON.stringify(b.generationConfig.thinkingConfig || null));
+      ok(b.safetySettings && b.safetySettings.every((x) => x.threshold === 'BLOCK_NONE'), 'scripture is never filtered out (safety: BLOCK_NONE)');
+      if (configs.length < 3) return { ok: false, status: 400, json: async () => ({ error: { message: 'bad thinking' } }) };
+      return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ thought: true, text: 'Let me think' }, { text: 'Amen.' }] }, finishReason: 'STOP' }] }) };
+    };
+    const th = await gem.hear(Buffer.from('x'), { fetchImpl: think, waits: [1] });
+    ok(configs.join('|') === '{"thinkingLevel":"minimal"}|{"thinkingLevel":"low"}|null' && th.text === 'Amen.', 'minimal → low → none; its thoughts are not the transcript', { configs, th });
+    // a stretch held back (recitation/safety) with nothing written is a failed stretch, not an empty one
+    const held = await gem.hear(Buffer.from('x'), { fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ candidates: [{ finishReason: 'RECITATION' }] }) }), waits: [1] }).catch((e) => e);
+    ok(held instanceof Error && /recitation/.test(held.message), 'a stretch Gemini held back is said, not taken as silence', held && held.message);
+    delete process.env.MW_GEMINI_MODEL; gem._reset();
+
+    // three stretches at once, and back in order whatever order they finish in
+    let live = 0, most = 0, k = 0;
+    const slow = async (url, o) => {
+      if (/\/models\?/.test(url)) return { ok: true, status: 200, json: async () => listing };
+      const me = ++k; live++; most = Math.max(most, live);
+      await new Promise((r) => setTimeout(r, me % 2 ? 120 : 20));
+      live--;
+      return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: 'part ' + me }] }, finishReason: 'STOP' }] }) };
+    };
+    const enc = async (input, a) => Buffer.from(String(a));
+    const sp = await gem.transcribeSpan({ input: 'x', from: 100, to: 1600, chunkSec: 300, encode: enc, fetchImpl: slow, waits: [1] });
+    ok(most === 3 && sp.chunks.length === 5 && sp.failed === 0, 'a 25-minute span: five stretches, three at a time', { most, n: sp.chunks.length });
+    ok(sp.chunks.every((c, i) => c.from === i * 300 && c.to === Math.min(1500, (i + 1) * 300)), '…in order, on the span\'s clock', sp.chunks);
     gem._reset();
   }
 
