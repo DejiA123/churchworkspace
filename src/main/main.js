@@ -1159,6 +1159,53 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
     ear.pc++;
     return localRange(s, en);
   });
+  /*
+   * ►► ASSEMBLYAI READS THE SERMON, when the church has its key. ◄◄ The same
+   * ear the captions use (it heard the audited sermon with 12 of 129 known
+   * mistakes left, against ~110 for Whisper alone), so the clips are chosen
+   * from the right words. The WHOLE recording is heard once — under two
+   * minutes for 45 — and each piece the scan asks about is cut from that;
+   * Groq or this PC hear it only if AssemblyAI cannot.
+   */
+  let scanRange = transcribeRange;
+  try {
+    const aai = require('./assemblyear');
+    if (contentAware && aai.ready()) {
+      let all = null;
+      const heardAll = () => all || (all = (async () => {
+        const dur = await video.getInfo(getCtx(), input).then((i) => i.durationSec || 0).catch(() => 0);
+        const audio = await geminiear.encodeFlac(input, 0, dur);
+        return aai.transcribe(audio, { cancelled: () => jobs.isCancelled() });
+      })());
+      const toSegs = (ws, s) => {
+        const segs = [];
+        let cur = null;
+        for (const w of ws) {
+          if (cur && (w.start - cur.end > 1.0)) { segs.push(cur); cur = null; }
+          if (!cur) cur = { start: w.start - s, end: w.end - s, text: w.text };
+          else { cur.end = w.end - s; cur.text += ' ' + w.text; }
+          if (/[.?!]$/.test(w.text)) { segs.push(cur); cur = null; }
+        }
+        if (cur) segs.push(cur);
+        return segs;
+      };
+      let aaiDown = false;
+      scanRange = async (s, en) => {
+        if (!aaiDown) {
+          try {
+            const ws = (await heardAll()).filter((w) => w.start >= s - 0.05 && w.end <= en + 0.05);
+            ear.cloud++; ear.model = 'assemblyai';
+            if (wordCache && ws.length) wordCache.add(s, en, ws.map((w) => ({ start: w.start, end: w.end, text: w.text })));
+            return { segs: toSegs(ws, s) };
+          } catch (err) {
+            if (err && err.cancelled) throw new jobs.CancelledError();
+            aaiDown = true; ear.why = 'AssemblyAI: ' + ((err && err.message) || 'could not hear it');
+          }
+        }
+        return transcribeRange(s, en);
+      };
+    }
+  } catch (e) { /* the ears above, as before */ }
   // THE READING MODEL. ☁️ Cloud AI = the large hosted model (llmjudge.makeCloudJudge),
   // otherwise the PC's own small one if the operator downloaded it, otherwise the
   // rules alone. Each returns null when it cannot run, and analyzeSermon simply
@@ -1166,7 +1213,7 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
   const judge = !(ai && contentAware) ? null
     : aiModel === 'cloud' ? llmjudge.makeCloudJudge() : llmjudge.makeJudge({ model: aiModel });
   const res = await highlights.analyzeSermon(ctx, {
-    input, minLen, maxLen, idealLen, maxClips, autoLen, contentAware, transcribeRange,
+    input, minLen, maxLen, idealLen, maxClips, autoLen, contentAware, transcribeRange: scanRange,
     // the sound is decoded in pieces at once (highlights.extractPcm): 66 min 55 s -> 24 s
     totalSec: await video.getInfo(getCtx(), input).then((i) => i.durationSec || 0).catch(() => 0),
     decodeParallel: Math.max(1, Math.min(4, Math.floor(cpus / 2) || 1)),
