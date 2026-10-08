@@ -1607,9 +1607,11 @@
     });
   }
 
-  async function detectSignals(frames, det, onProg) {
+  async function detectSignals(frames, det, onProg, stopped) {
     const raw = [];
     for (let i = 0; i < frames.length; i++) {
+      // ✕ Cancel: stop between pictures, not after the whole short
+      if (stopped && stopped()) { const e = new Error('Cancelled'); e.cancelled = true; throw e; }
       const f = frames[i];
       const img = await loadImage(f.url);
       const ok = !!img;
@@ -1684,7 +1686,7 @@
     // and how much their mouth is moving (see detectSignals: this is the
     // expensive, reusable half of tracking).
     const raw = opts.signals && opts.signals.length === frames.length
-      ? opts.signals : await detectSignals(frames, det, onProg);
+      ? opts.signals : await detectSignals(frames, det, onProg, opts.stopped);
     // A reused signal set still carries last run's verdicts — clear them, or a
     // second pick would be judged against the first one's answers.
     for (const f of raw) {

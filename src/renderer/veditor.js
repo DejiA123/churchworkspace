@@ -8959,7 +8959,8 @@
     // …and when nobody has, the AI is shown a few of these frames and says who
     // is preaching (🧠 in the Reframe tab). The PC still decides WHERE they are.
     const referee = lock ? null : reframeReferee();
-    try { dets = await window.FaceTrack.detectFrames(frames, { cuts, lock, referee }); } catch (e) { dets = []; }
+    try { dets = await window.FaceTrack.detectFrames(frames, { cuts, lock, referee, stopped: giveUp }); } catch (e) { dets = []; }
+    if (giveUp && giveUp()) { if (res.dir) window.api.sermon.rmdir(res.dir).catch(() => {}); return []; }
     if (referee && dets && dets.referee) noteReframeAi(dets.referee);   // null = nobody in shot to ask about
     if (res.dir) window.api.sermon.rmdir(res.dir).catch(() => {});
     if (!dets.length) return [];
@@ -10041,8 +10042,19 @@
           if (window.__chainBegin) {
             window.__chainBegin(task, exportPlan(s, { track: waitingOnTracking, captions: caps }));
           }
+          // ✕ Cancel answers at once: tracking runs on this page, where the
+          // server's cancel cannot reach — so the wait is let go of here, and the
+          // tracker itself stops at its next picture (ahead.stop -> giveUp).
+          const trackJob = window.__newJobId();
           const got = await ahead.take(s, (p) => window.__runJob(
-            `🎯 Tracking the speaker in "${s.label}"…`, window.__newJobId(), () => p, J(s, 'track')));
+            `🎯 Tracking the speaker in "${s.label}"…`, trackJob, () => new Promise((resolve, reject) => {
+              const tick = setInterval(() => {
+                if (!(window.__jobWasCancelled && window.__jobWasCancelled(trackJob))) return;
+                clearInterval(tick); ahead.stop();
+                const e = new Error('Cancelled'); e.cancelled = true; reject(e);
+              }, 200);
+              p.then((v) => { clearInterval(tick); resolve(v); }, (e) => { clearInterval(tick); reject(e); });
+            }), J(s, 'track')));
           // Start the NEXT one's tracking now, so it runs under this encode.
           // Not when the server makes them: there is no encode here to hide it
           // under, and tracking the next short WHILE this one's captions are
