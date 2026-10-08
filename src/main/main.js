@@ -1467,6 +1467,13 @@ function wantsCloudCaptions(model, fast) {
   return cloudspeech.fileReady();
 }
 /** The church's own names and spellings (the Word Book), for the speech model to expect. */
+/** "universal-3-5-pro" → "Universal-3.5 Pro" */
+function prettyAssembly(m) {
+  const s = String(m || '');
+  const k = /^universal-(\d+)(?:-(\d+))?(-pro)?$/i.exec(s);
+  if (k) return 'Universal-' + k[1] + (k[2] ? '.' + k[2] : '') + (k[3] ? ' Pro' : '');
+  return s === 'assemblyai' || !s ? '' : s.charAt(0).toUpperCase() + s.slice(1);
+}
 function captionTerms(max = 40) {
   try { return (wordbook.view().terms || []).map((t) => t && (t.text || t.term)).filter(Boolean).slice(0, max); }
   catch (e) { return []; }
@@ -1505,7 +1512,7 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
         const audio = await geminiear.encodeFlac(input, from, span);
         if (prog) prog(8);
         const aw = await aai.transcribe(audio, { terms: captionTerms(1000), cancelled: () => jobs.isCancelled() });
-        if (aw.length) { r = { words: aw, doneSec: span, why: '' }; aaiFirst = true; if (prog) prog(60); }
+        if (aw.length) { r = { words: aw, doneSec: span, why: '', model: aw.model }; aaiFirst = true; if (prog) prog(60); }
       }
     } catch (e) {
       if (e && e.cancelled) throw new jobs.CancelledError();
@@ -1539,7 +1546,7 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
         const restW = await aai.transcribe(audio, { terms: captionTerms(1000), cancelled: () => jobs.isCancelled() });
         if (restW.length) {
           words = words.concat(restW.map((w) => Object.assign({}, w, { start: w.start + r.doneSec, end: w.end + r.doneSec })));
-          r = Object.assign({}, r, { doneSec: span, why: '' });
+          r = Object.assign({}, r, { doneSec: span, why: '', alsoModel: restW.model });
           aaiFirst = true;
         }
       }
@@ -1662,11 +1669,14 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
   return {
     check,
     words: book.entries, segments: book.entries,
-    durationSec: info.durationSec, model: r.model || 'whisper-large-v3-turbo',
+    durationSec: info.durationSec, model: r.alsoModel || r.model || 'whisper-large-v3-turbo',
     fixed: book.count, fixedWords: book.count ? wordbook.summarise(book.changes, 4) : '',
     engine: pcSec > 0 ? 'mixed' : 'cloud',
-    engineName: cloudspeech.state().providerName + ' — Whisper ' + (/turbo/.test(cloudspeech.captionModelId()) ? 'Large v3 Turbo' : 'Large v3')
-      + (check.third && check.third.heard ? ' + Google ' + prettyGemini(check.third.model) : ''),
+    // the ear that actually heard it (it said "Groq — Whisper" even when AssemblyAI had)
+    engineName: aaiFirst
+      ? (r.alsoModel ? cloudspeech.state().providerName + ' — Whisper, then ' : '') + ('AssemblyAI ' + prettyAssembly(r.alsoModel || r.model)).trim()
+      : cloudspeech.state().providerName + ' — Whisper ' + (/turbo/.test(cloudspeech.captionModelId()) ? 'Large v3 Turbo' : 'Large v3')
+        + (check.third && check.third.heard ? ' + Google ' + prettyGemini(check.third.model) : ''),
     cloudMs: Date.now() - t0,
     cloudSec: Math.round(span - pcSec), pcSec: Math.round(pcSec),
     cloudWhy: pcSec > 0 ? r.why : '',

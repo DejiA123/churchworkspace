@@ -45,9 +45,9 @@ async function transcribe(audio, { terms = [], cancelled = () => false, fetchImp
     Object.assign({ speech_model: 'universal' }, hints.length ? { word_boost: hints.slice(0, 100) } : {}),
     {},
   ];
-  let job = null, lastErr = null;
+  let job = null, lastErr = null, asked = null;
   for (const t of tries) {
-    try { job = await call('/transcript', { method: 'POST', body: JSON.stringify(Object.assign({}, base, t)), headers: { 'content-type': 'application/json' }, fetchImpl }); break; }
+    try { job = await call('/transcript', { method: 'POST', body: JSON.stringify(Object.assign({}, base, t)), headers: { 'content-type': 'application/json' }, fetchImpl }); asked = t; break; }
     catch (e) { lastErr = e; if (!/ 400/.test(e.message)) throw e; }
   }
   if (!job || !job.id) throw lastErr || new Error('AssemblyAI would not start');
@@ -59,8 +59,12 @@ async function transcribe(audio, { terms = [], cancelled = () => false, fetchImp
     const r = await call('/transcript/' + job.id, { fetchImpl });
     if (r.status === 'completed') {
       // (how sure it was of each word comes too: the studio can point at the doubtful ones)
-      return (r.words || []).filter((w) => w && w.text).map((w) => Object.assign({ text: String(w.text), start: (+w.start || 0) / 1000, end: (+w.end || 0) / 1000 },
+      const words = (r.words || []).filter((w) => w && w.text).map((w) => Object.assign({ text: String(w.text), start: (+w.start || 0) / 1000, end: (+w.end || 0) / 1000 },
         typeof w.confidence === 'number' ? { confidence: Math.round(w.confidence * 1000) / 1000 } : {}));
+      // which model heard it: the one AssemblyAI says it used, else the one asked for
+      const used = r.speech_model_used || r.speech_model || (asked && (asked.speech_models ? asked.speech_models[0] : asked.speech_model)) || '';
+      Object.defineProperty(words, 'model', { value: String(used || 'assemblyai'), enumerable: false });
+      return words;
     }
     if (r.status === 'error') throw new Error('AssemblyAI: ' + String(r.error || 'failed').slice(0, 160));
   }

@@ -46,6 +46,7 @@ function fake({ refuse = () => false } = {}) {
     const w = await aai.transcribe(Buffer.from('x'), { terms: ['Olayinka'], fetchImpl: f.fetchImpl });
     ok(f.asked.length === 2 && f.asked[1].speech_models[0] === 'universal-3-pro' && f.asked[1].keyterms_prompt[0] === 'Olayinka', 'Universal-3 Pro, with the terms', f.asked);
     ok(w.length === 2, 'and the words come back');
+    ok(w.model === 'universal-3-pro', 'and say which model heard them', w.model);
     const g = fake({ refuse: (b) => !!b.speech_models });
     await aai.transcribe(Buffer.from('x'), { terms: Array.from({ length: 300 }, (_, i) => 'Term ' + i), fetchImpl: g.fetchImpl });
     const last = g.asked[g.asked.length - 1];
