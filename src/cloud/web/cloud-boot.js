@@ -3381,6 +3381,41 @@ let _hideTimer = null;
   }
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && capSheet) { e.stopPropagation(); closeCapSheet(); } }, true);
 
+  /*
+   * ►► THE PICTURE IS THERE WHEN A PROJECT REOPENS. ◄◄ An iPhone does not draw
+   * a paused video's frame until it has fetched picture data for it — and it
+   * fetches nothing until asked to play. So a project reopened at 0:34 showed
+   * a black preview until ▶ was pressed. Now, whenever the preview gets a new
+   * video or is moved while paused without a frame to show, it is asked for
+   * the data (preload, load) and, if that is still not enough, played silently
+   * for an instant and paused again at the same spot — the frame appears; no
+   * sound plays and the position does not change.
+   */
+  function installFirstFrame() {
+    const v = document.getElementById('vePlayer');
+    if (!v || v._firstFrame) return;
+    v._firstFrame = true;
+    v.preload = 'auto';
+    let busy = false;
+    const nudge = () => {
+      if (busy || !v.paused || !v.currentSrc || v.readyState >= 2) return;
+      busy = true;
+      const at = v.currentTime, wasMuted = v.muted;
+      v.muted = true; v._nudging = true;   // the editor ignores this play/pause (veditor.js)
+      let p = null;
+      try { p = v.play(); } catch (e) { p = null; }
+      const done = () => {
+        try { v.pause(); if (Math.abs(v.currentTime - at) > 0.05) v.currentTime = at; } catch (e) {}
+        v.muted = wasMuted; busy = false;
+        setTimeout(() => { v._nudging = false; }, 0);   // after the pause event has been seen
+      };
+      if (p && p.then) p.then(() => requestAnimationFrame(done), done); else done();
+    };
+    v.addEventListener('loadedmetadata', () => setTimeout(nudge, 150));
+    v.addEventListener('seeked', () => setTimeout(nudge, 150));
+    v.addEventListener('emptied', () => { busy = false; });
+  }
+
   function installTapNow() {
     let down = null;
     document.addEventListener('touchstart', (e) => {
@@ -5104,6 +5139,7 @@ let _hideTimer = null;
     installTapNow();
     installCapChips();
     installCapSheets();
+    installFirstFrame();
     installCapTidy();
     installDropBridge();
 

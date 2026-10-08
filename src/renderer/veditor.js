@@ -2615,7 +2615,7 @@
     wireTools();
     const p = ve.refs.player;
     if (p) {
-      p.addEventListener('play', startSourceLoop);
+      p.addEventListener('play', () => { if (!p._nudging) startSourceLoop(); });
       p.addEventListener('seeked', () => { drawSource(); startSourceLoop(); });
       // a paused seek may present no new frame for the loop to hear about
       p.addEventListener('timeupdate', () => { if (p.paused) drawSource(); });
@@ -12641,7 +12641,7 @@
     // (the timeline, the studio's ▶, a clip card) shows up here too.
     const p = ve.refs.player;
     if (p) {
-      p.addEventListener('play', () => { if (capModalOpen()) capPlayerLoop(); });
+      p.addEventListener('play', () => { if (!p._nudging && capModalOpen()) capPlayerLoop(); });
       ['pause', 'seeked', 'ended'].forEach((ev) => p.addEventListener(ev, () => { if (capModalOpen()) capPlayerPaint(true); }));
     }
     const capModalEl = document.getElementById('capModal');
@@ -15498,8 +15498,9 @@
     });
     // Pressing play is you asking to watch, so following comes back on; scrolling
     // away during playback turns it off again (see the scroll listener).
-    p.addEventListener('play', () => { if (centred()) { overruleCoast(); updatePlayhead(); } ve.refs.play.textContent = '⏸'; setFollow(true, true); updateClipPlayButtons(); syncMusicPreview(true); startCapTick(); syncFsControls(); });
-    p.addEventListener('pause', () => { if (ve._tailPausing || ve.tailRun) { ve._tailPausing = false; return; } ve.refs.play.textContent = '▶'; updateClipPlayButtons(); syncMusicPreview(); syncSoundPreview(); stopCapTick(); syncFsControls(); });
+    // (p._nudging: the phone drawing the first frame of a paused preview — cloud-boot.js installFirstFrame)
+    p.addEventListener('play', () => { if (p._nudging) return; if (centred()) { overruleCoast(); updatePlayhead(); } ve.refs.play.textContent = '⏸'; setFollow(true, true); updateClipPlayButtons(); syncMusicPreview(true); startCapTick(); syncFsControls(); });
+    p.addEventListener('pause', () => { if (p._nudging) return; if (ve._tailPausing || ve.tailRun) { ve._tailPausing = false; return; } ve.refs.play.textContent = '▶'; updateClipPlayButtons(); syncMusicPreview(); syncSoundPreview(); stopCapTick(); syncFsControls(); });
     p.addEventListener('ended', () => { stopCapTick(); if (ve.tailT == null && hasTail()) enterTail(dur(), true); });
     // anything else moving the main video's playhead (a clip's ▶, a jump) ends the tail
     p.addEventListener('seeking', () => { if (ve.tailT != null) leaveTail(); });
