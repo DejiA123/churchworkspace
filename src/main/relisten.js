@@ -46,6 +46,42 @@ function linesOf(words, alt) {
   return lines;
 }
 
+/*
+ * WHERE THE TWO WHISPER EARS DISAGREE. The places in a line where the other
+ * recogniser heard different words — each a short run of words on both
+ * sides (a missing or extra word alone is not one: that is mostly where the
+ * two cut a line differently). Indices are into the caption's own words.
+ */
+function disagreements(W, line, alt) {
+  const idx = [], cur = [];
+  for (let i = line.i0; i <= line.i1; i++) { const t = norm(W[i].text); if (t) { idx.push(i); cur.push(t); } }
+  const altW = String(line.alt || '').split(/\s+/).filter((t) => norm(t));
+  const at = altW.map(norm);
+  const n = cur.length, m = at.length;
+  if (!n || !m) return [];
+  const L = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = cur[i] === at[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const out = [];
+  let i = 0, j = 0, hi = -1, hj = -1;
+  const close = (ei, ej) => {
+    if (hi < 0) return;
+    const ci = [hi, ei - 1], aj = [hj, ej - 1];
+    const nc = ci[1] - ci[0] + 1, na = aj[1] - aj[0] + 1;
+    // both sides heard something, short, and not at the line's very edge (where the two only cut differently)
+    if (nc >= 1 && na >= 1 && nc <= 5 && na <= 5 && ci[0] > 0 && ci[1] < n - 1) {
+      out.push({ a: idx[ci[0]], b: idx[ci[1]], words: altW.slice(aj[0], aj[1] + 1), h: cur.slice(ci[0], ci[1] + 1), l: at.slice(aj[0], aj[1] + 1) });
+    }
+    hi = -1; hj = -1;
+  };
+  while (i < n || j < m) {
+    if (i < n && j < m && cur[i] === at[j]) { close(i, j); i++; j++; continue; }
+    if (hi < 0) { hi = i; hj = j; }
+    if (j >= m || (i < n && L[i + 1][j] >= L[i][j + 1])) i++; else j++;
+  }
+  close(i, j);
+  return out;
+}
+
 function proofreadPrompt(lines) {
   const body = lines.map((l) => `#${l.n} [${fmt(l.start)}] ${l.text}` + (l.alt ? `\n      (another recogniser heard: ${l.alt})` : '')).join('\n');
   return 'You are proofreading the automatic captions of a Christian sermon (a live church service; the preacher may speak Nigerian, '
@@ -205,6 +241,33 @@ async function proofread({ words, alt, input, from = 0, windowSec = 600, batch =
     items.push({ a: at.a, b: at.b, heard, likely, t0, t1,
       current: [ctxB, heard, ctxA].filter(Boolean).join(' '), proposed: [ctxB, likely, ctxA].filter(Boolean).join(' '), flip: items.length % 2 === 1 });
   }
+  /*
+   * ONE MORE VOTE: every place the two Whisper ears heard differently that
+   * the reader did not already raise is listened to as well — the caption's
+   * words against the other ear's, in no telling order. The audio decides,
+   * as for the reader's guesses; a grammar-only difference is never asked.
+   */
+  report.voted = 0;
+  for (const l of lines) {
+    if (!l.alt || report.voted >= 64) continue;
+    for (const d of disagreements(W, l, alt)) {
+      if (report.voted >= 64) break;
+      if (grammarOnly(d.h, d.l)) continue;
+      let clash = false;
+      for (let i = d.a; i <= d.b; i++) if (taken.has(i)) clash = true;
+      if (clash) continue;
+      for (let i = d.a; i <= d.b; i++) taken.add(i);
+      const ctxB = W.slice(Math.max(0, d.a - 2), d.a).map((w) => w.text).join(' ');
+      const ctxA = W.slice(d.b + 1, d.b + 3).map((w) => w.text).join(' ');
+      const heard = W.slice(d.a, d.b + 1).map((w) => w.text).join(' ');
+      const likely = d.words.map(display).filter((t) => norm(t)).join(' ');
+      if (!likely) continue;
+      const t0 = Math.max(0, +W[Math.max(0, d.a - 2)].start - 0.4), t1 = +W[Math.min(W.length - 1, d.b + 2)].end + 0.4;
+      items.push({ a: d.a, b: d.b, heard, likely, t0, t1, vote: true,
+        current: [ctxB, heard, ctxA].filter(Boolean).join(' '), proposed: [ctxB, likely, ctxA].filter(Boolean).join(' '), flip: items.length % 2 === 1 });
+      report.voted++;
+    }
+  }
   report.located = items.length;
   // 2. listen again: a few clips per question
   const batches = [];
@@ -271,4 +334,4 @@ async function proofread({ words, alt, input, from = 0, windowSec = 600, batch =
   return { words: out, unsure, report };
 }
 
-module.exports = { proofread, linesOf, locate, grammarOnly, proofreadPrompt, relistenPrompt, parseJson };
+module.exports = { disagreements, proofread, linesOf, locate, grammarOnly, proofreadPrompt, relistenPrompt, parseJson };
