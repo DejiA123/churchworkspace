@@ -3256,6 +3256,131 @@ let _hideTimer = null;
       .observe(modal, { attributes: true, attributeFilter: ['class'] });
   }
 
+  /*
+   * ►► NO SYSTEM PICKER AT ALL. ◄◄ The same pause, on the choices that were
+   * still dropdowns: "Font takes too long to open the first time", then "ALL
+   * CAPS too". An iPhone opens a dropdown in a system picker, and the first one
+   * of a page's life is slow to appear. Font, Case, Transition, Style and
+   * Hearing now open a list drawn by the page itself — there at once, every
+   * time — with each font shown in its own face once that face is on the phone
+   * (the system picker only ever showed the names). As with the chips, the
+   * dropdown stays underneath, hidden, and is what the studio reads and writes:
+   * a choice made here is set on it and announced the same way a pick would be.
+   */
+  const CAP_SHEETS = ['capFont', 'capCase', 'capTrans', 'capStyleSel', 'capModelSel'];
+  const selDesc = {
+    value: Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value'),
+    selectedIndex: Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'selectedIndex'),
+  };
+  const firstFamily = (ff) => String(ff || '').split(',')[0].trim().replace(/^['"]|['"]$/g, '');
+  // (asked at the weight the faces are loaded at — veditor.js loadCapFontFaces)
+  const faceReady = (fam) => { try { return !!fam && document.fonts && document.fonts.check(`800 16px '${fam.replace(/'/g, '')}'`); } catch (e) { return false; } };
+  function installCapSheets() {
+    const syncs = [];
+    for (const id of CAP_SHEETS) {
+      const sel = document.getElementById(id);
+      if (!sel || sel._sheet) continue;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cloud-pick';
+      btn.setAttribute('aria-haspopup', 'listbox');
+      const txt = document.createElement('span');
+      txt.className = 'cloud-pick-v';
+      btn.appendChild(txt);
+      const sync = () => {
+        const o = sel.options[sel.selectedIndex];
+        txt.textContent = o ? o.textContent : '';
+        const fam = firstFamily(sel.style.fontFamily);
+        txt.style.fontFamily = fam && faceReady(fam) ? sel.style.fontFamily : '';   // the Font picker wears the chosen face
+        btn.disabled = !!sel.disabled;
+      };
+      btn.addEventListener('click', () => { sync(); openCapSheet(sel, sync); });
+      // a value set by the studio itself (a look, a saved session) fires no event: told here instead
+      for (const k of ['value', 'selectedIndex']) {
+        const d = selDesc[k];
+        if (!d || !d.set) continue;
+        Object.defineProperty(sel, k, { configurable: true, enumerable: true,
+          get() { return d.get.call(this); },
+          set(v) { d.set.call(this, v); Promise.resolve().then(sync); } });
+      }
+      new MutationObserver(sync).observe(sel, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'disabled'] });
+      sel.addEventListener('change', sync);
+      sel._sheet = sync;
+      sel.classList.add('cloud-sheeted');
+      sel.after(btn);
+      sync();
+      syncs.push(sync);
+    }
+    const modal = document.getElementById('capModal');
+    if (modal && syncs.length) new MutationObserver(() => { if (!modal.classList.contains('hidden')) syncs.forEach((f) => f()); else closeCapSheet(); })
+      .observe(modal, { attributes: true, attributeFilter: ['class'] });
+    if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', () => syncs.forEach((f) => f()));
+  }
+  let capSheet = null;
+  function closeCapSheet() {
+    if (!capSheet) return;
+    const s = capSheet; capSheet = null;
+    try { s.remove(); } catch (e) {}
+  }
+  function openCapSheet(sel, sync) {
+    closeCapSheet();
+    if (sel.disabled) return;
+    const label = sel.closest('label');
+    const title = label ? Array.from(label.childNodes).filter((n) => n.nodeType === 3).map((n) => n.textContent).join(' ').trim() : '';
+    const wrap = document.createElement('div');
+    wrap.className = 'cloud-pickr';
+    wrap.setAttribute('role', 'dialog');
+    const panel = document.createElement('div');
+    panel.className = 'cloud-pickr-panel';
+    const head = document.createElement('div');
+    head.className = 'cloud-pickr-head';
+    const h = document.createElement('span'); h.textContent = title || 'Choose';
+    const x = document.createElement('button'); x.type = 'button'; x.className = 'cloud-pickr-x'; x.textContent = '✕'; x.setAttribute('aria-label', 'Close');
+    head.append(h, x);
+    const list = document.createElement('div');
+    list.className = 'cloud-pickr-list';
+    list.setAttribute('role', 'listbox');
+    let current = null;
+    const row = (o) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cloud-pickr-row' + (o.value === sel.value ? ' on' : '');
+      b.setAttribute('role', 'option');
+      b.setAttribute('aria-selected', o.value === sel.value ? 'true' : 'false');
+      b.disabled = !!o.disabled;
+      b.textContent = o.textContent;
+      // a font shown in its own face — once it is on the phone (a face still on its way would draw nothing)
+      const fam = firstFamily(o.style && o.style.fontFamily);
+      if (fam) {
+        const wear = () => { b.style.fontFamily = o.style.fontFamily; };
+        if (faceReady(fam)) wear();
+        else if (document.fonts && document.fonts.load) document.fonts.load(`800 16px '${fam.replace(/'/g, '')}'`).then(() => { if (faceReady(fam)) wear(); }).catch(() => {});
+      }
+      b.addEventListener('click', () => {
+        closeCapSheet();
+        if (sel.value !== o.value) { sel.value = o.value; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+        sync();
+      });
+      if (o.value === sel.value) current = b;
+      return b;
+    };
+    for (const n of sel.children) {
+      if (n.tagName === 'OPTGROUP') {
+        const g = document.createElement('div'); g.className = 'cloud-pickr-group'; g.textContent = n.label || '';
+        list.appendChild(g);
+        for (const o of n.children) if (o.tagName === 'OPTION' && !o.hidden) list.appendChild(row(o));
+      } else if (n.tagName === 'OPTION' && !n.hidden) list.appendChild(row(n));
+    }
+    panel.append(head, list);
+    wrap.appendChild(panel);
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) closeCapSheet(); });
+    x.addEventListener('click', closeCapSheet);
+    document.body.appendChild(wrap);
+    capSheet = wrap;
+    if (current) { try { current.scrollIntoView({ block: 'center' }); } catch (e) {} }
+  }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && capSheet) { e.stopPropagation(); closeCapSheet(); } }, true);
+
   function installTapNow() {
     let down = null;
     document.addEventListener('touchstart', (e) => {
@@ -4978,6 +5103,7 @@ let _hideTimer = null;
     installTouchBridge();
     installTapNow();
     installCapChips();
+    installCapSheets();
     installCapTidy();
     installDropBridge();
 

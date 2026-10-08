@@ -252,6 +252,47 @@ async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise
       });
       check(r.id && r.keep && r.inline === 0 && r.refs > 0, 'the pictures went to the server; the recipe only names them', r);
     }
+    console.log('\n[10] the captions window\'s choices open at once — the page\'s own list, not the system picker');
+    {
+      await page.evaluate(() => document.getElementById('capModal').classList.remove('hidden'));
+      await page.waitForTimeout(200);
+      const visible = () => page.evaluate(() => { const b = document.querySelector('#capCase + .cloud-pick'); return !!(b && b.offsetParent); });
+      if (!(await visible())) { await page.click('#capSumToggle').catch(() => {}); await page.waitForTimeout(250); }
+      const st = await page.evaluate(() => ['capFont', 'capCase', 'capTrans', 'capStyleSel', 'capModelSel'].map((id) => {
+        const s = document.getElementById(id); const b = s && s.nextElementSibling;
+        return { id, hidden: !!s && getComputedStyle(s).display === 'none', btn: !!(b && b.classList.contains('cloud-pick')),
+          shown: b ? b.textContent : null, sel: s && s.options[s.selectedIndex] ? s.options[s.selectedIndex].textContent : null };
+      }));
+      check(st.every((x) => x.hidden && x.btn && x.shown === x.sel), 'Font, Case, Transition, Style, Hearing: the dropdown hidden, a button showing the same choice', st);
+      if (process.env.SHOT_DIR) await page.screenshot({ path: path.join(process.env.SHOT_DIR, 'pick-panel.png') });
+      await page.evaluate(() => { window.__chg = 0; document.getElementById('capCase').addEventListener('change', () => { window.__chg++; }); });
+      await page.locator('#capCase + .cloud-pick').scrollIntoViewIfNeeded();
+      await page.click('#capCase + .cloud-pick');
+      if (process.env.SHOT_DIR) await page.screenshot({ path: path.join(process.env.SHOT_DIR, 'pick-case.png') });
+      const rows = await page.$$eval('.cloud-pickr .cloud-pickr-row', (bs) => bs.map((b) => ({ t: b.textContent, on: b.classList.contains('on') })));
+      check(rows.length === 4 && (rows.find((r) => r.on) || {}).t === 'ALL CAPS', 'tap Case: its four choices, there at once, ALL CAPS ticked', rows);
+      await page.click('.cloud-pickr .cloud-pickr-row:text-is("Title")');
+      const a1 = await page.evaluate(() => ({ v: document.getElementById('capCase').value, chg: window.__chg,
+        label: document.querySelector('#capCase + .cloud-pick').textContent, open: !!document.querySelector('.cloud-pickr') }));
+      check(a1.v === 'title' && a1.chg === 1 && a1.label === 'Title' && !a1.open, 'pick Title: set on the studio\'s own dropdown, announced once, the list closes', a1);
+      await page.evaluate(() => { document.getElementById('capCase').value = 'upper'; });
+      await page.waitForTimeout(50);
+      const a2 = await page.evaluate(() => document.querySelector('#capCase + .cloud-pick').textContent);
+      check(a2 === 'ALL CAPS', 'a choice set by the studio itself (a look, a saved session) shows on the button too', a2);
+      await page.locator('#capFont + .cloud-pick').scrollIntoViewIfNeeded();
+      await page.click('#capFont + .cloud-pick');
+      if (process.env.SHOT_DIR) { await page.waitForTimeout(1500); await page.screenshot({ path: path.join(process.env.SHOT_DIR, 'pick-font.png') }); }
+      const f = await page.evaluate(() => ({ rows: document.querySelectorAll('.cloud-pickr .cloud-pickr-row').length, opts: document.getElementById('capFont').options.length,
+        on: (document.querySelector('.cloud-pickr .cloud-pickr-row.on') || {}).textContent, val: document.getElementById('capFont').value }));
+      check(f.rows === f.opts && f.rows >= 20 && f.on === f.val, 'tap Font: every font listed, the one in use ticked', f);
+      await page.click('.cloud-pickr-x');
+      const a3 = await page.evaluate(() => ({ open: !!document.querySelector('.cloud-pickr'), val: document.getElementById('capFont').value }));
+      check(!a3.open && a3.val === f.val, '✕ closes it and changes nothing', a3);
+      await page.click('#capTrans + .cloud-pick');
+      await page.mouse.click(195, 60);   // the dimmed page above the list
+      check(!(await page.evaluate(() => !!document.querySelector('.cloud-pickr'))), 'a tap outside the list closes it');
+      await page.evaluate(() => document.getElementById('capModal').classList.add('hidden'));
+    }
   } catch (e) { check(false, 'the test ran to the end', e.message); }
   finally { await browser.close(); srv.kill(); fs.rmSync(WORK, { recursive: true, force: true }); }
   console.log(`\n${pass} PASS / ${fail} FAIL`);

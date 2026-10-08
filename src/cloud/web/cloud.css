@@ -418,7 +418,7 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
 .cloud-q, .cloud-export, .cloud-tr-extra { display: none; }
 
 /* the captions window's one-tap rows are the phone's (installCapChips); a wide screen keeps its dropdowns */
-.cloud-chips { display: none; }
+.cloud-chips, .cloud-pick { display: none; }
 @media (max-width: 900px) {
   body.mw-cloud {
     --ph-bg: #000;
@@ -1181,6 +1181,14 @@ body.mw-cloud #cloudPass:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rg
   body.mw-cloud #capModal .cloud-chips button { flex: 1 1 0; min-width: 0; margin: 0; padding: 0 2px; border: 0; border-radius: 7px;
     background: transparent; color: var(--ph-muted); font-size: 14px; font-weight: 650; letter-spacing: 0; text-transform: none; cursor: pointer; }
   body.mw-cloud #capModal .cloud-chips button.on { background: #2e3240; color: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.4); }
+  /* Font / Case / Transition / Style / Hearing: a list drawn by the page, not the system picker (installCapSheets) */
+  body.mw-cloud #capModal select.cloud-sheeted { display: none; }
+  body.mw-cloud #capModal .cloud-pick { display: flex; align-items: center; width: 100%; height: 42px; margin: 0; padding: 0 30px 0 12px;
+    border-radius: 10px; border: 1px solid var(--border); color: var(--text); cursor: pointer; text-align: left;
+    background: var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='16' viewBox='0 0 12 16'%3E%3Cpath d='M2 6l4-4 4 4M2 10l4 4 4-4' fill='none' stroke='%239aa0ad' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 12px center;
+    font-size: 16px; font-weight: 500; letter-spacing: 0; text-transform: none; -webkit-tap-highlight-color: transparent; }
+  body.mw-cloud #capModal .cloud-pick:disabled { opacity: .5; }
+  body.mw-cloud #capModal .cloud-pick-v { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   /* Pairs that belong together: the full-width Width slider goes after Colour,
      so Position is not left on a row by itself. */
   body.mw-cloud #capModal .cap-controls > label:has(#capFont) { order: 1; }
@@ -2570,3 +2578,20 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 
 /* 🔍 Search the captions (phone): thumb-sized, never zooms the page */
 .cap-search input { font-size: 16px; padding: 10px 14px; border-radius: 12px; }
+
+/* The page's own picker for the captions window (installCapSheets in cloud-boot.js) */
+.cloud-pickr { position: fixed; inset: 0; z-index: 2147482000; display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(0,0,0,.45); -webkit-tap-highlight-color: transparent; }
+.cloud-pickr-panel { width: 100%; max-width: 560px; max-height: 70vh; display: flex; flex-direction: column;
+  background: #1b1e27; border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px rgba(0,0,0,.5);
+  padding: 4px 0 calc(env(safe-area-inset-bottom, 0px) + 10px); }
+.cloud-pickr-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 8px 20px;
+  font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #9aa0ad; }
+.cloud-pickr-x { margin: 0; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; color: #e6e7ec; font-size: 17px; cursor: pointer; }
+.cloud-pickr-list { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 0 8px; }
+.cloud-pickr-group { padding: 12px 12px 4px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #9aa0ad; }
+.cloud-pickr-row { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 48px; margin: 0;
+  padding: 10px 12px; border: 0; border-radius: 10px; background: transparent; color: #f1f2f5; font-size: 18px; text-align: left; cursor: pointer; }
+.cloud-pickr-row.on { background: #2e3240; }
+.cloud-pickr-row.on::after { content: '✓'; margin-left: 12px; color: #a78bfa; font-family: system-ui, -apple-system, sans-serif; font-weight: 700; }
+.cloud-pickr-row:disabled { opacity: .45; }
