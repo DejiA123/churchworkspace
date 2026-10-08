@@ -8964,14 +8964,20 @@
     // the tracker measures mouth movement across, and mouth movement is how it
     // tells the person PREACHING from the person standing beside them.
     const crashed = trackCrashes()[trackKey(s)] || 0;
-    if (crashed >= 2) {
-      window.__toast && window.__toast(`"${s.label}" closed the app twice while following the speaker — framed in the centre instead.`, 'error');
+    s._trackCrashed = crashed;
+    if (crashed >= 3) {
+      window.__toast && window.__toast(`"${s.label}" closed the app three times while following the speaker — framed in the centre instead.`, 'error');
       return [];
     }
+    // after a second crash: faces only (the body model is the heavy one)
+    if (window.FaceTrack.setLite) window.FaceTrack.setLite(crashed >= 2);
+    const crumb = (m) => { if (window.__crumb) window.__crumb(`tracking "${s.label}": ${m}`); };
+    crumb(crashed ? `lighter tracking (after ${crashed} crash${crashed > 1 ? 'es' : ''})` : 'asking the server for pictures');
     try { localStorage.setItem(TRACK_NOTE, trackKey(s)); } catch (e) {}
     try {
       try { res = await window.api.sermon.extractFrames({ input, startSec, endSec, fps: crashed ? 3 : 6, pieces, pairs: !crashed }); }
       catch (e) { return []; }
+      crumb(`${((res && res.frames) || []).length} pictures, starting the tracker`);
       return await trackFromFrames(s, res, giveUp);
     } finally { try { localStorage.removeItem(TRACK_NOTE); } catch (e) {} }
   }
@@ -8989,7 +8995,8 @@
     const lock = (s && s.subject ? unpackClipSubject(s) : null) || followLock();
     // …and when nobody has, the AI is shown a few of these frames and says who
     // is preaching (🧠 in the Reframe tab). The PC still decides WHERE they are.
-    const referee = lock ? null : reframeReferee();
+    // (a clip that already crashed is not also shown to the AI: one less thing held at once)
+    const referee = lock || (s && s._trackCrashed) ? null : reframeReferee();
     try { dets = await window.FaceTrack.detectFrames(frames, { cuts, lock, referee, stopped: giveUp }); } catch (e) { dets = []; }
     if (giveUp && giveUp()) { if (res.dir) window.api.sermon.rmdir(res.dir).catch(() => {}); return []; }
     if (referee && dets && dets.referee) noteReframeAi(dets.referee);   // null = nobody in shot to ask about

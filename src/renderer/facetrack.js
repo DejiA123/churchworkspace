@@ -6,6 +6,7 @@
  */
 (function () {
   let detector = null, poser = null, initPromise = null;
+  let lite = false;   // faces only — the pose model is the heavy one (see setLite)
 
   /*
    * Where the MediaPipe bundle, wasm and models live.
@@ -89,6 +90,7 @@
         // stage silently changes person mid-clip.)
         runningMode: 'IMAGE', numPoses: 4, minPoseDetectionConfidence: 0.3,
       });
+      if (lite) { poser = null; return detector; }
       try {
         // Follows the face detector: if that one had to come back to the CPU,
         // this must too, or the clip is watched by two different processors.
@@ -1612,6 +1614,7 @@
     for (let i = 0; i < frames.length; i++) {
       // ✕ Cancel: stop between pictures, not after the whole short
       if (stopped && stopped()) { const e = new Error('Cancelled'); e.cancelled = true; throw e; }
+      if (i % 25 === 0 && window.__crumb) window.__crumb(`tracking: picture ${i + 1} of ${frames.length}${poser ? '' : ' (faces only)'}`);
       const f = frames[i];
       const img = await loadImage(f.url);
       const ok = !!img;
@@ -2882,6 +2885,8 @@
   }
   window.FaceTrack = {
     release,
+    /** Faces only, no body model — for a clip that closed the phone's app while tracking. */
+    setLite(on) { if (!!on !== lite) { release(); lite = !!on; } },
     async available() { try { await init(); return true; } catch (e) { console.warn('FaceTrack unavailable', e && e.message); return false; } },
     async poseAvailable() { try { await init(); return !!poser; } catch (e) { return false; } },
     detectFrames, buildKeyframes, detectElement, resetLive, detectPeople, CAM,
