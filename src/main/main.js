@@ -1516,7 +1516,14 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
   let check = { checked: false, why: pcSec > 0 ? 'part of it was heard on this server' : '' };
   // the second ear (Groq) and the third (Gemini) are different services: both listen at once
   // (Gemini hears it even where this server finished what the cloud could not)
-  const thirdOn = book.entries.length > 0 && geminiear.ready();
+  /*
+   * ASSEMBLYAI ALONE. Measured on the audited sermon: AssemblyAI by itself left
+   * fewer mistakes (12 of 129) than Whisper with Gemini on top (15), in a
+   * third of the time — so when it has heard the caption, it is the caption:
+   * no second Whisper ear, no Gemini. Those stay as the fallback for when
+   * AssemblyAI cannot answer (no key, no credit, no connection).
+   */
+  const thirdOn = book.entries.length > 0 && geminiear.ready() && !aaiFirst;
   const heard = [0, 0];
   const both = () => prog && prog(60 + Math.round(((heard[0] + heard[1]) / (thirdOn ? 2 : 1)) * 36));
   const tListen = Date.now();
@@ -1529,7 +1536,7 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
   let stopped = false;
   const settle = (e, fallback) => { if (e && e.cancelled) { stopped = true; return null; } return fallback; };
   const [second, third] = await Promise.all([
-    (!pcSec && book.entries.length) ? cloudspeech.secondOpinion({
+    (!pcSec && !aaiFirst && book.entries.length) ? cloudspeech.secondOpinion({
       input, from, to, words: [],      // compared below, after the Word Book
       terms: captionTerms(), plain, notAssembly: aaiFirst,   // (AssemblyAI already heard it: Whisper is the other ear)
       onProgress: (p) => { heard[0] = p / 100; both(); },
