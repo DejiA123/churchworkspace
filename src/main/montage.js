@@ -54,7 +54,9 @@ const EFFECTS = ['cut', 'punch_in', 'flash', 'slow_zoom', 'zoom_out', 'slow_moti
 /* how a shot comes IN from the one before it */
 const TRANSITIONS = ['cut', 'fade', 'flash'];
 /* something laid ON a video shot while its sound plays on */
-const OVERLAY_STYLES = ['cutaway', 'pip'];
+const OVERLAY_STYLES = ['cutaway', 'pip', 'snapshot'];
+/* the rules editor's mix: mostly cutaways, every third a box, and every fourth clip a snapshot (a still of it) */
+const ruleStyle = (n, cand) => (cand && cand.kind === 'video' && n % 4 === 0) ? 'snapshot' : (n % 3 === 0 ? 'pip' : 'cutaway');
 const STYLES = {
   hype: 'High energy. Fast cuts (often under a second on a fast song), punch-ins and flashes on the big moments, the most explosive moment first.',
   worship: 'Reverent and uplifting. Unhurried shots of raised hands, faces and light; slow zooms; let moments breathe; build to a climax.',
@@ -373,7 +375,7 @@ const PLAN_SCHEMA = {
         properties: {
           on_shot: { type: 'integer', description: 'Index (0-based) of the VIDEO shot it goes over.' },
           id: { type: 'string', description: 'The candidate shown on top (a photo or another clip).' },
-          style: { type: 'string', enum: OVERLAY_STYLES, description: '"cutaway" fills the frame; "pip" is a framed box in a corner.' },
+          style: { type: 'string', enum: OVERLAY_STYLES, description: '"cutaway" fills the frame; "pip" is a framed box in a corner; "snapshot" freezes one frame of the picture as a tilted white-bordered photo that pops in with a camera flash.' },
           start: { type: 'number', description: 'Seconds into that shot where it appears.' },
           seconds: { type: 'number', description: 'How long it stays (1–4).' },
         },
@@ -393,7 +395,7 @@ What makes it work:
 - Faces and genuine emotion beat scenery. Avoid near-duplicate frames back to back. Skip blurry, dark or empty frames.
 - When there is music, cut lengths are multiples of the beat; faster songs mean shorter shots. Without music, 1.2–3 s per shot.
 - Transitions (how each shot comes in): mostly "cut" on the beat; "fade" through black to change place, time or mood; "flash" (white) to hit a big moment. Never two fades in a row on a fast edit.
-- Overlays (B-roll) are what make it feel produced: lay a photo or another clip ON TOP of a video shot while that shot's sound carries on — show what is being preached or sung about, a reaction, the crowd, a moment from earlier. "cutaway" fills the frame; "pip" is a framed box in a corner. Use them on video shots whose sound carries (speech, singing, a crowd), 1.5–3.5 s each, never in the first second of the hook. A video shot can carry SEVERAL overlays, each with its own start — on a long clip, bring a picture in every 5–8 seconds so the eye always has something new while the sound tells the story.
+- Overlays (B-roll) are what make it feel produced: lay a photo or another clip ON TOP of a video shot while that shot's sound carries on — show what is being preached or sung about, a reaction, the crowd, a moment from earlier. "cutaway" fills the frame; "pip" is a framed box in a corner; "snapshot" is a still from a clip popping on screen like a photo just taken (with a flash) — perfect for hype: the crowd jumping, hands raised, the preacher's big moment, frozen for a beat. Use them on video shots whose sound carries (speech, singing, a crowd), 1.5–3.5 s each, never in the first second of the hook. A video shot can carry SEVERAL overlays, each with its own start — on a long clip, bring a picture in every 5–8 seconds so the eye always has something new while the sound tells the story.
 - Effects are seasoning: punch_in or flash on the biggest beats, slow_zoom / zoom_out to give photos life, slow_motion for one emotional peak at most. Most shots are a plain "cut".
 - On-screen words: one hook in the first shot (max 7 words, curiosity or emotion, no clickbait lies), short beats that carry the story (max 6 words each — one every 4–8 shots, and on a long piece one every 20–30 seconds so the words keep telling it), and a call to action at the end ("cta", e.g. an invitation to come, follow or share). Plain words, no emojis inside the video text, no hashtags in it.
 - Respect the faith context: uplifting, sincere, never mocking.
@@ -756,7 +758,7 @@ function spreadPhotos(shots) {
     const n = want[j];
     for (let k = 0; k < n && p < movable.length; k++) {
       const start = ((k + 0.5) * v.seconds) / n - OV_LEN / 2;
-      v.ovReq.push({ cand: movable[p++].cand, style: (++styleN % 3 === 0) ? 'pip' : 'cutaway', start, seconds: OV_LEN });
+      v.ovReq.push({ cand: movable[p].cand, style: ruleStyle(++styleN, movable[p++].cand), start, seconds: OV_LEN });
     }
     // the standalone ones go after this video
     // (more than two between clips — only when the clips are already full of
@@ -817,7 +819,7 @@ function layPhotosOverClips(shots) {
     for (let i = 0; i < n && p < pics.length; i++) {
       const seg = v.seconds / n;
       const len = clamp(seg * 0.65, 1, OV_LEN);
-      v.ovReq.push({ cand: pics[p++].cand, style: (++styleN % 3 === 0) ? 'pip' : 'cutaway', start: i * seg + (seg - len) / 2, seconds: len });
+      v.ovReq.push({ cand: pics[p].cand, style: ruleStyle(++styleN, pics[p++].cand), start: i * seg + (seg - len) / 2, seconds: len });
     }
   });
 }
@@ -857,7 +859,7 @@ function keepOrderPhotos(shots) {
     const on = pics.slice(0, fit), after = pics.slice(fit);
     on.forEach((m, k) => {
       const start = ((k + 0.5) * v.seconds) / on.length - OV_LEN / 2;
-      v.ovReq.push({ cand: m.cand, style: (++styleN % 3 === 0) ? 'pip' : 'cutaway', start, seconds: OV_LEN });
+      v.ovReq.push({ cand: m.cand, style: ruleStyle(++styleN, m.cand), start, seconds: OV_LEN });
     });
     shots.push(v);
     after.forEach((m, k) => {
@@ -1219,12 +1221,33 @@ async function renderPiece(ctx, s, W, H, keepAudio, out, next, { overlay = null,
     // A photo is read and fitted ONCE, then held for the overlay's length. Fed
     // with -loop 1 it was decoded and resized again for every frame — a 12 MP
     // picture thirty times a second, the slowest part of the whole montage.
-    if (oc.kind === 'image') args.push('-i', oc.file);
+    /*
+     * A SNAPSHOT is a still: one frame of the clip (kept as a picture next to
+     * the montage, see stillsFor) or the photo itself, held for its length.
+     */
+    const snap = o.style === 'snapshot';
+    const still = snap && (o.still && fs.existsSync(o.still) ? o.still : (oc.kind === 'image' ? oc.file : null));
+    let grab = '';
+    if (still || oc.kind === 'image') args.push('-i', still || oc.file);
+    else if (snap) { args.push('-ss', String(o.from || 0), '-t', '0.5', ...decodeOpts(oc, W, H), '-i', oc.file); grab = 'trim=end_frame=1,setpts=PTS-STARTPTS,'; }
     else args.push('-ss', String(o.from || 0), '-t', String(o.len + 0.2), ...decodeOpts(oc, W, H), '-i', oc.file);
     nextInput = 2;
     let fit, move = '';
     let x = '0', y = '0';
-    if (o.style === 'pip') {
+    if (snap) {
+      /*
+       * "Take screenshots from the video and add them as hype": the frame pops
+       * on like a photo just taken — a white-bordered print, a little tilted
+       * (left or right by turns), in the middle, with a camera flash.
+       */
+      const bw = Math.round((W * (W > H ? 0.5 : 0.74)) / 2) * 2, bh = Math.round((H * (W > H ? 0.62 : 0.5)) / 2) * 2;
+      const b = Math.max(6, Math.round(Math.min(W, H) * 0.02));
+      const a = o.pos === 'left' ? '-0.06' : '0.06';
+      fit = `scale=${bw}:${bh}:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,pad=iw+${2 * b}:ih+${2 * b}:${b}:${b}:white,setsar=1,`
+        + `format=rgba,rotate=${a}:c=none:ow=rotw(${a}):oh=roth(${a}),scale=trunc(iw/2)*2:trunc(ih/2)*2`;
+      x = '(W-w)/2';
+      y = `(H-h)/2-${Math.round(H * 0.04)}`;
+    } else if (o.style === 'pip') {
       const pw = Math.round((W * (W > H ? 0.34 : 0.5)) / 2) * 2, ph = Math.round((H * 0.34) / 2) * 2;
       fit = `scale=${pw}:${ph}:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,pad=iw+12:ih+12:6:6:white,setsar=1`;
       x = o.pos === 'left' ? '44' : `W-w-44`;
@@ -1244,11 +1267,14 @@ async function renderPiece(ctx, s, W, H, keepAudio, out, next, { overlay = null,
       fit = fitChain(oc, W, H, 'center', 1, 'o');
       move = `scale=w='trunc(${W}*(1+0.07*t/${o.len.toFixed(2)})/2)*2':h=-2:eval=frame,crop=${W}:${H}`;
     }
-    const hold = oc.kind === 'image' ? `,loop=loop=${Math.ceil((o.len + 0.2) * FPS)}:size=1:start=0,setpts=N/${FPS}/TB` : '';
-    const look = `${fit}${hold}${move ? ',' + move : ''}`;
-    const ov = `[1:v]${look},fps=${FPS},format=yuva420p,fade=t=in:st=0:d=0.25:alpha=1,fade=t=out:st=${Math.max(0, o.len - 0.25).toFixed(3)}:d=0.25:alpha=1,`
+    const hold = (oc.kind === 'image' || snap) ? `,loop=loop=${Math.ceil((o.len + 0.2) * FPS)}:size=1:start=0,setpts=N/${FPS}/TB` : '';
+    const look = `${grab}${fit}${hold}${move ? ',' + move : ''}`;
+    const fin = snap ? 0.1 : 0.25;
+    const ov = `[1:v]${look},fps=${FPS},format=yuva420p,fade=t=in:st=0:d=${fin}:alpha=1,fade=t=out:st=${Math.max(0, o.len - 0.25).toFixed(3)}:d=0.25:alpha=1,`
       + `trim=0:${o.len.toFixed(3)},setpts=PTS-STARTPTS+${o.start.toFixed(3)}/TB[ov]`;
-    graph = `${base}[bv];${ov};[bv][ov]overlay=${x}:${y}:eof_action=pass:enable='between(t,${o.start.toFixed(3)},${(o.start + o.len).toFixed(3)})'${edge.v ? ',' + edge.v : ''},format=yuv420p[v]`;
+    // the camera flash: the whole frame goes white for a blink as the snapshot lands
+    const flash = snap ? `,drawbox=x=0:y=0:w=iw:h=ih:color=white@0.8:t=fill:enable='between(t,${o.start.toFixed(3)},${(o.start + 0.07).toFixed(3)})'` : '';
+    graph = `${base}[bv];${ov};[bv][ov]overlay=${x}:${y}:eof_action=pass:enable='between(t,${o.start.toFixed(3)},${(o.start + o.len).toFixed(3)})'${flash}${edge.v ? ',' + edge.v : ''},format=yuv420p[v]`;
   } else {
     graph = `${base}${edge.v ? ',' + edge.v : ''},format=yuv420p[v]`;
   }
@@ -1285,8 +1311,31 @@ async function renderPiece(ctx, s, W, H, keepAudio, out, next, { overlay = null,
  */
 const baseOf = (output) => path.join(path.dirname(output), '.montage-edit', path.basename(output));
 
+/*
+ * A snapshot of a clip is kept as a picture beside the montage, so the
+ * studio can lay it back on as a photo (the frame it froze, not the clip
+ * playing on) and the export puts on the same still.
+ */
+async function stillsFor(ctx, plan, output) {
+  const dir = path.dirname(baseOf(output));
+  const stem = path.basename(output).replace(/\.[^.]+$/, '');
+  let k = 0;
+  for (const sh of plan.shots) {
+    for (const o of sh.overlays || []) {
+      if (o.style !== 'snapshot' || !o.cand || o.cand.kind !== 'video') continue;
+      const file = path.join(dir, `${stem}.snap-${++k}.jpg`);
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+        await ff.runFfmpeg(ctx.ffmpeg, ['-hide_banner', '-y', '-ss', String(o.from || 0), '-i', o.cand.file, '-frames:v', '1', '-q:v', '2', file]);
+        if (fs.existsSync(file)) o.still = file;
+      } catch (e) { o.still = null; }   // the render takes the frame itself instead
+    }
+  }
+}
+
 async function render(ctx, plan, { aspect, keepAudio, output, base, tmp, onProgress }) {
   const { w: W, h: H } = ASPECTS[aspect] || ASPECTS['9:16'];
+  await stillsFor(ctx, plan, output);
   /*
    * Pieces are independent, so a server with more than one CPU makes several
    * at once (the encoder gate still decides how many fit in its memory); on
@@ -1529,8 +1578,8 @@ function resultOf(plan, output, opts, extra) {
     // the edit without its overlays, which the studio opens and lays them on (see baseOf)
     base: fs.existsSync(baseOf(output)) ? baseOf(output) : null,
     overlays: plan.shots.flatMap((s) => (s.overlays || []).map((o) => ({
-      at: round2(s.at + o.start), seconds: o.len, style: o.style, file: o.cand.file,
-      kind: o.cand.kind, w: o.cand.w, h: o.cand.h, from: o.from == null ? 0 : o.from, pos: o.pos || 'right',
+      at: round2(s.at + o.start), seconds: o.len, style: o.style, file: o.still || o.cand.file,
+      kind: o.still ? 'image' : o.cand.kind, w: o.cand.w, h: o.cand.h, from: o.still || o.from == null ? 0 : o.from, pos: o.pos || 'right',
     }))),
     shots: plan.shots.map((s) => ({ at: s.at, seconds: s.seconds, effect: s.effect, transition: s.transition, file: s.cand.file, kind: s.cand.kind, from: s.from == null ? null : s.from })),
   }, extra);

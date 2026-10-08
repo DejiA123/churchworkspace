@@ -3774,6 +3774,16 @@
         s.pipX = o.pos === 'left' ? 50 / vw : 1 - s.pipW - 50 / vw;
         s.pipY = (Math.round(vh * 0.11) + 6) / vh;
         s.frame = 6 / vw;
+      } else if (o.style === 'snapshot') {
+        // the montage's snapshot: a still in a white border, in the middle (montage.js
+        // renderPiece tilts it a little; here it stands straight, to move or resize)
+        const ar = info.width / info.height, wide = vw > vh;
+        const b = Math.max(6, Math.round(Math.min(vw, vh) * 0.02));
+        const bw = Math.min(vw * (wide ? 0.5 : 0.74), vh * (wide ? 0.62 : 0.5) * ar);
+        s.pipW = bw / vw;
+        s.pipX = (1 - s.pipW) / 2;
+        s.pipY = Math.max(0, (vh - bw / ar) / 2 - vh * 0.04) / vh;
+        s.frame = b / vw;
       } else {
         Object.assign(s, { cover: true, pipX: 0, pipY: 0, pipW: 1 });
       }
