@@ -23,6 +23,7 @@
 #
 # Optional settings, as environment variables or answered when asked:
 #   GROQ_API_KEY        free key (console.groq.com) — captions and scans heard by Whisper Large
+#   GEMINI_API_KEY      free key (aistudio.google.com) — a third, non-Whisper ear checks every caption
 #   ANTHROPIC_API_KEY   Claude key — directs montages and proof-reads captions (paid)
 #   STUDIO_HOST         your own domain / DuckDNS name instead of the sslip.io one
 #   ADDRESS=tunnel      use the tunnel instead of the fixed address
@@ -106,6 +107,7 @@ ask_key() {   # name, what it is for
   fi
 }
 ask_key GROQ_API_KEY "A free Groq key (console.groq.com → API Keys): captions and sermon scans heard by Whisper Large — strongly recommended"
+ask_key GEMINI_API_KEY "A free Google Gemini key (aistudio.google.com → Get API key, no card): a third ear, not Whisper, checks every caption — recommended"
 ask_key ANTHROPIC_API_KEY "A Claude API key (console.anthropic.com), optional and paid: Claude directs AI montages and proof-reads captions"
 
 # ── 4. which address ─────────────────────────────────────────────────────────

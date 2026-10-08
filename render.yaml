@@ -42,6 +42,12 @@ services:
       # the repo.
       - key: GROQ_API_KEY
         sync: false
+      # A free Google Gemini key (aistudio.google.com → Get API key, no card).
+      # With it every caption is heard a third time by a model that is not
+      # Whisper, and the places the Whisper ears share a mishearing are put
+      # right. Optional; set it in the dashboard, never in the repo.
+      - key: GEMINI_API_KEY
+        sync: false
       # A Claude API key (console.anthropic.com → API keys). With it, ✨ AI
       # Montage is directed by Claude Opus 5.5, which LOOKS at every clip and
       # photo before cutting the edit. Without it the montage still works,

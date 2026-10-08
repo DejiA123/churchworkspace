@@ -106,6 +106,8 @@ const bgvideos = require('./bgvideos');
 const presenter = require('./presenter');
 const voicelisten = require('./voicelisten');
 const cloudspeech = require('./cloudspeech');
+const geminiear = require('./geminiear');
+const captionfuse = require('./captionfuse');
 const machine = require('./machine');
 const pauses = require('./pauses');
 // The other half of "listen to the clip, then write about it" — the hosted
@@ -1427,16 +1429,27 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
    * the PC finished was heard once, and is said to be).
    */
   let check = { checked: false, why: pcSec > 0 ? 'part of it was heard on this server' : '' };
-  if (!pcSec && book.entries.length) {
-    check = await cloudspeech.secondOpinion({
+  // the second ear (Groq) and the third (Gemini) are different services: both listen at once
+  const thirdOn = !pcSec && book.entries.length > 0 && geminiear.ready();
+  const heard = [0, 0];
+  const both = () => prog && prog(60 + Math.round(((heard[0] + heard[1]) / (thirdOn ? 2 : 1)) * 36));
+  const asCancel = (e) => { if (e && e.cancelled) throw new jobs.CancelledError(); };
+  const [second, third] = await Promise.all([
+    (!pcSec && book.entries.length) ? cloudspeech.secondOpinion({
       input, from, to, words: [],      // compared below, after the Word Book
       terms: captionTerms(), plain,
-      onProgress: (p) => prog && prog(60 + Math.round(p * 0.38)),
-    }).catch((e) => { if (e && e.cancelled) throw new jobs.CancelledError(); return { checked: false, why: (e && e.message) || 'the second listen failed' }; });
-  }
+      onProgress: (p) => { heard[0] = p / 100; both(); },
+    }).catch((e) => { asCancel(e); return { checked: false, why: (e && e.message) || 'the second listen failed' }; }) : null,
+    thirdOn ? geminiear.transcribeSpan({
+      input, from, to, terms: captionTerms(),
+      onProgress: (p) => { heard[1] = p; both(); },
+    }).catch((e) => { asCancel(e); return { chunks: [], failed: 1, why: (e && e.message) || 'the third listen failed' }; }) : null,
+  ]);
+  if (second) check = second;
+  let alt = null;
   if (check.checked && Array.isArray(check.alt)) {
     const m = wordbook.matcher();
-    const alt = m.empty ? check.alt : wordbook.engine.applyToWords(check.alt, m).words;
+    alt = m.empty ? check.alt : wordbook.engine.applyToWords(check.alt, m).words;
     // where the context led the first ear astray, the plain ear's words; then
     // words squeezed into an instant that the plain ear did not hear (never said)
     if (!plain) {
@@ -1447,7 +1460,22 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
         check.squeezed = sq.dropped; check.fromPlain = fz.replaced;
       }
     }
+  }
+  // ►► THE THIRD EAR (geminiear.js + captionfuse.js): two of three decide; where
+  // both Whisper ears share a mishearing, a reader picks between the hearings.
+  let unsure = [];
+  if (third) {
+    const t3 = await thirdEar(book.entries, alt, third).catch((e) => { asCancel(e); return { why: (e && e.message) || 'the third ear failed' }; });
+    if (t3.words) { book.entries.length = 0; book.entries.push(...t3.words); }
+    if (t3.altFix && alt) alt = t3.altFix(alt);
+    unsure = t3.unsure || [];
+    check.third = t3.report || { why: t3.why };
+  }
+  if (alt) {
     check.doubts = cloudspeech.markDisagreements(book.entries, alt);
+    // what two of three ears heard, or the reader chose, is settled; what the reader could not decide is listed
+    for (const w of book.entries) if (w.third === 'reader' && w.doubt) { delete w.doubt; check.doubts--; }
+    for (const w of unsure) if (!w.doubt && book.entries.includes(w)) { w.doubt = true; check.doubts++; }
     check.alt = alt.map((w) => ({ text: w.text, start: w.start, end: w.end }));
   }
   if (prog) prog(100);
@@ -1587,6 +1615,64 @@ ipcMain.handle('captions:grammar', wrap(async (e, { lines, before, after, passag
   if (out.failedBatches && !out.fixes.length) out.why = engine === 'groq' ? (cw.why || 'the AI did not answer') : 'the AI did not answer';
   return out;
 }));
+
+/*
+ * ►► THE THIRD EAR, DECIDED. ◄◄ Gemini's hearing (through the Word Book like
+ * the others) lined up against the caption words and the second ear's:
+ *   • Gemini and the second ear agree against the first: theirs, automatically.
+ *   • Both Whisper ears agree, Gemini heard something else: a reader (free
+ *     Groq) sees the sentence both ways and picks; when it cannot tell, the
+ *     Whisper words stay, marked as worth a look, with Gemini's hearing offered
+ *     as the one-tap alternative.
+ */
+async function thirdEar(words, alt, heard) {
+  const chunks = (heard && heard.chunks) || [];
+  const report = { model: (heard && heard.model) || '', heard: chunks.length, failed: (heard && heard.failed) || 0, why: (heard && heard.why) || '', auto: 0, asked: 0, reader: 0, unsure: 0 };
+  if (!chunks.length) return { report };
+  const m = wordbook.matcher();
+  const booked = m.empty ? chunks : chunks.map((c) => Object.assign({}, c, { text: wordbook.engine.applyToText(c.text, m).text }));
+  const pl = captionfuse.plan(words, alt, booked);
+  report.auto = pl.auto.length; report.asked = pl.ask.length;
+  const picks = await refereeHearings(pl.ask.slice(0, 120));
+  const take = pl.ask.filter((op, k) => picks.get(k) === 'B');
+  const doubt = pl.ask.filter((op, k) => picks.get(k) !== 'B' && picks.get(k) !== 'A');
+  report.reader = take.length; report.unsure = doubt.length;
+  if (picks.why) report.readerWhy = picks.why;
+  for (const op of pl.auto) op.how = 'two';
+  for (const op of take) op.how = 'reader';
+  const unsure = [];
+  for (const op of doubt) for (let i = op.i0; i <= op.i1; i++) if (words[i]) unsure.push(words[i]);
+  // the alternative offered on an unsure line is Gemini's hearing, not the Whisper one it agreed with
+  const altFix = doubt.length ? (a) => {
+    const ops = [];
+    for (const op of doubt) {
+      const ix = []; a.forEach((w, i) => { const mm = (w.start + w.end) / 2; if (mm >= op.start - 0.05 && mm <= op.end + 0.05) ix.push(i); });
+      if (ix.length && ix[ix.length - 1] - ix[0] + 1 === ix.length) ops.push({ i0: ix[0], i1: ix[ix.length - 1], tokens: op.tokens, start: op.start, end: op.end });
+    }
+    return captionfuse.apply(a, ops, 'alt');
+  } : null;
+  return { words: captionfuse.apply(words, pl.auto.concat(take)), unsure, altFix, report };
+}
+/** The reader's picks, by position in `items`: 'A' (the Whisper words), 'B' (Gemini's) or '?'. */
+async function refereeHearings(items) {
+  const picks = new Map();
+  if (!items.length) return picks;
+  for (let b = 0; b < items.length; b += 30) {
+    const batch = items.slice(b, b + 30).map((it, k) => Object.assign({}, it, { id: k + 1 }));
+    const { system, prompt } = captionfuse.refereePrompt(batch);
+    let got = null;
+    for (let attempt = 0; attempt < 2 && !got; attempt++) {
+      if (attempt) await new Promise((r) => setTimeout(r, 20000));
+      const text = await cloudwrite.chat({ system, prompt, json: true, temperature: 0, maxTokens: 3000, timeoutMs: 90000,
+        evenIfOff: true, prefer: ['openai/gpt-oss-120b'] }).catch(() => '');
+      got = captionfuse.parsePicks(text);
+      if (got && !got.size && batch.length) got = null;
+    }
+    if (!got) { picks.why = 'the reader did not answer'; continue; }
+    for (const [id, pick] of got) if (id >= 1 && id <= batch.length) picks.set(b + id - 1, pick);
+  }
+  return picks;
+}
 
 /** The fixes a second, different free model agrees are what was said (a Set of the fix objects). */
 async function secondReader(fixes, lines, passage) {

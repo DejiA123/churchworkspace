@@ -1,0 +1,201 @@
+'use strict';
+/*
+ * ►► A THIRD EAR THAT IS NOT WHISPER (Google Gemini, free tier). ◄◄
+ *
+ * Both of the captions' ears are Whisper (Large v3 and Turbo, on the free Groq
+ * account). They are close relatives, and on a real 45-minute sermon they made
+ * the SAME mistakes in the same places — "attract God on the same" for "on the
+ * scene", "relaying this story" heard as "learning", "who at a never" for "who
+ * art in heaven". Two ears that share a blind spot cannot point at it.
+ *
+ * Gemini hears audio with a language model's understanding of what is being
+ * said, and its mistakes are not Whisper's. Here it listens to the same
+ * stretches word for word; captionfuse.js lines its words up against the
+ * Whisper ones and decides, place by place, which hearing is right.
+ *
+ * Free: a key from Google AI Studio (no card) set on the server as
+ * GEMINI_API_KEY. Without one, nothing here runs and the captions are exactly
+ * what they were. Google's free tier may use what is sent to it to improve
+ * their products — said in CLOUD.md where the key is set.
+ */
+const { spawn } = require('child_process');
+
+const API = 'https://generativelanguage.googleapis.com/v1beta';
+const key = () => String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
+const ready = () => !!key();
+
+let ffmpegPath = null;
+try { ffmpegPath = require('ffmpeg-static'); } catch (e) { ffmpegPath = null; }
+function setFfmpeg(p) { if (p) ffmpegPath = p; }
+
+let jobs = null;
+try { jobs = require('./jobs'); } catch (e) { jobs = null; }
+const cancelled = () => !!(jobs && jobs.isCancelled && jobs.isCancelled());
+
+/* ---------------------------- which model ------------------------------- */
+// The best "flash" model this key has (newest first), never a lite, image,
+// speech or live one. Asked once and remembered; a fixed name if the list
+// cannot be read.
+const FALLBACK_MODEL = 'gemini-2.5-flash';
+let ranked = null;                 // this key's models, best first
+const spent = new Set();           // models whose free allowance is used up (or not open to this key) today
+let spentDay = '';
+function rankModel(name) {
+  const n = String(name || '').replace(/^models\//, '');
+  if (!/^gemini-/.test(n) || /lite|image|tts|live|audio|embed|vision|thinking-exp|learnlm/i.test(n)) return -1;
+  if (!/flash|pro/.test(n)) return -1;
+  const v = parseFloat((/gemini-(\d+(?:\.\d+)?)/.exec(n) || [])[1] || '0');
+  // flash before pro (pro's free allowance is tiny), released before preview
+  return v * 10 + (/flash/.test(n) ? 3 : 0) + (/preview|exp/.test(n) ? 0 : 1);
+}
+async function models(fetchImpl = fetch) {
+  const day = new Date().toISOString().slice(0, 10);
+  if (day !== spentDay) { spent.clear(); spentDay = day; }
+  if (!ranked) {
+    if (process.env.MW_GEMINI_MODEL) ranked = [process.env.MW_GEMINI_MODEL];
+    else {
+      try {
+        const res = await fetchImpl(`${API}/models?pageSize=200`, { headers: { 'x-goog-api-key': key() } });
+        if (res.ok) {
+          const j = await res.json();
+          ranked = (j.models || [])
+            .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
+            .map((m) => ({ id: String(m.name || '').replace(/^models\//, ''), r: rankModel(m.name) }))
+            .filter((m) => m.r > 0)
+            .sort((a, b) => b.r - a.r)
+            .map((m) => m.id)
+            .slice(0, 4);
+        }
+      } catch (e) { /* the fixed name below */ }
+      if (!ranked || !ranked.length) ranked = [FALLBACK_MODEL];
+      else if (!ranked.includes(FALLBACK_MODEL)) ranked.push(FALLBACK_MODEL);
+    }
+  }
+  return ranked.filter((m) => !spent.has(m));
+}
+async function pickModel(fetchImpl = fetch) { return (await models(fetchImpl))[0] || null; }
+
+/* ---------------------------- one stretch -------------------------------- */
+function promptFor(terms) {
+  const t = (terms || []).filter(Boolean).slice(0, 40);
+  return 'Transcribe this audio of a church sermon EXACTLY as spoken, word for word (verbatim). '
+    + 'Keep repeated words, unfinished sentences, filler words and the speaker\'s own grammar — '
+    + 'do not correct, tidy, summarise or paraphrase anything, and do not add anything that was not said. '
+    + 'Use normal punctuation and capital letters; write God, Jesus, Lord and Holy Spirit with capitals. '
+    + (t.length ? 'Names and words used at this church: ' + t.join(', ') + '. ' : '')
+    + 'If a stretch is music, singing or silence, leave it out. Reply with the transcript text only.';
+}
+
+/** The stretch as FLAC (16 kHz mono) — the same lossless audio the Whisper ears get. */
+function encodeFlac(input, startSec, durSec) {
+  return new Promise((resolve, reject) => {
+    if (!ffmpegPath) return reject(new Error('ffmpeg is missing'));
+    const args = ['-v', 'error', ...(startSec > 0 ? ['-ss', String(startSec)] : []), '-t', String(durSec),
+      '-i', input, '-vn', '-ac', '1', '-ar', '16000', '-sample_fmt', 's16', '-c:a', 'flac', '-f', 'flac', 'pipe:1'];
+    const p = spawn(ffmpegPath, args, { windowsHide: true });
+    if (jobs && jobs.track) jobs.track(p);
+    const out = []; let err = '';
+    const timer = setTimeout(() => { try { p.kill(); } catch (e) {} reject(new Error('decode timed out')); }, 120000);
+    p.stdout.on('data', (d) => out.push(d));
+    p.stderr.on('data', (d) => { err += d.toString().slice(0, 300); });
+    p.on('error', (e) => { clearTimeout(timer); reject(e); });
+    p.on('close', (code) => { clearTimeout(timer); code === 0 ? resolve(Buffer.concat(out)) : reject(new Error('ffmpeg ' + code + ' ' + err)); });
+  });
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** What Gemini wrote, as plain words: no "[music]" notes, no "Speaker 1:" labels, no timestamps. */
+function clean(text) {
+  return String(text || '')
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/(^|\n)\s*(speaker\s*\d*|preacher|pastor)\s*:/gi, ' ')
+    .replace(/\(?\b\d{1,2}:\d{2}(?::\d{2})?\b\)?(?=\s|$)/g, (m) => (/^\(/.test(m) || /^\d{1,2}:\d{2}:\d{2}$/.test(m) ? ' ' : m))
+    .replace(/\s+/g, ' ').trim();
+}
+/**
+ * One stretch of audio → its words as text. Waits out the free tier's
+ * per-minute limit (a few times); a model whose allowance for the DAY is used
+ * up is set aside and the next one asked, and when none is left the error
+ * says so (`exhausted`), so the rest of the span is not tried in vain.
+ */
+async function hear(flac, { terms = [], fetchImpl = fetch, waits = [15000, 30000, 45000] } = {}) {
+  const data = Buffer.from(flac).toString('base64');
+  let lastWhy = '';
+  for (;;) {
+    const model = await pickModel(fetchImpl);
+    if (!model) throw Object.assign(new Error('the free Gemini allowance is used up for today' + (lastWhy ? ' (' + lastWhy + ')' : '')), { exhausted: true });
+    const body = {
+      contents: [{ role: 'user', parts: [
+        { inline_data: { mime_type: 'audio/flac', data } },
+        { text: promptFor(terms) },
+      ] }],
+      generationConfig: { temperature: 0, maxOutputTokens: 8192 },
+    };
+    // a transcription is not a puzzle: no thinking budget where the model takes one
+    if (/2\.5-flash/.test(model)) body.generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    let next = false;
+    for (let attempt = 0; !next; attempt++) {
+      if (cancelled()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
+      let res;
+      try {
+        res = await fetchImpl(`${API}/models/${encodeURIComponent(model)}:generateContent`, {
+          method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key() }, body: JSON.stringify(body),
+        });
+      } catch (e) {
+        if (attempt >= waits.length) throw new Error('could not reach Gemini');
+        await sleep(waits[attempt]); continue;
+      }
+      if (res.ok) {
+        const j = await res.json();
+        const c = j && j.candidates && j.candidates[0];
+        const text = c && c.content && Array.isArray(c.content.parts) ? c.content.parts.map((p) => p.text || '').join('') : '';
+        return { text: clean(text), model };
+      }
+      let said = '';
+      try { const j = await res.json(); said = JSON.stringify((j && j.error) || j || '').slice(0, 600); } catch (e) {}
+      // a thinking setting this model does not take: once without it
+      if (res.status === 400 && body.generationConfig.thinkingConfig) { delete body.generationConfig.thinkingConfig; continue; }
+      const msg = (/"message":"([^"]*)/.exec(said) || [])[1] || '';
+      lastWhy = res.status + (msg ? ' ' + msg.slice(0, 120) : '');
+      // not open to this key, gone, or the day's allowance used up: the next model
+      const daily = /per ?day|PerDay|limit: ?0\b/i.test(said);
+      if (res.status === 404 || res.status === 403 || (res.status === 429 && daily)) { spent.add(model); next = true; continue; }
+      if ((res.status === 429 || res.status >= 500) && attempt < waits.length) {
+        const hint = +((/"retryDelay":"(\d+)/.exec(said) || [])[1] || 0) * 1000;
+        await sleep(hint > 0 ? Math.min(60000, hint + 1000) : waits[attempt]); continue;
+      }
+      if (res.status === 429) { spent.add(model); next = true; continue; }
+      throw new Error('Gemini answered ' + lastWhy);
+    }
+  }
+}
+
+/**
+ * The span [from, to) of `input`, heard in the same three-minute stretches as
+ * the Whisper ears: [{ from, to, text }] on the span's own clock. A stretch
+ * Gemini could not hear is left out (and counted), never guessed.
+ */
+async function transcribeSpan({ input, from = 0, to, terms = [], chunkSec = 300, onProgress = null, fetchImpl = fetch, waits, encode = encodeFlac } = {}) {
+  if (!ready() || !input || !(to > from)) return null;
+  const out = [];
+  let failed = 0, why = '', model = '';
+  const n = Math.max(1, Math.ceil((to - from) / chunkSec - 1e-6));
+  for (let i = 0; i < n; i++) {
+    const a = from + i * chunkSec, b = Math.min(to, a + chunkSec);
+    try {
+      const flac = await encode(input, a, b - a);
+      const r = await hear(flac, Object.assign({ terms, fetchImpl }, waits ? { waits } : {}));
+      model = r.model;
+      out.push({ from: a - from, to: b - from, text: r.text });
+    } catch (e) {
+      if (e && e.cancelled) throw e;
+      why = (e && e.message) || 'no answer';
+      if (e && e.exhausted) { failed += n - i; break; }
+      failed++;
+    }
+    if (onProgress) { try { onProgress((i + 1) / n); } catch (e) {} }
+  }
+  return { chunks: out, failed, why, model };
+}
+
+module.exports = { ready, transcribeSpan, hear, pickModel, rankModel, promptFor, clean, setFfmpeg, _reset: () => { ranked = null; spent.clear(); } };
