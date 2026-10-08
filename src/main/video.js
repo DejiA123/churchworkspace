@@ -3066,7 +3066,8 @@ async function mixMusic(ctx, { input, output, musicPath, musicVolume = 0.25, mus
   if (!musicPath || !fs.existsSync(musicPath)) throw new Error('That music file could not be found.');
   const info = await getInfo(ctx, input);
   const dur = info.durationSec || 0;
-  const vol = Math.max(0, Math.min(2, Number(musicVolume)));
+  // up to 1000% (a boost for a song mastered quiet); the limiter on the mix keeps a boosted song from clipping
+  const vol = Math.max(0, Math.min(10, Number(musicVolume)));
   const fi = Math.max(0, Math.min(dur / 2, Number(fadeIn) || 0));
   const fo = Math.max(0, Math.min(dur / 2, Number(fadeOut) || 0));
   const start = Math.max(0, Number(musicStartSec) || 0);

@@ -13886,13 +13886,30 @@
    * DOES stick (the desktop app, Chrome, Android) nothing changes at all.
    */
   let musicGain = null;   // { ac, g, el } once wired; false = not needed, or not possible here
+  // up to 1000%, as CapCut allows: some songs are simply mastered quiet
+  const MUSIC_MAX = 10;
   function setMusicLevel(a, v) {
-    v = clamp(Number(v) || 0, 0, 1);
+    v = clamp(Number(v) || 0, 0, MUSIC_MAX);
+    // an element's own volume stops at 100%: louder than that needs the gain stage
+    if (v > 1 && musicGain === false && !a._boostTried) {
+      a._boostTried = true;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) {
+        try {
+          let ac; try { ac = new AC({ latencyHint: 'playback' }); } catch (e) { ac = new AC(); }
+          const src = ac.createMediaElementSource(a), g = ac.createGain();
+          src.connect(g); g.connect(ac.destination);
+          try { a.volume = 1; } catch (e) {}
+          musicGain = { ac, g, el: a };
+          ac.resume().catch(() => {});
+        } catch (e) { /* stays at 100% in the preview; the export still boosts */ }
+      }
+    }
     // 0% is silence, on every phone: muted is the one switch iOS always obeys
     const mute = v <= 0.001;
     if (a.muted !== mute) { try { a.muted = mute; } catch (e) {} }
     if (musicGain && musicGain.el === a) { musicGain.g.gain.value = v; return; }
-    try { a.volume = v; } catch (e) {}
+    try { a.volume = Math.min(1, v); } catch (e) {}
   }
   function wireMusicGain(a) {
     if (musicGain) { if (musicGain.ac.state !== 'running') musicGain.ac.resume().catch(() => {}); return; }
@@ -15197,7 +15214,7 @@
     // Volume is live: drag it while the preview plays and you hear the balance.
     const mVol = $('#libMusicVol'); if (mVol) mVol.addEventListener('input', () => {
       if (!ve.music) return;
-      ve.music.volume = clamp(parseFloat(mVol.value) || 0, 0, 1);
+      ve.music.volume = clamp(parseFloat(mVol.value) || 0, 0, MUSIC_MAX);   // past 100%: a boost for a quiet song
       const vv = $('#libMusicVolV'); if (vv) vv.textContent = Math.round(ve.music.volume * 100) + '%';
       const a = ve.refs.musicAudio; if (a && !ve._auditionId) setMusicLevel(a, ve.music.volume);
       renderMusicLane(); saveMusicPref();
