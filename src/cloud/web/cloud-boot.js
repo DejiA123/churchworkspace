@@ -830,6 +830,7 @@ let _hideTimer = null;
     clearTimeout(_hideTimer); _hideTimer = null;
     clearOverlaySave();   // the last export's "Save to Photos" card never greets the next job
     const m = $('#overlayMsg'); if (m) m.textContent = msg || 'Working…';
+    showWaiting(0);
     resetProgress();
     const o = $('#overlay');
     // over the captions editor when the job was started from it (🎧 Generate
@@ -878,8 +879,27 @@ let _hideTimer = null;
     if (pct > prog.target) { prog.target = pct; prog.at = Date.now(); }
     if (pct >= 100) { prog.shown = 100; drawProgress(100); }
   }
+  /*
+   * IN LINE. Many people captioning at once take turns on the server
+   * (fairqueue.js): while this job waits, the overlay says so — and where it
+   * is in the line — so a wait never looks like a hang or a failure.
+   */
+  function showWaiting(n) {
+    const msg = $('#overlayMsg');
+    let el = $('#overlayWait');
+    if (!el && msg && n > 0) {
+      el = document.createElement('div');
+      el.id = 'overlayWait';
+      el.style.cssText = 'font-size:13px;opacity:.8;margin-top:4px';
+      msg.insertAdjacentElement('afterend', el);
+    }
+    if (!el) return;
+    el.textContent = n > 0 ? `Waiting for your turn — ${n === 1 ? 'you are next' : 'number ' + n + ' in line'}` : '';
+    el.classList.toggle('hidden', !(n > 0));
+  }
   function hideOverlay() {
     clearTimeout(_hideTimer); _hideTimer = null;
+    showWaiting(0);
     clearOverlaySave();
     const o = $('#overlay'); if (o) { o.classList.add('hidden'); o.classList.remove('on-top'); }
     stopProgress();
@@ -1079,6 +1099,7 @@ let _hideTimer = null;
        * drive the progress of whatever the operator is doing in front of it,
        * and would flick the number between "this pass" and "this export".
        */
+      if (d.waiting != null) showWaiting(d.waiting);
       jobProgressCbs.forEach((cb) => { try { cb(d); } catch (er) {} });
     });
     es.addEventListener('upload:progress', (e) => {

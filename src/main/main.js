@@ -96,6 +96,7 @@ const socialCopy = require('./social-copy');
 const schedulePlan = require('./schedule-plan');
 const llmjudge = require('./llmjudge');
 const jobs = require('./jobs');
+const fairqueue = require('./fairqueue');
 const library = require('./library');
 const sessions = require('./sessions');
 const space = require('./space');
@@ -1314,7 +1315,21 @@ ipcMain.handle('captions:engineInfo', wrap(async () => {
  * `fast: true` is still honoured (the highlights scanner asks for it), but a
  * caption that is going to be BURNED onto a video never does.
  */
-ipcMain.handle('captions:transcribe', wrap(async (e, { input, startSec, endSec, fast, denoise, model, plain, jobId }) => {
+/*
+ * TAKING TURNS (fairqueue.js). Many people captioning at once on one server:
+ * two run, the rest wait in line — turns going round the people, so one
+ * person's 14 shorts never lock everyone else out — and the phone says
+ * "waiting for your turn" instead of the job failing.
+ */
+const captionLine = fairqueue.create({
+  slots: Math.max(1, Math.min(8, parseInt(process.env.MW_CAPTION_SLOTS, 10) || 2)),
+  isCancelled: (id) => jobs.isCancelled(id),
+});
+ipcMain.handle('captions:transcribe', wrap(async (e, args) => captionLine.run(space.current() || '', () => transcribeCaptions(e, args), {
+  jobId: args.jobId,
+  onWait: (n) => { if (args.jobId && e && !e.sender.isDestroyed()) e.sender.send('job:progress', { jobId: args.jobId, percent: 0, waiting: n }); },
+})));
+async function transcribeCaptions(e, { input, startSec, endSec, fast, denoise, model, plain, jobId }) {
   const prog = onProgress(e, jobId);
   const local = model === CLOUD_CAPTIONS ? undefined : model;
   // (one rule decides "meant for the cloud" — also for a remembered model this machine cannot hold)
@@ -1347,7 +1362,7 @@ ipcMain.handle('captions:transcribe', wrap(async (e, { input, startSec, endSec, 
     engine: 'pc',
     cloudWhy: meantCloud ? (cloudspeech.fileReady() ? (cloudspeech.state().why || 'the cloud could not be reached') : 'no Groq key yet') : '',
   });
-}));
+}
 
 /* ============ ☁️ CAPTIONS HEARD BY THE FULL-SIZE WHISPER, FOR FREE ===========
  *

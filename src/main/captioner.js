@@ -691,8 +691,49 @@ function wordsFromTokens(json) {
  * was greedy-only because chopping into words was already slow, and greedy is
  * exactly where the misheard words came from.
  */
+/*
+ * THE SERVER'S OWN BACKUP EAR. When the cloud cannot hear a clip (no Groq key,
+ * its allowance used up, no internet) the server hears it itself — and the
+ * image ships only Tiny, the roughest model there is. A server that can hold
+ * Small (about 850 MB of memory; the free Oracle machine has 24 GB) fetches it
+ * once, in the background, the first time it starts — 466 MB onto the data
+ * volume, kept across updates — and from then on it is what the server hears
+ * with (bestModel). Small, not Medium: on four cores Medium hears a 45-minute
+ * sermon in about the time it takes to play it, Small in a third of that, and
+ * a backup that keeps people waiting an hour is not much of one. The words
+ * still get Google's third ear on top (main.js geminiPass); Small's job is
+ * mostly to give them their timing.
+ */
+const BACKUP_MODEL = 'small.en';
+let backupOn = false, backupFetch = null, backupFailedAt = 0;
+function ensureBackupModel({ log = () => {} } = {}) {
+  backupOn = true;
+  if (backupFetch) return backupFetch;
+  const m = MODELS.find((x) => x.id === BACKUP_MODEL);
+  const best = bestModel();
+  if (!MODELS_DIR || !m || modelPath(m) || (best && best.rank >= m.rank) || !machine.fitsWhisper(m.id)) return null;
+  if (Date.now() - backupFailedAt < 10 * 60e3) return null;   // a failed fetch is tried again later, not on every clip
+  log(`  Fetching the Small speech model (${m.sizeMB} MB, once) — this server's own backup ear when the cloud cannot hear.`);
+  const f = downloadModel(m.id, {}).then(
+    (r) => { log('  The Small speech model is ready: the server hears with it from now on.'); return r; },
+    (e) => { backupFailedAt = Date.now(); log('  Could not fetch the Small speech model (' + ((e && e.message) || e) + ') — will try again later.'); return null; });
+  backupFetch = f.finally(() => { backupFetch = null; });
+  return backupFetch;
+}
+
 async function transcribe(ctx, { input, startSec, endSec, model: modelKind, granularity = 'word', fast, threads: threadsOpt, denoise, onProgress }) {
   const { cli } = whisperPaths();
+  // the backup ear still arriving (a fresh server's first minutes): a short wait beats Tiny
+  const named = modelKind && MODELS.some((x) => x.id === modelKind && modelPath(x));
+  if (backupOn && !named && modelKind !== 'tiny' && modelKind !== 'base') {
+    const f = ensureBackupModel();
+    if (f) {
+      if (onProgress) onProgress(1);
+      let timer;
+      await Promise.race([f, new Promise((r) => { timer = setTimeout(r, 120e3); if (timer.unref) timer.unref(); })]);
+      clearTimeout(timer);
+    }
+  }
   const wanted = modelFor(modelKind);
   const engineMissing = () => {
     const i = engineInfo();
@@ -1373,5 +1414,5 @@ module.exports = {
   CAP_TRANSITIONS, capTransition, capEnterTag, capTypewriterLines,
   assSizeFactor, assSizeFor, faceMetrics,
   cliCandidates, findCli, ensureExecutable, dtwFor, dtwPreset, cliHelp,
-  MODELS, models, bestModel, modelFor, fitModel, pickScanModel, SCAN_AUTO, downloadModel, removeModel, asrAudioFilter, wordsFromTokens,
+  MODELS, models, bestModel, modelFor, fitModel, ensureBackupModel, pickScanModel, SCAN_AUTO, downloadModel, removeModel, asrAudioFilter, wordsFromTokens,
 };

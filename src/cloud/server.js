@@ -174,6 +174,9 @@ async function main() {
     dirs,
   });
 
+  // a better backup ear than Tiny, fetched once in the background (captioner.js)
+  try { captioner.ensureBackupModel({ log: (m) => console.log(m) }); } catch (e) {}
+
   const chan = rpc.channels().length;
   console.log('');
   console.log('  Cloud Studio is up.');
