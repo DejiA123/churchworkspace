@@ -160,7 +160,13 @@ function fuseGemini(words, alt, chunks, { edge = 1.0, maxBlock = 12, secPerWord 
       const room0 = before ? +before.end : t0, room1 = after ? +after.start : t1;
       // what the second ear heard here: its words between the middles of the two neighbours
       const a0 = before ? mid(before) : t0 - 0.05, a1 = after ? mid(after) : t1 + 0.05;
-      const altKey = keyOf(A.filter((w) => mid(w) > a0 && mid(w) < a1));
+      const altT = keyOf(A.filter((w) => mid(w) > a0 && mid(w) < a1)).split(' ').filter(Boolean);
+      // the second ear's timing drifts: its copy of a neighbour can fall inside the window
+      // (measured: Whisper's invented "praying." pushed "That" later, and the second ear's
+      // "that" landed in the gap) — a neighbour's own word at either end is not part of the block
+      if (before && altT.length && altT[0] === norm(before.text)) altT.shift();
+      if (after && altT.length && altT[altT.length - 1] === norm(after.text)) altT.pop();
+      const altKey = altT.join(' ');
       const pKey = keyOf(pa.map((i) => W[i])), gKey = gb.map(norm).filter((t) => !FILLER.has(t)).join(' ');
       if (pKey === gKey || sameWords(pKey, gKey)) { for (const i of pa) both.add(i); stats.same += pa.length; continue; }
       // Gemini only LEFT OUT words here (a repeat, a stumble): the same rule as leaving out all of them
@@ -182,7 +188,9 @@ function fuseGemini(words, alt, chunks, { edge = 1.0, maxBlock = 12, secPerWord 
         // only Gemini heard these: where Whisper left room for them, or the second ear heard them too
         if (!before || !after) continue;
         const gap = room1 - room0;
-        if (!(twoOfThree || gap >= gb.length * 0.18) || gb.length > maxBlock * 2) continue;
+        // (the second ear heard as many words here as Gemini, if not the same ones: something WAS said)
+        const heardToo = altT.length === gT.length && gT.length <= 2;
+        if (!(twoOfThree || heardToo || gap >= gb.length * 0.18) || gb.length > maxBlock * 2) continue;
         // a dropped word under a stretched neighbour: borrow time from the word before
         const need = gb.length * 0.18 - gap;
         const trim = need > 0 ? Math.min(need, (+before.end - +before.start) * 0.5) : 0;

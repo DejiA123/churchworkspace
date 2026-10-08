@@ -69,6 +69,11 @@ const F = (w, a, text, extra, opts) => fuse.fuseGemini(w, a, CH(text, extra), op
     const a2 = w2.filter((x) => x.text !== 'praying' && x.text !== 'for');      // the second ear: the same moments, without them
     const r2 = F(w2, a2, 'And run after them, ask them forever, say, wow, this is my child.');
     ok(!/praying/.test(said(r2.words)) && r2.stats.removed === 2, 'words neither Gemini nor the second ear heard are gone', said(r2.words));
+    // the second ear's timing drifts: its "that" falls where Whisper put the invented word
+    const w4 = WS('please do not let anybody know praying. that this is not the situation at all');
+    const a4 = w4.filter((x) => x.text !== 'praying.').map((x) => (x.text === 'that' ? Object.assign({}, x, { start: 3.2, end: 3.5 }) : x));
+    const r4 = F(w4, a4, "Please don't let anybody know that this is not the situation at all.");
+    ok(!/praying/.test(said(r4.words)), '…even when the second ear\'s timing drifts into the gap', said(r4.words));
     const w3 = WS('we serve a living God praying. and he hears us when we pray');
     const a3 = w3.filter((x) => x.text !== 'praying.');
     ok(said(F(w3, a3, 'We serve a living God and He hears us when we pray.').words).startsWith('We serve a living God. And'), '…a removed word that ended a sentence hands back its full stop',
@@ -87,6 +92,9 @@ const F = (w, a, text, extra, opts) => fuse.fuseGemini(w, a, CH(text, extra), op
     const w2 = WS('telling them as are making the ark the corner piece must be gold');
     const r2 = F(w2, w2, 'Telling them, as you are making the ark, the corner piece must be gold.');
     ok(!/as you are/.test(said(r2.words)), 'no room in Whisper\'s timing and no second ear: not added', said(r2.words));
+    const a2b = w2.slice(0, 3).concat([{ text: 'as', start: 2.0, end: 2.15 }, { text: 'we', start: 2.15, end: 2.35 }], w2.slice(4));
+    ok(/as you are making/i.test(said(F(w2, a2b, 'Telling them, as you are making the ark, the corner piece must be gold.').words)),
+      '…but where the second ear heard a word there too ("we"), Gemini\'s goes in', said(F(w2, a2b, 'Telling them, as you are making the ark, the corner piece must be gold.').words));
     const w3 = WS('the Lord is my shepherd').concat(WS('I shall not want for anything at all', 4.0));
     const r3 = F(w3, w3, 'The Lord is my shepherd, the Lord God, I shall not want for anything at all.');
     ok(/shepherd, the Lord God, I shall/.test(said(r3.words)), 'where Whisper left a gap, words only Gemini heard fill it', said(r3.words));
