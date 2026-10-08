@@ -10055,6 +10055,8 @@
               }, 200);
               p.then((v) => { clearInterval(tick); resolve(v); }, (e) => { clearInterval(tick); reject(e); });
             }), J(s, 'track')));
+          // a phone handing shorts to the server: the tracker's memory goes before the next short
+          if (sbatch && window.FaceTrack && window.FaceTrack.release) window.FaceTrack.release();
           // Start the NEXT one's tracking now, so it runs under this encode.
           // Not when the server makes them: there is no encode here to hide it
           // under, and tracking the next short WHILE this one's captions are

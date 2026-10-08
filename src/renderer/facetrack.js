@@ -2867,7 +2867,21 @@
     } catch (e) { return null; }
   }
 
+  /*
+   * Let the models go. Each holds its own WebAssembly memory, which only ever
+   * grows: a phone tracking fourteen shorts in a row kept all of it and was
+   * closed by iOS part-way through (the crash log ended right before a
+   * short's tracking). Released between shorts, the next one starts fresh —
+   * loading them again takes a second or two, from the phone's cache.
+   */
+  function release() {
+    const d = detector, p = poser;
+    detector = null; poser = null; initPromise = null;
+    try { if (d && d.close) d.close(); } catch (e) {}
+    try { if (p && p.close) p.close(); } catch (e) {}
+  }
   window.FaceTrack = {
+    release,
     async available() { try { await init(); return true; } catch (e) { console.warn('FaceTrack unavailable', e && e.message); return false; } },
     async poseAvailable() { try { await init(); return !!poser; } catch (e) { return false; } },
     detectFrames, buildKeyframes, detectElement, resetLive, detectPeople, CAM,
