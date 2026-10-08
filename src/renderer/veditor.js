@@ -8919,6 +8919,26 @@
    * them is the long half, and there is no point starting it for a short the
    * operator has just stopped.
    */
+  /*
+   * ►► A CLIP THAT CRASHED THE PHONE IS NOT TRACKED THE SAME WAY TWICE. ◄◄
+   * Measured from the crash log: a phone handing 14 shorts over died, twice, the
+   * moment it began following the speaker in one particular clip. A note is
+   * left while a clip is tracked; if the app is closed under it, the note is
+   * still there when the export carries on — and that clip is then tracked
+   * lightly (half the pictures, no mouth-movement pairs), and if it crashes
+   * again, framed in the centre. The batch finishes either way.
+   */
+  const TRACK_NOTE = 'mw-tracking-now', TRACK_CRASHED = 'mw-track-crashed';
+  const trackKey = (s) => (s && (s.id || s.label)) || '';
+  function trackCrashes() {
+    let m = {};
+    try { m = JSON.parse(localStorage.getItem(TRACK_CRASHED) || '{}') || {}; } catch (e) {}
+    try {
+      const was = localStorage.getItem(TRACK_NOTE);
+      if (was) { m[was] = (m[was] || 0) + 1; localStorage.removeItem(TRACK_NOTE); localStorage.setItem(TRACK_CRASHED, JSON.stringify(m)); }
+    } catch (e) {}
+    return m;
+  }
   async function computeReframeKeyframes(s, srcPath, ss, ee, pieces, giveUp) {
     if (!window.FaceTrack) return [];
     let avail = false;
@@ -8943,8 +8963,19 @@
     // `pairs` asks for a second still one frame after each sample: that is what
     // the tracker measures mouth movement across, and mouth movement is how it
     // tells the person PREACHING from the person standing beside them.
-    try { res = await window.api.sermon.extractFrames({ input, startSec, endSec, fps: 6, pieces, pairs: true }); }
-    catch (e) { return []; }
+    const crashed = trackCrashes()[trackKey(s)] || 0;
+    if (crashed >= 2) {
+      window.__toast && window.__toast(`"${s.label}" closed the app twice while following the speaker — framed in the centre instead.`, 'error');
+      return [];
+    }
+    try { localStorage.setItem(TRACK_NOTE, trackKey(s)); } catch (e) {}
+    try {
+      try { res = await window.api.sermon.extractFrames({ input, startSec, endSec, fps: crashed ? 3 : 6, pieces, pairs: !crashed }); }
+      catch (e) { return []; }
+      return await trackFromFrames(s, res, giveUp);
+    } finally { try { localStorage.removeItem(TRACK_NOTE); } catch (e) {} }
+  }
+  async function trackFromFrames(s, res, giveUp) {
     const frames = (res && res.frames) || [];
     if (!frames.length) return [];
     if (giveUp && giveUp()) { if (res.dir) window.api.sermon.rmdir(res.dir).catch(() => {}); return []; }
