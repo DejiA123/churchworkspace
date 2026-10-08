@@ -378,10 +378,12 @@ const F = (w, a, text, extra, opts) => fuse.fuseGemini(w, a, CH(text, extra), op
       words: txt.split(' ').map((x, i) => ({ word: x, start: 0.2 + i * 0.4, end: 0.55 + i * 0.4 })),
       segments: [{ start: 0.2, end: 0.2 + txt.split(' ').length * 0.4, text: txt, avg_logprob: -0.2, no_speech_prob: 0, compression_ratio: 1.2 }],
     });
-    const seen = { gemini: 0, reader: 0, read: 0 };
+    const seen = { gemini: 0, reader: 0, read: 0, listen: 0 };
     global.fetch = async (url, o) => {
       url = String(url);
       if (/generativelanguage/.test(url) && /\/models\?/.test(url)) return { ok: true, status: 200, json: async () => ({ models: [{ name: 'models/gemini-2.5-flash', supportedGenerationMethods: ['generateContent'] }] }) };
+      // the re-listen (the proofreader's clips, and the vote where the two Whisper ears differ): no clear answer here
+      if (/generativelanguage/.test(url) && /Clip 1:/.test(o.body)) { seen.listen++; return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"answers":[]}' }] }, finishReason: 'STOP' }] }) }; }
       if (/generativelanguage/.test(url) && /proofreading/.test(o.body)) { seen.read++; return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"fixes":[]}' }] }, finishReason: 'STOP' }] }) }; }
       if (/generativelanguage/.test(url)) { seen.gemini++; return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: GEM }] }, finishReason: 'STOP' }] }) }; }
       if (/chat\/completions/.test(url)) { seen.reader++; return { ok: false, status: 500, headers: { get: () => null }, json: async () => ({}) }; }
