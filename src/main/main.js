@@ -1322,10 +1322,26 @@ ipcMain.handle('captions:transcribe', wrap(async (e, { input, startSec, endSec, 
     const r = await cloudCaptions({ input, startSec, endSec, denoise, localModel: local, plain: !!plain, onProgress: prog });
     if (r) return r;
   }
-  const res = await captioner.transcribe(getCtx(), { input, startSec, endSec, fast: !!fast, denoise, model: local, onProgress: prog });
-  // Meant for the cloud and heard on the PC instead: say so, in the answer itself.
   const meantCloud = model === CLOUD_CAPTIONS || (!model && !fast && cloudspeech.fileReady());
-  return Object.assign({}, res, {
+  // the server's own model gives the timing; when the cloud was meant, Gemini still gives the words
+  const pcProg = meantCloud && geminiear.ready() && prog ? (p) => prog(Math.round(p * 0.9)) : prog;
+  const res = await captioner.transcribe(getCtx(), { input, startSec, endSec, fast: !!fast, denoise, model: local, onProgress: pcProg });
+  const extra = {};
+  if (meantCloud && !fast && geminiear.ready() && res.words && res.words.length) {
+    const clip = startSec != null && endSec != null;
+    const from = clip ? Math.max(0, +startSec || 0) : 0;
+    const to = clip ? +endSec : (res.durationSec || (await video.getInfo(getCtx(), input)).durationSec || 0);
+    const gp = await geminiPass({ words: res.words, input, from, to, prog });
+    if (gp.third && gp.third.heard) {
+      extra.words = gp.words; extra.segments = gp.words;
+      extra.check = { checked: false, why: 'the second listen needs the cloud', third: gp.third, relisten: gp.relisten };
+      for (const w of gp.unsure) w.doubt = true;
+      extra.engineName = 'this server\'s own speech model + Google ' + prettyGemini(gp.third.model);
+    }
+  }
+  if (prog) prog(100);
+  // Meant for the cloud and heard on the PC instead: say so, in the answer itself.
+  return Object.assign({}, res, extra, {
     engine: 'pc',
     cloudWhy: meantCloud ? (cloudspeech.fileReady() ? (cloudspeech.state().why || 'the cloud could not be reached') : 'no Groq key yet') : '',
   });
@@ -1432,7 +1448,8 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
    */
   let check = { checked: false, why: pcSec > 0 ? 'part of it was heard on this server' : '' };
   // the second ear (Groq) and the third (Gemini) are different services: both listen at once
-  const thirdOn = !pcSec && book.entries.length > 0 && geminiear.ready();
+  // (Gemini hears it even where this server finished what the cloud could not)
+  const thirdOn = book.entries.length > 0 && geminiear.ready();
   const heard = [0, 0];
   const both = () => prog && prog(60 + Math.round(((heard[0] + heard[1]) / (thirdOn ? 2 : 1)) * 36));
   const asCancel = (e) => { if (e && e.cancelled) throw new jobs.CancelledError(); };
@@ -1465,22 +1482,15 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
       }
     }
   }
-  // ►► THE THIRD EAR (geminiear.js + captionfuse.js): Gemini's words, Whisper's timing.
-  if (third) {
-    const t3 = thirdEar(book.entries, alt, third);
-    if (t3.words) { book.entries.length = 0; book.entries.push(...t3.words); }
-    check.third = t3.report;
-  }
-  // ►► THE PROOFREADER THAT LISTENS AGAIN (relisten.js): what every ear got wrong
+  // ►► THE THIRD EAR (geminiear.js + captionfuse.js): Gemini's words, Whisper's timing;
+  // then THE PROOFREADER THAT LISTENS AGAIN (relisten.js): what every ear got wrong
   let relistenUnsure = [];
-  if (check.third && check.third.heard) {
-    const pr = await relisten.proofread({
-      words: book.entries, alt, input, from,
-      onProgress: (p) => prog && prog(96 + Math.round(p * 3)),
-    }).catch((e) => { asCancel(e); return { report: { why: (e && e.message) || 'the proofreader failed' } }; });
-    if (pr.words) { book.entries.length = 0; book.entries.push(...pr.words); }
-    relistenUnsure = pr.unsure || [];
-    check.relisten = pr.report;
+  if (third) {
+    const gp = await geminiPass({ words: book.entries, alt, heard: third, input, from, prog });
+    book.entries.length = 0; book.entries.push(...gp.words);
+    check.third = gp.third;
+    if (gp.relisten) check.relisten = gp.relisten;
+    relistenUnsure = gp.unsure;
   }
   // where the time went (the first hearing, the second and third together, the proofreader)
   check.ms = { first: tListen - t0, others: listenMs, proofread: check.relisten ? (check.relisten.readMs || 0) + (check.relisten.listenMs || 0) : 0 };
@@ -1638,6 +1648,34 @@ ipcMain.handle('captions:grammar', wrap(async (e, { lines, before, after, passag
   if (out.failedBatches && !out.fixes.length) out.why = engine === 'groq' ? (cw.why || 'the AI did not answer') : 'the AI did not answer';
   return out;
 }));
+
+/**
+ * Gemini's words on Whisper's timing, then the proofreader that listens again —
+ * for the cloud's captions and for the ones this server heard itself when the
+ * cloud could not (a Groq allowance used up must not mean rough captions).
+ * `heard`: Gemini's stretches already in hand (or null: asked here).
+ */
+async function geminiPass({ words, alt = null, heard = null, input, from, to, prog }) {
+  const asCancel = (e) => { if (e && e.cancelled) throw new jobs.CancelledError(); };
+  let h = heard;
+  if (!h && geminiear.ready()) {
+    h = await geminiear.transcribeSpan({ input, from, to, terms: captionTerms(), onProgress: (p) => prog && prog(90 + Math.round(p * 6)) })
+      .catch((e) => { asCancel(e); return { chunks: [], failed: 1, why: (e && e.message) || 'the third listen failed' }; });
+  }
+  if (!h) return { words, third: null, relisten: null, unsure: [] };
+  const t3 = thirdEar(words, alt, h);
+  let out = t3.words || words;
+  let rl = null, unsure = [];
+  if (t3.report && t3.report.heard) {
+    const pr = await relisten.proofread({
+      words: out, alt, input, from,
+      onProgress: (p) => prog && prog(96 + Math.round(p * 3)),
+    }).catch((e) => { asCancel(e); return { report: { why: (e && e.message) || 'the proofreader failed' } }; });
+    if (pr.words) out = pr.words;
+    rl = pr.report; unsure = pr.unsure || [];
+  }
+  return { words: out, third: t3.report, relisten: rl, unsure };
+}
 
 /*
  * ►► THE THIRD EAR (captionfuse.fuseGemini). ◄◄ Gemini's hearing, through the

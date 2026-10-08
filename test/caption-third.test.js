@@ -320,6 +320,28 @@ const F = (w, a, text, extra, opts) => fuse.fuseGemini(w, a, CH(text, extra), op
     ok(d && d.length >= 4 && d.includes('tell'), '…listed for a look', d);
     ok(out2 && out2.check.alt.some((w) => w.text === 'sell'), '…with what Whisper heard as the one-tap alternative', out2 && out2.check.alt.map((w) => w.text).join(' '));
 
+    // the Groq allowance used up: this server's own model gives the timing, Gemini still gives the words
+    {
+      const captioner = require(path.join(ROOT, 'src/main/captioner'));
+      const real = { transcribe: captioner.transcribe, isAvailable: captioner.isAvailable };
+      const pcWords = 'and the presence of God came on the same and sad peace be still today'.split(' ').map((x, i) => ({ text: x, start: 0.2 + i * 0.4, end: 0.55 + i * 0.4 }));
+      captioner.isAvailable = () => true;
+      captioner.transcribe = async () => ({ words: pcWords.map((w) => Object.assign({}, w)), segments: [], durationSec: 6 });
+      GEM = 'And the presence of God came on the scene and said, peace, be still today.';
+      const before = global.fetch;
+      global.fetch = async (url, o) => {
+        if (/groq\.com\/openai\/v1\/audio/.test(String(url))) return { ok: false, status: 429, headers: { get: (k) => (k === 'retry-after' ? '3600' : null) }, json: async () => ({}) };
+        return before(url, o);
+      };
+      seen.gemini = 0;
+      const out4 = await run();
+      global.fetch = before; captioner.transcribe = real.transcribe; captioner.isAvailable = real.isAvailable;
+      const t4 = out4 && out4.words.map((w) => w.text).join(' ');
+      ok(out4 && out4.engine === 'pc' && /used up/.test(out4.cloudWhy || ''), 'Groq used up: heard on this server, and the answer says why', out4 && { engine: out4.engine, why: out4.cloudWhy });
+      ok(t4 === 'And the presence of God came on the scene and said, peace, be still today.' && seen.gemini === 1, '…but the words are still Gemini\'s ("on the scene")', t4);
+      ok(out4 && / \+ Google Gemini 2\.5 Flash$/.test(out4.engineName || '') && out4.check && out4.check.third.heard === 1, '…and the answer names both', out4 && out4.engineName);
+    }
+
     // no Gemini key: exactly the captions there were before
     SAY = { 'whisper-large-v3': 'and the presence of God came on the same and sad peace be still today', 'whisper-large-v3-turbo': 'and the presents of God came on the same and said peace be still today' };
     delete process.env.GEMINI_API_KEY; seen.gemini = 0;

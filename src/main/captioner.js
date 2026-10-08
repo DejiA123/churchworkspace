@@ -477,6 +477,11 @@ function runWhisperNow(cli, args, onProgress) {
     proc.on('close', (code) => {
       // Cancelled by the user (we SIGKILLed it) — not a transcription failure.
       if (jobs.isCancelled()) return reject(new jobs.CancelledError());
+      // whisper-cli meets a flag it does not know with its help text and exit code 0, writing nothing
+      if (code === 0 && /error: unknown argument/i.test(stderr)) {
+        return reject(new Error('The speech engine on this machine is too old for an option the studio used ('
+          + ((/unknown argument:\s*(\S+)/i.exec(stderr) || [])[1] || '?') + ').'));
+      }
       if (code === 0) return resolve(stderr);
       // macOS kills a quarantined/unsigned binary with SIGKILL and no output —
       // say what that means instead of showing an empty "Transcription failed".
@@ -551,9 +556,39 @@ function asrAudioFilter({ denoise = 0, floorDb } = {}) {
  * An unrecognised file (someone dropped in their own) gets no DTW rather than a
  * wrong preset, and captions fall back to the token timestamps as before.
  */
-function dtwFor(modelPath) {
+function dtwFor(modelPath, cli) {
   const m = MODELS.find((x) => String(modelPath || '').endsWith(x.file));
-  return m ? ['-nfa', '-dtw', m.id] : [];
+  if (!m) return [];
+  /*
+   * Only the flags THIS whisper-cli knows. Measured on the Oracle server: the
+   * image's whisper.cpp (v1.7.4) has no `-nfa` (flash attention was opt-in
+   * then, so DTW needs nothing switched off) — and whisper-cli answers an
+   * unknown flag by printing its help and exiting 0 without writing a word,
+   * so every caption the server heard itself failed with "Could not read the
+   * transcription". Asked once per binary.
+   */
+  if (cli) {
+    const help = cliHelp(cli);
+    if (help && !/(^|\s)-dtw\b|--dtw\b/.test(help)) return [];
+    if (help && !/(^|\s)-nfa\b|--no-flash-attn\b/.test(help)) return ['-dtw', m.id];
+  }
+  return ['-nfa', '-dtw', m.id];
+}
+const helpOf = new Map();
+/** whisper-cli's own list of flags ('' when it cannot be read). */
+function cliHelp(cli) {
+  if (helpOf.has(cli)) return helpOf.get(cli);
+  let text = '';
+  try {
+    const dir = path.dirname(cli);
+    const env = Object.assign({}, process.env);
+    if (process.platform === 'linux') env.LD_LIBRARY_PATH = [dir, env.LD_LIBRARY_PATH].filter(Boolean).join(':');
+    if (process.platform === 'darwin') env.DYLD_LIBRARY_PATH = [dir, env.DYLD_LIBRARY_PATH].filter(Boolean).join(':');
+    const r = require('child_process').spawnSync(cli, ['-h'], { cwd: dir, env, encoding: 'utf8', timeout: 15000, windowsHide: true });
+    text = String((r.stdout || '') + (r.stderr || ''));
+  } catch (e) { text = ''; }
+  helpOf.set(cli, text);
+  return text;
 }
 
 function wordsFromTokens(json) {
@@ -723,7 +758,7 @@ async function transcribe(ctx, { input, startSec, endSec, model: modelKind, gran
    * Only for word granularity. A highlights SCAN reads whole phrases, where
    * these timings change nothing and flash attention is worth keeping.
    */
-  const dtwArgs = granularity === 'segment' ? [] : dtwFor(model);
+  const dtwArgs = granularity === 'segment' ? [] : dtwFor(model, cli);
   const run = (extra) => runWhisper(cli, ['-m', model, '-f', wav, '-l', 'en', '-t', threads, ...decodeArgs, '-sns', ...dtwArgs, ...extra, '-pp', jsonArg, '-of', outBase],
     (p) => onProgress && onProgress(10 + Math.round(p * 0.88)));
   await run([]);
@@ -1329,6 +1364,6 @@ module.exports = {
   writeAss, writeOverlayAss, burnCaptions, FONTS, FONT_LIST, SIZE_PCT, whisperPaths, fontsDir,
   CAP_TRANSITIONS, capTransition, capEnterTag, capTypewriterLines,
   assSizeFactor, assSizeFor, faceMetrics,
-  cliCandidates, findCli, ensureExecutable, dtwFor,
+  cliCandidates, findCli, ensureExecutable, dtwFor, cliHelp,
   MODELS, models, bestModel, modelFor, fitModel, pickScanModel, SCAN_AUTO, downloadModel, removeModel, asrAudioFilter, wordsFromTokens,
 };
