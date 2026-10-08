@@ -830,8 +830,7 @@ let _hideTimer = null;
     clearTimeout(_hideTimer); _hideTimer = null;
     clearOverlaySave();   // the last export's "Save to Photos" card never greets the next job
     const m = $('#overlayMsg'); if (m) m.textContent = msg || 'Working…';
-    const b = $('#progressBar'); if (b) b.style.width = '0%';
-    const n = $('#overlayPct'); if (n) n.textContent = '0%';
+    resetProgress();
     const o = $('#overlay');
     // over the captions editor when the job was started from it (🎧 Generate
     // captions, Save video with captions) — it ran hidden behind it before
@@ -842,15 +841,48 @@ let _hideTimer = null;
    * the overlay read "0%" from the first short to the last while the work went
    * on underneath it (renderer.js, which the desk uses, sets both).
    */
-  function setProgress(p) {
-    const pct = Math.max(0, Math.min(100, Math.round(p) || 0));
-    const b = $('#progressBar'); if (b) b.style.width = Math.max(2, pct) + '%';
+  /*
+   * ALWAYS MOVING. The real figure arrives in steps (a stretch heard, a pass
+   * finished) and can sit still for a minute while the server works — which
+   * reads as "stuck". So the bar glides towards each real figure, and between
+   * them keeps creeping on, ever slower, never past the next likely step and
+   * never past 99 % until the job really is done. It never goes backwards.
+   */
+  const prog = { target: 0, shown: 0, at: 0, timer: null };
+  function drawProgress(v) {
+    const pct = Math.max(0, Math.min(100, Math.floor(v)));
+    const b = $('#progressBar'); if (b) b.style.width = Math.max(2, v) + '%';
     const n = $('#overlayPct'); if (n) n.textContent = pct + '%';
+  }
+  function tickProgress() {
+    const now = Date.now();
+    if (prog.shown < prog.target) prog.shown += Math.max(0.15, (prog.target - prog.shown) * 0.15);
+    else if (prog.target < 100) {
+      // creep: towards a ceiling a little ahead of the real figure, slower the longer it waits
+      const ceil = Math.min(99, prog.target + Math.max(4, (100 - prog.target) * 0.25));
+      const waited = (now - prog.at) / 1000;
+      prog.shown += Math.max(0, ceil - prog.shown) * Math.min(0.02, 0.6 / (10 + waited));
+    }
+    prog.shown = Math.min(prog.target >= 100 ? 100 : 99, prog.shown);
+    drawProgress(prog.shown);
+  }
+  function resetProgress() {
+    prog.target = 0; prog.shown = 0; prog.at = Date.now();
+    if (!prog.timer) prog.timer = setInterval(tickProgress, 100);
+    drawProgress(0);
+  }
+  function stopProgress() { clearInterval(prog.timer); prog.timer = null; }
+  function setProgress(p) {
+    const pct = Math.max(0, Math.min(100, Number(p) || 0));
+    if (!prog.timer) resetProgress();
+    if (pct > prog.target) { prog.target = pct; prog.at = Date.now(); }
+    if (pct >= 100) { prog.shown = 100; drawProgress(100); }
   }
   function hideOverlay() {
     clearTimeout(_hideTimer); _hideTimer = null;
     clearOverlaySave();
     const o = $('#overlay'); if (o) { o.classList.add('hidden'); o.classList.remove('on-top'); }
+    stopProgress();
     setJobBatch(null);
     showCancel(null);
     const bg = $('#overlayBackground');
