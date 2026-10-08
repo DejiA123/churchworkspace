@@ -40,6 +40,7 @@ const cancelled = () => !!(jobs && jobs.isCancelled && jobs.isCancelled());
 // (measured: gemini-2.5-flash now answers 404, "no longer available to new users")
 const FALLBACK_MODEL = 'gemini-flash-latest';
 let ranked = null;                 // this key's models, best first
+let transcribers = [];   // Google's speech-to-text models, asked first for the hearing
 // models whose free allowance is used up (or not open to this key), until when
 const spent = new Map();
 /*
@@ -82,6 +83,19 @@ async function models(fetchImpl = fetch) {
         const res = await fetchImpl(`${API}/models?pageSize=200`, { headers: { 'x-goog-api-key': key() } });
         if (res.ok) {
           const j = await res.json();
+          /*
+           * GOOGLE'S OWN TRANSCRIBER ("gemini-3.5-transcribe"): a model made for
+           * exactly this — on the public speech benchmarks it makes about a third
+           * fewer mistakes than Whisper large-v3 — with a free allowance of its
+           * own, beside Flash's. It is asked first for the HEARING (not for the
+           * proofreader's questions); Flash and the rest follow it as before.
+           */
+          transcribers = (j.models || [])
+            .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
+            .map((m) => String(m.name || '').replace(/^models\//, ''))
+            .filter((id) => /^gemini-.*transcribe/i.test(id) && !/live|preview-tts/i.test(id))
+            .sort((a, b) => parseFloat((/gemini-(\d+(?:\.\d+)?)/.exec(b) || [])[1] || 0) - parseFloat((/gemini-(\d+(?:\.\d+)?)/.exec(a) || [])[1] || 0))
+            .slice(0, 2);
           const list = (j.models || [])
             .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
             .map((m) => ({ id: String(m.name || '').replace(/^models\//, ''), r: rankModel(m.name) }))
@@ -176,13 +190,14 @@ function thinkingFor(model, level = 'minimal') {
  * in vain; a model too busy ("high demand") hands this request to the next.
  * json: the answer is JSON; think: how much the model may think first.
  */
-async function ask(parts, { fetchImpl = fetch, waits = [15000, 30000, 45000], timeoutMs = 240000, json = false, think = 'minimal', maxTokens = 16384, patient = true } = {}) {
+async function ask(parts, { fetchImpl = fetch, waits = [15000, 30000, 45000], timeoutMs = 240000, json = false, think = 'minimal', maxTokens = 16384, patient = true, hearing = false } = {}) {
   let lastWhy = '', silent = 0;
   const busy = new Set();
   const stopped = () => Object.assign(new Error('Cancelled'), { cancelled: true });
   for (;;) {
     if (cancelled()) throw stopped();
-    const open = await models(fetchImpl);
+    const general = await models(fetchImpl);
+    const open = (hearing ? transcribers.filter((m) => !isSpent(m) && !general.includes(m)) : []).concat(general);
     const model = open.find((m) => !busy.has(m));
     if (!open.length) throw Object.assign(new Error('the free Gemini allowance is used up for today' + (lastWhy ? ' (' + lastWhy + ')' : '')), { exhausted: true });
     if (!model) throw Object.assign(new Error((silent ? 'could not reach Gemini' : 'Gemini is busy right now') + ' (' + lastWhy + ')'), { passing: true, unreachable: silent > 0 });
@@ -229,6 +244,11 @@ async function ask(parts, { fetchImpl = fetch, waits = [15000, 30000, 45000], ti
       if ((res.status === 400 || res.status === 401 || res.status === 403) && /API[_ ]?key|PERMISSION_DENIED.*key|API_KEY_INVALID/i.test(full)) {
         throw Object.assign(new Error('Gemini refused the key (' + res.status + ' ' + (((/"message":"([^"]*)/.exec(full) || [])[1]) || '').slice(0, 120) + ')'), { exhausted: true });
       }
+      // the transcriber turning a request down (a setting it does not take): Flash hears it instead
+      if (res.status === 400 && /transcribe/i.test(model) && !body.generationConfig.thinkingConfig) {
+        lastWhy = res.status + ' ' + (((/"message":"([^"]*)/.exec(full) || [])[1]) || '').slice(0, 120);
+        setSpent(model); next = true; continue;
+      }
       // a thinking setting this model does not take: the next one, or none
       if (res.status === 400 && body.generationConfig.thinkingConfig) {
         if (thinking.length) body.generationConfig.thinkingConfig = thinking.shift(); else delete body.generationConfig.thinkingConfig;
@@ -274,7 +294,7 @@ function latinShare(text) {
   return letters.filter((c) => /[A-Za-z\u00C0-\u024F\u1E00-\u1EFF]/.test(c)).length / letters.length;
 }
 async function hear(flac, { terms = [], fetchImpl = fetch, waits, timeoutMs = 240000 } = {}) {
-  const opt = Object.assign({ fetchImpl, timeoutMs }, waits ? { waits } : {});
+  const opt = Object.assign({ fetchImpl, timeoutMs, hearing: true }, waits ? { waits } : {});
   let r = await ask([audioPart(flac), { text: promptFor(terms) }], opt);
   if (!clean(r.text) && r.finish && r.finish !== 'STOP') throw new Error('Gemini held this stretch back (' + r.finish.toLowerCase() + ')');
   if (latinShare(r.text) < 0.9) {
@@ -350,4 +370,4 @@ async function transcribeSpan({ input, from = 0, to, terms = [], chunkSec = 300,
   return { chunks: got.filter(Boolean), failed, why: failed ? why : '', model };
 }
 
-module.exports = { ready, transcribeSpan, hear, ask, audioPart, latinShare, nextPacificMidnight, encodeFlac, pickModel, rankModel, promptFor, clean, setFfmpeg, _reset: () => { ranked = null; spent.clear(); }, _spent: () => spent };
+module.exports = { ready, transcribeSpan, hear, ask, audioPart, latinShare, nextPacificMidnight, encodeFlac, pickModel, rankModel, promptFor, clean, setFfmpeg, _reset: () => { ranked = null; transcribers = []; spent.clear(); }, _spent: () => spent };
