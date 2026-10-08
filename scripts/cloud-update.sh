@@ -40,6 +40,14 @@ built_ok() {
   [ "$made" -ge "$(git log -1 --format=%ct "$1")" ]
 }
 if [ "$LOCAL" = "$REMOTE" ] && built_ok "$LOCAL"; then
+  # A key added to .env since the studio started (scripts/cloud-keys.sh does
+  # this for you): restart it with the new settings — compose only recreates
+  # the container when they really changed.
+  if [ -f .env ] && [ -f .cloud-built ] && [ .env -nt .cloud-built ]; then
+    $DOCKER compose up -d --remove-orphans >/dev/null 2>&1 || true
+    touch .cloud-built
+    echo "$(stamp) the settings in .env changed — the studio now runs with them"
+  fi
   # Said only to a person at a terminal — cron runs this every 30 minutes into a log.
   if [ -t 1 ]; then
     echo "$(stamp) already up to date: $BRANCH is at ${LOCAL:0:7} here and on GitHub, and that is what is running."
