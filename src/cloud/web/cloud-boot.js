@@ -3416,6 +3416,49 @@ let _hideTimer = null;
     v.addEventListener('emptied', () => { busy = false; });
   }
 
+  /*
+   * ►► A FLIGHT RECORDER FOR CRASHES. ◄◄ What the app was doing, step by step,
+   * kept on the phone while work runs. A page closed under it (iOS does that
+   * when a page uses too much memory) never says goodbye — so if the last
+   * session ended mid-work, the next open sends its last steps to the server's
+   * log (main.js diag:crash), and the next crash says exactly where it was.
+   */
+  const CRASH_KEY = 'mw-crumbs';
+  const crumbs = { list: [], last: '' };
+  function crumb(step) {
+    step = String(step || '').trim();
+    if (!step || step === crumbs.last) return;
+    crumbs.last = step;
+    let mb = 0;
+    try { if (performance.memory) mb = Math.round(performance.memory.usedJSHeapSize / 1048576); } catch (e) {}
+    crumbs.list.push({ at: Date.now(), s: step, mb });
+    if (crumbs.list.length > 25) crumbs.list.shift();
+    try { localStorage.setItem(CRASH_KEY, JSON.stringify({ busy: true, steps: crumbs.list })); } catch (e) {}
+  }
+  function crumbsIdle() { try { localStorage.setItem(CRASH_KEY, JSON.stringify({ busy: false, steps: crumbs.list })); } catch (e) {} }
+  window.__crumb = crumb;
+  function installCrashRecorder() {
+    let prev = null;
+    try { prev = JSON.parse(localStorage.getItem(CRASH_KEY) || 'null'); } catch (e) {}
+    try { localStorage.removeItem(CRASH_KEY); } catch (e) {}
+    if (prev && prev.busy && Array.isArray(prev.steps) && prev.steps.length) {
+      call('diag:crash', { steps: prev.steps, ua: navigator.userAgent }).catch(() => {});
+    }
+    // what the progress card says is the step; a hidden card means nothing is running
+    const msg = document.getElementById('overlayMsg'), batch = document.getElementById('overlayBatch'), ov = document.getElementById('overlay');
+    const read = () => {
+      const on = ov && !ov.classList.contains('hidden');
+      const busy = on || (window.__tasksBusy && window.__tasksBusy());
+      if (!busy) { if (crumbs.list.length) crumbsIdle(); return; }
+      crumb(((batch && !batch.classList.contains('hidden') ? batch.textContent + ' — ' : '') + (msg ? msg.textContent : '')) || 'working');
+    };
+    const mo = new MutationObserver(read);
+    [msg, batch, ov].forEach((el) => { if (el) mo.observe(el, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['class'] }); });
+    setInterval(read, 5000);
+    // a page that is put away cleanly is not a crash
+    window.addEventListener('pagehide', () => { if (!(ov && !ov.classList.contains('hidden'))) crumbsIdle(); });
+  }
+
   function installTapNow() {
     let down = null;
     document.addEventListener('touchstart', (e) => {
@@ -5140,6 +5183,7 @@ let _hideTimer = null;
     installCapChips();
     installCapSheets();
     installFirstFrame();
+    installCrashRecorder();
     installCapTidy();
     installDropBridge();
 

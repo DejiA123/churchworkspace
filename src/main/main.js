@@ -1789,6 +1789,18 @@ ipcMain.handle('wordbook:tidy', wrap(async () => ({ ...wordbook.tidy(), view: wo
 ipcMain.handle('captions:fonts', wrap(async () => Object.keys(captioner.FONTS)));
 // …and the same list with the file each name lives in, so the picker can render
 // every option IN that font instead of just naming it.
+/*
+ * WHERE A PHONE WAS WHEN THE APP DIED. The phone keeps a note of each step of
+ * an export; if the app is closed under it (iOS does this to a page using too
+ * much memory) the next open sends the last steps here, into the server's log:
+ *   docker compose logs studio | grep CRASH
+ */
+ipcMain.handle('diag:crash', wrap(async (e, { steps, ua } = {}) => {
+  const list = (Array.isArray(steps) ? steps : []).slice(-25)
+    .map((x) => `${new Date(+x.at || 0).toISOString().slice(11, 19)} ${String(x.s || '').slice(0, 160)}${x.mb ? ` (${x.mb} MB)` : ''}`);
+  console.log(`[CRASH] a phone's app closed mid-work (${String(ua || '').slice(0, 120)}). Last steps:\n  ` + list.join('\n  '));
+  return true;
+}));
 ipcMain.handle('captions:fontList', wrap(async () => captioner.FONT_LIST.map((f) => ({ name: f.name, family: f.family, file: f.file }))));
 
 /** Delete a burn's text-less intermediate so only the final file (with the text/

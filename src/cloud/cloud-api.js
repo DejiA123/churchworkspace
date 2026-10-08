@@ -218,6 +218,7 @@ const ALLOWED = {
   'captions:engineInfo': true,
   'captions:fonts': true,
   'captions:fontList': true,
+  'diag:crash': true,
   'captions:models': true,
   'captions:downloadModel': true,
   'captions:removeModel': true,
