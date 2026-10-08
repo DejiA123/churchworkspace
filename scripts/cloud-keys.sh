@@ -30,11 +30,15 @@ envset() {
 
 # Does the service accept this key? Prints the HTTP status (200 = yes).
 check_key() {
+  # curl prints its code (000 when it cannot connect) and fails: the code alone is the answer
+  local code=''
   case "$1" in
-    GEMINI_API_KEY) curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "x-goog-api-key: $2" 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1' || echo 000 ;;
-    GROQ_API_KEY)   curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "Authorization: Bearer $2" 'https://api.groq.com/openai/v1/models' || echo 000 ;;
-    *) echo 200 ;;
+    GEMINI_API_KEY) code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "x-goog-api-key: $2" 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1' 2>/dev/null)" || true ;;
+    GROQ_API_KEY)   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "Authorization: Bearer $2" 'https://api.groq.com/openai/v1/models' 2>/dev/null)" || true ;;
+    *) code=200 ;;
   esac
+  case "$code" in [0-9][0-9][0-9]) ;; *) code=000 ;; esac
+  printf '%s' "$code"
 }
 
 ask() {   # name, where to get it, what it looks like
@@ -61,8 +65,14 @@ if [ "$WANT" = "groq" ]; then
 fi
 
 if [ "$changed" = "1" ]; then
-  echo "  restarting the studio with the new key…"
-  $DOCKER compose up -d --remove-orphans >/dev/null 2>&1 || $DOCKER compose up -d --remove-orphans
+  # never in the middle of an export (the restart would break it): then the next update round does it
+  if $DOCKER compose exec -T studio sh -c 'pgrep -x ffmpeg >/dev/null || pgrep -f "[w]hisper-cli" >/dev/null' 2>/dev/null; then
+    warn "something is exporting right now — the studio will start using the new key at the next update round"
+    warn "(or run this when the export is done:  FORCE=1 bash scripts/cloud-update.sh)"
+  else
+    echo "  restarting the studio with the new key…"
+    $DOCKER compose up -d --remove-orphans >/dev/null 2>&1 || $DOCKER compose up -d --remove-orphans
+  fi
 fi
 
 # What the running studio can actually see (names only — never the keys).

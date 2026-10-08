@@ -196,8 +196,9 @@ async function proofread({ words, alt, input, from = 0, windowSec = 600, batch =
     for (let i = at.a; i <= at.b; i++) if (taken.has(i)) clash = true;
     if (clash) continue;
     for (let i = at.a; i <= at.b; i++) taken.add(i);
-    const ctxB = W.slice(Math.max(0, at.a - 4), at.a).map((w) => w.text).join(' ');
-    const ctxA = W.slice(at.b + 1, at.b + 5).map((w) => w.text).join(' ');
+    // the words around it are exactly the ones in the clip (two each side), so "EXACTLY what is said" can be true
+    const ctxB = W.slice(Math.max(0, at.a - 2), at.a).map((w) => w.text).join(' ');
+    const ctxA = W.slice(at.b + 1, at.b + 3).map((w) => w.text).join(' ');
     const heard = W.slice(at.a, at.b + 1).map((w) => w.text).join(' ');
     const likely = String(f.likely).split(/\s+/).map(display).filter((t) => norm(t)).join(' ');
     const t0 = Math.max(0, +W[Math.max(0, at.a - 2)].start - 0.4), t1 = +W[Math.min(W.length - 1, at.b + 2)].end + 0.4;
@@ -222,10 +223,13 @@ async function proofread({ words, alt, input, from = 0, windowSec = 600, batch =
       const r = await gem.ask(parts, Object.assign({ json: true, think: 'low', maxTokens: 4096 }, opt));
       const j = parseJson(r.text);
       for (const ans of (j && Array.isArray(j.answers) ? j.answers : [])) {
+        if (!ans || typeof ans !== 'object') continue;
         const it = bt[Math.round(+ans.clip) - 1];
         if (!it) continue;
-        const c = Math.round(+ans.choice);
-        it.verdict = c === 0 ? 'unsure' : ((c === 2) !== it.flip ? 'proposed' : 'current');
+        // only a clear 1 or 2 is an answer; anything else (missing, "neither", 3) is "cannot tell"
+        // (found by review: a missing choice on a flipped clip used to put the guess in, unheard)
+        const c = typeof ans.choice === 'number' || /^\s*[012]\s*$/.test(String(ans.choice)) ? +ans.choice : NaN;
+        it.verdict = c === 1 ? (it.flip ? 'proposed' : 'current') : c === 2 ? (it.flip ? 'current' : 'proposed') : 'unsure';
       }
       report.asked += bt.length;
     } catch (e) {

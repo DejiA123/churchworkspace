@@ -41,7 +41,9 @@ const isWord = (t) => { const n = norm(t); return !!n && !FILLER.has(n); };
 /** A Gemini word as a caption shows it: no quotation marks or brackets. */
 const display = (t) => String(t || '').replace(/["“”„«»()[\]{}]/g, '').replace(/^[-–—…]+/, '').replace(/[–—…]+$/, '');
 function tokensOf(text) {
-  return String(text || '').split(/\s+/).map((t) => display(t.trim())).filter(isWord);
+  // "(Laughter)", "(inaudible)", "*applause*": Gemini's notes about the room, never words said
+  const said = String(text || '').replace(/\([^)]*\)/g, ' ').replace(/\*[^*]*\*/g, ' ').replace(/\[[^\]]*\]/g, ' ');
+  return said.split(/\s+/).map((t) => display(t.trim())).filter(isWord);
 }
 
 /*
@@ -122,6 +124,23 @@ function fuseGemini(words, alt, chunks, { edge = 1.0, maxBlock = 12, secPerWord 
   const ops = [];               // { i0, i1, tokens, start, end, long, trimBefore, trim }
   const keep = new Set();       // i: Whisper's word kept where Gemini had nothing (or nothing sure)
   const both = new Set();       // i: heard the same by Gemini
+  /*
+   * ONE DECISION PER WORD. Stretches overlap, and a block that starts in one
+   * stretch's own part can run on into the next's; the next stretch, having
+   * heard the seam a little differently, may then want its own change on the
+   * same words. Applying both cut words out twice or doubled them at the seam
+   * (found by review). The first decision on a word stands.
+   */
+  const claimed = new Set(), insertAt = new Set();
+  const claim = (op) => {
+    if (op.i1 < op.i0) {                       // an insertion before word i0
+      if (claimed.has(op.i0) || insertAt.has(op.i0)) return false;
+      insertAt.add(op.i0); ops.push(op); return true;
+    }
+    for (let i = op.i0; i <= op.i1; i++) if (claimed.has(i) || (i > op.i0 && insertAt.has(i))) return false;
+    for (let i = op.i0; i <= op.i1; i++) claimed.add(i);
+    ops.push(op); return true;
+  };
   for (const c of chunks || []) {
     if (!c || !c.text) continue;
     const lo = c.atStart ? -Infinity : c.from + edge, hi = c.atEnd ? Infinity : c.to - edge;
@@ -158,44 +177,69 @@ function fuseGemini(words, alt, chunks, { edge = 1.0, maxBlock = 12, secPerWord 
       if (t0 == null || t1 == null) continue;
       if (!owns(pa.length ? mid(W[pa[0]]) : t0)) continue;
       const room0 = before ? +before.end : t0, room1 = after ? +after.start : t1;
+      const pKey = keyOf(pa.map((i) => W[i])), gKey = gb.map(norm).filter((t) => !FILLER.has(t)).join(' ');
+      const pT = pKey ? pKey.split(' ') : [], gT = gKey ? gKey.split(' ') : [];
       // what the second ear heard here: its words between the middles of the two neighbours
       const a0 = before ? mid(before) : t0 - 0.05, a1 = after ? mid(after) : t1 + 0.05;
-      const altT = keyOf(A.filter((w) => mid(w) > a0 && mid(w) < a1)).split(' ').filter(Boolean);
+      const altW = A.filter((w) => mid(w) > a0 && mid(w) < a1 && norm(w.text) && !FILLER.has(norm(w.text)));
       // the second ear's timing drifts: its copy of a neighbour can fall inside the window
       // (measured: Whisper's invented "praying." pushed "That" later, and the second ear's
-      // "that" landed in the gap) — a neighbour's own word at either end is not part of the block
-      if (before && altT.length && altT[0] === norm(before.text)) altT.shift();
-      if (after && altT.length && altT[altT.length - 1] === norm(after.text)) altT.pop();
+      // "that" landed in the gap) — a neighbour's own word at either end is not part of the
+      // block, unless the block itself repeats it ("we we", "the the": both ears' repeat stays)
+      if (before && altW.length && norm(altW[0].text) === norm(before.text) && pT[0] !== norm(before.text)) altW.shift();
+      if (after && altW.length && norm(altW[altW.length - 1].text) === norm(after.text) && pT[pT.length - 1] !== norm(after.text)) altW.pop();
+      const altT = altW.map((w) => norm(w.text));
       const altKey = altT.join(' ');
-      const pKey = keyOf(pa.map((i) => W[i])), gKey = gb.map(norm).filter((t) => !FILLER.has(t)).join(' ');
       if (pKey === gKey || sameWords(pKey, gKey)) { for (const i of pa) both.add(i); stats.same += pa.length; continue; }
-      // Gemini only LEFT OUT words here (a repeat, a stumble): the same rule as leaving out all of them
-      const pT = pKey ? pKey.split(' ') : [], gT = gKey ? gKey.split(' ') : [];
+      // Gemini only LEFT OUT words here (a repeat, a stumble): the same rule as leaving out all of them,
+      // and the words it kept keep their own Whisper times
       if (gb.length && pT.length > gT.length && subseq(gT, pT)) {
         if (altKey === gKey && A.length && pa.length <= maxBlock) {
-          ops.push({ i0: pa[0], i1: pa[pa.length - 1], tokens: gb.map(display), start: t0, end: t1 }); stats.removed += pT.length - gT.length;
+          const drop = [];
+          let j = 0;
+          for (const i of pa) {
+            const t = norm(W[i].text);
+            if (t && !FILLER.has(t) && j < gT.length && t === gT[j]) { both.add(i); if (display(gb[j]) !== W[i].text) retext.set(i, display(gb[j])); j++; }
+            else drop.push(i);
+          }
+          // each run of dropped words is one removal
+          for (let r = 0; r < drop.length;) {
+            let e = r; while (e + 1 < drop.length && drop[e + 1] === drop[e] + 1) e++;
+            if (claim({ i0: drop[r], i1: drop[e], tokens: [], start: +W[drop[r]].start, end: +W[drop[e]].end })) stats.removed += e - r + 1;
+            r = e + 1;
+          }
         } else { for (const i of pa) keep.add(i); stats.kept += pa.length; }
         continue;
       }
       if (!gb.length) {
         // Gemini left them out: gone only if the second Whisper ear did not hear them either
-        if (!altKey && A.length && pa.length <= maxBlock) { ops.push({ i0: pa[0], i1: pa[pa.length - 1], tokens: [], start: t0, end: t1 }); stats.removed += pa.length; }
-        else { for (const i of pa) keep.add(i); stats.kept += pa.length; }
+        if (!altKey && A.length && pa.length <= maxBlock) {
+          if (claim({ i0: pa[0], i1: pa[pa.length - 1], tokens: [], start: t0, end: t1 })) stats.removed += pa.length;
+        } else { for (const i of pa) keep.add(i); stats.kept += pa.length; }
         continue;
       }
       const twoOfThree = !!altKey && altKey === gKey;
       if (!pa.length) {
         // only Gemini heard these: where Whisper left room for them, or the second ear heard them too
-        if (!before || !after) continue;
+        if (!before || !after || gb.length > maxBlock * 2) continue;
         const gap = room1 - room0;
         // (the second ear heard as many words here as Gemini, if not the same ones: something WAS said)
         const heardToo = altT.length === gT.length && gT.length <= 2;
-        if (!(twoOfThree || heardToo || gap >= gb.length * 0.18) || gb.length > maxBlock * 2) continue;
-        // a dropped word under a stretched neighbour: borrow time from the word before
-        const need = gb.length * 0.18 - gap;
-        const trim = need > 0 ? Math.min(need, (+before.end - +before.start) * 0.5) : 0;
-        ops.push({ i0: idx[pi2], i1: idx[pi2] - 1, tokens: gb.map(display), start: room0 - trim, end: room1, trimBefore: trim > 0 ? idx[pi] : -1, trim });
-        stats.inserted += gb.length;
+        let start, end, trim = 0;
+        if ((twoOfThree || heardToo) && altW.length && +altW[altW.length - 1].end - +altW[0].start >= 0.05 * gb.length) {
+          // WHEN they were said: the second ear heard them, so its timing (inside the room Whisper left)
+          start = Math.max(+before.start + 0.05, +altW[0].start); end = Math.min(room1, +altW[altW.length - 1].end);
+          if (start < room0) trim = room0 - start;
+        } else {
+          if (gap < gb.length * 0.18 && !twoOfThree && !heardToo) continue;
+          // nothing says where in a long silence they were said: not guessed (an "Amen." held for 40 s over a song)
+          if (gap > gb.length * 0.6 + 1.0) continue;
+          const need = gb.length * 0.18 - gap;
+          trim = need > 0 ? Math.min(need, (+before.end - +before.start) * 0.5) : 0;
+          start = room0 - trim; end = room1;
+        }
+        if (!(end > start)) continue;
+        if (claim({ i0: idx[pi2], i1: idx[pi2] - 1, tokens: gb.map(display), start, end, trimBefore: trim > 0 ? idx[pi] : -1, trim })) stats.inserted += gb.length;
         continue;
       }
       // a different word or phrase
@@ -205,9 +249,17 @@ function fuseGemini(words, alt, chunks, { edge = 1.0, maxBlock = 12, secPerWord 
       // came back "Hey. Is that my tig?"
       const shrunk = pT.length >= 4 && gT.length * 2 < pT.length;
       if ((!twoOfThree && (pa.length > maxBlock || gb.length > maxBlock || shrunk)) || !fits) { for (const i of pa) keep.add(i); stats.kept += pa.length; continue; }
+      // laid over the old words' time — widened into the room around them when there are more words to fit
+      let s0 = t0, s1 = t1;
+      const want = gb.length * secPerWord;
+      if (s1 - s0 < want) {
+        const extra = want - (s1 - s0);
+        s0 = Math.max(room0, s0 - extra / 2); s1 = Math.min(room1, s0 + want);
+        if (s1 - s0 < want) s0 = Math.max(room0, s1 - want);
+      }
       const overrule = !!altKey && altKey === pKey;          // both Whisper ears heard the caption's words
       const long = overrule && (gb.length >= 4 || pa.length >= 4);
-      ops.push({ i0: pa[0], i1: pa[pa.length - 1], tokens: gb.map(display), start: t0, end: t1, long });
+      if (!claim({ i0: pa[0], i1: pa[pa.length - 1], tokens: gb.map(display), start: s0, end: s1, long })) continue;
       stats.replaced += gb.length;
       if (overrule) stats.overruled++;
       if (long) stats.long++;
@@ -236,7 +288,7 @@ function fuseGemini(words, alt, chunks, { edge = 1.0, maxBlock = 12, secPerWord 
     });
     const count = op.i1 >= op.i0 ? op.i1 - op.i0 + 1 : 0;
     // a removed word that ended a sentence hands its full stop to the word before
-    if (!n && count) {
+    if (!n && count && out[op.i1]) {
       const last = out[op.i1], prev = out[op.i0 - 1];
       const p = /[.?!]$/.exec(last.text || '');
       if (p && prev && !/[.?!,;:]$/.test(prev.text)) prev.text += p[0];

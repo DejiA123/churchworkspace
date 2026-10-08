@@ -39,21 +39,25 @@ built_ok() {
   made="$(date -d "$($DOCKER image inspect -f '{{.Created}}' "$img" 2>/dev/null)" +%s 2>/dev/null || echo 0)"
   [ "$made" -ge "$(git log -1 --format=%ct "$1")" ]
 }
+ENV_ONLY=0
+WHAT="new version"
 if [ "$LOCAL" = "$REMOTE" ] && built_ok "$LOCAL"; then
+  # (built_ok can also say yes from the image's date: write the note down, so a
+  # change to .env below can be noticed from now on)
+  [ -f .cloud-built ] || echo "$LOCAL" > .cloud-built
   # A key added to .env since the studio started (scripts/cloud-keys.sh does
-  # this for you): restart it with the new settings — compose only recreates
-  # the container when they really changed.
-  if [ -f .env ] && [ -f .cloud-built ] && [ .env -nt .cloud-built ]; then
-    $DOCKER compose up -d --remove-orphans >/dev/null 2>&1 || true
-    touch .cloud-built
-    echo "$(stamp) the settings in .env changed — the studio now runs with them"
+  # this for you): restart it with the new settings — but with the same care as
+  # a new version: never in the middle of an export or an upload.
+  if [ -f .env ] && [ .env -nt .cloud-built ]; then
+    ENV_ONLY=1; WHAT="new settings"
+  else
+    # Said only to a person at a terminal — cron runs this every 30 minutes into a log.
+    if [ -t 1 ]; then
+      echo "$(stamp) already up to date: $BRANCH is at ${LOCAL:0:7} here and on GitHub, and that is what is running."
+      echo "             (Work still on another branch arrives once it is merged into $BRANCH.)"
+    fi
+    exit 0
   fi
-  # Said only to a person at a terminal — cron runs this every 30 minutes into a log.
-  if [ -t 1 ]; then
-    echo "$(stamp) already up to date: $BRANCH is at ${LOCAL:0:7} here and on GitHub, and that is what is running."
-    echo "             (Work still on another branch arrives once it is merged into $BRANCH.)"
-  fi
-  exit 0
 fi
 
 # Only when nobody is using it. A restart takes ~20 seconds, but in those
@@ -64,16 +68,27 @@ fi
 IDLE_MIN="${MW_UPDATE_IDLE_MIN:-15}"
 if [ "${FORCE:-0}" != "1" ]; then
   # (the voice cleaner too: a long Studio-sound export spends minutes in it with no ffmpeg running)
-  if $DOCKER compose exec -T studio sh -c 'pgrep -x ffmpeg >/dev/null || pgrep -x deep-filter >/dev/null || pgrep -f whisper-cli >/dev/null' 2>/dev/null; then
-    echo "$(stamp) new version waiting — something is exporting, trying again next round"
+  if $DOCKER compose exec -T studio sh -c 'pgrep -x ffmpeg >/dev/null || pgrep -x deep-filter >/dev/null || pgrep -f "[w]hisper-cli" >/dev/null' 2>/dev/null; then
+    echo "$(stamp) $WHAT waiting — something is exporting, trying again next round"
     exit 0
   fi
   IDLE="$($DOCKER compose exec -T studio node -e "require('http').get('http://127.0.0.1:'+(process.env.MW_CLOUD_PORT||7390)+'/api/idle',r=>{let b='';r.on('data',d=>b+=d);r.on('end',()=>{try{const j=JSON.parse(b);console.log(j.uploads>0?0:j.idleSec)}catch(e){console.log(-1)}})}).on('error',()=>console.log(-1))" 2>/dev/null | tr -dc '0-9-' || true)"
   # (-1 / nothing = an older studio without /api/idle, or not running: update)
   if [ -n "$IDLE" ] && [ "$IDLE" -ge 0 ] && [ "$IDLE" -lt $((IDLE_MIN * 60)) ]; then
-    echo "$(stamp) new version waiting — someone is using the studio, trying again next round"
+    echo "$(stamp) $WHAT waiting — someone is using the studio, trying again next round"
     exit 0
   fi
+fi
+
+if [ "$ENV_ONLY" = "1" ]; then
+  # only marked as done once the studio really runs with them (a failed restart is tried next round)
+  if $DOCKER compose up -d --remove-orphans; then
+    touch .cloud-built
+    echo "$(stamp) the settings in .env changed — the studio now runs with them"
+  else
+    echo "$(stamp) could not restart the studio with the new settings — trying again next round"
+  fi
+  exit 0
 fi
 
 if [ "$LOCAL" != "$REMOTE" ]; then

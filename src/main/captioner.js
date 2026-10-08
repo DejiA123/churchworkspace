@@ -556,9 +556,14 @@ function asrAudioFilter({ denoise = 0, floorDb } = {}) {
  * An unrecognised file (someone dropped in their own) gets no DTW rather than a
  * wrong preset, and captions fall back to the token timestamps as before.
  */
+// whisper.cpp's own names for the alignment presets (examples/cli/cli.cpp): dots, not dashes —
+// "-dtw large-v3-turbo" is refused ("unknown DTW preset", exit 3), so every Turbo caption failed
+const DTW_PRESET = { 'large-v3-turbo': 'large.v3.turbo', 'large-v3': 'large.v3', 'large-v2': 'large.v2', 'large-v1': 'large.v1' };
+const dtwPreset = (id) => DTW_PRESET[id] || id;
 function dtwFor(modelPath, cli) {
   const m = MODELS.find((x) => String(modelPath || '').endsWith(x.file));
   if (!m) return [];
+  const preset = dtwPreset(m.id);
   /*
    * Only the flags THIS whisper-cli knows. Measured on the Oracle server: the
    * image's whisper.cpp (v1.7.4) has no `-nfa` (flash attention was opt-in
@@ -570,15 +575,18 @@ function dtwFor(modelPath, cli) {
   if (cli) {
     const help = cliHelp(cli);
     if (help && !/(^|\s)-dtw\b|--dtw\b/.test(help)) return [];
-    if (help && !/(^|\s)-nfa\b|--no-flash-attn\b/.test(help)) return ['-dtw', m.id];
+    if (help && !/(^|\s)-nfa\b|--no-flash-attn\b/.test(help)) return ['-dtw', preset];
   }
-  return ['-nfa', '-dtw', m.id];
+  return ['-nfa', '-dtw', preset];
 }
 const helpOf = new Map();
 /** whisper-cli's own list of flags ('' when it cannot be read). */
 function cliHelp(cli) {
   if (helpOf.has(cli)) return helpOf.get(cli);
   let text = '';
+  // runnable first (a fresh unzip has no exec bit), and only a real answer is remembered —
+  // a failed read once wedged the flags until the app was restarted (found by review)
+  try { ensureExecutable(cli); } catch (e) {}
   try {
     const dir = path.dirname(cli);
     const env = Object.assign({}, process.env);
@@ -587,7 +595,7 @@ function cliHelp(cli) {
     const r = require('child_process').spawnSync(cli, ['-h'], { cwd: dir, env, encoding: 'utf8', timeout: 15000, windowsHide: true });
     text = String((r.stdout || '') + (r.stderr || ''));
   } catch (e) { text = ''; }
-  helpOf.set(cli, text);
+  if (/usage|-m FNAME|--model/i.test(text)) helpOf.set(cli, text);
   return text;
 }
 
@@ -1364,6 +1372,6 @@ module.exports = {
   writeAss, writeOverlayAss, burnCaptions, FONTS, FONT_LIST, SIZE_PCT, whisperPaths, fontsDir,
   CAP_TRANSITIONS, capTransition, capEnterTag, capTypewriterLines,
   assSizeFactor, assSizeFor, faceMetrics,
-  cliCandidates, findCli, ensureExecutable, dtwFor, cliHelp,
+  cliCandidates, findCli, ensureExecutable, dtwFor, dtwPreset, cliHelp,
   MODELS, models, bestModel, modelFor, fitModel, pickScanModel, SCAN_AUTO, downloadModel, removeModel, asrAudioFilter, wordsFromTokens,
 };

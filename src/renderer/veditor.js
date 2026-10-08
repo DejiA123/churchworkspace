@@ -6574,6 +6574,9 @@
    * would silently wipe the transcript. Only operations that change the captions
    * themselves (🧹 Clear captions) record them, so only those can restore them.
    */
+  // an export's frozen copy (and its task) belongs to that export, never to an undo step:
+  // restored by Ctrl+Z, it outlived the export (found by review) — and it is heavy
+  const TRANSIENT = new Set(['__snap', '__task', '_thumbing']);
   function snapshotState(withCaps) {
     const s = { segments: ve.segments, sel: ve.sel, textOverlays: ve.textOverlays, textSel: ve.textSel, audio: ve.audio, audioSel: ve.audioSel, sounds: ve.sounds || [] };
     if (withCaps) {
@@ -6585,7 +6588,7 @@
         source: ve._capSource || null, mode: ve._capMode || null, clipId: ve._capClipId || null,
       };
     }
-    return JSON.stringify(s);
+    return JSON.stringify(s, (k, v) => (TRANSIENT.has(k) ? undefined : v));
   }
   /** Does this snapshot carry captions? (so undo/redo stay symmetrical) */
   function snapHasCaps(json) { try { return !!JSON.parse(json).caps; } catch (e) { return false; } }
@@ -6600,6 +6603,7 @@
   function restoreState(json) {
     const s = JSON.parse(json);
     ve.segments = s.segments; ve.sel = s.sel; ve.textOverlays = s.textOverlays; ve.textSel = s.textSel;
+    for (const x of ve.segments || []) if (x) { delete x.__snap; delete x.__task; delete x._thumbing; }
     if (s.audio) { ve.audio = s.audio; ve.audioSel = s.audioSel; }
     if (s.sounds) { ve.sounds = s.sounds; if (!ve.sounds.some((x) => x.id === ve.soundSel)) ve.soundSel = null; renderSoundTrack(); syncSoundPreview(); }
     if (s.caps) {
@@ -9381,6 +9385,9 @@
 
   async function exportSegment(id) {
     const s = ve.segments.find((x) => x.id === id); if (!s) return;
+    // already part of an Export all that is running: exporting it again here would replace that
+    // export's frozen copy of it, and then throw it away (found by review)
+    if (s.__task) return window.__toast && window.__toast(`“${s.label || 'This short'}” is already being exported by Export all — it will be in that batch.`, 'error', 7000);
     const task = startTask(`Exporting “${s.label || 'clip'}”`, { durationSec: Math.max(0.1, s.end - s.start), quality: qualityCfg() });
     armExport(s, task);
     /*
@@ -9395,7 +9402,7 @@
     // Lines already on the 💬 lane are burned as they are — that needs no speech
     // engine on this machine (they may have come from the cloud ear, or been
     // typed). Only captions still to be HEARD wait on one.
-    const withCaps = hasClipCaps(s);
+    const withCaps = exportHasCaps(s);
     if (window.__chainBegin) {
       window.__chainBegin(task, exportPlan(s, { track: reframeOn() && !!window.FaceTrack, captions: withCaps }));
     }
@@ -9685,7 +9692,7 @@
      */
     // The captions on the 💬 track over the kept stretch ALWAYS go in (this used
     // to wait on the auto-caption box and dropped them when it was off).
-    const planCaps = hasClipCaps(whole);
+    const planCaps = exportHasCaps(whole);
     if (window.__chainBegin) {
       window.__chainBegin(task, exportPlan(whole, { track: false, captions: planCaps, overlays: 'source' }));
     }
@@ -10002,7 +10009,7 @@
            * waiting on tracking and must be told so.
            */
           // One pass for both when both are wanted — see exportSegment.
-          const caps = hasClipCaps(s);
+          const caps = exportHasCaps(s);
           if (caps) capped++;
           /*
            * The number on the chip is THIS short's, start to finish — so the
@@ -13030,8 +13037,13 @@
    * the clip would only let the two drift apart, so the clip stores nothing but
    * a marker of WHAT RANGE it was captioned at (to skip re-transcribing it).
    */
-  const capLinesIn = (s) => (((F(s) && F(s).capEvents) || ve.capEvents) || []).filter((e) =>
+  // `frozen`: the export chain itself, reading the picture it took when it started; everyone
+  // else (Burn, the window, the badges) reads the live lane (found by review: Burn during a
+  // background Export all burned the copy from when the batch began)
+  const capLinesIn = (s, frozen) => ((((frozen && F(s)) ? F(s).capEvents : ve.capEvents)) || []).filter((e) =>
     e && e.end > s.start + 0.02 && e.start < s.end - 0.02);
+  /** Inside an export: does the picture it froze carry captions for this clip? */
+  const exportHasCaps = (s) => capLinesIn(s, true).length > 0;
   /** Does this clip's export carry captions? Exactly when the 💬 track has lines over it.
    *  (The REAL track — never an export's frozen copy, which can be stale.) */
   const hasClipCaps = (s) => (ve.capEvents || []).some((e) => e && e.end > s.start + 0.02 && e.start < s.end - 0.02);
@@ -13185,7 +13197,7 @@
    * (Export video renders at the recording's own size, not the social preset).
    */
   async function autoCaptionExport(s, shortPath, textImages, textSize) {
-    const rel = capLinesIn(s)
+    const rel = capLinesIn(s, true)
       .map((e) => ({ start: Math.max(0, e.start - s.start), end: Math.min(s.end, e.end) - s.start, text: e.text }))
       .filter((e) => e.text && e.text.trim());
     const timed = reTimed(s) ? remapCapEventsThroughCuts(s, rel) : rel;

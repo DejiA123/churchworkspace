@@ -103,6 +103,26 @@ const TEXT = 'A number of people have read that. When you have read that, the fi
   ok(/Clip 1: \(1\) "[^"]*read that[^"]*"  \(2\) "[^"]*real dad/.test(p) && /Clip 2: \(1\) "[^"]*real dad[^"]*"  \(2\) "[^"]*read that/.test(p), 'the two versions come in no telling order', p.slice(-600));
   ok(/EXACTLY what the speaker says/.test(p) && /answer 0/.test(p), 'the question asks for the sounds, and allows "cannot tell"');
 
+  console.log('\n[5a] only a clear answer counts (found by review)');
+  {
+    const odd = async (url, o) => {
+      if (/\/models\?/.test(url)) return { ok: true, status: 200, json: async () => listing };
+      const text = JSON.parse(o.body).contents[0].parts.map((p) => p.text || '').join('\n');
+      if (/proofreading/.test(text)) return reply({ fixes: [{ line: 2, heard: 'read that,', likely: 'real dad' }, { line: 3, heard: 'feel of love', likely: 'fill of love' }] });
+      return reply({ answers: [{ clip: 1, choice: 'neither' }, null, { clip: 2 }] });
+    };
+    gem._reset();
+    const r5 = await rl.proofread({ words, alt, input: 'x', from: 0, fetchImpl: odd, encode: enc });
+    ok(said(r5.words) === said(words) && r5.report.changed === 0 && r5.report.unsure === 2, '"neither", a missing choice, a null answer: nothing changed, both listed for a look', r5.report);
+    const p5 = (await (async () => { let last = ''; await rl.proofread({ words, alt, input: 'x', from: 0, encode: enc, fetchImpl: async (url, o) => {
+      if (/\/models\?/.test(url)) return { ok: true, status: 200, json: async () => listing };
+      const t = JSON.parse(o.body).contents[0].parts.map((p) => p.text || '').join('\n'); if (!/proofreading/.test(t)) last = t;
+      return reply(/proofreading/.test(t) ? { fixes: [{ line: 3, heard: 'feel of love', likely: 'fill of love' }] } : { answers: [] });
+    } }); return last; })());
+    ok(/\(1\) "your feel of love before you"/.test(p5) || /\(1\) "[^"]*"/.test(p5) && !/Amen/.test(p5), 'the words around a clip are the two each side that the clip holds', p5.slice(-200));
+    gem._reset();
+  }
+
   console.log('\n[5b] a bonus, never a wait');
   {
     let calls = 0;

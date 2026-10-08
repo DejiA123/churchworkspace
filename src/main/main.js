@@ -904,8 +904,7 @@ ipcMain.handle('video:speechPauses', wrap(async (e, { input, startSec, endSec, m
     // …the same answer captions:transcribe would give for this clip.
     transcript: {
       words: book.entries, segments: book.entries, model: r.model, engine: 'cloud',
-      engineName: cloudspeech.state().providerName + ' — Whisper ' + (/turbo/.test(cloudspeech.captionModelId()) ? 'Large v3 Turbo' : 'Large v3')
-      + (check.third && check.third.heard ? ' + Google ' + prettyGemini(check.third.model) : ''),
+      engineName: cloudspeech.state().providerName + ' — Whisper ' + (/turbo/.test(cloudspeech.captionModelId()) ? 'Large v3 Turbo' : 'Large v3'),
       fixed: book.count, fixedWords: book.count ? wordbook.summarise(book.changes, 4) : '', cloudMs: Date.now() - t0,
     },
   });
@@ -1318,11 +1317,12 @@ ipcMain.handle('captions:engineInfo', wrap(async () => {
 ipcMain.handle('captions:transcribe', wrap(async (e, { input, startSec, endSec, fast, denoise, model, plain, jobId }) => {
   const prog = onProgress(e, jobId);
   const local = model === CLOUD_CAPTIONS ? undefined : model;
-  if (wantsCloudCaptions(model, fast)) {
+  // (one rule decides "meant for the cloud" — also for a remembered model this machine cannot hold)
+  const meantCloud = wantsCloudCaptions(model, fast);
+  if (meantCloud) {
     const r = await cloudCaptions({ input, startSec, endSec, denoise, localModel: local, plain: !!plain, onProgress: prog });
     if (r) return r;
   }
-  const meantCloud = model === CLOUD_CAPTIONS || (!model && !fast && cloudspeech.fileReady());
   // the server's own model gives the timing; when the cloud was meant, Gemini still gives the words
   const pcProg = meantCloud && geminiear.ready() && prog ? (p) => prog(Math.round(p * 0.9)) : prog;
   const res = await captioner.transcribe(getCtx(), { input, startSec, endSec, fast: !!fast, denoise, model: local, onProgress: pcProg });
@@ -1332,9 +1332,11 @@ ipcMain.handle('captions:transcribe', wrap(async (e, { input, startSec, endSec, 
     const from = clip ? Math.max(0, +startSec || 0) : 0;
     const to = clip ? +endSec : (res.durationSec || (await video.getInfo(getCtx(), input)).durationSec || 0);
     const gp = await geminiPass({ words: res.words, input, from, to, prog });
+    jobs.throwIfCancelled();
+    // the answer always says what the third ear did — also when it could not be heard, and why
+    if (gp.third) extra.check = { checked: false, why: 'the second listen needs the cloud', third: gp.third, relisten: gp.relisten };
     if (gp.third && gp.third.heard) {
       extra.words = gp.words; extra.segments = gp.words;
-      extra.check = { checked: false, why: 'the second listen needs the cloud', third: gp.third, relisten: gp.relisten };
       for (const w of gp.unsure) w.doubt = true;
       extra.engineName = 'this server\'s own speech model + Google ' + prettyGemini(gp.third.model);
     }
@@ -1452,19 +1454,27 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
   const thirdOn = book.entries.length > 0 && geminiear.ready();
   const heard = [0, 0];
   const both = () => prog && prog(60 + Math.round(((heard[0] + heard[1]) / (thirdOn ? 2 : 1)) * 36));
-  const asCancel = (e) => { if (e && e.cancelled) throw new jobs.CancelledError(); };
   const tListen = Date.now();
+  /*
+   * Both ears are waited for, even when one is cancelled: passing the cancel on
+   * while the other still runs ended the job, cleared its cancel flag, and left
+   * the other ear hearing the rest of the sermon on the free allowance for
+   * nobody (found by review).
+   */
+  let stopped = false;
+  const settle = (e, fallback) => { if (e && e.cancelled) { stopped = true; return null; } return fallback; };
   const [second, third] = await Promise.all([
     (!pcSec && book.entries.length) ? cloudspeech.secondOpinion({
       input, from, to, words: [],      // compared below, after the Word Book
       terms: captionTerms(), plain,
       onProgress: (p) => { heard[0] = p / 100; both(); },
-    }).catch((e) => { asCancel(e); return { checked: false, why: (e && e.message) || 'the second listen failed' }; }) : null,
+    }).catch((e) => settle(e, { checked: false, why: (e && e.message) || 'the second listen failed' })) : null,
     thirdOn ? geminiear.transcribeSpan({
       input, from, to, terms: captionTerms(),
       onProgress: (p) => { heard[1] = p; both(); },
-    }).catch((e) => { asCancel(e); return { chunks: [], failed: 1, why: (e && e.message) || 'the third listen failed' }; }) : null,
+    }).catch((e) => settle(e, { chunks: [], failed: 1, why: (e && e.message) || 'the third listen failed' })) : null,
   ]);
+  if (stopped || jobs.isCancelled()) throw new jobs.CancelledError();
   if (second) check = second;
   const listenMs = Date.now() - tListen;
   let alt = null;
@@ -1487,6 +1497,7 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
   let relistenUnsure = [];
   if (third) {
     const gp = await geminiPass({ words: book.entries, alt, heard: third, input, from, prog });
+    jobs.throwIfCancelled();
     // (when Gemini heard nothing, gp.words IS book.entries: emptying one emptied both — measured on
     // the live server with Gemini's day used up, every caption came back with no words at all)
     if (gp.words !== book.entries) { const kept = gp.words.slice(); book.entries.length = 0; book.entries.push(...kept); }
@@ -1496,22 +1507,21 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
   }
   // where the time went (the first hearing, the second and third together, the proofreader)
   check.ms = { first: tListen - t0, others: listenMs, proofread: check.relisten ? (check.relisten.readMs || 0) + (check.relisten.listenMs || 0) : 0 };
-  if (alt) {
-    check.doubts = cloudspeech.markDisagreements(book.entries, alt);
-    if (check.third && check.third.heard) {
-      // what Gemini heard (with the caption's Whisper, or instead of it) is not listed for a look —
-      // except a long phrase where it overruled BOTH Whisper ears: listed, with Whisper's hearing offered
-      let settled = 0;
-      const recheck = new Set(relistenUnsure);
-      for (const w of book.entries) {
-        // the proofreader doubted it and the audio could not settle it: listed
-        if (w.long || recheck.has(w)) { if (!w.doubt) { w.doubt = true; check.doubts++; } }
-        else if (w.doubt && (w.src === 'both' || w.src === 'gemini' || w.src === 'relisten')) { delete w.doubt; check.doubts--; settled++; }
-      }
-      check.third.settled = settled;
+  if (alt) check.doubts = cloudspeech.markDisagreements(book.entries, alt);
+  if (check.third && check.third.heard) {
+    // what Gemini heard (with the caption's Whisper, or instead of it) is not listed for a look —
+    // except a long phrase where it overruled BOTH Whisper ears, and what the proofreader doubted
+    // and the audio could not settle: listed (with or without a second ear to compare)
+    let settled = 0;
+    check.doubts = check.doubts || 0;
+    const recheck = new Set(relistenUnsure);
+    for (const w of book.entries) {
+      if (w.long || recheck.has(w)) { if (!w.doubt) { w.doubt = true; check.doubts++; } }
+      else if (w.doubt && (w.src === 'both' || w.src === 'gemini' || w.src === 'relisten')) { delete w.doubt; check.doubts--; settled++; }
     }
-    check.alt = alt.map((w) => ({ text: w.text, start: w.start, end: w.end }));
+    check.third.settled = settled;
   }
+  if (alt) check.alt = alt.map((w) => ({ text: w.text, start: w.start, end: w.end }));
   if (prog) prog(100);
   return {
     check,
