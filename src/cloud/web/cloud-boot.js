@@ -417,6 +417,10 @@ let _hideTimer = null;
 
   /** A path on the studio machine, as something this browser can load. */
   window.MW_FILE_URL = (p) => '/api/media?p=' + encodeURIComponent(p) + (token ? '&k=' + encodeURIComponent(token) : '');
+  /* The bundled caption fonts, by file name: an address the phone may keep
+   * (cloud-api.js /fonts/, cached by sw.js) — through the media route above
+   * all 3.2 MB came down again every time the app opened. */
+  window.MW_FONT_URL = (file) => '/fonts/' + encodeURIComponent(file);
   const downloadUrl = (p) => '/api/file?p=' + encodeURIComponent(p) + '&dl=1' + (token ? '&k=' + encodeURIComponent(token) : '');
 
   /* MediaPipe loads its own runtime by appending names to this base, so it has
@@ -1015,46 +1019,142 @@ let _hideTimer = null;
    * An iPhone in Low Power Mode locks itself after 30 seconds, and a locked
    * phone puts the page to sleep mid-export. Like CapCut, the studio keeps the
    * screen awake while an export, a montage or a save to the phone is running,
-   * and lets it sleep again the moment nothing is. Two ways at once, because
-   * each fails somewhere: the Screen Wake Lock (iOS 16.4+, home-screen apps
-   * from iOS 18.4) and, behind it, a tiny silent looping video (a playing
-   * video keeps any iPhone awake, Low Power Mode included). The video has no
-   * sound track, so it never touches the music or the editor's audio.
+   * and lets it sleep again shortly after nothing is.
+   *
+   * WHAT AN IPHONE ACTUALLY ALLOWS (WebKit's own source, not folklore — the
+   * first version of this trusted folklore and kept nothing awake):
+   *  • The Screen Wake Lock is granted only to a page the person has just
+   *    TAPPED (within 5 s). Once one request has been granted that way, later
+   *    ones in the same page life go through without a tap (WakeLock.cpp). So
+   *    the lock is asked for INSIDE taps — the first tap of every page life,
+   *    to unlock the later asks, and any tap while work runs — never only from
+   *    a timer, which is all this used to do: it held only when a 2-second
+   *    tick happened to land within 5 s of a tap, which is why it "worked"
+   *    sometimes, and never after the app reopened itself mid-export.
+   *  • When it is still refused (the app reopened and resumed an export by
+   *    itself, before anyone touched it), the page says "tap the screen once".
+   *  • The silent looping MUTED video it leant on can never keep an iPhone
+   *    awake: WebKit ignores a video that loops, that is muted, or that has no
+   *    sound track — and in Low Power Mode it will not even start one without
+   *    a tap. The video is now only for phones without a working wake lock
+   *    (home-screen apps before iOS 18.4): a clip with a silent sound track,
+   *    not muted, sent back to its start instead of looping, started in a tap
+   *    and kept (a new element would need a new tap). Being "sound", it can
+   *    pause music playing in another app — which is why it is the fallback.
+   *  • Work pauses between shorts for a second or two; the screen is held for
+   *    a short grace after the work stops, so those gaps never drop it.
    */
-  const awake = { holds: new Set(), lock: null, vid: null, timer: null };
-  const AWAKE_MP4 = 'data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMrbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAB9AAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAlV0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAB9AAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAfQAAAAAAABAAAAAAHNbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAgABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABeG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAThzdGJsAAAAuHN0c2QAAAAAAAAAAQAAAKhhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABFUxhdmM2MC4zMS4xMDIgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAALmF2Y0MBQsAK/+EAFmdCwArZHsBEAAADAAQAAAMACDxImSABAAVoy4PLIAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAAApAAAAKQAAAABhzdHRzAAAAAAAAAAEAAAACAABAAAAAABRzdHNzAAAAAAAAAAEAAAABAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAACAAAAAQAAABxzdHN6AAAAAAAAAAAAAAACAAAChgAAAAoAAAAUc3RjbwAAAAAAAAABAAADWwAAAGJ1ZHRhAAAAWm1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAALWlsc3QAAAAlqXRvbwAAAB1kYXRhAAAAAQAAAABMYXZmNjAuMTYuMTAwAAAACGZyZWUAAAKYbWRhdAAAAnAGBf//bNxF6b3m2Ui3lizYINkj7u94MjY0IC0gY29yZSAxNjQgcjMxMDggMzFlMTlmOSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjMgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0wIHJlZj0zIGRlYmxvY2s9MTowOjAgYW5hbHlzZT0weDE6MHgxMTEgbWU9aGV4IHN1Ym1lPTcgcHN5PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhlZF9yZWY9MSBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTAgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTIgdGhyZWFkcz0xIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MCB3ZWlnaHRwPTAga2V5aW50PTI1MCBrZXlpbnRfbWluPTEgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD00MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAAOZYiEBb///w9FAAFPf4AAAAAGQZo4CvqA';
+  const AWAKE_GRACE_MS = 15000;
+  const awake = { holds: new Set(), lock: null, pending: null, primed: false, err: '', vid: null, vidErr: '', busy: false, idleSince: 0, timer: null, grace: AWAKE_GRACE_MS, note: null };
+  const AWAKE_MP4 = 'data:video/mp4;base64,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';
+  // a home-screen app on iOS before 18.4: the wake lock is there but does nothing (WebKit bug 254545)
+  const awakeLockBroken = (() => {
+    try {
+      const standalone = window.navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+      const m = /(?:iPhone|iPad|iPod).*? OS (\d+)_(\d+)/.exec(navigator.userAgent || '');
+      return !!(standalone && m && (+m[1] < 18 || (+m[1] === 18 && +m[2] < 4)));
+    } catch (e) { return false; }
+  })();
+  const awakeUseVideo = () => !('wakeLock' in navigator) || awakeLockBroken;
   function awakeNeeded() {
     if (awake.holds.size) return true;
     const o = document.getElementById('overlay'); if (o && !o.classList.contains('hidden')) return true;
+    try { if (window.__tasksBusy && window.__tasksBusy()) return true; } catch (e) {}
     try { if ((window.__tasksList ? window.__tasksList() : []).some((t) => t.state === 'run')) return true; } catch (e) {}
     try { if (window.MWSocial && window.MWSocial.busy && window.MWSocial.busy()) return true; } catch (e) {}
     return false;
   }
-  async function awakeOn() {
+  // needed now, or only just stopped being (the grace between one short and the next)
+  function awakeWanted() {
+    if (awakeNeeded()) { awake.idleSince = 0; awake.busy = true; return true; }
+    if (!awake.busy) return false;
+    if (!awake.idleSince) awake.idleSince = Date.now();
+    if (Date.now() - awake.idleSince < awake.grace) return true;
+    awake.busy = false; awake.idleSince = 0;
+    return false;
+  }
+  /** Ask for the screen lock — synchronously, so a tap that calls this counts. One ask at a time. */
+  function awakeRequestLock() {
+    if (!('wakeLock' in navigator) || awake.lock || awake.pending || document.visibilityState !== 'visible') return;
+    let req;
+    try { req = navigator.wakeLock.request('screen'); } catch (e) { awake.err = (e && e.name) || 'Error'; return; }
+    awake.pending = req;
+    Promise.resolve(req).then((lock) => {
+      awake.pending = null; awake.primed = true; awake.err = '';
+      // the first-tap ask that only unlocks later ones: let go at once
+      if (!awakeWanted()) { try { lock.release(); } catch (e) {} return; }
+      awake.lock = lock;
+      lock.addEventListener('release', () => { if (awake.lock === lock) awake.lock = null; });
+      awakeNote(false);
+    }, (e) => { awake.pending = null; awake.err = (e && e.name) || 'Error'; awakeNote(awakeWanted()); });
+  }
+  function awakeVideo() {
+    if (awake.vid) return awake.vid;
+    const v = document.createElement('video');
+    v.playsInline = true; v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', '');
+    v.setAttribute('aria-hidden', 'true'); v.setAttribute('title', 'Keeping the screen on');
+    v.muted = false; v.volume = 1;   // its sound track is silence; a muted video keeps nothing awake
+    v.preload = 'auto';
+    v.style.cssText = 'position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:-1';
+    // no `loop`: back to the start before it can end
+    v.addEventListener('timeupdate', () => { if (v.currentTime > 0.5) v.currentTime = Math.random() * 0.4; });
+    v.src = AWAKE_MP4;
+    document.body.appendChild(v);
+    awake.vid = v;
+    return v;
+  }
+  function awakePlayVideo() {
+    const v = awakeVideo();
+    if (!v.paused) return;
+    try { const p = v.play(); if (p && p.then) p.then(() => { awake.vidErr = ''; awakeNote(false); }, (e) => { awake.vidErr = (e && e.name) || 'Error'; awakeNote(awakeWanted()); }); } catch (e) {}
+  }
+  const awakeHeld = () => !!awake.lock || !!(awake.vid && !awake.vid.paused);
+  /* "Tap the screen once": shown only while work runs, nothing holds the screen and an ask was refused. */
+  function awakeNote(show) {
+    show = !!show && !awakeHeld() && document.visibilityState === 'visible' && (awake.err === 'NotAllowedError' || !!awake.vidErr);
+    if (!show) { if (awake.note) awake.note.classList.add('hidden'); return; }
+    if (!awake.note) {
+      const n = document.createElement('div');
+      n.id = 'awakeNote';
+      n.setAttribute('role', 'status');
+      n.textContent = '👆 Tap the screen once so it stays on while this works';
+      n.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top, 0px) + 8px);z-index:2147483000;'
+        + 'background:#f5b301;color:#111;font:600 14px/1.3 system-ui,-apple-system,sans-serif;padding:8px 14px;border-radius:18px;'
+        + 'box-shadow:0 4px 18px rgba(0,0,0,.35);max-width:calc(100% - 32px);text-align:center';
+      document.body.appendChild(n);
+      awake.note = n;
+    }
+    awake.note.classList.remove('hidden');
+  }
+  function awakeOn() {
     if (document.visibilityState !== 'visible') return;
-    if ('wakeLock' in navigator && !awake.lock) {
-      try { awake.lock = await navigator.wakeLock.request('screen'); awake.lock.addEventListener('release', () => { awake.lock = null; }); } catch (e) { awake.lock = null; }
-    }
-    if (!awake.vid) {
-      const v = document.createElement('video');
-      v.muted = true; v.loop = true; v.playsInline = true;
-      v.setAttribute('muted', ''); v.setAttribute('playsinline', ''); v.setAttribute('aria-hidden', 'true');
-      v.style.cssText = 'position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:-1';
-      v.src = AWAKE_MP4;
-      document.body.appendChild(v);
-      awake.vid = v;
-    }
-    if (awake.vid.paused) awake.vid.play().catch(() => {});
+    awakeRequestLock();                 // without a tap: goes through once a tap has unlocked it
+    if (awakeUseVideo()) awakePlayVideo();
+    if (!awake.pending) awakeNote(true);
   }
   function awakeOff() {
     if (awake.lock) { try { awake.lock.release(); } catch (e) {} awake.lock = null; }
-    if (awake.vid) { try { awake.vid.pause(); awake.vid.remove(); } catch (e) {} awake.vid = null; }
+    if (awake.vid && !awake.vid.paused) { try { awake.vid.pause(); } catch (e) {} }   // kept: a new one would need a new tap
+    awakeNote(false);
   }
-  function awakeCheck() { if (awakeNeeded()) awakeOn(); else awakeOff(); }
+  function awakeCheck() { if (awakeWanted()) awakeOn(); else awakeOff(); }
+  // EVERY TAP: the one moment WebKit grants the lock (and lets a sound-carrying video start)
+  function awakeTap() {
+    if (document.visibilityState !== 'visible') return;
+    const want = awakeWanted();
+    if (!awake.primed || (want && !awake.lock)) awakeRequestLock();
+    if (want && awakeUseVideo()) awakePlayVideo();
+  }
+  ['click', 'touchend', 'pointerup', 'keydown'].forEach((t) => document.addEventListener(t, awakeTap, { capture: true, passive: true }));
   /** keepAwake(key, true|false) — hold the screen on for a piece of work. */
   window.__keepAwake = (key, on) => { if (on) awake.holds.add(key); else awake.holds.delete(key); awakeCheck(); };
-  window.__awakeState = () => ({ needed: awakeNeeded(), lock: !!awake.lock, video: !!(awake.vid && !awake.vid.paused) });
-  // a lock is dropped whenever the app leaves the screen: take it again on return
+  window.__awakeState = () => ({
+    needed: awakeNeeded(), wanted: awakeWanted(), lock: !!awake.lock, pending: !!awake.pending, primed: awake.primed, err: awake.err,
+    video: !!(awake.vid && !awake.vid.paused), videoErr: awake.vidErr, videoEl: !!awake.vid, videoMuted: !!(awake.vid && awake.vid.muted), videoLoop: !!(awake.vid && awake.vid.loop),
+    useVideo: awakeUseVideo(), note: !!(awake.note && !awake.note.classList.contains('hidden')),
+  });
+  window.__awakeGrace = (ms) => { awake.grace = ms == null ? AWAKE_GRACE_MS : ms; };   // for the tests
+  // a lock is dropped whenever the app leaves the screen: taken again on return (no tap needed once unlocked)
   document.addEventListener('visibilitychange', awakeCheck);
   awake.timer = setInterval(awakeCheck, 2000);
 

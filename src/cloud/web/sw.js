@@ -30,6 +30,10 @@
 const VERSION = new URL(self.location.href).searchParams.get('v') || 'dev';
 const SHELL_CACHE = 'mw-shell-' + VERSION;
 const AI_CACHE = 'mw-ai-' + VERSION;
+// Not per version: the bundled fonts do not change between updates, and a phone
+// that is updated most days should not fetch 3.2 MB of them each time. Bump the
+// number if a bundled font file ever does change.
+const FONT_CACHE = 'mw-fonts-1';
 
 /* The page, and everything it needs to draw the desk. */
 const SHELL = [
@@ -63,7 +67,7 @@ self.addEventListener('install', (e) => {
 
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
-    const keep = new Set([SHELL_CACHE, AI_CACHE]);
+    const keep = new Set([SHELL_CACHE, AI_CACHE, FONT_CACHE]);
     for (const k of await caches.keys()) if (!keep.has(k)) await caches.delete(k);
     await self.clients.claim();
   })());
@@ -91,6 +95,19 @@ self.addEventListener('fetch', (e) => {
    * Cache-first, because re-downloading them on a phone's data is the
    * difference between reframing a clip and giving up on it.
    */
+  // The caption fonts: the same, cache-first — kept across updates (FONT_CACHE).
+  if (p.startsWith('/fonts/')) {
+    e.respondWith((async () => {
+      const cache = await caches.open(FONT_CACHE);
+      const hit = await cache.match(req, { ignoreSearch: true });
+      if (hit) return hit;
+      const res = await fetch(req);
+      if (res && res.ok) cache.put(req, res.clone()).catch(() => {});
+      return res;
+    })());
+    return;
+  }
+
   if (p.startsWith('/ai/')) {
     e.respondWith((async () => {
       const cache = await caches.open(AI_CACHE);

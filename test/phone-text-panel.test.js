@@ -174,14 +174,71 @@ async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise
     }
     console.log('\n[8] the screen stays on while something is being made');
     {
-      const a0 = await page.evaluate(() => window.__awakeState());
-      check(!a0.needed, 'nothing running: the screen may sleep', a0);
-      const a1 = await page.evaluate(async () => { window.__keepAwake('t', true); await new Promise((r) => setTimeout(r, 300)); return Object.assign(window.__awakeState(), { el: !!document.querySelector('video[aria-hidden="true"][playsinline]') }); });
-      check(a1.needed && a1.el, 'an export holds it on (wake lock + silent looping video)', a1);
-      const a2 = await page.evaluate(async () => { window.__keepAwake('t', false); await new Promise((r) => setTimeout(r, 300)); return Object.assign(window.__awakeState(), { el: !!document.querySelector('video[aria-hidden="true"][playsinline]') }); });
-      check(!a2.needed && !a2.el && !a2.lock, 'and lets go the moment it is done', a2);
-      const a3 = await page.evaluate(() => { window.__showOverlay('Exporting…'); const st = window.__awakeState(); window.__hideOverlay(); return st; });
-      check(a3.needed, 'an export watched on the progress card counts too', a3);
+      /*
+       * An iPhone's rules, played by a stand-in lock (Chromium cannot prove
+       * iOS — only that the page follows the rules WebKit's source sets): the
+       * lock is granted only with a fresh tap, and after one grant, later asks
+       * in the same page life go through without one.
+       */
+      await page.evaluate(() => {
+        const fake = { sticky: false, asked: 0, live: 0,
+          request() {
+            fake.asked++;
+            // (a real tap, seen by the page — Playwright's own evaluate() counts as a gesture to Chromium)
+            const tapped = Date.now() - (window.__lastTap || 0) < 1000;
+            if (!tapped && !fake.sticky) return Promise.reject(Object.assign(new Error('Permission was denied'), { name: 'NotAllowedError' }));
+            fake.sticky = true; fake.live++;
+            const ls = new Set();
+            const s = { released: false, addEventListener: (t, f) => ls.add(f), release() { if (!s.released) { s.released = true; fake.live--; ls.forEach((f) => f()); } return Promise.resolve(); } };
+            return Promise.resolve(s);
+          } };
+        window.__fakeLock = fake;
+        ['click', 'touchend', 'pointerup'].forEach((t) => window.addEventListener(t, () => { window.__lastTap = Date.now(); }, true));
+        Object.defineProperty(navigator, 'wakeLock', { value: fake, configurable: true });
+        window.__awakeGrace(0);
+      });
+      const tap = async () => {
+        await page.evaluate(() => { const d = document.createElement('div'); d.id = 'tapme'; d.style.cssText = 'position:fixed;left:40%;top:45%;width:20px;height:20px;z-index:2147483647'; document.body.appendChild(d); });
+        await page.click('#tapme');
+        await page.evaluate(() => document.getElementById('tapme').remove());
+        await page.waitForTimeout(100);
+      };
+      const st = (ms = 150) => page.evaluate(async (w) => { await new Promise((r) => setTimeout(r, w)); return Object.assign(window.__awakeState(), { live: window.__fakeLock.live, asked: window.__fakeLock.asked }); }, ms);
+      const a0 = await st(0);
+      check(!a0.needed && !a0.lock, 'nothing running: the screen may sleep', a0);
+      await page.evaluate(() => window.__keepAwake('t', true));
+      const a1 = await st();
+      check(a1.needed && !a1.lock && a1.err === 'NotAllowedError' && a1.note, 'work starts with no tap: refused, as an iPhone refuses — and the page says "tap the screen once"', a1);
+      await tap();
+      const a2 = await st();
+      check(a2.lock && a2.live === 1 && !a2.note, 'one tap: the lock is held, the note goes', a2);
+      await page.evaluate(() => window.__keepAwake('t', false));
+      const a3 = await st();
+      check(!a3.lock && a3.live === 0, 'done: it lets go', a3);
+      await page.evaluate(() => window.__keepAwake('t', true));
+      const a4 = await st();
+      check(a4.lock && a4.live === 1, 'the next export, no tap needed: the first tap unlocked the later asks', a4);
+      await page.evaluate(() => { window.__awakeGrace(1500); window.__keepAwake('t', false); });
+      const a5 = await st(400);
+      const a6 = await st(3700);   // (the grace, then the next 2-second check)
+      check(a5.lock && !a6.lock && a6.live === 0, 'the pause between two shorts never drops it: held for a grace, then let go', { a5, a6 });
+      await page.evaluate(() => window.__awakeGrace(0));
+      const a7 = await page.evaluate(() => { window.__showOverlay('Exporting…'); const s = window.__awakeState(); window.__hideOverlay(); return s; });
+      check(a7.needed, 'an export watched on the progress card counts too', a7);
+      const n0 = await st(2200);
+      check(!n0.lock && n0.live === 0 && !n0.note, 'and once it is over nothing is left holding the screen', n0);
+      // no wake lock at all (a home-screen app before iOS 18.4): the video that WebKit does count
+      await page.evaluate(() => { delete navigator.wakeLock; try { delete Navigator.prototype.wakeLock; } catch (e) {} window.__keepAwake('v', true); });
+      await tap();
+      const v1 = await st(400);
+      // (this Chromium has no H.264 to play it with — what counts is that the tap started it, unmuted and not looping)
+      check(v1.useVideo && v1.videoEl && (v1.video || v1.videoErr === 'NotSupportedError') && v1.videoErr !== 'NotAllowedError' && !v1.videoMuted && !v1.videoLoop,
+        'the fallback video is started by the tap — not muted, not looping (WebKit ignores either)', v1);
+      await page.evaluate(() => window.__keepAwake('v', false));
+      const v2 = await st(300);
+      const kept = await page.evaluate(() => !!document.querySelector('video[title="Keeping the screen on"]'));
+      check(!v2.video && kept, 'done: it pauses but stays, so the next export needs no new tap', { v2, kept });
+      await page.evaluate(() => window.__awakeGrace());
     }
     console.log('\n[9] a short recorded for a server batch sends its caption pictures ahead (no white screen)');
     {

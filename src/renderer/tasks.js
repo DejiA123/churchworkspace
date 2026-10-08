@@ -734,6 +734,8 @@
   window.__taskRunning = taskRunning;
   window.__taskBackground = sendTaskToBackground;
   window.__tasksList = tasksSnapshot;
+  // any job running, in front or in the background (the phone keeps its screen on for these)
+  window.__tasksBusy = () => Array.from(_tasks.values()).some((t) => t.state === 'run');
   window.__onTasks = (fn) => { _taskListeners.add(fn); return () => _taskListeners.delete(fn); };
   window.__taskStop = stopTask;
   window.__taskClear = clearTask;

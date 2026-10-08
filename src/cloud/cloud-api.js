@@ -1013,6 +1013,25 @@ async function handle(req, res) {
     return sendFile(req, res, full, { cache: 'public, max-age=604800' });
   }
 
+  /*
+   * The caption fonts that ship with the studio — by file name only, from the
+   * fonts folder only. Outside the sign-in gate for the same reason as /ai/:
+   * open-licence files identical in every install, nothing about this church.
+   * And unlike the media route they may be KEPT (a week here, for good by the
+   * phone's service worker): served as media, every one of the 21 faces came
+   * down again each time the home-screen app opened, and the Font picker sat
+   * empty until the last had arrived.
+   */
+  if (p.startsWith('/fonts/')) {
+    const base = cfg.dirs.fonts;
+    let name = '';
+    try { name = decodeURIComponent(p.slice(7)); } catch (e) { name = ''; }
+    if (!base || !/^[\w][\w .()+-]*\.(ttf|otf|woff2?)$/i.test(name)) return send(res, 404, 'text/plain', 'not found');
+    const full = path.normalize(path.join(base, name));
+    if (!within(full, base)) return send(res, 403, 'text/plain', 'forbidden');
+    return sendFile(req, res, full, { cache: 'public, max-age=604800' });
+  }
+
   if (p === '/api/hello') {
     return json(res, 200, {
       ok: true,

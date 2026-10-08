@@ -6150,7 +6150,7 @@
     await loadCapFonts();
     // the faces must actually BE fetched before anything is measured, or the
     // first caption is wrapped against Arial and every line break is wrong
-    await loadCapFontFaces();
+    await loadCapFontFaces([cfg.family, cfg.font]);
     if (onStage) onStage('💬 Drawing the captions exactly as you see them…');
     if (onProgress) onProgress(1);
     const layouts = list.map((e) => window.CapLayout.layout(e.text, cfg, outW, outH));
@@ -7444,7 +7444,8 @@
     ve.capPos = c.pos || null; ve.capWidth = c.width || null;
     if (c.style) {
       if (c.style.id) ve.capStyleId = c.style.id;
-      setVal('#capStyleSel', c.style.id); setVal('#capFont', c.style.font); setVal('#capSize', c.style.size);
+      setVal('#capStyleSel', c.style.id); setVal('#capFont', c.style.font);
+      { const cf = $('#capFont'); if (cf && c.style.font && cf.value !== c.style.font) cf.dataset.want = c.style.font; } setVal('#capSize', c.style.size);
       { const sp = $('#capSizePct'); if (sp) sp.value = c.style.sizePct || ''; }
       setVal('#capWords', c.style.words); setVal('#capCase', c.style.case);
       setVal('#capPos', c.style.position); setVal('#capColor', c.style.colour);
@@ -10888,48 +10889,72 @@
    * each name in its own face and the live preview on the video matches what the
    * burner will draw. Without this the dropdown is 22 identical-looking rows.
    */
-  async function loadCapFonts() {
-    if (CAP_FONTS.length) return CAP_FONTS;
-    let list = [];
-    try { list = (await window.api.captions.fontList()) || []; } catch (e) { list = []; }
-    if (!list.length) {
-      // Older main process, or the call failed: fall back to plain names so the
-      // picker still works — just without the previews.
-      try { list = ((await window.api.captions.fonts()) || []).map((n) => ({ name: n, family: n, file: null })); }
-      catch (e) { list = [{ name: 'Arial', family: 'Arial', file: null }]; }
-    }
-    CAP_FONTS = list;
-    try {
-      const p = await window.api.paths.get();
-      const dir = (p.fontsDir || '').replace(/\\/g, '/');
-      if (dir) {
-        // Registered under BOTH names: the family recorded inside the file
-        // ("Rubik ExtraBold") and the name the picker shows ("Rubik"). Text
-        // overlays are stored by the name the operator chose, captions by the
-        // family — and either way the page has to be able to draw it, or it
-        // silently falls back to Arial and the export stops matching.
-        const clean = (s) => String(s).replace(/['"\\;{}]/g, '');
-        /*
-         * `font-weight: 400 900` is not decoration — it is what stops Chromium
-         * SYNTHESISING a bold. These faces ship in a single weight; ask for 800
-         * from a face declared at 400 and the browser smears every glyph
-         * sideways to fake one. The export rasteriser declares the same range,
-         * so without this line the preview drew visibly fatter letters than the
-         * file: the same look, quietly heavier — exactly the drift this whole
-         * module exists to kill.
-         */
-        const css = list.filter((f) => f.file)
-          .flatMap((f) => Array.from(new Set([f.family, f.name].filter(Boolean)))
-            .map((n) => `@font-face{font-family:'${clean(n)}';src:url('${fileUrl(dir + '/' + f.file)}');`
-              + `font-weight:400 900;font-style:normal;font-display:block;}`))
-          .join('');
-        let st = document.getElementById('capFontFaces');
-        if (!st) { st = document.createElement('style'); st.id = 'capFontFaces'; document.head.appendChild(st); }
-        st.textContent = css;
-        await loadCapFontFaces();
+  /*
+   * WHERE A BUNDLED FONT FILE IS LOADED FROM. The desk reads it off the disk.
+   * A phone used to fetch every one through the signed-in media route, which
+   * says "never keep this" — so all 21 faces (3.2 MB) came down the line again
+   * every time the home-screen app opened, and the Font list stayed EMPTY until
+   * the last one arrived: the first tap on it seemed to take forever. The cloud
+   * page now gives fonts an address of their own that the phone keeps
+   * (cloud-api.js /fonts/, sw.js).
+   */
+  function capFontSrc(dir, file) {
+    if (typeof window !== 'undefined' && window.MW_FONT_URL) return window.MW_FONT_URL(file);
+    return fileUrl(dir + '/' + file);
+  }
+  /*
+   * THE LIST, NOT THE FACES. This waited for every face to download before it
+   * returned, and the picker was filled only after it — so the list is now
+   * ready after one round trip, and the faces load on their own: the one in
+   * use first (loadCapFace), the rest when the studio is idle (loadOtherFaces).
+   * One shared promise, so a second caller never gets the list before its
+   * @font-face rules exist.
+   */
+  let _capFontsP = null;
+  function loadCapFonts() {
+    if (!_capFontsP) _capFontsP = (async () => {
+      const pathsP = Promise.resolve().then(() => window.api.paths.get()).catch(() => ({}));
+      let list = [];
+      try { list = (await window.api.captions.fontList()) || []; } catch (e) { list = []; }
+      if (!list.length) {
+        // Older main process, or the call failed: fall back to plain names so the
+        // picker still works — just without the previews.
+        try { list = ((await window.api.captions.fonts()) || []).map((n) => ({ name: n, family: n, file: null })); }
+        catch (e) { list = [{ name: 'Arial', family: 'Arial', file: null }]; }
       }
-    } catch (e) { /* previews are a nicety; the names still work */ }
-    return CAP_FONTS;
+      try {
+        const p = (await pathsP) || {};
+        const dir = (p.fontsDir || '').replace(/\\/g, '/');
+        if (dir || window.MW_FONT_URL) {
+          // Registered under BOTH names: the family recorded inside the file
+          // ("Rubik ExtraBold") and the name the picker shows ("Rubik"). Text
+          // overlays are stored by the name the operator chose, captions by the
+          // family — and either way the page has to be able to draw it, or it
+          // silently falls back to Arial and the export stops matching.
+          const clean = (s) => String(s).replace(/['"\\;{}]/g, '');
+          /*
+           * `font-weight: 400 900` is not decoration — it is what stops Chromium
+           * SYNTHESISING a bold. These faces ship in a single weight; ask for 800
+           * from a face declared at 400 and the browser smears every glyph
+           * sideways to fake one. The export rasteriser declares the same range,
+           * so without this line the preview drew visibly fatter letters than the
+           * file: the same look, quietly heavier — exactly the drift this whole
+           * module exists to kill.
+           */
+          const css = list.filter((f) => f.file)
+            .flatMap((f) => Array.from(new Set([f.family, f.name].filter(Boolean)))
+              .map((n) => `@font-face{font-family:'${clean(n)}';src:url('${capFontSrc(dir, f.file)}');`
+                + `font-weight:400 900;font-style:normal;font-display:block;}`))
+            .join('');
+          let st = document.getElementById('capFontFaces');
+          if (!st) { st = document.createElement('style'); st.id = 'capFontFaces'; document.head.appendChild(st); }
+          st.textContent = css;
+        }
+      } catch (e) { /* previews are a nicety; the names still work */ }
+      CAP_FONTS = list;
+      return CAP_FONTS;
+    })();
+    return _capFontsP;
   }
   /**
    * Actually FETCH the faces, don't just declare them.
@@ -10941,14 +10966,72 @@
    * "IN NIGERIA WE ARE PRAYING" onto five Arial-width lines while the finished
    * picture drew two Bebas-width ones. Load them, then throw away every
    * measurement taken before they arrived.
+   *
+   * `only` names the faces wanted (by family or picker name) — an export waits
+   * for the ones it draws with, not all twenty-one; none = every face.
+   * `timeoutMs` stops a preview waiting on a slow line for ever (an export
+   * passes none: it must be drawn in the real face).
    */
-  async function loadCapFontFaces() {
+  async function loadCapFontFaces(only, timeoutMs) {
     if (!document.fonts || !document.fonts.load) return;
+    await loadCapFonts();
+    const want = only ? new Set([].concat(only).filter(Boolean).map(String)) : null;
     const names = new Set();
-    CAP_FONTS.forEach((f) => { if (f.file) { if (f.family) names.add(f.family); if (f.name) names.add(f.name); } });
-    await Promise.all([...names].map((n) => document.fonts.load(`800 100px '${n}'`).catch(() => null)));
-    try { await document.fonts.ready; } catch (e) {}
+    CAP_FONTS.forEach((f) => {
+      if (!f.file || (want && !want.has(f.family) && !want.has(f.name))) return;
+      if (f.family) names.add(f.family); if (f.name) names.add(f.name);
+    });
+    const work = Promise.all([...names].map((n) => document.fonts.load(`800 100px '${n}'`).catch(() => null)));
+    let timer = null;
+    if (timeoutMs) await Promise.race([work, new Promise((r) => { timer = setTimeout(r, timeoutMs); })]);
+    else await work;
+    clearTimeout(timer);
+    if (!want) { try { await document.fonts.ready; } catch (e) {} }
     window.CapLayout.forgetMeasurements();
+  }
+  /** The face the captions are in, first — the preview's line breaks are measured in it. */
+  async function loadCapFace(family) {
+    const f = CAP_FONTS.find((x) => x.family === family || x.name === family);
+    await loadCapFontFaces(f ? [f.family, f.name] : [family], 4000);
+    updateCapOverlay(ve.refs && ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
+  }
+  /*
+   * The other faces, so each name in the desk's dropdown wears its own face.
+   * Off the critical path: when the studio is idle, two at a time. A phone's
+   * own picker draws only the names, so there it waits longer and never
+   * competes with the video coming down the line.
+   */
+  let _otherFacesP = null;
+  function loadOtherFaces() {
+    if (_otherFacesP || !document.fonts || !document.fonts.load) return _otherFacesP;
+    _otherFacesP = (async () => {
+      await loadCapFonts();
+      await new Promise((r) => setTimeout(r, window.MW_FONT_URL ? 8000 : 300));
+      const names = [];
+      CAP_FONTS.forEach((f) => { if (f.file) [f.family, f.name].forEach((n) => { if (n && !names.includes(n)) names.push(n); }); });
+      for (let i = 0; i < names.length; i += 2) {
+        await Promise.all(names.slice(i, i + 2).map((n) => document.fonts.load(`800 100px '${n}'`).catch(() => null)));
+      }
+      try { renderCapFontPicker(); renderTextFontPicker(); } catch (e) {}
+    })();
+    return _otherFacesP;
+  }
+  /*
+   * A SAFETY NET for line breaks: whenever ANY face finishes arriving, every
+   * measurement taken while it was missing is thrown away and the preview is
+   * redrawn — whichever code path asked for it.
+   */
+  if (typeof document !== 'undefined' && document.fonts && document.fonts.addEventListener) {
+    let queued = false;
+    document.fonts.addEventListener('loadingdone', () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        try { window.CapLayout && window.CapLayout.forgetMeasurements(); } catch (e) {}
+        try { if (ve.video) updateCapOverlay(ve.refs && ve.refs.player ? (ve.refs.player.currentTime || 0) : 0); } catch (e) {}
+      });
+    });
   }
 
   /**
@@ -10970,14 +11053,17 @@
   /** The font dropdown, every option wearing its own typeface. */
   function renderCapFontPicker() {
     const sel = document.getElementById('capFont'); if (!sel) return;
-    const cur = sel.value || DEFAULT_CAP_FONT;
+    // (a font restored before the list arrived waits in data-want — an empty select drops a value)
+    const cur = sel.dataset.want || sel.value || DEFAULT_CAP_FONT;
+    if (CAP_FONTS.length) delete sel.dataset.want;
     sel.innerHTML = CAP_FONTS.map((f) =>
       `<option value="${attr2(f.name)}" style="font-family:'${attr2(f.family)}',system-ui,sans-serif">${escape2(f.name)}</option>`).join('');
     sel.value = CAP_FONTS.some((f) => f.name === cur) ? cur : DEFAULT_CAP_FONT;
     // …and the closed dropdown shows the chosen face too, not just the open list.
     const fam = (CAP_FONTS.find((f) => f.name === sel.value) || {}).family || sel.value;
     sel.style.fontFamily = `'${String(fam).replace(/['"\\;{}]/g, '')}', system-ui, sans-serif`;
-    sel.style.fontSize = '15px';
+    // (not on a phone: below 16px, iOS zooms the page in on every tap — cloud.css)
+    if (!window.MW_FONT_URL) sel.style.fontSize = '15px';
   }
 
   /** The transitions dropdown. */
@@ -15054,25 +15140,36 @@
     // Every caption face is loaded into the page first, so the picker can show
     // each name IN that face. Bebas Neue stays the default — tall, condensed and
     // all-caps by design, which is the shorts look.
+    // The list is there after one round trip (the faces follow on their own —
+    // see loadCapFonts), so the Font picker is never an empty box to tap.
     loadCapFonts().then(() => {
+      const sel = $('#capFont');
       renderCapFontPicker();
-      const want = [DEFAULT_CAP_FONT, 'Anton'].find((f) => CAP_FONTS.some((x) => x.name === f));
-      if (want) $('#capFont').value = want;
-      renderCapFontPicker();
+      // the default only when nothing was chosen (a restored session's font stays)
+      if (!sel.dataset.want && !CAP_FONTS.some((x) => x.name === sel.value && x.name !== DEFAULT_CAP_FONT)) {
+        const want = [DEFAULT_CAP_FONT, 'Anton'].find((f) => CAP_FONTS.some((x) => x.name === f));
+        if (want) sel.value = want;
+        renderCapFontPicker();
+      }
       renderTextFontPicker();   // 🔤 Add text gets the same typefaces
       renderCapStyleGrid();
       renderCapStyleStrip();
-      // Captions measured before the faces arrived were measured against Arial —
-      // throw those answers away and redraw, or the first preview keeps a set of
-      // line breaks the export will not agree with.
+      try { renderCapSummary(); } catch (e) {}
+      // Captions measured before the face arrived were measured against Arial —
+      // the face in use is fetched first, then those answers are thrown away and
+      // the preview redrawn, or it keeps line breaks the export will not agree with.
       window.CapLayout.forgetMeasurements();
       updateCapOverlay(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
+      loadCapFace(capFontFamily()).then(() => { renderCapStyleGrid(); renderCapStyleStrip(); }).catch(() => {});
+      loadOtherFaces();
     }).catch(() => {});
     renderCapTransPicker();
     // Changing the face repaints every sample, including the closed dropdown.
     $('#capFont').addEventListener('change', () => {
       renderCapFontPicker(); renderCapStyleGrid(); renderCapStyleStrip();
       updateCapOverlay(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
+      // a face not fetched yet: fetch it, then measure and draw again in it
+      loadCapFace(capFontFamily()).catch(() => {});
     });
     const transSel = $('#capTrans');
     if (transSel) {
@@ -15457,7 +15554,7 @@
       window.api.paths.get().then((p) => {
         if (!p.fontsDir) return;
         const dir = p.fontsDir.replace(/\\/g, '/');
-        const face = (fam, file) => `@font-face{font-family:'${fam}';src:url('${fileUrl(dir + '/' + file)}');}`;
+        const face = (fam, file) => `@font-face{font-family:'${fam}';src:url('${capFontSrc(dir, file)}');}`;
         const st = document.createElement('style');
         st.textContent = face('Anton', 'Anton-Regular.ttf') + face('Bebas Neue', 'BebasNeue-Regular.ttf') +
           face('Poppins', 'Poppins-Bold.ttf') + face('Bangers', 'Bangers-Regular.ttf');
