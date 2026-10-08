@@ -145,12 +145,20 @@ const pool = async (items, n, fn) => {
  * input/from: the recording and where the span starts in it.
  * Returns { words, unsure: [word objects], report }.
  */
-async function proofread({ words, alt, input, from = 0, windowSec = 300, batch = 12, fetchImpl, encode = gem.encodeFlac, onProgress = null } = {}) {
+async function proofread({ words, alt, input, from = 0, windowSec = 600, batch = 16, fetchImpl, encode = gem.encodeFlac, onProgress = null } = {}) {
   const report = { windows: 0, suspects: 0, located: 0, asked: 0, changed: 0, kept: 0, unsure: 0, why: '', readMs: 0, listenMs: 0 };
   let tick = Date.now();
   const W = Array.isArray(words) ? words : [];
   if (!gem.ready() || W.length < 4) return { words: W, unsure: [], report };
-  const opt = fetchImpl ? { fetchImpl } : {};
+  /*
+   * A bonus, never a wait. Gemini's free allowance is counted per minute and
+   * per day, and the HEARING needs it more: measured, a day of testing used
+   * it up and the proofreader then spent 91 s waiting on a one-minute clip.
+   * So it asks once per question (no waiting out a busy minute) and the first
+   * "busy" or "used up" ends it — what it has settled by then is kept.
+   */
+  const opt = Object.assign({ patient: false, waits: [] }, fetchImpl ? { fetchImpl } : {});
+  let stopped = false;
   const lines = linesOf(W, alt);
   // 1. read: five minutes at a time, three at once
   const windows = [];
@@ -163,6 +171,7 @@ async function proofread({ words, alt, input, from = 0, windowSec = 300, batch =
   const fixes = [];
   let done = 0;
   await pool(groups, 3, async (g) => {
+    if (stopped) return;
     try {
       const r = await gem.ask([{ text: proofreadPrompt(g) }], Object.assign({ json: true, think: 'low', maxTokens: 8192 }, opt));
       const j = parseJson(r.text);
@@ -170,6 +179,7 @@ async function proofread({ words, alt, input, from = 0, windowSec = 300, batch =
     } catch (e) {
       if (e && e.cancelled) throw e;
       report.why = (e && e.message) || 'the proofreader did not answer';
+      stopped = true;
     }
     done++;
     if (onProgress) { try { onProgress(done / (groups.length * 2)); } catch (e) {} }
@@ -200,6 +210,7 @@ async function proofread({ words, alt, input, from = 0, windowSec = 300, batch =
   for (let k = 0; k < items.length; k += batch) batches.push(items.slice(k, k + batch));
   let heardDone = 0;
   await pool(batches, 2, async (bt) => {
+    if (stopped) return;
     try {
       const parts = [];
       for (let k = 0; k < bt.length; k++) {
@@ -220,6 +231,7 @@ async function proofread({ words, alt, input, from = 0, windowSec = 300, batch =
     } catch (e) {
       if (e && e.cancelled) throw e;
       report.why = (e && e.message) || 'the re-listen did not answer';
+      stopped = true;
     }
     heardDone++;
     if (onProgress) { try { onProgress(0.5 + heardDone / (batches.length * 2)); } catch (e) {} }

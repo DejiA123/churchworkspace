@@ -36,7 +36,9 @@ const cancelled = () => !!(jobs && jobs.isCancelled && jobs.isCancelled());
 // The best "flash" model this key has (newest first), never a lite, image,
 // speech or live one. Asked once and remembered; a fixed name if the list
 // cannot be read.
-const FALLBACK_MODEL = 'gemini-2.5-flash';
+// Google's own "newest Flash" name, for when the list of models cannot be read
+// (measured: gemini-2.5-flash now answers 404, "no longer available to new users")
+const FALLBACK_MODEL = 'gemini-flash-latest';
 let ranked = null;                 // this key's models, best first
 const spent = new Set();           // models whose free allowance is used up (or not open to this key) today
 let spentDay = '';
@@ -67,8 +69,8 @@ async function models(fetchImpl = fetch) {
             .slice(0, 4);
         }
       } catch (e) { /* the fixed name below */ }
+      // the fixed name only when this key's own list could not be read (the list names the models it may use)
       if (!ranked || !ranked.length) ranked = [FALLBACK_MODEL];
-      else if (!ranked.includes(FALLBACK_MODEL)) ranked.push(FALLBACK_MODEL);
     }
   }
   return ranked.filter((m) => !spent.has(m));
@@ -140,7 +142,7 @@ function thinkingFor(model, level = 'minimal') {
  * in vain; a model too busy ("high demand") hands this request to the next.
  * json: the answer is JSON; think: how much the model may think first.
  */
-async function ask(parts, { fetchImpl = fetch, waits = [15000, 30000, 45000], timeoutMs = 240000, json = false, think = 'minimal', maxTokens = 16384 } = {}) {
+async function ask(parts, { fetchImpl = fetch, waits = [15000, 30000, 45000], timeoutMs = 240000, json = false, think = 'minimal', maxTokens = 16384, patient = true } = {}) {
   let lastWhy = '';
   const busy = new Set();
   for (;;) {
@@ -192,6 +194,8 @@ async function ask(parts, { fetchImpl = fetch, waits = [15000, 30000, 45000], ti
       // not open to this key, gone, or the day's allowance used up: the next model
       const daily = /per ?day|PerDay|limit: ?0\b/i.test(said);
       if (res.status === 404 || res.status === 403 || (res.status === 429 && daily)) { spent.add(model); next = true; continue; }
+      // impatient (a bonus step, like the proofreader): a busy minute is not waited out
+      if (res.status === 429 && !patient) { busy.add(model); next = true; continue; }
       if (res.status === 429 && attempt < waits.length) {
         const hint = +((/"retryDelay":"(\d+)/.exec(said) || [])[1] || 0) * 1000;
         await sleep(hint > 0 ? Math.min(60000, hint + 1000) : waits[attempt]); continue;
@@ -199,7 +203,7 @@ async function ask(parts, { fetchImpl = fetch, waits = [15000, 30000, 45000], ti
       if (res.status === 429) { spent.add(model); next = true; continue; }
       // overloaded ("high demand") or failing: one short wait, then another model takes this request
       if (res.status >= 500) {
-        if (attempt < 1 && waits.length) { await sleep(waits[0]); continue; }
+        if (attempt < 1 && waits.length && patient) { await sleep(waits[0]); continue; }
         busy.add(model); next = true; continue;
       }
       throw new Error('Gemini answered ' + lastWhy);

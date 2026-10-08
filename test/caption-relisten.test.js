@@ -103,6 +103,21 @@ const TEXT = 'A number of people have read that. When you have read that, the fi
   ok(/Clip 1: \(1\) "[^"]*read that[^"]*"  \(2\) "[^"]*real dad/.test(p) && /Clip 2: \(1\) "[^"]*real dad[^"]*"  \(2\) "[^"]*read that/.test(p), 'the two versions come in no telling order', p.slice(-600));
   ok(/EXACTLY what the speaker says/.test(p) && /answer 0/.test(p), 'the question asks for the sounds, and allows "cannot tell"');
 
+  console.log('\n[5b] a bonus, never a wait');
+  {
+    let calls = 0;
+    const t0 = Date.now();
+    const busyMin = async (url) => {
+      if (/\/models\?/.test(url)) return { ok: true, status: 200, json: async () => listing };
+      calls++;
+      return { ok: false, status: 429, json: async () => ({ error: { message: 'Resource exhausted: requests per minute', details: [{ retryDelay: '40s' }] } }) };
+    };
+    gem._reset();
+    const rb = await rl.proofread({ words, alt, input: 'x', from: 0, fetchImpl: busyMin, encode: enc });
+    ok(said(rb.words) === said(words) && Date.now() - t0 < 3000 && calls === 1 && /busy/.test(rb.report.why), 'Gemini busy for the minute: asked once, not waited on — the captions come back as they are', { ms: Date.now() - t0, calls, why: rb.report.why });
+    gem._reset();
+  }
+
   console.log('\n[6] no answer');
   const down = async (url) => {
     if (/\/models\?/.test(url)) return { ok: true, status: 200, json: async () => listing };
