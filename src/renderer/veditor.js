@@ -11607,12 +11607,22 @@
     if (ve.capListMode === 'fixed' && !nFixed) ve.capListMode = 'all';
     if (ve.capListMode === 'check' && !nDoubt) ve.capListMode = 'all';
     const mode = ve.capListMode || 'all';
-    const rows = mode === 'fixed' ? inScope.filter(({ c }) => isFixed(c))
+    let rows = mode === 'fixed' ? inScope.filter(({ c }) => isFixed(c))
       : mode === 'check' ? inScope.filter(({ c }) => isDoubt(c)) : inScope;
+    // 🔍 Search: only the lines that contain what was typed (any case, punctuation ignored)
+    const fold = (t) => String(t || '').toLowerCase().replace(/[’']/g, "'").replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const q = fold(ve.capQuery);
+    if (q) rows = rows.filter(({ c }) => (' ' + fold(c.text) + ' ').includes(q));
+    const sn = document.getElementById('capSearchN');
+    if (sn) sn.textContent = q ? `${rows.length} line${rows.length === 1 ? '' : 's'}` : '';
     document.getElementById('capCount').textContent = scope
       ? `${rows.length} caption line${rows.length === 1 ? '' : 's'} in this short`
       : all.length + ' caption lines';
     const list = document.getElementById('capList');
+    if (!rows.length && q) {
+      list.innerHTML = `<div class="cap-search-none muted">No caption line contains “${escape2(ve.capQuery.trim())}”.</div>`;
+      return;
+    }
     if (!rows.length) {
       /*
        * THE WINDOW OPENS BEFORE THERE ARE ANY WORDS, and that is the point.
@@ -15212,6 +15222,11 @@
     const musicRm = $('#libMusicRemove'); if (musicRm) musicRm.addEventListener('click', clearMusic);
     const outroRm = $('#libOutroRemove'); if (outroRm) outroRm.addEventListener('click', clearOutro);
     // Volume is live: drag it while the preview plays and you hear the balance.
+    const capSearch = $('#capSearch'); if (capSearch) capSearch.addEventListener('input', () => {
+      ve.capQuery = capSearch.value;
+      renderCapList();
+      const l = document.getElementById('capList'); if (l) l.scrollTop = 0;
+    });
     const mVol = $('#libMusicVol'); if (mVol) mVol.addEventListener('input', () => {
       if (!ve.music) return;
       ve.music.volume = clamp(parseFloat(mVol.value) || 0, 0, MUSIC_MAX);   // past 100%: a boost for a quiet song

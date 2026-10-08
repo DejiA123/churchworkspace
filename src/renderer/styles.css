@@ -2641,3 +2641,9 @@ body.ve-pfull .ve-preview .ve-fs-exit {
 .ve-aiv-btn.main { background: linear-gradient(135deg,#8b5cf6,#6366f1); border-color: transparent; }
 .ve-aiv.busy .ve-aiv-btn { opacity: .5; }
 .ve-aiv-note { display: block; margin-top: 10px; color: #9aa1b2; font-size: 13px; }
+
+/* 🔍 Search the captions — one slim field above the lines */
+.cap-search { display: flex; align-items: center; gap: 8px; margin: 6px 0 4px; }
+.cap-search input { flex: 1; min-width: 0; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border, #333); background: var(--bg-2, #15171d); color: inherit; font-size: 15px; }
+.cap-search span:empty { display: none; }
+.cap-search-none { padding: 18px 8px; text-align: center; }

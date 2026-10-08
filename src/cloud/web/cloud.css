@@ -2567,3 +2567,6 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
   body.mw-cloud #capModal .cap-box.folded .cap-foot-btns { grid-template-columns: 52px 1fr; }
   body.mw-cloud #capModal .cap-box.folded .cap-foot-btns button { height: 44px; font-size: 15px; border-radius: 12px; }
 }
+
+/* 🔍 Search the captions (phone): thumb-sized, never zooms the page */
+.cap-search input { font-size: 16px; padding: 10px 14px; border-radius: 12px; }
