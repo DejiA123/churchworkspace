@@ -897,7 +897,7 @@ ipcMain.handle('video:speechPauses', wrap(async (e, { input, startSec, endSec, m
     try {
       if (prog) prog(5);
       const audio = await geminiear.encodeFlac(input, from, to - from);
-      const aw = await aai.transcribe(audio, { cancelled: () => jobs.isCancelled() });
+      const aw = await aai.transcribe(audio, { terms: captionTerms(1000), cancelled: () => jobs.isCancelled() });
       if (aw.length) r = { words: aw, doneSec: to - from, model: 'assemblyai' };
     } catch (err) {
       if (err && err.cancelled) throw new jobs.CancelledError();
@@ -1192,7 +1192,7 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
       const heardAll = () => all || (all = (async () => {
         const dur = await video.getInfo(getCtx(), input).then((i) => i.durationSec || 0).catch(() => 0);
         const audio = await geminiear.encodeFlac(input, 0, dur);
-        return aai.transcribe(audio, { cancelled: () => jobs.isCancelled() });
+        return aai.transcribe(audio, { terms: captionTerms(1000), cancelled: () => jobs.isCancelled() });
       })());
       const toSegs = (ws, s) => {
         const segs = [];
@@ -1467,8 +1467,8 @@ function wantsCloudCaptions(model, fast) {
   return cloudspeech.fileReady();
 }
 /** The church's own names and spellings (the Word Book), for the speech model to expect. */
-function captionTerms() {
-  try { return (wordbook.view().terms || []).map((t) => t && (t.text || t.term)).filter(Boolean).slice(0, 40); }
+function captionTerms(max = 40) {
+  try { return (wordbook.view().terms || []).map((t) => t && (t.text || t.term)).filter(Boolean).slice(0, max); }
   catch (e) { return []; }
 }
 async function cloudCaptions({ input, startSec, endSec, denoise, localModel, plain = false, onProgress: prog }) {
@@ -1504,7 +1504,7 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
         if (prog) prog(2);
         const audio = await geminiear.encodeFlac(input, from, span);
         if (prog) prog(8);
-        const aw = await aai.transcribe(audio, { terms: captionTerms(), cancelled: () => jobs.isCancelled() });
+        const aw = await aai.transcribe(audio, { terms: captionTerms(1000), cancelled: () => jobs.isCancelled() });
         if (aw.length) { r = { words: aw, doneSec: span, why: '' }; aaiFirst = true; if (prog) prog(60); }
       }
     } catch (e) {
@@ -1536,7 +1536,7 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
       if (aai.ready()) {
         if (prog) prog(Math.max(1, Math.round((r.doneSec / span) * 60)));
         const audio = await geminiear.encodeFlac(input, from + r.doneSec, span - r.doneSec);
-        const restW = await aai.transcribe(audio, { terms: captionTerms(), cancelled: () => jobs.isCancelled() });
+        const restW = await aai.transcribe(audio, { terms: captionTerms(1000), cancelled: () => jobs.isCancelled() });
         if (restW.length) {
           words = words.concat(restW.map((w) => Object.assign({}, w, { start: w.start + r.doneSec, end: w.end + r.doneSec })));
           r = Object.assign({}, r, { doneSec: span, why: '' });

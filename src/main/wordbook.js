@@ -36,10 +36,12 @@ const MAX_TERMS = 2000;
 const WRITE_DELAY_MS = 400;
 
 /*
- * ONE BOOK PER SPACE. Every person on a shared Cloud Studio has a Word Book of
- * their own (see space.js): the owner's is <userData>/word-book.json, anyone
- * else's sits in their own space. Each is loaded the first time that person
- * uses it and then kept, with its own debounced write.
+ * ONE BOOK FOR THE WHOLE CHURCH. It used to be one per person (each space its
+ * own, see space.js), so a name one of the team taught — the pastor's, the
+ * church's — was still misspelt in everyone else's captions. A church's names
+ * are the same for all of them, so there is now one book, <userData>/
+ * word-book.json, that everybody reads and teaches. The books people had of
+ * their own are folded into it once (foldSpaces), so nothing taught is lost.
  */
 let baseDir = null;
 const states = new Map();     // space id ('' = owner) -> { file, book, compiled, writeTimer, lastTidy }
@@ -48,7 +50,7 @@ function fileFor(id) {
   return path.join(space.pathFor(path.join(baseDir, 'wordbook'), id), 'word-book.json');
 }
 function S() {
-  const id = space.current() || '';
+  const id = '';      // the church's one book, whoever is asking
   let st = states.get(id);
   if (!st) { st = loadState(id); states.set(id, st); }
   return st;
@@ -69,6 +71,7 @@ function sanitise(raw) {
   b.soundAlike = raw.soundAlike !== false;
   b.fixedTotal = Number(raw.fixedTotal) || 0;
   b.version = Number(raw.version) || 1;
+  if (raw.folded) b.folded = true;
   const seenFrom = new Set();
   for (const f of (Array.isArray(raw.fixes) ? raw.fixes : [])) {
     if (!f || typeof f !== 'object') continue;
@@ -120,6 +123,7 @@ function loadState(id) {
    * out is reported so the studio can say so rather than quietly editing
    * somebody's settings behind their back.
    */
+  if (!id && !st.book.folded) foldSpaces(st);
   if ((st.book.version || 1) < engine.VERSION) {
     states.set(id, st);       // tidy() works on the current space's book
     const r = tidy();
@@ -129,6 +133,32 @@ function loadState(id) {
   }
   return st;
 }
+/*
+ * Each person's own book, folded into the church's once: what they taught is
+ * kept (a correction the church book already has keeps the church's), and
+ * their files are left where they are.
+ */
+function foldSpaces(st) {
+  st.book.folded = true;
+  let dir = null;
+  try { const r = space.rootOf('aaaaaa'); dir = r ? path.dirname(r) : null; } catch (e) {}
+  let n = 0;
+  if (dir) {
+    let ids = [];
+    try { ids = fs.readdirSync(dir).filter(space.validId); } catch (e) {}
+    const fixFrom = new Set(st.book.fixes.map((f) => f.from));
+    const termN = new Set(st.book.terms.map((t) => engine.normPhrase(t.text)));
+    for (const id of ids) {
+      let b;
+      try { b = sanitise(JSON.parse(fs.readFileSync(path.join(dir, id, 'wordbook', 'word-book.json'), 'utf-8'))); } catch (e) { continue; }
+      for (const f of b.fixes) if (!fixFrom.has(f.from)) { fixFrom.add(f.from); st.book.fixes.push(f); n++; }
+      for (const t of b.terms) { const k = engine.normPhrase(t.text); if (!termN.has(k)) { termN.add(k); st.book.terms.push(t); n++; } }
+    }
+  }
+  if (n) console.log(`[wordbook] ${n} words from the team's own books are now in the church's Word Book`);
+  writeNow(st);
+}
+
 function init(userDataDir) {
   baseDir = userDataDir;
   states.clear();

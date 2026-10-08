@@ -35,11 +35,14 @@ async function transcribe(audio, { terms = [], cancelled = () => false, fetchImp
   const up = await call('/upload', { method: 'POST', body: audio, headers: { 'content-type': 'application/octet-stream' }, fetchImpl });
   if (!up.upload_url) throw new Error('AssemblyAI took no audio');
   const base = { audio_url: up.upload_url, language_code: 'en', punctuate: true, format_text: true };
-  const hints = (terms || []).filter(Boolean).slice(0, 100);
+  // the whole Word Book: the newest models take up to 1,000 names of up to six words each
+  const hints = [...new Set((terms || []).map((t) => String(t || '').trim()).filter((t) => t && t.split(/\s+/).length <= 6))].slice(0, 1000);
   // newest model first; a request it does not take is asked again the plain way
   const tries = [
+    Object.assign({ speech_models: ['universal-3-5-pro', 'universal-3-pro', 'universal-2'] }, hints.length ? { keyterms_prompt: hints } : {}),
     Object.assign({ speech_models: ['universal-3-pro', 'universal-2'] }, hints.length ? { keyterms_prompt: hints } : {}),
-    Object.assign({ speech_model: 'universal' }, hints.length ? { word_boost: hints } : {}),
+    Object.assign({ speech_models: ['universal-3-pro', 'universal-2'] }, hints.length ? { keyterms_prompt: hints.slice(0, 100) } : {}),
+    Object.assign({ speech_model: 'universal' }, hints.length ? { word_boost: hints.slice(0, 100) } : {}),
     {},
   ];
   let job = null, lastErr = null;
@@ -55,7 +58,9 @@ async function transcribe(audio, { terms = [], cancelled = () => false, fetchImp
     await sleep(2500);
     const r = await call('/transcript/' + job.id, { fetchImpl });
     if (r.status === 'completed') {
-      return (r.words || []).filter((w) => w && w.text).map((w) => ({ text: String(w.text), start: (+w.start || 0) / 1000, end: (+w.end || 0) / 1000 }));
+      // (how sure it was of each word comes too: the studio can point at the doubtful ones)
+      return (r.words || []).filter((w) => w && w.text).map((w) => Object.assign({ text: String(w.text), start: (+w.start || 0) / 1000, end: (+w.end || 0) / 1000 },
+        typeof w.confidence === 'number' ? { confidence: Math.round(w.confidence * 1000) / 1000 } : {}));
     }
     if (r.status === 'error') throw new Error('AssemblyAI: ' + String(r.error || 'failed').slice(0, 160));
   }
