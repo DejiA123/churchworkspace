@@ -2871,7 +2871,14 @@
     const cwin = cropWindow();
     if (cwin.cw >= 0.995 && cwin.ch >= 0.995) return;
     const p = ve.refs.player;
-    if (!p || p.paused || p.readyState < 2 || liveTrackBusy) return;
+    if (!p || p.paused || p.readyState < 2 || liveTrackBusy || p._nudging) return;
+    /*
+     * NEVER WHILE AN EXPORT IS TRACKING. A tap on the preview or the timeline
+     * during Export all played the video, and the live tracker started a second
+     * set of models beside the export's own — on a phone, that is what closed
+     * the app ("it crashes when I touch the screen during the export").
+     */
+    if (ve._exportingAll || (window.__tasksBusy && window.__tasksBusy())) return;
     maybeAskLiveAi(p);
     liveTrackBusy = true;
     window.FaceTrack.detectElement(p, { nearX: ve.liveFaceCx, nearY: ve.liveFaceCy, lock: followLock() }).then((face) => {

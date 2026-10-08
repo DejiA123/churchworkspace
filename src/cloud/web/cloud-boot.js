@@ -3399,6 +3399,9 @@ let _hideTimer = null;
     let busy = false;
     const nudge = () => {
       if (busy || !v.paused || !v.currentSrc || v.readyState >= 2) return;
+      // not during an export: nothing on the page may wake the preview then
+      const ov = document.getElementById('overlay');
+      if ((ov && !ov.classList.contains('hidden')) || (window.__tasksBusy && window.__tasksBusy())) return;
       busy = true;
       const at = v.currentTime, wasMuted = v.muted;
       v.muted = true; v._nudging = true;   // the editor ignores this play/pause (veditor.js)
