@@ -108,6 +108,7 @@ const voicelisten = require('./voicelisten');
 const cloudspeech = require('./cloudspeech');
 const geminiear = require('./geminiear');
 const captionfuse = require('./captionfuse');
+const relisten = require('./relisten');
 const machine = require('./machine');
 const pauses = require('./pauses');
 // The other half of "listen to the clip, then write about it" — the hosted
@@ -1468,15 +1469,28 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
     if (t3.words) { book.entries.length = 0; book.entries.push(...t3.words); }
     check.third = t3.report;
   }
+  // ►► THE PROOFREADER THAT LISTENS AGAIN (relisten.js): what every ear got wrong
+  let relistenUnsure = [];
+  if (check.third && check.third.heard) {
+    const pr = await relisten.proofread({
+      words: book.entries, alt, input, from,
+      onProgress: (p) => prog && prog(96 + Math.round(p * 3)),
+    }).catch((e) => { asCancel(e); return { report: { why: (e && e.message) || 'the proofreader failed' } }; });
+    if (pr.words) { book.entries.length = 0; book.entries.push(...pr.words); }
+    relistenUnsure = pr.unsure || [];
+    check.relisten = pr.report;
+  }
   if (alt) {
     check.doubts = cloudspeech.markDisagreements(book.entries, alt);
     if (check.third && check.third.heard) {
       // what Gemini heard (with the caption's Whisper, or instead of it) is not listed for a look —
       // except a long phrase where it overruled BOTH Whisper ears: listed, with Whisper's hearing offered
       let settled = 0;
+      const recheck = new Set(relistenUnsure);
       for (const w of book.entries) {
-        if (w.long) { if (!w.doubt) { w.doubt = true; check.doubts++; } }
-        else if (w.doubt && (w.src === 'both' || w.src === 'gemini')) { delete w.doubt; check.doubts--; settled++; }
+        // the proofreader doubted it and the audio could not settle it: listed
+        if (w.long || recheck.has(w)) { if (!w.doubt) { w.doubt = true; check.doubts++; } }
+        else if (w.doubt && (w.src === 'both' || w.src === 'gemini' || w.src === 'relisten')) { delete w.doubt; check.doubts--; settled++; }
       }
       check.third.settled = settled;
     }

@@ -271,10 +271,11 @@ const F = (w, a, text, extra, opts) => fuse.fuseGemini(w, a, CH(text, extra), op
       words: txt.split(' ').map((x, i) => ({ word: x, start: 0.2 + i * 0.4, end: 0.55 + i * 0.4 })),
       segments: [{ start: 0.2, end: 0.2 + txt.split(' ').length * 0.4, text: txt, avg_logprob: -0.2, no_speech_prob: 0, compression_ratio: 1.2 }],
     });
-    const seen = { gemini: 0, reader: 0 };
+    const seen = { gemini: 0, reader: 0, read: 0 };
     global.fetch = async (url, o) => {
       url = String(url);
       if (/generativelanguage/.test(url) && /\/models\?/.test(url)) return { ok: true, status: 200, json: async () => ({ models: [{ name: 'models/gemini-2.5-flash', supportedGenerationMethods: ['generateContent'] }] }) };
+      if (/generativelanguage/.test(url) && /proofreading/.test(o.body)) { seen.read++; return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"fixes":[]}' }] }, finishReason: 'STOP' }] }) }; }
       if (/generativelanguage/.test(url)) { seen.gemini++; return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: GEM }] }, finishReason: 'STOP' }] }) }; }
       if (/chat\/completions/.test(url)) { seen.reader++; return { ok: false, status: 500, headers: { get: () => null }, json: async () => ({}) }; }
       const m = o.body.get('model');
@@ -286,7 +287,8 @@ const F = (w, a, text, extra, opts) => fuse.fuseGemini(w, a, CH(text, extra), op
     const run = async () => { const res = await rpc.invoke('captions:transcribe', { input: INPUT, startSec: 0, endSec: 6, model: 'cloud' }); return res && res.ok !== undefined ? res.data : res; };
     const out = await run();
     const text = out && out.words.map((w) => w.text).join(' ');
-    ok(seen.gemini === 1 && seen.reader === 0, 'Gemini heard the clip once; no other AI was asked', seen);
+    ok(seen.gemini === 1 && seen.reader === 0 && seen.read === 1, 'Gemini heard the clip once and proofread it once; no other AI was asked', seen);
+    ok(out && out.check.relisten && out.check.relisten.windows === 1 && out.check.relisten.changed === 0, '…the proofreader found nothing to put right here', out && out.check.relisten);
     ok(text === 'And the presence of God came on the scene and said, peace, be still today.', 'the caption is Gemini\'s: "on the scene", "said"', text);
     const sc = out && out.words.find((w) => w.text === 'scene');
     ok(sc && Math.abs(sc.start - (0.2 + 8 * 0.4)) < 0.01, '…with Whisper\'s timing', sc);

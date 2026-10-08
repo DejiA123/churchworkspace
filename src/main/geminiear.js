@@ -125,29 +125,33 @@ const SAFETY = ['HARM_CATEGORY_HARASSMENT', 'HARM_CATEGORY_HATE_SPEECH', 'HARM_C
 // A transcription is not a puzzle: as little "thinking" as each model allows
 // (it costs time, and counts against the answer's length). Tried in order; a
 // setting a model refuses is dropped for the next, and at worst left out.
-function thinkingFor(model) {
-  if (/2\.5-flash/.test(model)) return [{ thinkingBudget: 0 }];
-  if (/gemini-([3-9]|\d\d)/.test(model)) return [{ thinkingLevel: 'minimal' }, { thinkingLevel: 'low' }];
+function thinkingFor(model, level = 'minimal') {
+  if (/2\.5-flash/.test(model)) return [{ thinkingBudget: level === 'minimal' ? 0 : 1024 }];
+  if (/gemini-([3-9]|\d\d)/.test(model)) return level === 'minimal' ? [{ thinkingLevel: 'minimal' }, { thinkingLevel: 'low' }] : [{ thinkingLevel: level }];
   return [];
 }
-async function hear(flac, { terms = [], fetchImpl = fetch, waits = [15000, 30000, 45000], timeoutMs = 240000 } = {}) {
-  const data = Buffer.from(flac).toString('base64');
+/**
+ * One request to Gemini: `parts` (text and/or audio), the answer's text back.
+ * Waits out the free tier's per-minute limit (a few times); a model whose
+ * allowance for the DAY is used up is set aside and the next one asked, and
+ * when none is left the error says so (`exhausted`), so the rest is not tried
+ * in vain; a model too busy ("high demand") hands this request to the next.
+ * json: the answer is JSON; think: how much the model may think first.
+ */
+async function ask(parts, { fetchImpl = fetch, waits = [15000, 30000, 45000], timeoutMs = 240000, json = false, think = 'minimal', maxTokens = 16384 } = {}) {
   let lastWhy = '';
-  const busy = new Set();          // models too busy for THIS stretch ("high demand"): the next one hears it
+  const busy = new Set();
   for (;;) {
     const open = await models(fetchImpl);
     const model = open.find((m) => !busy.has(m));
     if (!open.length) throw Object.assign(new Error('the free Gemini allowance is used up for today' + (lastWhy ? ' (' + lastWhy + ')' : '')), { exhausted: true });
     if (!model) throw new Error('Gemini is busy right now (' + lastWhy + ')');
     const body = {
-      contents: [{ role: 'user', parts: [
-        { inline_data: { mime_type: 'audio/flac', data } },
-        { text: promptFor(terms) },
-      ] }],
-      generationConfig: { temperature: 0, maxOutputTokens: 16384 },
+      contents: [{ role: 'user', parts }],
+      generationConfig: Object.assign({ temperature: 0, maxOutputTokens: maxTokens }, json ? { responseMimeType: 'application/json' } : {}),
       safetySettings: SAFETY,
     };
-    const thinking = thinkingFor(model);
+    const thinking = thinkingFor(model, think);
     if (thinking.length) body.generationConfig.thinkingConfig = thinking.shift();
     let next = false;
     for (let attempt = 0; !next; attempt++) {
@@ -172,8 +176,7 @@ async function hear(flac, { terms = [], fetchImpl = fetch, waits = [15000, 30000
         const c = j && j.candidates && j.candidates[0];
         const text = c && c.content && Array.isArray(c.content.parts) ? c.content.parts.filter((p) => !p.thought).map((p) => p.text || '').join('') : '';
         const why = String((c && c.finishReason) || (j && j.promptFeedback && j.promptFeedback.blockReason) || '');
-        if (!clean(text) && why && why !== 'STOP') throw new Error('Gemini held this stretch back (' + why.toLowerCase() + ')');
-        return { text: clean(text), model, finish: why };
+        return { text, model, finish: why };
       }
       let said = '';
       try { const e = await res.json(); said = JSON.stringify((e && e.error) || e || '').slice(0, 600); } catch (e) {}
@@ -192,7 +195,7 @@ async function hear(flac, { terms = [], fetchImpl = fetch, waits = [15000, 30000
         await sleep(hint > 0 ? Math.min(60000, hint + 1000) : waits[attempt]); continue;
       }
       if (res.status === 429) { spent.add(model); next = true; continue; }
-      // overloaded ("high demand") or failing: one short wait, then another model hears this stretch
+      // overloaded ("high demand") or failing: one short wait, then another model takes this request
       if (res.status >= 500) {
         if (attempt < 1 && waits.length) { await sleep(waits[0]); continue; }
         busy.add(model); next = true; continue;
@@ -200,6 +203,13 @@ async function hear(flac, { terms = [], fetchImpl = fetch, waits = [15000, 30000
       throw new Error('Gemini answered ' + lastWhy);
     }
   }
+}
+const audioPart = (flac) => ({ inline_data: { mime_type: 'audio/flac', data: Buffer.from(flac).toString('base64') } });
+/** One stretch of audio → its words as text. */
+async function hear(flac, { terms = [], fetchImpl = fetch, waits, timeoutMs = 240000 } = {}) {
+  const r = await ask([audioPart(flac), { text: promptFor(terms) }], Object.assign({ fetchImpl, timeoutMs }, waits ? { waits } : {}));
+  if (!clean(r.text) && r.finish && r.finish !== 'STOP') throw new Error('Gemini held this stretch back (' + r.finish.toLowerCase() + ')');
+  return { text: clean(r.text), model: r.model, finish: r.finish };
 }
 
 /**
@@ -259,4 +269,4 @@ async function transcribeSpan({ input, from = 0, to, terms = [], chunkSec = 300,
   return { chunks: got.filter(Boolean), failed, why: failed ? why : '', model };
 }
 
-module.exports = { ready, transcribeSpan, hear, pickModel, rankModel, promptFor, clean, setFfmpeg, _reset: () => { ranked = null; spent.clear(); } };
+module.exports = { ready, transcribeSpan, hear, ask, audioPart, encodeFlac, pickModel, rankModel, promptFor, clean, setFfmpeg, _reset: () => { ranked = null; spent.clear(); } };
