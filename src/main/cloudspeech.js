@@ -1361,11 +1361,11 @@ function fuseWithPlain(words, alt) {
 }
 
 /** Hear [from,to] again with the OTHER model and mark where the two disagree. */
-async function secondOpinion({ input, from, to, words, onProgress = null, terms = null, plain = false }) {
+async function secondOpinion({ input, from, to, words, onProgress = null, terms = null, plain = false, notAssembly = false }) {
   // an ear that is not Whisper, when the church has the free key (assemblyear.js); Whisper again otherwise
   try {
     const aai = require('./assemblyear');
-    if (aai.ready()) {
+    if (aai.ready() && !notAssembly) {
       const audio = await require('./geminiear').encodeFlac(input, from, to - from);
       const alt = await aai.transcribe(audio, { terms: terms || [], cancelled: () => !!(jobs && jobs.isCancelled && jobs.isCancelled()) });
       if (alt.length) return { checked: true, model: 'assemblyai', alt, doubts: words.length ? markDisagreements(words, alt) : 0 };

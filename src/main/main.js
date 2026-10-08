@@ -1434,6 +1434,32 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
   if (!r) return null;
   let words = r.words || [];
   let pcSec = 0;
+  /*
+   * GROQ USED UP: ASSEMBLYAI HEARS THE REST. Measured: with Groq's allowance
+   * gone, the server's own model heard 30 minutes of a sermon and took 37 of
+   * them to do it. When the church has the free AssemblyAI key, it hears what
+   * is left instead — in a minute or two, and as well as Whisper Large or
+   * better. The server's model is only the last resort now.
+   */
+  let aaiFirst = false;
+  if (r.doneSec < span - 0.5) {
+    try {
+      const aai = require('./assemblyear');
+      if (aai.ready()) {
+        if (prog) prog(Math.max(1, Math.round((r.doneSec / span) * 60)));
+        const audio = await geminiear.encodeFlac(input, from + r.doneSec, span - r.doneSec);
+        const restW = await aai.transcribe(audio, { terms: captionTerms(), cancelled: () => jobs.isCancelled() });
+        if (restW.length) {
+          words = words.concat(restW.map((w) => Object.assign({}, w, { start: w.start + r.doneSec, end: w.end + r.doneSec })));
+          r = Object.assign({}, r, { doneSec: span, why: '' });
+          aaiFirst = true;
+        }
+      }
+    } catch (e) {
+      if (e && e.cancelled) throw new jobs.CancelledError();
+      console.log('  AssemblyAI could not hear the rest (' + ((e && e.message) || e) + ') — the server hears it');
+    }
+  }
   if (r.doneSec < span - 0.5) {
     // Nothing came back from the cloud at all: the ordinary PC path, which
     // reports its own progress and says why (see cloudWhy in the handler).
@@ -1481,7 +1507,7 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
   const [second, third] = await Promise.all([
     (!pcSec && book.entries.length) ? cloudspeech.secondOpinion({
       input, from, to, words: [],      // compared below, after the Word Book
-      terms: captionTerms(), plain,
+      terms: captionTerms(), plain, notAssembly: aaiFirst,   // (AssemblyAI already heard it: Whisper is the other ear)
       onProgress: (p) => { heard[0] = p / 100; both(); },
     }).catch((e) => settle(e, { checked: false, why: (e && e.message) || 'the second listen failed' })) : null,
     thirdOn ? geminiear.transcribeSpan({
