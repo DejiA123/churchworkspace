@@ -1805,8 +1805,20 @@ let _hideTimer = null;
     const id = 'u' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
     const q = (extra) => `/api/upload?name=${encodeURIComponent(nameWithExt(file))}&id=${id}&size=${file.size}${extra || ''}`;
     let sent = 0;
-    const ctl = { cancelled: false };
+    /*
+     * STOP MEANS NOW. It used to be looked at only between 8 MB pieces — on a
+     * phone's connection a minute or more — so Stop seemed to do nothing. The
+     * piece on its way is cut off (abort), and the half-sent file on the server
+     * is thrown away (discard): a stopped upload leaves nothing behind.
+     */
+    const ac = new AbortController();
+    const ctl = { cancelled: false, stop() { this.cancelled = true; try { ac.abort(); } catch (e) {} } };
     currentUpload = ctl;
+    const stopped = () => {
+      currentUpload = null;
+      fetch(q('&discard=1'), { method: 'POST', headers: authHeaders() }).catch(() => {});
+      const e = new Error('Stopped.'); e.stopped = true; return e;
+    };
 
     // Where did we get to last time (if this is a retry of the same id)?
     try {
@@ -1816,7 +1828,7 @@ let _hideTimer = null;
     } catch (e) { sent = 0; }
 
     while (sent < file.size) {
-      if (ctl.cancelled) throw new Error('Stopped.');
+      if (ctl.cancelled) throw stopped();
       const end = Math.min(sent + CHUNK, file.size);
       const slice = file.slice(sent, end);
       let res;
@@ -1825,11 +1837,14 @@ let _hideTimer = null;
           method: 'POST',
           headers: Object.assign({ 'Content-Type': 'application/octet-stream' }, authHeaders()),
           body: slice,
+          signal: ac.signal,
         });
       } catch (e) {
+        if (ctl.cancelled) throw stopped();
         // A dropped connection is not a lost upload — wait and pick up where the
         // server says it got to.
         await new Promise((r) => setTimeout(r, 1500));
+        if (ctl.cancelled) throw stopped();
         const probe = await fetch(q('&probe=1'), { method: 'POST', headers: authHeaders() }).then((r) => r.json()).catch(() => null);
         if (probe && typeof probe.have === 'number') { sent = probe.have; continue; }
         throw new Error('The upload stopped and could not be picked up again.');
@@ -1878,6 +1893,8 @@ let _hideTimer = null;
             const p = await uploadFile(f, (pc) => showUploadProgress({ name: f.name, percent: pc }));
             paths.push(p);
           } catch (e) {
+            // Stop stops them all — the rest of a multi-pick are not sent either
+            if (e && e.stopped) { island({ kind: 'info', title: 'Upload stopped', sub: files.length > 1 ? 'Nothing more was sent.' : 'Nothing was kept on the server.', ms: 3500 }); break; }
             toast('⚠️ ' + (e.message || e), 'error');
           }
         }
@@ -5017,7 +5034,11 @@ let _hideTimer = null;
       const chosen = await chooseFromDevice(picking ? pickState.multi : true, picking ? pickState.exts : null);
       if (picking && chosen) finishPick(chosen);
     });
-    on('#cloudUploadCancel', 'click', () => { if (currentUpload) currentUpload.cancelled = true; });
+    on('#cloudUploadCancel', 'click', (ev) => {
+      if (!currentUpload) return;
+      currentUpload.stop();
+      const b = ev && ev.currentTarget; if (b) { b.textContent = 'Stopping…'; b.disabled = true; setTimeout(() => { b.textContent = 'Stop'; b.disabled = false; }, 1500); }
+    });
     on('#cloudDownloads', 'click', () => { renderDownloads(); raiseSheet($('#cloudDownloadsModal')); $('#cloudDownloadsModal').classList.remove('hidden'); });
     on('#cloudDownloadsClose', 'click', () => $('#cloudDownloadsModal').classList.add('hidden'));
     on('#cloudHelp', 'click', () => {

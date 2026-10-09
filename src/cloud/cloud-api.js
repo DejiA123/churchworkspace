@@ -1296,6 +1296,15 @@ function receiveUpload(req, res, url) {
   const offset = Math.max(0, Number(url.searchParams.get('offset') || 0) || 0);
   const total = Number(url.searchParams.get('size') || req.headers['content-length'] || 0) || 0;
 
+  // Stop: the half-sent file goes (a stopped upload leaves nothing behind)
+  if (url.searchParams.get('discard') === '1') {
+    const live = uploads.get(id);
+    if (live && live.req) { try { live.req.destroy(); } catch (e) {} }
+    uploads.delete(id);
+    setTimeout(() => { try { fs.rmSync(partial, { force: true }); } catch (e) {} }, 300);   // after the cut-off piece lets go of it
+    return json(res, 200, { ok: true, discarded: true });
+  }
+
   if (url.searchParams.get('probe') === '1') {
     let have = 0;
     try { have = fs.statSync(partial).size; } catch (e) { have = 0; }
@@ -1308,7 +1317,7 @@ function receiveUpload(req, res, url) {
   try { onDisk = fs.statSync(partial).size; } catch (e) { onDisk = 0; }
   if (offset > onDisk) return json(res, 409, { ok: false, error: 'Upload is out of step.', have: onDisk });
 
-  const rec = { id, name: cleaned, received: offset, total, path: partial };
+  const rec = { id, name: cleaned, received: offset, total, path: partial, req };
   uploads.set(id, rec);
 
   const out = fs.createWriteStream(partial, offset ? { flags: 'r+', start: offset } : { flags: 'w' });
