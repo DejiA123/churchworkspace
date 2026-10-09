@@ -630,6 +630,8 @@ let _hideTimer = null;
       linkClaim: (platform) => call('social:linkClaim', { platform }),
       unlink: (id) => call('social:unlink', { id }),
       check: (id) => call('social:check', { id }),
+      // whether the cloud AI writer/judge has its key (never the key itself) — the Cloud AI picker needs it
+      cloudState: () => call('social:cloudState'),
     },
     onJobProgress: (cb) => { jobProgressCbs.push(cb); return () => { jobProgressCbs = jobProgressCbs.filter((f) => f !== cb); }; },
     onSchedulerDue: () => () => {},

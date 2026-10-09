@@ -229,6 +229,7 @@ const ALLOWED = {
   // ☁️ which ear is available, and the ✍ AI proof-reader. NOT captions:cloudKey —
   // a key is pasted at the desk, never set from the internet.
   'captions:cloud': true,
+  'social:cloudState': true,      // is the cloud AI judge set up (a yes/no, never the key) — the long-to-shorts picker
   'captions:grammar': true,
   // 🎯 the reframe's eye (asks with the desk's key; the key itself never travels)
   'reframe:aiState': true,

@@ -8440,6 +8440,18 @@
     // shows (⬇), and the tooltip carries the explanation.
     // Auto means the cloud whenever the cloud judge is on (see sermon:analyze),
     // so the label says which ear Auto will actually be
+    /*
+     * ASSEMBLYAI IS THE EAR, when the church has its key — "only AssemblyAI should
+     * be on that list". The scan hears with it whatever is chosen here (sermon:
+     * analyze), so offering Small, Medium… was offering choices that did nothing;
+     * Groq and this server stay behind it, as the fallback if it cannot answer.
+     */
+    if (ve._capCloud && ve._capCloud.assembly) {
+      sel.innerHTML = '<option value="cloud">👂 ☁️ AssemblyAI</option>';
+      if (ve.asrModel !== 'cloud') { ve.asrModel = 'cloud'; saveExportPrefs(); }
+      sel.value = 'cloud';
+      return;
+    }
     const autoName = ve.aiModel === 'cloud' ? '☁️' : (auto ? escape2(auto.name.split(' —')[0].split(' (')[0]) : '');
     const opts = [`<option value="">👂 Auto${autoName ? ' (' + autoName + ')' : ''}</option>`,
       `<option value="cloud">👂 ☁️ ${cloudEarName()}</option>`];
