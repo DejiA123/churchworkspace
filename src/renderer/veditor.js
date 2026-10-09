@@ -10109,13 +10109,23 @@
       const w = ratio >= 1 ? even(short * ratio) : short, h = ratio >= 1 ? short : even(short / ratio);
       return { width: w, height: h, durationSec: Math.max(0.1, (s.end || 0) - (s.start || 0)), hasAudio: true, fps: 24 };
     };
+    /*
+     * How many were handed over before this run started — counted ONCE, here.
+     * It was read from `resume.sent` on every short, and on a resumed export that
+     * is the very list each short is added to as it is sent (hand IS resume), so
+     * every short counted twice: "Short 22 of 20" after a crash.
+     */
+    const before = resume ? (resume.sent || []).length : 0;
     try {
       for (let i = 0; i < list.length; i++) {
         const s = list[i];
         // "Short 2 of 5" on the progress overlay, so the whole batch reads as one
-        // continuous export instead of anonymous back-to-back jobs
-        const at = (resume ? (resume.sent || []).length : 0) + done + 1;
-        if (window.__setJobBatch) window.__setJobBatch(at, total);
+        // continuous export instead of anonymous back-to-back jobs. When the server
+        // makes them, what THIS screen shows is the phone getting each one ready to
+        // hand over — said so, so it cannot be mistaken for the server's own count
+        // (the jobs sheet), which is further behind and is the export itself.
+        const at = Math.min(total, before + done + 1);
+        if (window.__setJobBatch) window.__setJobBatch(at, total, sbatch ? 'Preparing short' : null, sbatch ? 'for the server' : null);
         if (window.__setTaskBatch) window.__setTaskBatch(task, at, total);
         try {
           /*

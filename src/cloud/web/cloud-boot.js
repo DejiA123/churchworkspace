@@ -914,11 +914,11 @@ let _hideTimer = null;
     const bg = $('#overlayBackground');
     if (bg) { bg.classList.add('hidden'); bg.onclick = null; }
   }
-  function setJobBatch(i, n) {
+  function setJobBatch(i, n, what, tail) {
     const el = $('#overlayBatch');
     if (!el) return;
     if (!i || !n) { el.classList.add('hidden'); el.textContent = ''; }
-    else { el.classList.remove('hidden'); el.textContent = `Short ${i} of ${n}`; }
+    else { el.classList.remove('hidden'); el.textContent = `${what || 'Short'} ${Math.min(i, n)} of ${n}${tail ? ' ' + tail : ''}`; }
   }
 
   let _cancelJobId = null;

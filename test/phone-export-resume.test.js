@@ -83,6 +83,15 @@ async function until(fn, ms = 120000, every = 200) {
     if (!login.token) throw new Error('could not sign in');
     const ctx = await browser.newContext({ ...devices['iPhone 13'] });
     await ctx.addInitScript((t) => { try { localStorage.setItem('mw.cloud.token', t); } catch (e) {} }, login.token);
+    // every "Short N of M" line the progress screen shows, as it shows it
+    await ctx.addInitScript(() => {
+      window.__batchSeen = [];
+      new MutationObserver(() => {
+        const el = document.getElementById('overlayBatch');
+        const t = el && !el.classList.contains('hidden') ? el.textContent.trim() : '';
+        if (t && window.__batchSeen[window.__batchSeen.length - 1] !== t) window.__batchSeen.push(t);
+      }).observe(document, { subtree: true, childList: true, characterData: true, attributes: true });
+    });
     const errors = [];
     const studio = async () => {
       const page = await ctx.newPage();
@@ -135,6 +144,13 @@ async function until(fn, ms = 120000, every = 200) {
     check(!!fin, 'the SAME export finishes', fin && { state: fin.state, received: fin.received });
     check(labels.length === 3 && new Set(labels).size === 3 && ['One', 'Two', 'Three'].every((l) => labels.includes(l)), 'One, Two and Three — each once', labels);
     check(fin && fin.done === 3 && fin.items.every((x) => x.state === 'done' && x.output), 'and all three are made', fin && fin.items);
+    // "Short 22 of 20" after a crash: the shorts sent before it were counted again for every short after it
+    const seen = await page.evaluate(() => window.__batchSeen || []);
+    const nums = seen.map((t) => { const m = /(\d+) of (\d+)/.exec(t); return m ? [+m[1], +m[2]] : null; }).filter(Boolean);
+    check(nums.length >= 2 && nums.every(([i, n]) => n === 3 && i >= 2 && i <= 3) && nums.some(([i]) => i === 3),
+      'the progress screen counts on from where it was cut off — never past the total', seen);
+    check(seen.length > 0 && seen.every((t) => /^Preparing short \d+ of 3 for the server$/.test(t)),
+      'and says it is getting them ready for the server (the jobs sheet has the export itself)', seen);
     const others = await page.evaluate(async (id) => ((await window.__mwBatch.list()) || []).filter((x) => x.id !== id).length, bid);
     check(others === 0, 'no second export was started for the rest', others);
 

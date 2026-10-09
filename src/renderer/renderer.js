@@ -160,11 +160,11 @@ window.__cancelJob = cancelCurrentJob;
 })();
 
 /** Batch indicator for multi-clip runs: "Short 2 of 5" above the job message. */
-function setJobBatch(i, n) {
+function setJobBatch(i, n, what, tail) {
   const el = $('#overlayBatch');
   if (!el) return;
   if (!i || !n) { el.classList.add('hidden'); el.textContent = ''; }
-  else { el.classList.remove('hidden'); el.textContent = `Short ${i} of ${n}`; }
+  else { el.classList.remove('hidden'); el.textContent = `${what || 'Short'} ${Math.min(i, n)} of ${n}${tail ? ' ' + tail : ''}`; }
 }
 
 /* The background-task layer — tasks, the chain that turns five ffmpeg passes
