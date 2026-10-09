@@ -100,4 +100,9 @@ fi
 $DOCKER compose up -d --build --remove-orphans
 echo "$REMOTE" > .cloud-built
 $DOCKER image prune -f >/dev/null 2>&1 || true   # old builds take disk the recordings need
+# …and so does Docker's build cache, which grows with every update and was never
+# cleared. A few GB of it are kept, so the next update still builds in seconds.
+$DOCKER builder prune -f --keep-storage 4gb >/dev/null 2>&1 \
+  || $DOCKER builder prune -f --reserved-space 4gb >/dev/null 2>&1 \
+  || $DOCKER builder prune -f --filter until=72h >/dev/null 2>&1 || true
 echo "$(stamp) updated"

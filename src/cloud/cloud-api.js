@@ -872,6 +872,11 @@ async function deleteFiles(req, res) {
     try { const sc = full + '.montage.json'; const ss = fs.statSync(sc); fs.unlinkSync(sc); freed += ss.size; } catch (e) { /* none */ }
     // …and the copy without its overlays that the studio edits (montage.js baseOf)
     try { const bo = path.join(path.dirname(full), '.montage-edit', path.basename(full)); const bs = fs.statSync(bo); fs.unlinkSync(bo); freed += bs.size; alsoGone.push(bo); } catch (e) { /* none */ }
+    // …and the stills its snapshot overlays froze (montage.js stillsFor: <name>.snap-N.jpg)
+    try {
+      const ed = path.join(path.dirname(full), '.montage-edit'), stem = path.basename(full).replace(/\.[^.]+$/, '') + '.snap-';
+      for (const n of fs.readdirSync(ed)) if (n.startsWith(stem) && /\.snap-\d+\.jpg$/.test(n)) { const sf = path.join(ed, n); const ss = fs.statSync(sf); fs.unlinkSync(sf); freed += ss.size; }
+    } catch (e) { /* none */ }
     const base = full.replace(/\.[^.\\/]+$/, '');
     for (const ext of COMPANIONS) {
       try { const c = base + ext; const cs = fs.statSync(c); fs.unlinkSync(c); freed += cs.size; } catch (e) { /* none */ }
