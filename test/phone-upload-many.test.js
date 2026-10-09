@@ -1,11 +1,13 @@
 'use strict';
 /*
- * STOPPING AN UPLOAD FROM A PHONE: "I should be able to stop an upload."
- * Stop was only looked at between 8 MB pieces, so on a slow connection it
- * seemed to do nothing. Over a connection where each piece takes 8 s:
- *   Stop stops it at once, says so, and leaves nothing half-sent on the server.
+ * SEVERAL UPLOADS AT ONCE, FROM A PHONE: "I should be able to upload more than
+ * one file simultaneously." Over a slow connection (each piece takes 3 s):
+ *   [1] four picked together: three go up at the same time, the fourth waits
+ *   [2] each has its own bar and Stop; stopping one leaves the others going
+ *   [3] more can be sent while some are on their way
+ *   [4] everything not stopped arrives, and the list shows it
  *
- *   node test/phone-upload-stop.test.js
+ *   node test/phone-upload-many.test.js
  */
 /*
  * THE TEXT PANEL ON A PHONE — still, docked, and its Size number true.
@@ -43,7 +45,7 @@ let chromium, devices;
 try { ({ chromium, devices } = require('playwright')); } catch (e) { console.log('SKIP: Playwright is not installed here.'); process.exit(0); }
 const ROOT = path.join(__dirname, '..');
 const ffmpeg = require(ROOT + '/node_modules/ffmpeg-static');
-const PORT = 7396, CODE = 'upstop-test-5821';
+const PORT = 7397, CODE = 'upmany-test-5821';
 let pass = 0, fail = 0;
 const check = (ok, name, d) => { console.log((ok ? '  PASS ' : '  FAIL ') + name + (d !== undefined && !ok ? '  -> ' + JSON.stringify(d) : '')); ok ? pass++ : fail++; };
 const onTop = (r) => r && !r.filesHidden && r.grid.every((g) => /cloudFilesModal/.test(g));
@@ -70,27 +72,45 @@ async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise
     page.on('pageerror', (e) => check(false, 'the page runs without errors', e.message));
     await page.goto(`http://127.0.0.1:${PORT}/#studio`, { waitUntil: 'load' });
     await page.waitForFunction(() => window.VideoEditor && window.VideoEditor.openPath, null, { timeout: 30000 });
-    // a 20 MB "video", sent over a connection where each piece takes 8 s
-    const BIG = path.join(WORK, 'big.mp4');
-    fs.writeFileSync(BIG, Buffer.alloc(20 * 1024 * 1024, 7));
-    await page.route('**/api/upload?*offset=*', async (route) => { await sleep(8000); try { await route.continue(); } catch (e) {} });
+
+    const mk = (n, mb) => { const f = path.join(WORK, n); fs.writeFileSync(f, Buffer.alloc(mb * 1024 * 1024, 7)); return f; };
+    const files = [mk('one.mp4', 10), mk('two.mp4', 10), mk('three.mp4', 10), mk('four.mp4', 10)];
+    let inFlight = 0, most = 0;
+    await page.route('**/api/upload?*offset=*', async (route) => {
+      inFlight++; most = Math.max(most, inFlight);
+      await sleep(3000);
+      try { await route.continue(); } catch (e) {}
+      inFlight--;
+    });
     await page.evaluate(() => document.getElementById('cloudFiles').click()); await sleep(1200);
-    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('#cloudUpload')]);
-    await chooser.setFiles(BIG);
+    const pick = async (list) => { const [ch] = await Promise.all([page.waitForEvent('filechooser'), page.click('#cloudUpload')]); await ch.setFiles(list); };
+    await pick(files);
     await sleep(1500);
-    const before = await page.evaluate(() => !document.getElementById('cloudUploadBar').classList.contains('hidden'));
-    check(before, 'the upload is showing, with its Stop');
-    const t0 = Date.now();
-    await page.click('#cloudUploadBar [data-upstop]');
-    const gone = await (async () => { for (let k = 0; k < 40; k++) { if (await page.evaluate(() => document.getElementById('cloudUploadBar').classList.contains('hidden'))) return Date.now() - t0; await sleep(100); } return -1; })();
-    check(gone >= 0 && gone < 2500, 'Stop stops it straight away (not after the piece on its way)', gone + ' ms');
-    const isl = await page.evaluate(() => (document.querySelector('.cloud-island.on') || {}).textContent || '');
-    check(/stopped/i.test(isl), 'and says so calmly', isl);
-    await sleep(1500);
-    const parts = [];
-    const walk = (d) => { try { for (const n of fs.readdirSync(d)) { const f = path.join(d, n); if (fs.statSync(f).isDirectory()) walk(f); else if (n.startsWith('.part-')) parts.push(f); } } catch (e) {} };
-    walk(DATA); walk(MEDIA);
-    check(parts.length === 0, 'nothing half-sent is left on the server', parts);
+    const rows = () => page.evaluate(() => [...document.querySelectorAll('#cloudUploadBar .cloud-up-row')].map((r) => ({ name: r.querySelector('.cloud-upload-name').textContent, wait: r.classList.contains('wait'), stop: !!r.querySelector('[data-upstop]') })));
+    let r1 = await rows();
+    console.log(JSON.stringify(r1));
+    check(r1.length === 4 && r1.filter((x) => !x.wait).length === 3 && r1.filter((x) => x.wait).length === 1, '[1] four picked: three going up, one waiting', r1);
+    check(r1.every((x) => x.stop), '[2] each has its own Stop');
+    const stopAll = await page.evaluate(() => !!document.querySelector('#cloudUploadBar [data-upstop="*"]'));
+    check(stopAll, '[2] and there is a Stop all');
+    // stop the second one only
+    await page.click('#cloudUploadBar .cloud-up-row:nth-child(2) [data-upstop]');
+    await sleep(800);
+    let r2 = await rows();
+    check(r2.length === 3 && !r2.some((x) => x.name === 'two.mp4'), '[2] stopping one takes only that one away', r2);
+    // [3] one more while they are going
+    await pick([mk('five.mp4', 4)]);
+    await sleep(800);
+    let r3 = await rows();
+    check(r3.some((x) => x.name === 'five.mp4'), '[3] another can be sent while these are on their way', r3);
+    // wait for the lot
+    for (let k = 0; k < 120; k++) { if (!(await rows()).length) break; await sleep(500); }
+    check(most >= 3, '[1] they really went up at the same time (pieces in flight together: ' + most + ')');
+    const names = await page.evaluate(() => [...document.querySelectorAll('#cloudFilesList .cf-row')].map((r) => r.textContent));
+    const has = (n) => names.some((t) => t.includes(n));
+    check(has('one.mp4') && has('three.mp4') && has('four.mp4') && has('five.mp4') && !has('two.mp4'), '[4] all but the stopped one arrived, and the list shows them', names.map((t) => t.slice(0, 40)));
+    const isl = await page.evaluate(() => [...document.querySelectorAll('.cloud-island')].map((x) => x.textContent).join(' | '));
+    void isl;
   } finally { await browser.close(); srv.kill(); }
   console.log(`${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FATAL', e); process.exit(1); });

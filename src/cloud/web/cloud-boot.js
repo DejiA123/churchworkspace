@@ -1800,7 +1800,7 @@ let _hideTimer = null;
     if (/\.[a-z0-9]{2,5}$/i.test(n)) return n;
     return n + (MIME_EXT[String(file.type || '').toLowerCase()] || (/^video\//.test(file.type) ? '.mp4' : /^image\//.test(file.type) ? '.jpg' : /^audio\//.test(file.type) ? '.mp3' : ''));
   }
-  async function uploadFile(file, onProgress) {
+  async function uploadFile(file, onProgress, ctlIn) {
     const CHUNK = 8 * 1024 * 1024;
     const id = 'u' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
     const q = (extra) => `/api/upload?name=${encodeURIComponent(nameWithExt(file))}&id=${id}&size=${file.size}${extra || ''}`;
@@ -1811,11 +1811,12 @@ let _hideTimer = null;
      * piece on its way is cut off (abort), and the half-sent file on the server
      * is thrown away (discard): a stopped upload leaves nothing behind.
      */
-    const ac = new AbortController();
-    const ctl = { cancelled: false, stop() { this.cancelled = true; try { ac.abort(); } catch (e) {} } };
-    currentUpload = ctl;
+    const ctl = ctlIn || newUploadCtl();
+    ctl.id = id;              // the server's progress messages carry it (showUploadProgress)
+    const ac = ctl.ac;
+    if (!ctlIn) currentUpload = ctl;
     const stopped = () => {
-      currentUpload = null;
+      if (currentUpload === ctl) currentUpload = null;
       fetch(q('&discard=1'), { method: 'POST', headers: authHeaders() }).catch(() => {});
       const e = new Error('Stopped.'); e.stopped = true; return e;
     };
@@ -1853,23 +1854,101 @@ let _hideTimer = null;
       const out = await res.json();
       if (!res.ok) throw new Error(out.error || 'Upload failed.');
       if (out.partial) { sent = out.have; }
-      else if (out.ok && out.path) { if (onProgress) onProgress(100); currentUpload = null; return out.path; }
+      else if (out.ok && out.path) { if (onProgress) onProgress(100); if (currentUpload === ctl) currentUpload = null; return out.path; }
       else sent = end;
       if (onProgress) onProgress(Math.round((sent / file.size) * 100));
     }
-    currentUpload = null;
+    if (currentUpload === ctl) currentUpload = null;
     throw new Error('The upload finished without a file coming back.');
   }
 
-  function showUploadProgress(d) {
+  function newUploadCtl() {
+    const ac = new AbortController();
+    return { ac, cancelled: false, stop() { this.cancelled = true; try { ac.abort(); } catch (e) {} } };
+  }
+  /*
+   * ►► SEVERAL AT ONCE. ◄◄ "I should be able to upload more than one file
+   * simultaneously." Every file sent from this phone is a row of its own — its
+   * name, its bar, its own Stop — and up to UP_AT_ONCE go up together (more
+   * than that only splits the same connection thinner); the rest wait their
+   * turn, listed as waiting. Sending more while some are on their way just adds
+   * rows. Each is still sent in resumable pieces (uploadFile).
+   */
+  const UP_AT_ONCE = 3;
+  const upRows = new Map();      // key -> { name, pct, state: 'wait'|'run', ctl, start }
+  let upRunning = 0;
+  const upQueue = [];
+  let upSeq = 0;
+  function renderUploads() {
     const bar = $('#cloudUploadBar');
     if (!bar) return;
-    if (d && d.done) { bar.classList.add('hidden'); return; }
+    if (!upRows.size) { bar.classList.add('hidden'); bar.innerHTML = ''; return; }
     bar.classList.remove('hidden');
-    const n = bar.querySelector('.cloud-upload-name');
-    if (n) n.textContent = (d && d.name) || 'Sending…';
-    const p = bar.querySelector('.progress-bar');
-    if (p) p.style.width = Math.max(2, Math.min(100, (d && d.percent) || 0)) + '%';
+    bar.classList.add('multi');
+    const rows = Array.from(upRows.entries());
+    bar.innerHTML = rows.map(([k, r]) => `<div class="cloud-up-row${r.state === 'wait' ? ' wait' : ''}" data-up="${k}">`
+      + `<div class="cloud-upload-name">${escHtml(r.name)}</div>`
+      + (r.state === 'wait' ? '<div class="cloud-up-wait">Waiting…</div>'
+        : `<div class="progress"><div class="progress-bar" style="width:${Math.max(2, Math.min(100, r.pct || 0))}%"></div></div>`)
+      + (r.ctl ? `<button type="button" class="cloud-files-pill" data-upstop="${k}">${r.stopping ? 'Stopping…' : 'Stop'}</button>` : '')
+      + '</div>').join('')
+      + (rows.filter(([, r]) => r.ctl).length > 1 ? '<button type="button" class="cloud-up-stopall" data-upstop="*">Stop all</button>' : '');
+  }
+  /* just the bar of one row, so a progress tick does not redraw (and steal) a tap */
+  function paintUploadPct(k) {
+    const r = upRows.get(k); const row = document.querySelector(`#cloudUploadBar [data-up="${k}"] .progress-bar`);
+    if (r && row) row.style.width = Math.max(2, Math.min(100, r.pct || 0)) + '%'; else renderUploads();
+  }
+  function stopUpload(k) {
+    const keys = k === '*' ? Array.from(upRows.keys()) : [k];
+    for (const key of keys) {
+      const r = upRows.get(key); if (!r || !r.ctl) continue;
+      r.stopping = true; r.ctl.stop();
+      if (r.state === 'wait') { r.done(Object.assign(new Error('Stopped.'), { stopped: true })); }
+    }
+    renderUploads();
+  }
+  function pumpUploads() {
+    while (upRunning < UP_AT_ONCE && upQueue.length) {
+      const key = upQueue.shift();
+      const r = upRows.get(key); if (!r || r.ctl.cancelled) continue;
+      r.state = 'run'; upRunning++;
+      renderUploads();
+      uploadFile(r.file, (pc) => { r.pct = pc; paintUploadPct(key); }, r.ctl)
+        .then((p) => r.done(null, p), (e) => r.done(e))
+        .finally(() => { upRunning--; pumpUploads(); });
+    }
+  }
+  /** Send files, several at once; resolves with [{ name, path } | { name, error }] in the order given. */
+  function sendFiles(files) {
+    return Promise.all(files.map((file) => new Promise((resolve) => {
+      const key = 'f' + (++upSeq);
+      const r = { name: file.name, pct: 0, state: 'wait', file, ctl: newUploadCtl() };
+      let settled = false;
+      r.done = (err, p) => {
+        if (settled) return; settled = true;
+        upRows.delete(key); renderUploads();
+        resolve(err ? { name: file.name, error: err } : { name: file.name, path: p });
+      };
+      upRows.set(key, r); upQueue.push(key);
+    })));
+  }
+  function sendFilesNow(files) { const all = sendFiles(files); renderUploads(); pumpUploads(); return all; }
+  /** Say how a batch went: stopped ones quietly, failures once each. */
+  function reportSent(results) {
+    const stopped = results.filter((x) => x.error && x.error.stopped).length;
+    for (const x of results) if (x.error && !x.error.stopped) toast('⚠️ ' + (x.name ? x.name + ': ' : '') + (x.error.message || x.error), 'error');
+    if (stopped) island({ kind: 'info', title: stopped > 1 ? `${stopped} uploads stopped` : 'Upload stopped', sub: 'Nothing of them was kept on the server.', ms: 3500 });
+  }
+  /* an upload reported by the server (another device's): shown, without a Stop of ours */
+  function showUploadProgress(d) {
+    if (!d || !d.id) return;
+    for (const r of upRows.values()) if (r.ctl && r.ctl.id === d.id) return;
+    const key = 'srv-' + d.id;
+    if (d.done) { upRows.delete(key); renderUploads(); return; }
+    const had = upRows.has(key);
+    upRows.set(key, Object.assign(upRows.get(key) || { name: d.name || 'Sending…', state: 'run' }, { pct: d.percent || 0 }));
+    if (had) paintUploadPct(key); else renderUploads();
   }
 
   /** Pick files off this device and send them; resolves with studio paths. */
@@ -1886,20 +1965,10 @@ let _hideTimer = null;
         const files = Array.from(input.files || []);
         input.remove();
         if (!files.length) return resolve(null);
-        const paths = [];
-        for (const f of files) {
-          showUploadProgress({ name: f.name, percent: 0 });
-          try {
-            const p = await uploadFile(f, (pc) => showUploadProgress({ name: f.name, percent: pc }));
-            paths.push(p);
-          } catch (e) {
-            // Stop stops them all — the rest of a multi-pick are not sent either
-            if (e && e.stopped) { island({ kind: 'info', title: 'Upload stopped', sub: files.length > 1 ? 'Nothing more was sent.' : 'Nothing was kept on the server.', ms: 3500 }); break; }
-            toast('⚠️ ' + (e.message || e), 'error');
-          }
-        }
-        showUploadProgress({ done: true });
-        if (!paths.length) return resolve(null);
+        const results = await sendFilesNow(files);
+        reportSent(results);
+        const paths = results.filter((x) => x.path).map((x) => x.path);
+        if (!paths.length) { refreshFiles(); return resolve(null); }
         await refreshFiles();
         resolve(multi ? paths : paths[0]);
       }, { once: true });
@@ -3565,13 +3634,9 @@ let _hideTimer = null;
       e.preventDefault();
       e.stopPropagation();
       const target = e.target;
-      const paths = [];
-      showUploadProgress({ name: files[0].name, percent: 0 });
-      for (const f of files) {
-        try { paths.push({ path: await uploadFile(f, (pc) => showUploadProgress({ name: f.name, percent: pc })), name: f.name }); }
-        catch (err) { toast('⚠️ ' + (err.message || err), 'error'); }
-      }
-      showUploadProgress({ done: true });
+      const results = await sendFilesNow(files);
+      reportSent(results);
+      const paths = results.filter((x) => x.path).map((x) => ({ path: x.path, name: x.name }));
       if (!paths.length) return;
       const ev = new Event('drop', { bubbles: true, cancelable: true });
       ev.__cloud = true;
@@ -5034,10 +5099,9 @@ let _hideTimer = null;
       const chosen = await chooseFromDevice(picking ? pickState.multi : true, picking ? pickState.exts : null);
       if (picking && chosen) finishPick(chosen);
     });
-    on('#cloudUploadCancel', 'click', (ev) => {
-      if (!currentUpload) return;
-      currentUpload.stop();
-      const b = ev && ev.currentTarget; if (b) { b.textContent = 'Stopping…'; b.disabled = true; setTimeout(() => { b.textContent = 'Stop'; b.disabled = false; }, 1500); }
+    on('#cloudUploadBar', 'click', (ev) => {
+      const b = ev.target.closest('[data-upstop]');
+      if (b) stopUpload(b.dataset.upstop);
     });
     on('#cloudDownloads', 'click', () => { renderDownloads(); raiseSheet($('#cloudDownloadsModal')); $('#cloudDownloadsModal').classList.remove('hidden'); });
     on('#cloudDownloadsClose', 'click', () => $('#cloudDownloadsModal').classList.add('hidden'));
