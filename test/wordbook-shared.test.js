@@ -37,6 +37,24 @@ ok(seen.includes('Zebedee') && seen.includes('Olayinka'), 'and in everyone else\
 const r = space.run('other999', () => wordbook.apply([{ text: 'Mireya', start: 0, end: 0.5 }]));
 ok(r.entries[0].text === 'Maria', 'corrections apply for everyone too', r.entries);
 
+console.log('\n[3] a book that learned rewrites is cleaned the next time it opens');
+{
+  const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'mw-wb-clean-'));
+  const L = (from, to) => ({ from, to, src: 'learned', on: true });
+  fs.writeFileSync(path.join(d2, 'word-book.json'), JSON.stringify({ version: 2, folded: true, terms: [], fixes: [
+    L('in the', 'on the'), L('we are', 'we have been'), L('it is', 'meetings'), L('to god', 'to Galway'), L('satan', 'shout'),
+    L('galilee', 'Galway'), L('yahweh', 'god'), L('the waliwke', 'Daddy Wale oke'), L('cardiffa', 'Cardava'),
+    { from: 'peel the music', to: 'play the music', src: 'user' }] }));
+  space.init(d2);
+  wordbook.init(d2);
+  const left = wordbook.view().fixes.map((f) => f.from).sort().join(', ');
+  ok(left === 'cardiffa, peel the music, the waliwke', 'only the mishearings and what a person typed are left', left);
+  const r = wordbook.apply('we are in the house of god'.split(' ').map((t, i) => ({ text: t, start: i, end: i + 0.5 })));
+  ok(r.entries.map((w) => w.text).join(' ') === 'we are in the house of god', 'ordinary sentences come out as heard', r.entries.map((w) => w.text).join(' '));
+  wordbook.flushSync();
+  fs.rmSync(d2, { recursive: true, force: true });
+}
+
 wordbook.flushSync();
 fs.rmSync(dir, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);

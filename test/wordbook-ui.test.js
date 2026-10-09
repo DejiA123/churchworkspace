@@ -197,13 +197,14 @@ app.whenReady().then(async () => {
       after.lines.filter((t) => t.split(' ').indexOf('THERE') >= 0).length === 2,
       JSON.stringify(after.lines.filter((t) => /THERE|THEIR/.test(t))));
     /*
-     * THE RULE CHANGED, DELIBERATELY. It used to store "there → their" bare and
-     * leave it waiting for a second sighting; a real church's book filled up
-     * with 142 such rules, two of which cancelled each other out. Now the words
-     * around it are part of what is remembered, and the app says so.
+     * THE RULE CHANGED, DELIBERATELY — twice. It used to store "there → their"
+     * bare (a real book grew 142 such rules); then widened with the words around
+     * it, and a real book grew "in the → on the", "it is → meetings" and a
+     * hundred more. A real word for a real word depends on the sentence: the
+     * line typed on is corrected, and nothing is remembered (engine.learnable).
      */
-    check('and it explains that the words AROUND it are what was remembered',
-      /with the words around it/.test(after.note), after.note);
+    check('and nothing about "their" is claimed as remembered',
+      !/their/i.test(after.note || ''), after.note);
   }
 
   head('It reached the book on disk — the one the NEXT transcription reads');
@@ -215,7 +216,7 @@ app.whenReady().then(async () => {
     const bare = view.fixes.find((f) => f.from === 'there');
     const phrase = view.fixes.find((f) => f.from.split(' ').length > 1 && /their/.test(f.to));
     check('the everyday word is NOT written down on its own', !bare, JSON.stringify(bare || null));
-    check('…it is written down as the phrase it was typed in', !!phrase && phrase.on === true,
+    check('…nor as the phrase it was typed in (it depends on the sentence)', !phrase,
       JSON.stringify(phrase));
     const next = wordbook.apply([
       { start: 0, end: 1, text: 'a' }, { start: 1, end: 2, text: 'fee' }, { start: 2, end: 3, text: 'shins' },
@@ -232,7 +233,7 @@ app.whenReady().then(async () => {
   head('The Word Book panel: see it, switch it off, delete it');
   {
     const wb = await js(`return await ${T}.openWordBook(true);`);
-    check('the panel opens with the corrections in it', wb.open && wb.fixes.length >= 2,
+    check('the panel opens with the corrections in it', wb.open && wb.fixes.length >= 1,
       JSON.stringify(wb.fixes.map((f) => f.from + '→' + f.to)));
     check('the button says how much it knows', /\(\d+\)/.test(wb.button), wb.button);
     check('every correction in the book is a name or a phrase — nothing bare and everyday',

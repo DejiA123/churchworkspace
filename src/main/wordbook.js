@@ -429,7 +429,9 @@ function tidy() {
     if (f.src === 'user') return false;                    // typed in by hand: their call, not ours
     const from = String(f.from || '');
     const to = engine.normPhrase(f.to);
-    return from.split(' ').length === 1 && to.split(' ').length === 1 && engine.isCommonWord(from);
+    if (from.split(' ').length === 1 && to.split(' ').length === 1 && engine.isCommonWord(from)) return true;
+    // learned, and not a mishearing (engine.learnable): "it is" → "meetings", "to God" → "to Galway"
+    return !engine.learnable(from, f.to);
   };
   for (const f of b.fixes) (isBare(f) ? dropped : kept).push(f);
   // …and any pair that undoes itself, whichever way round it was learned.

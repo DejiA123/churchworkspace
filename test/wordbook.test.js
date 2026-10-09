@@ -248,20 +248,26 @@ head('Learning: what one retyped line teaches');
    * both switched on. So such a change is WIDENED with the words around it, and
    * with no context anywhere it is not remembered at all.
    */
+  /*
+   * …AND THEN THE RULE THAT REPLACED THAT (engine.learnable). Widened, the
+   * everyday swaps still filled a real church's book: "we are" → "we have
+   * been" (applied 195 times), "in the" → "on the" (330), "it is" →
+   * "meetings" (113). A swap of real words for real words is true of the line
+   * it was typed in and nowhere else — so it corrects that line and is not
+   * remembered. Only a mishearing is: a non-word, or a name heard as words.
+   */
   const c2 = W.learnFromEdit('IT IS THERE BOOK', 'IT IS THEIR BOOK');
-  check('an everyday word is widened with the words around it, not stored bare',
-    c2.length === 1 && c2[0].from === 'is there book' && c2[0].widened === true, JSON.stringify(c2));
-  check('…and is not a judgement call any more, because it is specific', c2[0].risky === false);
-  check('…and the words it should say are kept in the case they belong in',
-    /their/.test(c2[0].to) && c2[0].to === 'is their book', c2[0] && c2[0].to);
-
+  check('an everyday word swapped for another is not remembered, even with the words around it', c2.length === 0, JSON.stringify(c2));
   const bare = W.learnFromEdit("HE'S", "IT'S");
-  check('with no context anywhere — one word per line, no neighbours — nothing is remembered',
-    bare.length === 0, JSON.stringify(bare));
+  check('…nor bare', bare.length === 0, JSON.stringify(bare));
   const withNeighbours = W.learnFromEdit("HE'S", "IT'S", { prev: 'AND', next: 'NOT' });
-  check('…but the caption lines either side ARE context, and make it specific',
-    withNeighbours.length === 1 && withNeighbours[0].from === "and he's not"
-      && withNeighbours[0].to === "and it's not", JSON.stringify(withNeighbours));
+  check('…nor with the caption lines either side', withNeighbours.length === 0, JSON.stringify(withNeighbours));
+  for (const [x, y] of [['TO GOD BE THE GLORY', 'TO GALWAY BE THE GLORY'], ['WE ARE IRISH', 'WE HAVE BEEN IRISH'], ['IT IS FINISHED', 'MEETINGS FINISHED'], ['THE SEA OF GALILEE', 'THE SEA OF GALWAY']]) {
+    const r = W.learnFromEdit(x, y);
+    check(`"${x}" → "${y}" teaches nothing`, r.length === 0, JSON.stringify(r));
+  }
+  const nw = W.learnFromEdit('AND THE WALIWKE SAID', 'AND DADDY WALE OKE SAID');
+  check('a mishearing that is not a word IS remembered ("the waliwke" → "Daddy Wale Oke")', nw.length === 1 && /wale oke/i.test(nw[0].to), JSON.stringify(nw));
 
   const c3 = W.learnFromEdit('GRACE IS FREE', 'GRACE IS FREE INDEED');
   check('a word ADDED teaches nothing (that is an edit, not a mishearing)', c3.length === 0, JSON.stringify(c3));
@@ -483,21 +489,19 @@ store.init(WORK);
     JSON.stringify(applied.entries));
 
   const r2 = store.learnFromEdits([{ before: 'IT IS THERE BOOK', after: 'IT IS THEIR BOOK' }]);
-  check('an everyday word is remembered only as a phrase', r2.learned.length === 1
-    && r2.learned[0].from === 'is there book', JSON.stringify(r2));
+  check('an everyday word swapped for another is not remembered (it depends on the sentence)', r2.count === 0, JSON.stringify(r2));
   const notYet = store.apply([{ start: 0, end: 1, text: 'there' }]);
   check('…so a bare "there" in another sentence is left completely alone', notYet.count === 0,
     JSON.stringify(notYet.entries));
   const inPhrase = store.apply(['it', 'is', 'there', 'book', 'again'].map((t, i) => ({ start: i, end: i + 1, text: t })));
-  check('…while the phrase it was learned from is fixed wherever it appears',
-    inPhrase.count === 1 && inPhrase.entries.map((e) => e.text).join(' ') === 'it is their book again',
-    inPhrase.entries.map((e) => e.text).join(' '));
+  check('…nor even in the sentence it was typed in, the next time (that line was corrected, and only that line)',
+    inPhrase.count === 0, inPhrase.entries.map((e) => e.text).join(' '));
 
   /* The pair that cancelled itself out in a real church's book. */
   const one = store.addFix({ from: "and he's not", to: "and it's not", src: 'learned' });
-  const other = store.learnFromEdits([{ before: "AND IT'S NOT", after: "AND HE'S NOT" }]);
+  const other = store.addFix({ from: "and it's not", to: "and he's not", src: 'learned' });
   check('a correction that would UNDO one already in the book is refused',
-    one.ok && (other.conflicts || []).length === 1, JSON.stringify(other));
+    one.ok && !other.ok && other.conflict, JSON.stringify(other));
   check('…and the one it contradicts is switched off too, because the word depends on the sentence',
     store.view().fixes.filter((f) => f.from === "and he's not").every((f) => f.on === false),
     JSON.stringify(store.view().fixes.filter((f) => /he's|it's/.test(f.from))));
@@ -521,8 +525,7 @@ store.init(WORK);
   store.flushSync();
   const raw = JSON.parse(fs.readFileSync(path.join(WORK, 'word-book.json'), 'utf-8'));
   check('it is on the disk',
-    Array.isArray(raw.fixes) && raw.fixes.some((f) => f.from === 'a fee shins')
-      && raw.fixes.some((f) => f.from === 'is there book'),
+    Array.isArray(raw.fixes) && raw.fixes.some((f) => f.from === 'a fee shins'),
     `${(raw.fixes || []).length} corrections`);
   store.init(WORK);
   check('and it is still there after a restart',

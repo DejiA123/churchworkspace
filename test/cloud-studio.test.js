@@ -618,8 +618,9 @@ async function run() {
 
   await as(owner, 'wordbook:addFix', { from: 'bishop richmond', to: 'Bishop Richman' });
   const wbO = await as(owner, 'wordbook:get', {}), wbA = await as(ama, 'wordbook:get', {});
-  log(wbO.data.fixes.some((f) => f.to === 'Bishop Richman') && !wbA.data.fixes.some((f) => f.to === 'Bishop Richman'),
-    'each Word Book is its owner’s');
+  // one Word Book for the whole church: a name the owner teaches is right in everyone's captions
+  log(wbO.data.fixes.some((f) => f.to === 'Bishop Richman') && wbA.data.fixes.some((f) => f.to === 'Bishop Richman'),
+    'the Word Book is the church’s, shared by everyone');
   await as(owner, 'session:autosave', { data: { video: { path: oFile }, name: 'Owner edit', timeline: {} } });
   const asA = await as(ama, 'session:autosaveGet', {});
   log(!(asA.data && asA.data.name === 'Owner edit'), '“Continue editing” is each person’s own');

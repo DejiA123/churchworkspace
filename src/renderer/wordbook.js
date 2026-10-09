@@ -67,7 +67,7 @@
   /** Bump when the stored shape changes in a way older books must be migrated for.
    *  2 — single everyday words are no longer stored bare, only widened with the
    *      words around them; books written under rule 1 are tidied on load. */
-  const VERSION = 2;
+  const VERSION = 3;
 
   /* The longest run of words a single fix may span. "a fee shins" is three;
    * beyond four a "correction" is really a rewrite of the sentence, and
@@ -900,6 +900,39 @@
    * and are skipped, as is anything longer than four words either side, which is
    * a rewrite rather than a correction.
    */
+  /*
+   * WHAT AN EDIT MAY TEACH FOR EVER: A MISHEARING, NOT A REWRITE.
+   *
+   * Measured on a real church's book: 113 corrections learned from retyped
+   * lines, and almost all of them were two different sentences paired up word
+   * by word — "it is" → "meetings" (applied 113 times), "in the" → "on the"
+   * (330 times), "we are" → "we have been" (195), "to the" → "to take charge"
+   * (174), "to God" → "to Galway", "Satan" → "shout". Every one of them true
+   * of the line it came from and wrong in every sermon after it.
+   *
+   * What a speech recogniser actually gets wrong, again and again, is a word
+   * it could not know — a name, a place — written as something that is NOT a
+   * word ("waliwke", "cardiffa"), or split into ordinary words that SOUND like
+   * it ("a fee shins" → Ephesians). So a learned correction is kept only when
+   * it is one of those two, and the two sides sound alike. Swapping one real word for another
+   * depends on the sentence, and is left to the sentence it was typed in.
+   * (A correction typed into the panel by hand is the operator's call, as ever.)
+   */
+  const LEARN_ALIKE = 0.55;
+  function learnable(from, to) {
+    const f = normPhrase(from), t = normPhrase(to);
+    if (!f || !t) return false;
+    const fw = f.split(' '), tw = t.split(' ');
+    // what was heard is not a word at all ("waliwke", "cardiffa")…
+    const nonWord = fw.some((w) => !isKnownWord(w));
+    // …or a name heard as ordinary words, more of them than the name has ("a fee shins" → Ephesians)
+    const split = fw.length > tw.length && tw.some((w) => !isCommonWord(w));
+    if (!nonWord && !split) return false;            // real words for real words: "to God" → "to Galway", "Galilee" → "Galway"
+
+    const letters = (s) => s.replace(/[^a-z]/g, '');
+    return Math.max(similarity(letters(f), letters(t)), similarity(soundKey(f), soundKey(t))) >= LEARN_ALIKE;
+  }
+
   function learnFromEdit(before, after, ctx) {
     const A = String(before == null ? '' : before).split(/\s+/).filter(Boolean);
     const B = String(after == null ? '' : after).split(/\s+/).filter(Boolean);
@@ -953,6 +986,7 @@
         if (normPhrase(to) === normPhrase(from)) continue;
         if (from.split(' ').length > MAX_N) continue;
       }
+      if (!learnable(from, to)) continue;               // a rewrite of the sentence, not a mishearing
       out.push({
         from,
         to,
@@ -999,7 +1033,7 @@
   }
 
   return {
-    VERSION, MAX_N,
+    VERSION, MAX_N, learnable,
     COMMON_WORDS, SEED_TERMS,
     SOUND_MIN_TERM_LEN, SOUND_MIN_HEARD_LEN, SOUND_SIM_ONE, SOUND_SIM_MANY, SOUND_NEAR_LEN, SOUND_NEAR_SIM,
     SOUND_MIN_KEY, SOUND_MIN_KEY_MANY, SOUND_UNCOMMON_RATIO,
