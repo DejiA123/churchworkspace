@@ -2629,3 +2629,6 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .cloud-files-group .cf-delall svg { width: 20px; height: 20px; }
 .cloud-files-group .cf-delall.sure { flex: 1 1 auto; background: #d70015; border-color: #d70015; color: #fff; box-shadow: 0 0 0 3px rgba(255,69,58,.3); }
 .cloud-files-group .cf-group-acts:has(.cf-delall.sure) .cf-saveall { display: none; }
+.cloud-files-group .cf-selall { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; border-radius: 14px;
+  border: 1px solid rgba(167,139,250,.55); background: rgba(139,92,246,.14); color: #d8c8ff; font: inherit; font-weight: 650; cursor: pointer; }
+.cloud-files-group .cf-selall svg, .cloud-files-group .cf-selall .mi { width: 20px; height: 20px; }

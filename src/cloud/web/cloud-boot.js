@@ -1581,7 +1581,12 @@ let _hideTimer = null;
       const sureAll = filesUi.delAllSure === g.key;
       const delAllBtn = !picking && del && g.key === 'output' && files.length > 1
         ? `<button type="button" class="cf-delall${sureAll ? ' sure' : ''}" data-delall="${g.key}">${mi('trash')}<span>${sureAll ? `Delete all ${files.length} for good?` : `Delete all ${files.length}`}</span></button>` : '';
-      const acts = saveAllBtn || delAllBtn ? `<div class="cf-group-acts">${saveAllBtn}${delAllBtn}</div>` : '';
+      let acts = saveAllBtn || delAllBtn ? `<div class="cf-group-acts">${saveAllBtn}${delAllBtn}</div>` : '';
+      // choosing, one by one or all at once: Select all / Clear in place of Save all · Delete all
+      if (filesUi.selecting && !picking && del) {
+        const all = files.length && files.every((f) => filesUi.chosen.has(f.path));
+        acts = `<div class="cf-group-acts"><button type="button" class="cf-selall" data-selall="${g.key}">${all ? '' : mi('check')}<span>${all ? 'Clear selection' : `Select all ${files.length}`}</span></button></div>`;
+      }
       html += `<section class="cloud-files-group"><h4 class="cloud-files-head"><span>${escHtml(g.label)}</span><small>${files.length} · ${fmtSize(total)}</small></h4>`
         + acts + files.map((f) => fileRow(f, del, picking)).join('') + '</section>';
     }
@@ -1622,6 +1627,7 @@ let _hideTimer = null;
     const sel = $('#cloudFilesSelect');
     if (sel) sel.textContent = filesUi.selecting ? 'Done' : 'Select';
     for (const r of $$('#cloudFilesList .cf-row.chosen')) r.classList.remove('chosen');
+    if (filesCache) renderFiles();     // the group buttons change with it (Select all / Save all)
     closeSure();
     paintSelBar();
   }
@@ -1659,6 +1665,16 @@ let _hideTimer = null;
     if (tx) tx.textContent = filesUi.sure && n ? `Delete ${n === 1 ? 'it' : 'all ' + n} for good?` : n > 1 ? `Delete ${n}` : 'Delete';
   }
   function onFilesClick(e) {
+    const sa0 = e.target.closest('[data-selall]');
+    if (sa0 && filesUi.selecting) {
+      const g = ((filesCache && filesCache.groups) || []).find((x) => x.key === sa0.dataset.selall);
+      const ps = ((g && g.files) || []).map((f) => f.path);
+      const all = ps.length && ps.every((p) => filesUi.chosen.has(p));
+      for (const p of ps) { if (all) filesUi.chosen.delete(p); else filesUi.chosen.add(p); }
+      filesUi.sure = false;
+      renderFiles(); paintSelBar();
+      return;
+    }
     const da = e.target.closest('[data-delall]');
     if (da && !filesUi.selecting) {
       const key = da.dataset.delall;
