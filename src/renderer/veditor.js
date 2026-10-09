@@ -2590,7 +2590,7 @@
     const box = (id) => { const c = document.getElementById(id); return !!(c && c.checked); };
     const len = opt('veShortLen').replace(/ shorts$/, '').replace(/^✨ /, '');
     const how = (document.getElementById('vePauseHow') || {}).value;
-    const bits = [len, box('veDeep') ? 'Deep' : 'Quick', opt('veAsrPicker'), opt('veAiPicker'),
+    const bits = [len, opt('veAsrPicker'), opt('veAiPicker'),
       box('veRemovePauses') ? (how === 'cloud' ? 'pauses by words' : 'pauses by silence') : 'pauses kept'];
     setText('#veFindSum', '⚙ ' + bits.filter(Boolean).join(' · '));
   }
@@ -6927,7 +6927,8 @@
     const jobId = window.__newJobId ? window.__newJobId() : 'j';
     try {
       let p = shortLenParams();
-      const deep = $('#veDeep') ? $('#veDeep').checked : false;
+      // (always on for people: the switch is no longer shown — only the tests turn it off for a quick scan)
+      const deep = $('#veDeep') ? $('#veDeep').checked : true;
       const ranges = searchRanges();
       const whole = searchIsWholeVideo(ranges);
       const from = ranges[0][0], to = ranges[ranges.length - 1][1];
@@ -8521,6 +8522,17 @@
       ve._aiModelUnset = false;
       if (cloudKey && !ve.aiModel) { ve.aiModel = 'cloud'; saveExportPrefs(); renderAsrPicker(); }
     }
+    /*
+     * ☁️ CLOUD AI IS THE DEFAULT — "Cloud AI is there, let that be the default."
+     * Moved over ONCE for anyone still on Rules from before (Rules used to be
+     * where it started); choosing Rules again afterwards is kept.
+     */
+    try {
+      if (cloudKey && !ve.aiModel && !localStorage.getItem('mw-ve-cloudai-default')) {
+        ve.aiModel = 'cloud'; saveExportPrefs(); renderAsrPicker();
+      }
+      if (cloudKey) localStorage.setItem('mw-ve-cloudai-default', '1');
+    } catch (e) {}
     const opts = [`<option value="cloud">☁️ Cloud AI${cloudKey ? '' : ' 🔑'}</option>`, '<option value="">⚡ Rules</option>'];
     sel.title = "Who judges the clips. ☁️ Cloud AI is the best: Groq's large Whisper hears the sermon and a large AI model decides where "
       + 'each clip ends, which ones stand alone, and what to call them (free Groq key). ⚡ Rules and 🤖 run on this PC.';

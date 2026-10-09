@@ -800,7 +800,8 @@
                     <option value="90">~1½ min shorts</option>
                     <option value="120">~2 min shorts</option>
                   </select>
-                  <label class="ve-deep" title="Deep mode reads the words for sentence-perfect, content-aware picks with viral scores. The FIRST run transcribes on your PC (takes a few minutes); after that the transcript is cached, so re-runs and other lengths are much faster."><input type="checkbox" id="veDeep" checked /> 🧠 Deep (best)</label>
+                  <!-- Deep is always on (the words are what the clips are chosen from): kept, hidden, for the code that reads it -->
+                  <label class="ve-deep hidden" title="Deep mode reads the words for sentence-perfect, content-aware picks with viral scores. The FIRST run transcribes on your PC (takes a few minutes); after that the transcript is cached, so re-runs and other lengths are much faster."><input type="checkbox" id="veDeep" checked /> 🧠 Deep (best)</label>
                   <select id="veAsrPicker" title="Which speech model reads the sermon when Deep is on. A bigger model hears more of the words right — and a mis-heard line is a mis-placed cut — but it is slower over an hour of audio. Downloaded once, then it works offline forever.">
                     <option value="">👂 Auto</option>
                   </select>
