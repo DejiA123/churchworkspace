@@ -314,7 +314,7 @@
   function showPreparing(nov, player, codec) {
     player.style.display = 'none'; nov.style.display = 'flex';
     nov.innerHTML = `<div style="font-size:44px">⏳</div>
-      <p style="text-align:center">Preparing a smooth preview &nbsp;<b class="ve-prep-pct">0%</b><br><span class="muted small">(${(codec || 'this format').toUpperCase()} can't play directly — building an H.264 preview)</span><br>
+      <p style="text-align:center;max-width:100%;padding:0 10px;white-space:normal;overflow-wrap:anywhere">Preparing a smooth preview &nbsp;<b class="ve-prep-pct">0%</b><br><span class="muted small">(${(codec || 'this format').toUpperCase()} can't play directly — building an H.264 preview)</span><br>
       <span class="muted small">You can already make Long to short clips &amp; edit — this only affects playback.</span></p>`;
   }
   async function makeProxyBg(origPath) {
@@ -6963,7 +6963,7 @@
         } catch (e) {}
         // ☁️ the cloud ear (see sermon:analyze): chosen outright, or implied by the
         // cloud judge with the ear left on Auto
-        if (ve.asrModel === 'cloud' || (ve.aiModel === 'cloud' && !ve.asrModel)) asr = ' with ☁️ Whisper Large';
+        if (ve.asrModel === 'cloud' || (ve.aiModel === 'cloud' && !ve.asrModel)) asr = ' with ☁️ ' + cloudEarName();
       }
       // The AI reader only has anything to read in Deep mode, and it is the one
       // thing here that visibly changes how long the operator waits — so it is
@@ -7011,8 +7011,9 @@
       // ☁️ asked for and not (fully) had: say so — a fallback nobody sees is how
       // the caption writer ran on templates for a month (see cloudwrite.js)
       const ear = res.meta && res.meta.ear;
-      const earNote = !ear ? '' : ear.cloud && !ear.pc ? ' Heard by ☁️ Whisper Large.'
-        : ear.cloud ? ` Heard by ☁️ Whisper Large, ${plural(ear.pc, 'stretch')} on this PC (${ear.why}).`
+      const earBy = ear && ear.model === 'assemblyai' ? 'AssemblyAI' : 'Whisper Large';
+      const earNote = !ear ? '' : ear.cloud && !ear.pc ? ` Heard by ☁️ ${earBy}.`
+        : ear.cloud ? ` Heard by ☁️ ${earBy}, ${plural(ear.pc, 'stretch')} on this PC (${ear.why}).`
           : ` ⚠ Heard on this PC — the cloud ear could not (${ear.why || 'no answer'}).`;
       const aiMissed = useAi && ve.aiModel === 'cloud' && !(res.meta && res.meta.aiPass)
         ? ` ⚠ ☁️ Cloud AI did not judge this run (${(res.meta && res.meta.aiMissing) || (st && st.why) || 'no answer'}) — ranked by the rules instead.` : '';
@@ -8440,7 +8441,7 @@
     // so the label says which ear Auto will actually be
     const autoName = ve.aiModel === 'cloud' ? '☁️' : (auto ? escape2(auto.name.split(' —')[0].split(' (')[0]) : '');
     const opts = [`<option value="">👂 Auto${autoName ? ' (' + autoName + ')' : ''}</option>`,
-      '<option value="cloud">👂 ☁️ Whisper Large</option>'];
+      `<option value="cloud">👂 ☁️ ${cloudEarName()}</option>`];
     for (const id of SCAN_ORDER) {
       const m = list.find((x) => x.id === id);
       if (!m) continue;
@@ -8554,7 +8555,7 @@
           }
           ve.aiModel = 'cloud'; saveExportPrefs();
           sel.value = 'cloud'; updateAiHint(); renderAsrPicker();
-          window.__toast && window.__toast('☁️ Long-to-shorts will be heard by Whisper Large and judged by a large AI model — endings, which clips stand alone, and titles.', 'good', 7000);
+          window.__toast && window.__toast('☁️ Long-to-shorts will be heard by ' + cloudEarName() + ' and judged by a large AI model — endings, which clips stand alone, and titles.', 'good', 7000);
           return;
         }
         if (!v.startsWith('get:')) { ve.aiModel = v; saveExportPrefs(); updateAiHint(); renderAsrPicker(); return; }
@@ -8745,7 +8746,8 @@
      */
     if (cloud) {
       opts.push(cloud.ready
-        ? '<option value="cloud">☁️ Groq cloud — Whisper Large v3 Turbo (free, most accurate)</option>'
+        ? (cloud.assembly ? '<option value="cloud">☁️ AssemblyAI (most accurate) — Groq Whisper as backup</option>'
+          : '<option value="cloud">☁️ Groq cloud — Whisper Large v3 Turbo (free, most accurate)</option>')
         : '<option value="setup:cloud">☁️ Groq cloud (free, most accurate) — add your free key…</option>');
     }
     for (const m of list) {
@@ -8790,7 +8792,7 @@
   /** Say which model is listening, wherever there is room to say it. */
   function updateCapModelNow() {
     const el = $('#capModelNow'); if (!el) return;
-    if (capHearsInCloud()) { el.textContent = 'Listening with ☁️ Groq — Whisper Large v3 Turbo (free)'; return; }
+    if (capHearsInCloud()) { el.textContent = ve._capCloud && ve._capCloud.assembly ? 'Listening with ☁️ AssemblyAI (Groq Whisper as backup)' : 'Listening with ☁️ Groq — Whisper Large v3 Turbo (free)'; return; }
     const list = ve._capModelAll || [];
     const picked = ve.capModel ? list.find((m) => m.id === ve.capModel) : null;
     const auto = list.find((m) => m.inUse);
@@ -8825,10 +8827,15 @@
   }
 
   /* ---- ☁️ the free cloud ear for captions ---- */
+  /** The cloud ear's name: AssemblyAI when the church has its key (it hears first), else Groq's Whisper. */
+  function cloudEarName() { return ve._capCloud && ve._capCloud.assembly ? 'AssemblyAI' : 'Whisper Large'; }
   async function refreshCapCloud() {
     const api = window.api && window.api.captions && window.api.captions.cloud;
     if (!api) { ve._capCloud = null; return null; }
+    const hadAai = !!(ve._capCloud && ve._capCloud.assembly);
     try { ve._capCloud = await api(); } catch (e) { ve._capCloud = null; }
+    // the long-to-shorts Hearing list names the cloud ear: it changes with the key
+    if (!!(ve._capCloud && ve._capCloud.assembly) !== hadAai) Promise.resolve().then(renderAsrPicker).catch(() => {});
     if (ve._capCloud && ve._capCloud.ready) adoptCloudDefault();
     return ve._capCloud;
   }
@@ -15578,9 +15585,36 @@
     // the picture stalled to buffer: the song waits with it — and picks up exactly there
     p.addEventListener('waiting', () => { syncMusicPreview(); syncSoundPreview(); });
     p.addEventListener('playing', () => { if (p._nudging) return; syncMusicPreview(true); syncSoundPreview(); });
+    /*
+     * THE PLAYER COULD NOT LOAD IT. For a format the phone cannot play, the
+     * answer is a preview copy (makeProxyBg). But a plain H.264 video — what
+     * most cameras and every export make — plays everywhere, and an error on
+     * one is the CONNECTION: a 600 MB sermon over a phone's wifi, or the app
+     * coming back from the background. Re-encoding an hour of sermon for that
+     * kept the server busy for ages ("Preparing a smooth preview 3%") and it
+     * was never needed. So such a video is simply loaded again, where it was —
+     * up to three times — and only then does the preview copy get made.
+     */
     p.addEventListener('error', () => {
-      // Some other unplayable codec — fall back to building a proxy.
-      if (ve.video && ve.video.path && !ve.video.proxy && !ve.video.proxying) { showPreparing($('#veNoVid'), p, ve.video.info.vcodec); makeProxyBg(ve.video.path); }
+      const v = ve.video;
+      if (!v || !v.path || v.proxy || v.proxying) return;
+      const info = v.info || {};
+      const plain = /^(h264|avc1?)$/i.test(info.vcodec || '') && !/10|4:2:2|4:4:4|422|444/.test(String(info.vprofile || ''));
+      // (only for the video itself: not a player that was emptied or pointed elsewhere)
+      const own = (p.currentSrc || p.getAttribute('src') || '') === fileUrl(v.path) || String(p.currentSrc || '').endsWith(fileUrl(v.path).replace(/^[a-z]+:\/\/[^/]*/i, ''));
+      if (plain && own && (v._reloads || 0) < 3) {
+        v._reloads = (v._reloads || 0) + 1;
+        const at = p.currentTime || 0, path = v.path;
+        setTimeout(() => {
+          if (ve.video !== v || v.path !== path || v.proxy) return;
+          p.src = fileUrl(path); p.load();
+          if (at > 0.05) p.addEventListener('loadedmetadata', () => { try { p.currentTime = at; } catch (e) {} }, { once: true });
+        }, 600 * v._reloads);
+        return;
+      }
+      // a format the phone cannot play (or one that kept failing) — build the preview copy
+      showPreparing($('#veNoVid'), p, info.vcodec);
+      makeProxyBg(v.path);
     });
     // live % while a preview proxy builds
     if (window.api.onJobProgress) window.api.onJobProgress(({ jobId, percent }) => {

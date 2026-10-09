@@ -1689,6 +1689,8 @@ ipcMain.handle('captions:cloud', wrap(async () => {
   return {
     ready: cloudspeech.fileReady(), provider: st.provider, providerName: st.providerName,
     model: st.model, free: st.free, why: st.why,
+    // AssemblyAI hears first when the church has its key (cloudCaptions, sermon:analyze)
+    assembly: require('./assemblyear').ready(),
     keyUrl: (cloudspeech.PROVIDERS[st.provider] || {}).keyUrl || 'https://console.groq.com/keys',
   };
 }));
