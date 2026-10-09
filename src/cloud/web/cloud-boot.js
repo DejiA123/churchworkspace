@@ -1568,8 +1568,13 @@ let _hideTimer = null;
       const vids = !picking && g.key === 'output' ? files.filter((f) => /\.(mp4|mov|m4v)$/i.test(f.name)) : [];
       const saveAllBtn = vids.length > 1
         ? `<button type="button" class="cv-act cv-save sa-all cf-saveall" data-saveall="output">${mi('download')}<span>Save all ${vids.length} to Photos</span></button>` : '';
+      // …and all of them deleted in one go, once they are saved (asks once more first: it cannot be undone)
+      const sureAll = filesUi.delAllSure === g.key;
+      const delAllBtn = !picking && del && g.key === 'output' && files.length > 1
+        ? `<button type="button" class="cf-delall${sureAll ? ' sure' : ''}" data-delall="${g.key}">${mi('trash')}<span>${sureAll ? `Delete all ${files.length} for good?` : `Delete all ${files.length}`}</span></button>` : '';
+      const acts = saveAllBtn || delAllBtn ? `<div class="cf-group-acts">${saveAllBtn}${delAllBtn}</div>` : '';
       html += `<section class="cloud-files-group"><h4 class="cloud-files-head"><span>${escHtml(g.label)}</span><small>${files.length} · ${fmtSize(total)}</small></h4>`
-        + saveAllBtn + files.map((f) => fileRow(f, del, picking)).join('') + '</section>';
+        + acts + files.map((f) => fileRow(f, del, picking)).join('') + '</section>';
     }
     if (!any) {
       html = `<div class="cloud-files-empty"><div class="cf-empty-art">${mi('folder')}</div><b>Nothing here yet</b>`
@@ -1633,6 +1638,25 @@ let _hideTimer = null;
     if (tx) tx.textContent = filesUi.sure && n ? `Delete ${n === 1 ? 'it' : 'all ' + n} for good?` : n > 1 ? `Delete ${n}` : 'Delete';
   }
   function onFilesClick(e) {
+    const da = e.target.closest('[data-delall]');
+    if (da && !filesUi.selecting) {
+      const key = da.dataset.delall;
+      if (filesUi.delAllSure !== key) {
+        // first tap: ask. It goes back to asking by itself if nothing more is tapped.
+        filesUi.delAllSure = key;
+        clearTimeout(filesUi.delAllTimer);
+        filesUi.delAllTimer = setTimeout(() => { if (filesUi.delAllSure) { filesUi.delAllSure = null; renderFiles(); } }, 6000);
+        renderFiles();
+        return;
+      }
+      filesUi.delAllSure = null;
+      clearTimeout(filesUi.delAllTimer);
+      const g = ((filesCache && filesCache.groups) || []).find((x) => x.key === key);
+      const paths = ((g && g.files) || []).map((f) => f.path);
+      if (paths.length) deletePaths(paths);
+      return;
+    }
+    if (filesUi.delAllSure) { filesUi.delAllSure = null; renderFiles(); }
     const sa = e.target.closest('[data-saveall]');
     if (sa && !filesUi.selecting) {
       const g = ((filesCache && filesCache.groups) || []).find((x) => x.key === sa.dataset.saveall);

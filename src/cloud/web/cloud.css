@@ -2598,3 +2598,11 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 
 /* Your files: Save all the finished exports to Photos (renderFiles) */
 .cloud-files-group .cf-saveall { display: flex; align-items: center; justify-content: center; gap: 8px; width: calc(100% - 8px); margin: 4px 4px 10px; min-height: 48px; }
+/* …and Delete all, beside it (asks once more: .sure) */
+.cloud-files-group .cf-group-acts { display: flex; gap: 8px; margin: 4px 4px 10px; }
+.cloud-files-group .cf-group-acts .cf-saveall { flex: 1 1 auto; width: auto; margin: 0; }
+.cloud-files-group .cf-delall { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 48px; padding: 0 14px;
+  border-radius: 14px; border: 1px solid rgba(255,69,58,.45); background: transparent; color: #ff6961; font: inherit; font-weight: 600; cursor: pointer; }
+.cloud-files-group .cf-delall svg { width: 20px; height: 20px; }
+.cloud-files-group .cf-delall.sure { flex: 1 1 auto; background: #d70015; border-color: #d70015; color: #fff; box-shadow: 0 0 0 3px rgba(255,69,58,.3); }
+.cloud-files-group .cf-group-acts:has(.cf-delall.sure) .cf-saveall { display: none; }
