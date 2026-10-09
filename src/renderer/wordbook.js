@@ -918,19 +918,43 @@
    * depends on the sentence, and is left to the sentence it was typed in.
    * (A correction typed into the panel by hand is the operator's call, as ever.)
    */
+  const SEED_SET = new Set(SEED_TERMS.map((t) => normPhrase(t)));
   const LEARN_ALIKE = 0.55;
+  const NAME_ALIKE = 0.7;      // a name for the same number of real words must sound closer still
   function learnable(from, to) {
     const f = normPhrase(from), t = normPhrase(to);
     if (!f || !t) return false;
     const fw = f.split(' '), tw = t.split(' ');
-    // what was heard is not a word at all ("waliwke", "cardiffa")…
-    const nonWord = fw.some((w) => !isKnownWord(w));
-    // …or a name heard as ordinary words, more of them than the name has ("a fee shins" → Ephesians)
-    const split = fw.length > tw.length && tw.some((w) => !isCommonWord(w));
-    if (!nonWord && !split) return false;            // real words for real words: "to God" → "to Galway", "Galilee" → "Galway"
-
     const letters = (s) => s.replace(/[^a-z]/g, '');
-    return Math.max(similarity(letters(f), letters(t)), similarity(soundKey(f), soundKey(t))) >= LEARN_ALIKE;
+    const alike = Math.max(similarity(letters(f), letters(t)), similarity(soundKey(f), soundKey(t)));
+    // what was heard is not a word at all ("waliwke", "cardiffa")…
+    if (fw.some((w) => !isKnownWord(w))) return alike >= LEARN_ALIKE;
+    // …or a name heard as ordinary words, more of them than the name has ("a fee shins" → Ephesians)
+    if (fw.length > tw.length && tw.some((w) => !isCommonWord(w))) return alike >= LEARN_ALIKE;
+    /*
+     * …or a NAME heard as as many real words ("Pastor okay" → Pastor Oke,
+     * "bakery" → Bakare): the correction writes a capitalised word that was not
+     * there, and it sounds very like what was heard. "to God" → "to Galway"
+     * and "Galilee" → "Galway" do not sound alike enough, and "is this" → "is
+     * bishop" writes no name.
+     */
+    const heard = new Set(fw);
+    // what was heard may not itself be a Bible name: "of Galilee" → "of Galway" swaps one place for another
+    if (fw.some((w) => !tw.includes(w) && SEED_SET.has(w))) return false;
+    const raw = String(to == null ? '' : to).split(/\s+/).filter(Boolean);
+    // (a short name counts: "Oke", "Ade", "Obi" — every word of three letters is "common" to isCommonWord)
+    const name = raw.some((w) => /^[A-Z]/.test(w) && !heard.has(normWord(w)) && normWord(w).length >= 3
+      && (normWord(w).length <= 3 || !isCommonWord(w)));
+    // …and never a real word on its own: "okay" → Oke would rename every "okay" in every sermon
+    return name && fw.length >= 2 && alike >= NAME_ALIKE;              // otherwise real words for real words: the sentence decides
+  }
+  /* "chorine thians thirteen" → "Corinthians 13": the name is the lesson, the verse number is not */
+  const NUMBERISH = /^(\d+[a-z]*|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|first|second|third)$/;
+  function withoutNumbers(from, to) {
+    const fw = from.split(' '), tw = to.split(' ');
+    while (fw.length > 1 && NUMBERISH.test(normWord(fw[fw.length - 1]))) fw.pop();
+    while (tw.length > 1 && NUMBERISH.test(normWord(tw[tw.length - 1]))) tw.pop();
+    return { from: fw.join(' '), to: tw.join(' ') };
   }
 
   function learnFromEdit(before, after, ctx) {
@@ -973,7 +997,8 @@
        * If no context exists anywhere, nothing is stored: the edit stands on the
        * line it was made on, which is all it was ever evidence for.
        */
-      const bare = fromWords.length === 1 && isCommonWord(from);
+      // (a real word, everyday or not: "okay" → Oke is true after "Pastor", never on its own)
+      const bare = fromWords.length === 1 && isKnownWord(from);
       if (bare) {
         const left = blk.ai > 0 ? na[blk.ai - 1] : (prev.length ? normWord(prev[prev.length - 1]) : '');
         const right = blk.aj < na.length ? na[blk.aj] : (next.length ? normWord(next[0]) : '');
@@ -986,7 +1011,11 @@
         if (normPhrase(to) === normPhrase(from)) continue;
         if (from.split(' ').length > MAX_N) continue;
       }
-      if (!learnable(from, to)) continue;               // a rewrite of the sentence, not a mishearing
+      if (!learnable(from, to)) {
+        const n = withoutNumbers(from, to);
+        if (n.from === from || !learnable(n.from, n.to)) continue;   // a rewrite of the sentence, not a mishearing
+        from = n.from; to = n.to;
+      }
       out.push({
         from,
         to,
@@ -1014,6 +1043,9 @@
     const w = String(word);
     if (!shouted || !isShout(w)) return w;
     const low = w.toLowerCase();
+    // a short word that is not everyday English is a name ("OKE", "ADE", "OBI"), not "oke"
+    const n = normWord(low);
+    if (n.length <= 3 && /^[a-z]+$/.test(n) && !COMMON_WORDS.has(n)) return smartTitle(low);
     return isCommonWord(low) ? low : smartTitle(low);
   }
 
@@ -1033,7 +1065,7 @@
   }
 
   return {
-    VERSION, MAX_N, learnable,
+    VERSION, MAX_N, learnable, hasKnownList: !!KNOWN,
     COMMON_WORDS, SEED_TERMS,
     SOUND_MIN_TERM_LEN, SOUND_MIN_HEARD_LEN, SOUND_SIM_ONE, SOUND_SIM_MANY, SOUND_NEAR_LEN, SOUND_NEAR_SIM,
     SOUND_MIN_KEY, SOUND_MIN_KEY_MANY, SOUND_UNCOMMON_RATIO,

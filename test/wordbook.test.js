@@ -269,6 +269,14 @@ head('Learning: what one retyped line teaches');
   const nw = W.learnFromEdit('AND THE WALIWKE SAID', 'AND DADDY WALE OKE SAID');
   check('a mishearing that is not a word IS remembered ("the waliwke" → "Daddy Wale Oke")', nw.length === 1 && /wale oke/i.test(nw[0].to), JSON.stringify(nw));
 
+  // (found by review) a NAME heard as as many real words is a mishearing — remembered with the words around it
+  const pk = W.learnFromEdit('PRAISE GOD FOR PASTOR OKAY TODAY', 'PRAISE GOD FOR PASTOR OKE TODAY');
+  check('"Pastor okay" → "Pastor Oke" is remembered, with the words around it', pk.length === 1 && pk[0].from === 'pastor okay today' && /Oke/.test(pk[0].to), JSON.stringify(pk));
+  check('…never "okay" → "Oke" on its own (every "okay" would be renamed)', W.learnFromEdit('OKAY', 'OKE').length === 0 && !W.learnable('okay', 'Oke'));
+  check('…and one name never for another ("of Galilee" → "of Galway")', W.learnFromEdit('THE SEA OF GALILEE', 'THE SEA OF GALWAY').length === 0);
+  const cor = W.learnFromEdit('READ CHORINE THIANS THIRTEEN', 'READ CORINTHIANS 13');
+  check('a name retyped with its verse number: the name is remembered, not the number', cor.length === 1 && cor[0].from === 'chorine thians' && cor[0].to === 'Corinthians', JSON.stringify(cor));
+
   const c3 = W.learnFromEdit('GRACE IS FREE', 'GRACE IS FREE INDEED');
   check('a word ADDED teaches nothing (that is an edit, not a mishearing)', c3.length === 0, JSON.stringify(c3));
 
@@ -510,6 +518,11 @@ store.init(WORK);
   check('the whole book can be switched off', off.enabled === false
     && store.apply([{ start: 0, end: 1, text: 'a' }, { start: 1, end: 2, text: 'fee' }, { start: 2, end: 3, text: 'shins' }]).count === 0);
   store.setOptions({ enabled: true });
+
+  const lf = store.addFix({ from: 'the waliwke', to: 'Daddy Wale oke', src: 'learned' });
+  store.updateFix(lf.fix.id, { to: 'Daddy Wale Oke' });
+  check('a learned correction re-spelled by hand becomes the operator\'s own (tidy never touches it)',
+    store.view().fixes.find((f) => f.id === lf.fix.id).src === 'user');
 
   const dup = store.addFix({ from: 'A FEE SHINS', to: 'Ephesians', src: 'user' });
   check('adding a correction that is already there does not duplicate it',

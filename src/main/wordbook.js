@@ -127,7 +127,8 @@ function loadState(id) {
   if ((st.book.version || 1) < engine.VERSION) {
     states.set(id, st);       // tidy() works on the current space's book
     const r = tidy();
-    st.book.version = engine.VERSION;
+    // (without the English word list the learned rewrites could not be judged: tidy again next time)
+    st.book.version = engine.hasKnownList ? engine.VERSION : Math.min(engine.VERSION, 2);
     if (r.removed) st.lastTidy = r;
     writeNow(st);
   }
@@ -334,6 +335,7 @@ function updateFix(id, patch) {
     if (engine.normPhrase(t) === f.from) return { ok: false, reason: 'Those two are the same word.' };
     f.to = t;
     autoTerm(t);
+    f.src = 'user';      // checked and re-spelled by hand: the operator's own now
   }
   if (patch && patch.from != null) {
     const nf = engine.normPhrase(patch.from);
@@ -341,6 +343,7 @@ function updateFix(id, patch) {
     if (nf !== f.from && b.fixes.some((x) => x.from === nf && x.id !== id)) return { ok: false, reason: 'That word is already in the book.' };
     f.from = nf;
     f.risky = nf.split(' ').length === 1 && engine.isCommonWord(nf);
+    f.src = 'user';
   }
   if (patch && typeof patch.on === 'boolean') f.on = patch.on;
   f.lastAt = nowIso();
@@ -431,7 +434,8 @@ function tidy() {
     const to = engine.normPhrase(f.to);
     if (from.split(' ').length === 1 && to.split(' ').length === 1 && engine.isCommonWord(from)) return true;
     // learned, and not a mishearing (engine.learnable): "it is" → "meetings", "to God" → "to Galway"
-    return !engine.learnable(from, f.to);
+    // (only with the list of English words to judge by: without it, nothing is thrown away)
+    return engine.hasKnownList && !engine.learnable(from, f.to);
   };
   for (const f of b.fixes) (isBare(f) ? dropped : kept).push(f);
   // …and any pair that undoes itself, whichever way round it was learned.
