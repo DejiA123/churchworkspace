@@ -1486,6 +1486,7 @@ function captionTerms(max = 40) {
  * them — measured on the audited sermon: "approach him as GALWAY" (God),
  * "what is BISHOP?" (this).
  */
+const AAI_UNSURE = 0.5;     // AssemblyAI less sure of a word than this: its line is listed to check
 function aaiTerms() {
   try { return (wordbook.view().terms || []).filter((t) => t && t.src !== 'learned').map((t) => t.text || t.term).filter(Boolean).slice(0, 1000); }
   catch (e) { return []; }
@@ -1633,6 +1634,20 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
   ]);
   if (stopped || jobs.isCancelled()) throw new jobs.CancelledError();
   if (second) check = second;
+  /*
+   * ►► WHAT ASSEMBLYAI WAS NOT SURE OF. ◄◄ It says how sure it was of every
+   * word. Where it heard ALL of it, the words it was less than half sure of are
+   * the ones worth a look — on the audited 45-minute sermon, 28 words, against
+   * the 350 "lines to check" the two Whisper ears used to disagree on. So the
+   * caption counts as checked, and only those lines are listed.
+   */
+  if (aaiFirst && !pcSec && !second) {
+    let unsure = 0;
+    for (const w of book.entries) {
+      if (typeof w.confidence === 'number' && w.confidence < AAI_UNSURE) { w.unsure = true; unsure++; }
+    }
+    check = { checked: true, by: 'assemblyai', unsureWords: unsure };
+  }
   const listenMs = Date.now() - tListen;
   let alt = null;
   if (check.checked && Array.isArray(check.alt)) {

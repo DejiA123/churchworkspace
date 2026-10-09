@@ -8289,6 +8289,14 @@
     ve._capModelList = installed; // remembered so the Remove button knows what's bundled vs. downloaded
     if (ve._capCloud === undefined) await refreshCapCloud();
     const cloudOk = !!(ve._capCloud && ve._capCloud.ready);
+    // AssemblyAI is the ear when the church has its key: the only choice offered (see renderAsrPicker)
+    if (cloudOk && ve._capCloud.assembly) {
+      sel.innerHTML = '<option value="cloud">☁️ AssemblyAI</option>';
+      if (ve.capModel !== 'cloud') { ve.capModel = 'cloud'; saveExportPrefs(); }
+      sel.value = 'cloud';
+      updateCapModelRmBtn();
+      return;
+    }
     sel.innerHTML = `<option value="">Auto (${cloudOk ? '☁️ Groq cloud' : 'best installed'})</option>`
       + (cloudOk || ve.capModel === 'cloud' ? '<option value="cloud">☁️ Groq cloud (free, most accurate)</option>' : '')
       + installed.map((m) => `<option value="${m.id}">${m.name}</option>`).join('');
@@ -8761,6 +8769,15 @@
     const cloud = ve._capCloud;
     const size = (mb) => (mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : mb + ' MB');
     const auto = list.find((m) => m.inUse);
+    // AssemblyAI is the ear when the church has its key: the only choice offered (Groq and this
+    // server stay behind it as the fallback, in cloudCaptions)
+    if (cloud && cloud.ready && cloud.assembly) {
+      sel.innerHTML = '<option value="cloud">☁️ AssemblyAI (most accurate)</option>';
+      if (ve.capModel !== 'cloud') { ve.capModel = 'cloud'; saveExportPrefs(); }
+      sel.value = 'cloud';
+      try { updateCapModelNow(); } catch (e) {}
+      return;
+    }
     const autoName = cloud && cloud.ready ? '☁️ Groq cloud (free)' : (auto ? auto.name : '');
     const opts = [`<option value="">Automatic${autoName ? ' — ' + escape2(autoName) : ''}</option>`];
     /*
@@ -11608,7 +11625,7 @@
       // A line the two ears disagreed on says so, with what the other one heard.
       + (!!c.doubt
         ? (() => { const alt = altTextFor(c);
-          return `<div class="cap-doubt"><span class="cap-doubt-tx">⚠ ${c.doubt === 'unsure' ? 'The model was unsure here' : (alt ? `The second listen heard “${escape2(alt)}”` : 'The second listen heard this differently')}</span>`
+          return `<div class="cap-doubt"><span class="cap-doubt-tx">⚠ ${c.doubt === 'unsure' ? (capCheckedByAai() ? 'AssemblyAI was not sure of this line — give it a listen' : 'The model was unsure here') : (alt ? `The second listen heard “${escape2(alt)}”` : 'The second listen heard this differently')}</span>`
             + (alt ? `<button type="button" class="cap-doubt-use" data-doubt-use="${i}">Use that</button>` : '')
             + `<button type="button" class="cap-doubt-ok" data-doubt-ok="${i}">✓ It's right</button></div>`; })()
         : '')
@@ -11884,6 +11901,10 @@
     const pct = heard.length ? Math.round(100 * (heard.length - nDoubt) / heard.length) : 0;
     const n0 = (x) => Number(x).toLocaleString('en-US');
     const note = !heard.length || (!checkedAll && !nUnchecked) ? ''
+      : checkedAll && capCheckedByAai()
+        ? `<div class="cap-check-note ${nDoubt ? 'warn' : 'good'}" title="AssemblyAI says how sure it was of every word; the lines with a word it was less than half sure of are listed under Check">`
+          + `<span class="cap-check-tx">✓ AssemblyAI · ${nDoubt ? `unsure of ${n0(nDoubt)} of ${n0(heard.length)} lines` : `sure of all ${n0(heard.length)} lines`}</span>`
+          + `<span class="cap-check-bar" aria-hidden="true"><i style="width:${pct}%"></i></span></div>`
       : checkedAll
         ? `<div class="cap-check-note ${nDoubt ? 'warn' : 'good'}" title="Every line was heard twice, by two different models">`
           + `<span class="cap-check-tx">✓ Heard twice · ${nDoubt ? `${n0(heard.length - nDoubt)} of ${n0(heard.length)} agree` : `all ${n0(heard.length)} lines agree`}</span>`
@@ -13020,6 +13041,13 @@
       ? ve.capAlt.filter((w) => !(w.end > range.start + 0.02 && w.start < range.end - 0.02)) : [];
     ve.capAlt = keep.concat(alt).sort((a, b) => a.start - b.start);
     if (!ok && c && c.why) ve._capCheckWhy = c.why;
+    // who checked it: two ears agreeing, or AssemblyAI saying how sure it was of each word
+    if (ok) ve._capCheckBy = c.by || '';
+  }
+  /** AssemblyAI heard these captions (and said how sure it was) — also after a project is reopened. */
+  function capCheckedByAai() {
+    if (ve._capCheckBy) return ve._capCheckBy === 'assemblyai';
+    return Array.isArray(ve.capWords) && ve.capWords.some((w) => w && typeof w.confidence === 'number');
   }
   /** What the second listen heard over this line (or null). */
   function altTextFor(e) {
