@@ -53,6 +53,13 @@ function fake({ refuse = () => false } = {}) {
     ok(last.speech_model === 'universal' && last.word_boost.length === 100, 'the older model gets the 100 it takes', { n: g.asked.length, last: last.speech_model });
   }
 
+  console.log('\n[2b] a model asked for by name goes first');
+  {
+    const f = fake();
+    const w = await aai.transcribe(Buffer.from('x'), { terms: ['Adeboye'], models: ['universal-3-pro'], fetchImpl: f.fetchImpl });
+    ok(f.asked[0].speech_models.join() === 'universal-3-pro' && f.asked[0].keyterms_prompt[0] === 'Adeboye' && w.model === 'universal-3-pro', 'Universal-3 Pro, as asked', f.asked[0]);
+  }
+
   console.log('\n[3] words in seconds, with confidence');
   {
     const f = fake();

@@ -30,7 +30,7 @@ async function call(path, { method = 'GET', body, headers = {}, fetchImpl = fetc
  * Hear `audio` (a Buffer: FLAC or any format it takes). Returns [{text, start,
  * end}] in seconds from the start of the audio. Throws when it cannot.
  */
-async function transcribe(audio, { terms = [], cancelled = () => false, fetchImpl = fetch, timeoutMs = 15 * 60e3 } = {}) {
+async function transcribe(audio, { terms = [], models = null, cancelled = () => false, fetchImpl = fetch, timeoutMs = 15 * 60e3 } = {}) {
   if (!ready()) throw new Error('no AssemblyAI key');
   const up = await call('/upload', { method: 'POST', body: audio, headers: { 'content-type': 'application/octet-stream' }, fetchImpl });
   if (!up.upload_url) throw new Error('AssemblyAI took no audio');
@@ -39,6 +39,7 @@ async function transcribe(audio, { terms = [], cancelled = () => false, fetchImp
   const hints = [...new Set((terms || []).map((t) => String(t || '').trim()).filter((t) => t && t.split(/\s+/).length <= 6))].slice(0, 1000);
   // newest model first; a request it does not take is asked again the plain way
   const tries = [
+    ...(Array.isArray(models) && models.length ? [Object.assign({ speech_models: models }, hints.length ? { keyterms_prompt: hints } : {})] : []),
     Object.assign({ speech_models: ['universal-3-5-pro', 'universal-3-pro', 'universal-2'] }, hints.length ? { keyterms_prompt: hints } : {}),
     Object.assign({ speech_models: ['universal-3-pro', 'universal-2'] }, hints.length ? { keyterms_prompt: hints } : {}),
     Object.assign({ speech_models: ['universal-3-pro', 'universal-2'] }, hints.length ? { keyterms_prompt: hints.slice(0, 100) } : {}),

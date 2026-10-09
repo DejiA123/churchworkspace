@@ -897,7 +897,7 @@ ipcMain.handle('video:speechPauses', wrap(async (e, { input, startSec, endSec, m
     try {
       if (prog) prog(5);
       const audio = await geminiear.encodeFlac(input, from, to - from);
-      const aw = await aai.transcribe(audio, { terms: captionTerms(1000), cancelled: () => jobs.isCancelled() });
+      const aw = await aai.transcribe(audio, { terms: aaiTerms(), cancelled: () => jobs.isCancelled() });
       if (aw.length) r = { words: aw, doneSec: to - from, model: 'assemblyai' };
     } catch (err) {
       if (err && err.cancelled) throw new jobs.CancelledError();
@@ -1192,7 +1192,7 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
       const heardAll = () => all || (all = (async () => {
         const dur = await video.getInfo(getCtx(), input).then((i) => i.durationSec || 0).catch(() => 0);
         const audio = await geminiear.encodeFlac(input, 0, dur);
-        return aai.transcribe(audio, { terms: captionTerms(1000), cancelled: () => jobs.isCancelled() });
+        return aai.transcribe(audio, { terms: aaiTerms(), cancelled: () => jobs.isCancelled() });
       })());
       const toSegs = (ws, s) => {
         const segs = [];
@@ -1393,13 +1393,13 @@ ipcMain.handle('captions:transcribe', wrap(async (e, args) => captionLine.run(sp
   jobId: args.jobId,
   onWait: (n) => { if (args.jobId && e && !e.sender.isDestroyed()) e.sender.send('job:progress', { jobId: args.jobId, percent: 0, waiting: n }); },
 })));
-async function transcribeCaptions(e, { input, startSec, endSec, fast, denoise, model, plain, jobId }) {
+async function transcribeCaptions(e, { input, startSec, endSec, fast, denoise, model, plain, jobId, aaiModels }) {
   const prog = onProgress(e, jobId);
   const local = model === CLOUD_CAPTIONS ? undefined : model;
   // (one rule decides "meant for the cloud" — also for a remembered model this machine cannot hold)
   const meantCloud = wantsCloudCaptions(model, fast);
   if (meantCloud) {
-    const r = await cloudCaptions({ input, startSec, endSec, denoise, localModel: local, plain: !!plain, onProgress: prog });
+    const r = await cloudCaptions({ input, startSec, endSec, denoise, localModel: local, plain: !!plain, onProgress: prog, aaiModels });
     if (r) return r;
   }
   // the server's own model gives the timing; when the cloud was meant, Gemini still gives the words
@@ -1478,7 +1478,21 @@ function captionTerms(max = 40) {
   try { return (wordbook.view().terms || []).map((t) => t && (t.text || t.term)).filter(Boolean).slice(0, max); }
   catch (e) { return []; }
 }
-async function cloudCaptions({ input, startSec, endSec, denoise, localModel, plain = false, onProgress: prog }) {
+/*
+ * WHAT ASSEMBLYAI IS TOLD TO LISTEN FOR: only the names somebody TYPED into
+ * the Word Book. The book also learns words by itself from edited captions
+ * ("Tuesday", "Horse", "Galway"…); those still put captions right afterwards,
+ * but handed to AssemblyAI as words to expect, they pulled its ear towards
+ * them — measured on the audited sermon: "approach him as GALWAY" (God),
+ * "what is BISHOP?" (this).
+ */
+function aaiTerms() {
+  try { return (wordbook.view().terms || []).filter((t) => t && t.src !== 'learned').map((t) => t.text || t.term).filter(Boolean).slice(0, 1000); }
+  catch (e) { return []; }
+}
+async function cloudCaptions({ input, startSec, endSec, denoise, localModel, plain = false, onProgress: prog, aaiModels = null }) {
+  // (a test can ask for particular AssemblyAI models, to compare them on the same sermon)
+  aaiModels = Array.isArray(aaiModels) && aaiModels.length && aaiModels.every((m) => /^universal-[a-z0-9-]{1,20}$/.test(String(m))) ? aaiModels.slice(0, 3) : null;
   if (!cloudspeech.fileReady()) return null;
   const info = await video.getInfo(getCtx(), input);
   const clip = startSec != null && endSec != null;
@@ -1511,7 +1525,7 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
         if (prog) prog(2);
         const audio = await geminiear.encodeFlac(input, from, span);
         if (prog) prog(8);
-        const aw = await aai.transcribe(audio, { terms: captionTerms(1000), cancelled: () => jobs.isCancelled() });
+        const aw = await aai.transcribe(audio, { terms: aaiTerms(), models: aaiModels, cancelled: () => jobs.isCancelled() });
         if (aw.length) { r = { words: aw, doneSec: span, why: '', model: aw.model }; aaiFirst = true; if (prog) prog(60); }
       }
     } catch (e) {
@@ -1543,7 +1557,7 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
       if (aai.ready()) {
         if (prog) prog(Math.max(1, Math.round((r.doneSec / span) * 60)));
         const audio = await geminiear.encodeFlac(input, from + r.doneSec, span - r.doneSec);
-        const restW = await aai.transcribe(audio, { terms: captionTerms(1000), cancelled: () => jobs.isCancelled() });
+        const restW = await aai.transcribe(audio, { terms: aaiTerms(), models: aaiModels, cancelled: () => jobs.isCancelled() });
         if (restW.length) {
           words = words.concat(restW.map((w) => Object.assign({}, w, { start: w.start + r.doneSec, end: w.end + r.doneSec })));
           r = Object.assign({}, r, { doneSec: span, why: '', alsoModel: restW.model });
