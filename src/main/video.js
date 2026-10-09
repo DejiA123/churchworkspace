@@ -1530,10 +1530,17 @@ function needsProxy(info) {
  *   • the same picture embedded in the MP4 as cover art, which is what a file
  *     manager, a media player and some uploaders read straight out of the file.
  *
- * The video itself is never re-encoded: the streams are copied and only the
- * cover art is added, so a finished short is not put through a second
- * generation of compression for the sake of its own thumbnail.
+ * …and, for anything up to COVER_FIRST_MAX_SEC long, the picture is also the
+ * video's FIRST FRAME, for a tenth of a second. "Even if I set the thumbnail,
+ * the exported video's thumbnail is not the one I selected": the iPhone's
+ * Photos app (and Files, and most uploaders) ignore cover art and show the
+ * first frame — so the chosen picture has to BE the first frame. Everything
+ * after it moves 0.1 s later, sound included, so captions stay in step. That
+ * costs one re-encode, which a short or a montage does in seconds; an hour of
+ * sermon keeps the cover art and the JPEG instead of tying the server up.
  */
+const COVER_FIRST_MAX_SEC = 15 * 60;
+const COVER_HOLD_SEC = 0.1;
 async function attachThumbnail(ctx, { input, imagePath, atSec = 0, output }) {
   const info = await getInfo(ctx, input);
   const dir = path.dirname(output || input);
@@ -1551,7 +1558,41 @@ async function attachThumbnail(ctx, { input, imagePath, atSec = 0, output }) {
   }
   if (!fs.existsSync(jpg)) throw new Error('could not make the thumbnail picture');
 
-  // 2. the same picture, carried inside the file
+  // 2. the picture as the first frame (what the iPhone shows) — not needed when
+  //    the chosen moment already IS the first frame
+  const firstAlready = !imagePath && (atSec || 0) < 0.05;
+  if (!firstAlready && info.width && info.height && (info.durationSec || 0) <= COVER_FIRST_MAX_SEC) {
+    const fps = Math.max(1, Math.min(60, Math.round(info.fps || 30)));
+    const W = info.width % 2 ? info.width - 1 : info.width, H = info.height % 2 ? info.height - 1 : info.height;
+    const lead = path.join(dir, base + '.cover.mp4');
+    // a whole number of frames, and the sound moved by exactly that much (at 25 fps 0.1 s is 2.5 frames)
+    const frames = Math.max(1, Math.round(COVER_HOLD_SEC * fps));
+    const hold = frames / fps;
+    const ms = Math.round(hold * 1000);
+    try {
+      await ff.runFfmpeg(ctx.ffmpeg, [
+        '-loop', '1', '-framerate', String(fps), '-i', jpg,
+        '-i', input,
+        '-filter_complex',
+        `[0:v]trim=end_frame=${frames},setpts=PTS-STARTPTS,scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,fps=${fps},format=yuv420p[c];`
+          + `[1:v]scale=${W}:${H},setsar=1,fps=${fps},format=yuv420p[m];[c][m]concat=n=2:v=1:a=0[v]`
+          + (info.hasAudio ? `;[1:a]adelay=${ms}|${ms},aresample=48000[a]` : ''),
+        '-map', '[v]', ...(info.hasAudio ? ['-map', '[a]', '-c:a', 'aac', '-b:a', '192k', '-ac', '2'] : ['-an']),
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-r', String(fps),
+        '-movflags', '+faststart', '-y', lead,
+      ], { totalDurationSec: (info.durationSec || 0) + hold });
+      if (fs.existsSync(lead) && fs.statSync(lead).size > 1000) {
+        fs.rmSync(input, { force: true });
+        fs.renameSync(lead, input);
+      } else fs.rmSync(lead, { force: true });
+    } catch (e) {
+      // the cover art and the JPEG still go on: a failed first frame must not fail the export
+      try { fs.rmSync(lead, { force: true }); } catch (er) {}
+      try { console.warn('[thumb] could not make the picture the first frame: ' + (e.message || e)); } catch (er) {}
+    }
+  }
+
+  // 3. the same picture, carried inside the file (for players that do read it)
   const tmp = path.join(dir, base + '.thumb.mp4');
   try {
     await ff.runFfmpeg(ctx.ffmpeg, [

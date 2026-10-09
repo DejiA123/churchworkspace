@@ -79,11 +79,25 @@ function streams(mp4) {
   check('the video and audio are still there', st.some((x) => x.codec_type === 'video' && x.codec_name === 'h264')
     && st.some((x) => x.codec_type === 'audio'), st.length + ' streams');
   const after = await video.getInfo(ctx, work);
-  check('the short is the same length as before', Math.abs(after.durationSec - info.durationSec) < 0.2,
+  check('the short is the same length as before (give or take the 0.1 s picture)', Math.abs(after.durationSec - info.durationSec) < 0.2,
     info.durationSec.toFixed(2) + 's -> ' + after.durationSec.toFixed(2) + 's');
-  check('and the video was NOT re-encoded for the sake of a thumbnail',
-    Math.abs(fs.statSync(work).size - before) < before * 0.25,
-    Math.round(before / 1024) + 'KB -> ' + Math.round(fs.statSync(work).size / 1024) + 'KB');
+  /*
+   * THE PICTURE IS THE FIRST FRAME. The iPhone's Photos app ignores cover art and
+   * shows the first frame, so "I set the thumbnail and the export shows a
+   * different one" — the chosen picture is now also the first 0.1 s of the video
+   * (which is why it is re-encoded once, and 0.1 s longer).
+   */
+  const first = path.join(OUT, 'first-frame.png');
+  execFileSync(ffmpeg, ['-v', 'error', '-y', '-i', work, '-map', '0:v:0', '-frames:v', '1', first]);
+  const f0 = meanColour(first);
+  check('the first frame of the video IS the chosen picture (green, not the red the short starts on)',
+    f0.v < 128 && f0.u < 128, `Y ${f0.y} U ${f0.u} V ${f0.v}`);
+  const at1 = path.join(OUT, 'at-0.5.png');
+  execFileSync(ffmpeg, ['-v', 'error', '-y', '-ss', '0.5', '-i', work, '-map', '0:v:0', '-frames:v', '1', at1]);
+  const f1 = meanColour(at1);
+  check('…for a blink only: half a second in, the short is itself again (red)', f1.v > 160, `Y ${f1.y} U ${f1.u} V ${f1.v}`);
+  check('the sound moves with the picture: 0.1 s longer, no more', after.durationSec - info.durationSec > 0.05 && after.durationSec - info.durationSec < 0.2,
+    (after.durationSec - info.durationSec).toFixed(3) + ' s');
 
   console.log('\n[4] A picture the operator made themselves');
   execFileSync(ffmpeg, ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=yellow:s=800x800', '-frames:v', '1', PIC]);

@@ -1639,8 +1639,10 @@
       MT.busy = false;
       mtProgress('Opening it in the studio…', 100, ' ');
       go('studio');
+      // (the Viral Montage's song plays under the WHOLE piece at 30% — about 10 dB under the
+      // preacher. At 16% it was lost under his voice and only heard in the narrator's lines.)
       await window.VideoEditor.applyMontage(talk
-        ? { output: res.output, base: res.base, overlays: res.overlays, music: song, musicVolume: 0.16, musicDuck: true, texts: res.texts, style: res.style || MT.style, words: res.words, talk: true, cuts: res.cuts }
+        ? { output: res.output, base: res.base, overlays: res.overlays, music: song, musicVolume: 0.3, texts: res.texts, style: res.style || MT.style, words: res.words, talk: true, cuts: res.cuts }
         : { output: res.output, base: res.base, overlays: res.overlays, music: song, musicVolume: MT.keep ? 0.7 : 1, texts: res.texts, style: res.style || MT.style, captions: MT.caps && MT.keep, cuts: res.cuts });
       res.song = song || null;
       C.closePanel(MT.panel, true);
