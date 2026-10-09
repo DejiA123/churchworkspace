@@ -1826,6 +1826,32 @@ let _hideTimer = null;
     if (/\.[a-z0-9]{2,5}$/i.test(n)) return n;
     return n + (MIME_EXT[String(file.type || '').toLowerCase()] || (/^video\//.test(file.type) ? '.mp4' : /^image\//.test(file.type) ? '.jpg' : /^audio\//.test(file.type) ? '.mp3' : ''));
   }
+  /*
+   * One piece, sent so it says how far it has got WHILE it goes. fetch() cannot
+   * say that, so the bar sat still for each 8 MB piece — a minute and more on
+   * a phone — and an upload looked stuck at 2%. Cut off by `signal` (Stop).
+   */
+  function postPiece(url, body, signal, onSent) {
+    return new Promise((resolve, reject) => {
+      const x = new XMLHttpRequest();
+      x.open('POST', url);
+      const h = Object.assign({ 'Content-Type': 'application/octet-stream' }, authHeaders());
+      for (const k of Object.keys(h)) x.setRequestHeader(k, h[k]);
+      x.responseType = 'text';
+      if (onSent) x.upload.onprogress = (e) => { if (e.lengthComputable) onSent(e.loaded); };
+      x.onload = () => {
+        let j = {};
+        try { j = JSON.parse(x.responseText || '{}'); } catch (e) { j = {}; }
+        resolve({ status: x.status, ok: x.status >= 200 && x.status < 300, json: async () => j });
+      };
+      const fail = (why) => { const e = new Error(why); e.name = why === 'aborted' ? 'AbortError' : 'NetworkError'; reject(e); };
+      x.onerror = () => fail('network');
+      x.onabort = () => fail('aborted');
+      if (signal) { if (signal.aborted) return fail('aborted'); signal.addEventListener('abort', () => { try { x.abort(); } catch (e) {} }, { once: true }); }
+      x.send(body);
+    });
+  }
+
   async function uploadFile(file, onProgress, ctlIn) {
     const CHUNK = 8 * 1024 * 1024;
     const id = 'u' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -1860,12 +1886,9 @@ let _hideTimer = null;
       const slice = file.slice(sent, end);
       let res;
       try {
-        res = await fetch(q('&offset=' + sent), {
-          method: 'POST',
-          headers: Object.assign({ 'Content-Type': 'application/octet-stream' }, authHeaders()),
-          body: slice,
-          signal: ac.signal,
-        });
+        const base = sent;
+        res = await postPiece(q('&offset=' + sent), slice, ac.signal,
+          (n) => { if (onProgress) onProgress(Math.min(99, Math.floor(((base + n) / file.size) * 100)), { sent: base + n, total: file.size }); });
       } catch (e) {
         if (ctl.cancelled) throw stopped();
         // A dropped connection is not a lost upload — wait and pick up where the
@@ -1882,7 +1905,7 @@ let _hideTimer = null;
       if (out.partial) { sent = out.have; }
       else if (out.ok && out.path) { if (onProgress) onProgress(100); if (currentUpload === ctl) currentUpload = null; return out.path; }
       else sent = end;
-      if (onProgress) onProgress(Math.round((sent / file.size) * 100));
+      if (onProgress) onProgress(Math.round((sent / file.size) * 100), { sent, total: file.size });
     }
     if (currentUpload === ctl) currentUpload = null;
     throw new Error('The upload finished without a file coming back.');
@@ -1915,15 +1938,31 @@ let _hideTimer = null;
     bar.innerHTML = rows.map(([k, r]) => `<div class="cloud-up-row${r.state === 'wait' ? ' wait' : ''}" data-up="${k}">`
       + `<div class="cloud-upload-name">${escHtml(r.name)}</div>`
       + (r.state === 'wait' ? '<div class="cloud-up-wait">Waiting…</div>'
-        : `<div class="progress"><div class="progress-bar" style="width:${Math.max(2, Math.min(100, r.pct || 0))}%"></div></div>`)
+        : `<div class="cloud-up-mid"><div class="progress"><div class="progress-bar" style="width:${Math.max(2, Math.min(100, r.pct || 0))}%"></div></div>`
+          + `<div class="cloud-up-pct">${upLine(r)}</div></div>`)
       + (r.ctl ? `<button type="button" class="cloud-files-pill" data-upstop="${k}">${r.stopping ? 'Stopping…' : 'Stop'}</button>` : '')
       + '</div>').join('')
       + (rows.filter(([, r]) => r.ctl).length > 1 ? '<button type="button" class="cloud-up-stopall" data-upstop="*">Stop all</button>' : '');
   }
-  /* just the bar of one row, so a progress tick does not redraw (and steal) a tap */
+  /* "34% · 412 MB of 1.2 GB · 3 min left" — how far, of how much, and how long to go */
+  function upLine(r) {
+    const pct = Math.max(0, Math.min(100, Math.round(r.pct || 0)));
+    let t = `<b>${pct}%</b>`;
+    if (r.total) t += ` · ${fmtSize(r.sent || 0)} of ${fmtSize(r.total)}`;
+    if (r.rate && r.total && pct < 100) {
+      const left = Math.max(0, (r.total - (r.sent || 0)) / r.rate);
+      t += ' · ' + (left < 60 ? Math.max(5, Math.ceil(left / 5) * 5) + ' s left' : left < 3600 ? Math.ceil(left / 60) + ' min left' : (left / 3600).toFixed(1).replace(/\.0$/, '') + ' h left');
+    }
+    return t;
+  }
+  /* just the bar and line of one row, so a progress tick does not redraw (and steal) a tap */
   function paintUploadPct(k) {
-    const r = upRows.get(k); const row = document.querySelector(`#cloudUploadBar [data-up="${k}"] .progress-bar`);
-    if (r && row) row.style.width = Math.max(2, Math.min(100, r.pct || 0)) + '%'; else renderUploads();
+    const r = upRows.get(k);
+    const row = document.querySelector(`#cloudUploadBar [data-up="${k}"]`);
+    const bar = row && row.querySelector('.progress-bar'), line = row && row.querySelector('.cloud-up-pct');
+    if (!r || !bar || !line) return renderUploads();
+    bar.style.width = Math.max(2, Math.min(100, r.pct || 0)) + '%';
+    line.innerHTML = upLine(r);
   }
   function stopUpload(k) {
     const keys = k === '*' ? Array.from(upRows.keys()) : [k];
@@ -1940,7 +1979,22 @@ let _hideTimer = null;
       const r = upRows.get(key); if (!r || r.ctl.cancelled) continue;
       r.state = 'run'; upRunning++;
       renderUploads();
-      uploadFile(r.file, (pc) => { r.pct = pc; paintUploadPct(key); }, r.ctl)
+      r.t0 = Date.now(); r.b0 = null;
+      uploadFile(r.file, (pc, b) => {
+        r.pct = pc;
+        if (b) {
+          r.sent = b.sent; r.total = b.total;
+          // the speed since it started (from where it started, for a resumed one), steadied
+          const now = Date.now();
+          if (r.b0 == null) { r.b0 = b.sent; r.t0 = now; }
+          const secs = (now - r.t0) / 1000;
+          if (secs > 1.5 && b.sent > r.b0) {
+            const rate = (b.sent - r.b0) / secs;
+            r.rate = r.rate ? r.rate * 0.7 + rate * 0.3 : rate;
+          }
+        }
+        paintUploadPct(key);
+      }, r.ctl)
         .then((p) => r.done(null, p), (e) => r.done(e))
         .finally(() => { upRunning--; pumpUploads(); });
     }
