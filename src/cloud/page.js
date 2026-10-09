@@ -267,6 +267,7 @@ ${styles}
         <span id="cloudFilesSelInfo" class="cloud-files-selinfo">Tap videos to save or delete</span>
         <button id="cloudFilesSelSave" type="button" class="cloud-files-del cloud-files-save" disabled><i class="mi" data-i="download"></i><span>Save</span></button>
         <button id="cloudFilesSelDelete" type="button" class="cloud-files-del" disabled><i class="mi" data-i="trash"></i><span>Delete</span></button>
+        <button id="cloudFilesSelUse" type="button" class="cloud-files-del cloud-files-use hidden" disabled><i class="mi" data-i="plus"></i><span>Add</span></button>
       </div>
     </div>
   </div>

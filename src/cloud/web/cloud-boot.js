@@ -1481,15 +1481,24 @@ let _hideTimer = null;
     m.dataset.picking = opts.picking ? '1' : '';
     const kind = opts.picking ? (pickState.kind || 'video') : 'video';
     const up = $('#cloudUpload span');
-    if (up) up.textContent = `Send ${SEND_WHAT[kind]} from ${window.matchMedia('(max-width: 900px)').matches ? 'this phone' : 'this computer'}`;
+    // (one short line: "Send a video or picture from this phone" ran off the button)
+    if (up) up.textContent = `Send ${String(SEND_WHAT[kind]).length <= 10 ? SEND_WHAT[kind] + ' ' : ''}from ${window.matchMedia('(max-width: 900px)').matches ? 'this phone' : 'this computer'}`;
     const title = m.querySelector('.cloud-files-title');
     if (title) title.textContent = opts.picking ? PICK_TITLE[kind] : 'Your files';
     setSelecting(false);
+    /*
+     * PICKING SEVERAL (the AI Montage's "From your files"): a tap ticks a video
+     * instead of taking it and closing, and "Add N" takes all the ticked ones.
+     */
+    filesUi.pickMulti = !!(opts.picking && pickState.multi);
+    m.classList.toggle('cf-picking-multi', filesUi.pickMulti);
+    paintSelBar();
     await refreshFiles();
   }
   function closeFilesModal() {
     const m = $('#cloudFilesModal');
-    if (m) { m.classList.add('hidden'); m.dataset.picking = ''; m.style.zIndex = ''; }
+    if (m) { m.classList.add('hidden'); m.dataset.picking = ''; m.style.zIndex = ''; m.classList.remove('cf-picking-multi'); }
+    filesUi.pickMulti = false;
     setSelecting(false);
     if (pickResolve) finishPick(null);
   }
@@ -1623,6 +1632,18 @@ let _hideTimer = null;
   function paintSelBar() {
     const bar = $('#cloudFilesSelBar');
     if (!bar) return;
+    const use = $('#cloudFilesSelUse');
+    if (filesUi.pickMulti) {
+      const k = filesUi.chosen.size;
+      bar.classList.remove('hidden');
+      for (const id of ['#cloudFilesSelSave', '#cloudFilesSelDelete']) { const b = $(id); if (b) b.classList.add('hidden'); }
+      if (use) { use.classList.remove('hidden'); use.disabled = !k; const t = use.querySelector('span'); if (t) t.textContent = k ? `Add ${k}` : 'Add'; }
+      const info = $('#cloudFilesSelInfo');
+      if (info) info.textContent = k ? `${k} chosen` : 'Tap the videos and photos to add';
+      return;
+    }
+    if (use) use.classList.add('hidden');
+    for (const id of ['#cloudFilesSelSave', '#cloudFilesSelDelete']) { const b = $(id); if (b) b.classList.remove('hidden'); }
     bar.classList.toggle('hidden', !filesUi.selecting);
     const n = filesUi.chosen.size;
     const bytes = Array.from(filesUi.chosen).reduce((t, p) => t + sizeOf(p), 0);
@@ -1677,6 +1698,11 @@ let _hideTimer = null;
       filesUi.sure = false;
       paintSelBar();
       return;
+    }
+    if (act === 'open' && filesUi.pickMulti) {
+      if (filesUi.chosen.has(p)) filesUi.chosen.delete(p); else filesUi.chosen.add(p);
+      row.classList.toggle('chosen', filesUi.chosen.has(p));
+      return paintSelBar();
     }
     if (act === 'open') return finishPick(pickState.multi ? [p] : p);
     // the row itself plays it here; the ⬇ button saves it
@@ -5077,6 +5103,11 @@ let _hideTimer = null;
     on('#cloudFilesSelect', 'click', () => setSelecting(!filesUi.selecting));
     on('#cloudFilesSelDelete', 'click', onSelDelete);
     // the chosen videos, all to Photos (Save all — a few to each tap of the share sheet)
+    on('#cloudFilesSelUse', 'click', () => {
+      const chosen = Array.from(filesUi.chosen);
+      if (!chosen.length) return;
+      finishPick(chosen);
+    });
     on('#cloudFilesSelSave', 'click', () => {
       const chosen = Array.from(filesUi.chosen);
       if (!chosen.length) return;

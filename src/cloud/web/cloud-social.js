@@ -1338,7 +1338,8 @@
           ? `<img src="${attr(it.url)}" alt="" draggable="false" />` : (it.poster ? `<img src="${attr(it.poster)}" alt="" draggable="false" />` : '<span class="mt-load"></span>') + `<span class="mt-dur">▶${it.secs ? ' ' + Math.floor(it.secs / 60) + ':' + String(Math.round(it.secs % 60)).padStart(2, '0') : ''}</span>`}
           ${MT.order === 'mine' ? `<span class="mt-num">${i + 1}</span>` : ''}
           <button type="button" class="mt-x" data-mt-del="${i}" aria-label="Remove">✕</button></div>`).join('')}
-          <button type="button" class="mt-add" data-mt="add">${mi('plus')}<span>Add</span></button></div>
+          <button type="button" class="mt-add" data-mt="add">${mi('plus')}<span>Add</span></button>
+          <button type="button" class="mt-add mt-add-files" data-mt="addsrv">${mi('folder')}<span>From your files</span></button></div>
       </section>
       <section class="mt-sec"${talk ? ' hidden' : ''}><h3>Order</h3><div class="mt-row">${chips(MT_ORDERS, MT.order, 'order')}</div>
         <small class="mt-hint">${MT.order === 'mine' ? 'The clips play in this order. Hold a tile and drag it to move it — a photo goes over the video before it.' : 'The AI puts the strongest moment first and orders the rest for the story. Hold and drag a tile to set your own order.'}</small></section>
@@ -1413,6 +1414,7 @@
       if (d.mtLen) { MT.len = d.mtLen === 'all' || d.mtLen === 'custom' ? d.mtLen : +d.mtLen; return mtPaint(); }
       if (d.mtAspect) { MT.aspect = d.mtAspect; return mtPaint(); }
       if (d.mt === 'add') return $('#mtPick', p.body).click();
+      if (d.mt === 'addsrv') return mtAddFromFiles();
       if (d.mt === 'song') return $('#mtSong', p.body).click();
       if (d.mt === 'go') return mtMake();
     };
@@ -1510,6 +1512,37 @@
    * played, so the tile showed nothing; a frame is grabbed onto a canvas once
    * instead (half a second in, past any fade from black).
    */
+  /*
+   * ►► FROM YOUR FILES. ◄◄ "The montage should be able to add videos that are
+   * on Your files." Clips already on the server — a sermon sent earlier, the
+   * shorts just exported — are picked from the same list, shown with their
+   * picture, and used where they are: nothing is sent up again.
+   */
+  async function mtAddFromFiles() {
+    let got = null;
+    try { got = await C.pickFiles([{ name: 'Videos and photos', extensions: ['mp4', 'mov', 'm4v', 'webm', 'mkv', 'jpg', 'jpeg', 'png', 'webp'] }], true); }
+    catch (e) { got = null; }
+    const paths = (Array.isArray(got) ? got : got ? [got] : []).filter((x) => typeof x === 'string');
+    if (!paths.length) return;
+    const have = new Set(MT.items.map((it) => it.path).filter(Boolean));
+    for (const p of paths.slice(0, Math.max(0, 60 - MT.items.length))) {
+      if (have.has(p)) continue;
+      const name = String(p).split(/[\\/]/).pop();
+      const kind = /\.(jpe?g|png|webp|heic|avif)$/i.test(name) ? 'image' : 'video';
+      const it = { path: p, name, kind, file: null, url: kind === 'image' ? C.fileUrl(p) : '' };
+      MT.items.push(it);
+      if (kind === 'video') {
+        // its picture and length, from the server (the phone does not have the file)
+        (async () => {
+          try { const t = await window.api.video.thumbnail(p, 1); if (t) it.poster = C.fileUrl(t); } catch (e) {}
+          try { const info = await window.api.video.info(p); if (info && info.durationSec) it.secs = info.durationSec; it.size = (info && info.sizeBytes) || 0; } catch (e) {}
+          mtPaint();
+        })();
+      }
+    }
+    mtPaint();
+  }
+
   function mtPoster(it) {
     const v = document.createElement('video');
     v.muted = true; v.playsInline = true; v.preload = 'auto';
@@ -1555,14 +1588,15 @@
     try {
       // 1) the files go up one by one (resumable, like every upload here)
       const paths = [];
-      const total = MT.items.reduce((n, it) => n + (it.file.size || 1), 0) + ((MT.songFile && MT.songFile.size) || 0);
+      const sizeOf = (it) => (it.file && it.file.size) || it.size || 1;
+      const total = MT.items.reduce((n, it) => n + sizeOf(it), 0) + ((MT.songFile && MT.songFile.size) || 0);
       let done = 0;
       for (let i = 0; i < MT.items.length; i++) {
         const it = MT.items[i];
-        if (it.path) { paths.push(it.path); done += it.file.size || 1; continue; }
+        if (it.path) { paths.push(it.path); done += sizeOf(it); continue; }
         mtProgress(`Sending ${i + 1} of ${MT.items.length}…`, (done / total) * 30);
-        it.path = await C.uploadFile(it.file, (pc) => mtProgress(`Sending ${i + 1} of ${MT.items.length}…`, ((done + (it.file.size || 1) * pc / 100) / total) * 30));
-        done += it.file.size || 1;
+        it.path = await C.uploadFile(it.file, (pc) => mtProgress(`Sending ${i + 1} of ${MT.items.length}…`, ((done + sizeOf(it) * pc / 100) / total) * 30));
+        done += sizeOf(it);
         paths.push(it.path);
       }
       // 2) the song joins the music library, so it is on the music lane afterwards
