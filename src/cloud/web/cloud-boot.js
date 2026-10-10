@@ -631,6 +631,7 @@ let _hideTimer = null;
       accounts: () => call('social:accounts'),
       setKeys: (keys) => call('social:setKeys', keys),
       setupStart: (o) => call('social:setupStart', o || {}),
+      setupStatus: (code) => call('social:setupStatus', { code }),
       linkStart: (platform) => call('social:linkStart', { platform }),
       linkClaim: (platform) => call('social:linkClaim', { platform }),
       unlink: (id) => call('social:unlink', { id }),

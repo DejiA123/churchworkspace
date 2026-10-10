@@ -41,7 +41,7 @@ function get(p) { return new Promise((resolve, reject) => http.get({ host: '127.
 async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise((res, rej) => http.get({ host: '127.0.0.1', port: PORT, path: '/api/hello', agent: false }, (r) => { r.resume(); r.statusCode === 200 ? res() : rej(); }).on('error', rej)); return true; } catch (e) { await sleep(250); } } return false; }
 
 /* ---- a stand-in Zernio: the endpoints the studio uses, and each platform's "Allow" page ---- */
-const GOOD = 'sk_test_' + 'a'.repeat(40);
+const GOOD = 'sk_test_' + 'a'.repeat(40), OTHER = 'sk_test_' + 'b'.repeat(40);
 const Z = { linked: { youtube: { _id: 'yt1', platform: 'youtube', username: 'gracechurch', displayName: 'Grace Church' } }, refuse: new Set(['instagram']), connects: [] };
 function zernio() {
   execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', path.join(WORK, 'k.pem'), '-out', path.join(WORK, 'c.pem'), '-days', '1', '-subj', '/CN=127.0.0.1'], { stdio: 'ignore' });
@@ -49,6 +49,7 @@ function zernio() {
     const u = new URL(req.url, `https://127.0.0.1:${ZPORT}`);
     const out = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
     if (u.pathname.startsWith('/api/v1/')) {
+      if (req.headers.authorization === 'Bearer ' + OTHER && u.pathname === '/api/v1/accounts') return out(200, { accounts: [{ _id: 'elsewhere1', platform: 'tiktok', username: 'someone_else' }] });
       if (req.headers.authorization !== 'Bearer ' + GOOD) return out(401, { error: 'Invalid API key' });
       const p = u.pathname.slice(7);
       if (p === '/accounts') return out(200, { accounts: Object.values(Z.linked) });
@@ -140,6 +141,25 @@ async function phone(browser) {
     const rows = await page.$$eval('#csConnect .cs-plat.linked', (r) => r.map((x) => x.dataset.plat));
     check(['tiktok', 'youtube', 'facebook'].every((p) => rows.includes(p)), 'the Accounts sheet filled in by itself', rows);
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'setup-4-sheet.png') });
+
+    const note = await page.waitForFunction(() => { const n = document.querySelector('#csConnect .cs-note.warn'); return n && n.textContent; }, null, { timeout: 12000 }).then((h) => h.jsonValue()).catch(() => '');
+    check(/Instagram/.test(note) && /billing/.test(note), 'when the run ends the sheet stops waiting and says what was not connected, and why', note);
+    check(!(await page.$('#csConnect a.cs-big')), 'and offers Set up everything again (not a stale Start the sign-ins)');
+    await win.reload();
+    check(await win.title() === 'Nearly there' && /TikTok ✓/.test(await win.evaluate(() => document.body.innerText)), 'reloading the results page shows the same results');
+    await win.close();
+
+    // a removed account stays removed; a key from ANOTHER Zernio account takes nothing over
+    const fb = (await page.evaluate(async () => (await window.api.social.accounts()).accounts)).find((a) => a.platform === 'facebook');
+    await page.evaluate((id) => window.api.social.unlink(id), fb.id);
+    await page.evaluate((k) => window.api.social.setKeys({ zoApiKey: k }), GOOD);
+    let now = (await page.evaluate(async () => (await window.api.social.accounts()).accounts));
+    check(!now.some((a) => a.platform === 'facebook'), 'a removed account is not brought back by saving the key again', now.map((a) => a.platform));
+    await page.evaluate((k) => window.api.social.setKeys({ zoApiKey: k }), OTHER);
+    const disk = JSON.parse(fs.readFileSync(path.join(WORK, 'd1', 'workstation.json'), 'utf-8')).socialAccounts;
+    const tk = disk.filter((a) => a.platform === 'tiktok');
+    check(tk.length === 1 && tk[0].zoAccountId === 'tiktok9' && tk[0].token === GOOD, 'a key from another Zernio account neither takes over the linked TikTok nor adds a second one', tk.map((a) => [a.zoAccountId, a.token.slice(-4)]));
+    await page.evaluate((k) => window.api.social.setKeys({ zoApiKey: k }), GOOD);
 
     // [5]
     Z.refuse.clear(); Z.connects.length = 0;

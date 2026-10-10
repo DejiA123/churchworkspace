@@ -467,6 +467,10 @@ class Accounts {
   byId(id) { return this.all().find((a) => a.id === id) || null; }
 
   remove(id) {
+    const gone = this.byId(id);
+    if (gone && gone.via === 'zernio' && gone.zoAccountId) {
+      this.store.set('zoRemoved', Array.from(new Set([...(this.store.get('zoRemoved') || []), String(gone.zoAccountId)])).slice(-50));
+    }
     this.store.set('socialAccounts', this.all().filter((a) => a.id !== id));
     return true;
   }
@@ -819,6 +823,9 @@ class Accounts {
     }
 
     const accountId = zoAccountId(acct);
+    // kept on purpose (Connect, a sign-in): no longer one that was removed
+    const removed = this.store.get('zoRemoved') || [];
+    if (removed.includes(String(accountId))) this.store.set('zoRemoved', removed.filter((x) => x !== String(accountId)));
     const handle = String(acct.username || acct.handle || acct.name || '').replace(/^@/, '');
     const picture = await fetchAvatarDataUri(acct.picture || acct.profileImage || acct.avatar || acct.social_images || '');
     const rec = this._upsert({
@@ -893,17 +900,28 @@ class Accounts {
    * linked on zernio.com (or before this studio was set up) needs no Connect.
    * Each key is asked once. Gives back the platforms now linked through Zernio.
    */
-  async zernioImportAll() {
+  async zernioImportAll(platforms) {
     const byKey = new Map();
     const linked = [];
+    const removed = new Set(this.store.get('zoRemoved') || []);
     for (const plat of ZO_PLATFORMS) {
+      if (Array.isArray(platforms) && !platforms.includes(plat)) continue;
       const { apiKey, apiBase } = zoCfg(this.store, plat);
       if (!apiKey) continue;
       const k = apiBase + '|' + apiKey;
       if (!byKey.has(k)) byKey.set(k, getJson(`${apiBase}/accounts`, { headers: { authorization: 'Bearer ' + apiKey } }).catch(() => null));
       const listed = await byKey.get(k);
       const acct = listed && zoAccountOf(listed, plat);
-      if (acct) { await this._zoKeep(plat, acct, apiKey); linked.push(plat); }
+      if (!acct) continue;
+      const id = String(zoAccountId(acct));
+      // one Removed here stays removed until it is connected again on purpose
+      if (removed.has(id)) continue;
+      // a platform already linked (its own app, Upload-Post, another Zernio account) is left
+      // as it is: a second link would post everything twice. The same account is refreshed.
+      const here = this.all().filter((a) => a.platform === plat);
+      if (here.length && !here.some((a) => a.via === 'zernio' && String(a.zoAccountId) === id)) continue;
+      await this._zoKeep(plat, acct, apiKey);
+      if (!here.length) linked.push(plat);   // newly linked (a refresh is not news)
     }
     return linked;
   }
@@ -911,12 +929,11 @@ class Accounts {
   /** Is this a Zernio key Zernio accepts? Throws in words the person can act on. */
   async zernioCheckKey(apiKey) {
     const { apiBase } = zoCfg(this.store, 'tiktok');
-    try { await getJson(`${apiBase}/accounts`, { headers: { authorization: 'Bearer ' + apiKey } }); }
+    try { return zoAccountList(await getJson(`${apiBase}/accounts`, { headers: { authorization: 'Bearer ' + apiKey } })); }
     catch (e) {
       if (e.status === 401 || e.status === 403 || /\b(401|403)\b|unauthor|invalid/i.test(e.message)) throw new Error('Zernio did not accept that key — copy it again from zernio.com → Settings → API keys.');
       throw new Error('Zernio could not be reached to check the key (' + e.message + ') — try again in a moment.');
     }
-    return true;
   }
 
   /*
@@ -924,10 +941,13 @@ class Accounts {
    * (each record keeps the key it posts with), so they move to the new one —
    * otherwise they would keep posting with a key that may have been revoked.
    */
-  zernioRekey(oldKey, newKey) {
+  zernioRekey(oldKey, newKey, visible) {
     if (!oldKey || !newKey || oldKey === newKey) return 0;
+    // only the accounts the new key can see: a key from a DIFFERENT Zernio account
+    // (a second free one) must not take over the first account's links
+    const seen = new Set((visible || []).map((a) => String(zoAccountId(a))));
     let n = 0;
-    const all = this.all().map((a) => (a.via === 'zernio' && a.token === oldKey ? (n++, { ...a, token: newKey }) : a));
+    const all = this.all().map((a) => (a.via === 'zernio' && a.token === oldKey && seen.has(String(a.zoAccountId)) ? (n++, { ...a, token: newKey }) : a));
     if (n) this.store.set('socialAccounts', all);
     return n;
   }

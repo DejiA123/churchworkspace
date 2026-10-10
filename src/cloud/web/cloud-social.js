@@ -1179,8 +1179,9 @@
         const chips = left.map((p) => `<button type="button" class="cs-pick${skip.has(p) ? '' : ' on'}" data-k="pick" data-p="${p}" aria-pressed="${skip.has(p) ? 'false' : 'true'}">${platMark(p, 'sm')}<span>${label(p)}</span></button>`).join('');
         const n = left.filter((p) => !skip.has(p)).length;
         hero = '<div class="cs-setup">'
-          + `<button type="button" class="cs-btn primary cs-wide cs-big" data-k="setup"${n ? '' : ' disabled'}>${watching ? 'Signing you in…' : '✨ Set up everything'}</button>`
-          + `<small class="cs-setup-sub">${watching ? 'Finish each sign-in in the window that opened — each one moves on to the next by itself. This list fills in as they connect.'
+          + (watching ? `<a class="cs-btn primary cs-wide cs-big" href="${escAttr(watching.url)}" target="_blank" rel="noopener">${mi('external')}Start the sign-ins</a>`
+            : `<button type="button" class="cs-btn primary cs-wide cs-big" data-k="setup"${n ? '' : ' disabled'}>✨ Set up everything</button>`)
+          + `<small class="cs-setup-sub">${watching ? 'Finish each sign-in in the window that opened — each one moves on to the next by itself, and this list fills in as they connect. (No window? Tap Start the sign-ins.)'
             : 'Signs you in to each one, one after another, in one window — just tap Allow on each. Untick any you don’t use.'}</small>`
           + `<div class="cs-picks">${chips}</div></div>`;
       } else {
@@ -1208,21 +1209,33 @@
       } catch (e) { /* keep waiting */ }
       if (claiming && Date.now() > claiming.until) { stopClaim(); draw({ kind: 'warn', text: `${label(p)} was not linked — tap Connect to try again.` }); }
     }
-    // Set up everything runs in its own window: this sheet just watches the list fill in
+    // Set up everything runs in its own window: this sheet watches the list fill in,
+    // and asks how the run is going so it stops waiting — and says why — when it ends
+    const typingHere = () => { const a = document.activeElement; return !!(a && panel.body.contains(a) && /^(INPUT|TEXTAREA)$/.test(a.tagName)); };
     async function watch() {
       if (!watching) return;
-      const before = linked().length;
+      const before = linked().map((a) => a.id).join();
       await loadSocial(true).catch(() => null);
-      const now = linked().length;
-      if (now > before) { renderSched(); renderHomeSocial(); }
-      if (!missing().filter((p) => !skip.has(p)).length) {
+      const changed = linked().map((a) => a.id).join() !== before;
+      if (changed) { renderSched(); renderHomeSocial(); }
+      let st = null;
+      if (watching.code) { try { st = await window.api.social.setupStatus(watching.code); } catch (e) { st = null; } }
+      if (!watching) return;
+      if (!missing().filter((p) => !skip.has(p)).length || (st && (st.done || st.expired)) || Date.now() > watching.until) {
         stopWatch();
-        draw({ kind: 'good', text: 'All set — your accounts are connected.' });
-        C.island({ kind: 'good', title: 'Accounts connected', sub: linked().map((a) => label(a.platform)).join(' · ') });
+        const bad = (st && st.results ? st.results : []).filter((x) => !x.ok);
+        if (!bad.length && !missing().filter((p) => !skip.has(p)).length) {
+          draw({ kind: 'good', text: 'All set — your accounts are connected.' });
+          C.island({ kind: 'good', title: 'Accounts connected', sub: linked().map((a) => label(a.platform)).join(' · ') });
+        } else {
+          const full = bad.some((x) => x.full);
+          draw({ kind: 'warn', text: (bad.length ? bad.map((x) => `${label(x.platform)}: ${x.error}`).join(' ') + ' ' : 'Not everything was connected. ')
+            + (full ? 'Turn on billing at zernio.com for more than 2 accounts, then tap ✨ Set up everything again.' : 'Tap ✨ Set up everything again for what is left.') });
+        }
         return;
       }
-      if (Date.now() > watching.until) stopWatch();
-      draw();
+      // redrawn only when something changed, and never under someone's typing
+      if (changed && !typingHere()) draw();
     }
     const onBack = () => { if (document.hidden) return; if (claiming) claim(); if (watching) watch(); };
     document.addEventListener('visibilitychange', onBack);
@@ -1266,7 +1279,7 @@
         if (!platforms.length) return;
         // the window is opened on the tap itself (a phone will not open one later); the address follows
         let w = null;
-        try { w = window.open('', '_blank'); } catch (er) { w = null; }
+        try { w = window.open('', '_blank'); if (w) w.opener = null; } catch (er) { w = null; }
         b.disabled = true; b.textContent = 'Opening…';
         let r;
         try { r = await window.api.social.setupStart({ origin: location.origin, platforms }); }
@@ -1277,15 +1290,10 @@
           return draw({ kind: 'good', text: 'Everything is connected — it was all on Zernio already.' });
         }
         stopClaim(); stopWatch();
-        watching = { until: Date.now() + 30 * 60000, timer: setInterval(watch, 4000) };
+        watching = { code: r.code, url: r.url, until: Date.now() + 30 * 60000, timer: setInterval(watch, 4000) };
         if (w) { try { w.location.href = r.url; } catch (er) { w = null; } }
-        if (!w) {
-          // the phone blocked the window: the same sign-ins, in this one
-          draw({ kind: '', text: 'Opening the sign-ins…' });
-          location.href = r.url;
-          return;
-        }
-        draw();
+        // the phone blocked the window: a real link opens it (never this page — an upload or export would stop)
+        draw(w ? null : { kind: '', text: 'Tap Start the sign-ins below.' });
         return;
       }
       if (k.startsWith('edit-')) {
@@ -1314,7 +1322,7 @@
         stopClaim();
         // opened on the tap, before anything is awaited — an iPhone blocks a window opened later
         let w = null;
-        try { w = window.open('', '_blank'); } catch (er) { w = null; }
+        try { w = window.open('', '_blank'); if (w) w.opener = null; } catch (er) { w = null; }
         b.disabled = true; b.textContent = 'Opening…';
         let r;
         try { r = await window.api.social.linkStart(p); }

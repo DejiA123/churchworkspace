@@ -2950,12 +2950,12 @@ ipcMain.handle('social:setKeys', wrap(async (e, patch = {}) => {
       throw new Error('That does not look like a Zernio API key — copy it again from zernio.com → Settings → API keys.');
     }
     // checked with Zernio before it is kept: a wrong key is found NOW, not at the first Connect
-    if (v) await accounts.zernioCheckKey(v);
-    changed.push([String(acc[k] || '').trim(), v]);
+    const visible = v ? await accounts.zernioCheckKey(v) : [];
+    changed.push([String(acc[k] || '').trim(), v, visible]);
     acc[k] = v;
   }
   store.set('settings', { ...s, accounts: acc });
-  for (const [was, now] of changed) accounts.zernioRekey(was, now);
+  for (const [was, now, visible] of changed) accounts.zernioRekey(was, now, visible);
   // whatever is already linked on Zernio is linked here too, straight away
   let linked = [];
   try { linked = await accounts.zernioImportAll(); } catch (er) { /* Connect still works */ }
@@ -2982,20 +2982,22 @@ ipcMain.handle('social:setupStart', wrap(async (e, { origin, platforms } = {}) =
   if (!/^https?:\/\/[^/\s?#]+$/i.test(base)) throw new Error('The studio’s address is not known — open the studio from its own link and try again.');
   if (!accountsMod.zoCfg(store, 'tiktok').apiKey && !accountsMod.zoCfg(store, 'facebook').apiKey) throw new Error('Add your Zernio key first.');
   const wanted = accountsMod.ZO_PLATFORMS.filter((p) => !Array.isArray(platforms) || platforms.includes(p));
-  try { await accounts.zernioImportAll(); } catch (er) {}
-  const have = new Set(accounts.list().filter((a) => a.via === 'zernio').map((a) => a.platform));
+  try { await accounts.zernioImportAll(wanted); } catch (er) {}
+  const have = new Set(accounts.list().map((a) => a.platform));
   const queue = wanted.filter((p) => !have.has(p));
   if (!queue.length) return { done: true, accounts: accounts.list() };
   const now = Date.now();
   for (const [k, r] of setupRuns) if (r.expires < now) setupRuns.delete(k);
   const code = require('crypto').randomBytes(18).toString('hex');
   setupRuns.set(code, { origin: base, queue, current: null, results: [], expires: now + SETUP_TTL_MS });
-  return { url: `${base}/social/next/${code}`, queue };
+  return { url: `${base}/social/next/${code}`, code, queue };
 }));
 /* Called by the page each sign-in comes back to: keep what was linked, open the next. */
 async function socialSetupNext(code) {
   const run = setupRuns.get(String(code || ''));
   if (!run || run.expires < Date.now()) { setupRuns.delete(String(code || '')); return { expired: true }; }
+  // finished: the same answer again (a reload, a tab the phone brought back) until it runs out
+  if (run.final) return run.final;
   if (run.current) {
     const plat = run.current; run.current = null;
     let r = null;
@@ -3014,10 +3016,17 @@ async function socialSetupNext(code) {
       run.results.push({ platform: plat, ok: false, error: full ? 'Zernio’s free plan is full (2 accounts).' : er.message, full });
     }
   }
-  setupRuns.delete(String(code));
-  return { done: true, results: run.results, back: run.origin + '/#scheduler' };
+  run.final = { done: true, results: run.results, back: run.origin + '/#scheduler' };
+  return run.final;
 }
 ipcMain.handle('social:setupNext', wrap(async (e, { code } = {}) => socialSetupNext(code)));
+/* The phone's sheet asking how its run is going — so it stops waiting, and says why, when it ends. */
+ipcMain.handle('social:setupStatus', wrap(async (e, { code } = {}) => {
+  const run = setupRuns.get(String(code || ''));
+  if (!run || run.expires < Date.now()) return { expired: true };
+  if (run.final) return { done: true, results: run.final.results };
+  return { running: true, current: run.current };
+}));
 
 ipcMain.handle('scheduler:testFb', wrap(async (e, { pageId, token }) => {
   const acc = (store.get('settings') || {}).accounts || {};
