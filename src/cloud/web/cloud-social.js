@@ -1371,7 +1371,7 @@
         <textarea id="mtBrief" class="mt-brief" rows="2" maxlength="400" placeholder="e.g. Bishop David Richman at The Power House — faith over fear. Join us Sundays at 10am">${esc(MT.brief)}</textarea>
         <div class="mt-ideas">${ideas.map(([v, l]) => `<button type="button" class="mt-chip${mtHas(MT.brief, v) ? ' on' : ''}" data-mt-idea="${escAttr(v)}">${esc(l)}</button>`).join('')}</div></section>`;
   }
-  const MT = { items: [], song: null, songFile: null, style: 'hype', len: 30, custom: 120, aspect: '9:16', keep: true, brief: '', busy: false, order: 'ai', caps: true, mode: 'music', free: null, freeMood: null, voice: '' };
+  const MT = { items: [], song: null, songFile: null, style: 'hype', len: 45, custom: 120, aspect: '9:16', keep: true, brief: '', busy: false, order: 'ai', caps: true, mode: 'talk', free: null, freeMood: null, voice: '' };
   /* which free mood suits which style, for "✨ Pick for me" */
   const MT_MOOD_OF = { hype: 'hype', fun: 'hype', cinematic: 'epic', worship: 'uplift', emotional: 'calm' };
   /*
@@ -1398,6 +1398,8 @@
     try { lib = await window.api.library.list(); } catch (e) { lib = null; }
     MT.lib = ((lib && lib.music) || []).filter((m) => !/^free:/.test(m.source || ''));
     try { MT.freeList = await window.api.freeMusic.list(false); } catch (e) { MT.freeList = null; }
+    // it opens on the Viral Montage: music under it unless the operator says otherwise (as picking the tab does)
+    if (MT.mode === 'talk' && !MT.song && !MT.songFile && !MT.free && MT.freeList && MT.freeList.tracks && MT.freeList.tracks.length) MT.free = 'auto';
     MT.who = who;
     mtPaint();
   }
