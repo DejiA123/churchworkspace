@@ -1439,10 +1439,8 @@
       </section>
       <section class="mt-sec"${talk ? ' hidden' : ''}><h3>Order</h3><div class="mt-row">${chips(MT_ORDERS, MT.order, 'order')}</div>
         <small class="mt-hint">${MT.order === 'mine' ? 'The clips play in this order. Hold a tile and drag it to move it — a photo goes over the video before it.' : 'The AI puts the strongest moment first and orders the rest for the story. Hold and drag a tile to set your own order.'}</small></section>
-      ${talk ? `<section class="mt-sec"><h3>Narrator <small>optional — a real voice opens and closes it</small></h3>
-        ${who.voiceover && who.voiceover.installed
-    ? `<div class="mt-row"><button type="button" class="mt-chip${!MT.voice ? ' on' : ''}" data-mt-voice="">No narrator</button>${(who.voiceover.voices || []).map((v) => `<button type="button" class="mt-chip${MT.voice === v.id ? ' on' : ''}" data-mt-voice="${attr(v.id)}">🎙 ${esc(v.label)}</button>`).join('')}</div>
-        <small class="mt-hint">The AI writes a line that hooks people before the first speaker, and a closing line to follow or share; the narrator says them over B-roll. The first time takes a minute longer while the voice is set up.</small>`
+      ${talk ? `<section class="mt-sec"><h3>Narrator <small>optional · tap ▶ to hear</small></h3>
+        ${who.voiceover && who.voiceover.installed ? mtVoiceHtml(who.voiceover.voices || [])
     : '<small class="mt-hint">The narrator voice is not installed on this server yet — update the server to add it.</small>'}</section>` : ''}
       <section class="mt-sec"><h3>${talk ? 'Background music' : 'Music'} <small>tap ▶ to listen</small></h3>
         ${mtMusicHtml()}
@@ -1515,12 +1513,31 @@
     }
     return `${tabs}<small class="mt-hint">${MT.mode === 'talk' ? 'No music — just the voices.' : 'No music — the clips’ own sound.'}</small>`;
   }
+  /*
+   * ►► THE NARRATOR, AS A LIST YOU CAN LISTEN TO. ◄◄ "No narrator", then each
+   * voice with what it sounds like, ▶ to hear it say a line, and a tick for
+   * the one that will open and close the edit (the same rows as the music).
+   */
+  const MT_VOICE_FEEL = {
+    am_michael: 'Warm and confident — a friendly host', af_heart: 'Bright and warm — welcoming',
+    bm_george: 'Calm British storyteller', bf_emma: 'Gentle and clear — British', am_onyx: 'Deep and cinematic — a trailer voice',
+  };
+  function mtVoiceHtml(voices) {
+    const esc = C.esc, attr = C.escAttr;
+    const playing = MT.preview && MT.preview.key;
+    const row = (id, title, sub, play) => `<div class="mt-song${(MT.voice || '') === id ? ' on' : ''}" data-mt-voice="${attr(id)}">
+        ${play ? `<button type="button" class="mt-play${playing === 'voice:' + id ? ' on' : ''}" data-mt-play="voice:${attr(id)}" aria-label="Hear ${attr(title)}"></button>` : '<span class="mt-play mt-play-x mt-play-off">🔇</span>'}
+        <span class="mt-song-t"><b>${esc(title)}</b><small data-mt-sub="voice:${attr(id)}" data-orig="${attr(sub)}">${esc(sub)}</small></span><span class="mt-radio"></span></div>`;
+    return `<div class="mt-list">${row('', 'No narrator', 'Straight in with the first line', false)}${voices.map((v) => row(v.id, v.label, MT_VOICE_FEEL[v.id] || 'An AI voice', true)).join('')}</div>
+      <small class="mt-hint">🎙 The narrator says a hook before the first line and a closing line to follow or share, over B-roll — words the AI writes for this edit.</small>`;
+  }
   const mtClock = (sec) => { const s = Math.max(0, Math.round(sec || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
   /* ▶ one song at a time: tap to hear it, tap again to stop. A free song plays
      straight from incompetech; if the phone cannot get it there, the server
      fetches it once (it is then in the library) and it plays from there. */
   function mtPreviewSrc(key) {
+    if (key.startsWith('voice:')) return window.MW_VOICE_SAMPLE_URL ? window.MW_VOICE_SAMPLE_URL(key.slice(6)) : '';
     if (key === 'file') return MT.songFile ? (MT.songFileUrl || (MT.songFileUrl = URL.createObjectURL(MT.songFile))) : '';
     if (key.startsWith('lib:')) { const m = MT.lib.find((x) => 'lib:' + x.id === key); return m && m.file ? C.fileUrl(m.file) : ''; }
     if (key.startsWith('free:')) {
@@ -1538,7 +1555,7 @@
     $$('[data-mt-sub]', p.body).forEach((el) => {
       if (pv && el.dataset.mtSub === key) {
         const a = pv.a;
-        el.textContent = a.currentTime < 0.05 ? 'Loading…' : `Playing · ${mtClock(a.currentTime)}${a.duration && isFinite(a.duration) ? ' / ' + mtClock(a.duration) : ''}`;
+        el.textContent = a.currentTime < 0.05 ? (key.startsWith('voice:') ? 'Getting the voice ready… (the first time takes about a minute)' : 'Loading…') : `Playing · ${mtClock(a.currentTime)}${a.duration && isFinite(a.duration) ? ' / ' + mtClock(a.duration) : ''}`;
       } else el.textContent = el.dataset.orig || '';
     });
   }
@@ -1559,7 +1576,9 @@
     const onErr = () => {
       const pv = MT.preview;
       if (!pv || pv.a !== a) return;
-      C.island({ kind: 'warn', title: 'That song would not play', sub: 'The music site did not answer — try again in a moment, or pick another.', ms: 4000 });
+      const voice = key.startsWith('voice:');
+      C.island({ kind: 'warn', title: voice ? 'That voice would not play' : 'That song would not play',
+        sub: voice ? 'The server could not make the voice just now — try again in a moment.' : 'The music site did not answer — try again in a moment, or pick another.', ms: 4000 });
       mtPreviewStop();
     };
     a.addEventListener('error', onErr);

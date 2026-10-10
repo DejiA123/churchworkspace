@@ -102,6 +102,9 @@ function dirsFor(id) {
 }
 const guard = makeGuard(() => Object.values(dirsFor()).filter(Boolean));
 const allowedPath = (p) => guard.allowedPath(p);
+/* the narrator samples being made (one at a time per voice) and the line they say */
+const voiceSampling = new Map();
+const VOICE_SAMPLE_LINE = 'What you are about to hear could change your life. Stay with me to the end — and share it with someone who needs it today.';
 
 /* -------------------------------------------------------------- allowlist */
 
@@ -1243,6 +1246,31 @@ async function authedRoutes(req, res, url, p, me) {
    * once: the server gets the song into its library (once — after that it is
    * just a file) and streams it, ranges and all.
    */
+  /*
+   * ▶ A NARRATOR VOICE, TO HEAR BEFORE IT IS CHOSEN (the Viral Montage). The
+   * same line in each voice, made once on the server (the first one wakes the
+   * voice — about a minute) and kept; played at this address on the tap.
+   */
+  if (p === '/api/voice-sample') {
+    const vox = require('../main/voiceover');
+    const id = String(url.searchParams.get('voice') || '').replace(/[^a-z_]/g, '').slice(0, 30);
+    if (!vox.VOICES.some(([v]) => v === id)) return send(res, 400, 'text/plain', 'which voice?');
+    if (!vox.installed()) return send(res, 503, 'text/plain', 'The AI voice is not installed on this server.');
+    const dir = path.join(os.tmpdir(), 'mw-voice-samples');
+    const file = path.join(dir, id + '.wav');
+    if (!fs.existsSync(file)) {
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+        if (!voiceSampling.has(id)) {
+          const tmp = file + '.part.wav';
+          voiceSampling.set(id, vox.speak(VOICE_SAMPLE_LINE, { voice: id, out: tmp }).then(() => fs.renameSync(tmp, file)).finally(() => voiceSampling.delete(id)));
+        }
+        await voiceSampling.get(id);
+      } catch (e) { return send(res, 502, 'text/plain', 'The voice could not be made: ' + ((e && e.message) || e)); }
+    }
+    return sendFile(req, res, file, {});
+  }
+
   if (p === '/api/free-song') {
     const id = String(url.searchParams.get('id') || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 80);
     if (!id) return send(res, 400, 'text/plain', 'which song?');

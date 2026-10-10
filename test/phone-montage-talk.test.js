@@ -146,6 +146,29 @@ async function waitUp() {
     await sleep(300);
     const pv2 = await page.evaluate(() => ({ on: !!document.querySelector('#cloudMontage [data-mt-play].on'), sub: (document.querySelector('#cloudMontage [data-mt-sub="file"]') || {}).textContent }));
     check(!pv2.on && pv2.sub === 'from this phone', 'a second tap stops it', pv2);
+    // THE NARRATOR: a list to listen to — each voice with ▶, the one in use ticked
+    await page.evaluate(() => {
+      window.api.montage.status = async () => ({ director: 'groq', voiceover: { installed: true, voices: [{ id: 'am_michael', label: 'Man · American' }, { id: 'af_heart', label: 'Woman · American' }, { id: 'am_onyx', label: 'Deep man · American' }] } });
+    });
+    await page.evaluate((w) => { window.MW_VOICE_SAMPLE_URL = () => window.MW_FILE_URL(w); }, wav);   // (no voice engine here: a stand-in sample)
+    await page.evaluate(() => { const x = document.querySelector('#cloudMontage .cp-x, #cloudMontage [data-close]'); if (x) x.click(); });
+    await sleep(400);
+    await page.evaluate(() => window.MWSocial.openMontage());
+    await sleep(1200);
+    const nv = await page.evaluate(() => ({ rows: [...document.querySelectorAll('#cloudMontage [data-mt-voice]')].map((r) => r.dataset.mtVoice), plays: document.querySelectorAll('#cloudMontage [data-mt-play^="voice:"]').length,
+      on: (document.querySelector('#cloudMontage [data-mt-voice].on') || {}).dataset }));
+    check(nv.rows.join() === ',am_michael,af_heart,am_onyx' && nv.plays === 3 && nv.on && nv.on.mtVoice === '', 'the narrator is a list: "No narrator" (ticked) then each voice with ▶ to hear it', nv);
+    await page.locator('#cloudMontage [data-mt-voice="am_onyx"] .mt-song-t').tap();
+    await sleep(300);
+    await page.locator('#cloudMontage [data-mt-play="voice:am_onyx"]').tap();
+    let vp = null;
+    for (let i = 0; i < 25; i++) { await sleep(200); vp = await page.evaluate(() => ({ ticked: (document.querySelector('#cloudMontage [data-mt-voice].on') || {}).dataset, on: !!document.querySelector('#cloudMontage [data-mt-play="voice:am_onyx"].on'), sub: (document.querySelector('#cloudMontage [data-mt-sub="voice:am_onyx"]') || {}).textContent })); if (/Playing/.test(vp.sub)) break; }
+    check(vp.ticked && vp.ticked.mtVoice === 'am_onyx' && vp.on && /Playing/.test(vp.sub), 'tapping a voice picks it; ▶ plays how it sounds', vp);
+    if (process.env.MW_SHOTS) { await page.evaluate(() => [...document.querySelectorAll('#cloudMontage .mt-sec h3')].find((h) => /Narrator/.test(h.textContent)).scrollIntoView({ block: 'start' })); await sleep(300); await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'montage-narrator.png') }); }
+    await page.locator('#cloudMontage [data-mt-play="voice:am_onyx"]').tap();
+    await sleep(200);
+    await page.locator('#cloudMontage [data-mt-voice=""] .mt-song-t').tap();
+    await sleep(200);
     // a FREE song plays through the server (incompetech will not play inside another site, and
     // an iPhone needs the sound to start on the tap): one the server already has streams at once
     await page.evaluate((w) => window.api.library.add('music', w, 'Movement Proposition · Kevin MacLeod', 'free:movement-proposition'), wav);
@@ -161,7 +184,7 @@ async function waitUp() {
     await sleep(200);
     // one the server cannot fetch (no internet here) says so, and the button goes back to ▶
     // (whichever other song is listed: which titles the server can reach depends on the internet here)
-    const other = await page.evaluate(() => [...document.querySelectorAll('#cloudMontage [data-mt-play]')].map((b) => b.dataset.mtPlay).find((k) => k !== 'free:movement-proposition'));
+    const other = await page.evaluate(() => [...document.querySelectorAll('#cloudMontage [data-mt-play^="free:"]')].map((b) => b.dataset.mtPlay).find((k) => k !== 'free:movement-proposition'));
     await page.locator(`#cloudMontage [data-mt-play="${other}"]`).tap();
     let bad = null;
     for (let i = 0; i < 60; i++) { await sleep(250); bad = await page.evaluate(() => ({ on: !!document.querySelector('#cloudMontage [data-mt-play].on'), island: document.body.innerText.includes('That song would not play') })); if (bad.island) break; }
