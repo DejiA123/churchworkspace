@@ -17,6 +17,9 @@
  *   [4] the YouTube title appears when a YouTube account is chosen
  *   [5] scheduling posts it with that caption and title
  *   [6] a caption typed before the AI answers is never written over
+ *   [9] "I selected a video from this phone but it did not show up": on a slow
+ *       connection the video shows AT ONCE, played from the phone, with how far
+ *       the sending has got — then the caption is written when it lands
  *
  * Needs Playwright with Chromium; without it this says so and skips.
  *   node test/phone-scheduler-studio.test.js
@@ -215,6 +218,30 @@ function aiServer() {
     const after = (await page.evaluate(async () => window.api.scheduler.list())).length;
     check(twice, 'while it waits for the caption, Schedule cannot be tapped twice');
     check(after === before, 'closing the sheet while it waits posts nothing', { before, after });
+
+    // [9] a big video on a slow connection
+    AI.slow = 0;
+    const BIG = path.join(WORK, 'Sunday service.mp4');
+    execFileSync(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=720x1280:r=30:d=6', '-f', 'lavfi', '-i', 'sine=d=6', '-c:v', 'libx264', '-preset', 'ultrafast', '-b:v', '6M', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', BIG]);
+    const cdp = await ctx.newCDPSession(page);
+    await cdp.send('Network.enable');
+    await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 40, downloadThroughput: 4e6, uploadThroughput: 600e3 });
+    await page.evaluate(() => { const x = document.querySelector('#csCompose .cp-x'); if (x) x.click(); });
+    await sleep(600);
+    await page.evaluate(() => window.MWSocial.compose({}));
+    await page.waitForSelector('#csCompose [data-c="device"]', { timeout: 8000 });
+    const [ch3] = await Promise.all([page.waitForEvent('filechooser', { timeout: 8000 }), page.tap('#csCompose [data-c="device"]')]);
+    await ch3.setFiles(BIG);
+    await page.waitForSelector('#csCompose .csb-prev.sending', { timeout: 5000 }).catch(() => {});
+    await sleep(1500);
+    const sending = await page.evaluate(() => ({ shown: !!document.querySelector('#csCompose .csb-prev.sending video'), tx: (document.querySelector('#csCompose .csb-send-tx') || {}).textContent || '', stop: !!document.querySelector('#csCompose [data-c="stopsend"]') }));
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'b-real-7-sending.png') });
+    check(sending.shown && /Sending to the studio… \d+%/.test(sending.tx) && sending.stop, 'the video shows at once, with how far the sending has got and a Stop', sending);
+    await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+    await page.waitForSelector('#csCompose .csb-prev:not(.sending)', { timeout: 120000 }).catch(() => {});
+    await page.waitForSelector('#csCompose .csb-ai-st.ok, #csCompose .csb-ai.busy', { timeout: 30000 }).catch(() => {});
+    const landed = await page.evaluate(() => ({ prev: !!document.querySelector('#csCompose .csb-prev:not(.sending)'), ai: !!document.querySelector('#csCompose .csb-ai') }));
+    check(landed.prev && landed.ai, 'when it lands it is the post\'s video, and its caption is written', landed);
 
     if (SHOTS) {
       await page.evaluate(() => { const x = document.querySelector('#csCompose .cp-x'); if (x) x.click(); });

@@ -2025,16 +2025,19 @@ let _hideTimer = null;
           }
         }
         paintUploadPct(key);
+        if (r.onPct) { try { r.onPct(pc, r); } catch (e) {} }
       }, r.ctl)
         .then((p) => r.done(null, p), (e) => r.done(e))
         .finally(() => { upRunning--; pumpUploads(); });
     }
   }
   /** Send files, several at once; resolves with [{ name, path } | { name, error }] in the order given. */
-  function sendFiles(files) {
-    return Promise.all(files.map((file) => new Promise((resolve) => {
+  function sendFiles(files, onEach, keys) {
+    return Promise.all(files.map((file, i) => new Promise((resolve) => {
       const key = 'f' + (++upSeq);
       const r = { name: file.name, pct: 0, state: 'wait', file, ctl: newUploadCtl() };
+      if (onEach) r.onPct = (pc, row) => onEach(i, pc, row);
+      if (keys) keys.push(key);
       let settled = false;
       r.done = (err, p) => {
         if (settled) return; settled = true;
@@ -2044,7 +2047,7 @@ let _hideTimer = null;
       upRows.set(key, r); upQueue.push(key);
     })));
   }
-  function sendFilesNow(files) { const all = sendFiles(files); renderUploads(); pumpUploads(); return all; }
+  function sendFilesNow(files, onEach, keys) { const all = sendFiles(files, onEach, keys); renderUploads(); pumpUploads(); return all; }
   /** Say how a batch went: stopped ones quietly, failures once each. */
   function reportSent(results) {
     const stopped = results.filter((x) => x.error && x.error.stopped).length;
@@ -2063,7 +2066,14 @@ let _hideTimer = null;
   }
 
   /** Pick files off this device and send them; resolves with studio paths. */
-  function chooseFromDevice(multi, exts) {
+  /*
+   * `hooks` lets the screen that asked show the sending itself — the upload bar
+   * lives in Your files, which is not open, so a big video from New post went
+   * up for minutes with nothing to see: onPicked(files, stop) the moment they
+   * are chosen, onProgress(i, percent, { sent, total, rate }) as they go.
+   */
+  function chooseFromDevice(multi, exts, hooks) {
+    const h = hooks || {};
     return new Promise((resolve) => {
       const input = document.createElement('input');
       input.type = 'file';
@@ -2076,7 +2086,10 @@ let _hideTimer = null;
         const files = Array.from(input.files || []);
         input.remove();
         if (!files.length) return resolve(null);
-        const results = await sendFilesNow(files);
+        const keys = [];
+        if (h.onPicked) { try { h.onPicked(files, () => keys.forEach((k) => stopUpload(k))); } catch (e) {} }
+        const results = await sendFilesNow(files, h.onProgress ? (i, pc, row) => h.onProgress(i, pc, { sent: row.sent, total: row.total, rate: row.rate }) : null, keys);
+        if (h.onResults) { try { h.onResults(results); } catch (e) {} }
         reportSent(results);
         const paths = results.filter((x) => x.path).map((x) => x.path);
         if (!paths.length) { refreshFiles(); return resolve(null); }

@@ -872,13 +872,32 @@
     // a batch starts from the time chosen (a free-slot tile), or from the next best time
     const batchTimes = () => planTimes(st.files.length, st.spacing, st.quick === 'pick' && st.when ? st.when : undefined);
 
+    const sendLine = (it) => {
+      const pct = Math.round(it.pct || 0);
+      const i = it.info || {};
+      let t = `Sending to the studio… ${pct}%`;
+      if (i.rate && i.total && pct < 100) {
+        const left = Math.max(0, (i.total - (i.sent || 0)) / i.rate);
+        t += left < 60 ? ` · ${Math.max(5, Math.ceil(left / 5) * 5)} s left` : ` · ${Math.ceil(left / 60)} min left`;
+      }
+      return pct >= 100 ? 'Almost there…' : t;
+    };
     const firstPlat = () => { const a = linked().find((x) => picked().includes(x.id) && /tiktok|instagram/.test(x.platform)) || linked().find((x) => picked().includes(x.id)); return a || null; };
     function mediaBlock() {
+      if (st.sending) {
+        return '<div class="csb-sending">' + st.sending.items.map((it, i) => `<div class="csb-prev sending${it.video ? '' : ' pic'}" data-send="${i}"${!it.video && it.url ? ` style="background-image:url('${escAttr(it.url)}')"` : ''}>`
+          + (it.video && it.url ? `<video src="${escAttr(it.url)}" muted playsinline autoplay loop preload="metadata"></video>` : '')
+          + `<span class="csb-send"><span class="csb-send-name">${esc(it.name)}</span><span class="csb-send-bar"><i style="width:${Math.max(3, it.pct || 0)}%"></i></span>`
+          + `<span class="csb-send-tx">${esc(sendLine(it))}</span></span>`
+          + (i === 0 ? `<button type="button" class="csb-pill right" data-c="stopsend">${mi('x')}<span>Stop</span></button>` : '')
+          + '</div>').join('') + '</div>';
+      }
       if (!st.files.length) {
+        const err = st.sendErr ? `<p class="csb-send-err">${mi('alert')}<span>${esc(st.sendErr)}</span></p>` : '';
         return '<div class="csb-choose">'
           + `<button type="button" class="csb-src" data-c="exports"><span class="csb-src-ic">${mi('film')}</span><b>Your exports</b><small>Shorts and videos the studio made</small></button>`
           + `<button type="button" class="csb-src" data-c="device"><span class="csb-src-ic">${mi('upload')}</span><b>From this ${phone() ? 'phone' : 'computer'}</b><small>A video, or a flyer to announce</small></button>`
-          + '</div>';
+          + '</div>' + err;
       }
       if (many()) {
         return '<div class="csb-strip">'
@@ -1028,7 +1047,7 @@
         + `<button type="button" class="csb-when" data-c="whenjump">${mi('clock')}<span><b>${esc(ws.main)}</b><small>${esc(ws.sub)}</small></span></button>`
         + `<button type="button" class="csb-go" data-c="go"${ready && !st.submitting ? '' : ' disabled'}>${st.submitting ? 'Scheduling…' : label}</button></div>`
         + (ready ? (busy ? '<p class="cs-hint">You can tap it now — it waits for the caption to be written.</p>' : '')
-          : `<p class="cs-hint">${!st.files.length ? 'Choose a video or a flyer first.' : 'Choose at least one account to post to.'}</p>`);
+          : `<p class="cs-hint">${st.sending ? 'Your video is on its way — the caption starts as soon as it lands.' : !st.files.length ? 'Choose a video or a flyer first.' : 'Choose at least one account to post to.'}</p>`);
       paintThumbs(panel.body);
     }
 
@@ -1133,9 +1152,36 @@
       });
       drawPick();
     }
+    /*
+     * ►► FROM THIS PHONE, WITH SOMETHING TO SEE. ◄◄ "I selected a video and it
+     * did not show up": a sermon takes minutes to send, and the only progress
+     * bar was in Your files, which is not open. Now the video is shown at once
+     * — played from the phone itself — with how far the sending has got, a
+     * Stop, and any failure said right there. The caption starts when it lands.
+     */
     async function pickDevice() {
-      const got = await C.chooseFromDevice(!edit, ['.mp4', '.mov', '.m4v', '.webm', '.jpg', '.jpeg', '.png']);
-      if (!got) return;
+      const got = await C.chooseFromDevice(!edit, ['.mp4', '.mov', '.m4v', '.webm', '.jpg', '.jpeg', '.png'], {
+        onPicked: (files, stop) => {
+          st.sending = { stop, items: files.map((f) => ({ name: f.name, video: /^video\//.test(f.type) || /\.(mov|mp4|m4v|webm)$/i.test(f.name), url: (() => { try { return URL.createObjectURL(f); } catch (e) { return ''; } })(), pct: 0 })) };
+          st.sendErr = '';
+          if (panel.el.isConnected) draw();
+        },
+        onProgress: (i, pct, info) => {
+          const it = st.sending && st.sending.items[i]; if (!it) return;
+          it.pct = pct; it.info = info;
+          const el = panel.body.querySelector(`[data-send="${i}"]`);
+          if (el) { const b = el.querySelector('.csb-send-bar i'); if (b) b.style.width = Math.max(3, pct) + '%'; const t = el.querySelector('.csb-send-tx'); if (t) t.textContent = sendLine(it); }
+        },
+        onResults: (results) => {
+          const bad = results.filter((x) => x.error && !x.error.stopped);
+          st.sendErr = bad.length ? `${bad[0].name}: ${(bad[0].error && bad[0].error.message) || 'it could not be sent'}` : '';
+        },
+      });
+      const was = st.sending;
+      st.sending = null;
+      if (was) setTimeout(() => was.items.forEach((x) => { try { URL.revokeObjectURL(x.url); } catch (e) {} }), 60000);
+      if (!panel.el.isConnected) return;
+      if (!got) { draw(); return; }
       const add = Array.isArray(got) ? got : [got];
       st.files = edit ? add.slice(0, 1) : (st.files.length ? Array.from(new Set(st.files.concat(add))) : add);
       if (!many() && !st.title) st.title = titleFromFile(st.files[0]);
@@ -1181,6 +1227,7 @@
         return draw();          // one file: offer both places again
       }
       if (c === 'device') return pickDevice();
+      if (c === 'stopsend') { if (st.sending && st.sending.stop) st.sending.stop(); return; }
       if (c === 'drop') { st.files.splice(+b.dataset.i, 1); return draw(); }
       if (c === 'connect') {
         return openConnect(() => {
