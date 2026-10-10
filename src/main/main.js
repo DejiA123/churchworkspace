@@ -2778,6 +2778,31 @@ ipcMain.handle('social:suggestCopy', wrap(async (e, { mediaPath, kind, durationS
   }
 
   /*
+   * ►► A FLYER IS READ, NOT GUESSED. ◄◄ A picture has nothing to listen to,
+   * and its file name is not a fact. The vision model reads every word on it
+   * (cloudsee.readFlyer) — the event, the day, the time, the place, who is
+   * speaking — and that is what the caption is written from. The picture is
+   * made small first (a phone photo is 12 MP; 1280 px reads just as well).
+   */
+  let flyer = null;
+  const isPicture = /\.(jpe?g|png|webp|heic|heif)$/i.test(String(mediaPath || ''));
+  if (!heardBy && isPicture && mediaPath && fs.existsSync(mediaPath) && cloudwrite.ready()) {
+    const tmp = path.join(require('os').tmpdir(), `mw-flyer-${process.pid}-${Date.now()}.jpg`);
+    try {
+      await ffmod.runFfmpeg(getCtx().ffmpeg, ['-v', 'error', '-i', mediaPath, '-frames:v', '1', '-vf', "scale='min(1280,iw)':-2", '-q:v', '3', '-y', tmp]);
+      const image = 'data:image/jpeg;base64,' + fs.readFileSync(tmp).toString('base64');
+      const r = await cloudsee.readFlyer({ image });
+      if (r && r.ok && (r.text || r.describe)) {
+        flyer = { event: r.event, date: r.date, time: r.time, place: r.place, people: r.people, theme: r.theme, contact: r.contact, isFlyer: r.isFlyer, model: r.model };
+        // what is printed is the only source of fact the writer has
+        transcript = [r.text, r.theme && `Theme: ${r.theme}`, r.describe && !r.isFlyer ? `The picture shows: ${r.describe}` : ''].filter(Boolean).join('\n');
+        heardBy = 'flyer';
+      }
+    } catch (er) { /* written from what else is known */ }
+    try { fs.rmSync(tmp, { force: true }); } catch (er) {}
+  }
+
+  /*
    * THEN WHO WRITES IT. The hosted model when there is one, the local one when
    * the church installed it, and the rules when neither — in that order,
    * because that is the order of how good the answer is. `polish` is the second
@@ -2811,12 +2836,27 @@ ipcMain.handle('social:suggestCopy', wrap(async (e, { mediaPath, kind, durationS
   const cw = cloudwrite.state();
   const rules = out.source !== 'ai';
   return Object.assign({}, out, {
-    heardBy,
+    heardBy, flyer,
     wroteBy: out.source === 'ai' ? (cloudReady ? 'cloud' : 'local') : 'rules',
     writerName: cloudReady ? cw.providerName : '',
     writerWhy: !rules ? ''
       : (cw.why || (cloudReady ? '' : (cw.hasKey || cw.borrowingKey ? 'it is switched off' : 'no key yet'))),
   });
+}));
+
+/*
+ * ✨ SHORTER, MORE HYPE, REWRITE — the caption the person is looking at,
+ * changed by the same writer, keeping its facts, quotes, names and hashtags.
+ */
+ipcMain.handle('social:reviseCopy', wrap(async (e, { title = '', caption = '', action = 'rewrite', instruction = '' } = {}) => {
+  const s = store.get('settings') || {};
+  const social = s.social || {};
+  const cloudReady = cloudwrite.ready();
+  const writer = cloudReady
+    ? { isAvailable: () => cloudwrite.isAvailable(), chat: (a) => cloudwrite.chat(a), parseJson: (t) => cloudwrite.parseJson(t) }
+    : { isAvailable: () => llm.isAvailable(), chat: (a) => llm.chat(a), parseJson: (t) => llm.parseJson(t) };
+  return socialCopy.revise({ title, caption, action, instruction, llm: writer,
+    churchName: (s.brand && s.brand.churchName) || '', allowBait: !!social.allowBait });
 }));
 
 /* The cloud writer's own settings, the same three calls the cloud ear has. */

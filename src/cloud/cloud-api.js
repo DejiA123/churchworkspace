@@ -137,6 +137,7 @@ const SOCIAL = {
   'social:unlink': true,
   'social:check': true,
   'social:suggestCopy': true,
+  'social:reviseCopy': { args: (a) => !!a && typeof a.caption === 'string' && a.caption.length <= 4000 && (a.title == null || (typeof a.title === 'string' && a.title.length <= 300)) && /^(shorten|hype|calmer|rewrite|custom)$/.test(a.action || 'rewrite') && (a.instruction == null || (typeof a.instruction === 'string' && a.instruction.length <= 300)) },
   'social:withMusic': true,
 };
 

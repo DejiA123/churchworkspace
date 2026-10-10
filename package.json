@@ -229,6 +229,7 @@
     "test:phone-project-delete": "node test/phone-project-delete.test.js",
     "test:phone-music-from-video": "node test/phone-music-from-video.test.js",
     "test:phone-social-setup": "node test/phone-social-setup.test.js",
+    "test:phone-scheduler-studio": "node test/phone-scheduler-studio.test.js",
     "test:phone-caption-touch": "node test/phone-caption-touch.test.js",
     "test:caption-second-opinion": "node test/caption-second-opinion.test.js"
   },

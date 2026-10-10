@@ -815,8 +815,51 @@ function ruleCopy(opts) {
   return { title: one.title, caption: one.caption, source: read ? 'heard' : 'rules', hook, heard: !!read };
 }
 
+/*
+ * ✨ CHANGE THE CAPTION THE PERSON IS LOOKING AT: shorter, more hype, or a
+ * fresh take — keeping every fact, quote, name and the hashtag line. Nothing
+ * new is invented: the caption itself is the only source of fact, so a name
+ * the writer adds that is not in it is taken out again (stripInventedNames).
+ */
+const REVISE = {
+  shorten: 'Make it SHORTER: about half the length. Keep the first line strong, keep the best quote, keep the hashtag line.',
+  hype: 'Make it MORE EXCITING: more energy and momentum, punchier sentences, an opening line that stops the scroll. Still true, still warm, no fake urgency, no engagement bait.',
+  calmer: 'Make it CALMER and more reflective: gentle, sincere, unhurried.',
+  rewrite: 'Write a FRESH version: a different opening line and angle, the same facts and the same quote.',
+  custom: '',
+};
+async function revise({ title = '', caption = '', action = 'rewrite', instruction = '', llm = null, churchName = '', allowBait = false } = {}) {
+  const was = { title: String(title || ''), caption: String(caption || '') };
+  if (!was.caption.trim()) return Object.assign({ source: 'unchanged', why: 'There is no caption to change yet.' }, was);
+  if (!llm || !(await llm.isAvailable())) return Object.assign({ source: 'unchanged', why: 'No AI writer is set up.' }, was);
+  const ask = action === 'custom' ? String(instruction || '').slice(0, 300) : (REVISE[action] || REVISE.rewrite);
+  const prompt = [
+    'You edit social media captions for a church. Reply with JSON only: {"title": "...", "caption": "..."}.',
+    '',
+    'THE CAPTION NOW:', '"""', was.caption, '"""',
+    was.title ? `THE TITLE NOW: ${was.title}` : '',
+    '',
+    `WHAT TO DO: ${ask}`,
+    'Rules: keep every fact, name, date, place and quote exactly as they are; never invent new ones. Keep the hashtags on the last line, after a blank line.',
+    'NEVER use an em dash or en dash. Two or three emoji at most. British spelling.',
+    allowBait ? '' : 'Never ask for engagement (no "drop an AMEN", no "comment below").',
+    'The title is for YouTube: under 70 characters, no hashtags, no emoji.',
+  ].filter((x) => x !== '').join('\n');
+  try {
+    const raw = await llm.chat({ prompt, maxTokens: 900, temperature: action === 'rewrite' ? 0.9 : 0.6, json: true });
+    const r = (llm.parseJson ? llm.parseJson(raw) : JSON.parse(raw)) || {};
+    const guard = (x) => stripInventedNames(x, { speaker: '', transcript: was.caption + ' ' + was.title, churchName });
+    const cap = houseStyle(guard(tidy(r.caption || '', 2100)), { allowBait });
+    const t = r.title ? houseStyle(guard(tidy(r.title, 100)), { allowBait, title: true }) : was.title;
+    if (!cap || cap.length < 8) return Object.assign({ source: 'unchanged', why: 'The writer did not give a usable caption.' }, was);
+    return { title: t || was.title, caption: cap, source: 'ai' };
+  } catch (e) {
+    return Object.assign({ source: 'unchanged', why: (e && e.message) || 'The writer did not answer.' }, was);
+  }
+}
+
 module.exports = {
-  suggest, ruleCopy, ruleOption, hookFromFilename, readTranscript, sentencesOf, hookScore,
+  suggest, revise, ruleCopy, ruleOption, hookFromFilename, readTranscript, sentencesOf, hookScore,
   buildPrompt, buildPolishPrompt, tidy, houseStyle, tagOf, tagLine, whoIsSpeaking, asSentence,
   stripInventedNames, STYLES, TELLS,
 };

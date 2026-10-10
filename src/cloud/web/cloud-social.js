@@ -552,25 +552,35 @@
 
   /* ------------------------------------------------------------ scheduler */
 
+  /*
+   * ►► THE SCHEDULER, CREATOR-STUDIO STYLE (the design the church chose). ◄◄
+   * Media first, like CapCut or TikTok Studio: the accounts as real cards
+   * (name, platform, live), the next post as a big "Up next" card, then what
+   * is coming as 9:16 tiles with their time on them — and the next free best
+   * time as a tile of its own, one tap from a post for it.
+   */
   function buildSched() {
     const el = document.createElement('div');
     el.id = 'cloudSched';
-    el.className = 'cloud-sched';
+    el.className = 'cloud-sched csb';
     el.innerHTML = `
-      <header class="cs-top">
-        <button type="button" class="cs-back" data-go="home" aria-label="Home">${mi('chev-left')}</button>
-        <h1>Scheduler</h1>
+      <header class="csb-top">
+        <button type="button" class="csb-round" data-go="home" aria-label="Home">${mi('chev-left')}</button>
         <span class="cs-chip-slot"></span>
-        <button type="button" class="cs-new" data-sched="new">${mi('plus')}<span>New post</span></button>
       </header>
-      <main class="cs-scroll">
-        <section class="cs-accts" id="csAccts"></section>
-        <nav class="cs-tabs" id="csTabs" role="tablist">
+      <main class="cs-scroll csb-scroll">
+        <div class="csb-head">
+          <div><small class="csb-eyebrow">Post everywhere</small><h1>Scheduler</h1></div>
+          <button type="button" class="csb-plus" data-sched="new" aria-label="New post">${mi('plus')}</button>
+        </div>
+        <div class="csb-h2"><h2>Accounts</h2><button type="button" class="csb-link" data-sched="connect">Manage</button></div>
+        <section class="csb-accts" id="csAccts"></section>
+        <nav class="csb-seg" id="csTabs" role="tablist">
           <button type="button" data-tab="upcoming" role="tab">Planned</button>
           <button type="button" data-tab="posted" role="tab">Posted</button>
           <button type="button" data-tab="failed" role="tab">Needs a look</button>
         </nav>
-        <div class="cs-list" id="csList"></div>
+        <div class="csb-list" id="csList"></div>
       </main>`;
     document.body.appendChild(el);
     el.querySelector('.cs-chip-slot').appendChild(C.jobChip());
@@ -579,6 +589,7 @@
       if (!b) return;
       if (b.dataset.go) return go(b.dataset.go);
       if (b.dataset.sched === 'new') return compose({});
+      if (b.dataset.sched === 'slot') return compose({ when: new Date(+b.dataset.at) });
       if (b.dataset.sched === 'connect') return openConnect();
       if (b.dataset.tab) { S.tab = b.dataset.tab; return renderSched(); }
       if (b.dataset.openPost) return openPost(b.dataset.openPost);
@@ -586,24 +597,42 @@
     return el;
   }
 
+  const platsOf = (p) => Array.from(new Set((p.platforms || []).concat(((p.accountIds || []).map((id) => (S.accounts.find((a) => a.id === id) || {}).platform)).filter(Boolean))));
+  const stack = (plats) => `<span class="csb-stack">${plats.map((x) => platMark(x, 'sm')).join('')}</span>`;
+  // "Tmrw 7 PM", "Sat 9:30 AM": fits on a 9:16 tile
+  const compactTime = (t) => { const d = new Date(t); return d.getMinutes() ? timeOf(d) : d.toLocaleTimeString(undefined, { hour: 'numeric' }); };
+  const shortWhen = (d) => {
+    const t = new Date(d);
+    const day = dayName(t);
+    return (day === 'Today' ? 'Today' : day === 'Tomorrow' ? 'Tmrw' : t.toLocaleDateString(undefined, { weekday: 'short' })) + ' ' + compactTime(t);
+  };
+  // the next best time with nothing booked near it (two hours either side), within a fortnight
+  function freeSlot() {
+    const taken = upcoming().map((p) => new Date(p.scheduledAt).getTime());
+    let t = nextWindow(new Date(Date.now() + 30 * 60000));
+    for (let i = 0; i < 40 && t; i++) {
+      if (!taken.some((x) => Math.abs(x - t.getTime()) < 2 * 3600e3)) return t;
+      t = nextWindow(new Date(t.getTime() + 60 * 60000));
+    }
+    return null;
+  }
+
   function renderSched() {
     if (S.view !== 'scheduler') return;
     const el = $('#cloudSched') || buildSched();
-    // the accounts strip
+    // the accounts, as cards: who they are and where
     const acc = linked();
-    $('#csAccts').innerHTML = acc.map((a) => `<button type="button" class="cs-acct" data-sched="connect">`
-      + `<span class="cs-ava">${a.picture ? `<img src="${escAttr(a.picture)}" alt="">` : `<b>${esc((a.name || '?').replace(/^@/, '').charAt(0).toUpperCase())}</b>`}${platMark(a.platform, 'badge')}</span>`
-      + `<span class="cs-acct-name">${esc(a.name || (PLAT[a.platform] || {}).name || a.platform)}</span></button>`).join('')
-      + `<button type="button" class="cs-acct cs-acct-add" data-sched="connect"><span class="cs-ava">${mi('plus')}</span>`
-      + `<span class="cs-acct-name">${acc.length ? 'Accounts' : 'Connect'}</span></button>`;
+    $('#csAccts').innerHTML = acc.map((a) => `<button type="button" class="csb-acc" data-sched="connect">`
+      + `<span class="csb-acc-top">${a.picture ? `<span class="csb-acc-pic" style="background-image:url('${escAttr(a.picture)}')">${platMark(a.platform, 'badge')}</span>` : platMark(a.platform, 'lg')}<i class="csb-live" title="Connected"></i></span>`
+      + `<b>${esc(a.name || (PLAT[a.platform] || {}).name || a.platform)}</b><small>${esc((PLAT[a.platform] || {}).name || a.platform)}</small></button>`).join('')
+      + `<button type="button" class="csb-acc add" data-sched="connect"><span class="csb-acc-plus">${mi('plus')}</span><b>${acc.length ? 'Add account' : 'Connect accounts'}</b><small>${acc.length ? 'TikTok, YouTube…' : 'One tap sets them up'}</small></button>`;
     // the tabs, with counts
     const counts = { upcoming: upcoming().length, posted: posted().length, failed: failed().length };
     for (const t of $$('#csTabs [data-tab]')) {
       const k = t.dataset.tab;
       t.classList.toggle('on', S.tab === k);
       t.setAttribute('aria-selected', S.tab === k ? 'true' : 'false');
-      t.innerHTML = `${{ upcoming: 'Planned', posted: 'Posted', failed: 'Needs a look' }[k]}${counts[k] ? `<i>${counts[k]}</i>` : ''}`;
-      t.classList.toggle('alert', k === 'failed' && counts.failed > 0);
+      t.innerHTML = `${{ upcoming: 'Planned', posted: 'Posted', failed: 'Needs a look' }[k]}${counts[k] ? `<i${k === 'failed' ? ' class="bad"' : ''}>${counts[k]}</i>` : ''}`;
     }
     const list = S.tab === 'posted' ? posted() : S.tab === 'failed' ? failed() : upcoming();
     const box = $('#csList');
@@ -611,31 +640,64 @@
       box.innerHTML = emptySched();
       return;
     }
-    // grouped by day
-    let html = '', day = '';
-    for (const p of list) {
-      const when = S.tab === 'posted' ? (p.postedAt || p.scheduledAt) : p.scheduledAt;
-      const d = dayName(when);
-      if (d !== day) { day = d; html += `<h3 class="cs-day">${esc(d)}</h3>`; }
-      html += postCard(p, when);
+    let html = '';
+    if (S.tab === 'upcoming') {
+      const [first, ...rest] = list;
+      html += '<div class="csb-h2"><h2>Up next</h2></div>' + heroCard(first);
+      const free = freeSlot();
+      if (rest.length || free) {
+        html += `<div class="csb-h2"><h2>Coming up</h2><span class="csb-dim">${rest.length ? `${rest.length} more` : ''}</span></div><div class="csb-grid">`
+          + rest.map((p) => tile(p, p.scheduledAt)).join('')
+          + (free ? `<button type="button" class="csb-tile free" data-sched="slot" data-at="${free.getTime()}"><span class="csb-free-plus">${mi('plus')}</span>`
+            + `<b>${esc(dayName(free))} is free</b><small>Best time ${esc(timeOf(free))}</small></button>` : '')
+          + '</div>';
+      }
+    } else {
+      html += '<div class="csb-grid">' + list.map((p) => tile(p, S.tab === 'posted' ? (p.postedAt || p.scheduledAt) : p.scheduledAt)).join('') + '</div>';
     }
     box.innerHTML = html;
     paintThumbs(box);
   }
 
+  function heroCard(p) {
+    const media = (p.mediaPaths || [])[0];
+    const st = statusOf(p);
+    const plats = platsOf(p);
+    const n = (p.accountIds || []).length || plats.length;
+    const cap = String(p.caption || '').split('\n').find((l) => l.trim()) || '';
+    return `<button type="button" class="csb-hero" data-open-post="${escAttr(p.id)}">`
+      + `<span class="csb-hero-pic" ${media ? `data-thumb="${escAttr(media)}"` : ''}>${media && isVideo(media) ? `<i class="csb-play">${mi('play')}</i>` : media ? '' : mi('type')}</span>`
+      + '<span class="csb-hero-main">'
+      + `<span class="csb-hero-when"><b>${esc(dayName(p.scheduledAt).toUpperCase())} · ${esc(timeOf(p.scheduledAt))}</b><i>${esc(fromNow(p.scheduledAt))}</i></span>`
+      + `<span class="csb-hero-title">${esc(p.title || 'Untitled post')}</span>`
+      + (cap ? `<span class="csb-hero-cap">${esc(cap)}</span>` : '')
+      + `<span class="csb-hero-foot">${stack(plats)}<span class="csb-dim">${n} account${n === 1 ? '' : 's'}</span><span class="cs-state ${st.cls}">${esc(st.tx)}</span></span>`
+      + '</span></button>';
+  }
+  function tile(p, when) {
+    const media = (p.mediaPaths || [])[0];
+    const st = statusOf(p);
+    return `<button type="button" class="csb-tile" data-open-post="${escAttr(p.id)}" ${media ? `data-thumb="${escAttr(media)}"` : ''}>`
+      + `<span class="csb-time">${esc(shortWhen(when))}</span>`
+      + (st.cls !== 'planned' ? `<span class="cs-state ${st.cls}">${esc(st.tx)}</span>` : '')
+      + (media && isVideo(media) ? `<i class="csb-play sm">${mi('play')}</i>` : '')
+      + `<span class="csb-tile-foot"><b>${esc(p.title || 'Untitled post')}</b>${stack(platsOf(p))}</span>`
+      + '</button>';
+  }
+
   function emptySched() {
     if (!S.keys.zo && !linked().length && S.tab === 'upcoming') {
-      return `<div class="cs-empty"><div class="cs-empty-art">${PLAT_ORDER.map((p) => platMark(p)).join('')}</div>`
-        + '<b>Post everywhere from here</b><p>Connect TikTok, YouTube, Instagram and Facebook once. Then pick a finished short, let the AI write the caption, choose a time — and it goes out on its own, even with this phone switched off.</p>'
-        + `<button type="button" class="cs-cta" data-sched="connect">${mi('link')}Connect accounts</button></div>`;
+      return `<div class="csb-empty"><div class="csb-empty-art">${PLAT_ORDER.map((p) => platMark(p, 'lg')).join('')}</div>`
+        + '<b>Post everywhere from here</b><p>Connect TikTok, YouTube, Instagram and Facebook once. Then pick a finished short — the AI writes the caption — choose a time, and it goes out on its own, even with this phone off.</p>'
+        + `<button type="button" class="csb-cta" data-sched="connect">${mi('link')}Connect accounts</button></div>`;
     }
     const msg = {
-      upcoming: ['Nothing planned yet', 'Pick a finished short and choose when it should go out.'],
+      upcoming: ['Nothing planned yet', 'Pick a short or a flyer — the AI writes the caption, you choose the time.'],
       posted: ['Nothing posted yet', 'Posts that have gone out show up here, with a link to each one.'],
       failed: ['All good', 'Nothing needs a look.'],
     }[S.tab];
-    return `<div class="cs-empty"><div class="cs-empty-art solo">${mi(S.tab === 'failed' ? 'check' : 'calendar')}</div><b>${msg[0]}</b><p>${msg[1]}</p>`
-      + (S.tab === 'upcoming' ? `<button type="button" class="cs-cta" data-sched="new">${mi('plus')}New post</button>` : '') + '</div>';
+    return `<div class="csb-empty"><div class="csb-empty-art solo">${mi(S.tab === 'failed' ? 'check' : 'calendar')}</div><b>${msg[0]}</b><p>${msg[1]}</p>`
+      + (S.tab === 'upcoming' ? `<button type="button" class="csb-cta" data-sched="new">${mi('plus')}New post</button>` : '') + '</div>';
   }
 
   function statusOf(p) {
@@ -772,7 +834,13 @@
       music: null,          // { free: id | 'auto' } or { lib: id } — laid under the video before it posts
       musicMood: 'uplift',
       shelf: null, songs: [],
+      // ✨ the AI caption: written by itself the moment something is chosen
+      ai: null,             // { stage: 'listen'|'read'|'write'|'done'|'fail', pct, from: 'video'|'flyer'|'picture', by, note, flyer }
+      autoFor: '',          // the file the caption on screen was written for (a re-pick drops a late answer)
+      prev: null,           // the caption before Shorter / More hype / Rewrite, for Undo
+      revising: '',
     };
+    if (o.when && !edit) { st.quick = 'pick'; st.when = new Date(o.when); }
     // the free shelf and the operator's own songs, for the Music section
     (async () => {
       try { st.shelf = await window.api.freeMusic.list(false); } catch (e) { st.shelf = null; }
@@ -800,34 +868,46 @@
     }
     function chosenWhen() { return st.quick === 'pick' ? (st.when || whenFor('best')) : whenFor(st.quick); }
 
+    const firstPlat = () => { const a = linked().find((x) => picked().includes(x.id) && /tiktok|instagram/.test(x.platform)) || linked().find((x) => picked().includes(x.id)); return a || null; };
     function mediaBlock() {
       if (!st.files.length) {
-        return '<div class="cs-pick">'
-          + `<button type="button" class="cs-pick-btn" data-c="exports">${mi('film')}<b>Your exports</b><small>Shorts and videos the studio made</small></button>`
-          + (phone()
-            ? `<button type="button" class="cs-pick-btn" data-c="device">${mi('upload')}<b>From this phone</b><small>A video or picture from your camera roll</small></button>`
-            : `<button type="button" class="cs-pick-btn" data-c="device">${mi('upload')}<b>From this computer</b><small>A video or picture from your files</small></button>`)
+        return '<div class="csb-choose">'
+          + `<button type="button" class="csb-src" data-c="exports"><span class="csb-src-ic">${mi('film')}</span><b>Your exports</b><small>Shorts and videos the studio made</small></button>`
+          + `<button type="button" class="csb-src" data-c="device"><span class="csb-src-ic">${mi('upload')}</span><b>From this ${phone() ? 'phone' : 'computer'}</b><small>A video, or a flyer to announce</small></button>`
           + '</div>';
       }
-      return `<div class="cs-media${many() ? ' many' : ''}">`
-        + st.files.map((f, i) => `<div class="cs-m">`
-          + `<span class="cs-m-pic" data-thumb="${escAttr(f)}">${isVideo(f) ? '<i class="cs-m-play"></i>' : ''}</span>`
-          + (many() ? `<button type="button" class="cs-m-x" data-c="drop" data-i="${i}" aria-label="Leave this one out">×</button>` : '')
-          + '</div>').join('')
-        + `<button type="button" class="cs-m-add" data-c="change">${mi(many() ? 'plus' : 'refresh')}<span>${many() ? 'Add' : 'Change'}</span></button>`
-        + '</div>';
+      if (many()) {
+        return '<div class="csb-strip">'
+          + st.files.map((f, i) => `<div class="csb-strip-it" data-thumb="${escAttr(f)}">${isVideo(f) ? `<i class="csb-play sm">${mi('play')}</i>` : ''}`
+            + `<button type="button" class="csb-x" data-c="drop" data-i="${i}" aria-label="Leave this one out">${mi('x')}</button></div>`).join('')
+          + `<button type="button" class="csb-strip-add" data-c="change">${mi('plus')}<span>Add</span></button></div>`;
+      }
+      // one post: the picture as it will be seen, with its caption on it
+      const f = st.files[0];
+      const a = firstPlat();
+      const lines = String(st.caption || '').split('\n').map((l) => l.trim()).filter(Boolean);
+      const tags = lines.filter((l) => /^#/.test(l)).join(' ');
+      const body = lines.filter((l) => !/^#/.test(l)).join(' ');
+      return `<div class="csb-prev${isVideo(f) ? '' : ' pic'}" data-thumb="${escAttr(f)}">`
+        + `<span class="csb-pill">${a ? platMark(a.platform, 'sm') : mi('eye')}<span>${a ? esc((PLAT[a.platform] || {}).name || '') + ' preview' : 'Preview'}</span></span>`
+        + `<button type="button" class="csb-pill right" data-c="change">${mi('refresh')}<span>Change</span></button>`
+        + (isVideo(f) ? `<i class="csb-play">${mi('play')}</i>` : '')
+        + `<span class="csb-prev-txt"><b>${esc(a ? '@' + String(a.name || '').replace(/^@/, '').replace(/\s+/g, '').toLowerCase() : '@yourchurch')}</b>`
+        + `<span class="csb-prev-cap" id="csbPrevCap">${body ? esc(body) : st.ai && st.ai.stage !== 'done' && st.ai.stage !== 'fail' ? '<i class="csb-shim w80"></i><i class="csb-shim w60"></i>' : '<em>Your caption shows here</em>'}</span>`
+        + (tags ? `<span class="csb-prev-tags" id="csbPrevTags">${esc(tags)}</span>` : '')
+        + '</span></div>';
     }
     function accountsBlock() {
       const acc = linked();
       if (!acc.length) {
         return `<button type="button" class="cs-connect-cta" data-c="connect">${PLAT_ORDER.map((p) => platMark(p, 'sm')).join('')}<span><b>Connect an account</b><small>TikTok, YouTube, Instagram or Facebook</small></span>${mi('chev-right')}</button>`;
       }
-      return '<div class="cs-who">' + acc.map((a) => {
-        const on = picked().includes(a.id);
-        return `<button type="button" class="cs-who-a${on ? ' on' : ''}" data-c="acct" data-id="${escAttr(a.id)}" aria-pressed="${on}">`
-          + `<span class="cs-ava">${a.picture ? `<img src="${escAttr(a.picture)}" alt="">` : `<b>${esc((a.name || '?').replace(/^@/, '').charAt(0).toUpperCase())}</b>`}${platMark(a.platform, 'badge')}<i class="cs-tick">${mi('check')}</i></span>`
-          + `<span>${esc(a.name || a.platform)}</span></button>`;
-      }).join('') + `<button type="button" class="cs-who-a add" data-c="connect"><span class="cs-ava">${mi('plus')}</span><span>Add</span></button></div>`;
+      return `<div class="csb-h3"><b>Posting to ${picked().length} of ${acc.length} account${acc.length === 1 ? '' : 's'}</b><button type="button" class="csb-link" data-c="connect">Manage</button></div>`
+        + '<div class="csb-pills">' + acc.map((a) => {
+          const on = picked().includes(a.id);
+          return `<button type="button" class="csb-acc-pill ${a.platform}${on ? ' on' : ''}" data-c="acct" data-id="${escAttr(a.id)}" aria-pressed="${on}">`
+            + `${platMark(a.platform, 'md')}<span>${esc(a.name || a.platform)}</span><i class="csb-check">${mi('check')}</i></button>`;
+        }).join('') + '</div>';
     }
     function whenBlock() {
       if (many()) {
@@ -836,29 +916,57 @@
           + [[24, 'One a day'], [12, 'Twice a day'], [6, 'Every 6 h'], [48, 'Every 2 days']].map(([h, l]) =>
             `<button type="button" class="cs-chip${st.spacing === h ? ' on' : ''}" data-c="spacing" data-h="${h}">${l}</button>`).join('')
           + '</div><ol class="cs-plan">' + times.map((t, i) => `<li><span class="cs-plan-pic" data-thumb="${escAttr(st.files[i])}"></span>`
-            + `<span><b>${esc(titleFromFile(st.files[i]))}</b><small>${esc(whenLabel(t))}</small></span></li>`).join('') + '</ol>';
+            + `<span><b>${esc((st.batchCaps[st.files[i]] || {}).title || titleFromFile(st.files[i]))}</b><small>${esc(whenLabel(t))}</small></span></li>`).join('') + '</ol>';
       }
       const w = chosenWhen();
       return '<div class="cs-chips">'
-        + [['now', 'Now'], ['best', 'Best time'], ['hour', 'In an hour'], ['tonight', 'Tonight 7 pm'], ['tomorrow', 'Tomorrow 9 am'], ['pick', 'Pick…']].map(([k, l]) =>
+        + [['now', 'Now'], ['best', '✦ Best time'], ['hour', 'In an hour'], ['tonight', 'Tonight 7 pm'], ['tomorrow', 'Tomorrow 9 am'], ['pick', 'Pick…']].map(([k, l]) =>
           `<button type="button" class="cs-chip${st.quick === k ? ' on' : ''}" data-c="quick" data-k="${k}">${l}</button>`).join('')
         + '</div>'
-        + (st.quick === 'pick' ? `<input type="datetime-local" class="cs-input cs-dt" data-c="dt" value="${localInput(w)}" min="${localInput(new Date())}">` : '')
-        + `<div class="cs-when-is">${mi('clock')}<span>${st.quick === 'now' ? 'Posts as soon as you tap Post' : esc(whenLabel(w)) + ' · ' + esc(fromNow(w))}</span></div>`;
+        + (st.quick === 'pick' ? `<input type="datetime-local" class="cs-input cs-dt" data-c="dt" value="${localInput(w)}" min="${localInput(new Date())}">` : '');
+    }
+    // what the AI is doing, in words
+    function aiStatus() {
+      const ai = st.ai;
+      if (!ai) return '';
+      if (ai.stage === 'listen') return `<span class="csb-ai-st busy"><i class="csb-spin"></i>Listening${ai.pct ? ` · ${ai.pct}%` : '…'}</span>`;
+      if (ai.stage === 'read') return '<span class="csb-ai-st busy"><i class="csb-spin"></i>Reading the flyer…</span>';
+      if (ai.stage === 'write') return '<span class="csb-ai-st busy"><i class="csb-spin"></i>Writing…</span>';
+      if (st.revising) return '<span class="csb-ai-st busy"><i class="csb-spin"></i>Changing it…</span>';
+      if (ai.stage === 'done') return `<span class="csb-ai-st ok">${mi('check')}Ready</span>`;
+      return '';
     }
     function textBlock() {
       if (many()) {
         const n = Object.keys(st.batchCaps).length;
-        return '<label class="cs-label">Caption for every post</label>'
-          + `<textarea class="cs-input cs-cap" data-c="caption" rows="4" placeholder="Leave it empty and each post gets its own — tap ✨ to write them">${esc(st.caption)}</textarea>`
-          + `<button type="button" class="cs-ai" data-c="write-all"${st.writing ? ' disabled' : ''}>${mi('sparkles')}${st.writing ? esc(st.writing) : n ? `Captions written for ${n} of ${st.files.length} — write again` : `Write a caption for each (${st.files.length})`}</button>`;
+        return `<div class="csb-ai"><div class="csb-ai-head"><span class="csb-ai-ic">${mi('sparkles')}</span><b>AI captions</b><small>one for each video</small>${st.writing ? `<span class="csb-ai-st busy"><i class="csb-spin"></i>${esc(st.writing)}</span>` : n ? `<span class="csb-ai-st ok">${mi('check')}${n} of ${st.files.length}</span>` : ''}</div>`
+          + `<textarea class="cs-input csb-cap" data-c="caption" rows="3" placeholder="Leave empty — each post gets its own AI caption. Or write one caption for all of them.">${esc(st.caption)}</textarea>`
+          + `<div class="csb-acts"><button type="button" class="csb-act" data-c="write-all"${st.writing ? ' disabled' : ''}>${mi('refresh')}${n ? 'Write them again' : 'Write them now'}</button></div></div>`;
       }
-      return '<label class="cs-label">Title <small>— YouTube shows it; the others use the caption</small></label>'
-        + `<input class="cs-input" data-c="title" maxlength="100" value="${escAttr(st.title)}" placeholder="What is this clip about?">`
-        + '<label class="cs-label">Caption</label>'
-        + `<textarea class="cs-input cs-cap" data-c="caption" rows="6" maxlength="2200" placeholder="Say what it is, who is speaking, and where. Hashtags at the end.">${esc(st.caption)}</textarea>`
-        + `<div class="cs-cap-bar"><button type="button" class="cs-ai" data-c="write"${st.writing || !st.files.length ? ' disabled' : ''}>${mi('sparkles')}${st.writing ? esc(st.writing) : 'Write it for me'}</button><span class="cs-count">${st.caption.length}/2200</span></div>`
-        + (st.options ? '<div class="cs-opts">' + st.options.map((op, i) => `<button type="button" class="cs-opt" data-c="opt" data-i="${i}"><b>${esc(op.label || 'Option ' + (i + 1))}</b><span>${esc(op.title || '')}</span></button>`).join('') + '</div>' : '');
+      const f = st.files[0];
+      const ai = st.ai || {};
+      const busy = ai.stage && ai.stage !== 'done' && ai.stage !== 'fail';
+      const from = ai.from === 'flyer' ? 'from the flyer' : isVideo(f) ? 'from what is said' : 'from the picture';
+      const fl = ai.flyer;
+      const facts = fl ? [fl.event && ['sparkles', fl.event], fl.date && ['calendar', fl.date], fl.time && ['clock', fl.time], fl.place && ['home', fl.place]].filter(Boolean) : [];
+      return `<div class="csb-ai${busy ? ' busy' : ''}">`
+        + `<div class="csb-ai-head"><span class="csb-ai-ic">${mi('sparkles')}</span><b>AI caption</b><small>${from}</small>${aiStatus()}</div>`
+        + (busy && isVideo(f) ? '<div class="csb-wave">' + Array.from({ length: 28 }, (x, i) => `<i style="animation-delay:${(i % 7) * 0.09}s"></i>`).join('') + '</div>' : '')
+        + (facts.length ? `<div class="csb-facts"><small>Read on the flyer</small>${facts.map(([ic, t]) => `<span>${mi(ic)}${esc(t)}</span>`).join('')}</div>` : '')
+        + (busy ? '<div class="csb-shims"><i class="csb-shim w90"></i><i class="csb-shim w75"></i><i class="csb-shim w50"></i></div>'
+          : `<textarea class="cs-input csb-cap" data-c="caption" rows="5" maxlength="2200" placeholder="Say what it is, who is speaking, and where. Hashtags at the end.">${esc(st.caption)}</textarea>`)
+        + (ai.note && !busy ? `<p class="csb-note">${esc(ai.note)}</p>` : '')
+        + (!busy ? '<div class="csb-acts">'
+          + (st.caption.trim() ? `<button type="button" class="csb-act" data-c="rev" data-a="rewrite"${st.revising ? ' disabled' : ''}>${mi('refresh')}Rewrite</button>`
+            + `<button type="button" class="csb-act" data-c="rev" data-a="shorten"${st.revising ? ' disabled' : ''}>${mi('scissors')}Shorter</button>`
+            + `<button type="button" class="csb-act" data-c="rev" data-a="hype"${st.revising ? ' disabled' : ''}>${mi('flame')}More hype</button>`
+            : `<button type="button" class="csb-act" data-c="write">${mi('sparkles')}Write it for me</button>`)
+          + (st.prev ? `<button type="button" class="csb-act ghost" data-c="undo">${mi('undo')}Undo</button>` : '')
+          + `<span class="cs-count">${st.caption.length}/2200</span></div>` : '')
+        + (st.options && !busy ? '<div class="csb-styles"><small>Other styles</small>' + st.options.map((op, i) => `<button type="button" class="csb-style" data-c="opt" data-i="${i}">${esc(op.label || 'Option ' + (i + 1))}</button>`).join('') + '</div>' : '')
+        + '</div>'
+        + (linked().some((x) => picked().includes(x.id) && x.platform === 'youtube')
+          ? `<label class="csb-yt">${platMark('youtube', 'md')}<span><small>YouTube title</small><input class="csb-yt-in" data-c="title" maxlength="100" value="${escAttr(st.title)}" placeholder="What is this clip about?"></span>${mi('pen')}</label>` : '');
     }
 
     /*
@@ -886,21 +994,100 @@
       return html;
     }
 
+    function whenSummary() {
+      if (many()) { const t = planTimes(st.files.length, st.spacing); return { main: `From ${shortWhenLabel(t[0])}`, sub: `${st.files.length} posts, spread out` }; }
+      if (st.quick === 'now') return { main: 'Right now', sub: 'As soon as you tap' };
+      const w = chosenWhen();
+      const day = dayName(w);
+      return { main: `${day === 'Today' ? 'Today' : day === 'Tomorrow' ? 'Tmrw' : new Date(w).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })} ${compactTime(w)}`, sub: (st.quick === 'best' ? '✦ Best time · ' : '') + fromNow(w) };
+    }
+    function shortWhenLabel(d) { const day = dayName(d); return (/^(Today|Tomorrow)$/.test(day) ? day : new Date(d).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })) + ' ' + timeOf(d); }
+
     function draw() {
-      panel.setTitle(edit ? 'Edit post' : many() ? `Schedule ${st.files.length} posts` : 'New post');
-      panel.body.innerHTML = '<div class="cs-form">'
-        + `<section class="cs-sec"><h4>${many() ? 'Videos' : 'Video or picture'}</h4>${mediaBlock()}</section>`
-        + (st.files.length ? `<section class="cs-sec">${textBlock()}</section>` : '')
-        + (musicBlock() ? `<section class="cs-sec"><h4>Music</h4>${musicBlock()}</section>` : '')
-        + `<section class="cs-sec"><h4>Post to</h4>${accountsBlock()}</section>`
-        + `<section class="cs-sec"><h4>When</h4>${whenBlock()}</section>`
+      panel.setTitle(edit ? 'Edit post' : many() ? `${st.files.length} posts` : 'New post');
+      panel.el.classList.add('csb-sheet');
+      const mus = musicBlock();
+      const musName = !st.music ? 'None' : st.music.free === 'auto' ? 'A worship song, picked for you' : st.music.lib ? 'Your song' : 'A free song';
+      panel.body.innerHTML = '<div class="csb-form">'
+        + mediaBlock()
+        + (st.files.length ? textBlock() : '')
+        + `<section class="csb-sec">${accountsBlock()}</section>`
+        + (mus ? `<details class="csb-more"${st.music ? ' open' : ''}><summary>${mi('music')}<span>Music</span><small>${esc(musName)}</small>${mi('chev-right')}</summary><div class="csb-more-in">${mus}</div></details>` : '')
+        + `<section class="csb-sec" id="csbWhen"><div class="csb-h3"><b>When</b></div>${whenBlock()}</section>`
         + '</div>';
+      const n = picked().length * Math.max(1, st.files.length);
       const ready = st.files.length && picked().length;
-      const label = edit ? 'Save changes' : many() ? `Schedule ${st.files.length} posts` : st.quick === 'now' ? 'Post now' : 'Schedule post';
-      panel.foot.innerHTML = `<button type="button" class="cs-btn primary wide" data-c="go"${ready ? '' : ' disabled'}>${mi(st.quick === 'now' && !many() ? 'send' : 'calendar')}${label}</button>`
-        + (ready ? '' : `<p class="cs-hint">${!st.files.length ? 'Choose a video first.' : 'Choose at least one account to post to.'}</p>`);
+      const busy = !many() && st.ai && st.ai.stage && st.ai.stage !== 'done' && st.ai.stage !== 'fail';
+      const label = edit ? 'Save changes' : st.quick === 'now' && !many() ? `Post ${n > 1 ? n + ' now' : 'now'}` : `Schedule ${n > 1 ? n + ' posts' : 'post'}`;
+      const ws = whenSummary();
+      panel.foot.innerHTML = '<div class="csb-bar">'
+        + `<button type="button" class="csb-when" data-c="whenjump">${mi('clock')}<span><b>${esc(ws.main)}</b><small>${esc(ws.sub)}</small></span></button>`
+        + `<button type="button" class="csb-go" data-c="go"${ready ? '' : ' disabled'}>${label}</button></div>`
+        + (ready ? (busy ? '<p class="cs-hint">You can tap it now — it waits for the caption to be written.</p>' : '')
+          : `<p class="cs-hint">${!st.files.length ? 'Choose a video or a flyer first.' : 'Choose at least one account to post to.'}</p>`);
       paintThumbs(panel.body);
     }
+
+    /*
+     * ►► THE CAPTION WRITES ITSELF. ◄◄ The moment a video or a flyer is
+     * chosen, the AI listens to it (or reads it) and writes the caption, the
+     * hashtags and a YouTube title — nobody has to ask. A caption already
+     * typed is never written over, and choosing another file drops a late
+     * answer for the old one.
+     */
+    function autoWrite(force) {
+      if (edit || many() || !st.files.length) return null;
+      const f = st.files[0];
+      if (!force && (st.caption.trim() || st.autoFor === f)) return null;
+      st.aiRun = writeFor(f);
+      return st.aiRun;
+    }
+    async function writeFor(f) {
+      st.autoFor = f; st.prev = null; st.options = null;
+      const video = isVideo(f);
+      st.ai = { stage: video ? 'listen' : 'read', pct: 0, from: video ? 'video' : 'picture' };
+      draw();
+      // "listening" becomes "writing" once the words are in (the writer itself reports nothing)
+      const jobId = 'copy_' + Date.now();
+      const off = window.api.onJobProgress ? window.api.onJobProgress((d) => {
+        if (!d || d.jobId !== jobId || !st.ai || st.autoFor !== f || st.ai.stage !== 'listen') return;
+        st.ai.pct = Math.min(99, Math.round(d.percent || 0));
+        if (st.ai.pct >= 99) st.ai.stage = 'write';
+        const el = panel.body.querySelector('.csb-ai-st'); if (el) el.outerHTML = aiStatus();
+      }) : null;
+      const toWrite = setTimeout(() => { if (st.ai && st.autoFor === f && st.ai.stage === 'read') { st.ai.stage = 'write'; const el = panel.body.querySelector('.csb-ai-st'); if (el) el.outerHTML = aiStatus(); } }, video ? 600000 : 7000);
+      let out = null, err = null;
+      try { out = await window.api.social.suggestCopy({ mediaPath: f, kind: video ? 'video' : 'image', listen: true, jobId }); }
+      catch (e) { err = e; }
+      clearTimeout(toWrite); if (off) off();
+      if (!panel.el.isConnected || st.autoFor !== f) return;
+      if (out) {
+        // what was typed while it was writing wins
+        if (!st.caption.trim()) st.caption = out.caption || '';
+        if (out.title && (!st.title || st.title === titleFromFile(f))) st.title = out.title;
+        st.options = (out.options && out.options.length > 1) ? out.options : null;
+        st.ai = { stage: 'done', from: out.flyer ? 'flyer' : video ? 'video' : 'picture', flyer: out.flyer || null,
+          note: out.wroteBy === 'rules' ? 'Written without the AI writer' + (out.writerWhy ? ` (${out.writerWhy})` : '') + ' — edit it freely.' : '' };
+      } else {
+        st.ai = { stage: 'fail', from: video ? 'video' : 'picture', note: 'The AI could not write it this time' + (err && err.message ? ` (${err.message})` : '') + ' — type it, or tap Write it for me.' };
+      }
+      draw();
+    }
+    async function writeAll() {
+      for (let i = 0; i < st.files.length; i++) {
+        if (!panel.el.isConnected || !many()) return;
+        st.writing = `Writing ${i + 1} of ${st.files.length}…`;
+        draw();
+        try {
+          const f = st.files[i];
+          const out = await window.api.social.suggestCopy({ mediaPath: f, kind: isVideo(f) ? 'video' : 'image', listen: true, quick: true, jobId: 'copy_' + Date.now() });
+          if (out) st.batchCaps[f] = { title: out.title, caption: out.caption };
+        } catch (er) { /* that one keeps the shared caption */ }
+      }
+      st.writing = false;
+      draw();
+    }
+    const afterPick = () => { if (many()) { if (!Object.keys(st.batchCaps).length && !st.writing) writeAll(); } else autoWrite(); };
 
     async function pickExports() {
       await loadExports();
@@ -928,6 +1115,7 @@
         if (!many() && !st.title) st.title = titleFromFile(st.files[0]);
         sub.close();
         draw();
+        afterPick();
       });
       drawPick();
     }
@@ -938,6 +1126,7 @@
       st.files = edit ? add.slice(0, 1) : (st.files.length ? Array.from(new Set(st.files.concat(add))) : add);
       if (!many() && !st.title) st.title = titleFromFile(st.files[0]);
       draw();
+      afterPick();
     }
 
     async function writeOne(file) {
@@ -951,6 +1140,10 @@
       if (t.dataset.c === 'caption') {
         st.caption = t.value;
         const n = panel.body.querySelector('.cs-count'); if (n) n.textContent = `${t.value.length}/2200`;
+        // the preview follows the typing
+        const lines = t.value.split('\n').map((l) => l.trim()).filter(Boolean);
+        const cap = panel.body.querySelector('#csbPrevCap'); if (cap) cap.textContent = lines.filter((l) => !/^#/.test(l)).join(' ') || ' ';
+        const tg = panel.body.querySelector('#csbPrevTags'); if (tg) tg.textContent = lines.filter((l) => /^#/.test(l)).join(' ');
       }
     });
     panel.body.addEventListener('change', (e) => {
@@ -963,7 +1156,9 @@
       if (c === 'exports') return pickExports();
       if (c === 'change') {
         if (many()) return pickExports();
-        st.files = []; return draw();          // one file: offer both places again
+        st.files = []; st.ai = null; st.autoFor = ''; st.options = null; st.prev = null;
+        if (!edit && st.caption && st.ai === null) { /* a typed caption is kept for the next file */ }
+        return draw();          // one file: offer both places again
       }
       if (c === 'device') return pickDevice();
       if (c === 'drop') { st.files.splice(+b.dataset.i, 1); return draw(); }
@@ -993,35 +1188,29 @@
         if (op) { st.title = op.title || st.title; st.caption = op.caption || st.caption; draw(); }
         return;
       }
-      if (c === 'write') {
-        st.writing = 'Listening to the clip…';
+      if (c === 'write') return autoWrite(true);
+      if (c === 'write-all') { st.batchCaps = {}; return writeAll(); }
+      if (c === 'whenjump') { const w = panel.body.querySelector('#csbWhen'); if (w) w.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+      if (c === 'undo') { if (st.prev) { st.caption = st.prev.caption; st.title = st.prev.title; st.prev = null; } return draw(); }
+      if (c === 'rev') {
+        if (st.revising || !st.caption.trim()) return;
+        const action = b.dataset.a;
+        st.revising = action;
+        const before = { caption: st.caption, title: st.title };
         draw();
         try {
-          const out = await writeOne(st.files[0]);
-          st.options = (out && out.options) || null;
-          st.title = (out && out.title) || st.title;
-          st.caption = (out && out.caption) || st.caption;
-          C.island({ kind: 'good', title: 'Caption written', sub: out && out.wroteBy === 'rules' ? 'From the clip’s words — tap another style to swap' : 'Tap a style below to try another', ms: 3500 });
-        } catch (er) { C.island({ kind: 'error', title: 'Could not write it', sub: er.message }); }
-        st.writing = false;
-        return draw();
-      }
-      if (c === 'write-all') {
-        for (let i = 0; i < st.files.length; i++) {
-          if (!panel.el.isConnected) return;
-          st.writing = `Writing ${i + 1} of ${st.files.length}…`;
-          draw();
-          try {
-            const out = await writeOne(st.files[i]);
-            if (out) st.batchCaps[st.files[i]] = { title: out.title, caption: out.caption };
-          } catch (er) { /* that one keeps the shared caption */ }
-        }
-        st.writing = false;
+          const r = await window.api.social.reviseCopy({ caption: st.caption, title: st.title, action });
+          if (r && r.source === 'ai' && r.caption) { st.prev = before; st.caption = r.caption; if (r.title) st.title = r.title; }
+          else C.island({ kind: 'warn', title: 'The caption was not changed', sub: (r && r.why) || '', ms: 4500 });
+        } catch (er) { C.island({ kind: 'error', title: 'Could not change it', sub: er.message }); }
+        st.revising = '';
         return draw();
       }
       if (c === 'go') return submit(b);
     });
     panel.foot.addEventListener('click', (e) => {
+      const j = e.target.closest('[data-c="whenjump"]');
+      if (j) { const w = panel.body.querySelector('#csbWhen'); if (w) w.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
       const b = e.target.closest('[data-c="go"]');
       if (b && !b.disabled) submit(b);
     });
@@ -1050,6 +1239,13 @@
 
     async function submit(btn) {
       btn.disabled = true;
+      // tapped while the AI was still writing: the post waits for its caption
+      if (!many() && st.aiRun && st.ai && st.ai.stage !== 'done' && st.ai.stage !== 'fail') {
+        btn.textContent = 'Finishing the caption…';
+        try { await st.aiRun; } catch (er) {}
+        btn = panel.foot.querySelector('[data-c="go"]') || btn;
+        btn.disabled = true;
+      }
       const accs = linked().filter((a) => picked().includes(a.id));
       const platforms = Array.from(new Set(accs.map((a) => a.platform)));
       try {
@@ -1107,6 +1303,7 @@
     if (st.files.length === 1 && !st.title) st.title = titleFromFile(st.files[0]);
     draw();
     ensure();
+    if (st.files.length) afterPick();
     return panel;
   }
 

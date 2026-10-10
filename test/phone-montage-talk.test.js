@@ -270,9 +270,10 @@ async function waitUp() {
     const sched = await page.evaluate(async (vid) => {
       window.MWSocial.compose({ files: [vid] });
       await new Promise((r) => setTimeout(r, 1200));
-      const sec = [...document.querySelectorAll('#csCompose .cs-sec h4')].find((h) => /Music/.test(h.textContent));
+      // (the Scheduler's design B: Music is a fold-out row)
+      const sec = [...document.querySelectorAll('#csCompose .csb-more summary, #csCompose .cs-sec h4')].find((h) => /Music/.test(h.textContent));
       return { music: !!sec, worship: !!document.querySelector('#csCompose [data-c="mus"][data-v="auto"]'),
-        moods: document.querySelectorAll('#csCompose [data-c="musmood"]').length, hint: (document.querySelector('#csCompose .cs-sec .cs-hint') || {}).textContent || '' };
+        moods: document.querySelectorAll('#csCompose [data-c="musmood"]').length, hint: (document.querySelector('#csCompose .csb-more .cs-hint, #csCompose .cs-sec .cs-hint') || {}).textContent || '' };
     }, VID);
     check(sched.music && sched.worship && sched.moods === 4, 'a new post offers Music: a worship song picked for you, or free songs by mood', sched);
     if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'schedule-music.png') });

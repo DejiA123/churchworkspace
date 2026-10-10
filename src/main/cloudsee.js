@@ -310,4 +310,63 @@ async function ask({ image, frames, columns = 8, maxWaitMs = 45000, people = fal
   return fail(lastWhy || 'no AI model would answer');
 }
 
-module.exports = { VISION, whoIsSpeaking, whereArePeople, state, ready, SYSTEM, _health: () => health, _blocked: () => blocked };
+/*
+ * ►► READ A FLYER. ◄◄ A picture posted to social media is usually a flyer:
+ * its words (the event, the day, the time, the place, who is speaking) are
+ * the only facts a caption can be written from — a file name is not one. The
+ * same vision models and key as above read it, word for word, and pick the
+ * facts out. Nothing is guessed: what is not printed comes back empty.
+ */
+const FLYER_SYSTEM = 'You read church flyers and posters for a social media team. Read EVERY word printed on the picture, exactly as printed. '
+  + 'Reply with JSON only: {"text": every word on it in reading order, "event": the event or headline, "date": the date as printed, '
+  + '"time": the time as printed, "place": the venue or address, "people": [names of speakers or guests as printed], '
+  + '"theme": the theme or scripture if printed, "contact": phone/website/handle if printed, "isFlyer": true if it is a flyer or poster, false for an ordinary photo, '
+  + '"describe": one short sentence on what the picture shows}. Use "" (or []) for anything not printed. Never guess or invent.';
+async function readFlyer({ image, maxWaitMs = 30000 } = {}) {
+  const a = cloudwrite.access();
+  if (!a.key) return { ok: false, why: 'no AI key yet' };
+  if (!a.url) return { ok: false, why: 'no address for that AI service' };
+  if (!image || !/^data:image\//.test(image)) return { ok: false, why: 'nothing to look at' };
+  const list = ladder(a, await discover(a));
+  if (!list.length) return { ok: false, why: `${a.providerName} has no model here that can look at pictures` };
+  let lastWhy = '', waited = 0;
+  for (let k = 0; k < list.length; k++) {
+    const model = list[k];
+    const body = Object.assign({
+      model, temperature: 0, max_tokens: 900, response_format: { type: 'json_object' },
+      messages: [{ role: 'system', content: FLYER_SYSTEM },
+        { role: 'user', content: [{ type: 'text', text: 'Read this picture.' }, { type: 'image_url', image_url: { url: image } }] }],
+    }, tuneFor(model));
+    let res, errText = '';
+    try {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), ASK_TIMEOUT_MS);
+      try { res = await fetch(a.url, { method: 'POST', headers: a.headers, body: JSON.stringify(body), signal: ac.signal }); }
+      finally { clearTimeout(timer); }
+    } catch (e) { lastWhy = 'could not reach the AI'; continue; }
+    if (res.ok) {
+      let j = null; try { j = await res.json(); } catch (e) {}
+      const r = parseJson(cloudwrite.textFrom(j));
+      if (!r || typeof r !== 'object') { lastWhy = model + ' did not answer in JSON'; continue; }
+      const str = (v, n) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, n);
+      return { ok: true, model,
+        text: str(r.text, 1500), event: str(r.event, 120), date: str(r.date, 60), time: str(r.time, 40), place: str(r.place, 120),
+        people: (Array.isArray(r.people) ? r.people : []).map((x) => str(x, 60)).filter(Boolean).slice(0, 6),
+        theme: str(r.theme, 120), contact: str(r.contact, 120), isFlyer: r.isFlyer !== false, describe: str(r.describe, 200) };
+    }
+    try { errText = (await res.text()).slice(0, 400); } catch (e) {}
+    if (res.status === 401 || res.status === 403) return { ok: false, why: 'the AI key was refused' };
+    if (res.status === 429 || res.status === 503) {
+      const wait = cloudwrite.waitMs(res.headers.get('retry-after')) || 8000;
+      if (waited + wait <= maxWaitMs) { waited += wait; await sleep(wait); k--; continue; }
+      lastWhy = 'the free AI allowance is used up for the moment'; continue;
+    }
+    if ((res.status === 400 || res.status === 404) && (GONE.test(errText) || CANT_SEE.test(errText))) {
+      blocked.set(model, Date.now() + 6 * 3600e3); lastWhy = model + ' cannot look at pictures'; continue;
+    }
+    lastWhy = `the AI answered ${res.status}`;
+  }
+  return { ok: false, why: lastWhy || 'no AI model would answer' };
+}
+
+module.exports = { VISION, whoIsSpeaking, whereArePeople, readFlyer, state, ready, SYSTEM, _health: () => health, _blocked: () => blocked };

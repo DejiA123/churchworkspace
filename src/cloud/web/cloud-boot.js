@@ -627,6 +627,7 @@ let _hideTimer = null;
     },
     social: {
       suggestCopy: (a) => call('social:suggestCopy', a),
+      reviseCopy: (a) => call('social:reviseCopy', a),
       withMusic: (a) => call('social:withMusic', a),
       accounts: () => call('social:accounts'),
       setKeys: (keys) => call('social:setKeys', keys),
