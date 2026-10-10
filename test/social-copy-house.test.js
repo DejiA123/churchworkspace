@@ -54,9 +54,9 @@ const EM_DASH = /[—–]/;
 
   console.log('\n[3] Hashtags');
   const tags = out.options.map((o) => (o.caption.match(/#[A-Za-z0-9]+/g) || []));
-  check('every option ends in a line of them', tags.every((t) => t.length >= 6), tags.map((t) => t.length).join(', '));
+  check('every option ends in a line of them — five at most (what Instagram and Threads take)', tags.every((t) => t.length >= 3 && t.length <= 5), tags.map((t) => t.length).join(', '));
   check('the speaker is the first one', tags.every((t) => t[0] === '#BishopFrancisWaleOke'), tags[0][0]);
-  check('the event is there too', tags.every((t) => t.includes('#AllIrelandOutpouring')));
+  check('(the speaker\'s tag stands for the post; the event\'s is used when no speaker is named)', tags.every((t) => !t.includes('#AllIrelandOutpouring')));
   check('they are about what was actually said',
     tags[0].some((t) => /Revival|Awakening|Youth|Outpouring/i.test(t)), tags[0].join(' '));
   check('never more than nine', tags.every((t) => t.length <= 9), tags.map((t) => t.length).join(', '));

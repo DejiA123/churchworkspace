@@ -180,8 +180,8 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
     log(/Faith over fear/.test(told) && /Bishop David Richman/.test(told) && /narrator/.test(told) && /Join us Sundays/.test(told), 'the AI is told the message to keep to, the names to spell, and the call to action (for the narrator too)', told);
     const outA = path.join(WORK, 'about.mp4');
     const rA = await montage.make(ctx, video.getInfo, { mediaPaths: [v1, v2], style: 'worship', lengthSec: 8, aspect: '9:16', keepAudio: true, output: outA, onProgress: () => {}, about });
-    log(/Join us Sundays at 10am$/.test(rA.postCaption) && /Bishop David Richman/.test(rA.postCaption) && rA.hashtags.includes('ThePowerHouse'),
-      'the post caption names the speaker and church and ends with the call to action, with the church as a hashtag', JSON.stringify({ c: rA.postCaption, h: rA.hashtags }));
+    log(/Join us Sundays at 10am$/.test(rA.postCaption) && /Bishop David Richman/.test(rA.postCaption) && rA.hashtags[0] === 'BishopDavidRichman' && rA.hashtags.length <= 5,
+      'the post caption names the speaker and church and ends with the call to action; the speaker\'s own hashtag leads five at most', JSON.stringify({ c: rA.postCaption, h: rA.hashtags }));
     log(rA.texts.some((t) => /Faith over fear/i.test(t.text)), 'with no AI, the message is the hook on screen', JSON.stringify(rA.texts));
     const pjA = montage.loadProject(outA);
     log(pjA && /Join us Sundays at 10am/.test(pjA.postCaption), 'and the saved edit keeps that caption for a remake');

@@ -38,8 +38,8 @@ check(sc.realChurch('Our Church') === '' && sc.realChurch('The Power House') ===
   const POP = new Set(sc.POPULAR_CORE.concat(['#healing', '#miracles', '#breakthrough', '#prayer', '#pray', '#prayerworks', '#christiantiktok', '#christianreels', '#christianinspiration']));
   const used = tagsOut.options.flatMap((o) => o.caption.match(/#\w+/g) || []);
   check(!used.some((t) => /DivineElevation|KingdomGrowth|SpiritualGrowthJourney|fyp/i.test(t)), 'made-up tags the AI wrote are taken off', used);
-  check(used.length >= 7 * 3 && used.every((t) => POP.has(t)), 'every tag is a popular one (followed by millions)', used.filter((t) => !POP.has(t)));
-  check(/#healing/.test(tagsOut.caption) && /#prayer/.test(tagsOut.caption) && /#jesus/.test(tagsOut.caption), 'led by the popular ones about the subject, then the big ones', tagsOut.caption.split('\n').pop());
+  check(used.length === 5 * 3 && used.every((t) => POP.has(t)), 'five on each, every one a popular one (followed by millions)', used.filter((t) => !POP.has(t)));
+  check(/#healing #prayer #jesus #faith #god$/.test(tagsOut.caption), 'led by the popular ones about the subject, then the big ones', tagsOut.caption.split('\n').pop());
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

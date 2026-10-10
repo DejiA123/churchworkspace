@@ -459,6 +459,8 @@ function aboutLines(opts) {
 /** The caption and hashtags always carry the call to action, the speaker and the church, however the edit was directed. */
 function withAbout(plan, about) {
   const a = about || {};
+  // five popular hashtags at most, never the AI's own (social-copy: what the platforms take)
+  plan.hashtags = popularTagsFor(plan, a);
   if (!a.cta && !a.speaker && !a.church) return plan;
   // whole words only: "Ade" is not named by "made"
   const esc = (x) => String(x).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -474,12 +476,14 @@ function withAbout(plan, about) {
   if (a.speaker && !named(cap, a.speaker)) cap = [cap, `🎤 ${a.speaker}${a.church && !named(cap, a.church) ? ' · ' + a.church : ''}`].filter(Boolean).join('\n\n');
   else if (a.church && !named(cap, a.church)) cap = [cap, `⛪ ${a.church}`].filter(Boolean).join('\n\n');
   if (a.cta && (ctaAt || !named(cap, a.cta))) cap = [cap, a.cta].filter(Boolean).join('\n\n');
-  const tags = (plan.hashtags || []).slice();
-  for (const name of [a.church, a.speaker]) {
-    const t = String(name || '').replace(/[^\p{L}\p{N}]+/gu, '');
-    if (t.length >= 3 && t.length <= 30 && !tags.some((x) => x.toLowerCase() === t.toLowerCase())) tags.unshift(t);
-  }
-  return Object.assign(plan, { postCaption: cap.slice(0, 900), hashtags: tags.slice(0, 12) });
+  return Object.assign(plan, { postCaption: cap.slice(0, 900) });
+}
+/* The montage's hashtags (without the #): the speaker's or church's own one, two popular ones about it, then the biggest. */
+function popularTagsFor(plan, a) {
+  const sc = require('./social-copy');
+  const text = [plan.title, plan.concept, plan.postCaption, (plan.hashtags || []).join(' ')].filter(Boolean).join(' ');
+  const line = sc.withPopularTags('', sc.STYLES[1], { speaker: a.speaker || '', eventName: a.speaker ? '' : (a.church || ''), text });
+  return (line.match(/#[\p{L}\p{N}_]+/gu) || []).map((t) => t.slice(1)).slice(0, 5);
 }
 const words = (t) => String(t).split(' ').filter(Boolean);
 const tidy = (t) => String(t).replace(/^[\s,;:.!?\-–—"'“”]+|[\s,;:\-–—"'“”]+$/g, '').trim();

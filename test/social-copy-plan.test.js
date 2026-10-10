@@ -29,7 +29,7 @@ check('a nameless file still yields something', copy.hookFromFilename('C:/x/IMG_
 const r = copy.ruleCopy({ mediaPath: REAL, churchName: 'The Power House International' });
 check('a title is produced with no model at all', r.title.length > 8 && r.title.length <= 100, JSON.stringify(r.title));
 check('the caption is built around the hook', /Sister Marela/i.test(r.caption));
-check('the caption carries hashtags', (r.caption.match(/#\w+/g) || []).length >= 6,
+check('the caption carries hashtags (five at most)', (r.caption.match(/#\w+/g) || []).length >= 3 && (r.caption.match(/#\w+/g) || []).length <= 5,
   (r.caption.match(/#\w+/g) || []).length + ' tags');
 check('the church name is included when known', /Power House/.test(r.caption));
 check('the caption fits Instagram\'s limit', r.caption.length <= 2200, r.caption.length + ' chars');

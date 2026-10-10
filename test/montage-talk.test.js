@@ -305,7 +305,7 @@ const SCRIPT = {
     const words = say(['God is not finished with you yet my friend.', 'Your story is still being written by his hand.', 'Do not quit in the middle of your miracle.'], 0.5);
     const brief = 'youth service sunday at the hall';
     const r0 = await montage.make(ctx, video.getInfo, { mediaPaths: [V], style: 'hype', lengthSec: 10, aspect: '9:16', output: path.join(WORK, 'post0.mp4'), mode: 'talk', hear: async () => words, brief });
-    ok(/[“"].+[”"]/.test(r0.postCaption) && !r0.postCaption.toLowerCase().includes(brief) && /comments|share/i.test(r0.postCaption) && r0.hashtags.length >= 6,
+    ok(/[“"].+[”"]/.test(r0.postCaption) && !r0.postCaption.toLowerCase().includes(brief) && /comments|share/i.test(r0.postCaption) && r0.hashtags.length >= 3 && r0.hashtags.length <= 5,
       'with no AI: the caption leads with a line actually said, asks people to comment or share, and has hashtags — the notes are not pasted in', { c: r0.postCaption, h: r0.hashtags });
     // with the caption writer: its words, from what was said
     const cw = require(path.join(ROOT, 'src/main/cloudwrite'));
@@ -319,7 +319,8 @@ const SCRIPT = {
     let r1;
     try { r1 = await montage.make(ctx, video.getInfo, { mediaPaths: [V], style: 'hype', lengthSec: 10, aspect: '9:16', output: path.join(WORK, 'post1.mp4'), mode: 'talk', hear: async () => words, brief }); }
     finally { cw.access = realAccess; cw.chat = realChat; }
-    ok(/still being written/.test(r1.postCaption) && r1.hashtags.includes('faith') && r1.hashtags.includes('neverquit'), 'with the AI: a real social caption and hashtags, written for this video', { c: r1.postCaption, h: r1.hashtags });
+    ok(/still being written/.test(r1.postCaption) && r1.hashtags.includes('faith') && !r1.hashtags.includes('neverquit') && r1.hashtags.length <= 5,
+      'with the AI: a real social caption, and five popular hashtags at most (not the AI\'s own)', { c: r1.postCaption, h: r1.hashtags });
     ok(/God is not finished with you/.test(asked) && /background only/.test(asked), 'the writer is given the words actually said; the notes only as background', asked.slice(0, 200));
   }
 

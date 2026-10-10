@@ -466,30 +466,30 @@ const PLATFORM_TAGS = {
 
 function topicTagsFor(text, want) {
   const out = [];
-  for (const [rx, tags] of TOPIC_TAGS) {
-    // two at most from one subject, so a post about healing AND prayer gets both
-    if (rx.test(text)) for (const t of tags.slice(0, 2)) if (!out.includes(t)) out.push(t);
-    if (out.length >= want) break;
-  }
+  // the top tag of each subject first, so a post about healing AND prayer gets both; then seconds
+  const hit = TOPIC_TAGS.filter(([rx]) => rx.test(text)).map(([, tags]) => tags);
+  for (const round of [0, 1]) for (const tags of hit) { const t = tags[round]; if (t && !out.includes(t)) out.push(t); }
   return out.slice(0, want);
 }
 
 /*
  * The hashtag line: the speaker's own tag when one was named, up to four
  * popular ones about the subject, the platform's big community tag, then the
- * evergreen core — nine at most, every one of them followed by millions.
+ * evergreen core — five at most, every one of them followed by millions.
  */
 function tagLine(style, { speaker, eventName, text }) {
+  // FIVE AT MOST: Instagram (since Dec 2025) and Threads take no more, and more reads as spam elsewhere
+  const MAX = MAX_TAGS;
   const tags = [];
-  const add = (t) => { const k = t.toLowerCase(); if (!BANNED_TAGS.test(t) && !tags.some((x) => x.toLowerCase() === k)) tags.push(t); };
-  // the speaker's and the event's own tags (set in Settings) label the post; the rest are popular ones
-  const st = tagOf(speaker); if (st) add(st);
-  const et = tagOf(eventName); if (et) add(et);
-  for (const t of topicTagsFor(text || '', 4)) add(t);
-  for (const t of (PLATFORM_TAGS[style && style.id] || ['#christiantiktok'])) add(t);
-  for (const t of POPULAR_CORE) { if (tags.length >= 9) break; add(t); }
-  return tags.slice(0, 9).join(' ');
+  const add = (t) => { const k = t.toLowerCase(); if (tags.length < MAX && !BANNED_TAGS.test(t) && !tags.some((x) => x.toLowerCase() === k)) tags.push(t); };
+  // the speaker's or event's own tag (set in Settings) labels the post — one of them, not both
+  const own = tagOf(speaker) || tagOf(eventName); if (own) add(own);
+  // then two popular ones about the subject, then the biggest evergreen ones
+  for (const t of topicTagsFor(text || '', 2)) add(t);
+  for (const t of POPULAR_CORE) add(t);
+  return tags.join(' ');
 }
+const MAX_TAGS = 5;
 /* A caption with its own hashtags taken off (the last hashtag-only lines, and any trailing on the last line). */
 function withoutTags(caption) {
   const lines = String(caption || '').replace(/\s+$/, '').split('\n');
