@@ -3829,7 +3829,7 @@
         start: from, end: from + len, tlStart: at,
         label: `${image ? 'Photo' : 'Clip'} ${++n}`,
         color: image ? '#0aa2c0' : '#a371f7',
-        mute: true, fade: 0.25, montage: true,
+        mute: true, fade: o.cover ? 0 : 0.25, montage: true,
       };
       if (o.style === 'pip') {
         // the montage's box: up to half the width (a third on a wide frame) and a

@@ -1963,7 +1963,7 @@
     ME.path = path; ME.project = project; ME.sel = null; ME.selShot = -1; ME.dirty = false; ME.busy = false;
     if (music !== undefined) ME.music = music;
     ME.shots = project.shots.map((sh, key) => ({ key, transition: sh.transition, overlays: sh.overlays.map((o) => ({ cid: o.cid, style: o.style })) }));
-    ME.panel = C.openPanel({ id: 'cloudMontageEdit', title: 'Edit the montage', cls: 'cp-montage' });
+    ME.panel = C.openPanel({ id: 'cloudMontageEdit', title: 'Edit the montage', cls: 'cp-montage', onClose: () => meStopPreview() });
     if (!ME.panel._wired) { ME.panel._wired = true; meWire(ME.panel); }
     mePaint();
   }
@@ -1979,6 +1979,7 @@
 
   function mePaint() {
     const p = ME.panel; if (!p) return;
+    meStopPreview();
     const esc = C.esc, attr = C.escAttr;
     const thumb = (c) => (c && c.thumb ? `<img src="${attr(c.thumb)}" alt="" draggable="false" />` : '<span class="me-nothumb"></span>');
     let t = 0;
@@ -1999,7 +2000,7 @@
       return `<div class="me-shot${ME.selShot === i ? ' sel' : ''}" data-me-shot="${i}">
           <div class="me-row">
             <span class="me-n">${i + 1}</span>
-            <span class="me-th">${thumb(c)}</span>
+            <span class="me-th" data-me-play="${i}" role="button" aria-label="Play this shot">${thumb(c)}<i class="me-playbadge" aria-hidden="true"></i></span>
             <span class="me-info"><b>${vid ? 'Clip' : 'Photo'} · ${esc(fmtS(b.seconds))}</b><small>${esc((c.name || '').slice(0, 28))}</small><small>starts ${esc(fmtS(at))}${i ? ' · ' + esc(sh.transition) + ' in' : ''}</small></span>
             <span class="me-btns">
               <button type="button" data-me-move="-1" aria-label="Earlier"${i === 0 ? ' disabled' : ''}>▲</button>
@@ -2012,7 +2013,7 @@
     }).join('');
     const unused = meUnused();
     p.body.innerHTML = `
-      <p class="mt-lead">${mi('sparkles')} Your montage, shot by shot.</p>
+      <p class="mt-lead">${mi('sparkles')} Your montage, shot by shot — tap a picture to play that shot.</p>
       <p class="mt-hint me-lead">Move clips with ▲ ▼, take one out with ✕. Tap a photo on a clip to move it to another clip, make it full screen or a box, or take it off. Then <b>Remake</b> — only the shots you changed are made again.</p>
       <div class="me-list">${rows}</div>
       ${unused.length ? `<section class="mt-sec"><h3>Photos not in it <small>${ME.selShot >= 0 ? 'tap one to put it on clip ' + (ME.selShot + 1) : 'tap a clip first, then a photo'}</small></h3>
@@ -2029,9 +2030,47 @@
     return -1;
   }
 
+  /*
+   * ▶ THE SHOT ITSELF, NOT A STILL OF IT. A tap on a shot's picture plays that
+   * shot right there — from the finished montage, so it is seen exactly as it
+   * is (cut round the speaker, its zooms, its photos and words) — and stops at
+   * its end; a second tap stops it. One at a time.
+   */
+  function meStopPreview() {
+    const pv = ME.preview; ME.preview = null;
+    if (!pv) return;
+    try { pv.v.pause(); pv.v.removeAttribute('src'); pv.v.load(); } catch (e) {}
+    if (pv.v.parentNode) pv.v.parentNode.removeChild(pv.v);
+    if (pv.slot) pv.slot.classList.remove('playing');
+  }
+  function mePlayShot(i, slot) {
+    const same = ME.preview && ME.preview.i === i;
+    meStopPreview();
+    if (same || !ME.path) return;
+    const sh = ME.shots[i]; if (!sh) return;
+    // where this shot is in the montage as it was made (the order may have been changed since)
+    let start = 0;
+    for (let k = 0; k < sh.key; k++) start += Number(ME.project.shots[k].seconds) || 0;
+    const end = start + (Number(ME.project.shots[sh.key].seconds) || 0);
+    const v = document.createElement('video');
+    v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'auto';
+    v.src = C.fileUrl(ME.path) + `#t=${start.toFixed(2)},${end.toFixed(2)}`;
+    slot.appendChild(v);
+    slot.classList.add('playing');
+    ME.preview = { i, v, slot };
+    const seekIn = () => { try { if (Math.abs(v.currentTime - start) > 0.3) v.currentTime = start; } catch (e) {} };
+    v.addEventListener('loadedmetadata', seekIn);
+    v.addEventListener('timeupdate', () => { if (v.currentTime >= end - 0.04) meStopPreview(); });
+    v.addEventListener('ended', meStopPreview);
+    v.addEventListener('error', () => { meStopPreview(); C.island({ kind: 'warn', title: 'That shot would not play', sub: 'Try again in a moment.', ms: 3000 }); });
+    v.play().catch(() => {});
+  }
+
   function meWire(p) {
     p.body.addEventListener('click', (e) => {
       if (ME.busy) return;
+      const play = e.target.closest('[data-me-play]');
+      if (play) { e.stopPropagation(); return mePlayShot(+play.dataset.mePlay, play); }
       const shotEl = e.target.closest('[data-me-shot]');
       const i = shotEl ? +shotEl.dataset.meShot : -1;
       const mv = e.target.closest('[data-me-move]');

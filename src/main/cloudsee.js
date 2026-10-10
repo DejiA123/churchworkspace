@@ -160,8 +160,9 @@ const peopleSystemFor = (n) => [
   'For each frame give two answers:',
   'people: how many real people can clearly be seen in the frame, up to 9. A frame with no person in it is 0: an empty stage or room, a screen, slides, song lyrics, a title graphic or designed text (an intro, a sermon title, a countdown, a lower third on its own), an animated or patterned background, a logo, lights, a building, or a black or blurred frame. A congregation or crowd counts as people.',
   "column: the column of the HEAD of the person the crop should keep: the one speaking or leading if you can tell (a microphone at the mouth, at the pulpit, addressing the room), otherwise the most prominent person (the closest, largest or most in focus). When people is 0, column is 0.",
+  'left and right: the first and the last column that SAME person\'s head and shoulders reach into (left <= column <= right). Be exact: the crop must keep all of them in view.',
   'Faces on posters, screens, backdrops or photos on the wall are NOT people.',
-  `Reply with JSON only: {"frames":[{"frame":"A","people":<0..9>,"column":<0..${n}>,"sure":<true|false>}]}`,
+  `Reply with JSON only: {"frames":[{"frame":"A","people":<0..9>,"column":<0..${n}>,"left":<0..${n}>,"right":<0..${n}>,"sure":<true|false>}]}`,
 ].join('\n');
 
 /** The first balanced JSON object in a reply (models wrap JSON in fences and prose). */
@@ -257,7 +258,12 @@ async function ask({ image, frames, columns = 8, maxWaitMs = 45000, people = fal
         // a column past the last one is not an answer at all — neither "here" nor "nobody"
         if (!Number.isFinite(n) || n < 0 || n > columns) { if (count != null) n = 0; else continue; }
         answers[L] = { column: n, sure: r.sure !== false };
-        if (people) answers[L].people = count;
+        if (people) {
+          answers[L].people = count;
+          // how far the person reaches across, when given sensibly round their head
+          const lf = Math.round(Number(r.left)), rt = Math.round(Number(r.right));
+          if (n > 0 && Number.isFinite(lf) && Number.isFinite(rt) && lf >= 1 && rt <= columns && lf <= n && rt >= n) { answers[L].left = lf; answers[L].right = rt; }
+        }
       }
       if (!Object.keys(answers).length) { lastWhy = model + ' did not answer about any frame'; continue; }
       health.ok++; health.why = ''; health.model = model; health.lastMs = Date.now() - t0; health.lastAt = Date.now();

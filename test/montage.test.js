@@ -336,7 +336,7 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
     const realReady = see.ready, realWho = see.whoIsSpeaking, realPeople = see.whereArePeople;
     see.ready = () => true;
     see.whoIsSpeaking = async ({ frames }) => ({ ok: true, answers: Object.fromEntries(frames.map((f) => [f.label, { column: 7, sure: true }])) });
-    see.whereArePeople = async ({ frames }) => ({ ok: true, answers: Object.fromEntries(frames.map((f) => [f.label, { column: 7, people: 1, sure: true }])) });
+    see.whereArePeople = async ({ frames }) => ({ ok: true, answers: Object.fromEntries(frames.map((f) => [f.label, { column: 11, people: 1, sure: true }])) });
     const outR = path.join(WORK, 'fill-r.mp4');
     let rR;
     try { rR = await montage.make(ctx, video.getInfo, { mediaPaths: [L], full: true, style: 'worship', aspect: '9:16', keepAudio: true, output: outR, onProgress: () => {} }); }

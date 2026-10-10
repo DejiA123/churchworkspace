@@ -161,7 +161,7 @@ const SCRIPT = {
     see.ready = () => true;
     see.whoIsSpeaking = async ({ image, frames }) => { grids.push(image); return { ok: true, answers: Object.fromEntries(frames.map((f) => [f.label, { column: 7, sure: true }])) }; };
     const realPeople = see.whereArePeople;
-    see.whereArePeople = async ({ image, frames }) => { grids.push(image); return { ok: true, answers: Object.fromEntries(frames.map((f) => [f.label, { column: 7, people: 1, sure: true }])) }; };
+    see.whereArePeople = async ({ image, frames }) => { grids.push(image); return { ok: true, answers: Object.fromEntries(frames.map((f) => [f.label, { column: 11, people: 1, sure: true }])) }; };
     const outR = path.join(WORK, 'fill-right.mp4');
     let r;
     try { r = await montage.make(ctx, video.getInfo, { mediaPaths: [L], style: 'hype', lengthSec: 12, aspect: '9:16', output: outR, mode: 'talk', hear: hear1 }); }
@@ -220,11 +220,11 @@ const SCRIPT = {
       fs.writeFileSync(f, Buffer.from(image.split(',')[1], 'base64'));
       const answers = {};
       frames.forEach((fr, k) => {
-        const tx = 4 + (k % 3) * (288 + 4), ty = 4 + Math.floor(k / 3) * (162 + 4);
+        const tx = (k % 3) * (384 + 4), ty = Math.floor(k / 3) * (216 + 4);
         // the picture inside the tile (above the column numbers, left of the letter)
-        if (lum(f, tx + 4, ty + 24, 280, 110) < 30) { nobodyTiles++; answers[fr.label] = { people: 0, column: 0, sure: true }; return; }
+        if (lum(f, tx + 4, ty + 30, 370, 150) < 30) { nobodyTiles++; answers[fr.label] = { people: 0, column: 0, sure: true }; return; }
         let best = 1, bv = -1;
-        for (let c = 0; c < 8; c++) { const v = lum(f, tx + c * 36 + 6, ty + 40, 24, 70); if (v > bv) { bv = v; best = c + 1; } }
+        for (let c = 0; c < 12; c++) { const v = lum(f, tx + c * 32 + 6, ty + 50, 20, 100); if (v > bv) { bv = v; best = c + 1; } }
         answers[fr.label] = { people: 1, column: best, sure: true };
       });
       return { ok: true, answers };
@@ -237,8 +237,10 @@ const SCRIPT = {
     ok(nobodyTiles > 0, 'the AI was asked about the empty-stage moments', { looked, nobodyTiles });
     const proj = montage.loadProject(outS);
     const lines = proj.shots.filter((x) => x.from != null && proj.cands[x.cid] && proj.cands[x.cid].kind === 'video');
-    ok(lines.length > 0 && lines.every((x) => x.from >= 19.5), 'no moment from the empty stage is used — every shot is from when someone is on it', lines.map((x) => x.from));
-    ok(lines.every((x) => x.from + x.seconds <= 29.6 || x.from >= 31.4), 'and a cut to a title graphic in the middle of the talk is not used either', lines.map((x) => [x.from, +(x.from + x.seconds).toFixed(2)]));
+    const coveredWhole = (x) => (x.overlays || []).some((o) => o.cover && o.start <= 0.05 && o.len >= x.seconds - 0.05);
+    ok(lines.length > 0 && lines.every((x) => x.from >= 19.5 || coveredWhole(x)), 'no moment from the empty stage is seen — every shot is from when someone is on it (or that beat is covered with someone)', lines.map((x) => [x.from, coveredWhole(x)]));
+    ok(lines.every((x) => x.from + x.seconds <= 29.6 || x.from >= 31.4 || (x.overlays || []).some((o) => o.cover && o.start <= 0.05 && o.len >= x.seconds - 0.05)),
+      'and a cut to a title graphic in the middle of the talk is never seen: left out, or that beat covered with someone', lines.map((x) => [x.from, +(x.from + x.seconds).toFixed(2), (x.overlays || []).some((o) => o.cover)]));
     // tracking: wherever the edit is, the white figure is inside the 9:16 frame (the frame is bright near the middle)
     const clear = (t) => !(rs.overlays || []).some((o) => t >= o.at - 0.2 && t <= o.at + o.seconds + 0.2);
     const times = [];
@@ -248,6 +250,11 @@ const SCRIPT = {
       return Math.max(...b);
     });
     ok(times.length >= 3 && inFrame.every((v) => v > 180), 'the person is always in the 9:16 frame — the crop follows them as they walk', { times, inFrame });
+    // a covered beat shows someone: the frame in the middle of each one has the white figure in it
+    let atC = 0; const coverAt = [];
+    proj.shots.forEach((x) => { if (coveredWhole(x)) coverAt.push(+(atC + x.seconds / 2).toFixed(2)); atC += x.seconds; });
+    const coverSeen = coverAt.map((t) => Math.max(...execFileSync(ffmpeg, ['-v', 'error', '-ss', String(t), '-i', outS, '-frames:v', '1', '-vf', 'crop=1080:400:0:760,scale=8:1,format=gray', '-f', 'rawvideo', '-'])));
+    ok(coverAt.length >= 1 && coverSeen.every((v) => v > 180), 'a beat covered for showing nobody shows the person instead', { coverAt, coverSeen });
     const pans = proj.shots.filter((x) => typeof x.fx2 === 'number');
     ok(pans.length >= 1 && pans.every((x) => x.fx2 > x.fx), 'within a line the crop pans with them (left to right, as they walk)', proj.shots.map((x) => [x.fx, x.fx2]));
     // EVERY line the director chose is on the empty stage: they are all replaced, never kept

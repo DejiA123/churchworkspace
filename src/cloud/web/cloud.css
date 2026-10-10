@@ -2531,6 +2531,14 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .me-n { flex: none; width: 24px; height: 24px; border-radius: 12px; display: grid; place-items: center; font: 800 12px/1 inherit; color: #fff; background: var(--ph-accent-fill, #8b5cf6); }
 .me-th { flex: none; width: 48px; height: 72px; border-radius: 8px; overflow: hidden; background: #111; }
 .me-th img, .me-ov img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.me-th { position: relative; cursor: pointer; transition: width .2s ease, height .2s ease; }
+/* ▶ on every shot's picture: tap to play the shot (the picture grows while it plays) */
+.me-playbadge { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%;
+  background: rgba(0,0,0,.55); box-shadow: 0 0 0 1px rgba(255,255,255,.35); pointer-events: none; }
+.me-playbadge::before { content: ''; position: absolute; left: 10px; top: 7px; border-style: solid; border-width: 6px 0 6px 9px; border-color: transparent transparent transparent #fff; }
+.me-th.playing { width: 108px; height: 192px; }
+.me-th.playing img, .me-th.playing .me-playbadge { display: none; }
+.me-th video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
 .me-nothumb { display: block; width: 100%; height: 100%; background: #222; }
 .me-info { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .me-info b { font-size: 14px; color: var(--ph-text, #fff); }
