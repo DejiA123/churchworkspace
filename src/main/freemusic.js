@@ -35,6 +35,14 @@ const TRACKS = [
   ['Heroic Age', 'epic'], ['Five Armies', 'epic'], ['Epic Unease', 'epic'], ['Volatile Reaction', 'epic'], ['Crusade - Heavy Industry', 'epic'],
   ['Cipher', 'hype'], ['Movement Proposition', 'hype'], ['Funkorama', 'hype'], ['Life of Riley', 'hype'], ['Wallpaper', 'hype'],
   ['Dreamer', 'calm'], ['Healing', 'calm'], ['Clean Soul', 'calm'], ['Gymnopedie No 1', 'calm'], ['Meditation Impromptu 01', 'calm'],
+  // more to choose from, so "✨ Pick for me" is not the same few songs every time
+  // (a title incompetech no longer has is hidden by the check below, never shown)
+  ['Dream Culture', 'uplift'], ['Daily Beetle', 'uplift'], ['Amazing Plan', 'uplift'], ['Achaidh Cheide', 'uplift'], ['Bright Wish', 'uplift'],
+  ['Impact Prelude', 'epic'], ['Impact Moderato', 'epic'], ['Rite of Passage', 'epic'], ['Prelude and Action', 'epic'], ['Killers', 'epic'], ['Curse of the Scarab', 'epic'],
+  ['Monkeys Spinning Monkeys', 'hype'], ['Fluffing a Duck', 'hype'], ['Sneaky Snitch', 'hype'], ['Hep Cats', 'hype'], ['Werq', 'hype'],
+  ['Local Forecast - Elevator', 'hype'], ['Pixel Peeker Polka - faster', 'hype'], ['Run Amok', 'hype'], ['Carefree', 'hype'],
+  ['Ethereal Relaxation', 'calm'], ['Peaceful Desolation', 'calm'], ['Meditation Impromptu 02', 'calm'], ['Meditation Impromptu 03', 'calm'],
+  ['Lightless Dawn', 'calm'], ['Relaxing Piano Music', 'calm'], ['Frost Waltz', 'calm'], ['At Rest', 'calm'],
 ].map(([title, mood]) => ({ id: title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), title, mood, url: BASE + encodeURIComponent(title) + '.mp3' }));
 
 const credit = (t) => `Music: “${t.title}” by Kevin MacLeod (incompetech.com) — licensed under Creative Commons: By Attribution 4.0`;

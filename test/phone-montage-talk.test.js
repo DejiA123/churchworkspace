@@ -114,6 +114,21 @@ async function waitUp() {
     }));
     check(extra.narrator, 'the Viral Montage offers a narrator', extra);
     check(extra.moods.length === 4 && extra.pick && extra.songs >= 3, 'free, safe-to-post music is on the page by mood — and "✨ Pick for me" is on by default', extra);
+    // ✨ Pick for me deals the mood's songs like cards: ten picks in a row, ten different songs
+    const dealt = await page.evaluate(() => {
+      const D = window.MWCloud._freeDeal;
+      const tracks = Array.from({ length: 12 }, (_, i) => ({ id: 'h' + i, mood: 'hype' })).concat([{ id: 'u0', mood: 'uplift' }]);
+      try { localStorage.removeItem('mw-free-recent'); } catch (e) {}
+      const got = [];
+      for (let i = 0; i < 10; i++) { const t = D.deal(tracks, 'hype')[0]; got.push(t.id); D.used(t.id); }
+      // all twelve used: the one used longest ago comes round first
+      for (let i = 10; i < 12; i++) { const t = D.deal(tracks, 'hype')[0]; got.push(t.id); D.used(t.id); }
+      const next = D.deal(tracks, 'hype')[0].id;
+      return { got, next, mood: got.every((x) => x[0] === 'h') };
+    });
+    check(new Set(dealt.got).size === 12 && dealt.mood && dealt.next === dealt.got[0], '"✨ Pick for me" never repeats a song until the whole mood has played, then starts with the oldest', dealt);
+    const shelf = await page.evaluate(() => document.querySelectorAll('#cloudMontage [data-mt-free]:not([data-mt-free="auto"])').length);
+    check(shelf >= 8, 'and each mood has plenty of songs to pick from', shelf);
     await page.locator('#cloudMontage [data-mt-mood="epic"]').tap();
     await sleep(200);
     check(await page.evaluate(() => [...document.querySelectorAll('#cloudMontage [data-mt-free]:not([data-mt-free="auto"])')].some((b) => /Heroic Age/.test(b.textContent))), 'a mood shows its songs (Epic: "Heroic Age"…)');

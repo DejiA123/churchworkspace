@@ -1009,10 +1009,11 @@
       if (!st.music || edit) return null;
       let free = st.music.free || null;
       if (free === 'auto') {
-        const pool = (st.shelf && st.shelf.tracks || []).filter((t) => t.mood === 'uplift');
-        const any = pool.length ? pool : (st.shelf && st.shelf.tracks) || [];
-        free = any.length ? any[Math.floor(Math.random() * any.length)].id : null;
+        // the next worship song not used lately (see freeDeal)
+        const next = freeDeal((st.shelf && st.shelf.tracks) || [], 'uplift')[0];
+        free = next ? next.id : null;
         if (!free) return null;
+        freeUsed(free);
       }
       const out = { files: [], credit: '' };
       for (let i = 0; i < st.files.length; i++) {
@@ -1277,6 +1278,43 @@
    * the words as text boxes, so captions, restyling and export are the studio's
    * own — nothing here re-invents them.
    */
+  /*
+   * ✨ PICK FOR ME, NOT THE SAME SONG EVERY TIME. Songs of the mood are dealt
+   * like cards: one not used lately comes first, and the whole mood is gone
+   * through before any comes round again (remembered on this phone). Returns
+   * the order to try them in, so a song that cannot be fetched gives way to
+   * the next instead of to no music.
+   */
+  const FREE_RECENT = 'mw-free-recent';
+  function freeDeal(tracks, mood) {
+    const all = tracks || [];
+    const pool = all.filter((t) => t.mood === mood);
+    const list = pool.length ? pool : all.slice();
+    let recent = [];
+    try { recent = JSON.parse(localStorage.getItem(FREE_RECENT) || '[]') || []; } catch (e) { recent = []; }
+    const shuffled = list.map((t) => [Math.random(), t]).sort((a, b) => a[0] - b[0]).map((x) => x[1]);
+    // least lately used first: never used, then used longest ago
+    const age = (t) => { const i = recent.indexOf(t.id); return i < 0 ? -1 : i; };
+    return shuffled.sort((a, b) => (age(a) < 0 ? -1 : 0) - (age(b) < 0 ? -1 : 0) || (age(b) - age(a)));
+  }
+  function freeUsed(id) {
+    try {
+      const recent = (JSON.parse(localStorage.getItem(FREE_RECENT) || '[]') || []).filter((x) => x !== id);
+      recent.unshift(id);
+      localStorage.setItem(FREE_RECENT, JSON.stringify(recent.slice(0, 60)));
+    } catch (e) { /* private window: still a random pick */ }
+  }
+  /** A free song onto the server: the one asked for, or (auto) the next in the deal that can be fetched. */
+  async function freeFetch(id, tracks, mood, onTry) {
+    const tries = id === 'auto' ? freeDeal(tracks, mood).slice(0, 4).map((t) => t.id) : [id];
+    let last = null;
+    for (const t of tries) {
+      if (onTry) onTry((tracks.find((x) => x.id === t) || {}).title || '');
+      try { const song = await window.api.freeMusic.get(t); freeUsed(t); return song; } catch (e) { last = e; }
+    }
+    throw last || new Error('No song could be fetched right now.');
+  }
+  C._freeDeal = { deal: freeDeal, used: freeUsed }; // for test/phone-montage-talk
   const MT = { items: [], song: null, songFile: null, style: 'hype', len: 30, custom: 120, aspect: '9:16', keep: true, brief: '', busy: false, order: 'ai', caps: true, mode: 'music', free: null, freeMood: null, voice: '' };
   /* which free mood suits which style, for "✨ Pick for me" */
   const MT_MOOD_OF = { hype: 'hype', fun: 'hype', cinematic: 'epic', worship: 'uplift', emotional: 'calm' };
@@ -1604,14 +1642,11 @@
       // a free song: fetched onto the server's music library (once), credited in the post
       let credit = '';
       if (!MT.songFile && MT.free && MT.freeList) {
-        let id = MT.free;
-        if (id === 'auto') {
-          const pool = MT.freeList.tracks.filter((t) => t.mood === (MT_MOOD_OF[MT.style] || 'uplift'));
-          const any = pool.length ? pool : MT.freeList.tracks;
-          id = any[Math.floor(Math.random() * any.length)].id;
-        }
         mtProgress('Getting the music…', 30);
-        try { song = await window.api.freeMusic.get(id); credit = song.credit || ''; } catch (er) {
+        try {
+          song = await freeFetch(MT.free, MT.freeList.tracks, MT_MOOD_OF[MT.style] || 'uplift', (title) => { if (title) mtProgress(`Getting the music — “${title}”…`, 30); });
+          credit = song.credit || '';
+        } catch (er) {
           C.island({ kind: 'warn', title: 'That song could not be fetched', sub: (er && er.message) || '', ms: 5000 });
           song = null;
         }
