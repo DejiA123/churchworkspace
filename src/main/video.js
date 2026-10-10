@@ -1713,6 +1713,13 @@ async function detectSceneCuts(ctx, { input, startSec, dur, pieces }) {
 }
 
 function clampN(v, a, b) { return Math.min(b, Math.max(a, v)); }
+/** A ⛶ Fill-frame overlay is cut across round `coverX` (0 left … 1 right — the
+ *  person an AI Montage found in it), else the middle (crop's own default). */
+function coverAt(o) {
+  const fx = Number(o && o.coverX);
+  if (!(o && o.coverX != null) || !Number.isFinite(fx) || Math.abs(fx - 0.5) < 0.001) return '';
+  return `:x='min(max(iw*${clampN(fx, 0, 1).toFixed(3)}-ow/2,0),iw-ow)'`;
+}
 
 // The pan path is still simplified (Ramer–Douglas–Peucker: drop points the line
 // already passes through) so the filter expression stays a sane length — but the
@@ -1999,6 +2006,7 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
  *   opacity        0..1 for watermarks (default 1 = solid)
  *   key            { color '#rrggbb', sim, blend } to key out a green/blue screen
  *   cover          fill the whole frame, cropped to fit (an AI Montage cutaway)
+ *   coverX         0..1, where across a cover is cut (round its person; default the middle)
  *   fade           seconds to fade in and out over (the montage's are 0.25)
  *   frame          a white frame around the picture, as a fraction of the width
  *                  (an AI Montage framed picture's 6 px), drawn outside its box
@@ -2092,7 +2100,7 @@ async function exportOverlayComposite(ctx, { base, overlays = [], output, baseSt
     }
     const fit = cover
       // the whole frame, the picture's middle — what the montage's cutaway is
-      ? `scale=${BW}:${BH}:force_original_aspect_ratio=increase${still ? ':flags=lanczos' : ''},crop=${BW}:${BH}`
+      ? `scale=${BW}:${BH}:force_original_aspect_ratio=increase${still ? ':flags=lanczos' : ''},crop=${BW}:${BH}${coverAt(o)}`
       : (still ? `scale=${w}:-2:flags=lanczos` : `scale=${w}:-2`);
     const chain = [...timing, fit, 'setsar=1'];
     if (edge) chain.push(`pad=iw+${2 * edge}:ih+${2 * edge}:${edge}:${edge}:white`);

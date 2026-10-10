@@ -3741,6 +3741,22 @@
    * montage plays the shot's sound under them — but a clip that has some can
    * have it turned on like any added video.
    */
+  /*
+   * Where a ⛶ Fill-frame picture is cut across: round `coverX` (0 left … 1
+   * right — the person an AI Montage found in it), else the middle. The same
+   * rule as the export's crop (video.js) and the montage's own (fitChain).
+   */
+  function coverLeft(s, nw, sw) {
+    const fx = typeof s.coverX === 'number' ? s.coverX : 0.5;
+    return clamp(fx * nw - sw / 2, 0, Math.max(0, nw - sw));
+  }
+  function coverPosition(s, bw, bh) {
+    const iw = s.srcInfo && s.srcInfo.width, ih = s.srcInfo && s.srcInfo.height;
+    if (typeof s.coverX !== 'number' || !iw || !ih || !bw || !bh) return '';
+    const sc = Math.max(bw / iw, bh / ih), spare = iw * sc - bw;
+    if (spare < 1) return '';
+    return `${(coverLeft(s, iw * sc, bw) / spare * 100).toFixed(2)}% 50%`;
+  }
   async function placeMontageOverlays(list) {
     const vw = (ve.video.info && ve.video.info.width) || 1080, vh = (ve.video.info && ve.video.info.height) || 1920;
     const infos = {};
@@ -3786,6 +3802,8 @@
         s.frame = b / vw;
       } else {
         Object.assign(s, { cover: true, pipX: 0, pipY: 0, pipW: 1 });
+        // cut round the person in it, as the montage was (montage.js aimShots)
+        if (typeof o.fx === 'number' && Number.isFinite(o.fx)) s.coverX = clamp(o.fx, 0, 1);
       }
       ve.segments.push(s);
       loadMediaThumb(s);
@@ -4059,6 +4077,7 @@
       // the preview did not, so a watermark dialled down to a third still looked
       // solid right up until the file came out.
       n.style.objectFit = s.cover ? 'cover' : '';
+      n.style.objectPosition = s.cover ? coverPosition(s, r.w, r.h) : '';
       // a montage's framed picture keeps its white frame (drawn outside the box, as the export pads it)
       n.style.outline = s.frame > 0 && !s.cover ? `${Math.max(1, Math.round(s.frame * r.fr.w))}px solid #fff` : '';
       // …and its fade in and out (an AI Montage picture's), the compositor's ramp
@@ -4337,7 +4356,7 @@
         // ⛶ Fill frame: the middle of the picture, cropped to the frame's shape —
         // the export's cover crop, not the whole picture squashed into it
         const sc = Math.max(w / nw, h / nh), sw = w / sc, sh = h / sc;
-        g.drawImage(n, (nw - sw) / 2, (nh - sh) / 2, sw, sh, 0, 0, w, h);
+        g.drawImage(n, coverLeft(s, nw, sw), (nh - sh) / 2, sw, sh, 0, 0, w, h);
       } else g.drawImage(n, 0, 0, w, h);
       const img = g.getImageData(0, 0, w, h), d = img.data;
       const k = s.key, kuv = keyUVFull(...hexRgb(k.color));
@@ -9158,6 +9177,7 @@
         key: keyOn(o) ? { color: o.key.color, sim: o.key.sim, blend: o.key.blend } : undefined,
         bgBlur: !!o.bgBlur,
         cover: !!o.cover,
+        coverX: o.cover && typeof o.coverX === 'number' ? o.coverX : undefined,
         frame: o.frame > 0 && !o.cover ? o.frame : undefined,
         fade: o.fade > 0 ? o.fade : undefined,
         // …in at its real start and out at its real end — a closed gap inside it

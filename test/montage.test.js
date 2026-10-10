@@ -334,6 +334,15 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
     const rRR = await montage.remake(ctx, { project: pjR, edits: { shots: pjR.shots.map((x, key) => ({ key, transition: 'fade', overlays: x.overlays })) }, output: outRR, onProgress: () => {} });
     const rr3 = rows(outRR, rRR.duration / 2);
     log(rr3.every(blue), 'and a remade montage is still full screen, round the same person', JSON.stringify(rr3));
+    // opened in the studio: a cutaway laid back on is cut round the same person when exported
+    const grey = make(['-f', 'lavfi', '-i', 'color=c=gray:s=1080x1920:r=30:d=3', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast'], path.join(WORK, 'grey.mp4'));
+    const comp = async (extra, name) => {
+      const o = path.join(WORK, name);
+      await video.exportOverlayComposite(ctx, { base: grey, overlays: [Object.assign({ src: L, srcStart: 1, srcEnd: 3, tlStart: 0, x: 0, y: 0, wFrac: 1, cover: true, mute: true }, extra)], output: o });
+      return [120, 960, 1800].map((y) => colourAt(o, 1.5, y));
+    };
+    const cR = await comp({ coverX: 0.82 }, 'studio-r.mp4'), cM = await comp({}, 'studio-m.mp4');
+    log(cR.every(blue) && cM.every(green), 'a studio export of a montage cutaway keeps it cut round its person (the middle when none was found)', JSON.stringify({ cR, cM }));
     // a tall clip in a 16:9 montage fills it too (no bands either side)
     const T = make(['-f', 'lavfi', '-i', 'color=c=0x00c000:s=720x1280:r=30:d=5', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast'], path.join(WORK, 'tall-green.mp4'));
     const outW = path.join(WORK, 'fill-w.mp4');

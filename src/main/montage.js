@@ -1402,7 +1402,7 @@ function fileSig(f) { try { const st = fs.statSync(f); return st.size + ':' + Ma
 function pieceKey(s, next, W, H, keepAudio) {
   const c = s.cand;
   return crypto.createHash('sha1').update(JSON.stringify({
-    v: 3, f: c.file, sig: fileSig(c.file), k: c.kind, w: c.w, h: c.h, a: !!c.hasAudio,
+    v: 4, f: c.file, sig: fileSig(c.file), k: c.kind, w: c.w, h: c.h, a: !!c.hasAudio,
     sec: s.seconds, from: s.from, need: s.need, e: s.effect, fo: s.focus, fx: s.fx == null ? null : s.fx, sl: !!s.slow, tr: s.transition, nt: next ? next.transition : null, gr: s.grade || null, mu: !!s.mute,
     ov: (s.overlays || []).map((o) => [o.cand.file, fileSig(o.cand.file), o.cand.kind, o.cand.w, o.cand.h, o.style, o.start, o.len, o.pos, o.from, o.fx == null ? null : o.fx]),
     W, H, keepAudio: !!keepAudio, enc: encodeOpts(),
@@ -1581,6 +1581,8 @@ function resultOf(plan, output, opts, extra) {
     overlays: plan.shots.flatMap((s) => (s.overlays || []).map((o) => ({
       at: round2(s.at + o.start), seconds: o.len, style: o.style, file: o.still || o.cand.file,
       kind: o.still ? 'image' : o.cand.kind, w: o.cand.w, h: o.cand.h, from: o.still || o.from == null ? 0 : o.from, pos: o.pos || 'right',
+      // where across a cutaway it is cut to fill the frame (round its person), for the studio
+      fx: !o.still && typeof o.fx === 'number' ? o.fx : null,
     }))),
     shots: plan.shots.map((s) => ({ at: s.at, seconds: s.seconds, effect: s.effect, transition: s.transition, file: s.cand.file, kind: s.cand.kind, from: s.from == null ? null : s.from })),
   }, extra);
