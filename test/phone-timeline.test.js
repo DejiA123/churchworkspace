@@ -560,6 +560,23 @@ async function waitUp() {
         return out;
       });
       check(live.t >= live.second[0] - 0.05 && live.t < live.second[1] && /contrast\(1\.4/.test(live.filter), 'the clip being adjusted comes on screen as the slider moves, and shows the change live', live);
+      // ✨ AUTO: a poor video gets a lot, a good one only a touch-up
+      const auto = await page.evaluate(() => {
+        const T = window.VideoEditor.__test;
+        return { poor: T.autoFxFor({ mean: 0.18, lo: 0.08, hi: 0.4, sat: 0.1, edge: 0.012 }, 480), good: T.autoFxFor({ mean: 0.48, lo: 0.03, hi: 0.97, sat: 0.38, edge: 0.07 }, 1080) };
+      });
+      check(auto.poor.bri >= 0.15 && auto.poor.con > 1.1 && auto.poor.sat > 1.2 && auto.poor.sharp >= 1.3, '✨ Auto: a dark, flat, washed-out, soft 480p video gets lifted, given punch, colour and real sharpening', auto.poor);
+      check(Math.abs(auto.good.bri) <= 0.02 && auto.good.con <= 1.05 && auto.good.sat <= 1.05 && auto.good.sharp <= 0.4, '✨ Auto: a good 1080p video is only touched up', auto.good);
+      const tapped = await page.evaluate(async () => {
+        const T = window.VideoEditor.__test, p = document.getElementById('vePlayer');
+        p.pause();
+        document.querySelector('#fxModal [data-fxtab="adjust"]') && document.querySelector('#fxModal [data-fxtab="adjust"]').click();
+        document.getElementById('fxAuto').click();
+        for (let i = 0; i < 40 && document.getElementById('fxAuto').classList.contains('busy'); i++) await new Promise((r) => setTimeout(r, 150));
+        await new Promise((r) => setTimeout(r, 300));
+        return { fx: T.clipFx().filter(Boolean), filter: p.style.filter, toast: document.body.innerText.includes('Auto enhanced') };
+      });
+      check(tapped.fx.some((f) => f.sharp > 0) && tapped.filter && tapped.toast, 'tapping ✨ Auto reads the clip and sets it — the preview shows it at once', tapped);
     }
 
     console.log('\n=== [M] the captions window, calm (CapCut\'s Edit captions) ===');

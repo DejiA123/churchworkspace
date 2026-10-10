@@ -13661,6 +13661,105 @@
       return c.toDataURL('image/jpeg', 0.8);
     } catch (e) { return ''; }   // (a frame from another origin cannot be read — the tiles keep their colours)
   }
+  /*
+   * ►► ✨ AUTO ENHANCE. ◄◄ What an editor does first to a phone recording of
+   * a service: lift it out of the dark, give it its punch back, bring the
+   * colour up a touch and make it crisp — set for THIS video by reading its
+   * own picture (a few frames of each clip): how bright it is, how much of
+   * the range it uses, how coloured it is, how soft its edges are, and how
+   * small it was recorded (a 480p or 720p video needs more sharpening to look
+   * clean at 1080p). A poor video gets more; a good one is only touched up.
+   */
+  function measureFrame(p) {
+    if (!p || !p.videoWidth) return null;
+    const w = 160, h = Math.max(2, Math.round((p.videoHeight / p.videoWidth) * w));
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    let d;
+    try { g.drawImage(p, 0, 0, w, h); d = g.getImageData(0, 0, w, h).data; } catch (e) { return null; }
+    const n = w * h, Y = new Float32Array(n), hist = new Uint32Array(101);
+    let sum = 0, sat = 0;
+    for (let i = 0; i < n; i++) {
+      const r = d[i * 4] / 255, gg = d[i * 4 + 1] / 255, b = d[i * 4 + 2] / 255;
+      const y = 0.299 * r + 0.587 * gg + 0.114 * b;
+      Y[i] = y; sum += y; hist[Math.round(y * 100)]++;
+      const mx = Math.max(r, gg, b), mn = Math.min(r, gg, b);
+      sat += mx > 0.04 ? (mx - mn) / mx : 0;
+    }
+    const pct = (q) => { let acc = 0; for (let k = 0; k <= 100; k++) { acc += hist[k]; if (acc >= q * n) return k / 100; } return 1; };
+    let edge = 0, m = 0;
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      edge += Math.abs(4 * Y[i] - Y[i - 1] - Y[i + 1] - Y[i - w] - Y[i + w]); m++;
+    }
+    return { mean: sum / n, lo: pct(0.02), hi: pct(0.98), sat: sat / n, edge: m ? edge / m : 0 };
+  }
+  /** The settings for a picture so measured (pure — test/phone-timeline checks it). */
+  function autoFxFor(mz, height) {
+    const r2 = (v, st) => Math.round(v / st) * st;
+    const range = Math.max(0.15, mz.hi - mz.lo);
+    const bri = clamp((0.47 - mz.mean) * 0.9, -0.1, 0.18);
+    let con = clamp(0.9 / range, 1.03, 1.3);
+    if (mz.mean < 0.22) con = Math.min(con, 1.15);          // a dark video: lift first, do not crush its shadows
+    const sat = mz.sat > 0.42 ? 1 : clamp(0.3 / Math.max(0.06, mz.sat), 1.02, 1.3);
+    // soft edges, and a small recording, want more sharpening (to look clean at 1080p and above)
+    let sharp = mz.edge < 0.018 ? 1 : mz.edge < 0.03 ? 0.75 : mz.edge < 0.05 ? 0.5 : 0.35;
+    if (height && height <= 480) sharp += 0.4; else if (height && height <= 720) sharp += 0.25;
+    sharp = clamp(sharp, 0.3, 1.4);
+    return { bri: +r2(bri, 0.01).toFixed(2), con: +r2(con, 0.01).toFixed(2), sat: +r2(sat, 0.02).toFixed(2), sharp: +r2(sharp, 0.05).toFixed(2) };
+  }
+  const seekAndWait = (p, t) => new Promise((res) => {
+    let done = false; const fin = () => { if (done) return; done = true; p.removeEventListener('seeked', fin); setTimeout(res, 60); };
+    p.addEventListener('seeked', fin); setTimeout(fin, 1800);
+    try { p.currentTime = t; } catch (e) { fin(); }
+  });
+  async function autoEnhance() {
+    const p = ve.refs.player, u = ve.fxUi;
+    if (!p || !ve.video) return;
+    const btn = document.getElementById('fxAuto');
+    if (btn && btn.classList.contains('busy')) return;
+    if (!fxTarget()) { const s0 = fxPickClip(); u.clipId = s0 ? s0.id : null; }
+    const main = mainClips();
+    const targets = u.scope === 'all' ? fxClips().concat(ve.segments.filter((x) => x.ai)) : [fxTarget()].filter(Boolean);
+    if (!targets.length) return;
+    if (btn) btn.classList.add('busy');
+    const wasPlaying = !p.paused, back = p.currentTime;
+    if (wasPlaying) p.pause();
+    const height = (ve.video.info && ve.video.info.height) || p.videoHeight || 0;
+    const shortSide = Math.min(height || 0, (ve.video.info && ve.video.info.width) || p.videoWidth || 0) || height;
+    let looked = 0, all = [];
+    try {
+      for (const s of targets) {
+        // a clip of the main video is read at a few moments of its own; one from another file takes the main video's reading
+        const own = main.includes(s) || s.ai || !s.src;
+        const ms = [];
+        if (own) {
+          for (const f of [0.25, 0.5, 0.75]) {
+            await seekAndWait(p, s.start + (s.end - s.start) * f);
+            const m = measureFrame(p); if (m) ms.push(m);
+          }
+        }
+        const use = ms.length ? ms : all;
+        if (!use.length) continue;
+        const avg = (k) => use.reduce((a, x) => a + x[k], 0) / use.length;
+        const mz = { mean: avg('mean'), lo: avg('lo'), hi: avg('hi'), sat: avg('sat'), edge: avg('edge') };
+        if (ms.length) all = all.concat(ms);
+        const a = autoFxFor(mz, shortSide);
+        if (!u.pushed) { pushHistory(); u.pushed = true; } else touchSession();
+        const next = cleanFx(Object.assign(fxOf(s), a));
+        if (next) s.fx = next; else delete s.fx;
+        looked++;
+      }
+    } finally {
+      if (btn) btn.classList.remove('busy');
+      if (u.scope === 'all') await seekAndWait(p, back); else fxShowClip(fxTarget());
+      if (wasPlaying) p.play().catch(() => {});
+    }
+    if (!looked) return window.__toast && window.__toast('Auto could not read this video’s picture — set it by hand below.', 'error');
+    syncClipLook(nowT()); updateMediaLayer(nowT()); renderFxPanel(); markFxBlocks();
+    window.__toast && window.__toast(`✨ Auto enhanced ${looked > 1 ? looked + ' clips' : 'this clip'} — brightness, contrast, colour and sharpness`, 'good');
+  }
+
   function renderFxPanel() {
     const m = document.getElementById('fxModal'); if (!m) return;
     const u = ve.fxUi;
@@ -15444,6 +15543,7 @@
     $$('#fxLooks [data-look]').forEach((b) => b.addEventListener('click', () => { fxShowClip(fxTarget()); setClipFx('look', b.dataset.look); }));
     $('#fxLook').addEventListener('change', (e) => setClipFx('look', e.target.value));
     $$('#fxModal [data-adj]').forEach((b) => b.addEventListener('click', () => { ve.fxUi.adj = b.dataset.adj; renderFxPanel(); }));
+    { const au = $('#fxAuto'); if (au) au.addEventListener('click', () => { autoEnhance(); }); }
     for (const [id, k] of Object.entries(FX_INPUTS)) {
       const el = $('#' + id); if (!el) continue;
       el.addEventListener('input', () => { paintFxSlider(el); setClipFx(k, parseFloat(el.value)); });
@@ -16357,6 +16457,8 @@
         return ve._lastAnalyzeArgs || null;
       },
       split(t) { splitAtPlayhead(t); },
+      autoFxFor(m, h) { return autoFxFor(m, h); },
+      clipFx() { return mainClips().map((x) => cleanFx(x.fx)); },
       moveClip(id, newStart) { const s = ve.segments.find((x) => x.id === id); if (!s) return; const len = s.end - s.start; s.start = newStart; s.end = newStart + len; renderSegments(); },
       moveClipWithHistory(id, newStart) { pushHistory(); const s = ve.segments.find((x) => x.id === id); if (!s) return; const len = s.end - s.start; s.start = newStart; s.end = newStart + len; renderSegments(); },
       audioSegDomCount() { return $$('#veAudioSegments .ve-audio-seg').length; },
