@@ -53,6 +53,15 @@ const { execFileSync } = require('child_process');
 const ROOT = path.join(__dirname, '..');
 // a call answers "still working" after this long (20 s on a real server)
 process.env.MW_CALL_HOLD_MS = '400';
+// A key is checked with Zernio when it is saved (main.js social:setKeys): a
+// stand-in Zernio on this machine accepts the test's own key and no other.
+const FAKE_ZERNIO = require('http').createServer((req, res) => {
+  const ok = /^Bearer zo_live_/.test(req.headers.authorization || '');
+  res.writeHead(ok ? 200 : 401, { 'content-type': 'application/json' });
+  res.end(JSON.stringify(ok ? { accounts: [] } : { error: 'Invalid API key' }));
+}).listen(0, '127.0.0.1');
+FAKE_ZERNIO.unref();
+FAKE_ZERNIO.on('listening', () => { process.env.ZERNIO_API_BASE = `http://127.0.0.1:${FAKE_ZERNIO.address().port}/api/v1`; });
 const PORT = 7394;
 const CODE = 'anchor-harvest-4271';
 

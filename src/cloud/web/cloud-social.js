@@ -1116,14 +1116,32 @@
    * LINKING AN ACCOUNT, FROM A PHONE. Through Zernio: free, its developer apps
    * are already approved by all four platforms, and it publishes a booked post
    * itself — so a post goes out at its time whether or not anything of ours is
-   * switched on. The church pastes a free key once; each account is then one
-   * sign-in on that platform's own page.
+   * switched on.
+   *
+   * ►► AS FEW TAPS AS THE PLATFORMS ALLOW. ◄◄ "I need to do a lot to set it
+   * up." What no app can skip: one Zernio key (made once, on zernio.com — or
+   * given to the server, ZERNIO_API_KEY, and never asked for) and each
+   * platform's own "Allow". Everything else is done for you:
+   *   • Open Zernio goes straight to its API keys page; 📋 Paste key reads
+   *     the copied key (no typing, no Save) and Zernio checks it there and then
+   *   • whatever is already linked on Zernio is linked here at once
+   *   • ✨ Set up everything opens each platform's sign-in in turn, in one
+   *     window, each coming back to the studio which opens the next
+   *     (main.js setupRuns, cloud-api.js /social/next) — no Connect per
+   *     platform, no coming back to the app in between
+   * Connect beside a platform still does just that one.
    */
   function openConnect(after) {
-    const panel = C.openPanel({ id: 'csConnect', title: 'Accounts', cls: 'cp-connect', onClose: () => { stopClaim(); if (after) after(); } });
+    const panel = C.openPanel({ id: 'csConnect', title: 'Accounts', cls: 'cp-connect', onClose: () => { stopClaim(); stopWatch(); if (after) after(); } });
     let claiming = null;   // { platform, timer, until }
+    let watching = null;   // { timer, until } — while Set up everything runs in its own window
+    let typing = false;    // the paste box, when the phone would not let the key be read
+    let more = false;
+    const skip = new Set();   // platforms left out of Set up everything
     function stopClaim() { if (claiming) { clearInterval(claiming.timer); claiming = null; } }
+    function stopWatch() { if (watching) { clearInterval(watching.timer); watching = null; } }
     const label = (p) => (PLAT[p] || {}).name || p;
+    const missing = () => PLAT_ORDER.filter((p) => !linked().some((x) => x.platform === p));
 
     function draw(msg) {
       const keyRow = (k, title, sub) => `<div class="cs-key${S.keys[k] ? ' set' : ''}">`
@@ -1136,21 +1154,42 @@
         const needs = (p === 'facebook' || p === 'instagram') ? (S.keys.zoFb || S.keys.zo) : S.keys.zo;
         const busy = claiming && claiming.platform === p;
         return `<div class="cs-plat${a ? ' linked' : ''}" data-plat="${p}">${platMark(p, 'lg')}`
-          + `<div class="cs-plat-tx"><b>${label(p)}</b><small>${a ? esc(a.name) : busy ? 'Waiting for you to finish signing in…' : 'Not connected'}</small></div>`
+          + `<div class="cs-plat-tx"><b>${label(p)}</b><small>${a ? esc(a.name) : busy ? 'Waiting for you to finish signing in…' : watching ? 'Waiting for its sign-in…' : 'Not connected'}</small></div>`
           + (a ? `<button type="button" class="cs-mini" data-k="unlink" data-id="${escAttr(a.id)}">Remove</button>`
             : busy ? (claiming.url ? `<a class="cs-mini accent" href="${escAttr(claiming.url)}" target="_blank" rel="noopener">${mi('external')}Open</a>` : '<span class="cs-spin"></span>')
               : `<button type="button" class="cs-mini accent" data-k="link" data-p="${p}"${needs ? '' : ' disabled'}>Connect</button>`)
           + '</div>';
       }).join('');
-      const keys = '<h4 class="cs-h4">Zernio key</h4>'
-        + (!S.keys.zo ? '<ol class="cs-steps"><li>Make a free account at <a href="https://zernio.com" target="_blank" rel="noopener">zernio.com</a> — it is what posts for you, even with this app closed.</li>'
-          + '<li>In Zernio, open <b>Settings → API keys</b> and copy a key.</li><li>Paste it here, then tap Connect beside each account.</li></ol>' : '')
-        + keyRow('zo', 'Main key', 'For TikTok and YouTube (and Facebook and Instagram if you only have one)')
-        + keyRow('zoFb', 'Second key (optional)', 'Zernio’s free plan links two accounts per key — a second free key covers Facebook and Instagram');
-      const plats = `<h4 class="cs-h4 first">Your accounts</h4><div class="cs-plats">${rows}</div>`;
-      panel.body.innerHTML = (msg ? `<p class="cs-note ${msg.kind || ''}">${esc(msg.text)}</p>` : '')
-        // no key yet: that is the first thing to do, so it comes first
-        + (S.keys.zo ? plats + keys : keys.replace('cs-h4', 'cs-h4 first') + plats);
+      const plats = `<h4 class="cs-h4">Your accounts</h4><div class="cs-plats">${rows}</div>`;
+      const left = missing();
+
+      // the one big thing to do next
+      let hero;
+      if (!S.keys.zo) {
+        hero = '<div class="cs-setup">'
+          + '<div class="cs-step"><span class="cs-step-n">1</span><div class="cs-step-tx"><b>Get your free Zernio key</b>'
+          + '<small>Zernio posts for you, even with this phone off. Sign up (Google works), tap <b>Create key</b>, then <b>Copy</b>.</small></div></div>'
+          + `<a class="cs-btn ghost cs-wide" href="https://zernio.com/settings/api-keys" target="_blank" rel="noopener">${mi('external')}Open Zernio</a>`
+          + '<div class="cs-step"><span class="cs-step-n">2</span><div class="cs-step-tx"><b>Come back and paste it</b>'
+          + '<small>It is checked with Zernio straight away, and anything you already linked there is linked here too.</small></div></div>'
+          + `<button type="button" class="cs-btn primary cs-wide cs-big" data-k="paste">📋 Paste key</button>`
+          + (typing ? '<div class="cs-key-in" data-key-row="zo"><input class="cs-input" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste the API key here" data-key="zo"><button type="button" class="cs-btn primary" data-k="save-zo">Save</button></div>' : '')
+          + '</div>';
+      } else if (left.length) {
+        const chips = left.map((p) => `<button type="button" class="cs-pick${skip.has(p) ? '' : ' on'}" data-k="pick" data-p="${p}" aria-pressed="${skip.has(p) ? 'false' : 'true'}">${platMark(p, 'sm')}<span>${label(p)}</span></button>`).join('');
+        const n = left.filter((p) => !skip.has(p)).length;
+        hero = '<div class="cs-setup">'
+          + `<button type="button" class="cs-btn primary cs-wide cs-big" data-k="setup"${n ? '' : ' disabled'}>${watching ? 'Signing you in…' : '✨ Set up everything'}</button>`
+          + `<small class="cs-setup-sub">${watching ? 'Finish each sign-in in the window that opened — each one moves on to the next by itself. This list fills in as they connect.'
+            : 'Signs you in to each one, one after another, in one window — just tap Allow on each. Untick any you don’t use.'}</small>`
+          + `<div class="cs-picks">${chips}</div></div>`;
+      } else {
+        hero = `<p class="cs-note good">${mi('check')} All four are connected — posts go out on their own.</p>`;
+      }
+      const keys = !S.keys.zo ? '' : `<button type="button" class="cs-more" data-k="more">${more ? 'Fewer options' : 'Zernio key and more'}</button>`
+        + (more ? keyRow('zo', 'Zernio key', 'For every account')
+          + keyRow('zoFb', 'Second Zernio account (optional)', 'Zernio’s free plan covers 2 accounts per Zernio account. A key from a second free Zernio account covers Facebook and Instagram — or turn on billing at zernio.com and use one key for all four.') : '');
+      panel.body.innerHTML = (msg ? `<p class="cs-note ${msg.kind || ''}">${esc(msg.text)}</p>` : '') + hero + plats + keys;
     }
 
     async function claim() {
@@ -1169,14 +1208,86 @@
       } catch (e) { /* keep waiting */ }
       if (claiming && Date.now() > claiming.until) { stopClaim(); draw({ kind: 'warn', text: `${label(p)} was not linked — tap Connect to try again.` }); }
     }
-    const onBack = () => { if (!document.hidden && claiming) claim(); };
+    // Set up everything runs in its own window: this sheet just watches the list fill in
+    async function watch() {
+      if (!watching) return;
+      const before = linked().length;
+      await loadSocial(true).catch(() => null);
+      const now = linked().length;
+      if (now > before) { renderSched(); renderHomeSocial(); }
+      if (!missing().filter((p) => !skip.has(p)).length) {
+        stopWatch();
+        draw({ kind: 'good', text: 'All set — your accounts are connected.' });
+        C.island({ kind: 'good', title: 'Accounts connected', sub: linked().map((a) => label(a.platform)).join(' · ') });
+        return;
+      }
+      if (Date.now() > watching.until) stopWatch();
+      draw();
+    }
+    const onBack = () => { if (document.hidden) return; if (claiming) claim(); if (watching) watch(); };
     document.addEventListener('visibilitychange', onBack);
     const origClose = panel.onClose;
     panel.onClose = () => { document.removeEventListener('visibilitychange', onBack); if (origClose) origClose(); };
 
+    async function saveKey(key, v) {
+      const res = await window.api.social.setKeys(key === 'zo' ? { zoApiKey: v } : { zoApiKeyFb: v });
+      S.keys = res;
+      typing = false;
+      await loadSocial(true);
+      renderSched(); renderHomeSocial();
+      const got = (res.linked || []).map(label);
+      const left = missing();
+      draw({ kind: 'good', text: (got.length ? `Key saved — ${got.join(', ')} ${got.length === 1 ? 'was' : 'were'} already on Zernio and ${got.length === 1 ? 'is' : 'are'} connected. ` : 'Key saved. ')
+        + (left.length ? 'Now tap ✨ Set up everything.' : 'Everything is connected.') });
+    }
+
     panel.body.addEventListener('click', async (e) => {
       const b = e.target.closest('[data-k]'); if (!b || b.disabled) return;
       const k = b.dataset.k;
+      if (k === 'more') { more = !more; return draw(); }
+      if (k === 'pick') { const p = b.dataset.p; if (skip.has(p)) skip.delete(p); else skip.add(p); return draw(); }
+      if (k === 'paste') {
+        // the copied key, read on this tap (the phone asks once: Paste); typed in when it cannot be read
+        let v = '';
+        try { v = navigator.clipboard && navigator.clipboard.readText ? String(await navigator.clipboard.readText() || '').trim() : ''; } catch (er) { v = ''; }
+        if (!v || /\s/.test(v) || v.length < 12) {
+          typing = true;
+          draw(v ? { kind: 'warn', text: 'What was copied does not look like a Zernio key — copy the key on zernio.com again, or paste it below.' } : null);
+          const i = panel.body.querySelector('input[data-key="zo"]'); if (i) i.focus();
+          return;
+        }
+        b.disabled = true; b.textContent = 'Checking the key with Zernio…';
+        try { await saveKey('zo', v); }
+        catch (er) { typing = true; draw({ kind: 'bad', text: er.message }); }
+        return;
+      }
+      if (k === 'setup') {
+        const platforms = missing().filter((p) => !skip.has(p));
+        if (!platforms.length) return;
+        // the window is opened on the tap itself (a phone will not open one later); the address follows
+        let w = null;
+        try { w = window.open('', '_blank'); } catch (er) { w = null; }
+        b.disabled = true; b.textContent = 'Opening…';
+        let r;
+        try { r = await window.api.social.setupStart({ origin: location.origin, platforms }); }
+        catch (er) { if (w) try { w.close(); } catch (x) {} draw({ kind: 'bad', text: er.message }); return; }
+        if (r && r.done) {
+          if (w) try { w.close(); } catch (x) {}
+          await loadSocial(true); renderSched(); renderHomeSocial();
+          return draw({ kind: 'good', text: 'Everything is connected — it was all on Zernio already.' });
+        }
+        stopClaim(); stopWatch();
+        watching = { until: Date.now() + 30 * 60000, timer: setInterval(watch, 4000) };
+        if (w) { try { w.location.href = r.url; } catch (er) { w = null; } }
+        if (!w) {
+          // the phone blocked the window: the same sign-ins, in this one
+          draw({ kind: '', text: 'Opening the sign-ins…' });
+          location.href = r.url;
+          return;
+        }
+        draw();
+        return;
+      }
       if (k.startsWith('edit-')) {
         const row = panel.body.querySelector(`[data-key-row="${k.slice(5)}"]`);
         if (row) { row.classList.remove('hidden'); const i = row.querySelector('input'); if (i) i.focus(); }
@@ -1187,11 +1298,9 @@
         const input = panel.body.querySelector(`input[data-key="${key}"]`);
         const v = input ? input.value.trim() : '';
         if (!v) { if (input) input.focus(); return; }
-        b.disabled = true;
-        try {
-          S.keys = await window.api.social.setKeys(key === 'zo' ? { zoApiKey: v } : { zoApiKeyFb: v });
-          draw({ kind: 'good', text: 'Key saved. Now tap Connect beside an account.' });
-        } catch (er) { b.disabled = false; draw({ kind: 'bad', text: er.message }); }
+        b.disabled = true; b.textContent = 'Checking…';
+        try { await saveKey(key, v); }
+        catch (er) { b.disabled = false; b.textContent = 'Save'; draw({ kind: 'bad', text: er.message }); }
         return;
       }
       if (k === 'unlink') {
@@ -1203,21 +1312,24 @@
       if (k === 'link') {
         const p = b.dataset.p;
         stopClaim();
+        // opened on the tap, before anything is awaited — an iPhone blocks a window opened later
+        let w = null;
+        try { w = window.open('', '_blank'); } catch (er) { w = null; }
         b.disabled = true; b.textContent = 'Opening…';
         let r;
         try { r = await window.api.social.linkStart(p); }
-        catch (er) { draw({ kind: 'bad', text: er.message }); return; }
+        catch (er) { if (w) try { w.close(); } catch (x) {} draw({ kind: 'bad', text: er.message }); return; }
         if (r && r.account) {
+          if (w) try { w.close(); } catch (x) {}
           await loadSocial(true);
           draw({ kind: 'good', text: `${label(p)} is connected as ${r.account.name}.` });
           renderSched(); renderHomeSocial();
           return;
         }
         claiming = { platform: p, url: r && r.url, until: Date.now() + 10 * 60000, timer: setInterval(claim, 4000) };
-        // A tap may open it straight away; if the phone blocks that, the row's
-        // own Open button (a real link) does it.
-        let opened = null;
-        try { opened = window.open(r.url, '_blank', 'noopener'); } catch (er) { opened = null; }
+        let opened = false;
+        if (w) { try { w.location.href = r.url; opened = true; } catch (er) { opened = false; } }
+        // if the phone blocked it, the row's own Open button (a real link) does it
         draw({ kind: '', text: opened ? `Sign in to ${label(p)} on the page that opened, then come back here.` : `Tap Open to sign in to ${label(p)}, then come back here.` });
       }
     });

@@ -630,6 +630,7 @@ let _hideTimer = null;
       withMusic: (a) => call('social:withMusic', a),
       accounts: () => call('social:accounts'),
       setKeys: (keys) => call('social:setKeys', keys),
+      setupStart: (o) => call('social:setupStart', o || {}),
       linkStart: (platform) => call('social:linkStart', { platform }),
       linkClaim: (platform) => call('social:linkClaim', { platform }),
       unlink: (id) => call('social:unlink', { id }),

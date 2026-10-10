@@ -131,6 +131,8 @@ const SOCIAL = {
   'social:setKeys': true,
   'social:linkStart': true,
   'social:linkClaim': true,
+  // one tap: every sign-in in turn (main.js); setupNext is reached only through /social/next/<code>
+  'social:setupStart': { args: (a) => !a || a.platforms == null || (Array.isArray(a.platforms) && a.platforms.every((p) => typeof p === 'string')) },
   'social:unlink': true,
   'social:check': true,
   'social:suggestCopy': true,
@@ -342,6 +344,36 @@ const mimeOf = (p) => MIME[path.extname(p).toLowerCase()] || 'application/octet-
 const WEB_DIR = path.join(__dirname, 'web');
 
 /* ------------------------------------------------------------- responding */
+
+/* The page "Set up everything" ends on: what was linked, and what was not and why. */
+const SETUP_NAMES = { tiktok: 'TikTok', youtube: 'YouTube', instagram: 'Instagram', facebook: 'Facebook' };
+function setupPage(r) {
+  const h = (t) => String(t == null ? '' : t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  let title, body = '';
+  if (r && r.expired) {
+    title = 'This link has run out';
+    body = '<p>Go back to the studio and tap <b>Set up everything</b> again.</p>';
+  } else if (r && r.done) {
+    const res = r.results || [];
+    const good = res.filter((x) => x.ok), bad = res.filter((x) => !x.ok);
+    title = good.length && !bad.length ? 'All set' : good.length ? 'Nearly there' : 'Nothing was connected';
+    body = '<ul>' + res.map((x) => `<li class="${x.ok ? 'ok' : 'no'}"><b>${h(SETUP_NAMES[x.platform] || x.platform)}</b> ${x.ok ? '✓ ' + h(x.name || 'connected') : '— ' + h(x.error || 'not connected')}</li>`).join('') + '</ul>'
+      + (bad.some((x) => x.full) ? '<p class="tip">Zernio’s free plan covers 2 accounts. To add more, turn on billing at <a href="https://zernio.com" target="_blank" rel="noopener">zernio.com</a> (about $6 a month for each extra account), then tap <b>Set up everything</b> again — only what is missing is asked for.</p>' : '')
+      + (bad.length && !bad.some((x) => x.full) ? '<p class="tip">Tap <b>Set up everything</b> again for anything not connected — only what is missing is asked for.</p>' : '');
+  } else {
+    title = 'That did not work';
+    body = `<p>${h((r && r.error) || 'Something went wrong')}</p>`;
+  }
+  const back = r && r.back ? `<a class="go" href="${h(r.back)}">Back to the studio</a>` : '';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<title>${h(title)}</title><style>
+:root{color-scheme:dark}body{margin:0;background:#0b0b12;color:#f5f5f7;font:17px/1.45 -apple-system,system-ui,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center}
+main{max-width:440px;padding:28px 22px}h1{font-size:26px;margin:0 0 14px}ul{list-style:none;padding:0;margin:0 0 16px}li{padding:12px 14px;border-radius:14px;background:#1a1a24;margin:8px 0}
+li.ok b{color:#86efac}li.no b{color:#fca5a5}.tip{color:#c4c4cc;font-size:15px}a{color:#c4b5fd}
+.go{display:block;text-align:center;margin-top:18px;padding:14px;border-radius:14px;background:linear-gradient(135deg,#a855f7,#7c3aed);color:#fff;font-weight:700;text-decoration:none}
+small{display:block;text-align:center;color:#8b8b96;margin-top:10px}</style></head>
+<body><main><h1>${h(title)}</h1>${body}${back}${back ? '<small>Or just close this page — the studio has it already.</small>' : ''}</main></body></html>`;
+}
 
 function send(res, code, type, body, extra) {
   const headers = Object.assign({
@@ -1040,6 +1072,27 @@ async function handle(req, res) {
     const full = path.normalize(path.join(base, name));
     if (!within(full, base)) return send(res, 403, 'text/plain', 'forbidden');
     return sendFile(req, res, full, { cache: 'public, max-age=604800' });
+  }
+
+  /*
+   * ►► WHERE EACH SIGN-IN COMES BACK TO (Scheduler → Set up everything). ◄◄
+   * Outside the sign-in gate: it is opened by the platform's own redirect, in
+   * whatever browser the sign-in happened, which carries no Authorization.
+   * The random one-run code in the address is the key (main.js setupRuns): it
+   * keeps the account that was just linked and goes straight on to the next
+   * platform's sign-in, then says what was linked.
+   */
+  if (p.startsWith('/social/next/') && SOCIAL_ON) {
+    const code = p.slice('/social/next/'.length);
+    if (!/^[0-9a-f]{36}$/.test(code)) return send(res, 404, 'text/plain', 'not found');
+    let out;
+    try { out = await rpc.invoke('social:setupNext', { code }, null); } catch (e) { out = { ok: false, error: e.message }; }
+    const r = out && out.ok ? out.data : { error: (out && out.error) || 'Something went wrong' };
+    if (r && r.redirect && /^https:\/\//i.test(r.redirect)) {
+      res.writeHead(302, { location: r.redirect, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
+      return res.end();
+    }
+    return send(res, 200, 'text/html; charset=utf-8', setupPage(r), { 'cache-control': 'no-store' });
   }
 
   if (p === '/api/hello') {

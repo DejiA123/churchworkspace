@@ -62,7 +62,8 @@ function getJson(urlStr, { timeoutMs = 20000, headers = {} } = {}) {
         const msg = (json && json.error && json.error.message) ? json.error.message
           : (json && typeof json.error === 'string') ? (json.error_description || json.error)
           : `HTTP ${res.statusCode}: ${out.slice(0, 300)}`;
-        reject(new Error(msg));
+        const err = new Error(msg); err.status = res.statusCode;
+        reject(err);
       });
     });
     req.setTimeout(timeoutMs, () => { req.destroy(new Error('Request timed out.')); });
@@ -153,10 +154,19 @@ function upCfg(store) {
   };
 }
 
+/*
+ * A Zernio key given to the SERVER (its environment) rather than pasted on a
+ * phone: whoever runs the studio sets it once and nobody is ever asked for it.
+ * A key saved in the app wins, as with the Groq key (main.js envGroqKey).
+ * LATE_API_KEY is Zernio's name from before it was renamed.
+ */
+const envZoKey = () => String(process.env.ZERNIO_API_KEY || process.env.MW_ZERNIO_KEY || process.env.LATE_API_KEY || '').trim();
+const envZoKeyFb = () => String(process.env.ZERNIO_API_KEY_FB || process.env.MW_ZERNIO_KEY_FB || '').trim();
+
 function zoCfg(store, platform) {
   const acc = ((store.get('settings') || {}).accounts) || {};
-  const mainKey = (acc.zoApiKey || '').trim();
-  const fbKey = (acc.zoApiKeyFb || '').trim();
+  const mainKey = (acc.zoApiKey || '').trim() || envZoKey();
+  const fbKey = (acc.zoApiKeyFb || '').trim() || envZoKeyFb();
   // Facebook + Instagram use their OWN free Zernio account (its own 2 free slots)
   // so all four platforms stay under Zernio's 2-account free cap — TikTok/YouTube
   // on the primary key, FB/IG on the secondary. Falls back to the primary key
@@ -164,7 +174,7 @@ function zoCfg(store, platform) {
   const isMeta = platform === 'facebook' || platform === 'instagram';
   return {
     apiKey: (isMeta && fbKey) ? fbKey : mainKey,
-    apiBase: (acc.zoApiBase || publisher.DEFAULT_ZO_API).replace(/\/+$/, ''),
+    apiBase: (acc.zoApiBase || process.env.ZERNIO_API_BASE || publisher.DEFAULT_ZO_API).replace(/\/+$/, ''),
     redirectUrl: (acc.zoRedirectUrl || DEFAULT_ZO_REDIRECT).trim(),
   };
 }
@@ -184,6 +194,7 @@ function zoAccountOf(listed, platform) {
 const ZO_ID_PREFIX = { tiktok: 'zotk_', youtube: 'zoyt_', facebook: 'zofb_', instagram: 'zoig_' };
 function zoIdPrefix(platform) { return ZO_ID_PREFIX[platform] || 'zo_'; }
 const ZO_LABEL = { tiktok: 'TikTok', youtube: 'YouTube', facebook: 'Facebook', instagram: 'Instagram' };
+const ZO_PLATFORMS = ['tiktok', 'youtube', 'instagram', 'facebook'];
 
 /** An Upload-Post platform entry is an object, a bare handle string, or absent. */
 function upAccountOf(profile, platform = 'tiktok') {
@@ -832,10 +843,13 @@ class Accounts {
    * and keeps the account if it is there. The phone opens the link, and claims
    * when it comes back to the front.
    */
-  async zernioLinkStart(platform) {
+  async zernioLinkStart(platform, opts = {}) {
     const plat = ['youtube', 'facebook', 'instagram'].includes(platform) ? platform : 'tiktok';
     const label = ZO_LABEL[plat] || 'TikTok';
-    const { apiKey, apiBase, redirectUrl } = zoCfg(this.store, plat);
+    const cfg = zoCfg(this.store, plat);
+    const { apiKey, apiBase } = cfg;
+    // "Set up everything" sends each sign-in back to the studio's own page, which opens the next one
+    const redirectUrl = opts.redirectUrl || cfg.redirectUrl;
     if (!apiKey) throw new Error('Add your Zernio key first (free at zernio.com → Settings → API keys).');
     const auth = { authorization: 'Bearer ' + apiKey };
     let listed;
@@ -872,6 +886,50 @@ class Accounts {
     const acct = zoAccountOf(listed, plat);
     if (!acct) return { pending: true };
     return { account: await this._zoKeep(plat, acct, apiKey) };
+  }
+
+  /*
+   * Everything already linked on Zernio, kept here in one go — an account
+   * linked on zernio.com (or before this studio was set up) needs no Connect.
+   * Each key is asked once. Gives back the platforms now linked through Zernio.
+   */
+  async zernioImportAll() {
+    const byKey = new Map();
+    const linked = [];
+    for (const plat of ZO_PLATFORMS) {
+      const { apiKey, apiBase } = zoCfg(this.store, plat);
+      if (!apiKey) continue;
+      const k = apiBase + '|' + apiKey;
+      if (!byKey.has(k)) byKey.set(k, getJson(`${apiBase}/accounts`, { headers: { authorization: 'Bearer ' + apiKey } }).catch(() => null));
+      const listed = await byKey.get(k);
+      const acct = listed && zoAccountOf(listed, plat);
+      if (acct) { await this._zoKeep(plat, acct, apiKey); linked.push(plat); }
+    }
+    return linked;
+  }
+
+  /** Is this a Zernio key Zernio accepts? Throws in words the person can act on. */
+  async zernioCheckKey(apiKey) {
+    const { apiBase } = zoCfg(this.store, 'tiktok');
+    try { await getJson(`${apiBase}/accounts`, { headers: { authorization: 'Bearer ' + apiKey } }); }
+    catch (e) {
+      if (e.status === 401 || e.status === 403 || /\b(401|403)\b|unauthor|invalid/i.test(e.message)) throw new Error('Zernio did not accept that key — copy it again from zernio.com → Settings → API keys.');
+      throw new Error('Zernio could not be reached to check the key (' + e.message + ') — try again in a moment.');
+    }
+    return true;
+  }
+
+  /*
+   * A key replaced in the app: the accounts linked with the old one carry it
+   * (each record keeps the key it posts with), so they move to the new one —
+   * otherwise they would keep posting with a key that may have been revoked.
+   */
+  zernioRekey(oldKey, newKey) {
+    if (!oldKey || !newKey || oldKey === newKey) return 0;
+    let n = 0;
+    const all = this.all().map((a) => (a.via === 'zernio' && a.token === oldKey ? (n++, { ...a, token: newKey }) : a));
+    if (n) this.store.set('socialAccounts', all);
+    return n;
   }
 
   /** Store a Zernio-linked account; hand back the record without its key. */
@@ -955,5 +1013,5 @@ module.exports = {
   googleAuthError,
   Accounts, captureUserToken, captureGoogleCode, captureTikTokCode, exchangeLongLived, listPages, fetchAvatarDataUri,
   cfg, ytCfg, tkCfg, upCfg, zoCfg, getJson, OAUTH_SCOPES, DEFAULT_OAUTH, DEFAULT_GRAPH, DEFAULT_YT_AUTH, YT_SCOPES,
-  DEFAULT_TK_AUTH, DEFAULT_TK_REDIRECT, TK_SCOPES, DEFAULT_ZO_REDIRECT,
+  DEFAULT_TK_AUTH, DEFAULT_TK_REDIRECT, TK_SCOPES, DEFAULT_ZO_REDIRECT, ZO_PLATFORMS, envZoKey,
 };

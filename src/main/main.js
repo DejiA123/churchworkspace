@@ -130,6 +130,7 @@ const { TransCache } = require('./transcache');
 const { Scheduler } = require('./scheduler');
 const autopost = require('./autopost');
 const { Accounts } = require('./accounts');
+const accountsMod = require('./accounts');
 const publisher = require('./publisher');
 const { LiveStream, ProgramHub, DESTINATIONS, QUALITIES, QUALITY_GROUPS, LEGACY_QUALITY, DEFAULT_QUALITY,
   detectEncoder, encoderLabel, REC_FORMATS, DEFAULT_REC_FORMAT, recFormat,
@@ -2933,28 +2934,90 @@ ipcMain.handle('accounts:check', wrap(async (e, { id }) => accounts.check(id)));
  */
 const SOCIAL_KEYS = ['zoApiKey', 'zoApiKeyFb'];
 function socialKeyState() {
-  const acc = ((store.get('settings') || {}).accounts) || {};
-  return { zo: !!String(acc.zoApiKey || '').trim(), zoFb: !!String(acc.zoApiKeyFb || '').trim() };
+  // a key given to the server (ZERNIO_API_KEY) counts: nobody needs to paste one
+  return { zo: !!accountsMod.zoCfg(store, 'tiktok').apiKey, zoFb: !!String((((store.get('settings') || {}).accounts) || {}).zoApiKeyFb || process.env.ZERNIO_API_KEY_FB || process.env.MW_ZERNIO_KEY_FB || '').trim() };
 }
 ipcMain.handle('social:accounts', wrap(async () => ({ accounts: accounts.list(), keys: socialKeyState() })));
 ipcMain.handle('social:setKeys', wrap(async (e, patch = {}) => {
   const s = store.get('settings') || {};
   const acc = { ...(s.accounts || {}) };
+  const changed = [];
   for (const k of SOCIAL_KEYS) {
     if (!patch || !(k in patch)) continue;
-    const v = String(patch[k] == null ? '' : patch[k]).trim();
+    // a key copied from a page or an email often comes with a space, a line break or quotes round it
+    const v = String(patch[k] == null ? '' : patch[k]).trim().replace(/^["'“”‘’`]+|["'“”‘’`]+$/g, '').trim();
     if (v.length > 400 || /\s/.test(v)) {
       throw new Error('That does not look like a Zernio API key — copy it again from zernio.com → Settings → API keys.');
     }
+    // checked with Zernio before it is kept: a wrong key is found NOW, not at the first Connect
+    if (v) await accounts.zernioCheckKey(v);
+    changed.push([String(acc[k] || '').trim(), v]);
     acc[k] = v;
   }
   store.set('settings', { ...s, accounts: acc });
-  return socialKeyState();
+  for (const [was, now] of changed) accounts.zernioRekey(was, now);
+  // whatever is already linked on Zernio is linked here too, straight away
+  let linked = [];
+  try { linked = await accounts.zernioImportAll(); } catch (er) { /* Connect still works */ }
+  return Object.assign(socialKeyState(), { linked });
 }));
 ipcMain.handle('social:linkStart', wrap(async (e, { platform } = {}) => accounts.zernioLinkStart(platform)));
 ipcMain.handle('social:linkClaim', wrap(async (e, { platform } = {}) => accounts.zernioLinkClaim(platform)));
 ipcMain.handle('social:unlink', wrap(async (e, { id } = {}) => accounts.remove(id)));
 ipcMain.handle('social:check', wrap(async (e, { id } = {}) => accounts.check(id)));
+
+/*
+ * ►► SET UP EVERYTHING, ONE TAP. ◄◄
+ * The phone taps once; a page of OUR studio (/social/next/<code>, cloud-api.js)
+ * opens each platform's own sign-in in turn — TikTok, YouTube, Instagram,
+ * Facebook — and Zernio sends each one back to that page, which keeps the
+ * account and opens the next. No Connect per platform, no coming back to the
+ * app in between. What is already linked on Zernio is skipped. The code in
+ * the address is the only key to it: random, for one run, 30 minutes.
+ */
+const setupRuns = new Map();   // code -> { origin, queue, current, results, expires }
+const SETUP_TTL_MS = 30 * 60000;
+ipcMain.handle('social:setupStart', wrap(async (e, { origin, platforms } = {}) => {
+  const base = String(origin || '').trim().replace(/\/+$/, '');
+  if (!/^https?:\/\/[^/\s?#]+$/i.test(base)) throw new Error('The studio’s address is not known — open the studio from its own link and try again.');
+  if (!accountsMod.zoCfg(store, 'tiktok').apiKey && !accountsMod.zoCfg(store, 'facebook').apiKey) throw new Error('Add your Zernio key first.');
+  const wanted = accountsMod.ZO_PLATFORMS.filter((p) => !Array.isArray(platforms) || platforms.includes(p));
+  try { await accounts.zernioImportAll(); } catch (er) {}
+  const have = new Set(accounts.list().filter((a) => a.via === 'zernio').map((a) => a.platform));
+  const queue = wanted.filter((p) => !have.has(p));
+  if (!queue.length) return { done: true, accounts: accounts.list() };
+  const now = Date.now();
+  for (const [k, r] of setupRuns) if (r.expires < now) setupRuns.delete(k);
+  const code = require('crypto').randomBytes(18).toString('hex');
+  setupRuns.set(code, { origin: base, queue, current: null, results: [], expires: now + SETUP_TTL_MS });
+  return { url: `${base}/social/next/${code}`, queue };
+}));
+/* Called by the page each sign-in comes back to: keep what was linked, open the next. */
+async function socialSetupNext(code) {
+  const run = setupRuns.get(String(code || ''));
+  if (!run || run.expires < Date.now()) { setupRuns.delete(String(code || '')); return { expired: true }; }
+  if (run.current) {
+    const plat = run.current; run.current = null;
+    let r = null;
+    try { r = await accounts.zernioLinkClaim(plat); } catch (er) { r = null; }
+    run.results.push(r && r.account ? { platform: plat, ok: true, name: r.account.name } : { platform: plat, ok: false, error: 'Not finished — it was skipped or cancelled.' });
+  }
+  while (run.queue.length) {
+    const plat = run.queue.shift();
+    try {
+      const r = await accounts.zernioLinkStart(plat, { redirectUrl: `${run.origin}/social/next/${code}` });
+      if (r.account) { run.results.push({ platform: plat, ok: true, name: r.account.name }); continue; }
+      run.current = plat;
+      return { redirect: r.url, platform: plat };
+    } catch (er) {
+      const full = /free plan|payment|402/i.test(er.message);
+      run.results.push({ platform: plat, ok: false, error: full ? 'Zernio’s free plan is full (2 accounts).' : er.message, full });
+    }
+  }
+  setupRuns.delete(String(code));
+  return { done: true, results: run.results, back: run.origin + '/#scheduler' };
+}
+ipcMain.handle('social:setupNext', wrap(async (e, { code } = {}) => socialSetupNext(code)));
 
 ipcMain.handle('scheduler:testFb', wrap(async (e, { pageId, token }) => {
   const acc = (store.get('settings') || {}).accounts || {};

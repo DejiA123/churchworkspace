@@ -2274,6 +2274,22 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .cs-note.good { background: rgba(48,209,88,.13); color: #c3f7d3; }
 .cs-note.bad { background: rgba(255,69,58,.13); color: #ffcbc6; }
 .cs-note.warn { background: rgba(255,179,64,.13); color: #ffe3b3; }
+.cs-note .mi { width: 15px; height: 15px; margin: 0 4px -2px 0; }
+/* Accounts: the one big thing to do next */
+.cs-setup { display: flex; flex-direction: column; gap: 10px; margin: 2px 0 6px; }
+.cs-wide { width: 100%; justify-content: center; text-decoration: none; }
+.cs-big { height: 56px; font-size: 17px; font-weight: 750; }
+.cs-step { display: flex; gap: 12px; align-items: flex-start; margin-top: 6px; }
+.cs-step-n { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: rgba(139,92,246,.25); color: #e6dcff; font-size: 14px; font-weight: 800; }
+.cs-step-tx > b { display: block; font-size: 15.5px; }
+.cs-step-tx small b { color: #e6e6ea; }
+.cs-step-tx small { display: block; margin-top: 2px; color: #9b9ea8; font-size: 13px; line-height: 1.42; }
+.cs-setup-sub { color: #9b9ea8; font-size: 13px; line-height: 1.42; text-align: center; }
+.cs-picks { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.cs-pick { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px 6px 6px; border-radius: 999px; border: 1.5px solid #34353d; background: transparent; color: #8a8d97; font-size: 14px; font-weight: 650; opacity: .6; }
+.cs-pick.on { border-color: #8b5cf6; color: #fff; background: rgba(139,92,246,.14); opacity: 1; }
+.cs-pick .cs-mark, .cs-pick > :first-child { flex: none; }
+.cs-more { display: block; margin: 16px auto 0; padding: 8px 12px; border: 0; background: transparent; color: #a99cf0; font-size: 14px; font-weight: 650; }
 .cs-spin { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 2.5px solid rgba(196,181,253,.3); border-top-color: #c4b5fd; animation: ciSpin .8s linear infinite; }
 
 .cs-detail .cs-video { display: block; width: 100%; max-height: 44vh; border-radius: 17px; background: #000; object-fit: contain; }

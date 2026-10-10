@@ -202,7 +202,7 @@ class Scheduler {
       tkTokenProxy: acc.tkTokenProxy || undefined,
       tkProxyToken: acc.tkProxyToken || undefined,
       upApiBase: acc.upApiBase || undefined,
-      zoApiBase: acc.zoApiBase || undefined,
+      zoApiBase: acc.zoApiBase || process.env.ZERNIO_API_BASE || undefined,
     };
   }
 
