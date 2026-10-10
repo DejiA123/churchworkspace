@@ -1193,8 +1193,8 @@
       if (!S.keys.zo) {
         hero = '<div class="cs-setup">'
           + '<div class="cs-step"><span class="cs-step-n">1</span><div class="cs-step-tx"><b>Get your free Zernio key</b>'
-          + '<small>Zernio posts for you, even with this phone off. Sign up (Google works), tap <b>Create key</b>, then <b>Copy</b>.</small></div></div>'
-          + `<a class="cs-btn ghost cs-wide" href="https://zernio.com/settings/api-keys" target="_blank" rel="noopener">${mi('external')}Open Zernio</a>`
+          + '<small>Zernio posts for you, even with this phone off. Sign up (or log in), open <b>API keys</b> in Zernio’s menu, tap <b>Create key</b>, then <b>Copy</b>.</small></div></div>'
+          + `<a class="cs-btn ghost cs-wide" href="https://zernio.com/signup" target="_blank" rel="noopener">${mi('external')}Open Zernio</a>`
           + '<div class="cs-step"><span class="cs-step-n">2</span><div class="cs-step-tx"><b>Come back and paste it</b>'
           + '<small>It is checked with Zernio straight away, and anything you already linked there is linked here too.</small></div></div>'
           + `<button type="button" class="cs-btn primary cs-wide cs-big" data-k="paste">📋 Paste key</button>`
@@ -1203,7 +1203,7 @@
       } else if (needSecondNow() && !watching) {
         hero = '<div class="cs-setup cs-second">'
           + `<div class="cs-step"><span class="cs-step-n">+</span><div class="cs-step-tx"><b>Free account${keyCount() > 1 ? 's' : ''} full — add another free one</b>`
-          + `<small>Each free Zernio account holds 2 accounts. Make ${keyCount() > 1 ? 'a third' : 'a second'} free Zernio account (use another email), tap <b>Create key</b>, then <b>Copy</b>. It stays free.</small></div></div>`
+          + `<small>Each free Zernio account holds 2 accounts. Make ${keyCount() > 1 ? 'a third' : 'a second'} free Zernio account (use another email), open <b>API keys</b> in its menu, tap <b>Create key</b>, then <b>Copy</b>. It stays free.</small></div></div>`
           + `<a class="cs-btn ghost cs-wide" href="https://zernio.com/signup" target="_blank" rel="noopener">${mi('external')}Open Zernio</a>`
           + `<button type="button" class="cs-btn primary cs-wide cs-big" data-k="paste2">📋 Paste the new key</button>`
           + (typing ? `<div class="cs-key-in" data-key-row="${nextSlot()}"><input class="cs-input" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste the new key here" data-key="${nextSlot()}"><button type="button" class="cs-btn primary" data-k="save-${nextSlot()}">Save</button></div>` : '')

@@ -763,7 +763,7 @@ class Accounts {
     const label = ZO_LABEL[platform] || 'TikTok';
     const { apiKey, apiBase, redirectUrl } = zoCfg(this.store, platform);
     if (!apiKey) {
-      throw new Error('Paste your Zernio API key first (free at zernio.com → Settings → API keys).');
+      throw new Error('Paste your Zernio API key first (free at zernio.com → API keys).');
     }
     const auth = { authorization: 'Bearer ' + apiKey };
 
@@ -771,7 +771,7 @@ class Accounts {
       try {
         return await getJson(`${apiBase}/accounts`, { headers: auth });
       } catch (e) {
-        throw new Error('Zernio did not accept the API key (' + e.message + ') — copy it again from zernio.com → Settings → API keys.');
+        throw new Error('Zernio did not accept the API key (' + e.message + ') — copy it again from zernio.com → API keys.');
       }
     };
 
@@ -866,13 +866,13 @@ class Accounts {
     const acc = ((this.store.get('settings') || {}).accounts) || {};
     const keys = Array.from(new Set([(acc.zoApiKey || '').trim() || envZoKey(), (acc.zoApiKeyFb || '').trim() || envZoKeyFb(), (acc.zoApiKey3 || '').trim()].filter(Boolean)));
     const { apiBase } = zoCfg(this.store, 'tiktok');
-    if (!keys.length) throw new Error('Add your Zernio key first (free at zernio.com → Settings → API keys).');
+    if (!keys.length) throw new Error('Add your Zernio key first (free at zernio.com → API keys).');
     const pool = [];
     for (const key of keys) {
       try { pool.push({ key, apiBase, accounts: zoAccountList(await getJson(`${apiBase}/accounts`, { headers: { authorization: 'Bearer ' + key } })) }); }
-      catch (e) { if (keys.length === 1) throw new Error('Zernio did not accept the key (' + e.message + ') — copy it again from zernio.com → Settings → API keys.'); }
+      catch (e) { if (keys.length === 1) throw new Error('Zernio did not accept the key (' + e.message + ') — copy it again from zernio.com → API keys.'); }
     }
-    if (!pool.length) throw new Error('Zernio did not accept your keys — copy them again from zernio.com → Settings → API keys.');
+    if (!pool.length) throw new Error('Zernio did not accept your keys — copy them again from zernio.com → API keys.');
     return pool;
   }
   /* The accounts of one platform across the pool, each with the key it is under. */
@@ -1011,7 +1011,7 @@ class Accounts {
     const { apiBase } = zoCfg(this.store, 'tiktok');
     try { return zoAccountList(await getJson(`${apiBase}/accounts`, { headers: { authorization: 'Bearer ' + apiKey } })); }
     catch (e) {
-      if (e.status === 401 || e.status === 403 || /\b(401|403)\b|unauthor|invalid/i.test(e.message)) throw new Error('Zernio did not accept that key — copy it again from zernio.com → Settings → API keys.');
+      if (e.status === 401 || e.status === 403 || /\b(401|403)\b|unauthor|invalid/i.test(e.message)) throw new Error('Zernio did not accept that key — copy it again from zernio.com → API keys.');
       throw new Error('Zernio could not be reached to check the key (' + e.message + ') — try again in a moment.');
     }
   }

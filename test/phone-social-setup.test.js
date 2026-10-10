@@ -115,7 +115,7 @@ async function phone(browser) {
 
     // [1]
     const open = await page.$eval('#csConnect a.cs-wide', (a) => a.href);
-    check(open === 'https://zernio.com/settings/api-keys', 'Open Zernio goes straight to its API keys page', open);
+    check(open === 'https://zernio.com/signup', 'Open Zernio goes to its sign-up page (a page that exists)', open);
     await page.evaluate(() => navigator.clipboard.writeText('sk_test_WRONGWRONGWRONGWRONG'));
     await page.tap('#csConnect [data-k="paste"]');
     await page.waitForSelector('#csConnect .cs-note.bad', { timeout: 15000 }).catch(() => {});

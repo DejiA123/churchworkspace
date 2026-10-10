@@ -2948,7 +2948,7 @@ ipcMain.handle('social:setKeys', wrap(async (e, patch = {}) => {
     // a key copied from a page or an email often comes with a space, a line break or quotes round it
     const v = String(patch[k] == null ? '' : patch[k]).trim().replace(/^["'“”‘’`]+|["'“”‘’`]+$/g, '').trim();
     if (v.length > 400 || /\s/.test(v)) {
-      throw new Error('That does not look like a Zernio API key — copy it again from zernio.com → Settings → API keys.');
+      throw new Error('That does not look like a Zernio API key — copy it again from zernio.com → API keys.');
     }
     // checked with Zernio before it is kept: a wrong key is found NOW, not at the first Connect
     // each extra key must be a DIFFERENT free Zernio account: the same one again gives no more places

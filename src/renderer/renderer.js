@@ -748,7 +748,7 @@ function showZoSetup(platform, err) {
   if ($('#zoGoAdvanced')) $('#zoGoAdvanced').onclick = (e) => { e.preventDefault(); zoAdvanced(platform); };
   const openExt = (url) => { try { api.shell.openExternal(url); } catch (e) { toast('Open ' + url + ' in your browser.', 'error'); } };
   $('#wizZoOpenSignup').onclick = () => openExt('https://zernio.com/signup');
-  $('#wizZoOpenKeys').onclick = () => openExt('https://zernio.com/settings/api-keys');
+  $('#wizZoOpenKeys').onclick = () => openExt('https://zernio.com/signup');
   $('#wizZoContinue').onclick = async () => {
     const key = $('#wizZoKey').value.trim();
     if (!key) return toast('Paste the Zernio API key first.', 'error');
