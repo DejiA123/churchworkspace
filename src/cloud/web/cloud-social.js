@@ -434,6 +434,26 @@
    * the open project first.
    */
   function openProjects() { go('projects'); }
+  /* Delete the project open in the editor — the studio's Project row, or the
+   * card at the top of Projects. Only the edit goes; then back to Projects. */
+  async function deleteOpenProject() {
+    const ed = window.VideoEditor;
+    if (!ed || !ed.deleteProject || !(ed.hasVideo && ed.hasVideo())) {
+      C.island({ kind: 'warn', title: 'No project is open', sub: 'Open one from Projects first', ms: 3500 });
+      return false;
+    }
+    const id = ed.projectId ? ed.projectId() : null;
+    const row = id ? (S.projects || []).find((r) => r.id === id) : null;
+    const nm = row ? row.name : String((ed.sourcePath && ed.sourcePath()) || '').split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
+    if (!window.confirm(`Delete this project${nm ? ` “${nm}”` : ''}?\n\nThe video and anything you exported stay — only this edit goes.`)) return false;
+    let ok = false;
+    try { ok = await ed.deleteProject(); } catch (e) { ok = false; }
+    if (!ok) { C.island({ kind: 'warn', title: 'That project could not be deleted', ms: 4000 }); return false; }
+    if (id && S.projects) S.projects = S.projects.filter((r) => r.id !== id);
+    C.island({ title: 'Project deleted', ms: 2500 });
+    if (S.view === 'projects') renderProjectsView(); else go('projects');
+    return true;
+  }
   function buildProjectsView() {
     const el = document.createElement('div');
     el.id = 'cloudProjView';
@@ -469,6 +489,7 @@
         return;
       }
       if (b.dataset.pv === 'continue') return go('studio');
+      if (b.dataset.pv === 'delete') return deleteOpenProject();
       if (b.dataset.proj) return openProject(b.dataset.proj);
       if (b.dataset.pjren) {
         const row = (S.projects || []).find((r) => r.id === b.dataset.pjren);
@@ -505,7 +526,8 @@
     cur.classList.toggle('hidden', !hasVid);
     if (hasVid) {
       const nm = curRow ? curRow.name : String((ed.sourcePath && ed.sourcePath()) || '').split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
-      cur.innerHTML = `<button type="button" class="pv-cont" data-pv="continue"><span class="pv-cont-k">Open in the editor</span><b>${esc(nm || 'Your video')}</b><span class="pv-cont-go">Continue ${mi('chev-right')}</span></button>`;
+      cur.innerHTML = `<button type="button" class="pv-cont" data-pv="continue"><span class="pv-cont-k">Open in the editor</span><b>${esc(nm || 'Your video')}</b><span class="pv-cont-go">Continue ${mi('chev-right')}</span></button>`
+        + `<button type="button" class="pv-cur-del" data-pv="delete">${mi('trash')}Delete this project</button>`;
     }
     const others = rows.filter((r) => r.id !== openId);
     $('#pvCount', el).textContent = rows.length ? String(rows.length) : '';
@@ -2242,5 +2264,5 @@
     }
   }
 
-  window.MWSocial = { busy: () => !!MT.busy, start, go, compose, openConnect, openMontage, editMontage, openProjects, openProject, view: () => S.view, _state: S, _planTimes: planTimes, _titleFromFile: titleFromFile };
+  window.MWSocial = { busy: () => !!MT.busy, start, go, compose, openConnect, openMontage, editMontage, openProjects, openProject, deleteOpenProject, view: () => S.view, _state: S, _planTimes: planTimes, _titleFromFile: titleFromFile };
 })();

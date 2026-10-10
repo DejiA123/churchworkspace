@@ -226,6 +226,7 @@
     "test:caption-track-stream": "node test/caption-track-stream.test.js",
     "test:phone-file-picker": "node test/phone-file-picker.test.js",
     "test:phone-text-panel": "node test/phone-text-panel.test.js",
+    "test:phone-project-delete": "node test/phone-project-delete.test.js",
     "test:phone-caption-touch": "node test/phone-caption-touch.test.js",
     "test:caption-second-opinion": "node test/caption-second-opinion.test.js"
   },

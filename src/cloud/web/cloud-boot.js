@@ -3970,6 +3970,7 @@ let _hideTimer = null;
       { icon: 'package', label: 'Batch', press: '#veBulk' },
       { icon: 'download', label: 'Saved', press: '#cloudDownloads' },
       { icon: 'book', label: 'Help', press: '#cloudHelp' },
+      { icon: 'trash', label: 'Delete', deleteProject: true },
     ],
   };
 
@@ -4266,6 +4267,7 @@ let _hideTimer = null;
     function act(t) {
       if (t.montage) return window.MWSocial && window.MWSocial.openMontage && window.MWSocial.openMontage();
       if (t.projects) return window.MWSocial && window.MWSocial.openProjects && window.MWSocial.openProjects();
+      if (t.deleteProject) return window.MWSocial && window.MWSocial.deleteOpenProject && window.MWSocial.deleteOpenProject();
       if (t.bg) {
         const E = window.VideoEditor; if (E && E.setBackground) E.setBackground(t.bg);
         const r = dock.querySelector('.cloud-dock-row.on'); if (r) for (const x of r.querySelectorAll('.cloud-tool')) if (x._sync) x._sync();

@@ -16094,6 +16094,25 @@
     /** A project renamed elsewhere (the phone's Projects sheet): the open one follows. */
     projectRenamed(id, name) { if (ve.sessionId === id) { ve.sessionName = name; updateSessionChip(); } },
     projectRemoved(id) { if (ve.sessionId === id) { ve.sessionId = null; ve.sessionName = null; ve.sessionDirty = false; updateSessionChip(); } },
+    /*
+     * Delete the project OPEN in the editor (Project row → Delete). Only the
+     * edit goes; the video and its exports stay. The studio lets go of the
+     * video first, so neither the 15 s sweep nor a pending write can make the
+     * project again, and a save already on its way is deleted when it lands
+     * (a first save creates the project, so its id is only known then).
+     */
+    async deleteProject() {
+      if (!ve.video) return false;
+      const pending = ve._projSaving;
+      ve._projAgain = null;
+      const ids = new Set([ve.sessionId].filter(Boolean));
+      closeVideo();
+      if (pending) { try { const res = await pending; if (res && res.id) ids.add(res.id); } catch (e) {} }
+      for (const id of ids) { try { await window.api.sessions.remove(id); } catch (e) {} }
+      // the "carry on where you left off" slot holds the same edit
+      try { await window.api.sessions.autosaveClear(); } catch (e) {}
+      return true;
+    },
     /**
      * An AI montage arrives: open it, put the operator's song on the music lane
      * (from the top, under the whole thing, on the beats it was cut to) and the
