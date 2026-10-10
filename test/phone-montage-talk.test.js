@@ -260,6 +260,29 @@ async function waitUp() {
     }, songPath);
     check(voice.opened && voice.said && voice.said.voice === 'af_heart' && /change the way you pray/.test(voice.said.text), 'AI voice: a typed line is sent to be spoken in the voice picked', voice);
     check(voice.closed && voice.lane, 'and it lands on the Sounds row', voice);
+    // THE PROGRESS SCREEN: a percentage beside the bar, always moving, never backwards
+    await page.evaluate(() => { window.MWSocial.go('home'); });
+    await sleep(400);
+    await page.evaluate(() => { window.MWSocial.openMontage(); });
+    await sleep(800);
+    const opened = await page.evaluate(() => !!document.getElementById('cloudMontage'));
+    if (opened) {
+      await page.setInputFiles('#mtPick', VID);
+      await sleep(600);
+      await page.locator('#cloudMontage [data-mt-song=""]').tap();
+      await page.evaluate(() => { window.__asked = false; window.api.montage.create = () => { window.__asked = true; return new Promise(() => {}); }; });   // the server is "working"
+      await page.locator('#cloudMontage .mt-go').tap();
+      for (let i = 0; i < 60 && !(await page.evaluate(() => window.__asked)); i++) await sleep(250);
+      const pctAt = () => page.evaluate(() => { const n = document.querySelector('#cloudMontage .mt-pct'); const i = document.querySelector('#cloudMontage .mt-bar i'); return { pct: n ? parseInt(n.textContent, 10) : -1, tf: i ? i.style.transform : '', stage: (document.querySelector('#cloudMontage .mt-stage') || {}).textContent }; });
+      await sleep(3000);
+      const a1 = await pctAt();
+      await sleep(3000);
+      const a2 = await pctAt();
+      if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'montage-progress.png') });
+      check(a1.pct >= 32 && a2.pct <= 42 && a2.pct > a1.pct && /scaleX/.test(a2.tf), 'the progress shows a percentage that keeps moving on its own between reports', { a1, a2 });
+      const same = await page.evaluate(() => document.querySelector('#cloudMontage .mt-run[data-live]') === document.querySelector('#cloudMontage .mt-run'));
+      check(same, 'and the screen is kept (only the words change), so the bar glides rather than jumps', same);
+    } else check(false, 'the montage page opened again for the progress check');
   } catch (e) {
     check(false, 'the test ran to the end', e && e.message);
   } finally {

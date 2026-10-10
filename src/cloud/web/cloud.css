@@ -2510,6 +2510,11 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .mt-stage { font-size: 17px; line-height: 1.35; color: var(--ph-text, #fff); }
 .mt-bar { width: 100%; height: 8px; border-radius: 999px; overflow: hidden; background: var(--ph-panel-2, #1d1e24); }
 .mt-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #ec4899, #a855f7); transition: width .4s ease; }
+/* the live progress: the bar is drawn by scaling (smooth, every frame) with the percentage beside it */
+.mt-barrow { display: flex; align-items: center; gap: 12px; width: 100%; }
+.mt-barrow .mt-bar { flex: 1; }
+.mt-barrow .mt-bar i { width: 100%; transform-origin: left center; transform: scaleX(.02); transition: none; will-change: transform; border-radius: 0; }
+.mt-pct { flex: 0 0 auto; min-width: 46px; text-align: right; font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--ph-text, #fff); }
 .mt-note { color: var(--ph-muted, #9b9ea8); font-size: 13px; line-height: 1.45; max-width: 320px; }
 .mt-concept { margin: 6px 0; font-size: 15px; line-height: 1.45; color: var(--ph-text, #fff); }
 .mt-tip { margin: 8px 0 4px; font-size: 13.5px; line-height: 1.5; color: var(--ph-muted, #9b9ea8); }

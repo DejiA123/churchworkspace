@@ -1770,18 +1770,60 @@
     v.load();
   }
 
+  /*
+   * ►► THE PROGRESS SCREEN: A NUMBER THAT IS ALWAYS MOVING. ◄◄ One screen,
+   * kept (only its words change), so the bar glides instead of jumping. The
+   * percentage shown eases up to where the work really is, and between the
+   * server's reports it keeps creeping a little — never more than a few
+   * points ahead, never backwards, and 100% only when it is done.
+   */
   function mtProgress(title, pct, note) {
     const p = MT.panel; if (!p) return;
-    p.body.innerHTML = `<div class="mt-run"><div class="mt-orb">${mi('sparkles')}</div><b class="mt-stage">${C.esc(title)}</b>
-      <div class="mt-bar"><i style="width:${Math.max(2, Math.min(100, pct || 0))}%"></i></div>
-      <small class="mt-note">${C.esc(note || 'You can lock your phone — it carries on, and the montage opens when you come back.')}</small></div>`;
-    p.foot.innerHTML = '';
+    const want = Math.max(0, Math.min(100, Number(pct) || 0));
+    let run = $('.mt-run[data-live]', p.body);
+    if (!run) {
+      p.body.innerHTML = `<div class="mt-run" data-live="1"><div class="mt-orb">${mi('sparkles')}</div><b class="mt-stage"></b>
+        <div class="mt-barrow"><div class="mt-bar"><i></i></div><b class="mt-pct">0%</b></div>
+        <small class="mt-note"></small></div>`;
+      p.foot.innerHTML = '';
+      run = $('.mt-run', p.body);
+      if (!MT.prog) MT.prog = { shown: 0, target: 0, at: 0, raf: 0 };
+    }
+    const pr = MT.prog || (MT.prog = { shown: 0, target: 0, at: 0, raf: 0 });
+    if (want > pr.target) { pr.target = want; pr.at = performance.now(); }
+    const st = $('.mt-stage', run);
+    if (st.textContent !== title) st.textContent = title;
+    $('.mt-note', run).textContent = note && note.trim() ? note : (note === ' ' ? '' : 'You can lock your phone — it carries on, and the montage opens when you come back.');
+    if (!pr.raf) {
+      let last = performance.now();
+      const tick = (now) => {
+        const bar = MT.panel && $('.mt-run[data-live] .mt-bar i', MT.panel.body);
+        if (!bar) { pr.raf = 0; return; }
+        const dt = Math.min(0.1, (now - last) / 1000); last = now;
+        if (pr.shown < pr.target) {
+          // catch up quickly, then settle
+          pr.shown = Math.min(pr.target, pr.shown + Math.max(0.6, (pr.target - pr.shown) * 4) * dt);
+        } else if (pr.target < 100) {
+          // nothing new for a while: creep on, slowing down, up to a few points past the last report
+          const roof = Math.min(99, pr.target + 10);
+          pr.shown += Math.max(0, roof - pr.shown) * 0.08 * dt;
+        }
+        bar.style.transform = `scaleX(${Math.max(0.02, pr.shown / 100).toFixed(4)})`;
+        const n = $('.mt-run[data-live] .mt-pct', MT.panel.body);
+        const label = Math.floor(pr.target >= 100 && pr.shown > 99.5 ? 100 : Math.min(pr.shown, 99)) + '%';
+        if (n && n.textContent !== label) n.textContent = label;
+        pr.raf = requestAnimationFrame(tick);
+      };
+      pr.raf = requestAnimationFrame(tick);
+    }
   }
 
   async function mtMake() {
     const talk = MT.mode === 'talk';
     if (talk ? !MT.items.some((it) => it.kind === 'video') : MT.items.length < 2) return;
     mtPreviewStop();
+    if (MT.prog && MT.prog.raf) cancelAnimationFrame(MT.prog.raf);
+    MT.prog = null;   // a new montage counts from 0%
     MT.busy = true;
     const jobId = 'mt' + Date.now().toString(36);
     let off = null;
