@@ -320,6 +320,19 @@ const SCRIPT = {
       const r = await montage.make(ctx, video.getInfo, { mediaPaths: [LV], style: 'hype', lengthSec: L, aspect: '9:16', output: path.join(LD, `len-${L}.mp4`), mode: 'talk', hear: async () => talk });
       ok(Math.abs(r.duration - L) <= 1.5, `${L} s asked → ${r.duration.toFixed(1)} s made (within a second and a half)`, r.duration);
     }
+    // long sentences (about 6 s each) and a narrator: still the length asked for
+    {
+      const longLines = [];
+      for (let i = 0; i < 18; i++) longLines.push(`This is sentence number ${i} and it carries the whole message of hope for every one of you tonight.`);
+      const longTalk = say(longLines, 0.5).filter((w) => w.end < 129);
+      const vox = require(path.join(ROOT, 'src/main/voiceover'));
+      vox._setEngine({ generate: async () => ({ save: async (out) => make(['-f', 'lavfi', '-i', 'sine=f=900:d=3.5'], out) }) });
+      for (const L of [10, 15, 30]) {
+        const LD2 = path.join(LD, 'long'); fs.mkdirSync(LD2, { recursive: true });   // (its own folder: its own history)
+        const r = await montage.make(ctx, video.getInfo, { mediaPaths: [LV], style: 'hype', lengthSec: L, aspect: '9:16', output: path.join(LD2, `long-${L}.mp4`), mode: 'talk', hear: async () => longTalk, voice: 'am_michael' });
+        ok(Math.abs(r.duration - L) <= 1.5, `with ~6 s sentences and a narrator: ${L} s asked → ${r.duration.toFixed(1)} s made`, r.duration);
+      }
+    }
     const lineSet = (o) => new Set((montage.loadProject(o).shots || []).map((x) => Math.round(x.from)));
     const a = lineSet(path.join(LD, 'len-30.mp4'));
     const r2 = await montage.make(ctx, video.getInfo, { mediaPaths: [LV], style: 'hype', lengthSec: 30, aspect: '9:16', output: path.join(LD, 'len-30b.mp4'), mode: 'talk', hear: async () => talk });

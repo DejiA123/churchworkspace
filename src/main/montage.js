@@ -2092,12 +2092,16 @@ const videoKey = (f) => { try { return path.basename(f) + '|' + fs.statSync(f).s
 function loadHistory(output) { try { return JSON.parse(fs.readFileSync(historyFile(output), 'utf8')) || {}; } catch (e) { return {}; } }
 /** The spans of this video used by its last three edits. */
 function usedSpans(h, file) { return (h[videoKey(file)] || []).slice(-3).flat(); }
-function saveHistory(output, h, picks) {
+function saveHistory(output, h0, picks) {
   try {
+    // read again now (another montage may have finished while this one was made), and write it whole or not at all
+    const h = loadHistory(output);
     const by = new Map();
     for (const p of picks) { const k = videoKey(p.cand.file); if (!by.has(k)) by.set(k, []); by.get(k).push([round2(p.start), round2(p.end)]); }
     for (const [k, spans] of by) h[k] = (h[k] || []).concat([spans]).slice(-6);
-    fs.writeFileSync(historyFile(output), JSON.stringify(h));
+    const tmpf = historyFile(output) + '.' + process.pid + '.' + Date.now() + '.tmp';
+    fs.writeFileSync(tmpf, JSON.stringify(h));
+    fs.renameSync(tmpf, historyFile(output));
   } catch (e) { /* only a convenience */ }
 }
 
@@ -2320,34 +2324,87 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
      * the strongest unused lines that show someone are added before the payoff.
      */
     {
-      const voLen = (vo.intro ? vo.intro.len + 0.25 : 0) + (vo.outro ? vo.outro.len + 0.6 : 0);
-      const want = Math.max(4, opts.lengthSec - voLen);
       const lenOf = (p) => (p.end - p.start) + 0.23;
-      let tot = picks.reduce((n, p) => n + lenOf(p), 0);
-      while (tot > want + 1 && picks.length > 2) {
-        const mid = picks.slice(1, -1);
-        // the line whose removal lands nearest the length (the weaker of near-equals)
-        const best = mid.map((p) => ({ p, miss: Math.abs(tot - lenOf(p) - want), score: p.score }))
-          .sort((a, b) => (a.miss - b.miss) || (a.score - b.score))[0];
-        if (!best || tot - lenOf(best.p) < want - 2.5) break;
-        picks.splice(picks.indexOf(best.p), 1); tot -= lenOf(best.p);
+      const sum = (ps) => ps.reduce((n, p) => n + lenOf(p), 0);
+      /*
+       * 1) THE BEST FIT OF WHAT IS THERE: the narrator in full, its opening line only, or none — each against
+       *    every set of the edit's lines to leave out (the hook always stays; the last line left is the payoff).
+       *    The one that lands nearest the length wins; the narrator is kept whenever it fits as well, and
+       *    fewer lines are left out among equally good fits.
+       */
+      const introLen = vo.intro ? vo.intro.len + 0.25 : 0, outroLen = vo.outro ? vo.outro.len + 0.6 : 0;
+      const configs = [{ intro: !!vo.intro, outro: !!vo.outro }];
+      if (vo.outro) configs.push({ intro: !!vo.intro, outro: false });
+      if (vo.intro || vo.outro) configs.push({ intro: false, outro: false });
+      const rest = picks.slice(1);
+      let best = null;
+      for (const cf of configs) {
+        const w = Math.max(3, opts.lengthSec - (cf.intro ? introLen : 0) - (cf.outro ? outroLen : 0));
+        const n = rest.length;
+        const masks = n <= 14 ? (1 << n) : 1;
+        for (let m = 0; m < masks; m++) {
+          let t = lenOf(picks[0]), cost = 0, out = 0;
+          for (let i = 0; i < n; i++) { if (m & (1 << i)) { cost += rest[i].score; out++; } else t += lenOf(rest[i]); }
+          const miss = Math.abs(t - w);
+          const narr = (cf.intro ? 1 : 0) + (cf.outro ? 1 : 0);
+          const better = !best || miss < best.miss - 0.3 || (Math.abs(miss - best.miss) <= 0.3 && (narr > best.narr || (narr === best.narr && (out < best.out || (out === best.out && cost < best.cost)))));
+          if (better) best = { cf, m, miss, cost, out, narr, w };
+        }
       }
-      const inEdit = new Set(picks);
-      const pool = list.filter((p) => !inEdit.has(p) && !rejected.has(p) && p.end - p.start >= 1.2 && !HOUSEKEEPING.test(p.text))
-        .sort((a, b) => (a.usedBefore - b.usedBefore) || (b.score - a.score));
-      for (let round = 0; round < 3 && tot < want - 1.2 && pool.length; round++) {
-        const room = want + 1 - tot;
-        const batch = pool.filter((p) => lenOf(p) <= room + 0.5).slice(0, 6);
+      if (best) {
+        if (!best.cf.outro && vo.outro) { vo.outro = null; if (log) log('length: the narrator\'s closing line left out, to keep to the length'); }
+        if (!best.cf.intro && vo.intro) { vo.intro = null; if (log) log('length: the narrator\'s opening line left out, to keep to the length'); }
+        if (rest.length <= 14) { const drop = new Set(rest.filter((_, i) => best.m & (1 << i))); picks = picks.filter((p) => !drop.has(p)); }
+      }
+      const voLen = (vo.intro ? introLen : 0) + (vo.outro ? outroLen : 0);
+      const want = Math.max(3, opts.lengthSec - voLen);
+      const ok = (t) => t >= want - 1 && t <= want + 1;
+      let tot = sum(picks);
+      // (a long list: the greedy way)
+      while (tot > want + 1 && picks.length > 2) {
+        const m2 = picks.slice(1, -1).map((p) => ({ p, miss: Math.abs(tot - lenOf(p) - want) })).sort((x, y) => x.miss - y.miss)[0];
+        if (!m2 || m2.miss >= Math.abs(tot - want)) break;
+        picks.splice(picks.indexOf(m2.p), 1); tot = sum(picks);
+      }
+      const inEdit = () => new Set(picks);
+      const pool = list.filter((p) => !inEdit().has(p) && !rejected.has(p) && p.end - p.start >= 1.2 && !HOUSEKEEPING.test(p.text) && !(p.text.match(FILLER_ANY) || []).length)
+        .sort((x, y) => (x.usedBefore - y.usedBefore) || (y.score - x.score));
+      const showsSomeone = async (cands) => {
+        const need = cands.filter((p) => !p.looks);
+        if (seen && need.length) await lookLines(need);
+        return cands.filter((p) => !seen || (!nobody(p) && (p.looks || []).some((l) => l.people > 0)));
+      };
+      // 2) too short: the strongest unused lines that show someone, before the payoff
+      for (let round = 0; round < 3 && tot < want - 1 && pool.length; round++) {
+        const batch = pool.filter((p) => lenOf(p) <= want + 1 - tot + 0.3).slice(0, 6);
         if (!batch.length) break;
         batch.forEach((p) => pool.splice(pool.indexOf(p), 1));
-        if (seen) await lookLines(batch);
-        for (const p of batch) {
-          if (tot >= want - 1.2) break;
-          if (seen && (nobody(p) || !(p.looks || []).some((l) => l.people > 0))) { rejected.add(p); continue; }
-          if (lenOf(p) > want + 1 - tot + 0.5) continue;
+        for (const p of await showsSomeone(batch)) {
+          if (tot >= want - 1) break;
+          if (lenOf(p) > want + 1 - tot + 0.3) continue;
           if (picks.length < 2) picks.push(p); else picks.splice(picks.length - 1, 0, p);
           tot += lenOf(p);
         }
+        batch.forEach((p) => { if (!picks.includes(p)) rejected.add(p); });
+      }
+      // 3) still off: swap a line (any — the hook and payoff too, when needed) for an unused one that shows
+      //    someone and lands nearer; up to three swaps
+      for (let k = 0; k < 3 && !ok(tot) && pool.length; k++) {
+        const opts2 = [];
+        for (const p of picks) for (const q of pool) {
+          const t2 = tot - lenOf(p) + lenOf(q);
+          if (Math.abs(t2 - want) < Math.abs(tot - want) - 0.3) opts2.push({ p, q, miss: Math.abs(t2 - want), keep: (p === picks[0] || p === picks[picks.length - 1]) ? 1 : 0 });
+        }
+        opts2.sort((x, y) => (x.miss - y.miss) || (x.keep - y.keep) || (y.q.score - x.q.score));
+        const tryQ = [...new Set(opts2.slice(0, 12).map((x) => x.q))].slice(0, 6);
+        if (!tryQ.length) break;
+        const good = new Set(await showsSomeone(tryQ));
+        tryQ.forEach((q) => { if (!good.has(q)) { rejected.add(q); pool.splice(pool.indexOf(q), 1); } });
+        const pick = opts2.find((x) => good.has(x.q));
+        if (!pick) continue;
+        picks[picks.indexOf(pick.p)] = pick.q;
+        pool.splice(pool.indexOf(pick.q), 1);
+        tot = sum(picks);
       }
       if (log) log(`length: ${tot.toFixed(1)} s of lines${voLen ? ` + ${voLen.toFixed(1)} s narrator` : ''} for ${opts.lengthSec} s asked`);
     }

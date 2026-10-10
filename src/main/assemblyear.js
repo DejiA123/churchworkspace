@@ -55,11 +55,15 @@ async function transcribe(audio, { terms = [], models = null, cancelled = () => 
   let job = null, lastErr = null, asked = null;
   for (const t of tries) {
     try { job = await call('/transcript', { method: 'POST', body: JSON.stringify(Object.assign({}, base, t)), headers: { 'content-type': 'application/json' }, fetchImpl }); asked = t; break; }
-    catch (e) { lastErr = e; if (!/ 400/.test(e.message)) throw e; }
-  }
-  if ((!job || !job.id) && highlights && lastErr && / 400/.test(lastErr.message)) {
-    // the highlights were what it would not take: the words matter more — ask without them
-    return transcribe(audio, { terms, models, cancelled, fetchImpl, timeoutMs, highlights: false });
+    catch (e) {
+      lastErr = e; if (!/ 400/.test(e.message)) throw e;
+      // the key phrases may be what it would not take: the same model, without them, before an older one
+      if (base.auto_highlights) {
+        const plain = Object.assign({}, base); delete plain.auto_highlights;
+        try { job = await call('/transcript', { method: 'POST', body: JSON.stringify(Object.assign({}, plain, t)), headers: { 'content-type': 'application/json' }, fetchImpl }); asked = t; break; }
+        catch (e2) { lastErr = e2; if (!/ 400/.test(e2.message)) throw e2; }
+      }
+    }
   }
   if (!job || !job.id) throw lastErr || new Error('AssemblyAI would not start');
   const t0 = Date.now();

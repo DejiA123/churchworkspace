@@ -60,6 +60,14 @@ function fake({ refuse = () => false } = {}) {
     ok(f.asked[0].speech_models.join() === 'universal-3-pro' && f.asked[0].keyterms_prompt[0] === 'Adeboye' && w.model === 'universal-3-pro', 'Universal-3 Pro, as asked', f.asked[0]);
   }
 
+  console.log('\n[2c] key phrases refused: the same newest model, without them (not an older model)');
+  {
+    const f = fake({ refuse: (b) => !!b.auto_highlights });
+    const w = await aai.transcribe(Buffer.from('x'), { terms: ['Adeboye'], highlights: true, fetchImpl: f.fetchImpl });
+    ok(f.asked.length === 2 && f.asked[0].auto_highlights && !f.asked[1].auto_highlights && f.asked[1].speech_models[0] === 'universal-3-5-pro' && f.asked[1].keyterms_prompt[0] === 'Adeboye' && w.length === 2,
+      'asked again on Universal-3.5 Pro with every Word Book name, only without the key phrases', f.asked.map((b) => [b.auto_highlights, b.speech_models]));
+  }
+
   console.log('\n[3] words in seconds, with confidence');
   {
     const f = fake();
