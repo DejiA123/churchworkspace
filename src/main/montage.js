@@ -1146,7 +1146,8 @@ function fitChain(c, W, H, focus, scale = 1, tag = '', fx = null, track = null) 
 
 /** `t0`: where in the shot this piece starts, so a zoom carries on across the sections of one shot. */
 function effectChain(effect, W, H, dur, t0 = 0) {
-  const sc = (f) => `scale=w='trunc(${W}*(${f})/2)*2':h=-2:eval=frame,crop=${W}:${H}`;
+  // a zoom keeps more of the TOP of the picture than the bottom: that is where heads are (a centred zoom cut them off)
+  const sc = (f) => `scale=w='trunc(${W}*(${f})/2)*2':h=-2:eval=frame,crop=${W}:${H}:(iw-ow)/2:(ih-oh)*0.3`;
   const T = t0 ? `(t+${t0.toFixed(3)})` : 't';
   switch (effect) {
     case 'punch_in': return t0 >= 0.3 ? '' : sc(`if(lt(${T},0.3),1.16-0.53*${T},1)`);
@@ -1155,7 +1156,7 @@ function effectChain(effect, W, H, dur, t0 = 0) {
     case 'flash': return t0 ? '' : 'fade=t=in:st=0:d=0.18:color=white';
     // the talk edit's jump zooms: the same speaker, framed closer, cut to on a word
     case 'hold_in': return sc('1.12');
-    case 'hold_tight': return sc('1.24');
+    case 'hold_tight': return sc('1.18');
     default: return '';
   }
 }
@@ -1793,11 +1794,15 @@ post_caption: the caption for the post, 1–3 short sentences, with a question o
 vo_intro / vo_outro: ONLY when a narrator is asked for (otherwise leave both empty). vo_intro is spoken by a narrator over B-roll BEFORE the first line: 6–14 words that create curiosity and make people stay ("He was about to give up — then he heard this."). Never a summary, never "in this video". vo_outro is spoken after the last line: 5–12 words, a warm call to follow or share. Plain words a person would say aloud — no emojis, no hashtags.`;
 
 function talkBrief(opts, list) {
-  return `Style: ${opts.style} — ${STYLES[opts.style] || ''}\nTarget length: about ${opts.lengthSec} seconds of speech.`
+  const used = list.some((p) => p.usedBefore), hl = list.some((p) => p.hl > 0);
+  return `Style: ${opts.style} — ${STYLES[opts.style] || ''}\nTarget length: ${opts.lengthSec} seconds of speech — choose lines that add up to it.`
     + `\nNarrator: ${opts.voice ? 'YES — write vo_intro and vo_outro.' : 'no — leave vo_intro and vo_outro empty.'}`
     + (aboutLines(opts).length ? '\n' + aboutLines(opts).join('\n') : '')
     + (opts.brief ? `\nWhat the operator says it is about: ${opts.brief}` : '')
-    + `\n\nPhrases (${list.length}):\n` + list.map((p) => `${p.id} | video ${p.vid} | ${p.start.toFixed(1)}-${p.end.toFixed(1)}s | loud ${p.score} | ${p.text}`).join('\n');
+    + (opts.angle ? `\nANGLE FOR THIS EDIT: build it around "${opts.angle}" — the hook and the payoff should serve that idea.` : '')
+    + (hl ? '\nLines marked ★ hold the key phrases of the whole message (ranked by AssemblyAI): strong candidates.' : '')
+    + (used ? '\nLines marked (used before) were in earlier edits of this video. The operator wants a FRESH edit: choose DIFFERENT lines — use one of those only if nothing else comes close.' : '')
+    + `\n\nPhrases (${list.length}):\n` + list.map((p) => `${p.id} | video ${p.vid} | ${p.start.toFixed(1)}-${p.end.toFixed(1)}s | loud ${p.score}${p.hl > 0 ? ' | ★' + p.hl.toFixed(2) : ''}${p.usedBefore ? ' | (used before)' : ''} | ${p.text}`).join('\n');
 }
 
 async function talkWithClaude(list, opts) {
@@ -1829,7 +1834,7 @@ async function talkWithGroq(list, opts) {
   if (!cw.access || !cw.access().key) return null;
   const prompt = talkBrief(opts, list)
     + '\n\nReply with JSON only, exactly this shape: {"concept":"","title":"","hook_text":"","post_caption":"","hashtags":[""],"picks":[{"id":"p1"}],"vo_intro":"","vo_outro":""}';
-  const text = await cw.chat({ system: TALK_SYSTEM, prompt, json: true, maxTokens: 2500, temperature: 0.5, timeoutMs: 90000, evenIfOff: true });
+  const text = await cw.chat({ system: TALK_SYSTEM, prompt, json: true, maxTokens: 2500, temperature: 0.9, timeoutMs: 90000, evenIfOff: true });   // (warm: a different edit each time)
   const plan = text ? cw.parseJson(text) : null;
   return plan && Array.isArray(plan.picks) ? { plan, director: 'groq', model: (cw.state && cw.state().model) || 'groq' } : null;
 }
@@ -1839,8 +1844,12 @@ function talkByRules(list, opts) {
   // without an AI to judge them, a line with an "um" in it or the business of the service is never used
   const clean = list.filter((p) => !HOUSEKEEPING.test(p.text) && !(p.text.match(FILLER_ANY) || []).length);
   if (clean.length >= 2) list = clean;
-  const hook = list.filter((p) => p.end - p.start >= 1.6 && p.end - p.start <= 6.5).sort((a, b) => b.score - a.score)[0] || list[0];
-  const rest = list.filter((p) => p !== hook).sort((a, b) => b.score - a.score);
+  // a line used in an earlier edit of this video counts for less, and near-equal lines are taken in a new order each time
+  const base = new Map(list.map((p) => [p, p.score - (p.usedBefore ? 0.5 : 0)]));
+  const val = new Map(list.map((p) => [p, base.get(p) + Math.random() * 0.12]));
+  // the hook: the strongest line not used before (the variety is in the rest, and in what earlier edits used)
+  const hook = list.filter((p) => p.end - p.start >= 1.6 && p.end - p.start <= 6.5).sort((a, b) => base.get(b) - base.get(a))[0] || list[0];
+  const rest = list.filter((p) => p !== hook).sort((a, b) => val.get(b) - val.get(a));
   const picked = [hook];
   let total = hook.end - hook.start;
   for (const p of rest) {
@@ -1883,7 +1892,7 @@ async function laySpeech(ctx, file, parts, tmp) {
  */
 // 12 columns on a bigger frame: an eighth of the picture was too coarse to keep a person whole in a 9:16 cut
 const SPEAK_COLS = 12, SPEAK_TILE_W = 384, SPEAK_TILE_H = 216, SPEAK_MAX_FRAMES = 48;
-const MAX_MOVE_ZOOM = 1.24;   // the tightest zoom move (effectChain hold_tight): the share of the cut it still shows
+const MAX_MOVE_ZOOM = 1.18;   // the tightest zoom move (effectChain hold_tight): the share of the cut it still shows
 const needsCrop = (c, W, H) => c && c.kind === 'video' && c.w && c.h && Math.abs(Math.log((c.w / c.h) / (W / H))) >= 0.42;
 /* An ffmpeg that can draw text, for the column numbers: the bundled one cannot
  * (no freetype), the system's usually can (the server image installs it). */
@@ -2071,6 +2080,27 @@ async function writeTalkPost(picks, opts, P, hook) {
   return { caption: lines.filter(Boolean).join('\n\n'), hashtags: fallbackTags };
 }
 
+/*
+ * ►► A FRESH EDIT EACH TIME. ◄◄ "It can't be the same ones again." Which
+ * moments each video's Viral Montages used is kept beside the montages
+ * (.viral-history.json, by the video's name and size); the next edit of the
+ * same video is told which lines were used and asked for different ones, and
+ * built round a different key idea of the message.
+ */
+const historyFile = (output) => path.join(path.dirname(output), '.viral-history.json');
+const videoKey = (f) => { try { return path.basename(f) + '|' + fs.statSync(f).size; } catch (e) { return path.basename(f); } };
+function loadHistory(output) { try { return JSON.parse(fs.readFileSync(historyFile(output), 'utf8')) || {}; } catch (e) { return {}; } }
+/** The spans of this video used by its last three edits. */
+function usedSpans(h, file) { return (h[videoKey(file)] || []).slice(-3).flat(); }
+function saveHistory(output, h, picks) {
+  try {
+    const by = new Map();
+    for (const p of picks) { const k = videoKey(p.cand.file); if (!by.has(k)) by.set(k, []); by.get(k).push([round2(p.start), round2(p.end)]); }
+    for (const [k, spans] of by) h[k] = (h[k] || []).concat([spans]).slice(-6);
+    fs.writeFileSync(historyFile(output), JSON.stringify(h));
+  } catch (e) { /* only a convenience */ }
+}
+
 /** A finished piece's length, as the join counts it (its container's duration). */
 async function pieceDuration(ctx, file) {
   if (!ctx.ffprobe) return 0;
@@ -2125,6 +2155,7 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
   const vids = infos.filter((x) => !x.image);
   if (!vids.length) throw new Error('Add at least one video with someone speaking — the Viral Montage is cut from what is said.');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mw-talk-'));
+  const history = loadHistory(output);
   try {
     // 1) HEAR
     const cands = [];
@@ -2149,8 +2180,22 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
       for (const p of phrasesOf(words, TALK_LINE_MAX)) {
         if (p.end > D) continue;
         p.id = 'p' + (++k); p.vid = i + 1; p.cand = c; p.score = phraseScore(p, loud);
+        // AssemblyAI's key phrases: the line that holds one of the message's most important phrases rises
+        p.hl = 0;
+        for (const h of (words.highlights || [])) for (const [a, b] of h.at || []) if (a < p.end && b > p.start) p.hl = Math.max(p.hl, h.rank || 0);
+        if (p.hl > 0) p.score = round2(p.score + 0.25 * p.hl);
+        // used in an earlier Viral Montage of this video: a fresh edit is asked for
+        p.usedBefore = usedSpans(history, v.file).some(([a, b]) => a < p.end - 0.2 && b > p.start + 0.2);
         phrases.push(p);
       }
+    }
+    // the key idea this edit is built round — a different one each time (AssemblyAI's top phrases)
+    {
+      const keys = [];
+      for (const p of phrases) if (p.hl > 0) keys.push([p.hl, p.text]);
+      keys.sort((a, b) => b[0] - a[0]);
+      const top = keys.slice(0, 8).map((x) => x[1]).filter((t, i, a) => a.indexOf(t) === i);
+      if (top.length) opts.angle = String(top[Math.floor(Math.random() * top.length)]).slice(0, 140);
     }
     if (phrases.length < 2) {
       const e = new Error('No one could be heard speaking in these videos. The Viral Montage is cut from what is said — choose “AI Standard Montage” for clips without speech.');
@@ -2266,6 +2311,45 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
         vo.why = (e && e.message) || 'the voice could not be made';
         if (log) log('voiceover: ' + vo.why);
       }
+    }
+    /*
+     * ►► THE LENGTH ASKED FOR, EXACTLY. ◄◄ "If I select 30 seconds it must be
+     * perfect." The narrator's real length is known now; the lines are fitted
+     * to what is left — whole lines only (a sentence is never cut): too long,
+     * the weakest middle line goes (never the hook or the payoff); too short,
+     * the strongest unused lines that show someone are added before the payoff.
+     */
+    {
+      const voLen = (vo.intro ? vo.intro.len + 0.25 : 0) + (vo.outro ? vo.outro.len + 0.6 : 0);
+      const want = Math.max(4, opts.lengthSec - voLen);
+      const lenOf = (p) => (p.end - p.start) + 0.23;
+      let tot = picks.reduce((n, p) => n + lenOf(p), 0);
+      while (tot > want + 1 && picks.length > 2) {
+        const mid = picks.slice(1, -1);
+        // the line whose removal lands nearest the length (the weaker of near-equals)
+        const best = mid.map((p) => ({ p, miss: Math.abs(tot - lenOf(p) - want), score: p.score }))
+          .sort((a, b) => (a.miss - b.miss) || (a.score - b.score))[0];
+        if (!best || tot - lenOf(best.p) < want - 2.5) break;
+        picks.splice(picks.indexOf(best.p), 1); tot -= lenOf(best.p);
+      }
+      const inEdit = new Set(picks);
+      const pool = list.filter((p) => !inEdit.has(p) && !rejected.has(p) && p.end - p.start >= 1.2 && !HOUSEKEEPING.test(p.text))
+        .sort((a, b) => (a.usedBefore - b.usedBefore) || (b.score - a.score));
+      for (let round = 0; round < 3 && tot < want - 1.2 && pool.length; round++) {
+        const room = want + 1 - tot;
+        const batch = pool.filter((p) => lenOf(p) <= room + 0.5).slice(0, 6);
+        if (!batch.length) break;
+        batch.forEach((p) => pool.splice(pool.indexOf(p), 1));
+        if (seen) await lookLines(batch);
+        for (const p of batch) {
+          if (tot >= want - 1.2) break;
+          if (seen && (nobody(p) || !(p.looks || []).some((l) => l.people > 0))) { rejected.add(p); continue; }
+          if (lenOf(p) > want + 1 - tot + 0.5) continue;
+          if (picks.length < 2) picks.push(p); else picks.splice(picks.length - 1, 0, p);
+          tot += lenOf(p);
+        }
+      }
+      if (log) log(`length: ${tot.toFixed(1)} s of lines${voLen ? ` + ${voLen.toFixed(1)} s narrator` : ''} for ${opts.lengthSec} s asked`);
     }
     // moments the edit did not use, from every speaking video — B-roll for the narrator and between lines
     // (never a line already seen to show nobody)
@@ -2455,6 +2539,7 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
       if (stage) stage('🎙 Laying the narrator on…');
       for (const f of [output, baseOf(output)]) if (fs.existsSync(f)) await laySpeech(ctx, f, voices, tmp);
     }
+    saveHistory(output, history, picks);   // the next edit of this video is asked for different lines
     withAbout(plan, opts.about);   // the caption carries the call to action, speaker and church — in the saved edit too
     saveProject(output, projectOf(plan, cands.concat(broll), { aspect: opts.aspect, keepAudio: true, style: opts.style, full: false }, plan));
     return resultOf(plan, output, opts, {

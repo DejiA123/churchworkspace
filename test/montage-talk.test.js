@@ -304,6 +304,40 @@ const SCRIPT = {
     ok(/God is not finished with you/.test(asked) && /background only/.test(asked), 'the writer is given the words actually said; the notes only as background', asked.slice(0, 200));
   }
 
+  console.log('\nTHE LENGTH ASKED FOR, EXACTLY — AND A FRESH EDIT EACH TIME');
+  {
+    const LD = fs.mkdtempSync(path.join(WORK, 'len-'));
+    const LV = make(['-f', 'lavfi', '-i', 'testsrc2=s=360x640:r=30:d=130', '-f', 'lavfi', '-i', 'sine=f=220:d=130', '-shortest', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast'], path.join(LD, 'sermon.mp4'));
+    const lines = [];
+    const bank = ['God is faithful to every promise he made', 'Your season of harvest has come', 'Do not give up in the middle of the storm', 'He will finish the work he started in you', 'Lift your eyes to the hills where your help comes from',
+      'The joy of the Lord is your strength today', 'You are not forgotten you are chosen', 'Faith is the substance of things hoped for', 'Every chain is broken in his name', 'Walk by faith and not by sight',
+      'Your latter shall be greater than your former', 'Weeping may endure for a night but joy comes', 'Be still and know that he is God', 'He makes a way where there seems to be no way', 'Greater is he that is in you'];
+    for (let r = 0; r < 4; r++) bank.forEach((b, i) => lines.push(b + (r ? ' ' + ['indeed', 'my friend', 'church'][r - 1] : '') + '.'));
+    const talk = say(lines, 0.5).filter((w) => w.end < 129);
+    // AssemblyAI's key phrases, on two of the lines
+    talk.highlights = [{ text: 'harvest has come', rank: 0.9, at: [[talk.find((w) => w.text === 'harvest').start, talk.find((w) => w.text === 'harvest').end]] }];
+    for (const L of [15, 30]) {
+      const r = await montage.make(ctx, video.getInfo, { mediaPaths: [LV], style: 'hype', lengthSec: L, aspect: '9:16', output: path.join(LD, `len-${L}.mp4`), mode: 'talk', hear: async () => talk });
+      ok(Math.abs(r.duration - L) <= 1.5, `${L} s asked → ${r.duration.toFixed(1)} s made (within a second and a half)`, r.duration);
+    }
+    const lineSet = (o) => new Set((montage.loadProject(o).shots || []).map((x) => Math.round(x.from)));
+    const a = lineSet(path.join(LD, 'len-30.mp4'));
+    const r2 = await montage.make(ctx, video.getInfo, { mediaPaths: [LV], style: 'hype', lengthSec: 30, aspect: '9:16', output: path.join(LD, 'len-30b.mp4'), mode: 'talk', hear: async () => talk });
+    const b = lineSet(path.join(LD, 'len-30b.mp4'));
+    const same = [...b].filter((x) => a.has(x)).length;
+    ok(same <= Math.ceil(b.size / 3) && Math.abs(r2.duration - 30) <= 1.5, 'made again: a fresh edit — mostly different moments, the same length', { same, of: b.size, d: r2.duration });
+    // with an AI: it is told the key phrases, what was used before, and an angle
+    const cw = require(path.join(ROOT, 'src/main/cloudwrite'));
+    const realAccess = cw.access, realChat = cw.chat;
+    let asked = '';
+    cw.access = () => ({ key: 'test' });
+    cw.chat = async ({ system, prompt }) => { if (/best short-form video editor/.test(system || '')) asked = prompt; return ''; };
+    try { await montage.make(ctx, video.getInfo, { mediaPaths: [LV], style: 'hype', lengthSec: 30, aspect: '9:16', output: path.join(LD, 'len-30c.mp4'), mode: 'talk', hear: async () => talk }); }
+    finally { cw.access = realAccess; cw.chat = realChat; }
+    ok(/★0\.90/.test(asked) && /\(used before\)/.test(asked) && /ANGLE FOR THIS EDIT: build it around "/.test(asked) && /FRESH edit/.test(asked),
+      'the AI is told AssemblyAI\'s key phrases (★), which lines earlier edits used, and an angle to build this one round', asked.slice(0, 400));
+  }
+
   console.log('\nNOTHING SAID');
   let err = null;
   try {

@@ -781,11 +781,14 @@ async function montageHear(file, durationSec, onProgress) {
       let p = 12;
       const walk = setInterval(() => { p = Math.min(92, p + Math.max(0.4, (92 - p) * 0.04)); if (onProgress) onProgress(Math.round(p)); }, 1500);
       let aw = [];
-      try { aw = await aai.transcribe(audio, { terms: aaiTerms(), cancelled: () => jobs.isCancelled() }); }
+      try { aw = await aai.transcribe(audio, { terms: aaiTerms(), cancelled: () => jobs.isCancelled(), highlights: true }); }
       finally { clearInterval(walk); }
       if (aw && aw.length) {
         if (onProgress) onProgress(100);
-        return wordbook.apply(aw).entries;
+        const entries = wordbook.apply(aw).entries;
+        // AssemblyAI's key phrases ride along (the montage leans on them for the strongest moments)
+        if (Array.isArray(aw.highlights)) Object.defineProperty(entries, 'highlights', { value: aw.highlights, enumerable: false });
+        return entries;
       }
     }
   } catch (err) {

@@ -31,11 +31,16 @@ async function call(path, { method = 'GET', body, headers = {}, fetchImpl = fetc
  * Hear `audio` (a Buffer: FLAC or any format it takes). Returns [{text, start,
  * end}] in seconds from the start of the audio. Throws when it cannot.
  */
-async function transcribe(audio, { terms = [], models = null, cancelled = () => false, fetchImpl = fetch, timeoutMs = 15 * 60e3 } = {}) {
+/*
+ * `highlights`: AssemblyAI also marks the phrases that matter most in what was
+ * said (its "key phrases", ranked) — the Viral Montage leans on them to find
+ * the strongest moments. Given back as words.highlights [{text, rank, at:[[s,e]]}].
+ */
+async function transcribe(audio, { terms = [], models = null, cancelled = () => false, fetchImpl = fetch, timeoutMs = 15 * 60e3, highlights = false } = {}) {
   if (!ready()) throw new Error('no AssemblyAI key');
   const up = await call('/upload', { method: 'POST', body: audio, headers: { 'content-type': 'application/octet-stream' }, fetchImpl });
   if (!up.upload_url) throw new Error('AssemblyAI took no audio');
-  const base = { audio_url: up.upload_url, language_code: 'en', punctuate: true, format_text: true };
+  const base = Object.assign({ audio_url: up.upload_url, language_code: 'en', punctuate: true, format_text: true }, highlights ? { auto_highlights: true } : {});
   // the whole Word Book: the newest models take up to 1,000 names of up to six words each
   const hints = [...new Set((terms || []).map((t) => String(t || '').trim()).filter((t) => t && t.split(/\s+/).length <= 6))].slice(0, 1000);
   // newest model first; a request it does not take is asked again the plain way
@@ -52,6 +57,10 @@ async function transcribe(audio, { terms = [], models = null, cancelled = () => 
     try { job = await call('/transcript', { method: 'POST', body: JSON.stringify(Object.assign({}, base, t)), headers: { 'content-type': 'application/json' }, fetchImpl }); asked = t; break; }
     catch (e) { lastErr = e; if (!/ 400/.test(e.message)) throw e; }
   }
+  if ((!job || !job.id) && highlights && lastErr && / 400/.test(lastErr.message)) {
+    // the highlights were what it would not take: the words matter more — ask without them
+    return transcribe(audio, { terms, models, cancelled, fetchImpl, timeoutMs, highlights: false });
+  }
   if (!job || !job.id) throw lastErr || new Error('AssemblyAI would not start');
   const t0 = Date.now();
   for (;;) {
@@ -66,6 +75,10 @@ async function transcribe(audio, { terms = [], models = null, cancelled = () => 
       // which model heard it: the one AssemblyAI says it used, else the one asked for
       const used = r.speech_model_used || r.speech_model || (asked && (asked.speech_models ? asked.speech_models[0] : asked.speech_model)) || '';
       Object.defineProperty(words, 'model', { value: String(used || 'assemblyai'), enumerable: false });
+      const hl = (r.auto_highlights_result && Array.isArray(r.auto_highlights_result.results) ? r.auto_highlights_result.results : [])
+        .filter((h) => h && h.text).map((h) => ({ text: String(h.text), rank: Math.round((+h.rank || 0) * 1000) / 1000,
+          at: (h.timestamps || []).map((x) => [(+x.start || 0) / 1000, (+x.end || 0) / 1000]) }));
+      Object.defineProperty(words, 'highlights', { value: hl, enumerable: false });
       return words;
     }
     if (r.status === 'error') throw new Error('AssemblyAI: ' + String(r.error || 'failed').slice(0, 160));
