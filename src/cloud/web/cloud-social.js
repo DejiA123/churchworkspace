@@ -1335,14 +1335,20 @@
     try { localStorage.setItem(MT_ABOUT_KEY, JSON.stringify({ speaker: MT.about.speaker, church: MT.about.church, cta: MT.about.cta })); } catch (e) { /* private window */ }
   }
   /* "Teaching with Bishop David Richman.mp4" → "Bishop David Richman": a titled name in a file's name */
-  const MT_TITLES = 'Pastor|Ps|Bishop|Archbishop|Rev(?:erend)?|Dr|Apostle|Prophet(?:ess)?|Evangelist|Minister|Elder|Deacon(?:ess)?|Baba|Mummy|Daddy|Pst';
+  const MT_TITLES = 'Pastor|Pst|Bishop|Archbishop|Rev(?:erend)?|Dr|Apostle|Prophet(?:ess)?|Evangelist|Minister|Elder|Deacon(?:ess)?|Baba|Mummy|Daddy';
+  // words a file's name goes on with after the name — never part of it
+  const MT_NOT_NAME = /^(live|stream|service|sermon|message|teaching|preaching|part|pt|sunday|monday|tuesday|wednesday|thursday|friday|saturday|night|day|morning|evening|full|hd|clip|video|worship|conference|special|session|at|on|in|the|and|with|of|vol|episode|ep|final|edit|copy)$/i;
   function mtSpeakerGuesses() {
     const out = [];
+    const re = new RegExp(`(?:^|[^\\p{L}])(${MT_TITLES})\\.?\\s+((?:\\p{Lu}[\\p{L}'’]*\\s*){1,3})`, 'giu');
     for (const it of MT.items) {
       const n = String((it.file && it.file.name) || it.name || '').replace(/\.[^.]+$/, '').replace(/[_+]+/g, ' ').replace(/\s+-\s+|-/g, ' ');
-      const m = n.match(new RegExp(`\\b(${MT_TITLES})\\.?\\s+([A-Z][\\w'’]+(?:\\s+[A-Z][\\w'’]+){0,2})`));
-      if (m) {
-        const name = (m[1] + ' ' + m[2]).replace(/\s+/g, ' ').trim();
+      for (const m of n.matchAll(re)) {
+        const title = m[1].charAt(0).toUpperCase() + m[1].slice(1);
+        const parts = [];
+        for (const w of m[2].trim().split(/\s+/)) { if (MT_NOT_NAME.test(w) || !/^\p{Lu}/u.test(w)) break; parts.push(w); }
+        if (!parts.length) continue;
+        const name = title + ' ' + parts.join(' ');
         if (!out.includes(name)) out.push(name);
       }
     }

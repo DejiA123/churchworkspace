@@ -2460,14 +2460,14 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 /* (an attribute-hidden toggle or section — the Viral Montage hides "keep the clips’ sound" and Order — must stay hidden) */
 #cloudMontage [hidden] { display: none !important; }
 .mt-toggle input { width: 20px; height: 20px; margin: 0; accent-color: #a855f7; }
-.mt-brief { width: 100%; box-sizing: border-box; margin: 0; padding: 10px 12px; font: 16px/1.4 inherit; border-radius: 12px; resize: none;
+.mt-brief { width: 100%; box-sizing: border-box; margin: 0; padding: 10px 12px; font-family: inherit; font-size: 16px; line-height: 1.4; border-radius: 12px; resize: none;
   background: var(--ph-panel-2, #1d1e24); color: var(--ph-text, #fff); border: 1px solid var(--ph-line, #2a2b32); }
 .mt-sec .mt-chip[data-mt-copy] { margin-top: 10px; }
 /* "What's it about?": a tap for the occasion, then a few short, labelled boxes */
 .mt-about .mt-row { margin-bottom: 4px; }
 .mt-field { display: block; margin-top: 12px; }
-.mt-field > span { display: block; margin: 0 0 6px 2px; font: 600 13px/1.2 inherit; color: var(--ph-text, #fff); }
-.mt-field input { width: 100%; box-sizing: border-box; height: 46px; margin: 0; padding: 0 12px; font: 16px/1.2 inherit; border-radius: 12px;
+.mt-field > span { display: block; margin: 0 0 6px 2px; font-weight: 600; font-size: 13px; line-height: 1.2; color: var(--ph-text, #fff); }
+.mt-field input { width: 100%; box-sizing: border-box; height: 46px; margin: 0; padding: 0 12px; font-family: inherit; font-size: 16px; line-height: 1.2; border-radius: 12px;
   background: var(--ph-panel-2, #1d1e24); color: var(--ph-text, #fff); border: 1px solid var(--ph-line, #2a2b32); }
 .mt-field input:focus, .mt-field textarea:focus { outline: none; border-color: #a855f7; box-shadow: 0 0 0 3px rgba(168,85,247,.25); }
 .mt-field input::placeholder, .mt-field textarea::placeholder { color: var(--ph-muted, #9b9ea8); opacity: .7; }

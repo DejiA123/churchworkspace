@@ -460,11 +460,20 @@ function aboutLines(opts) {
 function withAbout(plan, about) {
   const a = about || {};
   if (!a.cta && !a.speaker && !a.church) return plan;
-  const has = (txt, x) => String(txt || '').toLowerCase().includes(String(x).toLowerCase());
+  // whole words only: "Ade" is not named by "made"
+  const esc = (x) => String(x).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const named = (txt, x) => new RegExp('(^|[^\\p{L}\\p{N}])' + esc(x) + '(?![\\p{L}\\p{N}])', 'iu').test(String(txt || ''));
   let cap = String(plan.postCaption || '').trim();
-  if (a.speaker && !has(cap, a.speaker)) cap = [cap, `🎤 ${a.speaker}${a.church && !has(cap, a.church) ? ' · ' + a.church : ''}`].filter(Boolean).join('\n\n');
-  else if (a.church && !has(cap, a.church)) cap = [cap, `⛪ ${a.church}`].filter(Boolean).join('\n\n');
-  if (a.cta && !has(cap, a.cta)) cap = [cap, a.cta].filter(Boolean).join('\n\n');
+  // the call to action goes LAST — taken out wherever the AI put it, and put back at the end
+  // (only when it closes the caption — one inside a sentence stays where it is)
+  let ctaAt = false;
+  if (a.cta) {
+    const end = new RegExp('\\s*' + esc(a.cta) + '[\\s.!]*$', 'iu');
+    if (end.test(cap)) { cap = cap.replace(end, '').trim(); ctaAt = true; }
+  }
+  if (a.speaker && !named(cap, a.speaker)) cap = [cap, `🎤 ${a.speaker}${a.church && !named(cap, a.church) ? ' · ' + a.church : ''}`].filter(Boolean).join('\n\n');
+  else if (a.church && !named(cap, a.church)) cap = [cap, `⛪ ${a.church}`].filter(Boolean).join('\n\n');
+  if (a.cta && (ctaAt || !named(cap, a.cta))) cap = [cap, a.cta].filter(Boolean).join('\n\n');
   const tags = (plan.hashtags || []).slice();
   for (const name of [a.church, a.speaker]) {
     const t = String(name || '').replace(/[^\p{L}\p{N}]+/gu, '');
