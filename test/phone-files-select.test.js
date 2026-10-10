@@ -107,6 +107,8 @@ async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise
     const target = await page.evaluate(() => { const r = document.querySelector('#cloudFilesList .cf-row.can-del'); return r && r.dataset.path; });
     await page.evaluate((p) => window.VideoEditor.openPath(p), target);
     await page.waitForFunction((p) => window.VideoEditor.sourcePath() === p, target, { timeout: 20000 });
+    // as an iPhone video leaves it: "Preparing a smooth preview" in place of the empty-studio prompt, and music loaded
+    await page.evaluate(() => { const nv = document.getElementById('veNoVid'); nv.innerHTML = '<p>Preparing a smooth preview <b class="ve-prep-pct">99%</b></p>'; const m = document.getElementById('veMusicAudio'); if (m) { m.dataset.file = '/x.mp3'; m.dataset.src = 'blob:x'; } });
     await page.click('#cloudFilesSelect'); await sleep(300);
     await page.click(`#cloudFilesList .cf-row[data-path="${target.replace(/"/g, '\\"')}"] .cf-main`);
     await page.click('#cloudFilesSelDelete'); await sleep(200);
@@ -114,6 +116,20 @@ async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise
     st = await page.evaluate(() => ({ open: window.VideoEditor.hasVideo(), says: document.body.innerText }));
     check(!fs.existsSync(target) && !st.open && /closed in the Video Studio/.test(st.says) && !/Not deleted/.test(st.says),
       '[4] the video open in the studio is deleted when asked, and the studio is closed (not "Not deleted")', { gone: !fs.existsSync(target), open: st.open });
+    st = await page.evaluate(() => { const nv = document.getElementById('veNoVid'); const m = document.getElementById('veMusicAudio'); return { browse: !!document.getElementById('veOpen2'), text: nv.innerText, music: m ? m.dataset.file || '' : '' }; });
+    check(st.browse && /Open a sermon or video/.test(st.text) && !/Preparing/.test(st.text) && !st.music, '[4] the empty studio is the real one: "Open a sermon or video" with Browse (not a left-over "Preparing…"), and the music is reset', st);
+    // [5] a delete the server refuses (the video is in a planned post) leaves the studio and its edit alone
+    await sleep(800);
+    const t2 = await page.evaluate(() => { const r = document.querySelector('#cloudFilesList .cf-row.can-del'); return r && r.dataset.path; });
+    await page.evaluate((p) => window.api.scheduler.add({ title: 'Sunday clip', caption: 'x', mediaPaths: [p], accountIds: [], platforms: [], scheduledAt: new Date(Date.now() + 86400000).toISOString() }).catch((e) => ({ err: e.message })), t2);
+    await page.evaluate((p) => window.VideoEditor.openPath(p), t2);
+    await page.waitForFunction((p) => window.VideoEditor.sourcePath() === p, t2, { timeout: 20000 });
+    await page.click('#cloudFilesSelect'); await sleep(300);
+    await page.click(`#cloudFilesList .cf-row[data-path="${t2.replace(/"/g, '\\"')}"] .cf-main`);
+    await page.click('#cloudFilesSelDelete'); await sleep(200);
+    await page.click('#cloudFilesSelDelete'); await sleep(2500);
+    st = await page.evaluate((p) => ({ open: window.VideoEditor.sourcePath() === p, says: document.body.innerText }), t2);
+    check(fs.existsSync(t2) && st.open && /planned post/.test(st.says), '[5] a delete the server refuses (a planned post) keeps the video open in the studio, edit and all', { exists: fs.existsSync(t2), open: st.open });
   } finally { await browser.close(); srv.kill(); }
   console.log(`${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FATAL', e); process.exit(1); });

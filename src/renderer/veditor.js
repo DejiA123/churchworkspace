@@ -267,6 +267,10 @@
       if (!el) continue;
       try { el.pause(); el.removeAttribute('src'); el.load(); } catch (e) { /* already empty */ }
     }
+    // the music element forgets what it held, so the next video's play sets it again (clearMusic does the same)
+    if (ve.refs.musicAudio) { ve.refs.musicAudio.dataset.file = ''; ve.refs.musicAudio.dataset.src = ''; }
+    try { stopAudition(); } catch (e) {}
+    if (ve._proxyJobId) { try { window.api.job && window.api.job.cancel && Promise.resolve(window.api.job.cancel(ve._proxyJobId)).catch(() => {}); } catch (e) {} ve._proxyJobId = null; }
     ve.video = null;
     ve.segments = []; ve.sel = null; ve.audio = []; ve.audioSel = null; ve.activeRow = 'video';
     ve.sounds = []; ve.soundSel = null; ve.textOverlays = []; ve.textSel = null; ve.mediaThumbs = {};
@@ -276,7 +280,16 @@
     dropObjectUrl(ve.filmstripUrl); ve.filmstripUrl = null;
     ve.sessionId = null; ve.sessionName = null; ve.sessionThumb = null; ve.sessionDirty = false; ve.sessionAuto = false;
     if (ve.refs.player) ve.refs.player.style.display = 'none';
-    const nv = $('#veNoVid'); if (nv) nv.style.display = '';
+    const nv = $('#veNoVid');
+    if (nv) {
+      // "Preparing a smooth preview" (an iPhone video) replaced the empty-studio prompt: put it back, Browse and all
+      if (ve._noVidHtml != null && !nv.querySelector('#veOpen2')) {
+        nv.innerHTML = ve._noVidHtml;
+        const b = nv.querySelector('#veOpen2'); if (b && ve._openFn) b.addEventListener('click', ve._openFn);
+      }
+      nv.style.display = '';
+      try { resumePromptQuiet(false); } catch (e) {}
+    }
     if (ve.refs.capOverlay) ve.refs.capOverlay.classList.add('hidden');
     if (ve.refs.filmstrip) ve.refs.filmstrip.style.backgroundImage = '';
     const name = $('#veName'); if (name) name.textContent = '';
@@ -366,7 +379,8 @@
         $('#veNoVid').style.display = 'none'; ve.refs.player.style.display = 'block';
       }
     } catch (e) {
-      if (ve.video) ve.video.proxying = false;
+      if (!ve.video || ve.video.path !== origPath) return;   // closed or replaced meanwhile
+      ve.video.proxying = false;
       $('#veNoVid').innerHTML = `<div style="font-size:44px">🎬</div><p class="muted">Preview unavailable for this format, but <b>Long to short clips</b>, editing &amp; export all still work.</p>`;
     }
   }
@@ -9548,7 +9562,7 @@
     const overlays = overlaysFor(s);
     if (!overlays.length) return shortPath;
     const jid = window.__newJobId();
-    const what = overlays.some((o) => o.src !== ve.video.path) ? '📺 Adding your overlays to' : '📺 Adding picture-in-picture to';
+    const what = overlays.some((o) => !ve.video || o.src !== ve.video.path) ? '📺 Adding your overlays to' : '📺 Adding picture-in-picture to';
     return window.__runJob(`${what} "${s.label}"…`, jid, () => window.api.video.overlayComposite({
       base: shortPath, overlays, jobId: jid, deleteInput: true,
       outName: `short-${(s.label || 'clip').replace(/[^\w.-]+/g, '_').slice(0, 40)}-overlay`,
@@ -13168,6 +13182,7 @@
           { input: ve.video.path, model: capModelCfg(), jobId },
           scope ? { startSec: scope.start, endSec: scope.end } : {})));
     } catch (e) { return; }
+    if (!ve.video) return;   // the video was closed (deleted) while it was being heard
     const words = (res && res.words) || [];
     if (!words.length) return window.__toast && window.__toast('No speech was detected to caption.', 'error');
     noteBookFixes(res);
@@ -13254,6 +13269,7 @@
       ve._capFailWhy = (e && e.message) || 'no answer';
       return 'failed';
     }
+    if (!ve.video) return 'cancelled';   // the video was closed (deleted) while it was being heard
     const words = (res && res.words) || [];
     if (!words.length) return 'none';
     noteBookFixes(res);
@@ -14927,6 +14943,8 @@
     };
     const veOpenBtn = $('#veOpen');
     const veOpenBtn2 = $('#veOpen2');
+    ve._openFn = openFn;
+    { const nv0 = $('#veNoVid'); if (nv0) ve._noVidHtml = nv0.innerHTML; }
     if (veOpenBtn) veOpenBtn.addEventListener('click', openFn);
     if (veOpenBtn2) veOpenBtn2.addEventListener('click', openFn);
     $('#veFindHighlights').addEventListener('click', findHighlights);

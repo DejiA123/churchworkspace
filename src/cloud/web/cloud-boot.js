@@ -1739,11 +1739,10 @@ let _hideTimer = null;
     const ed = window.VideoEditor;
     const openNow = [ed && ed.sourcePath && ed.sourcePath(), ed && ed.montagePath && ed.montagePath()].filter(Boolean);
     const isOpen = (p) => openNow.includes(p);
-    // the one the studio has open goes too (it was asked for, twice): the studio lets go of it first
-    const closing = paths.some(isOpen);
-    if (closing) {
-      try { ed.closeVideo && ed.closeVideo(); } catch (e) {}
-    }
+    // the one the studio has open goes too (it was asked for, twice) — the server
+    // deletes it first, and only once it is really gone does the studio let go of
+    // it (a refused or failed delete leaves the edit exactly as it was)
+    let closing = false;
     const kept = ed && ed.closeVideo ? [] : paths.filter(isOpen);
     const go = paths.filter((p) => !kept.includes(p));
     const rows = $$('#cloudFilesList .cf-row').filter((r) => go.includes(r.dataset.path));
@@ -1767,6 +1766,10 @@ let _hideTimer = null;
       }
     }
     const gone = new Set(out.deleted || []);
+    if (ed && ed.closeVideo && [...gone].some(isOpen)) {
+      closing = true;
+      try { ed.closeVideo(); } catch (e) {}
+    }
     for (const r of $$('#cloudFilesList .cf-row')) {
       r.classList.remove('busy');
       if (gone.has(r.dataset.path)) r.classList.add('gone');
