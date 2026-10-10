@@ -1154,8 +1154,12 @@
     // counted only while its chip can be seen: never a Facebook sign-in after Facebook was unticked
     const wantSecondFb = () => extraFb && !(missing().includes('facebook') && skip.has('facebook')) && countOf('facebook') + (missing().includes('facebook') ? 1 : 0) < 2;
     // the free Zernio account is full: told by a run or a Connect, or seen — 2 accounts on one key and more wanted
-    const needSecondNow = () => needSecond || (S.keys.zo && !S.keys.zoFb && linked().filter((a) => a.via === 'zernio').length >= 2
-      && (missing().some((p) => !skip.has(p)) || wantSecondFb()));
+    // up to three free Zernio accounts (2 places each): the next empty key slot, if any
+    const KEY_FIELD = { zo: 'zoApiKey', zoFb: 'zoApiKeyFb', zo3: 'zoApiKey3' };
+    const nextSlot = () => (!S.keys.zo ? null : !S.keys.zoFb ? 'zoFb' : !S.keys.zo3 ? 'zo3' : null);
+    const keyCount = () => ['zo', 'zoFb', 'zo3'].filter((k) => S.keys[k]).length;
+    const needSecondNow = () => !!nextSlot() && (needSecond || (linked().filter((a) => a.via === 'zernio').length >= 2 * keyCount()
+      && (missing().some((p) => !skip.has(p)) || wantSecondFb())));
 
     function draw(msg) {
       const keyRow = (k, title, sub) => `<div class="cs-key${S.keys[k] ? ' set' : ''}">`
@@ -1198,15 +1202,15 @@
           + '</div>';
       } else if (needSecondNow() && !watching) {
         hero = '<div class="cs-setup cs-second">'
-          + `<div class="cs-step"><span class="cs-step-n">+</span><div class="cs-step-tx"><b>${S.keys.zoFb ? 'Your second key gave no room — use another free account' : 'Free account full — add a second free one'}</b>`
-          + '<small>Each free Zernio account holds 2 accounts. Make a second free Zernio account (use another email), tap <b>Create key</b>, then <b>Copy</b>. It stays free.</small></div></div>'
+          + `<div class="cs-step"><span class="cs-step-n">+</span><div class="cs-step-tx"><b>Free account${keyCount() > 1 ? 's' : ''} full — add another free one</b>`
+          + `<small>Each free Zernio account holds 2 accounts. Make ${keyCount() > 1 ? 'a third' : 'a second'} free Zernio account (use another email), tap <b>Create key</b>, then <b>Copy</b>. It stays free.</small></div></div>`
           + `<a class="cs-btn ghost cs-wide" href="https://zernio.com/signup" target="_blank" rel="noopener">${mi('external')}Open Zernio</a>`
-          + `<button type="button" class="cs-btn primary cs-wide cs-big" data-k="paste2">📋 ${S.keys.zoFb ? 'Replace second key' : 'Paste second key'}</button>`
-          + (typing ? '<div class="cs-key-in" data-key-row="zoFb"><input class="cs-input" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste the second key here" data-key="zoFb"><button type="button" class="cs-btn primary" data-k="save-zoFb">Save</button></div>' : '')
+          + `<button type="button" class="cs-btn primary cs-wide cs-big" data-k="paste2">📋 Paste the new key</button>`
+          + (typing ? `<div class="cs-key-in" data-key-row="${nextSlot()}"><input class="cs-input" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste the new key here" data-key="${nextSlot()}"><button type="button" class="cs-btn primary" data-k="save-${nextSlot()}">Save</button></div>` : '')
           + '</div>';
       } else if (left.length && left.every((p) => skip.has(p)) && !wantSecondFb() && !watching) {
         // everything wanted is connected; what is left was unticked on purpose
-        hero = `<p class="cs-note good">${mi('check')} All set — posts go out on their own.</p>`
+        hero = (msg && msg.kind === 'good' ? '' : `<p class="cs-note good">${mi('check')} All set — posts go out on their own.</p>`)
           + `<button type="button" class="cs-more" data-k="unskip">Also connect ${left.map(label).join(' or ')}</button>`;
       } else if (left.length) {
         const chips = left.map((p) => `<button type="button" class="cs-pick${skip.has(p) ? '' : ' on'}" data-k="pick" data-p="${p}" aria-pressed="${skip.has(p) ? 'false' : 'true'}">${platMark(p, 'sm')}<span>${label(p)}</span></button>`).join('');
@@ -1221,11 +1225,13 @@
             : 'Signs you in to each one, one after another, in one window — just tap Allow on each. Untick any you don’t use.'}</small>`
           + `<div class="cs-picks">${chips}${chips2}</div></div>`;
       } else {
-        hero = `<p class="cs-note good">${mi('check')} All four are connected — posts go out on their own.</p>`;
+        // said once: not again under a note that already says so
+        hero = msg && msg.kind === 'good' ? '' : `<p class="cs-note good">${mi('check')} Everything is connected — posts go out on their own.</p>`;
       }
       const keys = !S.keys.zo ? '' : `<button type="button" class="cs-more" data-k="more">${more ? 'Fewer options' : 'Zernio key and more'}</button>`
         + (more ? keyRow('zo', 'Zernio key', 'For every account')
-          + keyRow('zoFb', 'Second Zernio account (free)', 'Each free Zernio account holds 2 accounts. A key from a second free Zernio account gives 2 more places — the studio puts each account wherever there is room.') : '');
+          + keyRow('zoFb', 'Second Zernio account (free)', 'Each free Zernio account holds 2 accounts. A key from a second free Zernio account gives 2 more places — the studio puts each account wherever there is room.')
+          + (S.keys.zoFb ? keyRow('zo3', 'Third Zernio account (free)', 'Two more free places, for a fifth or sixth account.') : '') : '');
       panel.body.innerHTML = (msg ? `<p class="cs-note ${msg.kind || ''}">${esc(msg.text)}</p>` : '') + hero + plats + keys;
     }
 
@@ -1267,9 +1273,9 @@
           C.island({ kind: 'good', title: 'Accounts connected', sub: linked().map((a) => label(a.platform)).join(' · ') });
         } else {
           const full = bad.some((x) => x.full);
-          draw({ kind: 'warn', text: (needSecond ? `Your free Zernio account is full (2 accounts), so ${Array.from(new Set(bad.map((x) => label(x.platform) + (x.another ? ' (2nd page)' : '')))).join(' and ')} could not go on it. `
+          draw({ kind: 'warn', text: (needSecond && nextSlot() ? `Your free Zernio account${keyCount() > 1 ? 's are' : ' is'} full (2 accounts each), so ${Array.from(new Set(bad.map((x) => label(x.platform) + (x.another ? ' (2nd page)' : '')))).join(' and ')} could not go on it. `
             : bad.length ? bad.map((x) => `${label(x.platform)}${x.another ? ' (2nd page)' : ''}: ${x.error}`).join(' ') + ' ' : 'Not everything was connected. ')
-            + (needSecond ? 'Still free: add a second free Zernio account below, then tap ✨ Set up everything again.'
+            + (needSecond && nextSlot() ? 'Still free: add another free Zernio account below, then tap ✨ Set up everything again.'
               : full ? 'Remove one you don’t use, or turn on billing at zernio.com.' : 'Tap ✨ Set up everything again for what is left.') });
         }
         return;
@@ -1283,7 +1289,7 @@
     panel.onClose = () => { document.removeEventListener('visibilitychange', onBack); if (origClose) origClose(); };
 
     async function saveKey(key, v) {
-      const res = await window.api.social.setKeys(key === 'zo' ? { zoApiKey: v } : { zoApiKeyFb: v });
+      const res = await window.api.social.setKeys({ [KEY_FIELD[key] || 'zoApiKey']: v });
       S.keys = res;
       typing = false;
       await loadSocial(true);
@@ -1301,7 +1307,7 @@
       if (k === 'pick') { const p = b.dataset.p; if (p === 'facebook2') { extraFb = !extraFb; saveFb2(); } else { if (skip.has(p)) skip.delete(p); else skip.add(p); saveSkip(); } return draw(); }
       if (k === 'unskip') { skip.clear(); saveSkip(); return draw(); }
       if (k === 'paste' || k === 'paste2') {
-        const slot = k === 'paste2' ? 'zoFb' : 'zo';
+        const slot = k === 'paste2' ? (nextSlot() || 'zoFb') : 'zo';
         // the copied key, read on this tap (the phone asks once: Paste); typed in when it cannot be read
         let v = '';
         try { v = navigator.clipboard && navigator.clipboard.readText ? String(await navigator.clipboard.readText() || '').trim() : ''; } catch (er) { v = ''; }
@@ -1312,7 +1318,7 @@
           return;
         }
         b.disabled = true; b.textContent = 'Checking the key with Zernio…';
-        try { await saveKey(slot, v); if (slot === 'zoFb') needSecond = false; }
+        try { await saveKey(slot, v); if (slot !== 'zo') needSecond = false; }
         catch (er) { typing = true; draw({ kind: 'bad', text: er.message }); }
         return;
       }
@@ -1351,7 +1357,7 @@
         const v = input ? input.value.trim() : '';
         if (!v) { if (input) input.focus(); return; }
         b.disabled = true; b.textContent = 'Checking…';
-        try { await saveKey(key, v); if (key === 'zoFb') needSecond = false; }
+        try { await saveKey(key, v); if (key !== 'zo') needSecond = false; }
         catch (er) { b.disabled = false; b.textContent = 'Save'; draw({ kind: 'bad', text: er.message }); }
         return;
       }
@@ -1373,7 +1379,7 @@
         try { r = await window.api.social.linkStart(p, another); }
         catch (er) {
           if (w) try { w.close(); } catch (x) {}
-          if (/second free Zernio account/i.test(er.message)) needSecond = true;
+          if (/another free Zernio account/i.test(er.message)) needSecond = true;
           draw({ kind: needSecond ? 'warn' : 'bad', text: er.message }); return;
         }
         if (r && r.account) {

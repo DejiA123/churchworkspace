@@ -2932,10 +2932,11 @@ ipcMain.handle('accounts:check', wrap(async (e, { id }) => accounts.check(id)));
  * two-step easy connect (accounts.zernioLinkStart / zernioLinkClaim). They are
  * the only social channels the cloud allowlist admits — see cloud-api.js.
  */
-const SOCIAL_KEYS = ['zoApiKey', 'zoApiKeyFb'];
+const SOCIAL_KEYS = ['zoApiKey', 'zoApiKeyFb', 'zoApiKey3'];
 function socialKeyState() {
   // a key given to the server (ZERNIO_API_KEY) counts: nobody needs to paste one
-  return { zo: !!accountsMod.zoCfg(store, 'tiktok').apiKey, zoFb: !!String((((store.get('settings') || {}).accounts) || {}).zoApiKeyFb || process.env.ZERNIO_API_KEY_FB || process.env.MW_ZERNIO_KEY_FB || '').trim() };
+  const acc = ((store.get('settings') || {}).accounts) || {};
+  return { zo: !!accountsMod.zoCfg(store, 'tiktok').apiKey, zoFb: !!String(acc.zoApiKeyFb || process.env.ZERNIO_API_KEY_FB || process.env.MW_ZERNIO_KEY_FB || '').trim(), zo3: !!String(acc.zoApiKey3 || '').trim() };
 }
 ipcMain.handle('social:accounts', wrap(async () => ({ accounts: accounts.list(), keys: socialKeyState() })));
 ipcMain.handle('social:setKeys', wrap(async (e, patch = {}) => {
@@ -2950,15 +2951,18 @@ ipcMain.handle('social:setKeys', wrap(async (e, patch = {}) => {
       throw new Error('That does not look like a Zernio API key — copy it again from zernio.com → Settings → API keys.');
     }
     // checked with Zernio before it is kept: a wrong key is found NOW, not at the first Connect
-    // the second key must be a DIFFERENT free Zernio account: the same one again gives no more places
-    const other = String(k === 'zoApiKeyFb' ? (('zoApiKey' in patch) ? patch.zoApiKey : acc.zoApiKey) || accountsMod.envZoKey() : '').trim();
-    if (k === 'zoApiKeyFb' && v && other && v === other) throw new Error('That is the same key as your first Zernio account — copy the key from your SECOND free Zernio account.');
+    // each extra key must be a DIFFERENT free Zernio account: the same one again gives no more places
+    const keyOf = (n) => String(((n in patch) ? patch[n] : acc[n]) || (n === 'zoApiKey' ? accountsMod.envZoKey() : '') || '').trim();
+    const others = k === 'zoApiKey' ? [] : SOCIAL_KEYS.filter((n) => n !== k).map(keyOf).filter(Boolean);
+    if (v && others.includes(v)) throw new Error('That is the same key as one you already added — copy the key from your NEW free Zernio account.');
     const visible = v ? await accounts.zernioCheckKey(v) : [];
-    if (k === 'zoApiKeyFb' && v && other && visible.length) {
-      let first = [];
-      try { first = await accounts.zernioCheckKey(other); } catch (er) { first = []; }
-      const ids = new Set(first.map((a) => String(a._id || a.id || a.accountId)));
-      if (visible.some((a) => ids.has(String(a._id || a.id || a.accountId)))) throw new Error('That key is for the same Zernio account as your first key — make a second free Zernio account (another email) and copy ITS key.');
+    if (v && others.length && visible.length) {
+      const ids = new Set(visible.map((a) => String(a._id || a.id || a.accountId)));
+      for (const o of others) {
+        let theirs = [];
+        try { theirs = await accounts.zernioCheckKey(o); } catch (er) { theirs = []; }
+        if (theirs.some((a) => ids.has(String(a._id || a.id || a.accountId)))) throw new Error('That key is for a Zernio account you already added — make another free Zernio account (another email) and copy ITS key.');
+      }
     }
     changed.push([String(acc[k] || '').trim(), v, visible]);
     acc[k] = v;
@@ -3028,7 +3032,7 @@ async function socialSetupNext(code) {
     } catch (er) {
       const full = !!er.full || /free plan|payment|402/i.test(er.message);
       run.results.push({ platform: item.platform, another: item.another, ok: false, full, needSecondKey: !!er.needSecondKey,
-        error: er.needSecondKey ? 'Your free Zernio account is full (2 accounts).' : full ? 'Both Zernio accounts are full.' : er.message });
+        error: er.needSecondKey ? 'Your free Zernio account is full (2 accounts each).' : full ? 'All your free Zernio accounts are full.' : er.message });
     }
   }
   run.final = { done: true, results: run.results, back: run.origin + '/#scheduler' };

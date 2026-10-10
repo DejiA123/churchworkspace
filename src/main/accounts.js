@@ -196,6 +196,7 @@ function zoIdPrefix(platform) { return ZO_ID_PREFIX[platform] || 'zo_'; }
 const ZO_LABEL = { tiktok: 'TikTok', youtube: 'YouTube', facebook: 'Facebook', instagram: 'Instagram' };
 const ZO_PLATFORMS = ['tiktok', 'youtube', 'instagram', 'facebook'];
 const ZO_FREE = 2;   // linked accounts a free Zernio account holds
+const ZO_MAX_KEYS = 3;   // free Zernio accounts the studio pools (6 places: TikTok, YouTube, Instagram, Facebook ×2 …)
 
 /** An Upload-Post platform entry is an object, a bare handle string, or absent. */
 function upAccountOf(profile, platform = 'tiktok') {
@@ -863,7 +864,7 @@ class Accounts {
    */
   async _zoPool() {
     const acc = ((this.store.get('settings') || {}).accounts) || {};
-    const keys = Array.from(new Set([(acc.zoApiKey || '').trim() || envZoKey(), (acc.zoApiKeyFb || '').trim() || envZoKeyFb()].filter(Boolean)));
+    const keys = Array.from(new Set([(acc.zoApiKey || '').trim() || envZoKey(), (acc.zoApiKeyFb || '').trim() || envZoKeyFb(), (acc.zoApiKey3 || '').trim()].filter(Boolean)));
     const { apiBase } = zoCfg(this.store, 'tiktok');
     if (!keys.length) throw new Error('Add your Zernio key first (free at zernio.com → Settings → API keys).');
     const pool = [];
@@ -909,10 +910,11 @@ class Accounts {
     const auth = { authorization: 'Bearer ' + pick.key };
     const full = (e) => e && (e.status === 402 || /payment|free_tier_exceeded|402|more than 2 accounts/i.test(e.message || ''));
     const fullError = () => {
-      const err = new Error(pool.length < 2
-        ? `Zernio’s free plan holds 2 accounts, and both places are taken. Make a second free Zernio account (another email) and paste its key as your second key — ${label} goes there, free.`
-        : `Both your Zernio accounts are full (2 free places each). Remove one, or turn on billing at zernio.com for more.`);
-      err.full = true; err.needSecondKey = pool.length < 2;
+      const more = pool.length < ZO_MAX_KEYS;
+      const err = new Error(more
+        ? `Your free Zernio account${pool.length > 1 ? 's are' : ' is'} full (2 accounts each). Make another free Zernio account (another email) and paste its key — ${label} goes there, free.`
+        : `All ${pool.length} of your free Zernio accounts are full (2 each). Remove one, or turn on billing at zernio.com for more.`);
+      err.full = true; err.needSecondKey = more;
       return err;
     };
     const profOf = (a) => { const p = a && a.profileId; return String((p && (p._id || p.id)) || p || ''); };

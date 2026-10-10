@@ -19,9 +19,10 @@
  *   [5] an unticked platform is left out; the return page's code works once
  *       and a made-up code is refused
  *   [6] a key given to the server (ZERNIO_API_KEY) means nobody is asked
- *   [7] "Two Facebook pages, Instagram and TikTok — it must be free": when the
- *       free Zernio account (2 places) is full, the sheet asks for a second
- *       free one; pasted, the rest — both Facebook pages — go on it, free
+ *   [7] "Two Facebook pages, Instagram, TikTok — and YouTube — it must be
+ *       free": when the free Zernio account (2 places) is full, the sheet asks
+ *       for another free one; both Facebook pages go on the second, YouTube
+ *       on a third — five accounts, three free Zernio accounts, no billing
  *
  * Needs Playwright with Chromium; without it this says so and skips.
  *   node test/phone-social-setup.test.js
@@ -44,9 +45,9 @@ function get(p) { return new Promise((resolve, reject) => http.get({ host: '127.
 async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise((res, rej) => http.get({ host: '127.0.0.1', port: PORT, path: '/api/hello', agent: false }, (r) => { r.resume(); r.statusCode === 200 ? res() : rej(); }).on('error', rej)); return true; } catch (e) { await sleep(250); } } return false; }
 
 /* ---- a stand-in Zernio: per-key accounts with Zernio's 2 free places, profiles, each platform's "Allow" ---- */
-const GOOD = 'sk_test_' + 'a'.repeat(40), GOOD2 = 'sk_test_' + 'c'.repeat(40), OTHER = 'sk_test_' + 'b'.repeat(40);
+const GOOD = 'sk_test_' + 'a'.repeat(40), GOOD2 = 'sk_test_' + 'c'.repeat(40), GOOD3 = 'sk_test_' + 'd'.repeat(40), OTHER = 'sk_test_' + 'b'.repeat(40);
 const Z = { keys: { [GOOD]: { accounts: [{ _id: 'tiktok1', platform: 'tiktok', username: 'gracechurch', displayName: 'Grace Church' }], profiles: 1, billing: false },
-  [GOOD2]: { accounts: [], profiles: 1, billing: false }, [OTHER]: { accounts: [{ _id: 'elsewhere1', platform: 'tiktok', username: 'someone_else' }], profiles: 1, billing: false } },
+  [GOOD2]: { accounts: [], profiles: 1, billing: false }, [GOOD3]: { accounts: [], profiles: 1, billing: false }, [OTHER]: { accounts: [{ _id: 'elsewhere1', platform: 'tiktok', username: 'someone_else' }], profiles: 1, billing: false } },
   connects: [], seq: 0 };
 function zernio() {
   execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', path.join(WORK, 'k.pem'), '-out', path.join(WORK, 'c.pem'), '-days', '1', '-subj', '/CN=127.0.0.1'], { stdio: 'ignore' });
@@ -145,14 +146,14 @@ async function phone(browser) {
     if (SHOTS) await win.screenshot({ path: path.join(SHOTS, 'setup-3-done.png') });
     check(end.url.startsWith(`http://127.0.0.1:${PORT}/social/next/`), 'the sign-ins end on the studio\'s own page', end.url);
     check(end.title === 'Nearly there' && /Instagram ✓ @grace_instagram/.test(end.text), 'Instagram takes the free account\'s 2nd place', end.text);
-    check(/Facebook — Your free Zernio account is full/.test(end.text) && /Facebook \(2nd page\) —/.test(end.text) && /second free Zernio account/.test(end.text) && /Paste second key/.test(end.text),
-      'with the free account full, the page says the way on is a SECOND FREE Zernio account — not billing', end.text);
+    check(/Facebook — Your free Zernio account is full/.test(end.text) && /Facebook \(2nd page\) —/.test(end.text) && /another free Zernio account/.test(end.text) && /Paste the new key/.test(end.text),
+      'with the free account full, the page says the way on is ANOTHER FREE Zernio account — not billing', end.text);
     check(Z.connects.every((c) => c.redirect && c.redirect.startsWith(`http://127.0.0.1:${PORT}/social/next/`)), 'each sign-in was told to come back to the studio', Z.connects);
     check(/Back to the studio/.test(end.text), 'with a way back to the studio');
     await page.bringToFront();
     await page.waitForSelector('#csConnect [data-k="paste2"]', { timeout: 12000 }).catch(() => {});
     const sheet = await page.$eval('#csConnect', (n) => n.innerText);
-    check(!!(await page.$('#csConnect [data-k="paste2"]')) && /second free one/i.test(sheet), 'the sheet stops waiting and offers 📋 Paste second key', sheet.slice(0, 400));
+    check(!!(await page.$('#csConnect [data-k="paste2"]')) && /another free one/i.test(sheet), 'the sheet stops waiting and offers 📋 Paste the new key', sheet.slice(0, 400));
     const rows = await page.$$eval('#csConnect .cs-plat.linked', (r) => r.map((x) => x.dataset.plat));
     check(['tiktok', 'instagram'].every((p) => rows.includes(p)), 'the Accounts sheet filled in by itself', rows);
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'setup-4-second.png') });
@@ -165,13 +166,13 @@ async function phone(browser) {
     await sleep(500);
     await page.evaluate(() => window.MWSocial.openConnect());
     await page.waitForSelector('#csConnect [data-k="paste2"]', { timeout: 8000 }).catch(() => {});
-    check(!!(await page.$('#csConnect [data-k="paste2"]')), 'Paste second key is still offered after the sheet is closed and opened again');
+    check(!!(await page.$('#csConnect [data-k="paste2"]')), 'Paste the new key is still offered after the sheet is closed and opened again');
     // the FIRST key pasted again is refused: it gives no more places
     await page.evaluate((k) => navigator.clipboard.writeText(k), GOOD);
     await page.tap('#csConnect [data-k="paste2"]');
     await page.waitForSelector('#csConnect .cs-note.bad', { timeout: 10000 }).catch(() => {});
     const same = await page.$eval('#csConnect', (n) => n.innerText);
-    check(/same key as your first/i.test(same) && !(await page.evaluate(async () => (await window.api.social.accounts()).keys.zoFb)), 'the first key pasted as the second is refused, and not kept', same.slice(0, 200));
+    check(/same key as one you already added/i.test(same) && !(await page.evaluate(async () => (await window.api.social.accounts()).keys.zoFb)), 'the first key pasted as the second is refused, and not kept', same.slice(0, 200));
 
     // the second free key: both Facebook pages go on it
     await page.evaluate((k) => navigator.clipboard.writeText(k), GOOD2);
@@ -197,6 +198,25 @@ async function phone(browser) {
     check(disk0.filter((a) => a.platform === 'facebook').every((a) => a.token === GOOD2) && disk0.find((a) => a.platform === 'instagram').token === GOOD,
       'each account posts with the key of the Zernio account it is on', disk0.map((a) => [a.platform, a.token.slice(-4)]));
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'setup-6-sheet.png') });
+
+    // "I forgot to mention YouTube": a fifth account, on a third free Zernio account
+    await page.tap('#csConnect [data-k="unskip"]');
+    await page.waitForSelector('#csConnect [data-k="paste2"]', { timeout: 8000 }).catch(() => {});
+    const third = await page.$eval('#csConnect', (n) => n.innerText);
+    check(!!(await page.$('#csConnect [data-k="paste2"]')) && /third free Zernio account/.test(third), 'asking for YouTube too, with two free accounts full, it offers a third free one', third.slice(0, 300));
+    await page.evaluate((k) => navigator.clipboard.writeText(k), GOOD3);
+    await page.tap('#csConnect [data-k="paste2"]');
+    await page.waitForSelector('#csConnect [data-k="setup"]', { timeout: 15000 }).catch(() => {});
+    const [win3] = await Promise.all([ctx.waitForEvent('page', { timeout: 10000 }), page.tap('#csConnect [data-k="setup"]')]);
+    await win3.waitForFunction(() => /All set|Nearly there|Nothing/.test(document.title), null, { timeout: 30000 }).catch(() => {});
+    const end3 = await win3.evaluate(() => ({ title: document.title, text: document.body.innerText }));
+    check(end3.title === 'All set' && /YouTube ✓/.test(end3.text), 'YouTube is connected', end3.text);
+    check(Z.keys[GOOD3].accounts.length === 1 && Z.keys[GOOD3].accounts[0].platform === 'youtube' && ![GOOD, GOOD2, GOOD3].some((k) => Z.keys[k].billing),
+      'five accounts on three free Zernio accounts (2 + 2 + 1), no billing', [GOOD, GOOD2, GOOD3].map((k) => Z.keys[k].accounts.map((a) => a.platform)));
+    await win3.close(); await page.bringToFront();
+    await page.waitForFunction(() => document.querySelectorAll('#csConnect .cs-plat.linked').length >= 5, null, { timeout: 12000 }).catch(() => {});
+    check((await page.$$('#csConnect .cs-plat.linked')).length === 5, 'the sheet lists all five');
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'setup-7-five.png') });
 
     // a removed Facebook page is not brought back by "+ Add": a sign-in lets the person pick the new one
     const fbs = (await page.evaluate(async () => (await window.api.social.accounts()).accounts)).filter((a) => a.platform === 'facebook');
@@ -228,9 +248,9 @@ async function phone(browser) {
     const allSet = await page.$eval('#csConnect', (n) => n.innerText);
     check(!(await page.$('#csConnect [data-k="setup"]')) && /All set/.test(allSet) && !!(await page.$('#csConnect [data-k="unskip"]')),
       'with the rest unticked it says All set (no greyed-out button), with a way to connect them after all', allSet.slice(0, 200));
-    const code = await page.evaluate(async () => (await window.api.social.setupStart({ origin: location.origin, platforms: ['youtube'] })).url.split('/').pop());
+    const code = await page.evaluate(async () => (await window.api.social.setupStart({ origin: location.origin, platforms: ['instagram'] })).url.split('/').pop());
     const first = await get('/social/next/' + code);
-    check(first.status === 302 && /oauth\/youtube/.test(first.location), 'the return page opens the next sign-in', first);
+    check(first.status === 302 && /oauth\/instagram/.test(first.location), 'the return page opens the next sign-in', first);
     const fake = await get('/social/next/' + 'f'.repeat(36));
     check(fake.status === 200 && /run out/.test(fake.body), 'a made-up code is refused');
     const bad = await get('/social/next/../../api/me');

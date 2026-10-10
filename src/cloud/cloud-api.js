@@ -359,8 +359,8 @@ function setupPage(r) {
     const good = res.filter((x) => x.ok), bad = res.filter((x) => !x.ok);
     title = good.length && !bad.length ? 'All set' : good.length ? 'Nearly there' : 'Nothing was connected';
     body = '<ul>' + res.map((x) => `<li class="${x.ok ? 'ok' : 'no'}"><b>${h(SETUP_NAMES[x.platform] || x.platform)}${x.another ? ' (2nd page)' : ''}</b> ${x.ok ? '✓ ' + h(x.name || 'connected') : '— ' + h(x.error || 'not connected')}</li>`).join('') + '</ul>'
-      + (bad.some((x) => x.needSecondKey) ? '<p class="tip"><b>Still free:</b> each free Zernio account holds 2 accounts. Make a second free Zernio account (another email), go back to the studio and tap <b>Paste second key</b> — then <b>Set up everything</b> again. Only what is missing is asked for.</p>'
-        : bad.some((x) => x.full) ? '<p class="tip">Both free Zernio accounts are full (2 each). Remove one you don’t use, or turn on billing at <a href="https://zernio.com" target="_blank" rel="noopener">zernio.com</a>.</p>' : '')
+      + (bad.some((x) => x.needSecondKey) ? '<p class="tip"><b>Still free:</b> each free Zernio account holds 2 accounts. Make another free Zernio account (another email), go back to the studio and tap <b>Paste the new key</b> — then <b>Set up everything</b> again. Only what is missing is asked for.</p>'
+        : bad.some((x) => x.full) ? '<p class="tip">All your free Zernio accounts are full (2 each). Remove one you don’t use, or turn on billing at <a href="https://zernio.com" target="_blank" rel="noopener">zernio.com</a>.</p>' : '')
       + (bad.length && !bad.some((x) => x.full) ? '<p class="tip">Tap <b>Set up everything</b> again for anything not connected — only what is missing is asked for.</p>' : '');
   } else {
     title = 'That did not work';
