@@ -1924,7 +1924,13 @@ async function lookAt(ctx, reqs, tmp, log, { people = true, max = Infinity, fram
   let font = null;
   const tff = await textFfmpeg(ctx);
   try { const f = path.join(require('./captioner').fontsDir(), 'Poppins-Bold.ttf'); if (fs.existsSync(f) && tff) font = f; } catch (e) {}
-  if (!see || !see.ready() || !font || !reqs.length) { if (log && reqs.length) log('look: ' + (!see || !see.ready() ? 'no AI to ask' : 'no ffmpeg here can draw the column numbers') + ' — the middle of the picture'); return out; }
+  if (!reqs.length) return out;
+  if (!see || !see.ready() || !font) {
+    if (log) log('look: ' + (!see || !see.ready() ? 'no AI to ask' : 'no ffmpeg here can draw the column numbers') + (people ? ' — the person detector alone' : ' — the middle of the picture'));
+    if (people) await detectorLook(ctx, reqs.slice(0, max), out, frame, log);
+    return out;
+  }
+  const ctx0 = ctx;
   ctx = Object.assign({}, ctx, { ffmpeg: tff });
   const esc = (t) => String(t).replace(/[\\:']/g, '\\$&');
   const T = SPEAK_TILE_W, TH = SPEAK_TILE_H, cw = T / SPEAK_COLS;
@@ -1997,7 +2003,46 @@ async function lookAt(ctx, reqs, tmp, log, { people = true, max = Infinity, fram
       if (out[r.i].people == null && people) out[r.i].people = 1;
     });
   }
+  if (people) await detectorLook(ctx0, todo, out, frame, log);
   return out;
+}
+
+/*
+ * ►► THE DETECTOR HAS THE LAST WORD ON WHERE A PERSON IS. ◄◄ "Still out of
+ * frame" — the AI's look at the grid put the cut on a poster with a mask drawn
+ * on it, beside the singer. persondetect.js finds real people (a face and
+ * shoulders, not a picture of one): where it finds someone, the cut is placed
+ * on them — the one nearest where the AI looked, else the clearest — holding
+ * the head and both shoulders. Where it finds nobody it says nothing: it can
+ * miss someone small and far off, so "nobody here" is only ever the AI's call.
+ */
+async function detectorLook(ctx, reqs, out, frame, log) {
+  let pd = null;
+  try { pd = require('./persondetect'); } catch (e) { pd = null; }
+  if (!pd || !pd.available()) { if (log) log('look: ' + (pd ? pd.why() : 'no person detector') + ' — the AI\'s look stands'); return; }
+  let found = 0;
+  for (const r of reqs) {
+    jobs.throwIfCancelled();
+    let ppl = null;
+    try { ppl = await pd.people(ctx.ffmpeg, r.file, r.t); } catch (e) { if (log) log('look: the person detector could not look — ' + ((e && e.message) || e)); break; }
+    if (!ppl || !ppl.length) continue;
+    found++;
+    const o = out[r.i != null ? r.i : reqs.indexOf(r)];
+    const ai = o.head != null ? o.head : null;
+    // the one to keep: nearest where the AI looked (it saw who is singing); else the clearest and biggest
+    const pick = ai != null
+      ? ppl.reduce((a, b) => (Math.abs(b.face.x - ai) < Math.abs(a.face.x - ai) ? b : a))
+      : ppl.reduce((a, b) => (b.score * Math.sqrt(b.face.w) > a.score * Math.sqrt(a.face.w) ? b : a));
+    const head = clamp(pick.face.x, 0, 1);
+    o.head = head; o.fx = head; o.seen = 'detector';
+    o.people = Math.max(o.people || 0, ppl.length);
+    // the head and both shoulders: about a face's width and a bit either side of the face
+    const L = clamp(head - pick.face.w * 1.25, 0, 1), R = clamp(head + pick.face.w * 1.25, 0, 1);
+    o.span = [L, R];
+    const win = frame && r.w && r.h ? Math.min(1, (r.h * frame.W / frame.H) / r.w) / (frame.zoom || MAX_MOVE_ZOOM) : null;
+    if (win && win < 1 && R - L <= win * 0.92) o.fx = clamp(clamp(head - win / 2, R - win * 0.96, L - win * 0.04) + win / 2, 0, 1);
+  }
+  if (log) log(`look: the person detector found people in ${found} of ${reqs.length} moments`);
 }
 
 /**
@@ -2148,7 +2193,9 @@ function fxAtLook(p, t) {
   return a.fx + (b.fx - a.fx) * ((t - a.t) / Math.max(0.01, b.t - a.t));
 }
 
-async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, onProgress, stage, log, keepAudio }) {
+// the middle of a B-roll clip — of the part of it chosen, when a part was
+const brollMid = (c) => ((c.start || 0) + (c.end || c.fileDur || 0)) / 2;
+async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPath, output, onProgress, stage, log, keepAudio }) {
   const say = (a, b) => (p) => onProgress && onProgress(Math.round(a + (b - a) * (clamp(p, 0, 100) / 100)));
   const infos = [];
   for (const f of files) {
@@ -2168,21 +2215,28 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
     for (let i = 0; i < vids.length; i++) {
       const v = vids[i];
       const D = v.info.durationSec;
+      // the part the operator chose (the whole video when none): only it is heard, only its lines are used
+      const part = parts && parts.get(v.file);
+      const A = part ? clamp(part.from, 0, Math.max(0, D - 1)) : 0;
+      const B = part ? clamp(part.to, A + 1, D) : D;
+      if (part && log) log(`talk: video ${i + 1} — only ${round2(A)}s to ${round2(B)}s`);
       if (stage) stage(vids.length > 1 ? `👂 Listening to video ${i + 1} of ${vids.length}…` : '👂 Listening to every word…');
       let words = [];
       if (v.info.hasAudio && hear) {
         // (nothing from "What's it about?" goes to the ear: the captions are what was said)
-        try { words = (await hear(v.file, D, say((i / vids.length) * 40, ((i + 1) / vids.length) * 40))) || []; } catch (e) { if (e instanceof jobs.CancelledError || (e && e.cancelled)) throw e; if (log) log('hear failed: ' + e.message); words = []; }
+        try { words = (await hear(v.file, B, say((i / vids.length) * 40, ((i + 1) / vids.length) * 40), A)) || []; } catch (e) { if (e instanceof jobs.CancelledError || (e && e.cancelled)) throw e; if (log) log('hear failed: ' + e.message); words = []; }
       }
       let loud = [];
       if (v.info.hasAudio) { try { loud = await loudness(ctx, v.file); } catch (e) { if (e instanceof jobs.CancelledError) throw e; } }
-      const c = { id: 'v' + (i + 1), file: v.file, kind: 'video', start: 0, end: round2(D), peak: round2(D / 2), whole: true, fileDur: round2(D),
+      // (a hearing that ignored the part still gives only the part's words)
+      if (part) { const hl = words.highlights; words = words.filter((w) => w.start >= A - 0.05 && w.end <= B + 0.05); if (hl) Object.defineProperty(words, 'highlights', { value: hl, enumerable: false }); }
+      const c = { id: 'v' + (i + 1), file: v.file, kind: 'video', start: round2(A), end: round2(B), peak: round2((A + B) / 2), whole: true, fileDur: round2(D),
         hasAudio: !!v.info.hasAudio, w: v.info.width, h: v.info.height, name: path.basename(v.file), spoken: words.length >= 4 };
-      try { c.thumb = await thumb(ctx, v.file, Math.min(1, D / 3), path.join(tmp, c.id + '.jpg'), false); } catch (e) { c.thumb = null; }
+      try { c.thumb = await thumb(ctx, v.file, A + Math.min(1, (B - A) / 3), path.join(tmp, c.id + '.jpg'), false); } catch (e) { c.thumb = null; }
       cands.push(c);
       // short, snappy lines: a phrase ends by about 6 s (it used to run to 9–10)
       for (const p of phrasesOf(words, TALK_LINE_MAX)) {
-        if (p.end > D) continue;
+        if (p.end > B + 0.05 || p.start < A - 0.05) continue;
         p.id = 'p' + (++k); p.vid = i + 1; p.cand = c; p.score = phraseScore(p, loud);
         // AssemblyAI's key phrases: the line that holds one of the message's most important phrases rises
         p.hl = 0;
@@ -2416,7 +2470,7 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
     // the silent clips too (they fill the narrator's stretches and cutaways): looked at where they play, the middle
     const silent = broll.filter((b) => b.kind === 'video');
     if (seen && silent.length) {
-      const got = await lookAt(ctx, silent.map((b) => ({ file: b.file, t: round2(Math.max(0, (b.fileDur || 0) / 2)), w: b.w, h: b.h })), tmp, log, { people: true, frame: ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 } });
+      const got = await lookAt(ctx, silent.map((b) => ({ file: b.file, t: round2(Math.max(0, brollMid(b))), w: b.w, h: b.h })), tmp, log, { people: true, frame: ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 } });
       const out = silent.filter((b, i) => got[i] && got[i].people === 0);
       if (out.length) {
         for (const b of out) broll.splice(broll.indexOf(b), 1);
@@ -2460,7 +2514,7 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
         const br = broll.length ? broll[(n + (isIntro ? 0 : 1)) % broll.length] : null;
         let sh;
         if (br) {
-          sh = { cand: br, seconds: len, from: br.kind === 'video' ? round2(clamp(br.fileDur / 2 - len / 2 + n * 1.7, 0, Math.max(0, br.fileDur - len - 0.05))) : null,
+          sh = { cand: br, seconds: len, from: br.kind === 'video' ? round2(clamp(brollMid(br) - len / 2 + n * 1.7, br.start || 0, Math.max(br.start || 0, (br.end || br.fileDur) - len - 0.05))) : null,
             need: br.kind === 'video' ? len : undefined, effect: br.kind === 'image' ? 'slow_zoom' : moves[m++ % moves.length], focus: 'center', slow: false, transition: 'cut', grade, overlays: [], mute: true };
         } else {
           const sp = nextSpare(null) || picks[n % picks.length];
@@ -2552,7 +2606,7 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
       const len = round2(Math.min(broll.length ? 2.2 : 1.6, sh.seconds - 0.5));
       if (broll.length && bi < broll.length) {
         const o = broll[bi++];
-        sh.overlays.push({ cand: o, style: 'cutaway', start: 0.25, len, pos: i % 4 === 1 ? 'right' : 'left', from: o.kind === 'video' ? round2(clamp(o.fileDur / 2 - len / 2, 0, Math.max(0, o.fileDur - len - 0.05))) : null });
+        sh.overlays.push({ cand: o, style: 'cutaway', start: 0.25, len, pos: i % 4 === 1 ? 'right' : 'left', from: o.kind === 'video' ? round2(clamp(brollMid(o) - len / 2, o.start || 0, Math.max(o.start || 0, (o.end || o.fileDur) - len - 0.05))) : null });
       } else {
         /*
          * One video and no photos: the edit's own best unused moments go over it,
@@ -2615,8 +2669,11 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
  * The whole job. `stage(name)` says what is happening (for the phone), and
  * `onProgress(pct)` how far through the whole thing it is.
  */
-async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, full, aspect, brief, about, keepAudio, keepOrder, output, onProgress, stage, log, mode, hear, voice }) {
+async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, lengthSec, full, aspect, brief, about, keepAudio, keepOrder, output, onProgress, stage, log, mode, hear, voice }) {
   const files = (mediaPaths || []).filter((p) => p && fs.existsSync(p)).slice(0, 60);
+  // the part of each video to use ("from which part to which part"), by file
+  const partOf = new Map();
+  (mediaPaths || []).forEach((p, i) => { const r = Array.isArray(ranges) ? ranges[i] : null; if (p && r && (r.from > 0 || r.to > 0)) partOf.set(p, { from: Math.max(0, +r.from || 0), to: +r.to > 0 ? +r.to : Infinity }); });
   if (!files.length) throw new Error('Add some videos or pictures first.');
   if (mode === 'talk') {
     const topts = {
@@ -2627,7 +2684,7 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, ful
       brief: cleanBrief(brief),
       about: cleanAbout(about),
     };
-    return makeTalk(ctx, getInfo, { files, opts: topts, hear, musicPath, output, onProgress, stage, log, keepAudio });
+    return makeTalk(ctx, getInfo, { files, parts: partOf, opts: topts, hear, musicPath, output, onProgress, stage, log, keepAudio });
   }
   const opts = {
     style: STYLES[style] ? style : 'hype',

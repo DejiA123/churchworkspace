@@ -1425,13 +1425,15 @@
     p.body.innerHTML = `
       <section class="mt-sec"><h3>What kind of edit?</h3><div class="mt-row">${chips(MT_MODES, MT.mode, 'mode')}</div>
         <small class="mt-hint">${talk
-    ? 'Add one or more videos of someone speaking. The AI listens to every word, picks the lines that stop the scroll — from any of the videos — puts the strongest first and builds the story, then cuts it with jump zooms, a cinematic look, flashes, B-roll from your photos and captions lit up word by word.'
+    ? 'Add one or more videos of someone speaking — tap ✂️ on a video to use only part of it. The AI listens to every word, picks the lines that stop the scroll — from any of the videos — puts the strongest first and builds the story, then cuts it with jump zooms, a cinematic look, flashes, B-roll from your photos and captions lit up word by word.'
     : 'Clips and photos cut to music — the AI picks the best-looking moments and cuts them on the beat.'}</small></section>
       ${openIsMontage ? `<button type="button" class="me-banner" data-mt-rearrange>✏️ <span><b>Rearrange the montage that’s open</b><small>Move clips and photos, then remake it</small></span></button>` : ''}
       <p class="mt-lead">${mi('sparkles')} ${brain}</p>
       <section class="mt-sec"><h3>${talk ? 'Your videos' : 'Your clips &amp; photos'} <small>${MT.items.length ? MT.items.length + ' added' : talk ? 'add 1 or more videos (photos become B-roll)' : 'add 2 or more'}</small></h3>
         <div class="mt-grid${MT.order === 'mine' ? ' mt-ordered' : ''}">${MT.items.map((it, i) => `<div class="mt-tile" data-i="${i}">${it.kind === 'image'
-          ? `<img src="${attr(it.url)}" alt="" draggable="false" />` : (it.poster ? `<img src="${attr(it.poster)}" alt="" draggable="false" />` : '<span class="mt-load"></span>') + `<span class="mt-dur">▶${it.secs ? ' ' + Math.floor(it.secs / 60) + ':' + String(Math.round(it.secs % 60)).padStart(2, '0') : ''}</span>`}
+          ? `<img src="${attr(it.url)}" alt="" draggable="false" />` : (it.poster ? `<img src="${attr(it.poster)}" alt="" draggable="false" />` : '<span class="mt-load"></span>') + (talk
+            ? `<button type="button" class="mt-part${mtHasPart(it) ? ' on' : ''}" data-mt-part="${i}" aria-label="Choose the part to use">✂️ ${mtHasPart(it) ? mtClock(it.from || 0) + '–' + mtClock(it.to || it.secs) : 'All' + (it.secs ? ' ' + mtClock(it.secs) : '')}</button>`
+            : `<span class="mt-dur">▶${it.secs ? ' ' + Math.floor(it.secs / 60) + ':' + String(Math.round(it.secs % 60)).padStart(2, '0') : ''}</span>`)}
           ${MT.order === 'mine' ? `<span class="mt-num">${i + 1}</span>` : ''}
           <button type="button" class="mt-x" data-mt-del="${i}" aria-label="Remove">✕</button></div>`).join('')}
           <button type="button" class="mt-add" data-mt="add">${mi('plus')}<span>Add</span></button>
@@ -1598,7 +1600,7 @@
         C.closePanel(p, true);
         return editMontage(op);
       }
-      const b = e.target.closest('[data-mt],[data-mt-del],[data-mt-song],[data-mt-style],[data-mt-len],[data-mt-aspect],[data-mt-order],[data-mt-mode],[data-mt-voice],[data-mt-free],[data-mt-mood],[data-mt-idea],[data-mt-tab],[data-mt-play],[data-mt-all]');
+      const b = e.target.closest('[data-mt],[data-mt-part],[data-mt-del],[data-mt-song],[data-mt-style],[data-mt-len],[data-mt-aspect],[data-mt-order],[data-mt-mode],[data-mt-voice],[data-mt-free],[data-mt-mood],[data-mt-idea],[data-mt-tab],[data-mt-play],[data-mt-all]');
       if (!b || MT.busy || mtDrag.just) return;
       const d = b.dataset;
       if (d.mtOrder) { MT.order = d.mtOrder; return mtPaint(); }
@@ -1616,6 +1618,7 @@
         if (d.mtTab === 'free' && !MT.free) { MT.free = 'auto'; MT.song = null; MT.songFile = null; }
         return mtPaint();
       }
+      if (d.mtPart != null) return mtChoosePart(MT.items[+d.mtPart]);
       if (d.mtDel != null) { const it = MT.items.splice(+d.mtDel, 1)[0]; if (it) URL.revokeObjectURL(it.url); return mtPaint(); }
       if (d.mtSong != null) { MT.song = d.mtSong ? MT.lib.find((m) => m.id === d.mtSong) || null : null; MT.songFile = null; MT.free = null; MT.musTab = d.mtSong ? 'mine' : 'none'; if (!d.mtSong) mtPreviewStop(); return mtPaint(); }
       if (d.mtFree) { MT.free = d.mtFree; MT.song = null; MT.songFile = null; MT.musTab = 'free'; return mtPaint(); }
@@ -1688,7 +1691,7 @@
     const end = () => { clearTimeout(hold && hold.timer); hold = null; };
     p.body.addEventListener('pointerdown', (e) => {
       const tile = e.target.closest('.mt-tile');
-      if (!tile || e.target.closest('.mt-x') || MT.busy) return;
+      if (!tile || e.target.closest('.mt-x,.mt-part') || MT.busy) return;
       const x0 = e.clientX, y0 = e.clientY, id = e.pointerId;
       hold = { x0, y0, timer: setTimeout(() => {
         const r = tile.getBoundingClientRect();
@@ -1762,6 +1765,83 @@
       }
     }
     mtPaint();
+  }
+
+  /*
+   * ►► FROM WHICH PART TO WHICH PART. ◄◄ "Let me choose from which part to
+   * which part of the video for the AI to do its montage." Tap ✂️ on a video:
+   * it plays here, and two handles (or "Start here" / "End here" while it
+   * plays) mark the part. Only that part is listened to and cut from.
+   */
+  const mtHasPart = (it) => !!it && it.kind === 'video' && ((it.from || 0) > 0.05 || (it.to > 0 && (!it.secs || it.to < it.secs - 0.05)));
+  function mtChoosePart(it) {
+    if (!it || it.kind !== 'video' || MT.busy) return;
+    const esc = C.esc;
+    const src = it.url || (it.path ? C.fileUrl(it.path) : '');
+    const p = C.openPanel({ id: 'cloudMontagePart', title: 'Choose the part to use', cls: 'cp-montage cp-mtpart' });
+    let D = it.secs || 0, A = it.from || 0, B = it.to || D, stopAt = null;
+    const MIN = 3;   // a part shorter than this has nothing to cut from
+    p.body.innerHTML = `<div class="mp-wrap" data-mp="play">
+        <video class="mp-video" playsinline webkit-playsinline preload="metadata" src="${C.escAttr(src)}"></video>
+        <button type="button" class="mp-play" aria-label="Play"></button></div>
+      <div class="mp-times"><span><small>From</small><b data-mp-a></b></span><span class="mp-len"><small>Part</small><b data-mp-len></b></span><span><small>To</small><b data-mp-b></b></span></div>
+      <div class="mp-track"><i class="mp-sel"></i>
+        <input type="range" class="mp-r mp-ra" min="0" step="0.1" aria-label="From" />
+        <input type="range" class="mp-r mp-rb" min="0" step="0.1" aria-label="To" /></div>
+      <div class="mp-btns"><button type="button" class="mt-chip" data-mp="a">⇤ Start here</button>
+        <button type="button" class="mt-chip" data-mp="part">▶ Play the part</button>
+        <button type="button" class="mt-chip" data-mp="b">End here ⇥</button></div>
+      <small class="mt-hint">Drag the handles, or play it and tap <b>Start here</b> and <b>End here</b>. The AI listens only to this part and makes the montage from it.</small>`;
+    p.foot.innerHTML = `<div class="mt-foot2"><button type="button" class="mt-edit" data-mp="all">Use all of it</button><button type="button" class="mt-go" data-mp="ok">Use this part</button></div>`;
+    const v = $('.mp-video', p.body), ra = $('.mp-ra', p.body), rb = $('.mp-rb', p.body);
+    const paint = () => {
+      ra.max = rb.max = String(D || 1);
+      ra.value = String(A); rb.value = String(B);
+      $('[data-mp-a]', p.body).textContent = mtClock(A);
+      $('[data-mp-b]', p.body).textContent = mtClock(B);
+      $('[data-mp-len]', p.body).textContent = mtClock(B - A);
+      const sel = $('.mp-sel', p.body);
+      sel.style.left = (D ? (A / D) * 100 : 0) + '%';
+      sel.style.width = (D ? ((B - A) / D) * 100 : 100) + '%';
+      $('.mp-play', p.body).classList.toggle('on', !v.paused);
+    };
+    const seek = (t) => { try { v.currentTime = Math.max(0, Math.min(D || t, t)); } catch (e) {} };
+    v.addEventListener('loadedmetadata', () => {
+      if (!(v.duration > 0) || !isFinite(v.duration)) return;
+      const first = !D;
+      D = v.duration; it.secs = it.secs || D;
+      if (first || !(B > 0)) B = it.to || D;
+      B = Math.min(B, D); A = Math.min(A, Math.max(0, B - MIN));
+      paint(); seek(A + 0.01);
+    });
+    v.addEventListener('timeupdate', () => { if (stopAt != null && v.currentTime >= stopAt) { v.pause(); stopAt = null; } });
+    v.addEventListener('play', paint); v.addEventListener('pause', paint);
+    p.body.addEventListener('input', (e) => {
+      if (e.target === ra) { A = Math.min(+ra.value, Math.max(0, B - MIN)); seek(A); }
+      else if (e.target === rb) { B = Math.max(+rb.value, Math.min(D, A + MIN)); seek(B); }
+      else return;
+      stopAt = null; if (!v.paused) v.pause();
+      paint();
+    });
+    const onClick = (e) => {
+      const b = e.target.closest('[data-mp]'); if (!b) return;
+      const k = b.dataset.mp;
+      if (k === 'play') { if (v.paused) { stopAt = null; v.play().catch(() => {}); } else v.pause(); }
+      else if (k === 'part') { stopAt = B; seek(A); v.play().catch(() => {}); }
+      else if (k === 'a') { A = Math.min(v.currentTime || 0, Math.max(0, B - MIN)); paint(); }
+      else if (k === 'b') { B = Math.max(v.currentTime || 0, Math.min(D, A + MIN)); paint(); }
+      else if (k === 'all') { it.from = 0; it.to = 0; C.closePanel(p); mtPaint(); }
+      else if (k === 'ok') {
+        it.from = Math.round(A * 10) / 10;
+        it.to = D && B >= D - 0.05 ? 0 : Math.round(B * 10) / 10;
+        C.closePanel(p); mtPaint();
+      }
+    };
+    p.body.addEventListener('click', onClick);
+    p.foot.addEventListener('click', onClick);
+    p.onClose = () => { try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {} };
+    paint();
+    $('[data-mp-len]', p.body).textContent = D ? mtClock(B - A) : '…';
   }
 
   function mtPoster(it) {
@@ -1891,6 +1971,8 @@
       });
       const res = await window.api.montage.create({
         mediaPaths: paths, musicPath: song ? song.file : null, style: MT.style,
+        // the part of each video to use (null: all of it)
+        ranges: talk ? MT.items.map((it) => (it.kind === 'video' && mtHasPart(it) ? { from: it.from || 0, to: it.to || 0 } : null)) : undefined,
         lengthSec: MT.len === 'all' ? 0 : MT.len === 'custom' ? MT.custom : MT.len, full: MT.len === 'all',
         aspect: MT.aspect, brief: MT.brief, about: mtAboutOf(MT.brief), keepAudio: talk ? true : MT.keep, keepOrder: !talk && MT.order === 'mine', jobId,
         mode: talk ? 'talk' : undefined, voice: talk && MT.voice ? MT.voice : undefined,

@@ -187,6 +187,25 @@ const SCRIPT = {
     let tc = rc.duration * 0.55;
     for (let x = rc.duration * 0.3; x < rc.duration - 0.5; x += 0.25) if (clear(rc, x)) { tc = x; break; }
     ok(green(colourAt(outC, tc, 120)) && green(colourAt(outC, tc, 1760)), 'with no AI to ask, it still fills the frame (the middle of the picture)', [colourAt(outC, tc, 120), colourAt(outC, tc, 1760)]);
+    // THE PERSON DETECTOR HAS THE LAST WORD: the AI's look says right (a poster), the detector finds the person on the left
+    {
+      const pd = require(path.join(ROOT, 'src/main/persondetect'));
+      const realAv = pd.available, realPeople2 = pd.people;
+      const seen = [];
+      pd.available = () => true;
+      pd.people = async (ff, file, t) => { seen.push(t); return [{ score: 0.9, face: { x: 0.14, y: 0.4, w: 0.08, h: 0.14 }, body: { x0: 0.05, x1: 0.24 } }]; };
+      see.ready = () => true;
+      see.whereArePeople = async ({ frames }) => ({ ok: true, answers: Object.fromEntries(frames.map((f) => [f.label, { column: 11, people: 1, sure: true }])) });
+      const outD = path.join(WORK, 'fill-detector.mp4');
+      let rd;
+      try { rd = await montage.make(ctx, video.getInfo, { mediaPaths: [L], style: 'hype', lengthSec: 12, aspect: '9:16', output: outD, mode: 'talk', hear: hear1 }); }
+      finally { see.ready = realReady; see.whereArePeople = realPeople; pd.available = realAv; pd.people = realPeople2; }
+      let td = rd.duration * 0.55;
+      for (let x = rd.duration * 0.3; x < rd.duration - 0.5; x += 0.25) if (clear(rd, x)) { td = x; break; }
+      const red = (c) => c[0] > 150 && c[1] < 90 && c[2] < 90;
+      ok(seen.length >= 1, 'the person detector looked at the moments', seen.length);
+      ok(red(colourAt(outD, td, 120)) && red(colourAt(outD, td, 940)), 'where the detector finds the person (left), the cut follows them — not the AI\'s guess (a poster on the right)', [colourAt(outD, td, 120), colourAt(outD, td, 940)]);
+    }
     // short lines: nothing from a phrase longer than about 6.5 s
     const lines = montage.phrasesOf(long, 6.5);
     ok(lines.every((p) => p.end - p.start <= 7.6), 'a long run of speech is cut into short lines (≤ ~7 s)', lines.map((p) => +(p.end - p.start).toFixed(1)));
@@ -319,6 +338,24 @@ const SCRIPT = {
     for (const L of [15, 30]) {
       const r = await montage.make(ctx, video.getInfo, { mediaPaths: [LV], style: 'hype', lengthSec: L, aspect: '9:16', output: path.join(LD, `len-${L}.mp4`), mode: 'talk', hear: async () => talk });
       ok(Math.abs(r.duration - L) <= 1.5, `${L} s asked → ${r.duration.toFixed(1)} s made (within a second and a half)`, r.duration);
+    }
+    // FROM WHICH PART TO WHICH PART: only 0:40–1:30 of the sermon is heard and used
+    {
+      const asked = [];
+      const LD3 = fs.mkdtempSync(path.join(WORK, 'part-'));
+      const out = path.join(LD3, 'part.mp4');
+      const r = await montage.make(ctx, video.getInfo, { mediaPaths: [LV], ranges: [{ from: 40, to: 90 }], style: 'hype', lengthSec: 15, aspect: '9:16', output: out, mode: 'talk',
+        hear: async (f, end, prog, from) => { asked.push([from, end]); return talk; } });
+      ok(asked.length === 1 && asked[0][0] === 40 && asked[0][1] === 90, 'only the part chosen is listened to (0:40 to 1:30)', asked);
+      const pj = montage.loadProject(out);
+      const froms = [];
+      for (const sh of (pj && pj.shots) || []) {
+        if (sh.cid === 'v1' && sh.from != null) froms.push([sh.from, sh.from + (sh.need || sh.seconds)]);
+        for (const o of sh.overlays || []) if (o.cid === 'v1' && o.from != null) froms.push([o.from, o.from + o.len]);
+      }
+      ok(froms.length >= 3 && froms.every(([a, b]) => a >= 39.5 && b <= 90.6), 'every moment in it comes from inside that part', froms);
+      ok(Math.abs(r.duration - 15) <= 1.5, 'and it is still the length asked for', r.duration);
+      ok((r.words || []).every((w) => w.start >= 0), 'its captions are on the edit\'s own clock', (r.words || []).slice(0, 3));
     }
     // long sentences (about 6 s each) and a narrator: still the length asked for
     {

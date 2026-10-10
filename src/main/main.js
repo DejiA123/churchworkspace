@@ -770,12 +770,25 @@ ipcMain.handle('montage:status', wrap(async () => Object.assign({}, montage.dire
  * words on screen are what was said, never what the operator typed. Groq, or
  * this PC, only when AssemblyAI cannot.
  */
-async function montageHear(file, durationSec, onProgress) {
+/*
+ * `fromSec`: the operator chose a part of the video ("from which part to which
+ * part") — only that part is heard (nothing is spent on the rest), and the
+ * words come back on the video's own clock.
+ */
+async function montageHear(file, durationSec, onProgress, fromSec = 0) {
+  const from = Math.max(0, Math.min(+fromSec || 0, Math.max(0, durationSec - 0.5)));
+  const span = Math.max(0.5, durationSec - from);
+  const shift = (ws) => {
+    if (!from || !ws) return ws;
+    const out = ws.map((w) => Object.assign({}, w, { start: w.start + from, end: w.end + from }));
+    if (Array.isArray(ws.highlights)) Object.defineProperty(out, 'highlights', { value: ws.highlights.map((h) => Object.assign({}, h, { at: (h.at || []).map(([a, b]) => [a + from, b + from]) })), enumerable: false });
+    return out;
+  };
   try {
     const aai = require('./assemblyear');
     if (aai.ready()) {
       if (onProgress) onProgress(3);
-      const audio = await geminiear.encodeFlac(file, 0, durationSec);
+      const audio = await geminiear.encodeFlac(file, from, span);
       if (onProgress) onProgress(12);
       // AssemblyAI says nothing until it is done: the bar walks on gently meanwhile
       let p = 12;
@@ -788,7 +801,7 @@ async function montageHear(file, durationSec, onProgress) {
         const entries = wordbook.apply(aw).entries;
         // AssemblyAI's key phrases ride along (the montage leans on them for the strongest moments)
         if (Array.isArray(aw.highlights)) Object.defineProperty(entries, 'highlights', { value: aw.highlights, enumerable: false });
-        return entries;
+        return shift(entries);
       }
     }
   } catch (err) {
@@ -798,24 +811,24 @@ async function montageHear(file, durationSec, onProgress) {
   }
   if (cloudspeech.fileReady()) {
     let r = null;
-    try { r = await cloudspeech.transcribeWords({ input: file, startSec: 0, endSec: durationSec, onProgress }); } catch (err) {
+    try { r = await cloudspeech.transcribeWords({ input: file, startSec: from, endSec: durationSec, onProgress }); } catch (err) {
       if (err && err.cancelled) throw new jobs.CancelledError();
       r = null;
     }
-    if (r && r.words && r.words.length && r.doneSec >= durationSec - 0.5) return wordbook.apply(r.words).entries;
+    if (r && r.words && r.words.length && r.doneSec >= span - 0.5) return shift(wordbook.apply(r.words).entries);
   }
   if (captioner.isAvailable()) {
-    const r = await captioner.transcribe(getCtx(), { input: file, startSec: 0, endSec: durationSec, onProgress });
-    return wordbook.apply((r && r.words) || []).entries;
+    const r = await captioner.transcribe(getCtx(), { input: file, startSec: from, endSec: durationSec, onProgress });
+    return shift(wordbook.apply((r && r.words) || []).entries);
   }
   return [];
 }
-ipcMain.handle('montage:create', wrap(async (e, { mediaPaths, musicPath, style, lengthSec, full, aspect, brief, about, keepAudio, keepOrder, mode, voice, jobId }) => {
+ipcMain.handle('montage:create', wrap(async (e, { mediaPaths, ranges, musicPath, style, lengthSec, full, aspect, brief, about, keepAudio, keepOrder, mode, voice, jobId }) => {
   const output = outPath(`montage-${stamp()}.mp4`);
   let pct = 0, stageName = '';
   const tell = () => { if (jobId && e && !e.sender.isDestroyed()) e.sender.send('job:progress', { jobId, percent: pct, stage: stageName }); };
   const made = await montage.make(getCtx(), video.getInfo, {
-    mediaPaths, musicPath, style, lengthSec, full, aspect, brief, about, keepAudio, keepOrder, output,
+    mediaPaths, ranges, musicPath, style, lengthSec, full, aspect, brief, about, keepAudio, keepOrder, output,
     mode: mode === 'talk' ? 'talk' : undefined, hear: montageHear, voice: mode === 'talk' && voice ? String(voice) : null,
     onProgress: (p) => { pct = p; tell(); },
     stage: (name) => { stageName = name; tell(); },

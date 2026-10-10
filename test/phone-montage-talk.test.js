@@ -227,6 +227,24 @@ async function waitUp() {
     await sleep(150);
     const t2 = await page.evaluate(() => document.getElementById('mtBrief').value);
     check(t2 === 'Bishop David Richman', 'a second tap takes it out again', t2);
+    // FROM WHICH PART TO WHICH PART: ✂️ on a video, two handles / "Start here", only that part goes to the AI
+    await page.locator('#cloudMontage [data-mt-part="0"]').tap();
+    await page.waitForSelector('#cloudMontagePart .mp-video', { timeout: 5000 });
+    await page.waitForFunction(() => { const v = document.querySelector('#cloudMontagePart .mp-video'); return v && v.duration > 30 && +document.querySelector('#cloudMontagePart .mp-rb').max > 30; }, null, { timeout: 15000 });
+    const pp0 = await page.evaluate(() => ({ a: document.querySelector('#cloudMontagePart [data-mp-a]').textContent, b: document.querySelector('#cloudMontagePart [data-mp-b]').textContent }));
+    check(pp0.a === '0:00' && pp0.b === '0:40', 'the part picker opens on the whole video (0:00 to 0:40)', pp0);
+    await page.evaluate(() => { const r = document.querySelector('#cloudMontagePart .mp-rb'); r.value = '25'; r.dispatchEvent(new Event('input', { bubbles: true })); });
+    await page.evaluate(() => new Promise((res) => { const v = document.querySelector('#cloudMontagePart .mp-video'); v.addEventListener('seeked', res, { once: true }); v.currentTime = 10; }));
+    await page.locator('#cloudMontagePart [data-mp="a"]').tap();
+    await sleep(150);
+    const pp1 = await page.evaluate(() => ({ a: document.querySelector('#cloudMontagePart [data-mp-a]').textContent, b: document.querySelector('#cloudMontagePart [data-mp-b]').textContent, len: document.querySelector('#cloudMontagePart [data-mp-len]').textContent,
+      sel: document.querySelector('#cloudMontagePart .mp-sel').style.width, pageW: document.documentElement.scrollWidth <= window.innerWidth }));
+    check(pp1.a === '0:10' && pp1.b === '0:25' && pp1.len === '0:15' && parseFloat(pp1.sel) > 30 && parseFloat(pp1.sel) < 45 && pp1.pageW, 'a handle sets the end, "Start here" the start — 0:10 to 0:25, shown on the bar', pp1);
+    if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'montage-part.png') });
+    await page.locator('#cloudMontagePart [data-mp="ok"]').tap();
+    await sleep(300);
+    const tileT = await page.evaluate(() => ({ t: document.querySelector('#cloudMontage [data-mt-part="0"]').textContent.trim(), on: document.querySelector('#cloudMontage [data-mt-part="0"]').classList.contains('on'), other: document.querySelector('#cloudMontage [data-mt-part="1"]').textContent.trim(), gone: !document.getElementById('cloudMontagePart') }));
+    check(tileT.gone && tileT.on && /0:10–0:25/.test(tileT.t) && /All/.test(tileT.other), 'the video\'s tile shows the part chosen (the other still says All)', tileT);
     await page.locator('#mtBrief').fill('Bishop David Richman at The Power House — faith over fear. Sunday service');
     await page.locator('#cloudMontage [data-mt-song=""]').tap();
     await sleep(200);
@@ -234,7 +252,8 @@ async function waitUp() {
     if (process.env.MW_SHOTS) { await page.evaluate(() => document.getElementById('mtBrief').scrollIntoView({ block: 'center' })); await sleep(300); await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'montage-about.png'), fullPage: false }); }
     await page.locator('#cloudMontage .mt-go').tap();
     for (let i = 0; i < 60 && !(await page.evaluate(() => !!window.__mtArgs)); i++) await sleep(250);
-    const sent = await page.evaluate(() => window.__mtArgs && { brief: window.__mtArgs.brief, about: window.__mtArgs.about });
+    const sent = await page.evaluate(() => window.__mtArgs && { brief: window.__mtArgs.brief, about: window.__mtArgs.about, ranges: window.__mtArgs.ranges });
+    check(sent && JSON.stringify(sent.ranges) === JSON.stringify([{ from: 10, to: 25 }, null]), 'the part chosen goes to the server with its video (and the other video is used whole)', sent && sent.ranges);
     check(sent && /faith over fear/.test(sent.brief) && sent.about.speaker === 'Bishop David Richman' && sent.about.occasion === 'Sunday service',
       'the words go to the AI, with the speaker (spelt as written, for the captions too) and the occasion picked out', sent);
     // the studio side: the edit's own words become captions at once, lit up word by word
