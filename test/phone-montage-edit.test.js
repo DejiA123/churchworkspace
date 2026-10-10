@@ -48,7 +48,8 @@ async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise
     const n = await page.evaluate(() => document.querySelectorAll('#cloudMontageEdit [data-me-play]').length);
     check(n >= 2, '[1] every shot has its picture to tap, with ▶ on it', n);
     // the second shot: it plays from where it is in the montage
-    const want = await page.evaluate(async (o) => { const pj = await window.api.montage.project(o); return { start: pj.shots[0].seconds, end: pj.shots[0].seconds + pj.shots[1].seconds }; }, made);
+    const want = await page.evaluate(async (o) => { const pj = await window.api.montage.project(o); return { start: pj.shots[1].at, end: pj.shots[2] ? pj.shots[2].at : pj.shots[1].at + pj.shots[1].seconds, ats: pj.shots.map((x) => x.at) }; }, made);
+    check(want.ats.every((a, i) => typeof a === 'number' && (i === 0 || a > want.ats[i - 1])), '[2] the montage keeps where each shot really starts in the file', want.ats);
     // (this test browser has no H.264, so the montage cannot actually play here: what is checked is that the tap
     // starts THAT shot of the montage, in place and bigger — an iPhone plays it)
     const st = await page.evaluate(() => {
@@ -61,6 +62,8 @@ async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise
     });
     check(st && st.montage && Math.abs(st.from - want.start) < 0.05 && Math.abs(st.to - want.end) < 0.05 && st.playing && st.w >= 100, '[2] tapping a shot plays THAT shot of the montage, bigger, right there', { st, want });
     await page.evaluate(() => { const v = document.querySelector('#cloudMontageEdit video'); if (v) v.onerror = null; });
+    const sel = await page.evaluate(() => document.querySelector('#cloudMontageEdit [data-me-shot="1"]').classList.contains('sel'));
+    check(sel, '[2] tapping the picture also chooses that clip (for a photo to go on)');
     await page.evaluate(() => { const slot = document.querySelector('#cloudMontageEdit [data-me-play="1"]'); if (slot.querySelector('video')) slot.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await sleep(300);
     const gone = await page.evaluate(() => !document.querySelector('#cloudMontageEdit video'));

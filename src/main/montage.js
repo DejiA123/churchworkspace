@@ -1335,9 +1335,10 @@ async function renderPiece(ctx, s, W, H, keepAudio, out, next, { overlay = null,
     }
     const hold = (oc.kind === 'image' || snap) ? `,loop=loop=${Math.ceil((o.len + 0.2) * FPS)}:size=1:start=0,setpts=N/${FPS}/TB` : '';
     const look = `${grab}${fit}${hold}${move ? ',' + move : ''}`;
-    // (a cover over a whole beat goes on and off with the cut — no fade that would show what it covers)
-    const fin = o.cover ? 0.02 : snap ? 0.1 : 0.25, fout = o.cover ? 0.02 : 0.25;
-    const ov = `[1:v]${look},fps=${FPS},format=yuva420p,fade=t=in:st=0:d=${fin}:alpha=1,fade=t=out:st=${Math.max(0, o.len - fout).toFixed(3)}:d=${fout}:alpha=1,`
+    // (a cover over a whole beat goes on and off with the cut — no fade at all, not one frame of what it covers)
+    const fin = snap ? 0.1 : 0.25;
+    const fades = o.cover ? '' : `fade=t=in:st=0:d=${fin}:alpha=1,fade=t=out:st=${Math.max(0, o.len - 0.25).toFixed(3)}:d=0.25:alpha=1,`;
+    const ov = `[1:v]${look},fps=${FPS},format=yuva420p,${fades}`
       + `trim=0:${o.len.toFixed(3)},setpts=PTS-STARTPTS+${o.start.toFixed(3)}/TB[ov]`;
     // the camera flash: the whole frame goes white for a blink as the snapshot lands
     const flash = snap ? `,drawbox=x=0:y=0:w=iw:h=ih:color=white@0.8:t=fill:enable='between(t,${o.start.toFixed(3)},${(o.start + 0.07).toFixed(3)})'` : '';
@@ -1442,6 +1443,16 @@ async function render(ctx, plan, { aspect, keepAudio, output, base, tmp, onProgr
     await ff.runFfmpeg(ctx.ffmpeg, ['-hide_banner', '-y', '-f', 'concat', '-safe', '0', '-i', txt, '-c', 'copy', '-movflags', '+faststart', out]);
   };
   await join(pieces, output, 'pieces.txt');
+  // where each shot REALLY starts in the joined file (each piece runs a few ms past its planned length — on a
+  // long montage the planned sum drifts a third of a second): the Edit-the-montage preview plays from these
+  try {
+    let at = 0;
+    for (let i = 0; i < pieces.length; i++) {
+      plan.shots[i].realAt = round2(at);
+      const d = await pieceDuration(ctx, pieces[i]);
+      at += d > 0 ? d : plan.shots[i].seconds;
+    }
+  } catch (e) { /* the planned positions stand */ }
   if (base) {
     try { fs.rmSync(base, { force: true }); } catch (e) {}
     if (bare.some(Boolean)) {
@@ -1528,6 +1539,7 @@ function projectOf(plan, cands, { aspect, keepAudio, style, full }, meta = {}) {
     cands: C,
     shots: plan.shots.map((s) => ({
       cid: s.cand.id, seconds: s.seconds, from: s.from == null ? null : s.from, need: s.need == null ? null : s.need,
+      at: typeof s.realAt === 'number' ? s.realAt : null,   // where it really starts in the made file (Edit-the-montage preview)
       effect: s.effect, focus: s.focus, fx: s.fx == null ? null : s.fx, fx2: s.fx2 == null ? null : s.fx2, slow: !!s.slow, transition: s.transition, grade: s.grade || null, mute: !!s.mute,
       overlays: (s.overlays || []).map((o) => ({ cid: o.cand.id, style: o.style, start: o.start, len: o.len, pos: o.pos, from: o.from == null ? null : o.from, fx: o.fx == null ? null : o.fx, cover: !!o.cover })),
     })),
@@ -1871,6 +1883,7 @@ async function laySpeech(ctx, file, parts, tmp) {
  */
 // 12 columns on a bigger frame: an eighth of the picture was too coarse to keep a person whole in a 9:16 cut
 const SPEAK_COLS = 12, SPEAK_TILE_W = 384, SPEAK_TILE_H = 216, SPEAK_MAX_FRAMES = 48;
+const MAX_MOVE_ZOOM = 1.24;   // the tightest zoom move (effectChain hold_tight): the share of the cut it still shows
 const needsCrop = (c, W, H) => c && c.kind === 'video' && c.w && c.h && Math.abs(Math.log((c.w / c.h) / (W / H))) >= 0.42;
 /* An ffmpeg that can draw text, for the column numbers: the bundled one cannot
  * (no freetype), the system's usually can (the server image installs it). */
@@ -1957,7 +1970,9 @@ async function lookAt(ctx, reqs, tmp, log, { people = true, max = Infinity, fram
        * as it can be — instead of on the head alone, which left a shoulder, or
        * half a face by an edge, outside the frame.
        */
-      const win = frame && r.w && r.h ? Math.min(1, (r.h * frame.W / frame.H) / r.w) : null;
+      // (the zoom moves — hold_tight 1.24x, punch_in, hold_in — show less than the cut: fit the person to the
+      // narrowest of them, so a shoulder made room for is not zoomed back out of the frame)
+      const win = frame && r.w && r.h ? Math.min(1, (r.h * frame.W / frame.H) / r.w) / (frame.zoom || MAX_MOVE_ZOOM) : null;
       if (win && win < 1 && a.left && a.right) {
         const L = at((a.left - 1) * cw), R = at(a.right * cw);
         out[r.i].span = [L, R];
@@ -2054,6 +2069,15 @@ async function writeTalkPost(picks, opts, P, hook) {
   const base = tags(P.hashtags);
   const fallbackTags = base.length ? base : ['faith', 'jesus', 'church', 'sermon', 'christian', 'gospel', 'hope', 'godisgood'];
   return { caption: lines.filter(Boolean).join('\n\n'), hashtags: fallbackTags };
+}
+
+/** A finished piece's length, as the join counts it (its container's duration). */
+async function pieceDuration(ctx, file) {
+  if (!ctx.ffprobe) return 0;
+  return new Promise((resolve) => {
+    require('child_process').execFile(ctx.ffprobe, ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', file], { windowsHide: true, timeout: 20000 },
+      (err, out) => resolve(err ? 0 : (parseFloat(String(out).trim()) || 0)));
+  });
 }
 
 /** A line cut into its beats (about 2.4 s each, cut between words): their source spans and word ranges — the same cut the edit makes. */
@@ -2328,7 +2352,11 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
         const transition = first && hypeish && ((pi === 0 && vo.intro) || pi % 2 === 1) ? 'flash' : 'cut';
         const sh = { cand: p.cand, seconds: need, from: round2(from), need, effect, focus: 'center', slow: false, transition, grade, overlays: [], at: round2(at), line: pi };
         // TRACKING: cut round the person, panning with them from where they stand at this beat's start to its end
-        const fa = fxAtLook(p, from), fb = fxAtLook(p, from + need);
+        // framed from THIS beat's own looks (a camera that cuts from wide to close between beats is not blended):
+        // one look holds there, two or more pan from the first to the last; none borrows the line's nearest
+        const own = (p.looks || []).filter((l) => l.fx != null && l.people !== 0 && l.t >= from - 0.05 && l.t <= from + need + 0.05).sort((x, y) => x.t - y.t);
+        const fa = own.length ? own[0].fx : fxAtLook(p, from + need / 2);
+        const fb = own.length > 1 ? own[own.length - 1].fx : null;
         if (fa != null) { sh.fx = round2(fa); if (fb != null && Math.abs(fb - fa) > 0.02) sh.fx2 = round2(fb); }
         // a beat whose own look saw nobody (the camera on the screen for a moment): covered below
         if ((p.looks || []).some((l) => l.people === 0 && l.t >= from - 0.05 && l.t <= from + need + 0.05)) sh.cover = true;

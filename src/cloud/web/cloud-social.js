@@ -2050,8 +2050,10 @@
     const sh = ME.shots[i]; if (!sh) return;
     // where this shot is in the montage as it was made (the order may have been changed since)
     let start = 0;
-    for (let k = 0; k < sh.key; k++) start += Number(ME.project.shots[k].seconds) || 0;
-    const end = start + (Number(ME.project.shots[sh.key].seconds) || 0);
+    const own = ME.project.shots[sh.key], next = ME.project.shots[sh.key + 1];
+    if (typeof own.at === 'number') start = own.at;   // where it really is in the file (montage.js render)
+    else for (let k = 0; k < sh.key; k++) start += Number(ME.project.shots[k].seconds) || 0;
+    const end = next && typeof next.at === 'number' ? next.at : start + (Number(own.seconds) || 0);
     const v = document.createElement('video');
     v.playsInline = true; v.setAttribute('playsinline', ''); v.preload = 'auto';
     v.src = C.fileUrl(ME.path) + `#t=${start.toFixed(2)},${end.toFixed(2)}`;
@@ -2070,7 +2072,16 @@
     p.body.addEventListener('click', (e) => {
       if (ME.busy) return;
       const play = e.target.closest('[data-me-play]');
-      if (play) { e.stopPropagation(); return mePlayShot(+play.dataset.mePlay, play); }
+      if (play) {
+        e.stopPropagation();
+        // the picture is the clip too: tapping it also chooses it (for a photo to go on), as tapping the row does
+        const k = +play.dataset.mePlay;
+        if (ME.selShot !== k || ME.sel) {
+          ME.selShot = k; ME.sel = null;
+          $$('#cloudMontageEdit [data-me-shot]').forEach((el) => el.classList.toggle('sel', +el.dataset.meShot === k));
+        }
+        return mePlayShot(k, play);
+      }
       const shotEl = e.target.closest('[data-me-shot]');
       const i = shotEl ? +shotEl.dataset.meShot : -1;
       const mv = e.target.closest('[data-me-move]');
