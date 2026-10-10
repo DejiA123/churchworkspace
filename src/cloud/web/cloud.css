@@ -2968,3 +2968,14 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .csb-bmain .csb-shims { margin-top: 10px; }
 .csb-bpost > .csb-x { top: 8px; right: 8px; }
 .csb-addrow { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* bulk timing: starts, then one every N */
+.csb-lbl { display: block; margin: 12px 2px 8px; color: rgba(235,235,245,.5); font-size: 12px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; }
+.csb-lbl:first-child { margin-top: 0; }
+.csb-gap { display: flex; align-items: center; gap: 10px; margin-top: 10px; color: rgba(235,235,245,.7); font-size: 14px; }
+.csb-gap .cs-input { width: 90px; }
+.csb-snap { display: flex; align-items: center; gap: 10px; margin-top: 12px; color: rgba(235,235,245,.8); font-size: 14px; }
+.csb-snap input { width: 20px; height: 20px; accent-color: #a855f7; }
+.csb-plan { display: flex; gap: 10px; align-items: flex-start; margin: 14px 0 0; padding: 12px 14px; border-radius: 14px; background: rgba(139,92,246,.12); color: #e9d5ff; font-size: 13.5px; line-height: 1.4; }
+.csb-plan .mi { flex: none; width: 18px; height: 18px; margin-top: 1px; }
+.csb-plan b { display: block; color: #fff; font-size: 14.5px; }

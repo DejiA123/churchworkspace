@@ -830,6 +830,7 @@
       when: edit ? new Date(edit.scheduledAt) : null,
       quick: edit ? 'pick' : 'best',
       spacing: 24,
+      snap: false,          // a bulk: exactly every N hours, or nudged onto the best times
       options: null,
       writing: false,
       batchCaps: {},
@@ -874,7 +875,19 @@
     }
     function chosenWhen() { return st.quick === 'pick' ? (st.when || whenFor('best')) : whenFor(st.quick); }
     // a batch starts from the time chosen (a free-slot tile), or from the next best time
-    const batchTimes = () => planTimes(st.files.length, st.spacing, st.quick === 'pick' && st.when ? st.when : undefined);
+    /*
+     * ►► A BULK, ONE BY ONE, OVER DAYS. ◄◄ "Every 6 hours" means every 6
+     * hours: the first goes at the start chosen (Now, Tonight, Pick…), each
+     * next one the gap later, for as many days as it takes. "Nudge to the best
+     * times" moves each onto the nearest hour people look instead.
+     */
+    const batchStart = () => (st.quick === 'now' ? new Date(Date.now() + 2 * 60000) : chosenWhen());
+    const batchTimes = () => {
+      const n = st.files.length, start = batchStart();
+      if (st.snap) return planTimes(n, st.spacing, start);
+      return Array.from({ length: n }, (_, i) => new Date(start.getTime() + i * st.spacing * 3600e3));
+    };
+    const gapWords = (h) => (h % 24 === 0 ? (h === 24 ? 'every day' : `every ${h / 24} days`) : h === 1 ? 'every hour' : `every ${h} hours`);
 
     const sendLine = (it) => {
       const pct = Math.round(it.pct || 0);
@@ -948,10 +961,20 @@
     function whenBlock() {
       if (many()) {
         const times = batchTimes();
-        return '<div class="cs-chips">'
-          + [[24, 'One a day'], [12, 'Twice a day'], [6, 'Every 6 h'], [48, 'Every 2 days']].map(([h, l]) =>
-            `<button type="button" class="cs-chip${st.spacing === h ? ' on' : ''}" data-c="spacing" data-h="${h}">${l}</button>`).join('')
-          + `</div><p class="cs-hint">First one ${esc(whenLabel(times[0]))}, then ${st.spacing >= 24 ? (st.spacing === 24 ? 'one a day' : `every ${st.spacing / 24} days`) : `every ${st.spacing} hours`} at the best times — each card shows its time.</p>`;
+        const gaps = [[1, '1 h'], [2, '2 h'], [3, '3 h'], [6, '6 h'], [12, '12 h'], [24, 'Daily'], [48, '2 days']];
+        const custom = !gaps.some(([h]) => h === st.spacing);
+        const last = times[times.length - 1];
+        return '<small class="csb-lbl">Starts</small><div class="cs-chips">'
+          + [['now', 'Now'], ['best', '✦ Best time'], ['hour', 'In an hour'], ['tonight', 'Tonight 7 pm'], ['tomorrow', 'Tomorrow 9 am'], ['pick', 'Pick…']].map(([k, l]) =>
+            `<button type="button" class="cs-chip${st.quick === k ? ' on' : ''}" data-c="quick" data-k="${k}">${l}</button>`).join('')
+          + '</div>'
+          + (st.quick === 'pick' ? `<input type="datetime-local" class="cs-input cs-dt" data-c="dt" value="${localInput(chosenWhen())}" min="${localInput(new Date())}">` : '')
+          + '<small class="csb-lbl">Then one every</small><div class="cs-chips">'
+          + gaps.map(([h, l]) => `<button type="button" class="cs-chip${st.spacing === h ? ' on' : ''}" data-c="spacing" data-h="${h}">${l}</button>`).join('')
+          + `<button type="button" class="cs-chip${custom ? ' on' : ''}" data-c="spacing-other">${custom ? `${st.spacing} h` : 'Other…'}</button></div>`
+          + (st.spacingOther ? `<label class="csb-gap"><input class="cs-input" type="number" min="1" max="336" step="1" inputmode="numeric" data-c="gap" value="${st.spacing}"><span>hours between posts</span></label>` : '')
+          + `<label class="csb-snap"><input type="checkbox" data-c="snap"${st.snap ? ' checked' : ''}><span>✦ Nudge each onto the best times people look</span></label>`
+          + `<p class="csb-plan">${mi('calendar')}<span><b>${times.length} posts, ${esc(gapWords(st.spacing))}</b>${esc(shortWhen(times[0]))} → ${esc(shortWhen(last))} · one at a time, by themselves</span></p>`;
       }
       const w = chosenWhen();
       return '<div class="cs-chips">'
@@ -1056,7 +1079,7 @@
     }
 
     function whenSummary() {
-      if (many()) { const t = batchTimes(); return { main: `${st.files.length} posts`, sub: `from ${shortWhen(t[0])}` }; }
+      if (many()) { const t = batchTimes(); return { main: `${st.files.length} posts`, sub: `${gapWords(st.spacing)} from ${shortWhen(t[0])}` }; }
       if (st.quick === 'now') return { main: 'Right now', sub: 'As soon as you tap' };
       const w = chosenWhen();
       const day = dayName(w);
@@ -1260,6 +1283,8 @@
     panel.body.addEventListener('change', (e) => {
       const t = e.target;
       if (t.dataset.c === 'dt' && t.value) { st.when = new Date(t.value); draw(); }
+      if (t.dataset.c === 'gap') { const h = Math.round(+t.value); if (h >= 1 && h <= 336) { st.spacing = h; draw(); } }
+      if (t.dataset.c === 'snap') { st.snap = !!t.checked; draw(); }
     });
     panel.body.addEventListener('click', async (e) => {
       const b = e.target.closest('[data-c]'); if (!b || b.disabled) return;
@@ -1306,7 +1331,8 @@
         if (st.quick === 'pick' && !st.when) st.when = whenFor('best');
         return draw();
       }
-      if (c === 'spacing') { st.spacing = +b.dataset.h; return draw(); }
+      if (c === 'spacing') { st.spacing = +b.dataset.h; st.spacingOther = false; return draw(); }
+      if (c === 'spacing-other') { st.spacingOther = true; draw(); const i = panel.body.querySelector('input[data-c="gap"]'); if (i) { i.focus(); i.select(); } return; }
       if (c === 'mus') { st.music = b.dataset.v ? { free: b.dataset.v } : null; return draw(); }
       if (c === 'muslib') { st.music = { lib: b.dataset.v }; return draw(); }
       if (c === 'musmood') { st.musicMood = b.dataset.v; return draw(); }

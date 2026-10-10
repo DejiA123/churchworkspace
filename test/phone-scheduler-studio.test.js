@@ -304,6 +304,13 @@ function aiServer() {
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'b-real-10-bulk-cards.png') });
     check(cards.length === 3 && cards.every((c) => c.length > 10), 'then a card per post, each with its own AI caption', cards.map((c) => c.slice(0, 40)));
     await page.fill('#csCompose .csb-bcap[data-bcap="1"]', 'My own words for clip two');
+    // several days, one by one: starts Tonight 7 pm, then exactly every 6 hours
+    await page.tap('#csCompose [data-c="quick"][data-k="tonight"]');
+    await page.tap('#csCompose [data-c="spacing"][data-h="6"]');
+    const plan = await page.$eval('#csCompose .csb-plan', (n) => n.textContent).catch(() => '');
+    const cardTimes = await page.$$eval('#csCompose .csb-bmain > small', (xs) => xs.map((x) => x.textContent.trim()));
+    if (SHOTS) { await page.evaluate(() => { const w = document.querySelector('#csbWhen'); if (w) w.scrollIntoView({ block: 'center' }); }); await sleep(200); await page.screenshot({ path: path.join(SHOTS, 'b-real-11-bulk-every6h.png') }); }
+    check(/3 posts, every 6 hours/.test(plan) && cardTimes.length === 3, 'Starts + "then one every 6 h": the plan and each card say when', { plan, cardTimes });
     const goLabel = await page.$eval('#csCompose [data-c="go"]', (b) => b.textContent);
     check(/Schedule 3 posts/.test(goLabel), 'the button says how many posts', goLabel);
     await page.tap('#csCompose [data-c="go"]');
@@ -314,7 +321,9 @@ function aiServer() {
     const times = fresh.map((p) => +new Date(p.scheduledAt)).sort();
     check(all.length === nBefore + 3 && fresh.some((p) => p.caption === 'My own words for clip two') && new Set(fresh.map((p) => p.caption)).size === 3,
       'Schedule makes one post each, with its own caption (an edited one kept)', fresh.map((p) => (p.caption || '').slice(0, 30)));
-    check(times[2] - times[0] >= 2 * 3600e3, 'spread out over time', times.map((t) => new Date(t).toISOString()));
+    const t7 = new Date(times[0]);
+    check(times[1] - times[0] === 6 * 3600e3 && times[2] - times[1] === 6 * 3600e3 && t7.getHours() === 19 && t7.getMinutes() === 0,
+      'they go out one by one: 7 pm, then exactly every 6 hours', times.map((t) => new Date(t).toString()));
 
     if (SHOTS) {
       await page.evaluate(() => { const x = document.querySelector('#csCompose .cp-x'); if (x) x.click(); });
