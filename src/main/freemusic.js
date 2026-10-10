@@ -35,7 +35,7 @@ const TRACKS = [
   ['Inspired', 'uplift'], ['Wholesome', 'uplift'], ['Heartwarming', 'uplift'], ['Ascending the Vale', 'uplift'],
   ['Easy Lemon', 'uplift'], ['Cheery Monday', 'uplift'],
   ['Heroic Age', 'epic'], ['Five Armies', 'epic'], ['Epic Unease', 'epic'], ['Volatile Reaction', 'epic'], ['Crusade - Heavy Industry', 'epic'],
-  ['Cipher', 'hype'], ['Movement Proposition', 'hype'], ['Funkorama', 'hype'], ['Life of Riley', 'hype'], ['Wallpaper', 'hype'],
+  ['Movement Proposition', 'hype'],   // (Cipher taken off the shelf at the church's request) ['Funkorama', 'hype'], ['Life of Riley', 'hype'], ['Wallpaper', 'hype'],
   ['Dreamer', 'calm'], ['Healing', 'calm'], ['Clean Soul', 'calm'], ['Gymnopedie No 1', 'calm'], ['Meditation Impromptu 01', 'calm'],
   // more to choose from, so "✨ Pick for me" is not the same few songs every time
   // (a title incompetech no longer has is hidden by the check below, never shown)
@@ -133,9 +133,11 @@ async function get(ctx, video, library, id) {
 }
 
 /** The credit a post needs for a library song (null for the operator's own). */
+// songs taken off the shelf: not offered any more, but a post that already has one still credits it
+const RETIRED = [{ id: 'cipher', title: 'Cipher' }];
 function creditFor(entry) {
   const id = entry && /^free:/.test(entry.source || '') ? entry.source.slice(5) : null;
-  const t = id && TRACKS.find((x) => x.id === id);
+  const t = id && (TRACKS.find((x) => x.id === id) || RETIRED.find((x) => x.id === id));
   return t ? credit(t) : null;
 }
 

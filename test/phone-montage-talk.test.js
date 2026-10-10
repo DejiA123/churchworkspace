@@ -130,6 +130,7 @@ async function waitUp() {
     const shelf = await page.evaluate(() => ({ rows: document.querySelectorAll('#cloudMontage .mt-list [data-mt-free]:not([data-mt-free="auto"])').length,
       more: (document.querySelector('#cloudMontage [data-mt-all]') || {}).textContent || '', tabs: [...document.querySelectorAll('#cloudMontage .mt-seg button')].map((b) => b.textContent.trim()),
       plays: document.querySelectorAll('#cloudMontage .mt-list [data-mt-play]').length }));
+    check(!(await page.evaluate(() => [...document.querySelectorAll('#cloudMontage .mt-song-t b')].some((b) => /Cipher/.test(b.textContent)))), 'Cipher is no longer offered');
     check(shelf.tabs.length === 3 && shelf.rows === 4 && shelf.plays === 4 && +((shelf.more.match(/\d+/) || [])[0]) >= 8,
       'music is tidy: No music / Free songs / My songs, then four songs with ▶ and "Show all" for the rest of the mood', shelf);
     // ▶ plays a song before it is used (one from this phone, so no network is needed)
@@ -147,19 +148,21 @@ async function waitUp() {
     check(!pv2.on && pv2.sub === 'from this phone', 'a second tap stops it', pv2);
     // a FREE song plays through the server (incompetech will not play inside another site, and
     // an iPhone needs the sound to start on the tap): one the server already has streams at once
-    await page.evaluate((w) => window.api.library.add('music', w, 'Cipher · Kevin MacLeod', 'free:cipher'), wav);
+    await page.evaluate((w) => window.api.library.add('music', w, 'Movement Proposition · Kevin MacLeod', 'free:movement-proposition'), wav);
     await page.locator('#cloudMontage [data-mt-tab="free"]').tap();
     await sleep(200);
     await page.locator('#cloudMontage [data-mt-mood="hype"]').tap();
     await sleep(200);
-    await page.locator('#cloudMontage [data-mt-play="free:cipher"]').tap();
+    await page.locator('#cloudMontage [data-mt-play="free:movement-proposition"]').tap();
     let fp = null;
-    for (let i = 0; i < 25; i++) { await sleep(200); fp = await page.evaluate(() => ({ on: !!document.querySelector('#cloudMontage [data-mt-play="free:cipher"].on'), sub: (document.querySelector('#cloudMontage [data-mt-sub="free:cipher"]') || {}).textContent })); if (/Playing · 0:0[1-9]/.test(fp.sub)) break; }
+    for (let i = 0; i < 25; i++) { await sleep(200); fp = await page.evaluate(() => ({ on: !!document.querySelector('#cloudMontage [data-mt-play="free:movement-proposition"].on'), sub: (document.querySelector('#cloudMontage [data-mt-sub="free:movement-proposition"]') || {}).textContent })); if (/Playing · 0:0[1-9]/.test(fp.sub)) break; }
     check(fp.on && /Playing · 0:0[1-9]/.test(fp.sub), '▶ on a free song plays it through the server', fp);
-    await page.locator('#cloudMontage [data-mt-play="free:cipher"]').tap();
+    await page.locator('#cloudMontage [data-mt-play="free:movement-proposition"]').tap();
     await sleep(200);
     // one the server cannot fetch (no internet here) says so, and the button goes back to ▶
-    await page.locator('#cloudMontage [data-mt-play="free:funkorama"]').tap();
+    // (whichever other song is listed: which titles the server can reach depends on the internet here)
+    const other = await page.evaluate(() => [...document.querySelectorAll('#cloudMontage [data-mt-play]')].map((b) => b.dataset.mtPlay).find((k) => k !== 'free:movement-proposition'));
+    await page.locator(`#cloudMontage [data-mt-play="${other}"]`).tap();
     let bad = null;
     for (let i = 0; i < 60; i++) { await sleep(250); bad = await page.evaluate(() => ({ on: !!document.querySelector('#cloudMontage [data-mt-play].on'), island: document.body.innerText.includes('That song would not play') })); if (bad.island) break; }
     check(bad.island && !bad.on, 'a song that cannot be fetched says so, and nothing is left spinning', bad);
