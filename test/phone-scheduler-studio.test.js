@@ -17,6 +17,8 @@
  *   [4] the YouTube title appears when a YouTube account is chosen
  *   [5] scheduling posts it with that caption and title
  *   [6] a caption typed before the AI answers is never written over
+ *   [10] "I don't like 'the speaker' and 'Our Church'": with no names given the
+ *       caption names nobody; names given on the post are used, and remembered
  *   [9] "I selected a video from this phone but it did not show up": on a slow
  *       connection the video shows AT ONCE, played from the phone, with how far
  *       the sending has got — then the caption is written when it lands
@@ -55,6 +57,15 @@ function aiServer() {
       let out;
       if (vision) { AI.calls.push('read'); out = FLYER; }
       else if (/WHAT TO DO: Make it SHORTER/.test(text)) { AI.calls.push('shorten'); out = { title: 'Night of Worship', caption: 'Night of Worship, Friday 24 October, 7 pm. 🙌\n\n#ThePowerHouse #Worship' }; }
+      else if (/ruthless short-form copy editor/.test(text)) { AI.calls.push('polish'); out = { scores: [] }; }
+      else if (/"options"/.test(text) && !/WHAT IS PRINTED ON THE FLYER/.test(text)) {
+        AI.calls.push('write'); AI.lastVideoWrite = text;
+        if (AI.slow) await sleep(AI.slow);
+        const named = /The speaker is Bishop David Richman/.test(text);
+        const cap = named ? '"God is not finished with you," Bishop David Richman said at The Power House International. 🙌\n\n#Faith'
+          : 'Ever felt stuck? "Especially when the children of God gather together and talk to God over issues," the speaker said at Our Church. In that moment, healing came. 🙌\n\n#Faith #Prayer';
+        out = { options: [{ title: 'Ever felt stuck?', hook: 'Ever felt stuck?', caption: cap }, { title: 'Two', hook: 'x', caption: cap }, { title: 'Three', hook: 'x', caption: cap }] };
+      }
       else if (/"options"/.test(text)) {
         AI.calls.push('write'); if (!AI.firstWrite) AI.firstWrite = text;
         if (AI.slow) await sleep(AI.slow);
@@ -242,6 +253,28 @@ function aiServer() {
     await page.waitForSelector('#csCompose .csb-ai-st.ok, #csCompose .csb-ai.busy', { timeout: 30000 }).catch(() => {});
     const landed = await page.evaluate(() => ({ prev: !!document.querySelector('#csCompose .csb-prev:not(.sending)'), ai: !!document.querySelector('#csCompose .csb-ai') }));
     check(landed.prev && landed.ai, 'when it lands it is the post\'s video, and its caption is written', landed);
+
+    // [10] no names: nobody named; names given: used and remembered
+    await page.evaluate(() => { const x = document.querySelector('#csCompose .cp-x'); if (x) x.click(); });
+    await sleep(600);
+    await page.evaluate((f) => window.MWSocial.compose({ files: [f] }), VID);
+    await page.waitForSelector('#csCompose .csb-ai-st.ok', { timeout: 30000 }).catch(() => {});
+    const plain = await page.$eval('#csCompose .csb-cap', (n) => n.value).catch(() => '');
+    check(/talk to God over issues\." In that moment/.test(plain) && !/the speaker/i.test(plain) && !/our church/i.test(plain), 'with no names given, the caption names nobody: no "the speaker", no "Our Church"', plain);
+    // (this studio's settings name the church, so only the speaker is unknown here)
+    check(/Do NOT refer to the speaker at all/.test(AI.lastVideoWrite || '') && /THE CHURCH: The Power House/.test(AI.lastVideoWrite || ''), 'the writer is told to leave out the speaker it does not know', (AI.lastVideoWrite || '').slice(0, 200));
+    await page.tap('#csCompose [data-c="names"]');
+    await page.fill('#csCompose input[data-n="speaker"]', 'Bishop David Richman');
+    await page.fill('#csCompose input[data-n="church"]', 'The Power House International');
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'b-real-8-names.png') });
+    await page.tap('#csCompose [data-c="names-save"]');
+    await page.waitForFunction(() => /Bishop David Richman/.test((document.querySelector('#csCompose .csb-cap') || {}).value || ''), null, { timeout: 30000 }).catch(() => {});
+    const named = await page.$eval('#csCompose .csb-cap', (n) => n.value).catch(() => '');
+    check(/Bishop David Richman said at The Power House International/.test(named) && /The speaker is Bishop David Richman/.test(AI.lastVideoWrite) && /THE CHURCH: The Power House International/.test(AI.lastVideoWrite),
+      'names given on the post are used — written again with them', named);
+    const keptNames = await page.evaluate(() => localStorage.getItem('mw.social.names'));
+    check(/Bishop David Richman/.test(keptNames || ''), 'and remembered for the next post', keptNames);
+    await page.evaluate(() => localStorage.removeItem('mw.social.names'));
 
     if (SHOTS) {
       await page.evaluate(() => { const x = document.querySelector('#csCompose .cp-x'); if (x) x.click(); });

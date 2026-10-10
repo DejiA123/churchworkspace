@@ -363,6 +363,36 @@ function whoIsSpeaking(transcript, speakers) {
  */
 const TITLED_RX = /\b(Pastor|Bishop|Rev(?:erend)?|Apostle|Prophet(?:ess)?|Evangelist|Deacon|Minister|Dr|Brother|Sister)\.?\s+([A-Z][a-z'-]+(?:\s+[A-Z][a-z'-]+){0,2})/g;
 
+/*
+ * ►► NO "THE SPEAKER", NO "OUR CHURCH". ◄◄ When nobody has said who is
+ * speaking or what the church is called, a caption names neither — it is
+ * rephrased round them, never padded with "the speaker said at Our Church"
+ * ("Our Church" is only the app's placeholder for a name never set).
+ */
+const realChurch = (n) => { const t = String(n || '').trim(); return /^(our|my|the) church$/i.test(t) ? '' : t; };
+const SAID = '(?:says|said|shares|shared|reminds us|reminded us|declares|declared|tells us|told us|explains|explained|preached|prayed|proclaims|proclaimed|teaches|taught)';
+const NOBODY = '(?:the|our) (?:speaker|preacher|pastor|minister)';
+function dropFaceless(text) {
+  let t = String(text == null ? '' : text);
+  if (!t) return t;
+  // the placeholder name, wherever it landed (first: the patterns below read past it)
+  t = t.replace(/\s+(?:at|in|from|with)\s+our church\b/gi, '').replace(/\bour church\b/g, 'church');
+  // "…issues," the speaker said at Our Church.  ->  "…issues."
+  t = t.replace(new RegExp(`,(["”'’])\\s*${NOBODY}\\s+${SAID}(?:\\s+(?:at|during|in|on)\\s+[^.!?\\n"]+)?\\s*([.!?])`, 'gi'), '$2$1');
+  // "…issues" says the speaker.  /  , the speaker said,
+  t = t.replace(new RegExp(`(["”'’])\\s*,?\\s*${SAID}\\s+${NOBODY}(?:\\s+(?:at|during|in|on)\\s+[^.!?\\n"]+)?`, 'gi'), '$1');
+  t = t.replace(new RegExp(`,\\s*${NOBODY}\\s+${SAID}(?:\\s+(?:at|during|in|on)\\s+[^.!?,\\n"]+)?\\s*,`, 'gi'), ',');
+  t = t.replace(new RegExp(`,\\s*${NOBODY}\\s+${SAID}(?:\\s+(?:at|during|in|on)\\s+[^.!?,\\n"]+)?(?=[.!?])`, 'gi'), '');
+  // "— the speaker" after a quote
+  t = t.replace(new RegExp(`\\s*[—–-]\\s*${NOBODY}\\b`, 'gi'), '');
+  // "The speaker reminded us that grace is enough."  ->  "Grace is enough."
+  t = t.replace(new RegExp(`(^|[.!?]\\s+|\\n)${NOBODY}\\s+(?:${SAID}|reminds|reminded|told|tells)(?:\\s+us)?(?:\\s+(?:at|during|in|on)\\s+[^,.!?\\n"]+(?=,))?(?:\\s+that|\\s*,)?\\s+(\\S)`, 'gi'),
+    (m, lead, ch) => lead + ch.toUpperCase());
+  // a quote left ending in a comma: "Hold on,". -> "Hold on."
+  t = t.replace(/,(["”'’])\s*\./g, '.$1');
+  return t.replace(/ {2,}/g, ' ').replace(/ ([,.!?])/g, '$1');
+}
+
 function stripInventedNames(text, { speaker, transcript, churchName }) {
   let t = String(text == null ? '' : text);
   if (!t) return t;
@@ -380,7 +410,7 @@ function stripInventedNames(text, { speaker, transcript, churchName }) {
     if (said && countWord(said, surname) > 0) return whole;
     // A church can be called "St Andrew's" — do not rewrite its own name.
     if (church && church.includes(name.toLowerCase())) return whole;
-    return 'the speaker';
+    return 'the speaker';   // (dropFaceless then writes the attribution out)
   });
 }
 
@@ -469,7 +499,8 @@ function ruleOption(style, ctx) {
   const { hook, speaker, eventName, churchName, summary, allowBait, quotes, seed } = ctx;
   // The event is the flag worth planting. With no event set, the church's own
   // name is the next best thing, and better than a caption from nowhere.
-  const at = eventName ? `at the ${eventName}` : (churchName ? `at ${churchName}` : '');
+  const church = realChurch(churchName);
+  const at = eventName ? `at the ${eventName}` : (church ? `at ${church}` : '');
   const who = speaker || 'the preacher';
   const emoji = style.titleEmoji[0];
   const idx = STYLES.findIndex((s) => s.id === style.id);
@@ -541,11 +572,12 @@ function buildPrompt({ hook, kind, churchName, eventName, speaker, durationSec, 
   const rules = [
     eventName ? `EVERY caption must say that this happened at the ${eventName}. Work it into a sentence, do not bolt it on the end.` : '',
     speaker ? `The speaker is ${speaker}. Name them in every caption, and use ${tagOf(speaker)} as the first hashtag.`
-      : 'NOBODY HAS TOLD YOU WHO IS SPEAKING. Do NOT invent a name for them: not a '
-        + 'first name, not "Pastor" anything, not a guess. Call them "the speaker", or '
-        + 'leave the attribution out. You MAY name anyone the words above actually name, '
-        + 'spelled exactly as they are spelled there, and you must never change a name '
-        + 'inside a sentence you are quoting.',
+      : 'NOBODY HAS TOLD YOU WHO IS SPEAKING. Do NOT invent a name for them. Do NOT refer to the speaker at all: no '
+        + 'name, no "the speaker", no "the preacher", no "the pastor", no "he" or "she". '
+        + 'Quote their words without saying who said them, or put the idea in your own '
+        + 'words. You MAY name anyone the words above actually name, spelled exactly as '
+        + 'they are spelled there, and you must never change a name inside a quote.',
+    churchName ? '' : 'NOBODY HAS TOLD YOU THE CHURCH\'S NAME. Do not name a church, and never write "our church" or "at church" as a place.',
     'NEVER use an em dash or en dash (— or –). Use a colon or a comma instead.',
     'NEVER use the hashtag #SermonClip, #fyp, #viral or #trending.',
     allowBait ? '' : 'NEVER ask for engagement. No "Drop an AMEN in the comments", no "Type AMEN", no "comment below", no "like and subscribe".',
@@ -587,8 +619,8 @@ function buildPrompt({ hook, kind, churchName, eventName, speaker, durationSec, 
     'THEN THE REST OF THE CAPTION:',
     '  - Two to four short sentences that pay the first line off, all of them about',
     '    what is ACTUALLY said in the words above. Vary the sentence lengths.',
-    flyer ? '  - Say clearly what is happening, when and where, exactly as printed, and why someone should come.' : '  - Quote the speaker directly at least once, word for word from above.',
-    '  - Name the speaker and where it happened, naturally, inside a sentence.',
+    flyer ? '  - Say clearly what is happening, when and where, exactly as printed, and why someone should come.' : '  - Quote the words directly at least once, word for word from above.',
+    (speaker || eventName || churchName) ? '  - Name the speaker and where it happened, naturally, inside a sentence, using only what you were told above.' : '  - Do NOT say who spoke or where: make it about the words and the reader.',
     '  - End on a line that lands: something true about the reader, not a request.',
     '  - Then a blank line, then 6 to 9 hashtags on the last line, mixing big ones',
     '    with two or three that are specific to this subject.',
@@ -667,8 +699,9 @@ function buildPolishPrompt({ options, eventName, speaker, allowBait }) {
  * out, not merely requested on the way in, because a model that has been told
  * six rules will eventually forget one.
  */
-async function suggest({ mediaPath, kind = 'video', churchName = '', eventName = '', speakers = [],
+async function suggest({ mediaPath, kind = 'video', churchName: churchIn = '', eventName = '', speakers = [],
   durationSec = 0, transcript = '', allowBait = false, llm = null, signal, quick = false, flyer = null } = {}) {
+  const churchName = realChurch(churchIn);
   /*
    * A FLYER'S WORDS ARE ALL FACT. They are short lines ("FRIDAY 24 OCT",
    * "7PM"), which the transcript reader drops as too short to be sentences —
@@ -701,7 +734,7 @@ async function suggest({ mediaPath, kind = 'video', churchName = '', eventName =
     let usedModel = false;
     const options = STYLES.map((st, i) => {
       const o = raw[i] || {};
-      const guard = (x) => stripInventedNames(x, { speaker, transcript, churchName });
+      const guard = (x) => (speaker ? stripInventedNames(x, { speaker, transcript, churchName }) : dropFaceless(stripInventedNames(x, { speaker, transcript, churchName })));
       const title = houseStyle(guard(tidy(o.title, 100)), { allowBait, title: true });
       let caption = houseStyle(guard(tidy(o.caption, 2100)), { allowBait });
       // Judged on what the MODEL wrote, before the repairs below: appending a
@@ -788,13 +821,13 @@ async function suggest({ mediaPath, kind = 'video', churchName = '', eventName =
             // A high score means "leave it alone", and a rewrite that came back
             // shorter than half the original is a model that lost the plot.
             if (Number.isFinite(score) && score >= 8) return o;
-            const cap = houseStyle(stripInventedNames(tidy(c.caption, 2100), { speaker, transcript, churchName }), { allowBait });
+            const cap = houseStyle(dropFaceless(stripInventedNames(tidy(c.caption, 2100), { speaker, transcript, churchName })), { allowBait });
             if (cap.length < Math.max(60, o.caption.length * 0.5)) return o;
             if (eventName && cap.toLowerCase().indexOf(eventName.toLowerCase()) < 0) return o;
             if (speaker && cap.toLowerCase().indexOf(speaker.toLowerCase()) < 0) return o;
             if (!/#\w/.test(cap)) return o;
             polished = true;
-            const t = houseStyle(stripInventedNames(tidy(c.title, 100), { speaker, transcript, churchName }), { allowBait, title: true });
+            const t = houseStyle(dropFaceless(stripInventedNames(tidy(c.title, 100), { speaker, transcript, churchName })), { allowBait, title: true });
             return Object.assign({}, o, { caption: cap, title: t.length >= 6 ? t : o.title });
           });
           options = merged;
@@ -857,7 +890,7 @@ async function revise({ title = '', caption = '', action = 'rewrite', instructio
   try {
     const raw = await llm.chat({ prompt, maxTokens: 900, temperature: action === 'rewrite' ? 0.9 : 0.6, json: true });
     const r = (llm.parseJson ? llm.parseJson(raw) : JSON.parse(raw)) || {};
-    const guard = (x) => stripInventedNames(x, { speaker: '', transcript: was.caption + ' ' + was.title, churchName });
+    const guard = (x) => dropFaceless(stripInventedNames(x, { speaker: '', transcript: was.caption + ' ' + was.title, churchName: realChurch(churchName) }));
     const cap = houseStyle(guard(tidy(r.caption || '', 2100)), { allowBait });
     const t = r.title ? houseStyle(guard(tidy(r.title, 100)), { allowBait, title: true }) : was.title;
     if (!cap || cap.length < 8) return Object.assign({ source: 'unchanged', why: 'The writer did not give a usable caption.' }, was);
@@ -875,7 +908,7 @@ async function revise({ title = '', caption = '', action = 'rewrite', instructio
 }
 
 module.exports = {
-  suggest, revise, ruleCopy, ruleOption, hookFromFilename, readTranscript, sentencesOf, hookScore,
+  suggest, revise, dropFaceless, realChurch, ruleCopy, ruleOption, hookFromFilename, readTranscript, sentencesOf, hookScore,
   buildPrompt, buildPolishPrompt, tidy, houseStyle, tagOf, tagLine, whoIsSpeaking, asSentence,
   stripInventedNames, STYLES, TELLS,
 };

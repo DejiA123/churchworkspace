@@ -2702,14 +2702,17 @@ ipcMain.handle('fonts:data', wrap(async () => {
  * the built-in rules when it does not — the button works either way, which is
  * the whole point of it (see social-copy.js).
  */
-ipcMain.handle('social:suggestCopy', wrap(async (e, { mediaPath, kind, durationSec, listen = true, quick = false, jobId } = {}) => {
+ipcMain.handle('social:suggestCopy', wrap(async (e, { mediaPath, kind, durationSec, listen = true, quick = false, jobId, speaker: askedSpeaker = '', churchName: askedChurch = '' } = {}) => {
   const s = store.get('settings') || {};
-  const churchName = (s.brand && s.brand.churchName) || '';
+  // who is speaking and the church's name, when the person said so on the post (New post on a phone)
+  const churchName = String(askedChurch || '').trim().slice(0, 80) || (s.brand && s.brand.churchName) || '';
   // The two facts that make a caption postable rather than generic: WHERE it
   // happened and WHO said it. Set once, in Settings, and used on every clip.
   const social = s.social || {};
   const eventName = String(social.eventName || '').trim();
-  const speakers = String(social.speakers || '').split(/[,;\r\n]+/).map((x) => x.trim()).filter(Boolean);
+  const speakers = String(askedSpeaker || '').trim()
+    ? [String(askedSpeaker).trim().slice(0, 80)]
+    : String(social.speakers || '').split(/[,;\r\n]+/).map((x) => x.trim()).filter(Boolean);
   const allowBait = !!social.allowBait;
 
   /*

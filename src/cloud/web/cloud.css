@@ -2939,3 +2939,13 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .csb-send-tx { display: block; margin-top: 6px; font-size: 12.5px; color: rgba(235,235,245,.75); }
 .csb-send-err { display: flex; gap: 8px; align-items: flex-start; margin: 10px 2px 0; padding: 10px 12px; border-radius: 14px; background: rgba(255,69,58,.13); color: #ffcbc6; font-size: 13.5px; line-height: 1.4; }
 .csb-send-err .mi { flex: none; width: 17px; height: 17px; margin-top: 1px; }
+
+/* New post: who is speaking and the church's name (optional) */
+.csb-names-btn { width: 100%; margin-top: 12px; padding: 10px 12px; border: 1px dashed rgba(255,255,255,.16); border-radius: 14px; background: none; color: rgba(235,235,245,.7); display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; text-align: left; }
+.csb-names-btn span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.csb-names-btn .mi { flex: none; width: 16px; height: 16px; color: #c4b5fd; }
+.csb-names { margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.07); display: flex; flex-direction: column; gap: 10px; }
+.csb-names label { display: flex; flex-direction: column; gap: 4px; }
+.csb-names small { color: rgba(235,235,245,.5); font-size: 12px; font-weight: 600; }
+.csb-names-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.csb-names-hint { line-height: 1.4; }

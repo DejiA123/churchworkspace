@@ -841,6 +841,10 @@
       autoFor: '',          // the file the caption on screen was written for (a re-pick drops a late answer)
       prev: null,           // the caption before Shorter / More hype / Rewrite, for Undo
       revising: '',
+      // who is speaking and the church's name — optional, remembered on this phone; with
+      // neither, the caption names nobody (no "the speaker", no "our church")
+      names: (() => { try { return JSON.parse(localStorage.getItem('mw.social.names') || '{}') || {}; } catch (e) { return {}; } })(),
+      namesOpen: false,
     };
     if (o.when && !edit) { st.quick = 'pick'; st.when = new Date(o.when); }
     // the free shelf and the operator's own songs, for the Music section
@@ -959,6 +963,19 @@
       if (ai.stage === 'done') return `<span class="csb-ai-st ok">${mi('check')}Ready</span>`;
       return '';
     }
+    function namesRow() {
+      const n = st.names || {};
+      const has = n.speaker || n.church;
+      if (!st.namesOpen) {
+        return `<button type="button" class="csb-names-btn" data-c="names">${mi('user')}<span>${has ? esc([n.speaker, n.church].filter(Boolean).join(' · ')) : 'Name the speaker and church (optional)'}</span>${mi('chev-right')}</button>`;
+      }
+      return '<div class="csb-names">'
+        + `<label><small>Who is speaking?</small><input class="cs-input" data-n="speaker" maxlength="80" value="${escAttr(n.speaker || '')}" placeholder="e.g. Bishop David Richman"></label>`
+        + `<label><small>Church name</small><input class="cs-input" data-n="church" maxlength="80" value="${escAttr(n.church || '')}" placeholder="e.g. The Power House International"></label>`
+        + `<div class="csb-names-acts"><button type="button" class="csb-act" data-c="names-save">${mi('sparkles')}Use them — write it again</button>`
+        + `<button type="button" class="csb-act ghost" data-c="names-clear">Leave names out</button></div>`
+        + '<small class="csb-names-hint">Left empty, captions name nobody — never "the speaker" or "our church". Remembered on this phone.</small></div>';
+    }
     function textBlock() {
       if (many()) {
         const n = Object.keys(st.batchCaps).length;
@@ -986,6 +1003,7 @@
             : `<button type="button" class="csb-act" data-c="write">${mi('sparkles')}Write it for me</button>`)
           + (st.prev ? `<button type="button" class="csb-act ghost" data-c="undo">${mi('undo')}Undo</button>` : '')
           + `<span class="cs-count">${st.caption.length}/2200</span></div>` : '')
+        + (!busy ? namesRow() : '')
         + (st.options && !busy ? '<div class="csb-styles"><small>Other styles</small>' + st.options.map((op, i) => `<button type="button" class="csb-style" data-c="opt" data-i="${i}">${esc(op.label || 'Option ' + (i + 1))}</button>`).join('') + '</div>' : '')
         + '</div>'
         + (linked().some((x) => picked().includes(x.id) && x.platform === 'youtube')
@@ -1082,7 +1100,7 @@
       }) : null;
       const toWrite = setTimeout(() => { if (st.ai && st.autoFor === f && st.ai.stage === 'read') { st.ai.stage = 'write'; const el = panel.body.querySelector('.csb-ai-st'); if (el) el.outerHTML = aiStatus(); } }, video ? 600000 : 7000);
       let out = null, err = null;
-      try { out = await window.api.social.suggestCopy({ mediaPath: f, kind: video ? 'video' : 'image', listen: true, jobId }); }
+      try { out = await window.api.social.suggestCopy({ mediaPath: f, kind: video ? 'video' : 'image', listen: true, jobId, speaker: st.names.speaker || '', churchName: st.names.church || '' }); }
       catch (e) { err = e; }
       clearTimeout(toWrite); if (off) off();
       if (!panel.el.isConnected || st.autoFor !== f) return;
@@ -1113,7 +1131,7 @@
         st.writing = `Writing ${i + 1} of ${st.files.length}…`;
         draw();
         try {
-          const out = await window.api.social.suggestCopy({ mediaPath: f, kind: isVideo(f) ? 'video' : 'image', listen: true, quick: true, jobId: 'copy_' + Date.now() });
+          const out = await window.api.social.suggestCopy({ mediaPath: f, kind: isVideo(f) ? 'video' : 'image', listen: true, quick: true, jobId: 'copy_' + Date.now(), speaker: st.names.speaker || '', churchName: st.names.church || '' });
           if (out) st.batchCaps[f] = { title: out.title, caption: out.caption };
         } catch (er) { /* that one keeps the shared caption */ }
       }
@@ -1257,6 +1275,15 @@
       }
       if (c === 'write') return autoWrite(true);
       if (c === 'write-all') { if (st.batchRun) return; st.batchCaps = {}; return writeAll(); }
+      if (c === 'names') { st.namesOpen = true; return draw(); }
+      if (c === 'names-save' || c === 'names-clear') {
+        const v = (k) => ((panel.body.querySelector(`input[data-n="${k}"]`) || {}).value || '').trim();
+        st.names = c === 'names-clear' ? {} : { speaker: v('speaker'), church: v('church') };
+        try { localStorage.setItem('mw.social.names', JSON.stringify(st.names)); } catch (e) {}
+        st.namesOpen = false;
+        if (st.files.length && !many()) return autoWrite(true);
+        return draw();
+      }
       if (c === 'whenjump') { const w = panel.body.querySelector('#csbWhen'); if (w) w.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
       if (c === 'undo') { if (st.prev) { st.caption = st.prev.caption; st.title = st.prev.title; st.prev = null; } return draw(); }
       if (c === 'rev') {
