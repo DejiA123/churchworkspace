@@ -1382,7 +1382,7 @@
    * grade, B-roll from the photos and captions lit up word by word
    * (montage.js makeTalk).
    */
-  const MT_MODES = [['music', '🎵 AI Standard Montage'], ['talk', '🔥 Viral Montage']];
+  const MT_MODES = [['talk', '🔥 Viral Montage'], ['music', '🎵 AI Standard Montage']];   // the Viral Montage first (on the left)
   const MT_TALK_LENS = [[15, '15s'], [30, '30s'], [45, '45s'], [60, '60s'], ['custom', 'Custom']];
   const MT_ORDERS = [['ai', '✨ AI decides'], ['mine', '📌 My order']];
   const MT_STYLES = [['hype', 'Hype'], ['worship', 'Worship'], ['emotional', 'Emotional'], ['cinematic', 'Cinematic'], ['fun', 'Fun']];
