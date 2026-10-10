@@ -1391,7 +1391,7 @@
 
   async function openMontage() {
     if (MT.busy && MT.panel && document.body.contains(MT.panel.el)) return;
-    const panel = C.openPanel({ id: 'cloudMontage', title: 'AI Montage', cls: 'cp-montage', onClose: () => { if (!MT.busy) mtRelease(); } });
+    const panel = C.openPanel({ id: 'cloudMontage', title: 'AI Montage', cls: 'cp-montage', onClose: () => { mtPreviewStop(); if (!MT.busy) mtRelease(); } });
     MT.panel = panel;
     let who = null, lib = null;
     try { who = await window.api.montage.status(); } catch (e) { who = null; }
@@ -1442,14 +1442,8 @@
     ? `<div class="mt-row"><button type="button" class="mt-chip${!MT.voice ? ' on' : ''}" data-mt-voice="">No narrator</button>${(who.voiceover.voices || []).map((v) => `<button type="button" class="mt-chip${MT.voice === v.id ? ' on' : ''}" data-mt-voice="${attr(v.id)}">🎙 ${esc(v.label)}</button>`).join('')}</div>
         <small class="mt-hint">The AI writes a line that hooks people before the first speaker, and a closing line to follow or share; the narrator says them over B-roll. The first time takes a minute longer while the voice is set up.</small>`
     : '<small class="mt-hint">The narrator voice is not installed on this server yet — update the server to add it.</small>'}</section>` : ''}
-      <section class="mt-sec"><h3>${talk ? 'Background music <small>quietly under the voice</small>' : 'Music'}</h3>
-        <div class="mt-songs">
-          <button type="button" class="mt-chip${!MT.song && !MT.songFile && !MT.free ? ' on' : ''}" data-mt-song="">No music</button>
-          ${MT.freeList && MT.freeList.tracks && MT.freeList.tracks.length ? `<button type="button" class="mt-chip${MT.free === 'auto' ? ' on' : ''}" data-mt-free="auto">✨ Pick for me</button>` : ''}
-          <button type="button" class="mt-chip mt-upsong${MT.songFile ? ' on' : ''}" data-mt="song">🎵 ${MT.songFile ? esc(MT.songFile.name.slice(0, 26)) : 'Add your song'}</button>
-          ${MT.lib.slice(0, 12).map((m) => `<button type="button" class="mt-chip${MT.song && MT.song.id === m.id ? ' on' : ''}" data-mt-song="${attr(m.id)}">${esc(String(m.name || 'song').slice(0, 26))}</button>`).join('')}
-        </div>
-        ${mtFreeShelf()}
+      <section class="mt-sec"><h3>${talk ? 'Background music' : 'Music'} <small>tap ▶ to listen</small></h3>
+        ${mtMusicHtml()}
         <label class="mt-toggle"${talk ? ' hidden' : ''}><input type="checkbox" id="mtKeep" ${MT.keep ? 'checked' : ''}/> <span>Keep the clips’ own sound${MT.song || MT.songFile ? ' under the music' : ''}</span></label>
       </section>
       <section class="mt-sec"><h3>Style</h3><div class="mt-row">${chips(MT_STYLES, MT.style, 'style')}</div></section>
@@ -1470,14 +1464,107 @@
   }
 
   /* 🎁 the free shelf: songs that are safe to post (freemusic.js), by mood */
-  function mtFreeShelf() {
-    const F = MT.freeList;
-    if (!F || !F.tracks || !F.tracks.length) return '';
+  /*
+   * ►► BACKGROUND MUSIC: TABS, A SHORT LIST, ▶ TO LISTEN. ◄◄ No music / Free
+   * songs / My songs. Free songs: the moods, then "✨ Pick for me" and four
+   * songs of the mood (the rest a tap away), each with ▶ to hear it before it
+   * is used and a round tick for the one that will be. My songs: the
+   * library's, and adding one from the phone.
+   */
+  const mtMusTab = () => MT.musTab || (MT.song || MT.songFile ? 'mine' : MT.free ? 'free' : 'none');
+  const MT_LIST_SHOW = 4;
+  function mtMusicHtml() {
     const esc = C.esc, attr = C.escAttr;
-    const mood = MT.freeMood || (F.tracks.find((t) => t.id === MT.free) || {}).mood || MT_MOOD_OF[MT.style] || 'uplift';
-    return `<div class="mt-free"><small class="mt-hint">🎁 Free songs, safe to post — no muting or copyright flags (the post credits the artist automatically):</small>
-      <div class="mt-row">${F.moods.map((m) => `<button type="button" class="mt-chip mt-mood${mood === m.id ? ' on' : ''}" data-mt-mood="${attr(m.id)}">${esc(m.name)}</button>`).join('')}</div>
-      <div class="mt-songs">${F.tracks.filter((t) => t.mood === mood).map((t) => `<button type="button" class="mt-chip${MT.free === t.id ? ' on' : ''}" data-mt-free="${attr(t.id)}">♪ ${esc(t.title)}</button>`).join('')}</div></div>`;
+    const F = MT.freeList, hasFree = !!(F && F.tracks && F.tracks.length);
+    const tab = mtMusTab();
+    const tabs = `<div class="mt-seg" role="tablist">
+        <button type="button" class="${tab === 'none' ? 'on' : ''}" data-mt-song="">No music</button>
+        ${hasFree ? `<button type="button" class="${tab === 'free' ? 'on' : ''}" data-mt-tab="free">✨ Free songs</button>` : ''}
+        <button type="button" class="${tab === 'mine' ? 'on' : ''}" data-mt-tab="mine">🎵 My songs</button></div>`;
+    const playing = MT.preview && MT.preview.key;
+    const row = ({ key, sel, title, sub, pick, play }) => `<div class="mt-song${sel ? ' on' : ''}" ${pick}>
+        ${play ? `<button type="button" class="mt-play${playing === key ? ' on' : ''}" data-mt-play="${attr(key)}" aria-label="Listen to ${attr(title)}"></button>` : '<span class="mt-play mt-play-x">✨</span>'}
+        <span class="mt-song-t"><b>${esc(title)}</b><small data-mt-sub="${attr(key)}" data-orig="${attr(sub)}">${esc(sub)}</small></span><span class="mt-radio"></span></div>`;
+    if (tab === 'free' && hasFree) {
+      const mood = MT.freeMood || (F.tracks.find((t) => t.id === MT.free) || {}).mood || MT_MOOD_OF[MT.style] || 'uplift';
+      const mName = (F.moods.find((m) => m.id === mood) || {}).name || '';
+      const songs = F.tracks.filter((t) => t.mood === mood);
+      const selAt = songs.findIndex((t) => t.id === MT.free);
+      const all = MT.showAll === mood || selAt >= MT_LIST_SHOW;
+      const shown = all ? songs : songs.slice(0, MT_LIST_SHOW);
+      const short = (n) => String(n).replace(/\s*&.*$/, '');
+      return `${tabs}
+        <div class="mt-row mt-moods">${F.moods.map((m) => `<button type="button" class="mt-chip${mood === m.id ? ' on' : ''}" data-mt-mood="${attr(m.id)}">${esc(short(m.name))}</button>`).join('')}</div>
+        <div class="mt-list">
+          ${row({ key: 'auto', sel: MT.free === 'auto', title: 'Pick for me', sub: `a different ${short(mName).replace(/^\S+\s/, '')} song each time`, pick: 'data-mt-free="auto"' })}
+          ${shown.map((t) => row({ key: 'free:' + t.id, sel: MT.free === t.id, title: t.title, sub: mName.replace(/^\S+\s/, ''), pick: `data-mt-free="${attr(t.id)}"`, play: true })).join('')}
+          ${!all && songs.length > MT_LIST_SHOW ? `<button type="button" class="mt-more" data-mt-all="${attr(mood)}">Show all ${songs.length} ${esc(short(mName).replace(/^\S+\s/, ''))} songs ▾</button>` : ''}
+        </div>
+        <small class="mt-hint">🎁 Free and safe to post — no muting or copyright flags; the post credits the artist for you.</small>`;
+    }
+    if (tab === 'mine') {
+      return `${tabs}
+        <div class="mt-list">
+          ${MT.songFile ? row({ key: 'file', sel: true, title: MT.songFile.name.replace(/\.[^.]+$/, ''), sub: 'from this phone', pick: 'data-mt-tab="mine"', play: true }) : ''}
+          ${MT.lib.slice(0, 30).map((m) => row({ key: 'lib:' + m.id, sel: !!(MT.song && MT.song.id === m.id), title: String(m.name || 'Song'), sub: m.durationSec ? mtClock(m.durationSec) : 'your song', pick: `data-mt-song="${attr(m.id)}"`, play: true })).join('')}
+          <button type="button" class="mt-more" data-mt="song">＋ Add a song from this phone</button>
+        </div>
+        ${MT.lib.length || MT.songFile ? '' : '<small class="mt-hint">Your own songs: a worship track, an instrumental — add one from this phone and it stays here for next time.</small>'}`;
+    }
+    return `${tabs}<small class="mt-hint">${MT.mode === 'talk' ? 'No music — just the voices.' : 'No music — the clips’ own sound.'}</small>`;
+  }
+  const mtClock = (sec) => { const s = Math.max(0, Math.round(sec || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+  /* ▶ one song at a time: tap to hear it, tap again to stop. A free song plays
+     straight from incompetech; if the phone cannot get it there, the server
+     fetches it once (it is then in the library) and it plays from there. */
+  function mtPreviewSrc(key) {
+    if (key === 'file') return MT.songFile ? (MT.songFileUrl || (MT.songFileUrl = URL.createObjectURL(MT.songFile))) : '';
+    if (key.startsWith('lib:')) { const m = MT.lib.find((x) => 'lib:' + x.id === key); return m && m.file ? C.fileUrl(m.file) : ''; }
+    if (key.startsWith('free:')) { const t = MT.freeList && MT.freeList.tracks.find((x) => 'free:' + x.id === key); return t ? t.url || '' : ''; }
+    return '';
+  }
+  function mtPreviewPaint() {
+    const p = MT.panel; if (!p) return;
+    const pv = MT.preview, key = pv && pv.key;
+    $$('[data-mt-play]', p.body).forEach((b) => b.classList.toggle('on', b.dataset.mtPlay === key));
+    $$('[data-mt-sub]', p.body).forEach((el) => {
+      if (pv && el.dataset.mtSub === key) {
+        const a = pv.a;
+        el.textContent = a.currentTime < 0.05 ? 'Loading…' : `Playing · ${mtClock(a.currentTime)}${a.duration && isFinite(a.duration) ? ' / ' + mtClock(a.duration) : ''}`;
+      } else el.textContent = el.dataset.orig || '';
+    });
+  }
+  function mtPreviewStop() {
+    const pv = MT.preview; MT.preview = null;
+    if (pv && pv.a) { try { pv.a.pause(); pv.a.removeAttribute('src'); pv.a.load(); } catch (e) {} }
+    mtPreviewPaint();
+  }
+  async function mtPreviewToggle(key) {
+    if (MT.preview && MT.preview.key === key) return mtPreviewStop();
+    mtPreviewStop();
+    let src = mtPreviewSrc(key);
+    if (!src) return;
+    const a = new Audio();
+    a.preload = 'auto';
+    MT.preview = { key, a, fellBack: false };
+    // remember each row's own line, to put back when it stops
+    const onErr = async () => {
+      const pv = MT.preview;
+      if (!pv || pv.a !== a) return;
+      if (key.startsWith('free:') && !pv.fellBack) {
+        pv.fellBack = true;
+        try { const song = await window.api.freeMusic.get(key.slice(5)); if (MT.preview === pv && song && song.file) { a.src = C.fileUrl(song.file); a.play().catch(() => {}); return; } } catch (e) {}
+      }
+      if (MT.preview === pv) { C.island({ kind: 'warn', title: 'That song would not play', sub: 'Try another — or it may still work in the montage.', ms: 3500 }); mtPreviewStop(); }
+    };
+    a.addEventListener('error', onErr);
+    a.addEventListener('timeupdate', mtPreviewPaint);
+    a.addEventListener('loadedmetadata', mtPreviewPaint);
+    a.addEventListener('ended', () => { if (MT.preview && MT.preview.a === a) mtPreviewStop(); });
+    a.src = src;
+    mtPreviewPaint();
+    try { await a.play(); } catch (e) { if (e && e.name !== 'AbortError') onErr(); }
   }
 
   function mtWire(p) {
@@ -1487,7 +1574,7 @@
         C.closePanel(p, true);
         return editMontage(op);
       }
-      const b = e.target.closest('[data-mt],[data-mt-del],[data-mt-song],[data-mt-style],[data-mt-len],[data-mt-aspect],[data-mt-order],[data-mt-mode],[data-mt-voice],[data-mt-free],[data-mt-mood],[data-mt-idea]');
+      const b = e.target.closest('[data-mt],[data-mt-del],[data-mt-song],[data-mt-style],[data-mt-len],[data-mt-aspect],[data-mt-order],[data-mt-mode],[data-mt-voice],[data-mt-free],[data-mt-mood],[data-mt-idea],[data-mt-tab],[data-mt-play],[data-mt-all]');
       if (!b || MT.busy || mtDrag.just) return;
       const d = b.dataset;
       if (d.mtOrder) { MT.order = d.mtOrder; return mtPaint(); }
@@ -1498,10 +1585,17 @@
         if (MT.mode === 'talk' && !MT.song && !MT.songFile && !MT.free && MT.freeList && MT.freeList.tracks && MT.freeList.tracks.length) MT.free = 'auto';
         return mtPaint();
       }
+      if (d.mtPlay != null) return mtPreviewToggle(d.mtPlay);
+      if (d.mtAll != null) { MT.showAll = d.mtAll; return mtPaint(); }
+      if (d.mtTab) {
+        MT.musTab = d.mtTab;
+        if (d.mtTab === 'free' && !MT.free) { MT.free = 'auto'; MT.song = null; MT.songFile = null; }
+        return mtPaint();
+      }
       if (d.mtDel != null) { const it = MT.items.splice(+d.mtDel, 1)[0]; if (it) URL.revokeObjectURL(it.url); return mtPaint(); }
-      if (d.mtSong != null) { MT.song = d.mtSong ? MT.lib.find((m) => m.id === d.mtSong) || null : null; MT.songFile = null; MT.free = null; return mtPaint(); }
-      if (d.mtFree) { MT.free = d.mtFree; MT.song = null; MT.songFile = null; return mtPaint(); }
-      if (d.mtMood) { MT.freeMood = d.mtMood; return mtPaint(); }
+      if (d.mtSong != null) { MT.song = d.mtSong ? MT.lib.find((m) => m.id === d.mtSong) || null : null; MT.songFile = null; MT.free = null; MT.musTab = d.mtSong ? 'mine' : 'none'; if (!d.mtSong) mtPreviewStop(); return mtPaint(); }
+      if (d.mtFree) { MT.free = d.mtFree; MT.song = null; MT.songFile = null; MT.musTab = 'free'; return mtPaint(); }
+      if (d.mtMood) { MT.freeMood = d.mtMood; MT.showAll = null; return mtPaint(); }
       if (d.mtVoice != null) { MT.voice = d.mtVoice; return mtPaint(); }
       if (d.mtIdea != null) {
         MT.brief = mtToggleIdea(MT.brief, d.mtIdea);
@@ -1532,7 +1626,7 @@
         mtPaint();
       } else if (e.target.id === 'mtSong') {
         const f = e.target.files && e.target.files[0];
-        if (f) { MT.songFile = f; MT.song = null; }
+        if (f) { MT.songFile = f; MT.song = null; MT.free = null; MT.musTab = 'mine'; if (MT.songFileUrl) { URL.revokeObjectURL(MT.songFileUrl); MT.songFileUrl = null; } }
         e.target.value = '';
         mtPaint();
       } else if (e.target.id === 'mtKeep') MT.keep = e.target.checked;
@@ -1685,6 +1779,7 @@
   async function mtMake() {
     const talk = MT.mode === 'talk';
     if (talk ? !MT.items.some((it) => it.kind === 'video') : MT.items.length < 2) return;
+    mtPreviewStop();
     MT.busy = true;
     const jobId = 'mt' + Date.now().toString(36);
     let off = null;

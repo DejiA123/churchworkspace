@@ -85,6 +85,7 @@ async function list(library, { wait = false } = {}) {
     moods: MOODS.map(([id, name]) => ({ id, name })),
     tracks: TRACKS.filter((t) => probe.ok.get(t.id) !== false).map((t) => ({
       id: t.id, title: t.title, mood: t.mood, credit: credit(t),
+      url: t.url,   // for a ▶ preview on the phone, straight from incompetech
       inLibrary: have.has(t.id) ? have.get(t.id).id : null,
     })),
     checked: !!probe.at,

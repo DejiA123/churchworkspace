@@ -127,8 +127,27 @@ async function waitUp() {
       return { got, next, mood: got.every((x) => x[0] === 'h') };
     });
     check(new Set(dealt.got).size === 12 && dealt.mood && dealt.next === dealt.got[0], '"✨ Pick for me" never repeats a song until the whole mood has played, then starts with the oldest', dealt);
-    const shelf = await page.evaluate(() => document.querySelectorAll('#cloudMontage [data-mt-free]:not([data-mt-free="auto"])').length);
-    check(shelf >= 8, 'and each mood has plenty of songs to pick from', shelf);
+    const shelf = await page.evaluate(() => ({ rows: document.querySelectorAll('#cloudMontage .mt-list [data-mt-free]:not([data-mt-free="auto"])').length,
+      more: (document.querySelector('#cloudMontage [data-mt-all]') || {}).textContent || '', tabs: [...document.querySelectorAll('#cloudMontage .mt-seg button')].map((b) => b.textContent.trim()),
+      plays: document.querySelectorAll('#cloudMontage .mt-list [data-mt-play]').length }));
+    check(shelf.tabs.length === 3 && shelf.rows === 4 && shelf.plays === 4 && +((shelf.more.match(/\d+/) || [])[0]) >= 8,
+      'music is tidy: No music / Free songs / My songs, then four songs with ▶ and "Show all" for the rest of the mood', shelf);
+    // ▶ plays a song before it is used (one from this phone, so no network is needed)
+    const wav = path.join(MEDIA, 'preview-song.wav');
+    execFileSync(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'sine=f=440:d=8', wav]);
+    await page.setInputFiles('#mtSong', wav);
+    await sleep(500);
+    await page.locator('#cloudMontage [data-mt-play="file"]').tap();
+    let pv = null;
+    for (let i = 0; i < 20; i++) { await sleep(200); pv = await page.evaluate(() => ({ on: !!document.querySelector('#cloudMontage [data-mt-play="file"].on'), sub: (document.querySelector('#cloudMontage [data-mt-sub="file"]') || {}).textContent })); if (/Playing · 0:0[1-9]/.test(pv.sub)) break; }
+    check(pv.on && /Playing · 0:0[1-9]/.test(pv.sub), '▶ plays the song right there, and says how far in it is', pv);
+    await page.locator('#cloudMontage [data-mt-play="file"]').tap();
+    await sleep(300);
+    const pv2 = await page.evaluate(() => ({ on: !!document.querySelector('#cloudMontage [data-mt-play].on'), sub: (document.querySelector('#cloudMontage [data-mt-sub="file"]') || {}).textContent }));
+    check(!pv2.on && pv2.sub === 'from this phone', 'a second tap stops it', pv2);
+    await page.locator('#cloudMontage [data-mt-tab="free"]').tap();
+    await sleep(200);
+    if (process.env.MW_SHOTS) { await page.evaluate(() => document.querySelector('#cloudMontage .mt-seg').scrollIntoView({ block: 'start' })); await sleep(300); await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'montage-music.png') }); }
     await page.locator('#cloudMontage [data-mt-mood="epic"]').tap();
     await sleep(200);
     check(await page.evaluate(() => [...document.querySelectorAll('#cloudMontage [data-mt-free]:not([data-mt-free="auto"])')].some((b) => /Heroic Age/.test(b.textContent))), 'a mood shows its songs (Epic: "Heroic Age"…)');
