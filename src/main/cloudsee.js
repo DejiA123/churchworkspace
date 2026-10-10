@@ -249,14 +249,15 @@ async function ask({ image, frames, columns = 8, maxWaitMs = 45000, people = fal
       for (const r of rows) {
         const L = String(r && (r.frame != null ? r.frame : r.picture) || '').trim().toUpperCase();
         if (!labels.includes(L)) continue;
-        const n = Math.round(Number(r.column != null ? r.column : r.speaker));
+        let n = Math.round(Number(r.column != null ? r.column : r.speaker));
+        // "people: 0" is an answer on its own — nobody there — whatever the column says (or if it is left out)
+        const c = people ? Math.round(Number(r.people)) : NaN;
+        const count = Number.isFinite(c) && c >= 0 ? Math.min(9, c) : null;
+        if (count === 0) n = 0;
         // a column past the last one is not an answer at all — neither "here" nor "nobody"
-        if (!Number.isFinite(n) || n < 0 || n > columns) continue;
+        if (!Number.isFinite(n) || n < 0 || n > columns) { if (count != null) n = 0; else continue; }
         answers[L] = { column: n, sure: r.sure !== false };
-        if (people) {
-          const c = Math.round(Number(r.people));
-          answers[L].people = Number.isFinite(c) && c >= 0 ? Math.min(9, c) : null;
-        }
+        if (people) answers[L].people = count;
       }
       if (!Object.keys(answers).length) { lastWhy = model + ' did not answer about any frame'; continue; }
       health.ok++; health.why = ''; health.model = model; health.lastMs = Date.now() - t0; health.lastAt = Date.now();

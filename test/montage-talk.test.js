@@ -215,7 +215,7 @@ const SCRIPT = {
     let looked = 0, nobodyTiles = 0;
     const lum = (file, x, y, w, h) => execFileSync(ffmpeg, ['-v', 'error', '-i', file, '-vf', `crop=${w}:${h}:${x}:${y},scale=1:1,format=gray`, '-f', 'rawvideo', '-'])[0];
     see.ready = () => true;
-    see.whereArePeople = async ({ image, frames }) => {
+    const stagePeople = async ({ image, frames }) => {
       const f = path.join(gridDir, `g${looked++}.jpg`);
       fs.writeFileSync(f, Buffer.from(image.split(',')[1], 'base64'));
       const answers = {};
@@ -229,6 +229,7 @@ const SCRIPT = {
       });
       return { ok: true, answers };
     };
+    see.whereArePeople = stagePeople;
     const outS = path.join(WORK, 'stage-916.mp4');
     let rs;
     try { rs = await montage.make(ctx, video.getInfo, { mediaPaths: [S], style: 'hype', lengthSec: 15, aspect: '9:16', output: outS, mode: 'talk', hear: async () => talk }); }
@@ -249,6 +250,23 @@ const SCRIPT = {
     ok(times.length >= 3 && inFrame.every((v) => v > 180), 'the person is always in the 9:16 frame — the crop follows them as they walk', { times, inFrame });
     const pans = proj.shots.filter((x) => typeof x.fx2 === 'number');
     ok(pans.length >= 1 && pans.every((x) => x.fx2 > x.fx), 'within a line the crop pans with them (left to right, as they walk)', proj.shots.map((x) => [x.fx, x.fx2]));
+    // EVERY line the director chose is on the empty stage: they are all replaced, never kept
+    {
+      const seeAll = require(path.join(ROOT, 'src/main/cloudsee'));
+      const rr = seeAll.ready, rp = seeAll.whereArePeople;
+      seeAll.ready = () => true;
+      // the strong, well-shaped lines (4 s each) in the dark half; only short ones once someone is on stage
+      const strong = say(['This is the word of the Lord for you today my friend.', 'God is about to do something new in your whole life.', 'Do not be afraid of anything that is coming at you.', 'He has never failed you once and he never will at all.'], 0.5);
+      const weak = say(['Amen church.', 'Say yes.', 'Praise him.', 'Lift your hands.', 'Glory to God.', 'Thank you Jesus.', 'He is good.', 'Shout amen.'], 21);
+      const outAll = path.join(WORK, 'stage-all.mp4');
+      try {
+        seeAll.whereArePeople = async (a) => stagePeople(a);
+        await montage.make(ctx, video.getInfo, { mediaPaths: [S], style: 'hype', lengthSec: 6, aspect: '9:16', output: outAll, mode: 'talk', hear: async () => strong.concat(weak) });
+      } finally { seeAll.ready = rr; seeAll.whereArePeople = rp; }
+      const pa = montage.loadProject(outAll);
+      const la = pa.shots.filter((x) => x.from != null && pa.cands[x.cid] && pa.cands[x.cid].kind === 'video');
+      ok(la.length > 0 && la.every((x) => x.from >= 19.5), 'when every chosen line shows nobody, they are replaced by lines that show someone (never kept)', la.map((x) => x.from));
+    }
     // the captions are what was said: every caption word is one of the spoken words, in order
     const spoken = new Set(talk.map((w) => w.text));
     const capt = (rs.words || []).map((w) => w.text);

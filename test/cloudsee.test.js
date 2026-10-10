@@ -139,6 +139,17 @@ const ok = (answer) => reply(200, { choices: [{ message: { content: typeof answe
   const all = await Promise.all([1, 2, 3].map(() => cloudsee.whoIsSpeaking({ image: IMG, frames: FRAMES })));
   check('three shorts asking at once are asked one after another', all.every((x) => x.ok) && most === 1, 'most at once: ' + most);
 
+  console.log('\n[8b] Where are the people? (the Viral Montage)');
+  calls = [];
+  script = [ok({ frames: [{ frame: 'A', people: 2, column: 3, sure: true }, { frame: 'B', people: 0, sure: true }] })];
+  const pp = await cloudsee.whereArePeople({ image: IMG, frames: FRAMES });
+  check('counts the people, and "people: 0" with no column is still an answer: nobody there', pp.ok && pp.answers.A.people === 2 && pp.answers.A.column === 3 && pp.answers.B && pp.answers.B.people === 0 && pp.answers.B.column === 0, JSON.stringify(pp.answers));
+  check('…asked as a people question: title graphics and screens count as nobody', /people/.test(calls[0].system) && /title graphic/.test(calls[0].system));
+  calls = [];
+  script = [ok({ frames: [{ frame: 'A', people: 0, column: 5 }] })];
+  const p0 = await cloudsee.whereArePeople({ image: IMG, frames: FRAMES });
+  check('nobody there wins over a column given anyway', p0.ok && p0.answers.A.people === 0 && p0.answers.A.column === 0, JSON.stringify(p0.answers));
+
   console.log('\n[9] Bad input');
   const bad = await cloudsee.whoIsSpeaking({ image: 'C:/not-a-data-url.jpg', frames: FRAMES });
   check('a picture that is not a data URL is refused before any call', !bad.ok, bad.why);
