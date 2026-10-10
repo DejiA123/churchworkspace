@@ -533,8 +533,8 @@ function ruleOption(style, ctx) {
  * #SermonClip, no manufactured urgency. Those raise a number and cost the
  * account its voice, and the operator ruled on them already.
  */
-function buildPrompt({ hook, kind, churchName, eventName, speaker, durationSec, transcript, allowBait, quotes }) {
-  const read = transcript ? readTranscript(transcript) : null;
+function buildPrompt({ hook, kind, churchName, eventName, speaker, durationSec, transcript, allowBait, quotes, flyer }) {
+  const read = flyer || (transcript ? readTranscript(transcript) : null);
   const secs = Math.round(durationSec || 0);
   const what = kind === 'image' ? 'a photo or flyer' : `a ${secs || 'short'}${secs ? '-second' : ''} vertical clip`;
   const shortlist = (quotes && quotes.length ? quotes : (read && read.quotes) || []).slice(0, 5);
@@ -563,7 +563,7 @@ function buildPrompt({ hook, kind, churchName, eventName, speaker, durationSec, 
     `THE POST: ${what} from a church service.`,
     churchName ? `THE CHURCH: ${churchName}` : '',
     '',
-    read ? 'WHAT IS ACTUALLY SAID IN IT (this is the only source of fact you have):' : '',
+    read ? (flyer ? 'WHAT IS PRINTED ON THE FLYER (this is the only source of fact you have — give the event, day, time and place exactly as printed):' : 'WHAT IS ACTUALLY SAID IN IT (this is the only source of fact you have):') : '',
     read ? '"""' : '', read ? (read.full || read.summary) : '', read ? '"""' : '',
     '',
     shortlist.length ? 'THE MOST QUOTABLE LINES IN IT, strongest first:' : '',
@@ -587,7 +587,7 @@ function buildPrompt({ hook, kind, churchName, eventName, speaker, durationSec, 
     'THEN THE REST OF THE CAPTION:',
     '  - Two to four short sentences that pay the first line off, all of them about',
     '    what is ACTUALLY said in the words above. Vary the sentence lengths.',
-    '  - Quote the speaker directly at least once, word for word from above.',
+    flyer ? '  - Say clearly what is happening, when and where, exactly as printed, and why someone should come.' : '  - Quote the speaker directly at least once, word for word from above.',
     '  - Name the speaker and where it happened, naturally, inside a sentence.',
     '  - End on a line that lands: something true about the reader, not a request.',
     '  - Then a blank line, then 6 to 9 hashtags on the last line, mixing big ones',
@@ -668,8 +668,17 @@ function buildPolishPrompt({ options, eventName, speaker, allowBait }) {
  * six rules will eventually forget one.
  */
 async function suggest({ mediaPath, kind = 'video', churchName = '', eventName = '', speakers = [],
-  durationSec = 0, transcript = '', allowBait = false, llm = null, signal, quick = false } = {}) {
-  const read = transcript ? readTranscript(transcript) : null;
+  durationSec = 0, transcript = '', allowBait = false, llm = null, signal, quick = false, flyer = null } = {}) {
+  /*
+   * A FLYER'S WORDS ARE ALL FACT. They are short lines ("FRIDAY 24 OCT",
+   * "7PM"), which the transcript reader drops as too short to be sentences —
+   * so a flyer is handed to the writer whole, as what is printed on it.
+   */
+  const flyerText = flyer ? [flyer.event && `Event: ${flyer.event}`, flyer.date && `Date: ${flyer.date}`, flyer.time && `Time: ${flyer.time}`,
+    flyer.place && `Place: ${flyer.place}`, flyer.people && flyer.people.length && `People: ${flyer.people.join(', ')}`,
+    flyer.theme && `Theme: ${flyer.theme}`, flyer.contact && `Contact: ${flyer.contact}`, transcript && `Every word on it: ${transcript}`].filter(Boolean).join('\n') : '';
+  const read = flyer ? { full: flyerText, summary: flyerText, quotes: [], hook: flyer.event || '', words: flyerText.split(/\s+/).length }
+    : transcript ? readTranscript(transcript) : null;
   const hook = (read && read.hook) || hookFromFilename(mediaPath) || '';
   const speaker = whoIsSpeaking(transcript, speakers);
   const ctx = { hook, speaker, eventName, churchName, allowBait,
@@ -724,7 +733,7 @@ async function suggest({ mediaPath, kind = 'video', churchName = '', eventName =
 
   try {
     const out = await llm.chat({
-      prompt: buildPrompt({ hook, kind, churchName, eventName, speaker, durationSec, transcript, allowBait,
+      prompt: buildPrompt({ hook, kind, churchName, eventName, speaker, durationSec, transcript, allowBait, flyer: flyer ? read : null,
                            quotes: read ? read.quotes : null }),
       maxTokens: 1800, temperature: 0.85, json: true, signal,
     });
@@ -852,7 +861,14 @@ async function revise({ title = '', caption = '', action = 'rewrite', instructio
     const cap = houseStyle(guard(tidy(r.caption || '', 2100)), { allowBait });
     const t = r.title ? houseStyle(guard(tidy(r.title, 100)), { allowBait, title: true }) : was.title;
     if (!cap || cap.length < 8) return Object.assign({ source: 'unchanged', why: 'The writer did not give a usable caption.' }, was);
-    return { title: t || was.title, caption: cap, source: 'ai' };
+    // the hashtag line comes back if the writer dropped it
+    let out = cap;
+    if (/#\w/.test(was.caption) && !/#\w/.test(cap)) {
+      const paras = was.caption.split(/\n\s*\n/);
+      const tags = paras.filter((x) => /^\s*#/.test(x)).pop() || (was.caption.match(/#\w+/g) || []).join(' ');
+      if (tags) out = cap.trimEnd() + '\n\n' + tags.trim();
+    }
+    return { title: t || was.title, caption: out, source: 'ai' };
   } catch (e) {
     return Object.assign({ source: 'unchanged', why: (e && e.message) || 'The writer did not answer.' }, was);
   }

@@ -53,7 +53,7 @@ function aiServer() {
       if (vision) { AI.calls.push('read'); out = FLYER; }
       else if (/WHAT TO DO: Make it SHORTER/.test(text)) { AI.calls.push('shorten'); out = { title: 'Night of Worship', caption: 'Night of Worship, Friday 24 October, 7 pm. 🙌\n\n#ThePowerHouse #Worship' }; }
       else if (/"options"/.test(text)) {
-        AI.calls.push('write');
+        AI.calls.push('write'); if (!AI.firstWrite) AI.firstWrite = text;
         if (AI.slow) await sleep(AI.slow);
         const cap = 'One night to lift His name together. 🙌 Night of Worship is this Friday 24 October at 7 pm, at The Power House Church, 12 Grace Road. Bring a friend and come as you are.\n\n#ThePowerHouse #NightOfWorship #Worship #Friday';
         out = { options: [{ title: 'Night of Worship: Friday 7 pm 🙌', hook: 'One night to lift His name together.', caption: cap },
@@ -145,6 +145,8 @@ function aiServer() {
     check(done.facts.includes('Night of Worship') && done.facts.includes('Friday 24 October') && done.facts.includes('7 pm'), 'what was read on the flyer is shown', done.facts);
     check(/One night to lift His name/.test(done.prev), 'the preview shows the caption on the picture', done.prev);
     check(done.styles === 3 && AI.calls.includes('read'), 'other styles are offered', { styles: done.styles, calls: AI.calls });
+    check(/WHAT IS PRINTED ON THE FLYER/.test(AI.firstWrite || '') && /Date: Friday 24 October/.test(AI.firstWrite || '') && /Time: 7 pm/.test(AI.firstWrite || ''),
+      'the writer is given every fact printed on the flyer', (AI.firstWrite || '').slice(0, 300));
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'b-real-4-written.png') });
 
     // [3]
@@ -183,6 +185,37 @@ function aiServer() {
     await page.tap('#csCompose [data-c="write"]').catch(() => {});
     const kept = await page.$eval('#csCompose .csb-cap', (n) => n.value).catch(() => '');
     check(kept === typed, 'a typed caption is not written over by itself', kept);
+    // [7] another file chosen: the AI's caption for the old one goes, a new one is written; what was typed stays
+    await page.evaluate(() => { const x = document.querySelector('#csCompose .cp-x'); if (x) x.click(); });
+    await sleep(600);
+    AI.slow = 0;
+    await page.evaluate((f) => window.MWSocial.compose({ files: [f] }), FLY);
+    await page.waitForSelector('#csCompose .csb-ai-st.ok', { timeout: 30000 }).catch(() => {});
+    const writes0 = AI.calls.filter((c) => c === 'write').length;
+    await page.tap('#csCompose .csb-pill.right');   // Change
+    await sleep(300);
+    const cleared = await page.evaluate(() => ({ src: !!document.querySelector('#csCompose .csb-src') }));
+    const [ch2] = await Promise.all([page.waitForEvent('filechooser', { timeout: 8000 }), page.tap('#csCompose [data-c="device"]')]);
+    await ch2.setFiles(VID);
+    await page.waitForSelector('#csCompose .csb-ai-st.ok', { timeout: 30000 }).catch(() => {});
+    check(cleared.src && AI.calls.filter((c) => c === 'write').length > writes0, 'choosing another file writes a new caption for it (the old one goes)', { cleared, calls: AI.calls });
+
+    // [8] Schedule tapped while writing, then the sheet closed: nothing is posted
+    AI.slow = 4000;
+    const before = (await page.evaluate(async () => window.api.scheduler.list())).length;
+    await page.evaluate(() => { const x = document.querySelector('#csCompose .cp-x'); if (x) x.click(); });
+    await sleep(600);
+    await page.evaluate((f) => window.MWSocial.compose({ files: [f] }), VID2);
+    await page.waitForSelector('#csCompose .csb-ai.busy', { timeout: 8000 }).catch(() => {});
+    await page.tap('#csCompose [data-c="go"]');
+    await sleep(300);
+    const twice = await page.$eval('#csCompose [data-c="go"]', (b) => b.disabled).catch(() => true);
+    await page.evaluate(() => { const x = document.querySelector('#csCompose .cp-x'); if (x) x.click(); });
+    await sleep(6000);
+    const after = (await page.evaluate(async () => window.api.scheduler.list())).length;
+    check(twice, 'while it waits for the caption, Schedule cannot be tapped twice');
+    check(after === before, 'closing the sheet while it waits posts nothing', { before, after });
+
     if (SHOTS) {
       await page.evaluate(() => { const x = document.querySelector('#csCompose .cp-x'); if (x) x.click(); });
       await sleep(600);

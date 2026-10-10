@@ -604,7 +604,9 @@
   const shortWhen = (d) => {
     const t = new Date(d);
     const day = dayName(t);
-    return (day === 'Today' ? 'Today' : day === 'Tomorrow' ? 'Tmrw' : t.toLocaleDateString(undefined, { weekday: 'short' })) + ' ' + compactTime(t);
+    const near = Math.abs(t.getTime() - Date.now()) < 6 * 86400e3;
+    return (day === 'Today' ? 'Today' : day === 'Tomorrow' ? 'Tmrw' : day === 'Yesterday' ? 'Yday'
+      : near ? t.toLocaleDateString(undefined, { weekday: 'short' }) : t.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })) + ' ' + compactTime(t);
   };
   // the next best time with nothing booked near it (two hours either side), within a fortnight
   function freeSlot() {
@@ -867,6 +869,8 @@
       return st.when || nextWindow(new Date(now.getTime() + 30 * 60000));
     }
     function chosenWhen() { return st.quick === 'pick' ? (st.when || whenFor('best')) : whenFor(st.quick); }
+    // a batch starts from the time chosen (a free-slot tile), or from the next best time
+    const batchTimes = () => planTimes(st.files.length, st.spacing, st.quick === 'pick' && st.when ? st.when : undefined);
 
     const firstPlat = () => { const a = linked().find((x) => picked().includes(x.id) && /tiktok|instagram/.test(x.platform)) || linked().find((x) => picked().includes(x.id)); return a || null; };
     function mediaBlock() {
@@ -911,7 +915,7 @@
     }
     function whenBlock() {
       if (many()) {
-        const times = planTimes(st.files.length, st.spacing);
+        const times = batchTimes();
         return '<div class="cs-chips">'
           + [[24, 'One a day'], [12, 'Twice a day'], [6, 'Every 6 h'], [48, 'Every 2 days']].map(([h, l]) =>
             `<button type="button" class="cs-chip${st.spacing === h ? ' on' : ''}" data-c="spacing" data-h="${h}">${l}</button>`).join('')
@@ -995,7 +999,7 @@
     }
 
     function whenSummary() {
-      if (many()) { const t = planTimes(st.files.length, st.spacing); return { main: `From ${shortWhenLabel(t[0])}`, sub: `${st.files.length} posts, spread out` }; }
+      if (many()) { const t = batchTimes(); return { main: `From ${shortWhenLabel(t[0])}`, sub: `${st.files.length} posts, spread out` }; }
       if (st.quick === 'now') return { main: 'Right now', sub: 'As soon as you tap' };
       const w = chosenWhen();
       const day = dayName(w);
@@ -1022,7 +1026,7 @@
       const ws = whenSummary();
       panel.foot.innerHTML = '<div class="csb-bar">'
         + `<button type="button" class="csb-when" data-c="whenjump">${mi('clock')}<span><b>${esc(ws.main)}</b><small>${esc(ws.sub)}</small></span></button>`
-        + `<button type="button" class="csb-go" data-c="go"${ready ? '' : ' disabled'}>${label}</button></div>`
+        + `<button type="button" class="csb-go" data-c="go"${ready && !st.submitting ? '' : ' disabled'}>${st.submitting ? 'Scheduling…' : label}</button></div>`
         + (ready ? (busy ? '<p class="cs-hint">You can tap it now — it waits for the caption to be written.</p>' : '')
           : `<p class="cs-hint">${!st.files.length ? 'Choose a video or a flyer first.' : 'Choose at least one account to post to.'}</p>`);
       paintThumbs(panel.body);
@@ -1036,9 +1040,11 @@
      * answer for the old one.
      */
     function autoWrite(force) {
-      if (edit || many() || !st.files.length) return null;
+      if (many() || !st.files.length) return null;
       const f = st.files[0];
-      if (!force && (st.caption.trim() || st.autoFor === f)) return null;
+      if (!force && (edit || st.caption.trim() || st.autoFor === f)) return null;
+      // asked for again: the new answer replaces the AI's last one (never what was typed)
+      if (force && st.aiText && st.caption === st.aiText.caption) st.caption = '';
       st.aiRun = writeFor(f);
       return st.aiRun;
     }
@@ -1064,7 +1070,8 @@
       if (out) {
         // what was typed while it was writing wins
         if (!st.caption.trim()) st.caption = out.caption || '';
-        if (out.title && (!st.title || st.title === titleFromFile(f))) st.title = out.title;
+        if (out.title && (!st.title || st.title === titleFromFile(f) || (st.aiText && st.title === st.aiText.title))) st.title = out.title;
+        st.aiText = { caption: st.caption, title: st.title };
         st.options = (out.options && out.options.length > 1) ? out.options : null;
         st.ai = { stage: 'done', from: out.flyer ? 'flyer' : video ? 'video' : 'picture', flyer: out.flyer || null,
           note: out.wroteBy === 'rules' ? 'Written without the AI writer' + (out.writerWhy ? ` (${out.writerWhy})` : '') + ' — edit it freely.' : '' };
@@ -1073,21 +1080,28 @@
       }
       draw();
     }
-    async function writeAll() {
+    function writeAll() {
+      // one run at a time; files added meanwhile are written when it gets to them
+      if (st.batchRun) return st.batchRun;
+      st.batchRun = writeMissing().finally(() => { st.batchRun = null; });
+      return st.batchRun;
+    }
+    async function writeMissing() {
       for (let i = 0; i < st.files.length; i++) {
-        if (!panel.el.isConnected || !many()) return;
+        if (!panel.el.isConnected || !many()) break;
+        const f = st.files[i];
+        if (st.batchCaps[f]) continue;
         st.writing = `Writing ${i + 1} of ${st.files.length}…`;
         draw();
         try {
-          const f = st.files[i];
           const out = await window.api.social.suggestCopy({ mediaPath: f, kind: isVideo(f) ? 'video' : 'image', listen: true, quick: true, jobId: 'copy_' + Date.now() });
           if (out) st.batchCaps[f] = { title: out.title, caption: out.caption };
         } catch (er) { /* that one keeps the shared caption */ }
       }
       st.writing = false;
-      draw();
+      if (panel.el.isConnected) draw();
     }
-    const afterPick = () => { if (many()) { if (!Object.keys(st.batchCaps).length && !st.writing) writeAll(); } else autoWrite(); };
+    const afterPick = () => { if (many()) { if (st.files.some((f) => !st.batchCaps[f])) writeAll(); } else autoWrite(); };
 
     async function pickExports() {
       await loadExports();
@@ -1156,8 +1170,14 @@
       if (c === 'exports') return pickExports();
       if (c === 'change') {
         if (many()) return pickExports();
-        st.files = []; st.ai = null; st.autoFor = ''; st.options = null; st.prev = null;
-        if (!edit && st.caption && st.ai === null) { /* a typed caption is kept for the next file */ }
+        // what the AI wrote for the old file goes with it; what the person typed stays
+        if (st.aiText) {
+          if (st.caption === st.aiText.caption) st.caption = '';
+          if (st.title === st.aiText.title) st.title = '';
+          st.aiText = null;
+        }
+        if (!edit && st.files.length === 1 && st.title === titleFromFile(st.files[0])) st.title = '';
+        st.files = []; st.ai = null; st.autoFor = ''; st.options = null; st.prev = null; st.batchCaps = {};
         return draw();          // one file: offer both places again
       }
       if (c === 'device') return pickDevice();
@@ -1189,7 +1209,7 @@
         return;
       }
       if (c === 'write') return autoWrite(true);
-      if (c === 'write-all') { st.batchCaps = {}; return writeAll(); }
+      if (c === 'write-all') { if (st.batchRun) return; st.batchCaps = {}; return writeAll(); }
       if (c === 'whenjump') { const w = panel.body.querySelector('#csbWhen'); if (w) w.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
       if (c === 'undo') { if (st.prev) { st.caption = st.prev.caption; st.title = st.prev.title; st.prev = null; } return draw(); }
       if (c === 'rev') {
@@ -1238,13 +1258,26 @@
     const withCredit = (caption, credit) => (credit && !String(caption || '').includes(credit) ? [String(caption || '').trim(), credit].filter(Boolean).join('\n\n') : caption);
 
     async function submit(btn) {
+      if (st.submitting) return;
+      st.submitting = true;
       btn.disabled = true;
-      // tapped while the AI was still writing: the post waits for its caption
-      if (!many() && st.aiRun && st.ai && st.ai.stage !== 'done' && st.ai.stage !== 'fail') {
-        btn.textContent = 'Finishing the caption…';
-        try { await st.aiRun; } catch (er) {}
+      try { await submitNow(btn); } finally { st.submitting = false; }
+    }
+    async function submitNow(btn) {
+      // tapped while the AI was still writing: the post waits for its caption(s)
+      const waitFor = many() ? st.batchRun : (st.aiRun && st.ai && st.ai.stage !== 'done' && st.ai.stage !== 'fail' ? st.aiRun : null);
+      if (waitFor) {
+        btn.textContent = many() ? 'Finishing the captions…' : 'Finishing the caption…';
+        try { await waitFor; } catch (er) {}
+        // closed meanwhile: that is a cancel, not a post
+        if (!panel.el.isConnected) return;
         btn = panel.foot.querySelector('[data-c="go"]') || btn;
         btn.disabled = true;
+        if (!many() && !st.caption.trim() && st.ai && st.ai.stage === 'fail') {
+          draw();
+          C.island({ kind: 'warn', title: 'There is no caption yet', sub: 'The AI could not write it — type one, or tap Write it for me.', ms: 6000 });
+          return;
+        }
       }
       const accs = linked().filter((a) => picked().includes(a.id));
       const platforms = Array.from(new Set(accs.map((a) => a.platform)));
@@ -1265,7 +1298,7 @@
           });
           C.island({ kind: 'good', title: 'Post updated', sub: whenLabel(chosenWhen()) });
         } else if (many()) {
-          const times = planTimes(st.files.length, st.spacing);
+          const times = batchTimes();
           for (let i = 0; i < st.files.length; i++) {
             btn.innerHTML = `${mi('calendar')}Booking ${i + 1} of ${st.files.length}…`;
             const f = st.files[i];

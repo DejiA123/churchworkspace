@@ -2787,9 +2787,10 @@ ipcMain.handle('social:suggestCopy', wrap(async (e, { mediaPath, kind, durationS
   let flyer = null;
   const isPicture = /\.(jpe?g|png|webp|heic|heif)$/i.test(String(mediaPath || ''));
   if (!heardBy && isPicture && mediaPath && fs.existsSync(mediaPath) && cloudwrite.ready()) {
-    const tmp = path.join(require('os').tmpdir(), `mw-flyer-${process.pid}-${Date.now()}.jpg`);
+    const tmp = path.join(require('os').tmpdir(), `mw-flyer-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`);
     try {
-      await ffmod.runFfmpeg(getCtx().ffmpeg, ['-v', 'error', '-i', mediaPath, '-frames:v', '1', '-vf', "scale='min(1280,iw)':-2", '-q:v', '3', '-y', tmp]);
+      // the preview lane: a person is waiting on this, not on an export
+      await ffmod.runFfmpeg(getCtx().ffmpeg, ['-v', 'error', '-i', mediaPath, '-frames:v', '1', '-vf', "scale='min(1280,iw)':-2", '-q:v', '3', '-y', tmp], { preview: true });
       const image = 'data:image/jpeg;base64,' + fs.readFileSync(tmp).toString('base64');
       const r = await cloudsee.readFlyer({ image });
       if (r && r.ok && (r.text || r.describe)) {
@@ -2819,7 +2820,7 @@ ipcMain.handle('social:suggestCopy', wrap(async (e, { mediaPath, kind, durationS
     // The clip's real length, when we had to open it anyway to listen to it.
     // A writer told "a 41-second clip" writes to 41 seconds.
     mediaPath, kind, durationSec: durationSec || Math.round(dur) || 0,
-    churchName, eventName, speakers, allowBait, transcript, llm: writer, quick: !!quick,
+    churchName, eventName, speakers, allowBait, transcript, llm: writer, quick: !!quick, flyer,
   });
   // The operator has to be able to see WHY a caption is good or poor — which
   // ear heard the clip and which writer wrote it. Without this, "it's terrible

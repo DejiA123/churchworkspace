@@ -330,13 +330,15 @@ async function readFlyer({ image, maxWaitMs = 30000 } = {}) {
   const list = ladder(a, await discover(a));
   if (!list.length) return { ok: false, why: `${a.providerName} has no model here that can look at pictures` };
   let lastWhy = '', waited = 0;
+  const noJson = new Set();   // models that choke on the JSON envelope: asked again without it
   for (let k = 0; k < list.length; k++) {
     const model = list[k];
     const body = Object.assign({
-      model, temperature: 0, max_tokens: 900, response_format: { type: 'json_object' },
+      model, temperature: 0, max_tokens: 900,
       messages: [{ role: 'system', content: FLYER_SYSTEM },
         { role: 'user', content: [{ type: 'text', text: 'Read this picture.' }, { type: 'image_url', image_url: { url: image } }] }],
     }, tuneFor(model));
+    if (!noJson.has(model)) body.response_format = { type: 'json_object' };
     let res, errText = '';
     try {
       const ac = new AbortController();
@@ -356,6 +358,7 @@ async function readFlyer({ image, maxWaitMs = 30000 } = {}) {
     }
     try { errText = (await res.text()).slice(0, 400); } catch (e) {}
     if (res.status === 401 || res.status === 403) return { ok: false, why: 'the AI key was refused' };
+    if (res.status === 400 && /json_validate_failed|failed to generate json/i.test(errText) && !noJson.has(model)) { noJson.add(model); k--; continue; }
     if (res.status === 429 || res.status === 503) {
       const wait = cloudwrite.waitMs(res.headers.get('retry-after')) || 8000;
       if (waited + wait <= maxWaitMs) { waited += wait; await sleep(wait); k--; continue; }
