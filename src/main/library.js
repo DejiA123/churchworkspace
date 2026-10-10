@@ -88,6 +88,22 @@ function list() {
   return out;
 }
 
+/*
+ * A video given to My music — an instrumental screen-recorded off YouTube —
+ * keeps only its sound, saved as a song (<id>.m4a). No sound, no song.
+ */
+const VIDEO_EXT = CLIP_EXT.filter((e) => !STILL_EXT.includes(e)).concat(['3gp']);
+async function soundIn(ctx, video, srcPath, id) {
+  let info = null;
+  try { info = await video.getInfo(ctx, srcPath); } catch (e) { throw new Error('That video could not be read.'); }
+  if (!info.hasAudio) throw new Error('That video has no sound to use as music.');
+  const dest = path.join(root(), 'music', `${id}.m4a`);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  try { await video.soundOf(ctx, { input: srcPath, output: dest, acodec: info.acodec }); }
+  catch (e) { try { fs.rmSync(dest, { force: true }); } catch (er) {} throw new Error('The sound could not be taken from that video.'); }
+  return dest;
+}
+
 function copyIn(kind, srcPath, id) {
   const ext = (path.extname(srcPath) || '').replace(/^\./, '').toLowerCase() || (kind === 'music' ? 'mp3' : 'mp4');
   const dest = path.join(root(), kind === 'music' ? 'music' : 'clips', `${id}.${ext}`);
@@ -114,20 +130,21 @@ async function add(ctx, video, { kind, path: srcPath, name, source, move }) {
   const k = kind === 'music' ? 'music' : 'clips';
   const ext = (path.extname(srcPath) || '').replace(/^\./, '').toLowerCase();
   const allowed = k === 'music' ? MUSIC_EXT : CLIP_EXT;
-  if (ext && !allowed.includes(ext)) {
+  if (ext && !allowed.includes(ext) && !(k === 'music' && VIDEO_EXT.includes(ext))) {
     throw new Error(k === 'music'
       ? `“.${ext}” isn’t an audio file. Pick an ${MUSIC_EXT.slice(0, 4).join(', ')}…`
       : `“.${ext}” isn’t a video or picture. Pick an ${CLIP_EXT.slice(0, 4).join(', ')}… or a jpg/png.`);
   }
   const still = STILL_EXT.includes(ext);
   const id = uid();
-  const { dest } = copyIn(k, srcPath, id);
+  const fromVideo = k === 'music' && VIDEO_EXT.includes(ext);
+  const dest = fromVideo ? await soundIn(ctx, video, srcPath, id) : copyIn(k, srcPath, id).dest;
   if (move) { try { fs.rmSync(srcPath, { force: true }); } catch (e) {} }
 
   const entry = {
     id, name: safeName(name || plainName(srcPath)),
     file: dest, ext: (path.extname(dest) || '').replace(/^\./, ''),
-    addedAt: Date.now(), source: source || 'file',
+    addedAt: Date.now(), source: source || (fromVideo ? 'video' : 'file'),
   };
   // Duration (and, for clips, a poster frame) so the library reads like a real
   // media bin instead of a list of filenames.

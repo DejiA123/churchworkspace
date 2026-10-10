@@ -14089,15 +14089,18 @@
     const a = $('#libOutroAll'); if (a) a.checked = ve.outroAll !== false;
   }
 
-  async function addToLibrary(kind) {
-    const filters = kind === 'music'
+  async function addToLibrary(kind, fromVideo) {
+    const filters = fromVideo
+      // a video whose SOUND becomes a song — an instrumental screen-recorded off YouTube
+      ? [{ name: 'Video', extensions: ['mp4', 'mov', 'm4v', 'mkv', 'webm', 'avi', '3gp'] }]
+      : kind === 'music'
       ? [{ name: 'Audio', extensions: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac', 'wma', 'opus'] }]
       // Pictures too: a church's end card is very often a flyer, not footage.
       : [{ name: 'Video or picture', extensions: ['mp4', 'mov', 'mkv', 'avi', 'webm', 'm4v', 'wmv', 'flv', 'jpg', 'jpeg', 'png', 'webp', 'bmp', 'avif'] }];
     let p;
     try { p = await window.api.dialog.openFile(filters); } catch (e) { p = null; }
     if (!p) return;
-    window.__showOverlay && window.__showOverlay(kind === 'music' ? '🎵 Saving to your music library…' : '🎬 Saving to your clip library…');
+    window.__showOverlay && window.__showOverlay(fromVideo ? '🎵 Taking the sound from the video…' : kind === 'music' ? '🎵 Saving to your music library…' : '🎬 Saving to your clip library…');
     try {
       const entry = await window.api.library.add(kind, p);
       await libRefresh();
@@ -15656,6 +15659,7 @@
     const libDoneBtn = $('#libDone'); if (libDoneBtn) libDoneBtn.addEventListener('click', closeLib);
     $$('.lib-tab').forEach((b) => b.addEventListener('click', () => { setLibTab(b.dataset.libtab); renderLibrary(); }));
     const addMusicBtn = $('#libAddMusic'); if (addMusicBtn) addMusicBtn.addEventListener('click', () => addToLibrary('music'));
+    const addSoundBtn = $('#libAddMusicVideo'); if (addSoundBtn) addSoundBtn.addEventListener('click', () => addToLibrary('music', true));
     const addClipBtn = $('#libAddClip'); if (addClipBtn) addClipBtn.addEventListener('click', () => addToLibrary('clips'));
     const musicRm = $('#libMusicRemove'); if (musicRm) musicRm.addEventListener('click', clearMusic);
     const outroRm = $('#libOutroRemove'); if (outroRm) outroRm.addEventListener('click', clearOutro);

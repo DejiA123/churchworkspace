@@ -3199,6 +3199,20 @@ async function audioPreview(ctx, { input, output }) {
   return output;
 }
 
+/*
+ * THE SOUND OF A VIDEO, AS A SONG. An instrumental screen-recorded off YouTube
+ * is a video; My music keeps its soundtrack. AAC (what a phone records) is
+ * copied as it is — no quality lost; anything else is encoded to 256k AAC.
+ */
+async function soundOf(ctx, { input, output, acodec }) {
+  const tail = ['-map', '0:a:0', '-vn', '-sn', '-dn', '-map_metadata', '-1', '-movflags', '+faststart', '-y', output];
+  if (acodec === 'aac') {
+    try { await ff.runFfmpeg(ctx.ffmpeg, ['-i', input, '-c:a', 'copy', ...tail]); return output; } catch (e) { /* encode instead */ }
+  }
+  await ff.runFfmpeg(ctx.ffmpeg, ['-i', input, '-c:a', 'aac', '-b:a', '256k', '-ar', '48000', '-ac', '2', ...tail]);
+  return output;
+}
+
 /**
  * Stick extra clips (an outro sting, an intro bumper) onto a finished video.
  *
@@ -3457,7 +3471,7 @@ module.exports = {
   cleanMotion, motionExpr, motionAt, motionChain, MOTION_MAX_Z, keyOf, inPreviewLane, transparentPng, writeTrackFrames, burnCaptionFrames,
   cropFirstChain, fillChain,
   simplifyKeyframes, buildLerpExpr, isCleanEncode,
-  detectSilences, mixMusic, audioPreview, songGainDb, MUSIC_LUFS, appendClips, audioSample,
+  detectSilences, mixMusic, audioPreview, soundOf, songGainDb, MUSIC_LUFS, appendClips, audioSample,
   // background noise removal + background-blur fill (pure, unit-tested)
   noiseReductionAf, studioVoiceAf, noiseStrength, measureNoiseFloor, denoiseFilter, NOISE_LEVELS,
   rnnoiseModelPath, voiceIsolationAf, withVoicePasses, ffPath, measureSeparation, renderVerifiedVoice,
