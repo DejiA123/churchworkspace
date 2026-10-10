@@ -2950,7 +2950,16 @@ ipcMain.handle('social:setKeys', wrap(async (e, patch = {}) => {
       throw new Error('That does not look like a Zernio API key — copy it again from zernio.com → Settings → API keys.');
     }
     // checked with Zernio before it is kept: a wrong key is found NOW, not at the first Connect
+    // the second key must be a DIFFERENT free Zernio account: the same one again gives no more places
+    const other = String(k === 'zoApiKeyFb' ? (('zoApiKey' in patch) ? patch.zoApiKey : acc.zoApiKey) || accountsMod.envZoKey() : '').trim();
+    if (k === 'zoApiKeyFb' && v && other && v === other) throw new Error('That is the same key as your first Zernio account — copy the key from your SECOND free Zernio account.');
     const visible = v ? await accounts.zernioCheckKey(v) : [];
+    if (k === 'zoApiKeyFb' && v && other && visible.length) {
+      let first = [];
+      try { first = await accounts.zernioCheckKey(other); } catch (er) { first = []; }
+      const ids = new Set(first.map((a) => String(a._id || a.id || a.accountId)));
+      if (visible.some((a) => ids.has(String(a._id || a.id || a.accountId)))) throw new Error('That key is for the same Zernio account as your first key — make a second free Zernio account (another email) and copy ITS key.');
+    }
     changed.push([String(acc[k] || '').trim(), v, visible]);
     acc[k] = v;
   }

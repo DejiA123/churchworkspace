@@ -160,6 +160,19 @@ async function phone(browser) {
     check(await win.title() === 'Nearly there' && /Instagram ✓/.test(await win.evaluate(() => document.body.innerText)), 'reloading the results page shows the same results');
     await win.close();
 
+    // the card is still there when the sheet is opened again (the person went off to make the account)
+    await page.evaluate(() => { const c = document.querySelector('#csConnect .cp-close, #csConnect [data-close], #csConnect button[aria-label="Close"]'); if (c) c.click(); });
+    await sleep(500);
+    await page.evaluate(() => window.MWSocial.openConnect());
+    await page.waitForSelector('#csConnect [data-k="paste2"]', { timeout: 8000 }).catch(() => {});
+    check(!!(await page.$('#csConnect [data-k="paste2"]')), 'Paste second key is still offered after the sheet is closed and opened again');
+    // the FIRST key pasted again is refused: it gives no more places
+    await page.evaluate((k) => navigator.clipboard.writeText(k), GOOD);
+    await page.tap('#csConnect [data-k="paste2"]');
+    await page.waitForSelector('#csConnect .cs-note.bad', { timeout: 10000 }).catch(() => {});
+    const same = await page.$eval('#csConnect', (n) => n.innerText);
+    check(/same key as your first/i.test(same) && !(await page.evaluate(async () => (await window.api.social.accounts()).keys.zoFb)), 'the first key pasted as the second is refused, and not kept', same.slice(0, 200));
+
     // the second free key: both Facebook pages go on it
     await page.evaluate((k) => navigator.clipboard.writeText(k), GOOD2);
     await page.tap('#csConnect [data-k="paste2"]');
@@ -184,6 +197,16 @@ async function phone(browser) {
     check(disk0.filter((a) => a.platform === 'facebook').every((a) => a.token === GOOD2) && disk0.find((a) => a.platform === 'instagram').token === GOOD,
       'each account posts with the key of the Zernio account it is on', disk0.map((a) => [a.platform, a.token.slice(-4)]));
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'setup-6-sheet.png') });
+
+    // a removed Facebook page is not brought back by "+ Add": a sign-in lets the person pick the new one
+    const fbs = (await page.evaluate(async () => (await window.api.social.accounts()).accounts)).filter((a) => a.platform === 'facebook');
+    await page.evaluate((id) => window.api.social.unlink(id), fbs[0].id);
+    Z.keys[GOOD].billing = Z.keys[GOOD2].billing = true;   // places on Zernio are still taken (the removed page keeps its own)
+    const again = await page.evaluate(() => window.api.social.linkStart('facebook', true));
+    check(!!again.url && !again.account, '"+ Add another Facebook page" after removing one opens a sign-in, never the removed page', again);
+    Z.keys[GOOD].billing = Z.keys[GOOD2].billing = false;
+    const claimNow = await page.evaluate(() => window.api.social.linkClaim('facebook', true));
+    check(claimNow.pending === true, 'and the removed page is not claimed back in its place', claimNow);
 
     // a removed account stays removed; a key from ANOTHER Zernio account takes nothing over
     const ig = (await page.evaluate(async () => (await window.api.social.accounts()).accounts)).find((a) => a.platform === 'instagram');

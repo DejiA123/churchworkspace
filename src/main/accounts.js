@@ -892,10 +892,13 @@ class Accounts {
     const redirectUrl = opts.redirectUrl || zoCfg(this.store, plat).redirectUrl;
     const pool = await this._zoPool();
     const stored = this._zoStored();
+    const removed = new Set(this.store.get('zoRemoved') || []);
     const found = this._zoFind(pool, plat);
-    // already on Zernio: kept, no sign-in (for "another", one not kept here yet)
-    const ready = another ? found.find((f) => !stored.has(String(zoAccountId(f.acct))))
-      : (found.find((f) => stored.has(String(zoAccountId(f.acct)))) || found[0]);
+    const idOf = (f) => String(zoAccountId(f.acct));
+    // already on Zernio: kept, no sign-in (for "another", one not kept here yet). One
+    // removed here is never brought back this way — a sign-in lets the person choose.
+    const ready = another ? found.find((f) => !stored.has(idOf(f)) && !removed.has(idOf(f)))
+      : (found.find((f) => stored.has(idOf(f))) || found.find((f) => !removed.has(idOf(f))));
     if (ready) return { account: await this._zoKeep(plat, ready.acct, ready.key) };
     // the key with room: a free place first, then one without this platform, then the emptiest
     const has = (k) => k.accounts.some((a) => String(a.platform || a.provider || '').toLowerCase() === plat);
@@ -904,20 +907,47 @@ class Accounts {
       || ((has(x.k) ? 1 : 0) - (has(y.k) ? 1 : 0))
       || (x.k.accounts.length - y.k.accounts.length) || (x.i - y.i))[0].k;
     const auth = { authorization: 'Bearer ' + pick.key };
+    const full = (e) => e && (e.status === 402 || /payment|free_tier_exceeded|402|more than 2 accounts/i.test(e.message || ''));
+    const fullError = () => {
+      const err = new Error(pool.length < 2
+        ? `Zernio’s free plan holds 2 accounts, and both places are taken. Make a second free Zernio account (another email) and paste its key as your second key — ${label} goes there, free.`
+        : `Both your Zernio accounts are full (2 free places each). Remove one, or turn on billing at zernio.com for more.`);
+      err.full = true; err.needSecondKey = pool.length < 2;
+      return err;
+    };
+    const profOf = (a) => { const p = a && a.profileId; return String((p && (p._id || p.id)) || p || ''); };
     let profileId = '';
-    try {
-      if (has(pick)) {
-        // a second page of the same platform needs a profile of its own
-        const made = await publisher.postJson(`${pick.apiBase}/profiles`, { name: `${label} ${found.length + 1}` }, auth);
-        const p = made && made.json && (made.json.profile || made.json.data || made.json);
-        profileId = p ? String(p._id || p.id || p.profileId || '') : '';
-      } else {
+    if (has(pick)) {
+      /*
+       * A second page of the same platform needs a profile of its own (Zernio
+       * keeps one account per platform in each). One left empty by an earlier,
+       * cancelled try is used again; a new one is made only when there is none.
+       * Never the default profile: that would replace the first page.
+       */
+      try {
+        const profs = await getJson(`${pick.apiBase}/profiles`, { headers: auth });
+        const list = Array.isArray(profs) ? profs : (profs && (profs.profiles || profs.data)) || [];
+        const taken = new Set(pick.accounts.filter((a) => String(a.platform || a.provider || '').toLowerCase() === plat).map(profOf));
+        const free = list.find((p) => !taken.has(String(p._id || p.id || p.profileId || '')) && !(p.isDefault || p.is_default));
+        if (free) profileId = String(free._id || free.id || free.profileId || '');
+        if (!profileId) {
+          const made = await publisher.postJson(`${pick.apiBase}/profiles`, { name: `${label} ${found.length + 1}` }, auth);
+          const p = made && made.json && (made.json.profile || made.json.data || made.json);
+          profileId = p ? String(p._id || p.id || p.profileId || '') : '';
+        }
+      } catch (e) {
+        if (full(e)) throw fullError();
+        throw new Error(`Zernio could not make room for another ${label} (${e.message}) — try again in a moment.`);
+      }
+      if (!profileId) throw new Error(`Zernio could not make room for another ${label} — try again in a moment.`);
+    } else {
+      try {
         const profs = await getJson(`${pick.apiBase}/profiles`, { headers: auth });
         const list = Array.isArray(profs) ? profs : (profs && (profs.profiles || profs.data)) || [];
         const chosen = list.find((p) => p.isDefault || p.is_default) || list[0];
         profileId = chosen ? String(chosen._id || chosen.id || chosen.profileId || '') : '';
-      }
-    } catch (e) { /* older API with no profiles */ }
+      } catch (e) { /* older API with no profiles */ }
+    }
     let url = '';
     try {
       const q = { redirect_url: redirectUrl };
@@ -925,13 +955,7 @@ class Accounts {
       const gen = await getJson(`${pick.apiBase}/connect/${plat}?` + new URLSearchParams(q), { headers: auth });
       url = gen && (gen.url || gen.authUrl || gen.connectUrl || gen.access_url);
     } catch (e) {
-      if (/payment|free_tier_exceeded|402|more than 2 accounts/i.test(e.message)) {
-        const err = new Error(pool.length < 2
-          ? `Zernio’s free plan holds 2 accounts, and both places are taken. Make a second free Zernio account (another email) and paste its key as your second key — ${label} goes there, free.`
-          : `Both your Zernio accounts are full (2 free places each). Remove one, or turn on billing at zernio.com for more.`);
-        err.full = true; err.needSecondKey = pool.length < 2;
-        throw err;
-      }
+      if (full(e)) throw fullError();
       throw new Error(this._connectErrorText(e.message, label, pick.accounts));
     }
     if (!url || !/^https:\/\//i.test(String(url))) throw new Error('Zernio did not return a ' + label + ' connect link — try again.');
@@ -943,9 +967,10 @@ class Accounts {
     const plat = ['youtube', 'facebook', 'instagram'].includes(platform) ? platform : 'tiktok';
     const pool = await this._zoPool();
     const stored = this._zoStored();
+    const removed = new Set(this.store.get('zoRemoved') || []);
     const found = this._zoFind(pool, plat);
-    const hit = opts.another ? found.find((f) => !stored.has(String(zoAccountId(f.acct))))
-      : (found.find((f) => !stored.has(String(zoAccountId(f.acct)))) || found[0]);
+    const fresh = (f) => !stored.has(String(zoAccountId(f.acct))) && !removed.has(String(zoAccountId(f.acct)));
+    const hit = opts.another ? found.find(fresh) : (found.find(fresh) || found.find((f) => stored.has(String(zoAccountId(f.acct)))));
     if (!hit) return { pending: true };
     return { account: await this._zoKeep(plat, hit.acct, hit.key) };
   }

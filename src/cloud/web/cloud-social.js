@@ -1137,7 +1137,10 @@
     let watching = null;   // { timer, until } — while Set up everything runs in its own window
     let typing = false;    // the paste box, when the phone would not let the key be read
     let more = false;
-    let extraFb = false;      // a second Facebook page in Set up everything
+    // a second Facebook page in Set up everything — remembered, like what was unticked
+    const FB2_KEY = 'mw.social.fb2';
+    let extraFb = (() => { try { return localStorage.getItem(FB2_KEY) === '1'; } catch (e) { return false; } })();
+    const saveFb2 = () => { try { localStorage.setItem(FB2_KEY, extraFb ? '1' : '0'); } catch (e) {} };
     let needSecond = false;   // the free Zernio account is full: a second free one is the way on
     // platforms left out of Set up everything — remembered on this phone (a church with no YouTube says so once)
     const SKIP_KEY = 'mw.social.skip';
@@ -1148,7 +1151,11 @@
     const label = (p) => (PLAT[p] || {}).name || p;
     const missing = () => PLAT_ORDER.filter((p) => !linked().some((x) => x.platform === p));
     const countOf = (p) => linked().filter((x) => x.platform === p).length;
-    const wantSecondFb = () => extraFb && countOf('facebook') + (missing().includes('facebook') && !skip.has('facebook') ? 1 : 0) < 2;
+    // counted only while its chip can be seen: never a Facebook sign-in after Facebook was unticked
+    const wantSecondFb = () => extraFb && !(missing().includes('facebook') && skip.has('facebook')) && countOf('facebook') + (missing().includes('facebook') ? 1 : 0) < 2;
+    // the free Zernio account is full: told by a run or a Connect, or seen — 2 accounts on one key and more wanted
+    const needSecondNow = () => needSecond || (S.keys.zo && !S.keys.zoFb && linked().filter((a) => a.via === 'zernio').length >= 2
+      && (missing().some((p) => !skip.has(p)) || wantSecondFb()));
 
     function draw(msg) {
       const keyRow = (k, title, sub) => `<div class="cs-key${S.keys[k] ? ' set' : ''}">`
@@ -1189,15 +1196,15 @@
           + `<button type="button" class="cs-btn primary cs-wide cs-big" data-k="paste">📋 Paste key</button>`
           + (typing ? '<div class="cs-key-in" data-key-row="zo"><input class="cs-input" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste the API key here" data-key="zo"><button type="button" class="cs-btn primary" data-k="save-zo">Save</button></div>' : '')
           + '</div>';
-      } else if (needSecond && !S.keys.zoFb) {
+      } else if (needSecondNow() && !watching) {
         hero = '<div class="cs-setup cs-second">'
-          + '<div class="cs-step"><span class="cs-step-n">+</span><div class="cs-step-tx"><b>Free account full — add a second free one</b>'
+          + `<div class="cs-step"><span class="cs-step-n">+</span><div class="cs-step-tx"><b>${S.keys.zoFb ? 'Your second key gave no room — use another free account' : 'Free account full — add a second free one'}</b>`
           + '<small>Each free Zernio account holds 2 accounts. Make a second free Zernio account (use another email), tap <b>Create key</b>, then <b>Copy</b>. It stays free.</small></div></div>'
           + `<a class="cs-btn ghost cs-wide" href="https://zernio.com/signup" target="_blank" rel="noopener">${mi('external')}Open Zernio</a>`
-          + `<button type="button" class="cs-btn primary cs-wide cs-big" data-k="paste2">📋 Paste second key</button>`
+          + `<button type="button" class="cs-btn primary cs-wide cs-big" data-k="paste2">📋 ${S.keys.zoFb ? 'Replace second key' : 'Paste second key'}</button>`
           + (typing ? '<div class="cs-key-in" data-key-row="zoFb"><input class="cs-input" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste the second key here" data-key="zoFb"><button type="button" class="cs-btn primary" data-k="save-zoFb">Save</button></div>' : '')
           + '</div>';
-      } else if (left.length && left.every((p) => skip.has(p)) && !watching) {
+      } else if (left.length && left.every((p) => skip.has(p)) && !wantSecondFb() && !watching) {
         // everything wanted is connected; what is left was unticked on purpose
         hero = `<p class="cs-note good">${mi('check')} All set — posts go out on their own.</p>`
           + `<button type="button" class="cs-more" data-k="unskip">Also connect ${left.map(label).join(' or ')}</button>`;
@@ -1291,7 +1298,7 @@
       const b = e.target.closest('[data-k]'); if (!b || b.disabled) return;
       const k = b.dataset.k;
       if (k === 'more') { more = !more; return draw(); }
-      if (k === 'pick') { const p = b.dataset.p; if (p === 'facebook2') extraFb = !extraFb; else { if (skip.has(p)) skip.delete(p); else skip.add(p); saveSkip(); } return draw(); }
+      if (k === 'pick') { const p = b.dataset.p; if (p === 'facebook2') { extraFb = !extraFb; saveFb2(); } else { if (skip.has(p)) skip.delete(p); else skip.add(p); saveSkip(); } return draw(); }
       if (k === 'unskip') { skip.clear(); saveSkip(); return draw(); }
       if (k === 'paste' || k === 'paste2') {
         const slot = k === 'paste2' ? 'zoFb' : 'zo';
@@ -1338,7 +1345,9 @@
       }
       if (k.startsWith('save-')) {
         const key = k.slice(5);
-        const input = panel.body.querySelector(`input[data-key="${key}"]`);
+        // the box in the tapped button's own row (the paste card and "more" can both show one)
+        const row = b.closest('[data-key-row]');
+        const input = (row && row.querySelector('input')) || panel.body.querySelector(`input[data-key="${key}"]`);
         const v = input ? input.value.trim() : '';
         if (!v) { if (input) input.focus(); return; }
         b.disabled = true; b.textContent = 'Checking…';
