@@ -141,35 +141,39 @@ async function waitUp() {
     await sleep(300);
     const c = await st();
     check(/montage/.test(c.go) && c.disabled, 'the music montage still asks for two or more clips', c);
-    // "WHAT'S IT ABOUT?": a tap for the occasion, labelled boxes, the speaker guessed from the file's name
+    // "WHAT'S IT ABOUT?": one box, one row of ideas to tap (the speaker read off the video's own name)
     await page.locator('#cloudMontage [data-mt-mode="talk"]').tap();
     await sleep(300);
     await page.setInputFiles('#mtPick', { name: 'Teaching with Bishop David Richman.webm', mimeType: 'video/webm', buffer: fs.readFileSync(VID) });
     await sleep(800);
-    const ab0 = await page.evaluate(() => ({
-      occ: document.querySelectorAll('#cloudMontage [data-mt-occ]').length,
-      boxes: ['mtAbSpeaker', 'mtAbChurch', 'mtAbFocus', 'mtAbCta', 'mtBrief'].filter((id) => document.getElementById(id)).length,
-      guess: [...document.querySelectorAll('#cloudMontage [data-mt-who]')].map((b) => b.dataset.mtWho),
-    }));
-    check(ab0.occ >= 8 && ab0.boxes === 5, '"What\'s it about?" has occasion taps and labelled boxes: speaker, church, message, call to action, anything else', ab0);
-    check(ab0.guess.includes('Bishop David Richman'), 'the speaker is offered from the video\'s own name', ab0.guess);
-    await page.locator('#cloudMontage [data-mt-who="Bishop David Richman"]').tap();
-    await page.locator('#cloudMontage [data-mt-occ="Sunday service"]').tap();
-    await sleep(200);
-    await page.fill('#mtAbChurch', 'The Power House');
-    await page.fill('#mtAbFocus', 'Faith over fear');
-    await page.fill('#mtAbCta', 'Join us Sundays at 10am');
+    const ab0 = await page.evaluate(() => {
+      const row = document.querySelector('#cloudMontage .mt-ideas');
+      const chips = row ? [...row.querySelectorAll('[data-mt-idea]')] : [];
+      const tops = new Set(chips.map((c) => Math.round(c.getBoundingClientRect().top)));
+      return { boxes: document.querySelectorAll('#cloudMontage .mt-sec textarea#mtBrief').length, inputs: document.querySelectorAll('#cloudMontage .mt-sec input[type="text"]').length,
+        ideas: chips.map((c) => c.dataset.mtIdea), oneRow: tops.size === 1, pageW: document.documentElement.scrollWidth <= window.innerWidth };
+    });
+    check(ab0.boxes === 1 && ab0.inputs === 0 && ab0.oneRow && ab0.pageW, '"What\'s it about?" is one box with one row of ideas under it (swiped sideways, the page does not widen)', ab0);
+    check(ab0.ideas[0] === 'Bishop David Richman' && ab0.ideas.includes('Sunday service'), 'the first idea is the speaker, read off the video\'s own name', ab0.ideas);
+    await page.locator('#cloudMontage [data-mt-idea="Bishop David Richman"]').tap();
+    await page.locator('#cloudMontage [data-mt-idea="Sunday service"]').tap();
+    await sleep(150);
+    const t1 = await page.evaluate(() => ({ v: document.getElementById('mtBrief').value, on: [...document.querySelectorAll('#cloudMontage [data-mt-idea].on')].map((c) => c.dataset.mtIdea) }));
+    check(t1.v === 'Bishop David Richman — Sunday service' && t1.on.length === 2, 'a tap adds the idea to the box (and lights it)', t1);
+    await page.locator('#cloudMontage [data-mt-idea="Sunday service"]').tap();
+    await sleep(150);
+    const t2 = await page.evaluate(() => document.getElementById('mtBrief').value);
+    check(t2 === 'Bishop David Richman', 'a second tap takes it out again', t2);
+    await page.locator('#mtBrief').fill('Bishop David Richman at The Power House — faith over fear. Sunday service');
     await page.locator('#cloudMontage [data-mt-song=""]').tap();
     await sleep(200);
-    if (process.env.MW_SHOTS) { await page.evaluate(() => document.querySelector('#cloudMontage .mt-about').scrollIntoView()); await sleep(300); await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'montage-about.png'), fullPage: false }); }
     await page.evaluate(() => { window.api.montage.create = async (a) => { window.__mtArgs = a; throw new Error('stopped by the test'); }; });
+    if (process.env.MW_SHOTS) { await page.evaluate(() => document.getElementById('mtBrief').scrollIntoView({ block: 'center' })); await sleep(300); await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'montage-about.png'), fullPage: false }); }
     await page.locator('#cloudMontage .mt-go').tap();
     for (let i = 0; i < 60 && !(await page.evaluate(() => !!window.__mtArgs)); i++) await sleep(250);
-    const sent = await page.evaluate(() => ({ about: window.__mtArgs && window.__mtArgs.about, kept: JSON.parse(localStorage.getItem('mw-mt-about') || '{}') }));
-    check(sent.about && sent.about.speaker === 'Bishop David Richman' && sent.about.occasion === 'Sunday service' && sent.about.church === 'The Power House'
-      && sent.about.focus === 'Faith over fear' && sent.about.cta === 'Join us Sundays at 10am', 'all of it goes to the AI with the montage', sent.about);
-    check(sent.kept.speaker === 'Bishop David Richman' && sent.kept.church === 'The Power House' && sent.kept.cta === 'Join us Sundays at 10am' && !sent.kept.focus,
-      'speaker, church and call to action are remembered for next time (the message is not)', sent.kept);
+    const sent = await page.evaluate(() => window.__mtArgs && { brief: window.__mtArgs.brief, about: window.__mtArgs.about });
+    check(sent && /faith over fear/.test(sent.brief) && sent.about.speaker === 'Bishop David Richman' && sent.about.occasion === 'Sunday service',
+      'the words go to the AI, with the speaker (spelt as written, for the captions too) and the occasion picked out', sent);
     // the studio side: the edit's own words become captions at once, lit up word by word
     await page.evaluate(() => { const x = document.querySelector('#cloudMontage .cp-x, #cloudMontage [data-close]'); if (x) x.click(); });
     const st2 = await page.evaluate(async (vid) => {

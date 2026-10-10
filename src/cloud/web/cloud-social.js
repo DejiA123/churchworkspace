@@ -1316,23 +1316,34 @@
   }
   C._freeDeal = { deal: freeDeal, used: freeUsed }; // for test/phone-montage-talk
   /*
-   * ►► "WHAT'S IT ABOUT?", MADE EASY. ◄◄ A tap for the occasion and four short
-   * boxes — who is speaking, the church, the message, what people should do —
-   * instead of one empty box nobody knows what to write in. The AI keeps to
-   * the message, spells the names as typed (the captions hear them too) and
-   * ends the caption with the call to action (montage.js aboutLines/withAbout).
-   * Speaker, church and call to action are remembered on this phone.
+   * ►► "WHAT'S IT ABOUT?" ◄◄ One clean box, and under it one row of ideas to
+   * tap (swiped sideways): the occasion, and the speaker read off a video's
+   * own file name. A tap adds the words to the box, a second tap takes them
+   * out. A speaker or occasion that is in the box also goes to the server as
+   * such (montage.js cleanAbout), so the name is spelt as written — in the
+   * captions too.
    */
   const MT_OCCASIONS = [['Sunday service', '⛪ Sunday service'], ['Youth service', '🔥 Youth'], ['Conference', '🎤 Conference'], ['Worship night', '🙌 Worship night'],
     ['Outreach', '📣 Outreach'], ['Testimony', '💬 Testimony'], ['Camp', '🏕 Camp'], ['Baptism', '💧 Baptism'], ['Special event', '🎉 Special event']];
-  const MT_ABOUT_KEY = 'mw-mt-about';
-  function mtAboutLoad() {
-    let a = {};
-    try { a = JSON.parse(localStorage.getItem(MT_ABOUT_KEY) || '{}') || {}; } catch (e) { a = {}; }
-    return { occasion: '', focus: '', speaker: String(a.speaker || ''), church: String(a.church || ''), cta: String(a.cta || '') };
+  const mtHas = (text, x) => String(text || '').toLowerCase().includes(String(x).toLowerCase());
+  /** the box with an idea added (or, when it is already there, taken out) */
+  function mtToggleIdea(text, idea) {
+    const t = String(text || '');
+    if (mtHas(t, idea)) {
+      const i = t.toLowerCase().indexOf(idea.toLowerCase());
+      return (t.slice(0, i) + t.slice(i + idea.length)).replace(/^[\s—,·-]+|[\s—,·-]+$/g, '').replace(/\s*—\s*—\s*/g, ' — ').trim();
+    }
+    const base = t.replace(/[\s—,·-]+$/, '');
+    return base ? `${base} — ${idea}` : idea;
   }
-  function mtAboutSave() {
-    try { localStorage.setItem(MT_ABOUT_KEY, JSON.stringify({ speaker: MT.about.speaker, church: MT.about.church, cta: MT.about.cta })); } catch (e) { /* private window */ }
+  /** what the box says, in parts the server can use: a guessed speaker or an occasion written in it */
+  function mtAboutOf(text) {
+    const about = {};
+    const who = mtSpeakerGuesses().find((g) => mtHas(text, g));
+    if (who) about.speaker = who;
+    const occ = MT_OCCASIONS.find(([v]) => mtHas(text, v));
+    if (occ) about.occasion = occ[0];
+    return about;
   }
   /* "Teaching with Bishop David Richman.mp4" → "Bishop David Richman": a titled name in a file's name */
   const MT_TITLES = 'Pastor|Pst|Bishop|Archbishop|Rev(?:erend)?|Dr|Apostle|Prophet(?:ess)?|Evangelist|Minister|Elder|Deacon(?:ess)?|Baba|Mummy|Daddy';
@@ -1354,21 +1365,13 @@
     }
     return out.slice(0, 3);
   }
-  function mtAboutHtml(talk) {
-    const a = MT.about;
-    const guesses = a.speaker ? [] : mtSpeakerGuesses();
-    const field = (id, label, val, ph, max) => `<label class="mt-field"><span>${label}</span><input id="${id}" type="text" maxlength="${max}" autocomplete="off" enterkeyhint="done" value="${escAttr(val)}" placeholder="${escAttr(ph)}" /></label>`;
-    return `<section class="mt-sec mt-about"><h3>What’s it about? <small>all optional</small></h3>
-        <div class="mt-row">${MT_OCCASIONS.map(([v, l]) => `<button type="button" class="mt-chip${a.occasion === v ? ' on' : ''}" data-mt-occ="${escAttr(v)}">${esc(l)}</button>`).join('')}</div>
-        ${field('mtAbSpeaker', talk ? '🎤 Who’s speaking' : '🎤 Who’s in it', a.speaker, talk ? 'e.g. Bishop David Richman' : 'e.g. the youth choir, Pastor Poju Oyemade', 80)}
-        ${guesses.length ? `<div class="mt-row mt-guess">${guesses.map((g) => `<button type="button" class="mt-chip" data-mt-who="${escAttr(g)}">＋ ${esc(g)}</button>`).join('')}</div>` : ''}
-        ${field('mtAbChurch', '⛪ Church / ministry', a.church, 'e.g. The Power House Church', 80)}
-        ${field('mtAbFocus', '🎯 The message', a.focus, talk ? 'e.g. Faith over fear — God finishes what He starts' : 'e.g. Three days of worship, games and baptisms', 160)}
-        ${field('mtAbCta', '📣 What should people do?', a.cta, 'e.g. Join us Sundays at 10am · link in bio', 160)}
-        <label class="mt-field"><span>📝 Anything else</span><textarea id="mtBrief" class="mt-brief" rows="2" maxlength="400" placeholder="Names, places, dates — e.g. Youth camp 2026, Lekki">${esc(MT.brief)}</textarea></label>
-        <small class="mt-hint">✨ ${talk ? 'The AI picks the lines that carry your message, opens on the strongest, and' : 'The AI tells your story with the shots and'} writes the headline, caption and hashtags around it — names spelt exactly as you type them${talk ? ' (the captions hear them right too)' : ''}, and the caption ends with what people should do. Speaker, church and call to action are remembered for next time.</small></section>`;
+  function mtAboutHtml() {
+    const ideas = mtSpeakerGuesses().map((g) => [g, '🎤 ' + g]).concat(MT_OCCASIONS);
+    return `<section class="mt-sec"><h3>What’s it about? <small>optional</small></h3>
+        <textarea id="mtBrief" class="mt-brief" rows="2" maxlength="400" placeholder="e.g. Bishop David Richman at The Power House — faith over fear. Join us Sundays at 10am">${esc(MT.brief)}</textarea>
+        <div class="mt-ideas">${ideas.map(([v, l]) => `<button type="button" class="mt-chip${mtHas(MT.brief, v) ? ' on' : ''}" data-mt-idea="${escAttr(v)}">${esc(l)}</button>`).join('')}</div></section>`;
   }
-  const MT = { items: [], song: null, songFile: null, style: 'hype', len: 30, custom: 120, aspect: '9:16', keep: true, brief: '', busy: false, order: 'ai', caps: true, mode: 'music', free: null, freeMood: null, voice: '', about: mtAboutLoad() };
+  const MT = { items: [], song: null, songFile: null, style: 'hype', len: 30, custom: 120, aspect: '9:16', keep: true, brief: '', busy: false, order: 'ai', caps: true, mode: 'music', free: null, freeMood: null, voice: '' };
   /* which free mood suits which style, for "✨ Pick for me" */
   const MT_MOOD_OF = { hype: 'hype', fun: 'hype', cinematic: 'epic', worship: 'uplift', emotional: 'calm' };
   /*
@@ -1459,7 +1462,7 @@
         ${talk ? '<p class="mt-hint">💬 Captions of every word, lit up as it’s said, are always on — plus a headline hook at the top. You can restyle both in the studio.</p>'
     : `<label class="mt-toggle"><input type="checkbox" id="mtCaps" ${MT.caps ? 'checked' : ''}/> <span>💬 Captions of what’s said, added automatically</span></label>
         <small class="mt-hint">The AI also writes a hook, story lines and a closing line, styled to match — tell it the story below.</small>`}</section>
-      ${mtAboutHtml(talk)}
+      ${mtAboutHtml()}
       <input type="file" id="mtPick" accept="video/*,image/*" multiple hidden />
       <input type="file" id="mtSong" accept="audio/*,.mp3,.m4a,.wav,.aac" hidden />`;
     p.foot.innerHTML = `<button type="button" class="mt-go" data-mt="go"${ready ? '' : ' disabled'}>${mi('sparkles')} ${talk ? 'Make my Viral Montage' : 'Make my montage'}</button>`;
@@ -1484,7 +1487,7 @@
         C.closePanel(p, true);
         return editMontage(op);
       }
-      const b = e.target.closest('[data-mt],[data-mt-del],[data-mt-song],[data-mt-style],[data-mt-len],[data-mt-aspect],[data-mt-order],[data-mt-mode],[data-mt-voice],[data-mt-free],[data-mt-mood],[data-mt-occ],[data-mt-who]');
+      const b = e.target.closest('[data-mt],[data-mt-del],[data-mt-song],[data-mt-style],[data-mt-len],[data-mt-aspect],[data-mt-order],[data-mt-mode],[data-mt-voice],[data-mt-free],[data-mt-mood],[data-mt-idea]');
       if (!b || MT.busy || mtDrag.just) return;
       const d = b.dataset;
       if (d.mtOrder) { MT.order = d.mtOrder; return mtPaint(); }
@@ -1500,8 +1503,13 @@
       if (d.mtFree) { MT.free = d.mtFree; MT.song = null; MT.songFile = null; return mtPaint(); }
       if (d.mtMood) { MT.freeMood = d.mtMood; return mtPaint(); }
       if (d.mtVoice != null) { MT.voice = d.mtVoice; return mtPaint(); }
-      if (d.mtOcc != null) { MT.about.occasion = MT.about.occasion === d.mtOcc ? '' : d.mtOcc; return mtPaint(); }
-      if (d.mtWho != null) { MT.about.speaker = d.mtWho; mtAboutSave(); return mtPaint(); }
+      if (d.mtIdea != null) {
+        MT.brief = mtToggleIdea(MT.brief, d.mtIdea);
+        const box = $('#mtBrief', p.body);
+        if (box) box.value = MT.brief;
+        b.classList.toggle('on', mtHas(MT.brief, d.mtIdea));
+        return;
+      }
       if (d.mtStyle) { MT.style = d.mtStyle; return mtPaint(); }
       if (d.mtLen) { MT.len = d.mtLen === 'all' || d.mtLen === 'custom' ? d.mtLen : +d.mtLen; return mtPaint(); }
       if (d.mtAspect) { MT.aspect = d.mtAspect; return mtPaint(); }
@@ -1532,9 +1540,10 @@
     });
     mtWireDrag(p);
     p.body.addEventListener('input', (e) => {
-      if (e.target.id === 'mtBrief') MT.brief = e.target.value;
-      const ab = { mtAbSpeaker: 'speaker', mtAbChurch: 'church', mtAbFocus: 'focus', mtAbCta: 'cta' }[e.target.id];
-      if (ab) { MT.about[ab] = e.target.value; if (ab !== 'focus') mtAboutSave(); }
+      if (e.target.id === 'mtBrief') {
+        MT.brief = e.target.value;
+        $$('[data-mt-idea]', p.body).forEach((x) => x.classList.toggle('on', mtHas(MT.brief, x.dataset.mtIdea)));
+      }
       if (e.target.id === 'mtMin' || e.target.id === 'mtSec') {
         const mm = Math.max(0, Math.min(10, parseInt($('#mtMin', p.body).value, 10) || 0));
         const ss = Math.max(0, Math.min(59, parseInt($('#mtSec', p.body).value, 10) || 0));
@@ -1722,7 +1731,7 @@
       const res = await window.api.montage.create({
         mediaPaths: paths, musicPath: song ? song.file : null, style: MT.style,
         lengthSec: MT.len === 'all' ? 0 : MT.len === 'custom' ? MT.custom : MT.len, full: MT.len === 'all',
-        aspect: MT.aspect, brief: MT.brief, about: Object.assign({}, MT.about), keepAudio: talk ? true : MT.keep, keepOrder: !talk && MT.order === 'mine', jobId,
+        aspect: MT.aspect, brief: MT.brief, about: mtAboutOf(MT.brief), keepAudio: talk ? true : MT.keep, keepOrder: !talk && MT.order === 'mine', jobId,
         mode: talk ? 'talk' : undefined, voice: talk && MT.voice ? MT.voice : undefined,
       });
       if (credit) res.postCaption = [res.postCaption, credit].filter(Boolean).join('\n\n');
@@ -1738,7 +1747,7 @@
       res.song = song || null;
       C.closePanel(MT.panel, true);
       mtRelease();
-      MT.items = []; MT.brief = ''; MT.about.focus = ''; MT.about.occasion = '';
+      MT.items = []; MT.brief = '';
       res.autoCaps = talk ? 'talk' : MT.caps && MT.keep;
       mtResult(res);
     } catch (e) {
