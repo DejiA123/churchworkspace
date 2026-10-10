@@ -195,6 +195,7 @@ const ZO_ID_PREFIX = { tiktok: 'zotk_', youtube: 'zoyt_', facebook: 'zofb_', ins
 function zoIdPrefix(platform) { return ZO_ID_PREFIX[platform] || 'zo_'; }
 const ZO_LABEL = { tiktok: 'TikTok', youtube: 'YouTube', facebook: 'Facebook', instagram: 'Instagram' };
 const ZO_PLATFORMS = ['tiktok', 'youtube', 'instagram', 'facebook'];
+const ZO_FREE = 2;   // linked accounts a free Zernio account holds
 
 /** An Upload-Post platform entry is an object, a bare handle string, or absent. */
 function upAccountOf(profile, platform = 'tiktok') {
@@ -850,49 +851,103 @@ class Accounts {
    * and keeps the account if it is there. The phone opens the link, and claims
    * when it comes back to the front.
    */
+  /*
+   * ►► EVERY ZERNIO KEY IS ONE POOL. ◄◄ Zernio's free plan holds 2 linked
+   * accounts per Zernio account, so a church with TikTok, Instagram and two
+   * Facebook pages uses two free Zernio accounts — and should not have to
+   * work out which account goes on which. Each Connect goes on whichever key
+   * still has a free place (and, for a second Facebook page, one that does not
+   * hold a Facebook page already, or a new profile in it — Zernio keeps one
+   * account per platform in each profile). Each linked account keeps the key
+   * it was found under, which is the one it posts with.
+   */
+  async _zoPool() {
+    const acc = ((this.store.get('settings') || {}).accounts) || {};
+    const keys = Array.from(new Set([(acc.zoApiKey || '').trim() || envZoKey(), (acc.zoApiKeyFb || '').trim() || envZoKeyFb()].filter(Boolean)));
+    const { apiBase } = zoCfg(this.store, 'tiktok');
+    if (!keys.length) throw new Error('Add your Zernio key first (free at zernio.com → Settings → API keys).');
+    const pool = [];
+    for (const key of keys) {
+      try { pool.push({ key, apiBase, accounts: zoAccountList(await getJson(`${apiBase}/accounts`, { headers: { authorization: 'Bearer ' + key } })) }); }
+      catch (e) { if (keys.length === 1) throw new Error('Zernio did not accept the key (' + e.message + ') — copy it again from zernio.com → Settings → API keys.'); }
+    }
+    if (!pool.length) throw new Error('Zernio did not accept your keys — copy them again from zernio.com → Settings → API keys.');
+    return pool;
+  }
+  /* The accounts of one platform across the pool, each with the key it is under. */
+  _zoFind(pool, plat) {
+    const out = [];
+    for (const k of pool) for (const a of k.accounts) {
+      if (String((a && (a.platform || a.provider)) || '').toLowerCase() === plat && zoAccountId(a)) out.push({ acct: a, key: k.key });
+    }
+    return out;
+  }
+  _zoStored() { return new Set(this.all().filter((a) => a.via === 'zernio').map((a) => String(a.zoAccountId))); }
+
   async zernioLinkStart(platform, opts = {}) {
     const plat = ['youtube', 'facebook', 'instagram'].includes(platform) ? platform : 'tiktok';
     const label = ZO_LABEL[plat] || 'TikTok';
-    const cfg = zoCfg(this.store, plat);
-    const { apiKey, apiBase } = cfg;
+    const another = !!opts.another;
     // "Set up everything" sends each sign-in back to the studio's own page, which opens the next one
-    const redirectUrl = opts.redirectUrl || cfg.redirectUrl;
-    if (!apiKey) throw new Error('Add your Zernio key first (free at zernio.com → Settings → API keys).');
-    const auth = { authorization: 'Bearer ' + apiKey };
-    let listed;
-    try { listed = await getJson(`${apiBase}/accounts`, { headers: auth }); }
-    catch (e) { throw new Error('Zernio did not accept the key (' + e.message + ') — copy it again from zernio.com → Settings → API keys.'); }
-    const acct = zoAccountOf(listed, plat);
-    if (acct) return { account: await this._zoKeep(plat, acct, apiKey) };
+    const redirectUrl = opts.redirectUrl || zoCfg(this.store, plat).redirectUrl;
+    const pool = await this._zoPool();
+    const stored = this._zoStored();
+    const found = this._zoFind(pool, plat);
+    // already on Zernio: kept, no sign-in (for "another", one not kept here yet)
+    const ready = another ? found.find((f) => !stored.has(String(zoAccountId(f.acct))))
+      : (found.find((f) => stored.has(String(zoAccountId(f.acct)))) || found[0]);
+    if (ready) return { account: await this._zoKeep(plat, ready.acct, ready.key) };
+    // the key with room: a free place first, then one without this platform, then the emptiest
+    const has = (k) => k.accounts.some((a) => String(a.platform || a.provider || '').toLowerCase() === plat);
+    const pick = pool.map((k, i) => ({ k, i })).sort((x, y) =>
+      ((x.k.accounts.length >= ZO_FREE ? 1 : 0) - (y.k.accounts.length >= ZO_FREE ? 1 : 0))
+      || ((has(x.k) ? 1 : 0) - (has(y.k) ? 1 : 0))
+      || (x.k.accounts.length - y.k.accounts.length) || (x.i - y.i))[0].k;
+    const auth = { authorization: 'Bearer ' + pick.key };
     let profileId = '';
     try {
-      const profs = await getJson(`${apiBase}/profiles`, { headers: auth });
-      const list = Array.isArray(profs) ? profs : (profs && (profs.profiles || profs.data)) || [];
-      const chosen = list.find((p) => p.isDefault || p.is_default) || list[0];
-      profileId = chosen ? String(chosen._id || chosen.id || chosen.profileId || '') : '';
+      if (has(pick)) {
+        // a second page of the same platform needs a profile of its own
+        const made = await publisher.postJson(`${pick.apiBase}/profiles`, { name: `${label} ${found.length + 1}` }, auth);
+        const p = made && made.json && (made.json.profile || made.json.data || made.json);
+        profileId = p ? String(p._id || p.id || p.profileId || '') : '';
+      } else {
+        const profs = await getJson(`${pick.apiBase}/profiles`, { headers: auth });
+        const list = Array.isArray(profs) ? profs : (profs && (profs.profiles || profs.data)) || [];
+        const chosen = list.find((p) => p.isDefault || p.is_default) || list[0];
+        profileId = chosen ? String(chosen._id || chosen.id || chosen.profileId || '') : '';
+      }
     } catch (e) { /* older API with no profiles */ }
     let url = '';
     try {
       const q = { redirect_url: redirectUrl };
       if (profileId) q.profileId = profileId;
-      const gen = await getJson(`${apiBase}/connect/${plat}?` + new URLSearchParams(q), { headers: auth });
+      const gen = await getJson(`${pick.apiBase}/connect/${plat}?` + new URLSearchParams(q), { headers: auth });
       url = gen && (gen.url || gen.authUrl || gen.connectUrl || gen.access_url);
     } catch (e) {
-      throw new Error(this._connectErrorText(e.message, label, listed));
+      if (/payment|free_tier_exceeded|402|more than 2 accounts/i.test(e.message)) {
+        const err = new Error(pool.length < 2
+          ? `Zernio’s free plan holds 2 accounts, and both places are taken. Make a second free Zernio account (another email) and paste its key as your second key — ${label} goes there, free.`
+          : `Both your Zernio accounts are full (2 free places each). Remove one, or turn on billing at zernio.com for more.`);
+        err.full = true; err.needSecondKey = pool.length < 2;
+        throw err;
+      }
+      throw new Error(this._connectErrorText(e.message, label, pick.accounts));
     }
     if (!url || !/^https:\/\//i.test(String(url))) throw new Error('Zernio did not return a ' + label + ' connect link — try again.');
     return { url: String(url), platform: plat, label };
   }
 
   /** Is it linked yet? Keeps the account when it is; `{ pending: true }` when not. */
-  async zernioLinkClaim(platform) {
+  async zernioLinkClaim(platform, opts = {}) {
     const plat = ['youtube', 'facebook', 'instagram'].includes(platform) ? platform : 'tiktok';
-    const { apiKey, apiBase } = zoCfg(this.store, plat);
-    if (!apiKey) throw new Error('Add your Zernio key first (free at zernio.com → Settings → API keys).');
-    const listed = await getJson(`${apiBase}/accounts`, { headers: { authorization: 'Bearer ' + apiKey } });
-    const acct = zoAccountOf(listed, plat);
-    if (!acct) return { pending: true };
-    return { account: await this._zoKeep(plat, acct, apiKey) };
+    const pool = await this._zoPool();
+    const stored = this._zoStored();
+    const found = this._zoFind(pool, plat);
+    const hit = opts.another ? found.find((f) => !stored.has(String(zoAccountId(f.acct))))
+      : (found.find((f) => !stored.has(String(zoAccountId(f.acct)))) || found[0]);
+    if (!hit) return { pending: true };
+    return { account: await this._zoKeep(plat, hit.acct, hit.key) };
   }
 
   /*
@@ -901,27 +956,25 @@ class Accounts {
    * Each key is asked once. Gives back the platforms now linked through Zernio.
    */
   async zernioImportAll(platforms) {
-    const byKey = new Map();
     const linked = [];
     const removed = new Set(this.store.get('zoRemoved') || []);
+    let pool;
+    try { pool = await this._zoPool(); } catch (e) { return linked; }
     for (const plat of ZO_PLATFORMS) {
       if (Array.isArray(platforms) && !platforms.includes(plat)) continue;
-      const { apiKey, apiBase } = zoCfg(this.store, plat);
-      if (!apiKey) continue;
-      const k = apiBase + '|' + apiKey;
-      if (!byKey.has(k)) byKey.set(k, getJson(`${apiBase}/accounts`, { headers: { authorization: 'Bearer ' + apiKey } }).catch(() => null));
-      const listed = await byKey.get(k);
-      const acct = listed && zoAccountOf(listed, plat);
-      if (!acct) continue;
-      const id = String(zoAccountId(acct));
-      // one Removed here stays removed until it is connected again on purpose
-      if (removed.has(id)) continue;
-      // a platform already linked (its own app, Upload-Post, another Zernio account) is left
-      // as it is: a second link would post everything twice. The same account is refreshed.
       const here = this.all().filter((a) => a.platform === plat);
-      if (here.length && !here.some((a) => a.via === 'zernio' && String(a.zoAccountId) === id)) continue;
-      await this._zoKeep(plat, acct, apiKey);
-      if (!here.length) linked.push(plat);   // newly linked (a refresh is not news)
+      for (const f of this._zoFind(pool, plat)) {
+        const id = String(zoAccountId(f.acct));
+        // one Removed here stays removed until it is connected again on purpose
+        if (removed.has(id)) continue;
+        // a platform already linked (its own app, Upload-Post, another account) is left as
+        // it is — a second link would post everything twice. The same account is refreshed.
+        const same = here.some((a) => a.via === 'zernio' && String(a.zoAccountId) === id);
+        if (here.length && !same) continue;
+        await this._zoKeep(plat, f.acct, f.key);
+        if (!same) linked.push(plat);   // newly linked (a refresh is not news)
+        break;
+      }
     }
     return linked;
   }

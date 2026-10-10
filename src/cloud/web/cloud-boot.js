@@ -632,8 +632,8 @@ let _hideTimer = null;
       setKeys: (keys) => call('social:setKeys', keys),
       setupStart: (o) => call('social:setupStart', o || {}),
       setupStatus: (code) => call('social:setupStatus', { code }),
-      linkStart: (platform) => call('social:linkStart', { platform }),
-      linkClaim: (platform) => call('social:linkClaim', { platform }),
+      linkStart: (platform, another) => call('social:linkStart', { platform, another: !!another }),
+      linkClaim: (platform, another) => call('social:linkClaim', { platform, another: !!another }),
       unlink: (id) => call('social:unlink', { id }),
       check: (id) => call('social:check', { id }),
       // whether the cloud AI writer/judge has its key (never the key itself) — the Cloud AI picker needs it

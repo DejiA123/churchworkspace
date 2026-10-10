@@ -19,6 +19,9 @@
  *   [5] an unticked platform is left out; the return page's code works once
  *       and a made-up code is refused
  *   [6] a key given to the server (ZERNIO_API_KEY) means nobody is asked
+ *   [7] "Two Facebook pages, Instagram and TikTok — it must be free": when the
+ *       free Zernio account (2 places) is full, the sheet asks for a second
+ *       free one; pasted, the rest — both Facebook pages — go on it, free
  *
  * Needs Playwright with Chromium; without it this says so and skips.
  *   node test/phone-social-setup.test.js
@@ -40,34 +43,41 @@ function post(p, body) { return new Promise((resolve, reject) => { const data = 
 function get(p) { return new Promise((resolve, reject) => http.get({ host: '127.0.0.1', port: PORT, path: p, agent: false }, (r) => { let b = ''; r.on('data', (c) => { b += c; }); r.on('end', () => resolve({ status: r.statusCode, body: b, location: r.headers.location })); }).on('error', reject)); }
 async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise((res, rej) => http.get({ host: '127.0.0.1', port: PORT, path: '/api/hello', agent: false }, (r) => { r.resume(); r.statusCode === 200 ? res() : rej(); }).on('error', rej)); return true; } catch (e) { await sleep(250); } } return false; }
 
-/* ---- a stand-in Zernio: the endpoints the studio uses, and each platform's "Allow" page ---- */
-const GOOD = 'sk_test_' + 'a'.repeat(40), OTHER = 'sk_test_' + 'b'.repeat(40);
-const Z = { linked: { youtube: { _id: 'yt1', platform: 'youtube', username: 'gracechurch', displayName: 'Grace Church' } }, refuse: new Set(['instagram']), connects: [] };
+/* ---- a stand-in Zernio: per-key accounts with Zernio's 2 free places, profiles, each platform's "Allow" ---- */
+const GOOD = 'sk_test_' + 'a'.repeat(40), GOOD2 = 'sk_test_' + 'c'.repeat(40), OTHER = 'sk_test_' + 'b'.repeat(40);
+const Z = { keys: { [GOOD]: { accounts: [{ _id: 'tiktok1', platform: 'tiktok', username: 'gracechurch', displayName: 'Grace Church' }], profiles: 1, billing: false },
+  [GOOD2]: { accounts: [], profiles: 1, billing: false }, [OTHER]: { accounts: [{ _id: 'elsewhere1', platform: 'tiktok', username: 'someone_else' }], profiles: 1, billing: false } },
+  connects: [], seq: 0 };
 function zernio() {
   execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', path.join(WORK, 'k.pem'), '-out', path.join(WORK, 'c.pem'), '-days', '1', '-subj', '/CN=127.0.0.1'], { stdio: 'ignore' });
   return https.createServer({ key: fs.readFileSync(path.join(WORK, 'k.pem')), cert: fs.readFileSync(path.join(WORK, 'c.pem')) }, (req, res) => {
     const u = new URL(req.url, `https://127.0.0.1:${ZPORT}`);
     const out = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
     if (u.pathname.startsWith('/api/v1/')) {
-      if (req.headers.authorization === 'Bearer ' + OTHER && u.pathname === '/api/v1/accounts') return out(200, { accounts: [{ _id: 'elsewhere1', platform: 'tiktok', username: 'someone_else' }] });
-      if (req.headers.authorization !== 'Bearer ' + GOOD) return out(401, { error: 'Invalid API key' });
+      const key = String(req.headers.authorization || '').replace(/^Bearer /, '');
+      const K = Z.keys[key];
+      if (!K) return out(401, { error: 'Invalid API key' });
       const p = u.pathname.slice(7);
-      if (p === '/accounts') return out(200, { accounts: Object.values(Z.linked) });
+      if (p === '/accounts') return out(200, { accounts: K.accounts });
+      if (p === '/profiles' && req.method === 'POST') { K.profiles++; return out(201, { profile: { _id: 'prof' + K.profiles } }); }
       if (p === '/profiles') return out(200, { profiles: [{ _id: 'prof1', isDefault: true }] });
       const m = /^\/connect\/(\w+)$/.exec(p);
       if (m) {
-        Z.connects.push({ platform: m[1], redirect: u.searchParams.get('redirect_url') });
-        if (Z.refuse.has(m[1])) return out(402, { error: 'free_tier_exceeded: more than 2 accounts needs billing' });
-        return out(200, { authUrl: `https://127.0.0.1:${ZPORT}/oauth/${m[1]}?r=${encodeURIComponent(u.searchParams.get('redirect_url'))}` });
+        const profileId = u.searchParams.get('profileId');
+        Z.connects.push({ platform: m[1], key: key.slice(-4), profileId, redirect: u.searchParams.get('redirect_url') });
+        if (K.accounts.length >= 2 && !K.billing) return out(402, { error: 'free_tier_exceeded: Add a payment method to connect more than 2 accounts.' });
+        // one account per platform per profile, as Zernio keeps it
+        if (K.accounts.some((a) => a.platform === m[1] && a.profileId === profileId)) return out(409, { error: 'This profile already has a ' + m[1] + ' account' });
+        return out(200, { authUrl: `https://127.0.0.1:${ZPORT}/oauth/${m[1]}?k=${encodeURIComponent(key)}&pr=${encodeURIComponent(profileId)}&r=${encodeURIComponent(u.searchParams.get('redirect_url'))}` });
       }
       return out(404, { error: 'no' });
     }
     const m = /^\/oauth\/(\w+)$/.exec(u.pathname);
-    if (m) {   // the platform's "Allow": linked, and back to where the studio asked
-      const plat = m[1];
-      Z.linked[plat] = { _id: plat + '9', platform: plat, username: 'grace_' + plat };
+    if (m) {   // the platform's "Allow": linked on that key, and back to where the studio asked
+      const plat = m[1], n = ++Z.seq;
+      Z.keys[u.searchParams.get('k')].accounts.push({ _id: plat + n, platform: plat, profileId: u.searchParams.get('pr'), username: 'grace_' + plat, displayName: plat === 'facebook' ? 'Grace Church Page ' + n : undefined });
       const r = u.searchParams.get('r');
-      res.writeHead(302, { location: r + (r.includes('?') ? '&' : '?') + `connected=${plat}&accountId=${plat}9` });
+      res.writeHead(302, { location: r + (r.includes('?') ? '&' : '?') + `connected=${plat}&accountId=${plat}${n}` });
       return res.end();
     }
     res.writeHead(404); res.end();
@@ -119,55 +129,85 @@ async function phone(browser) {
     const after = await page.$eval('#csConnect', (n) => n.innerText);
     const acc = await page.evaluate(async () => window.api.social.accounts());
     check(acc.keys.zo, 'the copied key is kept (spaces and line breaks round it are fine)');
-    check(acc.accounts.some((a) => a.platform === 'youtube' && a.via === 'zernio'), 'YouTube, already on Zernio, is linked at once', acc.accounts);
-    check(/YouTube was already on Zernio/.test(after) && /Set up everything/.test(after), 'it says so, and offers ✨ Set up everything', after.slice(0, 300));
+    check(acc.accounts.some((a) => a.platform === 'tiktok' && a.via === 'zernio'), 'TikTok, already on Zernio, is linked at once', acc.accounts);
+    check(/TikTok was already on Zernio/.test(after) && /Set up everything/.test(after), 'it says so, and offers ✨ Set up everything', after.slice(0, 300));
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'setup-2-ready.png') });
 
-    // [3] + [4]
+    // [3] + [4] + [7]: Instagram and two Facebook pages, no YouTube
     const picks = await page.$$eval('#csConnect .cs-pick', (bs) => bs.map((b) => b.textContent.trim()));
-    check(picks.join(',') === 'TikTok,Instagram,Facebook', 'it offers just the ones not yet connected', picks);
+    check(picks.join(',') === 'YouTube,Instagram,Facebook,2nd page', 'it offers the ones not yet connected, and a 2nd Facebook page', picks);
+    await page.tap('#csConnect .cs-pick[data-p="youtube"]');
+    await page.tap('#csConnect .cs-pick[data-p="facebook2"]');
     const [win] = await Promise.all([ctx.waitForEvent('page', { timeout: 10000 }), page.tap('#csConnect [data-k="setup"]')]);
     await win.waitForLoadState('load').catch(() => {});
     await win.waitForFunction(() => /All set|Nearly there|Nothing/.test(document.title), null, { timeout: 30000 }).catch(() => {});
     const end = await win.evaluate(() => ({ title: document.title, text: document.body.innerText, url: location.href }));
     if (SHOTS) await win.screenshot({ path: path.join(SHOTS, 'setup-3-done.png') });
     check(end.url.startsWith(`http://127.0.0.1:${PORT}/social/next/`), 'the sign-ins end on the studio\'s own page', end.url);
-    check(end.title === 'Nearly there' && /TikTok ✓ @grace_tiktok/.test(end.text) && /Facebook ✓ @grace_facebook/.test(end.text), 'TikTok and Facebook were signed in to, one after the other, in one window', end.text);
-    check(/Instagram — Zernio’s free plan is full/.test(end.text) && /free plan covers 2 accounts/i.test(end.text), 'Instagram, refused by Zernio, is said in plain words', end.text);
+    check(end.title === 'Nearly there' && /Instagram ✓ @grace_instagram/.test(end.text), 'Instagram takes the free account\'s 2nd place', end.text);
+    check(/Facebook — Your free Zernio account is full/.test(end.text) && /Facebook \(2nd page\) —/.test(end.text) && /second free Zernio account/.test(end.text) && /Paste second key/.test(end.text),
+      'with the free account full, the page says the way on is a SECOND FREE Zernio account — not billing', end.text);
     check(Z.connects.every((c) => c.redirect && c.redirect.startsWith(`http://127.0.0.1:${PORT}/social/next/`)), 'each sign-in was told to come back to the studio', Z.connects);
     check(/Back to the studio/.test(end.text), 'with a way back to the studio');
     await page.bringToFront();
-    await page.waitForFunction(() => document.querySelectorAll('#csConnect .cs-plat.linked').length >= 3, null, { timeout: 12000 }).catch(() => {});
+    await page.waitForSelector('#csConnect [data-k="paste2"]', { timeout: 12000 }).catch(() => {});
+    const sheet = await page.$eval('#csConnect', (n) => n.innerText);
+    check(!!(await page.$('#csConnect [data-k="paste2"]')) && /second free one/i.test(sheet), 'the sheet stops waiting and offers 📋 Paste second key', sheet.slice(0, 400));
     const rows = await page.$$eval('#csConnect .cs-plat.linked', (r) => r.map((x) => x.dataset.plat));
-    check(['tiktok', 'youtube', 'facebook'].every((p) => rows.includes(p)), 'the Accounts sheet filled in by itself', rows);
-    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'setup-4-sheet.png') });
-
-    const note = await page.waitForFunction(() => { const n = document.querySelector('#csConnect .cs-note.warn'); return n && n.textContent; }, null, { timeout: 12000 }).then((h) => h.jsonValue()).catch(() => '');
-    check(/Instagram/.test(note) && /billing/.test(note), 'when the run ends the sheet stops waiting and says what was not connected, and why', note);
-    check(!(await page.$('#csConnect a.cs-big')), 'and offers Set up everything again (not a stale Start the sign-ins)');
+    check(['tiktok', 'instagram'].every((p) => rows.includes(p)), 'the Accounts sheet filled in by itself', rows);
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'setup-4-second.png') });
     await win.reload();
-    check(await win.title() === 'Nearly there' && /TikTok ✓/.test(await win.evaluate(() => document.body.innerText)), 'reloading the results page shows the same results');
+    check(await win.title() === 'Nearly there' && /Instagram ✓/.test(await win.evaluate(() => document.body.innerText)), 'reloading the results page shows the same results');
     await win.close();
 
+    // the second free key: both Facebook pages go on it
+    await page.evaluate((k) => navigator.clipboard.writeText(k), GOOD2);
+    await page.tap('#csConnect [data-k="paste2"]');
+    await page.waitForSelector('#csConnect [data-k="setup"]', { timeout: 15000 }).catch(() => {});
+    const picks2 = await page.$$eval('#csConnect .cs-pick', (bs) => bs.map((b) => b.textContent.trim() + (b.classList.contains('on') ? '+' : '')));
+    check(picks2.includes('Facebook+') && picks2.includes('2nd page+'), 'after pasting it, Set up everything still has Facebook and the 2nd page ticked', picks2);
+    const [win2] = await Promise.all([ctx.waitForEvent('page', { timeout: 10000 }), page.tap('#csConnect [data-k="setup"]')]);
+    await win2.waitForFunction(() => /All set|Nearly there|Nothing/.test(document.title), null, { timeout: 30000 }).catch(() => {});
+    const end2 = await win2.evaluate(() => ({ title: document.title, text: document.body.innerText }));
+    if (SHOTS) await win2.screenshot({ path: path.join(SHOTS, 'setup-5-allset.png') });
+    check(end2.title === 'All set' && /Facebook ✓ Grace Church Page/.test(end2.text) && /Facebook \(2nd page\) ✓ Grace Church Page/.test(end2.text), 'both Facebook pages are connected', end2.text);
+    const fbConn = Z.connects.filter((c) => c.platform === 'facebook' && c.key === GOOD2.slice(-4));
+    check(fbConn.length === 2 && fbConn[0].profileId !== fbConn[1].profileId, 'on the second free account, the 2nd page in a profile of its own', fbConn);
+    check(!Z.keys[GOOD].billing && !Z.keys[GOOD2].billing && Z.keys[GOOD].accounts.length === 2 && Z.keys[GOOD2].accounts.length === 2, 'all four on two free Zernio accounts — 2 each, no billing',
+      [Z.keys[GOOD].accounts.length, Z.keys[GOOD2].accounts.length]);
+    await win2.close();
+    await page.bringToFront();
+    await page.waitForFunction(() => document.querySelectorAll('#csConnect .cs-plat.linked').length >= 4, null, { timeout: 12000 }).catch(() => {});
+    const rows2 = await page.$$eval('#csConnect .cs-plat.linked', (r) => r.map((x) => x.dataset.plat));
+    check(rows2.filter((p) => p === 'facebook').length === 2 && rows2.includes('tiktok') && rows2.includes('instagram'), 'the sheet lists TikTok, Instagram and both Facebook pages', rows2);
+    const disk0 = JSON.parse(fs.readFileSync(path.join(WORK, 'd1', 'workstation.json'), 'utf-8')).socialAccounts;
+    check(disk0.filter((a) => a.platform === 'facebook').every((a) => a.token === GOOD2) && disk0.find((a) => a.platform === 'instagram').token === GOOD,
+      'each account posts with the key of the Zernio account it is on', disk0.map((a) => [a.platform, a.token.slice(-4)]));
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'setup-6-sheet.png') });
+
     // a removed account stays removed; a key from ANOTHER Zernio account takes nothing over
-    const fb = (await page.evaluate(async () => (await window.api.social.accounts()).accounts)).find((a) => a.platform === 'facebook');
-    await page.evaluate((id) => window.api.social.unlink(id), fb.id);
+    const ig = (await page.evaluate(async () => (await window.api.social.accounts()).accounts)).find((a) => a.platform === 'instagram');
+    await page.evaluate((id) => window.api.social.unlink(id), ig.id);
     await page.evaluate((k) => window.api.social.setKeys({ zoApiKey: k }), GOOD);
     let now = (await page.evaluate(async () => (await window.api.social.accounts()).accounts));
-    check(!now.some((a) => a.platform === 'facebook'), 'a removed account is not brought back by saving the key again', now.map((a) => a.platform));
+    check(!now.some((a) => a.platform === 'instagram'), 'a removed account is not brought back by saving the key again', now.map((a) => a.platform));
     await page.evaluate((k) => window.api.social.setKeys({ zoApiKey: k }), OTHER);
     const disk = JSON.parse(fs.readFileSync(path.join(WORK, 'd1', 'workstation.json'), 'utf-8')).socialAccounts;
     const tk = disk.filter((a) => a.platform === 'tiktok');
-    check(tk.length === 1 && tk[0].zoAccountId === 'tiktok9' && tk[0].token === GOOD, 'a key from another Zernio account neither takes over the linked TikTok nor adds a second one', tk.map((a) => [a.zoAccountId, a.token.slice(-4)]));
+    check(tk.length === 1 && tk[0].zoAccountId === 'tiktok1' && tk[0].token === GOOD, 'a key from another Zernio account neither takes over the linked TikTok nor adds a second one', tk.map((a) => [a.zoAccountId, a.token.slice(-4)]));
     await page.evaluate((k) => window.api.social.setKeys({ zoApiKey: k }), GOOD);
 
     // [5]
-    Z.refuse.clear(); Z.connects.length = 0;
-    await page.tap('#csConnect .cs-pick[data-p="instagram"]');   // untick the one left
-    check(await page.$eval('#csConnect [data-k="setup"]', (b) => b.disabled), 'with everything unticked there is nothing to set up');
-    const code = await page.evaluate(async () => (await window.api.social.setupStart({ origin: location.origin, platforms: ['instagram'] })).url.split('/').pop());
+    Z.keys[GOOD].billing = true; Z.connects.length = 0;
+    await page.evaluate(() => window.MWSocial.openConnect());
+    await page.waitForSelector('#csConnect .cs-pick', { timeout: 10000 });
+    for (const p of await page.$$eval('#csConnect .cs-pick.on', (bs) => bs.map((b) => b.dataset.p))) await page.tap(`#csConnect .cs-pick[data-p="${p}"]`);
+    const allSet = await page.$eval('#csConnect', (n) => n.innerText);
+    check(!(await page.$('#csConnect [data-k="setup"]')) && /All set/.test(allSet) && !!(await page.$('#csConnect [data-k="unskip"]')),
+      'with the rest unticked it says All set (no greyed-out button), with a way to connect them after all', allSet.slice(0, 200));
+    const code = await page.evaluate(async () => (await window.api.social.setupStart({ origin: location.origin, platforms: ['youtube'] })).url.split('/').pop());
     const first = await get('/social/next/' + code);
-    check(first.status === 302 && /oauth\/instagram/.test(first.location), 'the return page opens the next sign-in', first);
+    check(first.status === 302 && /oauth\/youtube/.test(first.location), 'the return page opens the next sign-in', first);
     const fake = await get('/social/next/' + 'f'.repeat(36));
     check(fake.status === 200 && /run out/.test(fake.body), 'a made-up code is refused');
     const bad = await get('/social/next/../../api/me');

@@ -2961,8 +2961,8 @@ ipcMain.handle('social:setKeys', wrap(async (e, patch = {}) => {
   try { linked = await accounts.zernioImportAll(); } catch (er) { /* Connect still works */ }
   return Object.assign(socialKeyState(), { linked });
 }));
-ipcMain.handle('social:linkStart', wrap(async (e, { platform } = {}) => accounts.zernioLinkStart(platform)));
-ipcMain.handle('social:linkClaim', wrap(async (e, { platform } = {}) => accounts.zernioLinkClaim(platform)));
+ipcMain.handle('social:linkStart', wrap(async (e, { platform, another } = {}) => accounts.zernioLinkStart(platform, { another: !!another })));
+ipcMain.handle('social:linkClaim', wrap(async (e, { platform, another } = {}) => accounts.zernioLinkClaim(platform, { another: !!another })));
 ipcMain.handle('social:unlink', wrap(async (e, { id } = {}) => accounts.remove(id)));
 ipcMain.handle('social:check', wrap(async (e, { id } = {}) => accounts.check(id)));
 
@@ -2983,8 +2983,12 @@ ipcMain.handle('social:setupStart', wrap(async (e, { origin, platforms } = {}) =
   if (!accountsMod.zoCfg(store, 'tiktok').apiKey && !accountsMod.zoCfg(store, 'facebook').apiKey) throw new Error('Add your Zernio key first.');
   const wanted = accountsMod.ZO_PLATFORMS.filter((p) => !Array.isArray(platforms) || platforms.includes(p));
   try { await accounts.zernioImportAll(wanted); } catch (er) {}
-  const have = new Set(accounts.list().map((a) => a.platform));
-  const queue = wanted.filter((p) => !have.has(p));
+  const count = (p) => accounts.list().filter((a) => a.platform === p).length;
+  const queue = wanted.filter((p) => !count(p)).map((p) => ({ platform: p }));
+  // a church with two Facebook pages: the second one too ('facebook2')
+  if (Array.isArray(platforms) && platforms.includes('facebook2') && count('facebook') + (queue.some((q) => q.platform === 'facebook') ? 1 : 0) < 2) {
+    queue.push({ platform: 'facebook', another: true });
+  }
   if (!queue.length) return { done: true, accounts: accounts.list() };
   const now = Date.now();
   for (const [k, r] of setupRuns) if (r.expires < now) setupRuns.delete(k);
@@ -2999,21 +3003,23 @@ async function socialSetupNext(code) {
   // finished: the same answer again (a reload, a tab the phone brought back) until it runs out
   if (run.final) return run.final;
   if (run.current) {
-    const plat = run.current; run.current = null;
+    const item = run.current; run.current = null;
     let r = null;
-    try { r = await accounts.zernioLinkClaim(plat); } catch (er) { r = null; }
-    run.results.push(r && r.account ? { platform: plat, ok: true, name: r.account.name } : { platform: plat, ok: false, error: 'Not finished — it was skipped or cancelled.' });
+    try { r = await accounts.zernioLinkClaim(item.platform, { another: item.another }); } catch (er) { r = null; }
+    run.results.push(r && r.account ? { platform: item.platform, another: item.another, ok: true, name: r.account.name }
+      : { platform: item.platform, another: item.another, ok: false, error: 'Not finished — it was skipped or cancelled.' });
   }
   while (run.queue.length) {
-    const plat = run.queue.shift();
+    const item = run.queue.shift();
     try {
-      const r = await accounts.zernioLinkStart(plat, { redirectUrl: `${run.origin}/social/next/${code}` });
-      if (r.account) { run.results.push({ platform: plat, ok: true, name: r.account.name }); continue; }
-      run.current = plat;
-      return { redirect: r.url, platform: plat };
+      const r = await accounts.zernioLinkStart(item.platform, { another: item.another, redirectUrl: `${run.origin}/social/next/${code}` });
+      if (r.account) { run.results.push({ platform: item.platform, another: item.another, ok: true, name: r.account.name }); continue; }
+      run.current = item;
+      return { redirect: r.url, platform: item.platform };
     } catch (er) {
-      const full = /free plan|payment|402/i.test(er.message);
-      run.results.push({ platform: plat, ok: false, error: full ? 'Zernio’s free plan is full (2 accounts).' : er.message, full });
+      const full = !!er.full || /free plan|payment|402/i.test(er.message);
+      run.results.push({ platform: item.platform, another: item.another, ok: false, full, needSecondKey: !!er.needSecondKey,
+        error: er.needSecondKey ? 'Your free Zernio account is full (2 accounts).' : full ? 'Both Zernio accounts are full.' : er.message });
     }
   }
   run.final = { done: true, results: run.results, back: run.origin + '/#scheduler' };
