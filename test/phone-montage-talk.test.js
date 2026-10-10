@@ -145,6 +145,24 @@ async function waitUp() {
     await sleep(300);
     const pv2 = await page.evaluate(() => ({ on: !!document.querySelector('#cloudMontage [data-mt-play].on'), sub: (document.querySelector('#cloudMontage [data-mt-sub="file"]') || {}).textContent }));
     check(!pv2.on && pv2.sub === 'from this phone', 'a second tap stops it', pv2);
+    // a FREE song plays through the server (incompetech will not play inside another site, and
+    // an iPhone needs the sound to start on the tap): one the server already has streams at once
+    await page.evaluate((w) => window.api.library.add('music', w, 'Cipher · Kevin MacLeod', 'free:cipher'), wav);
+    await page.locator('#cloudMontage [data-mt-tab="free"]').tap();
+    await sleep(200);
+    await page.locator('#cloudMontage [data-mt-mood="hype"]').tap();
+    await sleep(200);
+    await page.locator('#cloudMontage [data-mt-play="free:cipher"]').tap();
+    let fp = null;
+    for (let i = 0; i < 25; i++) { await sleep(200); fp = await page.evaluate(() => ({ on: !!document.querySelector('#cloudMontage [data-mt-play="free:cipher"].on'), sub: (document.querySelector('#cloudMontage [data-mt-sub="free:cipher"]') || {}).textContent })); if (/Playing · 0:0[1-9]/.test(fp.sub)) break; }
+    check(fp.on && /Playing · 0:0[1-9]/.test(fp.sub), '▶ on a free song plays it through the server', fp);
+    await page.locator('#cloudMontage [data-mt-play="free:cipher"]').tap();
+    await sleep(200);
+    // one the server cannot fetch (no internet here) says so, and the button goes back to ▶
+    await page.locator('#cloudMontage [data-mt-play="free:funkorama"]').tap();
+    let bad = null;
+    for (let i = 0; i < 60; i++) { await sleep(250); bad = await page.evaluate(() => ({ on: !!document.querySelector('#cloudMontage [data-mt-play].on'), island: document.body.innerText.includes('That song would not play') })); if (bad.island) break; }
+    check(bad.island && !bad.on, 'a song that cannot be fetched says so, and nothing is left spinning', bad);
     await page.locator('#cloudMontage [data-mt-tab="free"]').tap();
     await sleep(200);
     if (process.env.MW_SHOTS) { await page.evaluate(() => document.querySelector('#cloudMontage .mt-seg').scrollIntoView({ block: 'start' })); await sleep(300); await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'montage-music.png') }); }

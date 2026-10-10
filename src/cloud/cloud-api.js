@@ -1235,6 +1235,25 @@ async function authedRoutes(req, res, url, p, me) {
     return answerCall(trackCall(callKey(me, cid), work), req, res);
   }
 
+  /*
+   * ▶ A FREE SONG, TO LISTEN TO BEFORE IT IS USED (the AI Montage's song list).
+   * The phone cannot play it from incompetech (it will not be played inside
+   * another site), and fetching it first and then playing loses the tap an
+   * iPhone needs before it makes a sound. So the phone plays THIS address at
+   * once: the server gets the song into its library (once — after that it is
+   * just a file) and streams it, ranges and all.
+   */
+  if (p === '/api/free-song') {
+    const id = String(url.searchParams.get('id') || '').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 80);
+    if (!id) return send(res, 400, 'text/plain', 'which song?');
+    let out = null;
+    try { out = await rpc.invoke('music:freeGet', { id }); } catch (e) { out = { ok: false, error: e.message }; }
+    const file = out && out.ok && out.data && out.data.file;
+    if (!file) return send(res, 502, 'text/plain', (out && out.error) || 'That song could not be fetched.');
+    if (!allowedPath(file)) return send(res, 403, 'text/plain', 'forbidden');
+    return sendFile(req, res, path.resolve(file), {});
+  }
+
   if (p === '/api/media' || p === '/api/file') {
     const target = url.searchParams.get('p') || '';
     if (!allowedPath(target)) return send(res, 403, 'text/plain', 'forbidden');

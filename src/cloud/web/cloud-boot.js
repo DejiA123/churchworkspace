@@ -417,6 +417,8 @@ let _hideTimer = null;
 
   /** A path on the studio machine, as something this browser can load. */
   window.MW_FILE_URL = (p) => '/api/media?p=' + encodeURIComponent(p) + (token ? '&k=' + encodeURIComponent(token) : '');
+  /** A free song from the music shelf, played through the server (cloud-api.js /api/free-song). */
+  window.MW_FREE_SONG_URL = (id) => '/api/free-song?id=' + encodeURIComponent(id) + (token ? '&k=' + encodeURIComponent(token) : '');
   /* The bundled caption fonts, by file name: an address the phone may keep
    * (cloud-api.js /fonts/, cached by sw.js) — through the media route above
    * all 3.2 MB came down again every time the app opened. */

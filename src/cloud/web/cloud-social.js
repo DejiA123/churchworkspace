@@ -1521,7 +1521,12 @@
   function mtPreviewSrc(key) {
     if (key === 'file') return MT.songFile ? (MT.songFileUrl || (MT.songFileUrl = URL.createObjectURL(MT.songFile))) : '';
     if (key.startsWith('lib:')) { const m = MT.lib.find((x) => 'lib:' + x.id === key); return m && m.file ? C.fileUrl(m.file) : ''; }
-    if (key.startsWith('free:')) { const t = MT.freeList && MT.freeList.tracks.find((x) => 'free:' + x.id === key); return t ? t.url || '' : ''; }
+    if (key.startsWith('free:')) {
+      // through the server (it fetches the song once and streams it), else straight from incompetech
+      const t = MT.freeList && MT.freeList.tracks.find((x) => 'free:' + x.id === key);
+      if (!t) return '';
+      return window.MW_FREE_SONG_URL ? window.MW_FREE_SONG_URL(t.id) : (t.url || '');
+    }
     return '';
   }
   function mtPreviewPaint() {
@@ -1547,16 +1552,13 @@
     if (!src) return;
     const a = new Audio();
     a.preload = 'auto';
-    MT.preview = { key, a, fellBack: false };
+    MT.preview = { key, a };
     // remember each row's own line, to put back when it stops
-    const onErr = async () => {
+    const onErr = () => {
       const pv = MT.preview;
       if (!pv || pv.a !== a) return;
-      if (key.startsWith('free:') && !pv.fellBack) {
-        pv.fellBack = true;
-        try { const song = await window.api.freeMusic.get(key.slice(5)); if (MT.preview === pv && song && song.file) { a.src = C.fileUrl(song.file); a.play().catch(() => {}); return; } } catch (e) {}
-      }
-      if (MT.preview === pv) { C.island({ kind: 'warn', title: 'That song would not play', sub: 'Try another — or it may still work in the montage.', ms: 3500 }); mtPreviewStop(); }
+      C.island({ kind: 'warn', title: 'That song would not play', sub: 'The music site did not answer — try again in a moment, or pick another.', ms: 4000 });
+      mtPreviewStop();
     };
     a.addEventListener('error', onErr);
     a.addEventListener('timeupdate', mtPreviewPaint);
