@@ -423,44 +423,85 @@ function asSentence(s) {
   return /[.!?…"]$/.test(t) ? t : t + '.';
 }
 
-/** A handful of subject hashtags drawn from what was actually said. */
+/*
+ * ►► HASHTAGS PEOPLE ACTUALLY FOLLOW. ◄◄ "The hashtags should be the
+ * popular ones, always — not random ones." A made-up tag (#DivineElevation,
+ * #KingdomGrowth) is followed by nobody, so a post carrying it is found by
+ * nobody. Every caption now ends on the evergreen faith tags with the most
+ * posts and followers on TikTok, Instagram, Facebook and YouTube, led by the
+ * popular ones that match what the post is about. The writer does not
+ * invent tags any more: whatever it wrote is replaced by this line.
+ * (#fyp / #viral / #foryou stay out: the platforms say they do not widen
+ * reach, and on a church account they read as spam.)
+ */
+const POPULAR_CORE = ['#jesus', '#faith', '#god', '#christian', '#bible', '#jesuschrist', '#prayer', '#worship',
+  '#christianity', '#church', '#godisgood', '#blessed', '#gospel', '#holyspirit', '#hope', '#love'];
 const TOPIC_TAGS = [
-  [/\b(revival|outpour|awaken)/i, ['#Revival', '#SpiritualAwakening', '#HolySpiritOutpouring']],
-  [/\b(pray|prayer|interced|fast)/i, ['#PrayerAndFasting', '#Intercession']],
-  [/\b(bishop|consecrat|ordain|apostolic|office)/i, ['#ApostolicGrace', '#KingdomLeadership', '#Consecration']],
-  [/\b(youth|young|generation|children)/i, ['#YouthAwakening', '#NextGeneration']],
-  [/\b(heal|deliver|breakthrough|miracle)/i, ['#Breakthrough', '#HealingPower']],
-  [/\b(faith|believe|trust)/i, ['#FaithInAction', '#WalkByFaith']],
-  [/\b(salvation|born again|saved|repent)/i, ['#Salvation', '#BornAgain']],
-  [/\b(bless|multipl|increase|prosper|elevat|promot)/i, ['#DivineElevation', '#KingdomGrowth']],
-  [/\b(grace|mercy|love)/i, ['#GraceAndMercy'],],
-  [/\b(word|scripture|bible|verse|gospel)/i, ['#GospelTruth', '#BiblicalTruth']],
+  [/\b(heal|sick|disease|miracle|deliver|breakthrough)/i, ['#healing', '#miracles', '#breakthrough']],
+  [/\b(pray|prayer|interced|fasting)/i, ['#prayer', '#pray', '#prayerworks']],
+  [/\b(worship|praise|sing|song|choir|music)/i, ['#worship', '#praise', '#gospelmusic', '#worshipmusic']],
+  [/\b(holy spirit|holy ghost|revival|fire|anoint)/i, ['#holyspirit', '#revival']],
+  [/\b(salvation|saved|born again|repent|cross)/i, ['#salvation', '#jesussaves']],
+  [/\b(fear|anxi|worry|afraid|peace|stress)/i, ['#peace', '#anxiety', '#encouragement']],
+  [/\b(hope|wait|season|stuck|tired|weary|storm|struggl)/i, ['#hope', '#encouragement', '#motivation']],
+  [/\b(faith|believe|trust)/i, ['#faith', '#trustgod']],
+  [/\b(grace|mercy|forgiv)/i, ['#grace', '#forgiveness']],
+  [/\b(love|loved)\b/i, ['#godslove', '#love']],
+  [/\b(scripture|bible|verse|word of god|psalm|proverb)/i, ['#bible', '#bibleverse', '#scripture']],
+  [/\b(marriage|husband|wife|married)/i, ['#marriage', '#christianmarriage']],
+  [/\b(family|children|parents|kids)/i, ['#family', '#christianfamily']],
+  [/\b(youth|young people|teen|student)/i, ['#youth', '#christianyouth']],
+  [/\b(testimony|testify)/i, ['#testimony']],
+  [/\b(easter|resurrect|risen)/i, ['#easter', '#heisrisen']],
+  [/\b(christmas|nativity)/i, ['#christmas']],
+  [/\b(preach|sermon|message|pastor|bishop)/i, ['#sermon', '#preaching']],
+  [/\b(sunday|service|church)/i, ['#church', '#sundayservice']],
 ];
-const FALLBACK_TAGS = ['#KingdomMinded', '#ChristianInspiration', '#SpiritualGrowth', '#FaithInAction', '#GospelTruth'];
+const FALLBACK_TAGS = POPULAR_CORE;
 const PLATFORM_TAGS = {
-  bold: ['#ChristianReels'],
-  energy: ['#ChristianTikTok', '#ChurchTok'],
-  deep: ['#ChristianInspiration'],
+  bold: ['#christianreels'],
+  energy: ['#christiantiktok'],
+  deep: ['#christianinspiration'],
 };
 
 function topicTagsFor(text, want) {
   const out = [];
   for (const [rx, tags] of TOPIC_TAGS) {
-    if (rx.test(text)) for (const t of tags) if (!out.includes(t)) out.push(t);
+    // two at most from one subject, so a post about healing AND prayer gets both
+    if (rx.test(text)) for (const t of tags.slice(0, 2)) if (!out.includes(t)) out.push(t);
     if (out.length >= want) break;
   }
-  for (const t of FALLBACK_TAGS) { if (out.length >= want) break; if (!out.includes(t)) out.push(t); }
   return out.slice(0, want);
 }
 
-/** The hashtag line: speaker, event, then subject, then the platform's own. */
+/*
+ * The hashtag line: the speaker's own tag when one was named, up to four
+ * popular ones about the subject, the platform's big community tag, then the
+ * evergreen core — nine at most, every one of them followed by millions.
+ */
 function tagLine(style, { speaker, eventName, text }) {
   const tags = [];
-  const st = tagOf(speaker); if (st) tags.push(st);
-  const et = tagOf(eventName); if (et) tags.push(et);
-  for (const t of topicTagsFor(text || '', 5)) if (!tags.includes(t)) tags.push(t);
-  for (const t of (PLATFORM_TAGS[style.id] || [])) if (!tags.includes(t)) tags.push(t);
-  return tags.filter((t) => !BANNED_TAGS.test(t)).slice(0, 9).join(' ');
+  const add = (t) => { const k = t.toLowerCase(); if (!BANNED_TAGS.test(t) && !tags.some((x) => x.toLowerCase() === k)) tags.push(t); };
+  // the speaker's and the event's own tags (set in Settings) label the post; the rest are popular ones
+  const st = tagOf(speaker); if (st) add(st);
+  const et = tagOf(eventName); if (et) add(et);
+  for (const t of topicTagsFor(text || '', 4)) add(t);
+  for (const t of (PLATFORM_TAGS[style && style.id] || ['#christiantiktok'])) add(t);
+  for (const t of POPULAR_CORE) { if (tags.length >= 9) break; add(t); }
+  return tags.slice(0, 9).join(' ');
+}
+/* A caption with its own hashtags taken off (the last hashtag-only lines, and any trailing on the last line). */
+function withoutTags(caption) {
+  const lines = String(caption || '').replace(/\s+$/, '').split('\n');
+  while (lines.length && (/^\s*$/.test(lines[lines.length - 1]) || /^\s*(#[\wÀ-￿]+[\s,]*)+$/.test(lines[lines.length - 1]))) lines.pop();
+  if (lines.length) lines[lines.length - 1] = lines[lines.length - 1].replace(/(\s+#[\wÀ-￿]+)+\s*$/, '');
+  return lines.join('\n').replace(/\s+$/, '');
+}
+/* The caption with the popular hashtag line put on it, in place of whatever it had. */
+function withPopularTags(caption, style, ctx) {
+  const body = withoutTags(caption);
+  const line = tagLine(style, { speaker: ctx.speaker, eventName: ctx.eventName, text: [ctx.text || '', body].join(' ') });
+  return body ? body + '\n\n' + line : line;
 }
 
 /* Closing lines that say something true about the reader instead of asking them
@@ -622,8 +663,7 @@ function buildPrompt({ hook, kind, churchName, eventName, speaker, durationSec, 
     flyer ? '  - Say clearly what is happening, when and where, exactly as printed, and why someone should come.' : '  - Quote the words directly at least once, word for word from above.',
     (speaker || eventName || churchName) ? '  - Name the speaker and where it happened, naturally, inside a sentence, using only what you were told above.' : '  - Do NOT say who spoke or where: make it about the words and the reader.',
     '  - End on a line that lands: something true about the reader, not a request.',
-    '  - Then a blank line, then 6 to 9 hashtags on the last line, mixing big ones',
-    '    with two or three that are specific to this subject.',
+    '  - Do NOT write any hashtags: the most-followed faith hashtags are added for you.',
     '',
     'Write THREE options, in this order and in these voices:',
     ...STYLES.map((s, i) => `  ${i + 1}. "${s.label}" for ${s.platforms}: ${s.voice}.`),
@@ -748,9 +788,8 @@ async function suggest({ mediaPath, kind = 'video', churchName: churchIn = '', e
           ? caption.slice(0, tagsAt) + '\n\n' + said + caption.slice(tagsAt)
           : caption + '\n\n' + said;
       }
-      if (!/#\w/.test(caption)) {
-        caption += '\n\n' + tagLine(st, { speaker, eventName, text: hook + ' ' + (read ? read.summary : '') });
-      }
+      // the popular hashtags, in place of any the model wrote
+      if (caption) caption = withPopularTags(caption, st, { speaker, eventName, text: hook + ' ' + (read ? (read.summary || read.full || '') : '') });
       const fb = base.options[i];
       if (!raw[i]) return fb;   // the model only wrote some of them
       const keepTitle = title.length >= 6, keepCaption = wroteSomething;
@@ -821,7 +860,8 @@ async function suggest({ mediaPath, kind = 'video', churchName: churchIn = '', e
             // A high score means "leave it alone", and a rewrite that came back
             // shorter than half the original is a model that lost the plot.
             if (Number.isFinite(score) && score >= 8) return o;
-            const cap = houseStyle(dropFaceless(stripInventedNames(tidy(c.caption, 2100), { speaker, transcript, churchName })), { allowBait });
+            const cap0 = houseStyle(dropFaceless(stripInventedNames(tidy(c.caption, 2100), { speaker, transcript, churchName })), { allowBait });
+            const cap = cap0 ? withPopularTags(cap0, STYLES[i] || STYLES[0], { speaker, eventName, text: hook + ' ' + (read ? (read.summary || read.full || '') : '') }) : cap0;
             if (cap.length < Math.max(60, o.caption.length * 0.5)) return o;
             if (eventName && cap.toLowerCase().indexOf(eventName.toLowerCase()) < 0) return o;
             if (speaker && cap.toLowerCase().indexOf(speaker.toLowerCase()) < 0) return o;
@@ -894,13 +934,11 @@ async function revise({ title = '', caption = '', action = 'rewrite', instructio
     const cap = houseStyle(guard(tidy(r.caption || '', 2100)), { allowBait });
     const t = r.title ? houseStyle(guard(tidy(r.title, 100)), { allowBait, title: true }) : was.title;
     if (!cap || cap.length < 8) return Object.assign({ source: 'unchanged', why: 'The writer did not give a usable caption.' }, was);
-    // the hashtag line comes back if the writer dropped it
-    let out = cap;
-    if (/#\w/.test(was.caption) && !/#\w/.test(cap)) {
-      const paras = was.caption.split(/\n\s*\n/);
-      const tags = paras.filter((x) => /^\s*#/.test(x)).pop() || (was.caption.match(/#\w+/g) || []).join(' ');
-      if (tags) out = cap.trimEnd() + '\n\n' + tags.trim();
-    }
+    // the post's own hashtag line stays as it was (the popular one) — none the writer made up
+    let out = withoutTags(cap);
+    const paras = was.caption.split(/\n\s*\n/);
+    const tags = paras.filter((x) => /^\s*#/.test(x)).pop() || (was.caption.match(/#\w+/g) || []).join(' ');
+    if (tags) out = out.trimEnd() + '\n\n' + tags.trim();
     return { title: t || was.title, caption: out, source: 'ai' };
   } catch (e) {
     return Object.assign({ source: 'unchanged', why: (e && e.message) || 'The writer did not answer.' }, was);
@@ -908,7 +946,7 @@ async function revise({ title = '', caption = '', action = 'rewrite', instructio
 }
 
 module.exports = {
-  suggest, revise, dropFaceless, realChurch, ruleCopy, ruleOption, hookFromFilename, readTranscript, sentencesOf, hookScore,
+  suggest, revise, dropFaceless, realChurch, withPopularTags, withoutTags, POPULAR_CORE, ruleCopy, ruleOption, hookFromFilename, readTranscript, sentencesOf, hookScore,
   buildPrompt, buildPolishPrompt, tidy, houseStyle, tagOf, tagLine, whoIsSpeaking, asSentence,
   stripInventedNames, STYLES, TELLS,
 };

@@ -31,7 +31,15 @@ check(sc.realChurch('Our Church') === '' && sc.realChurch('The Power House') ===
   check(/Do NOT refer to the speaker at all/.test(prompt) && /NOBODY HAS TOLD YOU THE CHURCH/.test(prompt) && !/THE CHURCH: Our Church/.test(prompt), 'the writer is told to name neither', prompt.slice(0, 200));
   check(!/the speaker|our church/i.test(out.caption), 'and what it wrote comes out naming neither', out.caption);
   const r = await sc.revise({ caption: out.caption, action: 'shorten', llm: { isAvailable: async () => true, parseJson: JSON.parse, chat: async () => JSON.stringify({ caption: '"Talk to God," the speaker said at Our Church.' }) } });
-  check(!/the speaker|our church/i.test(r.caption) && /#Faith/.test(r.caption), 'Shorter / More hype keep it that way (and keep the hashtags)', r.caption);
+  check(!/the speaker|our church/i.test(r.caption) && /#faith/i.test(r.caption), 'Shorter / More hype keep it that way (and keep the hashtags)', r.caption);
+  // "The hashtags should be the popular ones, always — not random ones."
+  const tagsOut = await sc.suggest({ mediaPath: '/x/clip.mp4', transcript: 'Especially when the children of God gather together and pray, every sickness will be healed. Healing came to many people that night.',
+    llm: { isAvailable: async () => true, parseJson: JSON.parse, chat: async () => JSON.stringify({ options: [0, 1, 2].map(() => ({ title: 'Healing', caption: 'Pray and believe. Healing is here. 🙌\n\n#DivineElevation #KingdomGrowth #SpiritualGrowthJourney #fyp' })) }) } });
+  const POP = new Set(sc.POPULAR_CORE.concat(['#healing', '#miracles', '#breakthrough', '#prayer', '#pray', '#prayerworks', '#christiantiktok', '#christianreels', '#christianinspiration']));
+  const used = tagsOut.options.flatMap((o) => o.caption.match(/#\w+/g) || []);
+  check(!used.some((t) => /DivineElevation|KingdomGrowth|SpiritualGrowthJourney|fyp/i.test(t)), 'made-up tags the AI wrote are taken off', used);
+  check(used.length >= 7 * 3 && used.every((t) => POP.has(t)), 'every tag is a popular one (followed by millions)', used.filter((t) => !POP.has(t)));
+  check(/#healing/.test(tagsOut.caption) && /#prayer/.test(tagsOut.caption) && /#jesus/.test(tagsOut.caption), 'led by the popular ones about the subject, then the big ones', tagsOut.caption.split('\n').pop());
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
