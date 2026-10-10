@@ -763,12 +763,39 @@ const phonecopy = require('./phonecopy');
 ipcMain.handle('montage:status', wrap(async () => Object.assign({}, montage.directorStatus(), { voiceover: require('./voiceover').status() })));
 /* The talk edit's ears: every word of a video, from the cloud (Groq's Whisper)
  * or, without it, this server's own speech model — through the Word Book. */
-async function montageHear(file, durationSec, onProgress, names) {
+/*
+ * ►► THE VIRAL MONTAGE HEARS WITH ASSEMBLYAI. ◄◄ The same ear as the
+ * captions (cloudCaptions): the whole video heard once, with the church's own
+ * Word Book names as key terms — and NOTHING from "What's it about?": the
+ * words on screen are what was said, never what the operator typed. Groq, or
+ * this PC, only when AssemblyAI cannot.
+ */
+async function montageHear(file, durationSec, onProgress) {
+  try {
+    const aai = require('./assemblyear');
+    if (aai.ready()) {
+      if (onProgress) onProgress(3);
+      const audio = await geminiear.encodeFlac(file, 0, durationSec);
+      if (onProgress) onProgress(12);
+      // AssemblyAI says nothing until it is done: the bar walks on gently meanwhile
+      let p = 12;
+      const walk = setInterval(() => { p = Math.min(92, p + Math.max(0.4, (92 - p) * 0.04)); if (onProgress) onProgress(Math.round(p)); }, 1500);
+      let aw = [];
+      try { aw = await aai.transcribe(audio, { terms: aaiTerms(), cancelled: () => jobs.isCancelled() }); }
+      finally { clearInterval(walk); }
+      if (aw && aw.length) {
+        if (onProgress) onProgress(100);
+        return wordbook.apply(aw).entries;
+      }
+    }
+  } catch (err) {
+    if (err && err.cancelled) throw new jobs.CancelledError();
+    if (err instanceof jobs.CancelledError) throw err;
+    console.warn('[montage] AssemblyAI could not hear it:', err && err.message);
+  }
   if (cloudspeech.fileReady()) {
     let r = null;
-    // the speaker and church typed on the montage page, heard as names (spelt as typed)
-    const terms = (Array.isArray(names) ? names : []).map((x) => String(x || '').trim()).filter(Boolean).slice(0, 4);
-    try { r = await cloudspeech.transcribeWords({ input: file, startSec: 0, endSec: durationSec, onProgress, terms: terms.length ? terms : null }); } catch (err) {
+    try { r = await cloudspeech.transcribeWords({ input: file, startSec: 0, endSec: durationSec, onProgress }); } catch (err) {
       if (err && err.cancelled) throw new jobs.CancelledError();
       r = null;
     }

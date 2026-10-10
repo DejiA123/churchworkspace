@@ -333,13 +333,14 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
     log(same(c3), 'top, middle and bottom are the same picture — no dimmed, blurred band', JSON.stringify(c3));
     // the AI says the speaker is on the right: the crop follows them
     const see = require(path.join(ROOT, 'src/main/cloudsee'));
-    const realReady = see.ready, realWho = see.whoIsSpeaking;
+    const realReady = see.ready, realWho = see.whoIsSpeaking, realPeople = see.whereArePeople;
     see.ready = () => true;
     see.whoIsSpeaking = async ({ frames }) => ({ ok: true, answers: Object.fromEntries(frames.map((f) => [f.label, { column: 7, sure: true }])) });
+    see.whereArePeople = async ({ frames }) => ({ ok: true, answers: Object.fromEntries(frames.map((f) => [f.label, { column: 7, people: 1, sure: true }])) });
     const outR = path.join(WORK, 'fill-r.mp4');
     let rR;
     try { rR = await montage.make(ctx, video.getInfo, { mediaPaths: [L], full: true, style: 'worship', aspect: '9:16', keepAudio: true, output: outR, onProgress: () => {} }); }
-    finally { see.ready = realReady; see.whoIsSpeaking = realWho; }
+    finally { see.ready = realReady; see.whoIsSpeaking = realWho; see.whereArePeople = realPeople; }
     const r3 = rows(outR, rR.duration / 2);
     log(r3.every(blue), 'and is cut round the person in it when the AI can see them', JSON.stringify(r3));
     // rearranged later: the crop is kept (no AI is asked again)

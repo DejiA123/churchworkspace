@@ -13,7 +13,8 @@
  * One stretch: the audio goes up, a transcript is asked for, and the answer
  * is collected — words with their times, on the stretch's own clock.
  */
-const API = 'https://api.assemblyai.com/v2';
+// (MW_AAI_API: a stand-in AssemblyAI for the tests — test/montage-aai.test.js)
+const API = process.env.MW_AAI_API || 'https://api.assemblyai.com/v2';
 const key = () => String(process.env.ASSEMBLYAI_API_KEY || '').trim();
 const ready = () => !!key();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

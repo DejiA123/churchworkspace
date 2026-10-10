@@ -1123,7 +1123,7 @@ function finalise(raw, cands, opts, music) {
 
 /* ------------------------------------------------------------------- render */
 
-function fitChain(c, W, H, focus, scale = 1, tag = '', fx = null) {
+function fitChain(c, W, H, focus, scale = 1, tag = '', fx = null, track = null) {
   const w = W * scale, h = H * scale;
   const y = focus === 'top' ? '0' : focus === 'bottom' ? '(ih-oh)' : '(ih-oh)/2';
   // ALWAYS FULL SCREEN: "even if I upload a 16:9 video and select 9:16 … no
@@ -1133,7 +1133,14 @@ function fitChain(c, W, H, focus, scale = 1, tag = '', fx = null) {
   // Across, it is cut round the person in it when the shot knows where they
   // stand (`fx`, 0 left … 1 right — findSpeakers), else round the middle.
   const at = typeof fx === 'number' && Number.isFinite(fx) ? clamp(fx, 0, 1) : 0.5;
-  const x = at === 0.5 ? '(iw-ow)/2' : `'min(max(iw*${at.toFixed(3)}-ow/2,0),iw-ow)'`;
+  let x = at === 0.5 ? '(iw-ow)/2' : `'min(max(iw*${at.toFixed(3)}-ow/2,0),iw-ow)'`;
+  // TRACKING: the cut pans with the person — from where they stand as the shot starts to where they are as it
+  // ends (`track.fx2`), smoothly over its `dur` seconds; `t0` is how far into the shot this piece begins
+  if (track && typeof track.fx2 === 'number' && Number.isFinite(track.fx2) && track.dur > 0 && Math.abs(track.fx2 - at) > 0.01) {
+    const b = clamp(track.fx2, 0, 1), d = Math.max(0.1, track.dur), t0 = Math.max(0, track.t0 || 0);
+    const u = `min(max((t+${t0.toFixed(3)})/${d.toFixed(3)},0),1)`;
+    x = `'min(max(iw*(${at.toFixed(3)}+${(b - at).toFixed(3)}*${u})-ow/2,0),iw-ow)'`;
+  }
   return `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}:${x}:${y},setsar=1`;
 }
 
@@ -1265,7 +1272,7 @@ async function renderPiece(ctx, s, W, H, keepAudio, out, next, { overlay = null,
   } else {
     args.push('-ss', String(s.from), '-t', String(s.need + 0.1), ...decodeOpts(c, W, H), '-i', c.file);
     const fx = effectChain(s.effect, W, H, effectDur || dur, t0);
-    base = `[0:v]${s.slow ? 'setpts=2.0*PTS,' : ''}${fitChain(c, W, H, s.focus, 1, 'b', s.fx)}${fx ? ',' + fx : ''}${s.grade ? ',' + s.grade : ''},fps=${FPS}`;
+    base = `[0:v]${s.slow ? 'setpts=2.0*PTS,' : ''}${fitChain(c, W, H, s.focus, 1, 'b', s.fx, { fx2: s.fx2, t0, dur: effectDur || dur })}${fx ? ',' + fx : ''}${s.grade ? ',' + s.grade : ''},fps=${FPS}`;
   }
   let graph;
   let nextInput = 1;
@@ -1461,7 +1468,7 @@ function pieceKey(s, next, W, H, keepAudio) {
   const c = s.cand;
   return crypto.createHash('sha1').update(JSON.stringify({
     v: 4, f: c.file, sig: fileSig(c.file), k: c.kind, w: c.w, h: c.h, a: !!c.hasAudio,
-    sec: s.seconds, from: s.from, need: s.need, e: s.effect, fo: s.focus, fx: s.fx == null ? null : s.fx, sl: !!s.slow, tr: s.transition, nt: next ? next.transition : null, gr: s.grade || null, mu: !!s.mute,
+    sec: s.seconds, from: s.from, need: s.need, e: s.effect, fo: s.focus, fx: s.fx == null ? null : s.fx, fx2: s.fx2 == null ? null : s.fx2, sl: !!s.slow, tr: s.transition, nt: next ? next.transition : null, gr: s.grade || null, mu: !!s.mute,
     ov: (s.overlays || []).map((o) => [o.cand.file, fileSig(o.cand.file), o.cand.kind, o.cand.w, o.cand.h, o.style, o.start, o.len, o.pos, o.from, o.fx == null ? null : o.fx]),
     W, H, keepAudio: !!keepAudio, enc: encodeOpts(),
   })).digest('hex');
@@ -1520,7 +1527,7 @@ function projectOf(plan, cands, { aspect, keepAudio, style, full }, meta = {}) {
     cands: C,
     shots: plan.shots.map((s) => ({
       cid: s.cand.id, seconds: s.seconds, from: s.from == null ? null : s.from, need: s.need == null ? null : s.need,
-      effect: s.effect, focus: s.focus, fx: s.fx == null ? null : s.fx, slow: !!s.slow, transition: s.transition, grade: s.grade || null, mute: !!s.mute,
+      effect: s.effect, focus: s.focus, fx: s.fx == null ? null : s.fx, fx2: s.fx2 == null ? null : s.fx2, slow: !!s.slow, transition: s.transition, grade: s.grade || null, mute: !!s.mute,
       overlays: (s.overlays || []).map((o) => ({ cid: o.cand.id, style: o.style, start: o.start, len: o.len, pos: o.pos, from: o.from == null ? null : o.from, fx: o.fx == null ? null : o.fx })),
     })),
     texts: (plan.texts || []).map((t) => {
@@ -1571,7 +1578,7 @@ async function remake(ctx, { project, edits, output, onProgress, stage }) {
     const c = C[base.cid];
     if (!c || !fs.existsSync(c.file)) return;
     const sh = {
-      cand: c, seconds: base.seconds, from: base.from, need: base.need, effect: base.effect, focus: base.focus, fx: typeof base.fx === 'number' ? base.fx : null, slow: !!base.slow, grade: base.grade || null, mute: !!base.mute,
+      cand: c, seconds: base.seconds, from: base.from, need: base.need, effect: base.effect, focus: base.focus, fx: typeof base.fx === 'number' ? base.fx : null, fx2: typeof base.fx2 === 'number' ? base.fx2 : null, slow: !!base.slow, grade: base.grade || null, mute: !!base.mute,
       transition: TRANSITIONS.includes(w.transition) ? w.transition : base.transition, overlays: [],
     };
     // the pictures on it: kept as they were, or spaced again if they changed
@@ -1860,7 +1867,7 @@ async function laySpeech(ctx, file, parts, tmp) {
  * moments to a picture; whatever it cannot tell (or with no AI to ask), the
  * middle of the picture. A wrong guess costs a centred crop, never the blur.
  */
-const SPEAK_COLS = 8, SPEAK_TILE_W = 288, SPEAK_TILE_H = 162, SPEAK_MAX_FRAMES = 48;
+const SPEAK_COLS = 8, SPEAK_TILE_W = 288, SPEAK_TILE_H = 162, SPEAK_MAX_FRAMES = 96;
 const needsCrop = (c, W, H) => c && c.kind === 'video' && c.w && c.h && Math.abs(Math.log((c.w / c.h) / (W / H))) >= 0.42;
 /* An ffmpeg that can draw text, for the column numbers: the bundled one cannot
  * (no freetype), the system's usually can (the server image installs it). */
@@ -1875,19 +1882,29 @@ async function textFfmpeg(ctx) {
   return textFf;
 }
 async function findSpeakers(ctx, reqs, tmp, log) {
-  const out = reqs.map(() => 0.5);
+  return (await lookAt(ctx, reqs, tmp, log, { people: true })).map((x) => (x.fx == null ? 0.5 : x.fx));
+}
+/**
+ * The AI's look at moments of the videos, six frames to a grid: for each
+ * request `{ file, t, w, h }`, `{ fx, people }` — where across the picture the
+ * person to keep stands (0 left … 1 right, null when it could not tell) and how
+ * many people can be seen (0 = nobody: an empty stage, a screen; null = not
+ * asked or no answer). `people:false` asks only for the speaker's column.
+ */
+async function lookAt(ctx, reqs, tmp, log, { people = true } = {}) {
+  const out = reqs.map(() => ({ fx: null, people: null }));
   let see = null;
   try { see = require('./cloudsee'); } catch (e) { see = null; }
   let font = null;
   const tff = await textFfmpeg(ctx);
   try { const f = path.join(require('./captioner').fontsDir(), 'Poppins-Bold.ttf'); if (fs.existsSync(f) && tff) font = f; } catch (e) {}
-  if (!see || !see.ready() || !font || !reqs.length) { if (log && reqs.length) log('speakers: ' + (!see || !see.ready() ? 'no AI to ask' : 'no ffmpeg here can draw the column numbers') + ' — the middle of the picture'); return out; }
+  if (!see || !see.ready() || !font || !reqs.length) { if (log && reqs.length) log('look: ' + (!see || !see.ready() ? 'no AI to ask' : 'no ffmpeg here can draw the column numbers') + ' — the middle of the picture'); return out; }
   ctx = Object.assign({}, ctx, { ffmpeg: tff });
   const esc = (t) => String(t).replace(/[\\:']/g, '\\$&');
   const T = SPEAK_TILE_W, TH = SPEAK_TILE_H, cw = T / SPEAK_COLS;
   const LETTERS = 'ABCDEF';
   const todo = reqs.slice(0, SPEAK_MAX_FRAMES).map((r, i) => Object.assign({ i }, r));
-  if (reqs.length > todo.length && log) log(`speakers: ${reqs.length - todo.length} moments past the first ${SPEAK_MAX_FRAMES} keep the middle`);
+  if (reqs.length > todo.length && log) log(`look: ${reqs.length - todo.length} moments past the first ${SPEAK_MAX_FRAMES} were not looked at`);
   for (let g = 0; g * 6 < todo.length; g++) {
     const part = todo.slice(g * 6, g * 6 + 6);
     const dir = path.join(tmp, 'spk-' + g);
@@ -1910,16 +1927,21 @@ async function findSpeakers(ctx, reqs, tmp, log) {
     catch (e) { if (e instanceof jobs.CancelledError) throw e; continue; }
     if (!fs.existsSync(grid)) continue;
     let ans = null;
-    try { ans = await see.whoIsSpeaking({ image: 'data:image/jpeg;base64,' + fs.readFileSync(grid).toString('base64'), frames: part.map((_, k) => ({ label: LETTERS[k] })), columns: SPEAK_COLS }); }
+    const ask = people && see.whereArePeople ? see.whereArePeople : see.whoIsSpeaking;
+    try { ans = await ask({ image: 'data:image/jpeg;base64,' + fs.readFileSync(grid).toString('base64'), frames: part.map((_, k) => ({ label: LETTERS[k] })), columns: SPEAK_COLS }); }
     catch (e) { ans = null; }
-    if (!ans || !ans.ok) { if (log) log('speakers: ' + ((ans && ans.why) || 'no answer') + ' — the middle of the picture'); break; }
+    if (!ans || !ans.ok) { if (log) log('look: ' + ((ans && ans.why) || 'no answer') + ' — the middle of the picture'); break; }
     part.forEach((r, k) => {
       const a = ans.answers[LETTERS[k]];
-      if (!a || !(a.column > 0)) return;
+      if (!a) return;
+      if (typeof a.people === 'number') out[r.i].people = a.people;
+      if (!(a.column > 0)) return;
       // the column's middle on the ruled tile → across the clip's own picture (a tile pads a clip of another shape)
       const ar = (r.w && r.h) ? r.w / r.h : 16 / 9;
       const shown = Math.min(T, TH * ar), left = (T - shown) / 2;
-      out[r.i] = clamp(((a.column - 0.5) * cw - left) / shown, 0, 1);
+      out[r.i].fx = clamp(((a.column - 0.5) * cw - left) / shown, 0, 1);
+      // a column with no count (an older answer) still means someone is there
+      if (out[r.i].people == null && people) out[r.i].people = 1;
     });
   }
   return out;
@@ -1938,18 +1960,28 @@ async function aimShots(ctx, shots, aspect, { picks = null, tmp, log, stage } = 
   const want = (cand, t, put) => { if (!needsCrop(cand, W, H)) return; reqs.push({ file: cand.file, t: round2(clamp(t, 0, Math.max(0, (cand.fileDur || 0) - 0.1))), w: cand.w, h: cand.h }); back.push(put); };
   const lineAt = new Map();
   shots.forEach((sh) => {
-    if (sh.line != null && picks && picks[sh.line]) {
+    if (sh.fx != null) { /* already aimed (a line's own looks) */ } else if (sh.line != null && picks && picks[sh.line]) {
       // one look per LINE, shared by its beats (it is the same speaker, a second or two apart)
       if (!lineAt.has(sh.line)) { const p = picks[sh.line]; lineAt.set(sh.line, []); want(p.cand, (p.start + p.end) / 2, (fx) => lineAt.get(sh.line).forEach((x) => { x.fx = fx; })); }
       if (needsCrop(sh.cand, W, H)) lineAt.get(sh.line).push(sh);
     } else if (sh.cand.kind === 'video') want(sh.cand, (sh.from || 0) + (sh.need || sh.seconds) / 2, (fx) => { sh.fx = fx; });
-    for (const o of sh.overlays || []) if (o.style === 'cutaway' && o.cand.kind === 'video') want(o.cand, (o.from || 0) + o.len / 2, (fx) => { o.fx = fx; });
+    for (const o of sh.overlays || []) if (o.style === 'cutaway' && o.cand.kind === 'video' && o.fx == null) want(o.cand, (o.from || 0) + o.len / 2, (fx) => { o.fx = fx; });
   });
   if (!reqs.length) return;
   if (stage) stage('🎯 Finding the speaker in every moment, to fill the frame…');
   let fxs = reqs.map(() => 0.5);
   try { fxs = await findSpeakers(ctx, reqs, tmp, log); } catch (e) { if (e instanceof jobs.CancelledError) throw e; if (log) log('speakers: ' + e.message); }
   back.forEach((put, i) => put(fxs[i] == null ? 0.5 : fxs[i]));
+}
+
+/** Where the person stands across a line's picture at source time `t`, from its looks (between two, in proportion); null when no look saw anyone. */
+function fxAtLook(p, t) {
+  const L = (p.looks || []).filter((l) => l.fx != null && l.people !== 0).sort((a, b) => a.t - b.t);
+  if (!L.length) return null;
+  if (L.length === 1 || t <= L[0].t) return L[0].fx;
+  const a = L[0], b = L[L.length - 1];
+  if (t >= b.t) return b.fx;
+  return a.fx + (b.fx - a.fx) * ((t - a.t) / Math.max(0.01, b.t - a.t));
 }
 
 async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, onProgress, stage, log, keepAudio }) {
@@ -1974,7 +2006,8 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
       if (stage) stage(vids.length > 1 ? `👂 Listening to video ${i + 1} of ${vids.length}…` : '👂 Listening to every word…');
       let words = [];
       if (v.info.hasAudio && hear) {
-        try { words = (await hear(v.file, D, say((i / vids.length) * 40, ((i + 1) / vids.length) * 40), [opts.about && opts.about.speaker, opts.about && opts.about.church].filter(Boolean))) || []; } catch (e) { if (e instanceof jobs.CancelledError || (e && e.cancelled)) throw e; if (log) log('hear failed: ' + e.message); words = []; }
+        // (nothing from "What's it about?" goes to the ear: the captions are what was said)
+        try { words = (await hear(v.file, D, say((i / vids.length) * 40, ((i + 1) / vids.length) * 40))) || []; } catch (e) { if (e instanceof jobs.CancelledError || (e && e.cancelled)) throw e; if (log) log('hear failed: ' + e.message); words = []; }
       }
       let loud = [];
       if (v.info.hasAudio) { try { loud = await loudness(ctx, v.file); } catch (e) { if (e instanceof jobs.CancelledError) throw e; } }
@@ -2016,6 +2049,50 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
       const cut = picks.splice(picks.length - 2, 1)[0];   // the last line is the payoff: take the one before it
       total -= cut.end - cut.start;
     }
+    /*
+     * 2b) SOMEONE ON SCREEN, ALWAYS. The AI looks at every chosen line (two
+     * frames of it — near its start and near its end) and counts the people.
+     * A line that shows nobody — the camera on an empty stage, the screen, the
+     * slides — is not used, and the next strongest lines that DO show someone
+     * take its place. The looks are kept: they say where to cut each beat so
+     * the person stays in the 9:16 frame, and how to pan with them (FULL SCREEN).
+     */
+    const looksAt = (p) => { const len = p.end - p.start; return len < 2.2 ? [p.start + len / 2] : [p.start + len * 0.2, p.end - len * 0.2]; };
+    const lookLines = async (ps) => {
+      const reqs = [], who = [];
+      ps.forEach((p) => { p.looks = []; looksAt(p).forEach((t) => { reqs.push({ file: p.cand.file, t: round2(clamp(t, 0, Math.max(0, p.cand.fileDur - 0.1))), w: p.cand.w, h: p.cand.h }); who.push(p); }); });
+      if (!reqs.length) return;
+      const got = await lookAt(ctx, reqs, tmp, log, { people: true });
+      got.forEach((g, i) => who[i].looks.push({ t: reqs[i].t, fx: g.fx, people: g.people }));
+    };
+    // nobody in ANY look at it (its start or its end on an empty stage) is a line not to use
+    const nobody = (p) => !!(p.looks && p.looks.some((l) => l.people === 0));
+    if (stage) stage('👀 Making sure someone can be seen in every line…');
+    await lookLines(picks);
+    const seen = picks.some((p) => p.looks.some((l) => l.people != null));
+    if (seen) {
+      const empty = picks.filter(nobody);
+      if (empty.length && empty.length < picks.length) {
+        picks = picks.filter((p) => !nobody(p));
+        let tot = picks.reduce((n, p) => n + (p.end - p.start), 0);
+        const tried = new Set(picks.concat(empty));
+        const pool = list.filter((p) => !tried.has(p) && p.end - p.start >= 1.4).sort((a, b) => b.score - a.score);
+        let added = 0;
+        for (let round = 0; round < 3 && tot < opts.lengthSec * 0.9 && pool.length; round++) {
+          const batch = pool.splice(0, 6);
+          await lookLines(batch);
+          for (const p of batch) {
+            if (tot >= opts.lengthSec * 0.9) break;
+            if (nobody(p) || !p.looks.some((l) => l.people > 0)) continue;
+            picks.splice(Math.max(1, picks.length - 1), 0, p);   // before the payoff, which stays last
+            tot += p.end - p.start; added++;
+          }
+        }
+        if (log) log(`people: ${empty.length} line(s) showed nobody and were left out; ${added} line(s) with someone in them took their place`);
+      } else if (empty.length) {
+        if (log) log('people: every chosen line seemed to show nobody — kept as chosen');
+      }
+    }
     if (onProgress) onProgress(50);
     // the narrator, when asked for: the director's words (or the operator's own hook), in a real voice
     const P = d.plan || {};
@@ -2042,6 +2119,16 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
     }
     // moments the edit did not use, from every speaking video — B-roll for the narrator and between lines
     const spare = phrases.filter((p) => !picks.includes(p) && p.end - p.start >= 1.4).sort((a, b) => b.score - a.score);
+    // the B-roll moments too: only ones where someone can be seen (looked at where the snapshot freezes)
+    const snapAt = (sp) => round2(clamp(sp.start + Math.min(1.2, (sp.end - sp.start) / 2), 0, Math.max(0, sp.cand.fileDur - 0.1)));
+    if (seen && spare.length) {
+      const top = spare.slice(0, 24);
+      const got = await lookAt(ctx, top.map((sp) => ({ file: sp.cand.file, t: snapAt(sp), w: sp.cand.w, h: sp.cand.h })), tmp, log, { people: true });
+      top.forEach((sp, i) => { sp.snapLook = got[i]; });
+      const good = top.filter((sp) => !(sp.snapLook && sp.snapLook.people === 0));
+      if (log && good.length < top.length) log(`people: ${top.length - good.length} B-roll moment(s) showed nobody and were left out`);
+      spare.length = 0; spare.push(...good);
+    }
     let spareAt = 0;
     const nextSpare = (notFile) => {
       for (let n = 0; n < spare.length; n++) {
@@ -2108,6 +2195,9 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
         const hypeish = opts.style === 'hype' || opts.style === 'fun';
         const transition = first && hypeish && ((pi === 0 && vo.intro) || pi % 2 === 1) ? 'flash' : 'cut';
         const sh = { cand: p.cand, seconds: need, from: round2(from), need, effect, focus: 'center', slow: false, transition, grade, overlays: [], at: round2(at), line: pi };
+        // TRACKING: cut round the person, panning with them from where they stand at this beat's start to its end
+        const fa = fxAtLook(p, from), fb = fxAtLook(p, from + need);
+        if (fa != null) { sh.fx = round2(fa); if (fb != null && Math.abs(fb - fa) > 0.02) sh.fx2 = round2(fb); }
         for (const w of ws.slice(a, b + 1)) {
           const s0 = at + (w.start - from), s1 = at + (w.end - from);
           capWords.push({ text: w.text, start: round2(Math.max(at, s0)), end: round2(Math.min(at + need, Math.max(s0 + 0.05, s1))) });
@@ -2145,8 +2235,10 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
         const snap = sb++ % 3 !== 2;
         const ol = snap ? round2(Math.min(1.5, sh.seconds - 0.5)) : len;
         const at0 = snap ? sp.start + Math.min(1.2, (sp.end - sp.start) / 2) : sp.start + 0.2;
-        sh.overlays.push({ cand: sp.cand, style: snap ? 'snapshot' : 'cutaway', start: snap ? 0.35 : 0.3, len: ol, pos: sb % 2 ? 'left' : 'right',
-          from: round2(clamp(at0, 0, Math.max(0, sp.cand.fileDur - ol - 0.05))) });
+        const ov = { cand: sp.cand, style: snap ? 'snapshot' : 'cutaway', start: snap ? 0.35 : 0.3, len: ol, pos: sb % 2 ? 'left' : 'right',
+          from: round2(clamp(at0, 0, Math.max(0, sp.cand.fileDur - ol - 0.05))) };
+        if (!snap && sp.snapLook && sp.snapLook.fx != null) ov.fx = round2(sp.snapLook.fx);   // already looked at: cut round its person
+        sh.overlays.push(ov);
       }
     }
     const duration = at;

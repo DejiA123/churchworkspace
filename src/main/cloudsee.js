@@ -146,6 +146,23 @@ const systemFor = (n) => [
   `Reply with JSON only: {"frames":[{"frame":"A","column":<0..${n}>,"sure":<true|false>}]}`,
 ].join('\n');
 const SYSTEM = systemFor(8);
+/*
+ * ►► WHERE ARE THE PEOPLE? (the Viral Montage) ◄◄ Not only who is speaking:
+ * HOW MANY people can be seen — so a moment with nobody in it (an empty
+ * stage, the screen, slides, lights) is never chosen — and where the one to
+ * keep in a narrow 9:16 crop stands: the speaker when it is clear, otherwise
+ * the most prominent person.
+ */
+const peopleSystemFor = (n) => [
+  'You help a church media team cut a sermon or service recording into a vertical (9:16) video. Every frame will be cropped to a narrow vertical strip, and a person must always be seen in it.',
+  'The image is a grid of separate video frames. Each frame has a white capital LETTER on black in its top-right corner.',
+  `Each frame is ruled into ${n} equal vertical columns, numbered 1 (left) to ${n} (right) along its bottom edge.`,
+  'For each frame give two answers:',
+  'people: how many people can clearly be seen in the frame, up to 9. An empty stage or room, a screen, slides, song lyrics, a logo, lights, a building, or a black or blurred frame with no one in it is 0. A congregation or crowd counts as people.',
+  "column: the column of the HEAD of the person the crop should keep: the one speaking or leading if you can tell (a microphone at the mouth, at the pulpit, addressing the room), otherwise the most prominent person (the closest, largest or most in focus). When people is 0, column is 0.",
+  'Faces on posters, screens, backdrops or photos on the wall are NOT people.',
+  `Reply with JSON only: {"frames":[{"frame":"A","people":<0..9>,"column":<0..${n}>,"sure":<true|false>}]}`,
+].join('\n');
 
 /** The first balanced JSON object in a reply (models wrap JSON in fences and prose). */
 const parseJson = (t) => cloudwrite.parseJson(t);
@@ -167,8 +184,11 @@ function whoIsSpeaking(args) {
   queue = run.catch(() => {});
   return run;
 }
+/** The same grid, asked how many people each frame shows and where the one to keep stands:
+ *  answers: { A: { people, column, sure } } (people 0 = nobody to be seen). */
+function whereArePeople(args) { return whoIsSpeaking(Object.assign({}, args, { people: true })); }
 
-async function ask({ image, frames, columns = 8, maxWaitMs = 45000 } = {}) {
+async function ask({ image, frames, columns = 8, maxWaitMs = 45000, people = false } = {}) {
   const a = cloudwrite.access();
   health.asked++;
   const fail = (why) => { health.failed++; health.why = why; return { ok: false, why }; };
@@ -197,7 +217,7 @@ async function ask({ image, frames, columns = 8, maxWaitMs = 45000 } = {}) {
     const body = Object.assign({
       model, temperature: 0, max_tokens: 60 + 40 * frames.length,
       messages: [
-        { role: 'system', content: systemFor(columns) },
+        { role: 'system', content: people ? peopleSystemFor(columns) : systemFor(columns) },
         { role: 'user', content: [
           { type: 'text', text: `${frames.length} frame${frames.length === 1 ? '' : 's'}: ${frames.map((f) => f.label).join(', ')}. Each is ruled into ${columns} columns.` },
           { type: 'image_url', image_url: { url: image } },
@@ -233,6 +253,10 @@ async function ask({ image, frames, columns = 8, maxWaitMs = 45000 } = {}) {
         // a column past the last one is not an answer at all — neither "here" nor "nobody"
         if (!Number.isFinite(n) || n < 0 || n > columns) continue;
         answers[L] = { column: n, sure: r.sure !== false };
+        if (people) {
+          const c = Math.round(Number(r.people));
+          answers[L].people = Number.isFinite(c) && c >= 0 ? Math.min(9, c) : null;
+        }
       }
       if (!Object.keys(answers).length) { lastWhy = model + ' did not answer about any frame'; continue; }
       health.ok++; health.why = ''; health.model = model; health.lastMs = Date.now() - t0; health.lastAt = Date.now();
@@ -278,4 +302,4 @@ async function ask({ image, frames, columns = 8, maxWaitMs = 45000 } = {}) {
   return fail(lastWhy || 'no AI model would answer');
 }
 
-module.exports = { VISION, whoIsSpeaking, state, ready, SYSTEM, _health: () => health, _blocked: () => blocked };
+module.exports = { VISION, whoIsSpeaking, whereArePeople, state, ready, SYSTEM, _health: () => health, _blocked: () => blocked };

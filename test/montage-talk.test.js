@@ -160,10 +160,12 @@ const SCRIPT = {
     const grids = [];
     see.ready = () => true;
     see.whoIsSpeaking = async ({ image, frames }) => { grids.push(image); return { ok: true, answers: Object.fromEntries(frames.map((f) => [f.label, { column: 7, sure: true }])) }; };
+    const realPeople = see.whereArePeople;
+    see.whereArePeople = async ({ image, frames }) => { grids.push(image); return { ok: true, answers: Object.fromEntries(frames.map((f) => [f.label, { column: 7, people: 1, sure: true }])) }; };
     const outR = path.join(WORK, 'fill-right.mp4');
     let r;
     try { r = await montage.make(ctx, video.getInfo, { mediaPaths: [L], style: 'hype', lengthSec: 12, aspect: '9:16', output: outR, mode: 'talk', hear: hear1 }); }
-    finally { see.ready = realReady; see.whoIsSpeaking = realWho; }
+    finally { see.ready = realReady; see.whoIsSpeaking = realWho; see.whereArePeople = realPeople; }
     const colourAt = (file, t, y) => {
       const buf = execFileSync(ffmpeg, ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-vf', `crop=40:40:520:${y},scale=1:1`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']);
       return [buf[0], buf[1], buf[2]];
@@ -189,6 +191,66 @@ const SCRIPT = {
     const lines = montage.phrasesOf(long, 6.5);
     ok(lines.every((p) => p.end - p.start <= 7.6), 'a long run of speech is cut into short lines (≤ ~7 s)', lines.map((p) => +(p.end - p.start).toFixed(1)));
     ok(r.overlays.some((o) => o.style === 'snapshot'), 'one video, no photos: its best moments come back as snapshots', r.overlays.map((o) => o.style));
+  }
+
+  console.log('\nNOBODY ON SCREEN IS NEVER USED — AND THE CROP FOLLOWS THE PERSON');
+  {
+    // a 16:9 service: the first 20 s the camera is on an empty, dark stage (someone still talking off camera);
+    // then a "person" (a white figure) walks from the left of the stage to the right
+    const S = make(['-f', 'lavfi', '-i', 'color=c=black:s=1280x720:r=30:d=20', '-f', 'lavfi', '-i', 'color=c=0x606060:s=1280x720:r=30:d=20',
+      '-f', 'lavfi', '-i', 'sine=f=220:d=40', '-f', 'lavfi', '-i', 'color=c=white:s=110x420:r=30:d=20',
+      '-filter_complex', "[1:v][3:v]overlay=x='100+t*48':y=160[walk];[0:v][walk]concat=n=2:v=1:a=0[v]",
+      '-map', '[v]', '-map', '2:a', '-shortest', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast'], path.join(WORK, 'stage.mp4'));
+    // speech all the way through — the strongest-sounding lines are in the EMPTY half
+    const talk = say(['Listen to me now this is the word for you today church.', 'God is about to do something new in your life.', 'Do not be afraid of what is coming next.', 'He has never failed you and he never will.',
+      'Praise him in the storm and in the calm.', 'Your breakthrough is closer than you think.', 'Lift your hands and give him glory.', 'This is your season of harvest and joy.',
+      'Every chain is broken in the name of Jesus.', 'Walk in faith and not in fear today.'], 0.5);
+    // the loud ones first: so a plain director would pick from the empty half
+    const see = require(path.join(ROOT, 'src/main/cloudsee'));
+    const realReady = see.ready, realPeople = see.whereArePeople;
+    // the stand-in for the vision AI really LOOKS at the grid: a dark tile has nobody in it; otherwise the
+    // person is the brightest of the eight columns
+    const gridDir = process.env.KEEP_GRIDS || fs.mkdtempSync(path.join(WORK, 'grid-'));
+    let looked = 0, nobodyTiles = 0;
+    const lum = (file, x, y, w, h) => execFileSync(ffmpeg, ['-v', 'error', '-i', file, '-vf', `crop=${w}:${h}:${x}:${y},scale=1:1,format=gray`, '-f', 'rawvideo', '-'])[0];
+    see.ready = () => true;
+    see.whereArePeople = async ({ image, frames }) => {
+      const f = path.join(gridDir, `g${looked++}.jpg`);
+      fs.writeFileSync(f, Buffer.from(image.split(',')[1], 'base64'));
+      const answers = {};
+      frames.forEach((fr, k) => {
+        const tx = 4 + (k % 3) * (288 + 4), ty = 4 + Math.floor(k / 3) * (162 + 4);
+        // the picture inside the tile (above the column numbers, left of the letter)
+        if (lum(f, tx + 4, ty + 24, 280, 110) < 30) { nobodyTiles++; answers[fr.label] = { people: 0, column: 0, sure: true }; return; }
+        let best = 1, bv = -1;
+        for (let c = 0; c < 8; c++) { const v = lum(f, tx + c * 36 + 6, ty + 40, 24, 70); if (v > bv) { bv = v; best = c + 1; } }
+        answers[fr.label] = { people: 1, column: best, sure: true };
+      });
+      return { ok: true, answers };
+    };
+    const outS = path.join(WORK, 'stage-916.mp4');
+    let rs;
+    try { rs = await montage.make(ctx, video.getInfo, { mediaPaths: [S], style: 'hype', lengthSec: 15, aspect: '9:16', output: outS, mode: 'talk', hear: async () => talk }); }
+    finally { see.ready = realReady; see.whereArePeople = realPeople; }
+    ok(nobodyTiles > 0, 'the AI was asked about the empty-stage moments', { looked, nobodyTiles });
+    const proj = montage.loadProject(outS);
+    const lines = proj.shots.filter((x) => x.from != null && proj.cands[x.cid] && proj.cands[x.cid].kind === 'video');
+    ok(lines.length > 0 && lines.every((x) => x.from >= 19.5), 'no moment from the empty stage is used — every shot is from when someone is on it', lines.map((x) => x.from));
+    // tracking: wherever the edit is, the white figure is inside the 9:16 frame (the frame is bright near the middle)
+    const clear = (t) => !(rs.overlays || []).some((o) => t >= o.at - 0.2 && t <= o.at + o.seconds + 0.2);
+    const times = [];
+    for (let t = 0.6; t < rs.duration - 0.4 && times.length < 8; t += 0.9) if (clear(t)) times.push(+t.toFixed(2));
+    const inFrame = times.map((t) => {
+      const b = execFileSync(ffmpeg, ['-v', 'error', '-ss', String(t), '-i', outS, '-frames:v', '1', '-vf', 'crop=1080:400:0:760,scale=8:1,format=gray', '-f', 'rawvideo', '-']);
+      return Math.max(...b);
+    });
+    ok(times.length >= 3 && inFrame.every((v) => v > 180), 'the person is always in the 9:16 frame — the crop follows them as they walk', { times, inFrame });
+    const pans = proj.shots.filter((x) => typeof x.fx2 === 'number');
+    ok(pans.length >= 1 && pans.every((x) => x.fx2 > x.fx), 'within a line the crop pans with them (left to right, as they walk)', proj.shots.map((x) => [x.fx, x.fx2]));
+    // the captions are what was said: every caption word is one of the spoken words, in order
+    const spoken = new Set(talk.map((w) => w.text));
+    const capt = (rs.words || []).map((w) => w.text);
+    ok(capt.length > 10 && capt.every((w) => spoken.has(w)), 'the captions are exactly the words that were said (nothing added)', capt.filter((w) => !spoken.has(w)));
   }
 
   console.log('\nNOTHING SAID');
