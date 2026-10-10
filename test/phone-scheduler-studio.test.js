@@ -19,6 +19,9 @@
  *   [6] a caption typed before the AI answers is never written over
  *   [10] "I don't like 'the speaker' and 'Our Church'": with no names given the
  *       caption names nobody; names given on the post are used, and remembered
+ *   [11] bulk upload: several picked on the phone at once — a tile each while
+ *       sending, then a card per post with its own AI caption to edit, its own
+ *       time; Schedule makes one post each, with its own caption
  *   [9] "I selected a video from this phone but it did not show up": on a slow
  *       connection the video shows AT ONCE, played from the phone, with how far
  *       the sending has got — then the caption is written when it lands
@@ -275,6 +278,43 @@ function aiServer() {
     const keptNames = await page.evaluate(() => localStorage.getItem('mw.social.names'));
     check(/Bishop David Richman/.test(keptNames || ''), 'and remembered for the next post', keptNames);
     await page.evaluate(() => localStorage.removeItem('mw.social.names'));
+
+    // [11] bulk upload from the phone
+    await page.evaluate(() => { const x = document.querySelector('#csCompose .cp-x'); if (x) x.click(); });
+    await sleep(600);
+    const nBefore = (await page.evaluate(async () => window.api.scheduler.list())).length;
+    await page.evaluate(() => window.MWSocial.compose({}));
+    await page.waitForSelector('#csCompose [data-c="device"]', { timeout: 8000 });
+    const cdp2 = await ctx.newCDPSession(page);
+    await cdp2.send('Network.enable');
+    await cdp2.send('Network.emulateNetworkConditions', { offline: false, latency: 40, downloadThroughput: 4e6, uploadThroughput: 900e3 });
+    const [ch4] = await Promise.all([page.waitForEvent('filechooser', { timeout: 8000 }), page.tap('#csCompose [data-c="device"]')]);
+    check(ch4.isMultiple(), 'From this phone lets several be picked at once');
+    const B2 = path.join(WORK, 'Clip two.mp4');
+    fs.copyFileSync(BIG, B2);
+    await ch4.setFiles([BIG, B2, FLY]);
+    await page.waitForSelector('#csCompose .csb-strip-it.sending', { timeout: 5000 }).catch(() => {});
+    await sleep(800);
+    const bulkSend = await page.evaluate(() => ({ tiles: document.querySelectorAll('#csCompose .csb-strip-it.sending').length, head: (document.querySelector('#csCompose .csb-h3 b') || {}).textContent || '' }));
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'b-real-9-bulk-sending.png') });
+    check(bulkSend.tiles === 3 && /Sending \d of 3 to the studio/.test(bulkSend.head), 'while sending: a tile each, and how many are done', bulkSend);
+    await cdp2.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+    await page.waitForFunction(() => document.querySelectorAll('#csCompose .csb-bcap').length === 3, null, { timeout: 120000 }).catch(() => {});
+    const cards = await page.$$eval('#csCompose .csb-bcap', (xs) => xs.map((x) => x.value));
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'b-real-10-bulk-cards.png') });
+    check(cards.length === 3 && cards.every((c) => c.length > 10), 'then a card per post, each with its own AI caption', cards.map((c) => c.slice(0, 40)));
+    await page.fill('#csCompose .csb-bcap[data-bcap="1"]', 'My own words for clip two');
+    const goLabel = await page.$eval('#csCompose [data-c="go"]', (b) => b.textContent);
+    check(/Schedule 3 posts/.test(goLabel), 'the button says how many posts', goLabel);
+    await page.tap('#csCompose [data-c="go"]');
+    await page.waitForFunction(() => !document.querySelector('#csCompose.on'), null, { timeout: 30000 }).catch(() => {});
+    await sleep(1200);
+    const all = await page.evaluate(async () => window.api.scheduler.list());
+    const fresh = all.slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, 3);
+    const times = fresh.map((p) => +new Date(p.scheduledAt)).sort();
+    check(all.length === nBefore + 3 && fresh.some((p) => p.caption === 'My own words for clip two') && new Set(fresh.map((p) => p.caption)).size === 3,
+      'Schedule makes one post each, with its own caption (an edited one kept)', fresh.map((p) => (p.caption || '').slice(0, 30)));
+    check(times[2] - times[0] >= 2 * 3600e3, 'spread out over time', times.map((t) => new Date(t).toISOString()));
 
     if (SHOTS) {
       await page.evaluate(() => { const x = document.querySelector('#csCompose .cp-x'); if (x) x.click(); });

@@ -888,6 +888,15 @@
     };
     const firstPlat = () => { const a = linked().find((x) => picked().includes(x.id) && /tiktok|instagram/.test(x.platform)) || linked().find((x) => picked().includes(x.id)); return a || null; };
     function mediaBlock() {
+      if (st.sending && st.sending.items.length > 1) {
+        // a bulk send: a tile each, with its own progress
+        const its = st.sending.items;
+        const done = its.filter((x) => (x.pct || 0) >= 100).length;
+        return `<div class="csb-h3"><b>Sending ${Math.min(its.length, done + 1)} of ${its.length} to the studio…</b><button type="button" class="csb-link" data-c="stopsend">Stop all</button></div>`
+          + '<div class="csb-strip">' + its.map((it, i) => `<div class="csb-strip-it sending" data-send="${i}"${!it.video && it.url ? ` style="background-image:url('${escAttr(it.url)}')"` : ''}>`
+            + (it.video && it.url ? `<video src="${escAttr(it.url)}#t=0.5" muted playsinline preload="metadata"></video>` : '')
+            + `<span class="csb-send mini"><span class="csb-send-bar"><i style="width:${Math.max(3, it.pct || 0)}%"></i></span><span class="csb-send-tx">${(it.pct || 0) >= 100 ? '✓' : Math.round(it.pct || 0) + '%'}</span></span></div>`).join('') + '</div>';
+      }
       if (st.sending) {
         return '<div class="csb-sending">' + st.sending.items.map((it, i) => `<div class="csb-prev sending${it.video ? '' : ' pic'}" data-send="${i}"${!it.video && it.url ? ` style="background-image:url('${escAttr(it.url)}')"` : ''}>`
           + (it.video && it.url ? `<video src="${escAttr(it.url)}" muted playsinline autoplay loop preload="metadata"></video>` : '')
@@ -900,14 +909,14 @@
         const err = st.sendErr ? `<p class="csb-send-err">${mi('alert')}<span>${esc(st.sendErr)}</span></p>` : '';
         return '<div class="csb-choose">'
           + `<button type="button" class="csb-src" data-c="exports"><span class="csb-src-ic">${mi('film')}</span><b>Your exports</b><small>Shorts and videos the studio made</small></button>`
-          + `<button type="button" class="csb-src" data-c="device"><span class="csb-src-ic">${mi('upload')}</span><b>From this ${phone() ? 'phone' : 'computer'}</b><small>A video, or a flyer to announce</small></button>`
+          + `<button type="button" class="csb-src" data-c="device"><span class="csb-src-ic">${mi('upload')}</span><b>From this ${phone() ? 'phone' : 'computer'}</b><small>Videos or flyers — pick one, or many at once</small></button>`
           + '</div>' + err;
       }
       if (many()) {
-        return '<div class="csb-strip">'
-          + st.files.map((f, i) => `<div class="csb-strip-it" data-thumb="${escAttr(f)}">${isVideo(f) ? `<i class="csb-play sm">${mi('play')}</i>` : ''}`
-            + `<button type="button" class="csb-x" data-c="drop" data-i="${i}" aria-label="Leave this one out">${mi('x')}</button></div>`).join('')
-          + `<button type="button" class="csb-strip-add" data-c="change">${mi('plus')}<span>Add</span></button></div>`;
+        // each post is a card below (picture, time, caption): here only a way to add more
+        return '<div class="csb-addrow">'
+          + `<button type="button" class="csb-act" data-c="device">${mi('upload')}Add from ${phone() ? 'phone' : 'computer'}</button>`
+          + `<button type="button" class="csb-act" data-c="exports">${mi('film')}Add exports</button></div>`;
       }
       // one post: the picture as it will be seen, with its caption on it
       const f = st.files[0];
@@ -942,8 +951,7 @@
         return '<div class="cs-chips">'
           + [[24, 'One a day'], [12, 'Twice a day'], [6, 'Every 6 h'], [48, 'Every 2 days']].map(([h, l]) =>
             `<button type="button" class="cs-chip${st.spacing === h ? ' on' : ''}" data-c="spacing" data-h="${h}">${l}</button>`).join('')
-          + '</div><ol class="cs-plan">' + times.map((t, i) => `<li><span class="cs-plan-pic" data-thumb="${escAttr(st.files[i])}"></span>`
-            + `<span><b>${esc((st.batchCaps[st.files[i]] || {}).title || titleFromFile(st.files[i]))}</b><small>${esc(whenLabel(t))}</small></span></li>`).join('') + '</ol>';
+          + `</div><p class="cs-hint">First one ${esc(whenLabel(times[0]))}, then ${st.spacing >= 24 ? (st.spacing === 24 ? 'one a day' : `every ${st.spacing / 24} days`) : `every ${st.spacing} hours`} at the best times — each card shows its time.</p>`;
       }
       const w = chosenWhen();
       return '<div class="cs-chips">'
@@ -978,10 +986,22 @@
     }
     function textBlock() {
       if (many()) {
-        const n = Object.keys(st.batchCaps).length;
-        return `<div class="csb-ai"><div class="csb-ai-head"><span class="csb-ai-ic">${mi('sparkles')}</span><b>AI captions</b><small>one for each video</small>${st.writing ? `<span class="csb-ai-st busy"><i class="csb-spin"></i>${esc(st.writing)}</span>` : n ? `<span class="csb-ai-st ok">${mi('check')}${n} of ${st.files.length}</span>` : ''}</div>`
-          + `<textarea class="cs-input csb-cap" data-c="caption" rows="3" placeholder="Leave empty — each post gets its own AI caption. Or write one caption for all of them.">${esc(st.caption)}</textarea>`
-          + `<div class="csb-acts"><button type="button" class="csb-act" data-c="write-all"${st.writing ? ' disabled' : ''}>${mi('refresh')}${n ? 'Write them again' : 'Write them now'}</button></div></div>`;
+        // ►► BULK: every post its own card — its picture, its time, its own AI caption to edit
+        const n = st.files.filter((f) => st.batchCaps[f]).length;
+        const times = batchTimes();
+        return `<div class="csb-ai"><div class="csb-ai-head"><span class="csb-ai-ic">${mi('sparkles')}</span><b>AI captions</b><small>one for each post</small>${st.writing ? `<span class="csb-ai-st busy"><i class="csb-spin"></i>${esc(st.writing)}</span>` : n ? `<span class="csb-ai-st ok">${mi('check')}${n} of ${st.files.length}</span>` : ''}</div>`
+          + '<div class="csb-bposts">' + st.files.map((f, i) => {
+            const own = st.batchCaps[f];
+            const writing = st.writingFile === f;
+            return `<div class="csb-bpost"><span class="csb-bpic" data-thumb="${escAttr(f)}">${isVideo(f) ? `<i class="csb-play sm">${mi('play')}</i>` : ''}</span>`
+              + `<div class="csb-bmain"><small>${mi('clock')}${esc(times[i] ? shortWhen(times[i]) : '')}</small>`
+              + (own ? `<textarea class="cs-input csb-bcap" data-bcap="${i}" rows="4" maxlength="2200">${esc(own.caption || '')}</textarea>`
+                : writing ? '<div class="csb-shims"><i class="csb-shim w90"></i><i class="csb-shim w75"></i><i class="csb-shim w50"></i></div>'
+                  : `<p class="csb-bwait">${st.writing ? 'Waiting its turn…' : 'No caption yet'}</p>`)
+              + `</div><button type="button" class="csb-x" data-c="drop" data-i="${i}" aria-label="Leave this one out">${mi('x')}</button></div>`;
+          }).join('') + '</div>'
+          + `<div class="csb-acts"><button type="button" class="csb-act" data-c="write-all"${st.writing ? ' disabled' : ''}>${mi('refresh')}${n ? 'Write them all again' : 'Write them now'}</button></div>`
+          + (!st.writing ? namesRow() : '') + '</div>';
       }
       const f = st.files[0];
       const ai = st.ai || {};
@@ -1036,7 +1056,7 @@
     }
 
     function whenSummary() {
-      if (many()) { const t = batchTimes(); return { main: `From ${shortWhenLabel(t[0])}`, sub: `${st.files.length} posts, spread out` }; }
+      if (many()) { const t = batchTimes(); return { main: `${st.files.length} posts`, sub: `from ${shortWhen(t[0])}` }; }
       if (st.quick === 'now') return { main: 'Right now', sub: 'As soon as you tap' };
       const w = chosenWhen();
       const day = dayName(w);
@@ -1059,13 +1079,13 @@
       const n = picked().length * Math.max(1, st.files.length);
       const ready = st.files.length && picked().length;
       const busy = !many() && st.ai && st.ai.stage && st.ai.stage !== 'done' && st.ai.stage !== 'fail';
-      const label = edit ? 'Save changes' : st.quick === 'now' && !many() ? `Post ${n > 1 ? n + ' now' : 'now'}` : `Schedule ${n > 1 ? n + ' posts' : 'post'}`;
+      const label = edit ? 'Save changes' : many() ? `Schedule ${st.files.length} posts` : st.quick === 'now' ? `Post ${n > 1 ? n + ' now' : 'now'}` : `Schedule ${n > 1 ? n + ' posts' : 'post'}`;
       const ws = whenSummary();
       panel.foot.innerHTML = '<div class="csb-bar">'
         + `<button type="button" class="csb-when" data-c="whenjump">${mi('clock')}<span><b>${esc(ws.main)}</b><small>${esc(ws.sub)}</small></span></button>`
         + `<button type="button" class="csb-go" data-c="go"${ready && !st.submitting ? '' : ' disabled'}>${st.submitting ? 'Scheduling…' : label}</button></div>`
         + (ready ? (busy ? '<p class="cs-hint">You can tap it now — it waits for the caption to be written.</p>' : '')
-          : `<p class="cs-hint">${st.sending ? 'Your video is on its way — the caption starts as soon as it lands.' : !st.files.length ? 'Choose a video or a flyer first.' : 'Choose at least one account to post to.'}</p>`);
+          : `<p class="cs-hint">${st.sending ? (st.sending.items.length > 1 ? 'Your videos are on their way — the captions start as each one lands.' : 'Your video is on its way — the caption starts as soon as it lands.') : !st.files.length ? 'Choose a video or a flyer first.' : 'Choose at least one account to post to.'}</p>`);
       paintThumbs(panel.body);
     }
 
@@ -1129,16 +1149,24 @@
         const f = st.files[i];
         if (st.batchCaps[f]) continue;
         st.writing = `Writing ${i + 1} of ${st.files.length}…`;
+        st.writingFile = f;
         draw();
         try {
           const out = await window.api.social.suggestCopy({ mediaPath: f, kind: isVideo(f) ? 'video' : 'image', listen: true, quick: true, jobId: 'copy_' + Date.now(), speaker: st.names.speaker || '', churchName: st.names.church || '' });
           if (out) st.batchCaps[f] = { title: out.title, caption: out.caption };
         } catch (er) { /* that one keeps the shared caption */ }
       }
-      st.writing = false;
+      st.writing = false; st.writingFile = '';
       if (panel.el.isConnected) draw();
     }
-    const afterPick = () => { if (many()) { if (st.files.some((f) => !st.batchCaps[f])) writeAll(); } else autoWrite(); };
+    const afterPick = () => {
+      if (many()) {
+        // the first post's caption (written or typed) stays that post's own
+        const f0 = st.files[0];
+        if (st.caption.trim() && !st.batchCaps[f0]) st.batchCaps[f0] = { title: st.title, caption: st.caption };
+        if (st.files.some((f) => !st.batchCaps[f])) writeAll();
+      } else autoWrite();
+    };
 
     async function pickExports() {
       await loadExports();
@@ -1188,7 +1216,11 @@
           const it = st.sending && st.sending.items[i]; if (!it) return;
           it.pct = pct; it.info = info;
           const el = panel.body.querySelector(`[data-send="${i}"]`);
-          if (el) { const b = el.querySelector('.csb-send-bar i'); if (b) b.style.width = Math.max(3, pct) + '%'; const t = el.querySelector('.csb-send-tx'); if (t) t.textContent = sendLine(it); }
+          if (el) {
+            const b = el.querySelector('.csb-send-bar i'); if (b) b.style.width = Math.max(3, pct) + '%';
+            const t = el.querySelector('.csb-send-tx'); if (t) t.textContent = st.sending.items.length > 1 ? (pct >= 100 ? '✓' : Math.round(pct) + '%') : sendLine(it);
+            if (st.sending.items.length > 1) { const h = panel.body.querySelector('.csb-h3 b'); const its = st.sending.items; if (h) h.textContent = `Sending ${Math.min(its.length, its.filter((x) => (x.pct || 0) >= 100).length + 1)} of ${its.length} to the studio…`; }
+          }
         },
         onResults: (results) => {
           const bad = results.filter((x) => x.error && !x.error.stopped);
@@ -1215,6 +1247,7 @@
     panel.body.addEventListener('input', (e) => {
       const t = e.target;
       if (t.dataset.c === 'title') st.title = t.value;
+      if (t.dataset.bcap != null) { const f = st.files[+t.dataset.bcap]; if (f) st.batchCaps[f] = Object.assign({}, st.batchCaps[f], { caption: t.value }); }
       if (t.dataset.c === 'caption') {
         st.caption = t.value;
         const n = panel.body.querySelector('.cs-count'); if (n) n.textContent = `${t.value.length}/2200`;
@@ -1246,7 +1279,16 @@
       }
       if (c === 'device') return pickDevice();
       if (c === 'stopsend') { if (st.sending && st.sending.stop) st.sending.stop(); return; }
-      if (c === 'drop') { st.files.splice(+b.dataset.i, 1); return draw(); }
+      if (c === 'drop') {
+        st.files.splice(+b.dataset.i, 1);
+        // down to one: its own caption becomes the post's
+        if (st.files.length === 1) {
+          const own = st.batchCaps[st.files[0]];
+          if (own && !st.caption.trim()) { st.caption = own.caption || ''; st.title = own.title || st.title; st.autoFor = st.files[0]; st.ai = { stage: 'done', from: isVideo(st.files[0]) ? 'video' : 'picture' }; }
+          else if (!st.caption.trim()) autoWrite();
+        }
+        return draw();
+      }
       if (c === 'connect') {
         return openConnect(() => {
           if (!panel.el.isConnected) return;
@@ -1282,6 +1324,7 @@
         try { localStorage.setItem('mw.social.names', JSON.stringify(st.names)); } catch (e) {}
         st.namesOpen = false;
         if (st.files.length && !many()) return autoWrite(true);
+        if (many() && !st.batchRun) { st.batchCaps = {}; return writeAll(); }
         return draw();
       }
       if (c === 'whenjump') { const w = panel.body.querySelector('#csbWhen'); if (w) w.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
@@ -1379,7 +1422,7 @@
             const own = st.batchCaps[f] || {};
             await window.api.scheduler.add({
               title: own.title || titleFromFile(f),
-              caption: withCredit(st.caption.trim() ? st.caption : (own.caption || titleFromFile(f)), credit),
+              caption: withCredit(own.caption || st.caption || titleFromFile(f), credit),
               mediaPaths: [fileAt(i)], accountIds: accs.map((a) => a.id), platforms,
               scheduledAt: times[i].toISOString(),
             });
