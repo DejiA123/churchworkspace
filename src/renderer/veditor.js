@@ -13568,14 +13568,20 @@
   /** The clips a look can go on, in timeline order: the main track, then the clips after it. */
   const fxClips = () => mainClips().concat(tailClips());
   /** The CSS that shows a look on the preview (close to ffmpeg's eq, not pixel-identical). */
+  /* Safari (every iPhone) cannot run an SVG filter on a playing video: with
+     url(#fxSharpen) in the filter it drops the WHOLE filter, so brightness,
+     contrast and the rest showed nothing either. There sharpening is previewed
+     as the crisper contrast it gives; the export sharpens for real. */
+  const NO_SVG_VIDEO_FILTER = typeof navigator !== 'undefined' && /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|Edg|Electron/.test(navigator.userAgent);
   function fxCss(f) {
     f = Object.assign({}, FX_DEFAULT, f || {});
     const parts = [];
     if (Math.abs(f.bri) > 0.001) parts.push(`brightness(${(1 + f.bri).toFixed(3)})`);
-    if (Math.abs(f.con - 1) > 0.001) parts.push(`contrast(${f.con})`);
+    const con = f.con * (NO_SVG_VIDEO_FILTER && f.sharp > 0.001 ? 1 + 0.08 * f.sharp : 1);
+    if (Math.abs(con - 1) > 0.001) parts.push(`contrast(${+con.toFixed(3)})`);
     if (Math.abs(f.sat - 1) > 0.001) parts.push(`saturate(${f.sat})`);
     if (FX_LOOK_CSS[f.look]) parts.push(FX_LOOK_CSS[f.look]);
-    if (f.sharp > 0.001) parts.push('url(#fxSharpen)');
+    if (f.sharp > 0.001 && !NO_SVG_VIDEO_FILTER) parts.push('url(#fxSharpen)');
     return parts.join(' ');
   }
   function setSharpKernel(sharp) {
@@ -13588,7 +13594,10 @@
   /** The main video shows the look of the clip under the playhead — and sounds at its volume. */
   function syncClipLook(t) {
     const p = ve.refs.player; if (!p || !ve.video) return;
-    const s = ve.tailT != null ? null : mainClips().find((x) => t >= x.start - 1e-3 && t < x.end);
+    // under the playhead: the clip being adjusted when it is there (clips can lie over one another), else the first
+    const here = ve.tailT != null ? [] : mainClips().filter((x) => t >= x.start - 1e-3 && t < x.end);
+    const tgt = ve.fxUi && ve.fxUi.clipId;
+    const s = here.find((x) => x.id === tgt) || here[0] || null;
     const f = fxOf(s);
     const css = fxCss(f);
     if (ve._fxCss !== css) { ve._fxCss = css; p.style.filter = css; }
@@ -13719,6 +13728,9 @@
       const next = cleanFx(Object.assign(fxOf(s), { [key]: value }));
       if (next) s.fx = next; else delete s.fx;
     }
+    // LIVE: the change is on screen as the slider moves — the preview goes to the clip being changed
+    // (not while it plays: a playing video is left where it is, and shows it as it reaches that clip)
+    if (u.scope !== 'all' && ve.refs.player && ve.refs.player.paused) fxShowClip(fxTarget());
     syncClipLook(nowT());
     updateMediaLayer(nowT());
     renderFxPanel();

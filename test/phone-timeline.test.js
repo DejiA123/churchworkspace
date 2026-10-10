@@ -535,9 +535,31 @@ async function waitUp() {
       });
       await sleep(300);
       const f = await page.evaluate(() => document.getElementById('vePlayer').style.filter);
-      check(opened && /brightness\(1\.2/.test(f) && /fxSharpen/.test(f), 'Adjust → Brightness and Sharpen change the preview as the slider moves', { opened, f });
+      // on an iPhone (Safari) an SVG filter on a playing video blanks the WHOLE filter: there sharpen is previewed as contrast
+      check(opened && /brightness\(1\.2/.test(f) && !/url\(/.test(f) && /contrast\(1\.08/.test(f), 'Adjust → Brightness and Sharpen change the preview as the slider moves (on an iPhone, without the SVG filter Safari cannot draw)', { opened, f });
       if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'adjust.png') });
       await page.evaluate(() => { const set = (id, v) => { const r = document.getElementById(id); r.value = v; r.dispatchEvent(new Event('input', { bubbles: true })); r.dispatchEvent(new Event('change', { bubbles: true })); }; set('fxBri', '0'); set('fxSharp', '0'); });
+      // the clip being changed is not the one on screen: moving the slider brings it on screen, changed
+      const live = await page.evaluate(async () => {
+        const T = window.VideoEditor.__test, p = document.getElementById('vePlayer');
+        p.pause();
+        const segs0 = T.segments().filter((x) => x.lane === 0);
+        if (segs0.length < 2) { const s0 = segs0[0]; T.split(s0.start + (s0.end - s0.start) / 2); }
+        const segs = T.segments().filter((x) => x.lane === 0).sort((a, b) => a.start - b.start);
+        p.currentTime = segs[0].start + 0.2;
+        await new Promise((r) => setTimeout(r, 300));
+        const label = () => (document.querySelector('#fxModal .fxq-clipnav, #fxClipName, #fxModal [data-clipnav]') || {}).textContent || '';
+        document.getElementById('fxNextClip').click();
+        await new Promise((r) => setTimeout(r, 200));
+        p.currentTime = segs[0].start + 0.2;          // and the playhead back on the FIRST clip
+        await new Promise((r) => setTimeout(r, 300));
+        const r = document.getElementById('fxCon'); r.value = '1.4'; r.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise((res) => setTimeout(res, 400));
+        const out = { t: p.currentTime, second: [segs[1].start, segs[1].end], filter: p.style.filter, label: label() };
+        r.value = '1'; r.dispatchEvent(new Event('input', { bubbles: true }));
+        return out;
+      });
+      check(live.t >= live.second[0] - 0.05 && live.t < live.second[1] && /contrast\(1\.4/.test(live.filter), 'the clip being adjusted comes on screen as the slider moves, and shows the change live', live);
     }
 
     console.log('\n=== [M] the captions window, calm (CapCut\'s Edit captions) ===');
