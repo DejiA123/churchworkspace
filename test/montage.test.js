@@ -172,6 +172,21 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
   log(res.bpm && Math.abs(res.bpm - 128) <= 1 && res.texts.length === 1 && res.texts[0].text === 'Camp night', 'cut to the song, with the operator’s words as the hook', `${res.bpm} BPM, ${JSON.stringify(res.texts)}`);
   log(stages.length >= 3, 'it says what it is doing', stages.join(' / '));
 
+  console.log('\n"WHAT\'S IT ABOUT?" IN PARTS: occasion, speaker, church, message, call to action');
+  {
+    const about = montage.cleanAbout({ occasion: 'Sunday service', speaker: 'Bishop David Richman', church: 'The Power House', focus: 'Faith over fear', cta: 'Join us Sundays at 10am', junk: 'x'.repeat(50) });
+    log(Object.keys(about).join() === 'occasion,speaker,church,focus,cta', 'only the five parts are kept', JSON.stringify(about));
+    const told = montage.aboutLines({ about, voice: 'am_michael' }).join(' ');
+    log(/Faith over fear/.test(told) && /Bishop David Richman/.test(told) && /narrator/.test(told) && /Join us Sundays/.test(told), 'the AI is told the message to keep to, the names to spell, and the call to action (for the narrator too)', told);
+    const outA = path.join(WORK, 'about.mp4');
+    const rA = await montage.make(ctx, video.getInfo, { mediaPaths: [v1, v2], style: 'worship', lengthSec: 8, aspect: '9:16', keepAudio: true, output: outA, onProgress: () => {}, about });
+    log(/Join us Sundays at 10am$/.test(rA.postCaption) && /Bishop David Richman/.test(rA.postCaption) && rA.hashtags.includes('ThePowerHouse'),
+      'the post caption names the speaker and church and ends with the call to action, with the church as a hashtag', JSON.stringify({ c: rA.postCaption, h: rA.hashtags }));
+    log(rA.texts.some((t) => /Faith over fear/i.test(t.text)), 'with no AI, the message is the hook on screen', JSON.stringify(rA.texts));
+    const pjA = montage.loadProject(outA);
+    log(pjA && /Join us Sundays at 10am/.test(pjA.postCaption), 'and the saved edit keeps that caption for a remake');
+  }
+
   console.log('\nKEEP EVERYTHING');
   const fullPlan = montage.finalise({
     shots: [

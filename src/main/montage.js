@@ -424,6 +424,54 @@ const STOP = new Set(('the a an and or but of to in on at for with from by is ar
 function cleanBrief(b) {
   return String(b == null ? '' : b).replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500);
 }
+/*
+ * ►► "WHAT'S IT ABOUT?", IN PARTS. ◄◄ Beside the free words (the brief), the
+ * phone asks the few things an editor always wants to know: the occasion, who
+ * is speaking, the church, the message to keep to and what people should do
+ * next. Each is short, plain text — nothing here is trusted as an instruction.
+ */
+const ABOUT_KEYS = ['occasion', 'speaker', 'church', 'focus', 'cta'];
+function cleanAbout(a) {
+  const out = {};
+  if (!a || typeof a !== 'object') return out;
+  for (const k of ABOUT_KEYS) {
+    const v = cleanBrief(a[k]).slice(0, k === 'cta' || k === 'focus' ? 160 : 80);
+    if (v) out[k] = v;
+  }
+  return out;
+}
+/** What the edit is about in one line, for when no AI is there: the operator's words, else the message, else the occasion. */
+function briefText(opts) {
+  const a = opts.about || {};
+  return opts.brief || a.focus || [a.occasion, a.church].filter(Boolean).join(' at ') || '';
+}
+/** The parts, told to the AI. */
+function aboutLines(opts) {
+  const a = opts.about || {};
+  const L = [];
+  if (a.occasion) L.push(`Occasion: ${a.occasion}.`);
+  if (a.speaker) L.push(`Speaker: ${a.speaker} — spell the name exactly like this wherever it appears (title, caption, words on screen).`);
+  if (a.church) L.push(`Church / ministry: ${a.church} — spell it exactly like this.`);
+  if (a.focus) L.push(`THE MESSAGE TO KEEP TO: "${a.focus}". Choose the moments that carry this message above everything else; the hook and the payoff should land it.`);
+  if (a.cta) L.push(`Call to action, in the operator's words: "${a.cta}". End the post caption with it${opts.voice ? ', and make the narrator\'s closing line say it in plain spoken words' : ''}.`);
+  return L;
+}
+/** The caption and hashtags always carry the call to action, the speaker and the church, however the edit was directed. */
+function withAbout(plan, about) {
+  const a = about || {};
+  if (!a.cta && !a.speaker && !a.church) return plan;
+  const has = (txt, x) => String(txt || '').toLowerCase().includes(String(x).toLowerCase());
+  let cap = String(plan.postCaption || '').trim();
+  if (a.speaker && !has(cap, a.speaker)) cap = [cap, `🎤 ${a.speaker}${a.church && !has(cap, a.church) ? ' · ' + a.church : ''}`].filter(Boolean).join('\n\n');
+  else if (a.church && !has(cap, a.church)) cap = [cap, `⛪ ${a.church}`].filter(Boolean).join('\n\n');
+  if (a.cta && !has(cap, a.cta)) cap = [cap, a.cta].filter(Boolean).join('\n\n');
+  const tags = (plan.hashtags || []).slice();
+  for (const name of [a.church, a.speaker]) {
+    const t = String(name || '').replace(/[^\p{L}\p{N}]+/gu, '');
+    if (t.length >= 3 && t.length <= 30 && !tags.some((x) => x.toLowerCase() === t.toLowerCase())) tags.unshift(t);
+  }
+  return Object.assign(plan, { postCaption: cap.slice(0, 900), hashtags: tags.slice(0, 12) });
+}
 const words = (t) => String(t).split(' ').filter(Boolean);
 const tidy = (t) => String(t).replace(/^[\s,;:.!?\-–—"'“”]+|[\s,;:\-–—"'“”]+$/g, '').trim();
 
@@ -461,6 +509,7 @@ function briefOf(opts, music) {
     music ? `Music: the operator's own song, ${music.bpm} BPM (one beat = ${music.interval}s). Shot lengths should be whole numbers of beats.` : 'No music chosen: the clips\' own sound plays.',
   ];
   if (opts.keepOrder) lines.push('ORDER IS THE OPERATOR\'S: the candidates are listed in the order they chose. Keep the shots in that order — do not reorder them. You still choose lengths, effects, transitions, overlays and words.');
+  lines.push(...aboutLines(opts));
   if (opts.brief) {
     lines.push(`WHAT IT IS ABOUT, in the operator's own words: "${cleanBrief(opts.brief)}"`);
     lines.push('This is the story of the edit. Choose and order the shots to tell it. The hook, every word on screen, the title, the post caption and the hashtags must be about THIS — use its names, places, dates and numbers exactly as written, and never invent details it does not give.');
@@ -621,7 +670,7 @@ function rulesOverlays(shots, cands) {
 
 /** No AI at all: strongest first, the rest in an alternating, varied order. */
 function directByRules(cands, opts, music) {
-  const fb = fromBrief(opts.brief);
+  const fb = fromBrief(briefText(opts));
   const hook0 = fb ? fb.hook : '';
   if (opts.full) {
     // everything, strongest first, photos spread between the videos, a fade
@@ -1046,7 +1095,7 @@ function finalise(raw, cands, opts, music) {
   }
   let tags = (Array.isArray(raw.hashtags) ? raw.hashtags : []).map((h) => String(h).replace(/^#+/, '').replace(/\s+/g, '')).filter(Boolean).slice(0, 10);
   // whatever the director left empty, the operator's own words fill
-  const fb = fromBrief(opts.brief);
+  const fb = fromBrief(briefText(opts));
   if (fb) {
     if (!texts.some((x) => x.role === 'hook') && fb.hook) {
       const first = shots[0];
@@ -1563,6 +1612,7 @@ async function remake(ctx, { project, edits, output, onProgress, stage }) {
 
 /** What the phone is told about a finished montage (made or remade). */
 function resultOf(plan, output, opts, extra) {
+  withAbout(plan, opts.about);
   return Object.assign({
     output,
     duration: plan.duration,
@@ -1715,6 +1765,7 @@ vo_intro / vo_outro: ONLY when a narrator is asked for (otherwise leave both emp
 function talkBrief(opts, list) {
   return `Style: ${opts.style} — ${STYLES[opts.style] || ''}\nTarget length: about ${opts.lengthSec} seconds of speech.`
     + `\nNarrator: ${opts.voice ? 'YES — write vo_intro and vo_outro.' : 'no — leave vo_intro and vo_outro empty.'}`
+    + (aboutLines(opts).length ? '\n' + aboutLines(opts).join('\n') : '')
     + (opts.brief ? `\nWhat the operator says it is about: ${opts.brief}` : '')
     + `\n\nPhrases (${list.length}):\n` + list.map((p) => `${p.id} | video ${p.vid} | ${p.start.toFixed(1)}-${p.end.toFixed(1)}s | loud ${p.score} | ${p.text}`).join('\n');
 }
@@ -1914,7 +1965,7 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
       if (stage) stage(vids.length > 1 ? `👂 Listening to video ${i + 1} of ${vids.length}…` : '👂 Listening to every word…');
       let words = [];
       if (v.info.hasAudio && hear) {
-        try { words = (await hear(v.file, D, say((i / vids.length) * 40, ((i + 1) / vids.length) * 40))) || []; } catch (e) { if (e instanceof jobs.CancelledError || (e && e.cancelled)) throw e; if (log) log('hear failed: ' + e.message); words = []; }
+        try { words = (await hear(v.file, D, say((i / vids.length) * 40, ((i + 1) / vids.length) * 40), [opts.about && opts.about.speaker, opts.about && opts.about.church].filter(Boolean))) || []; } catch (e) { if (e instanceof jobs.CancelledError || (e && e.cancelled)) throw e; if (log) log('hear failed: ' + e.message); words = []; }
       }
       let loud = [];
       if (v.info.hasAudio) { try { loud = await loudness(ctx, v.file); } catch (e) { if (e instanceof jobs.CancelledError) throw e; } }
@@ -1959,11 +2010,11 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
     if (onProgress) onProgress(50);
     // the narrator, when asked for: the director's words (or the operator's own hook), in a real voice
     const P = d.plan || {};
-    const fb0 = fromBrief(opts.brief);
+    const fb0 = fromBrief(briefText(opts));
     const vo = { intro: null, outro: null, why: '' };
     if (opts.voice) {
       const say1 = String(P.vo_intro || (fb0 && fb0.hook) || 'You need to hear this.').replace(/\s+/g, ' ').trim().slice(0, 160);
-      const say2 = String(P.vo_outro || 'Share this with someone who needs it today.').replace(/\s+/g, ' ').trim().slice(0, 140);
+      const say2 = String(P.vo_outro || (opts.about && opts.about.cta) || 'Share this with someone who needs it today.').replace(/\s+/g, ' ').trim().slice(0, 140);
       if (stage) stage('🎙 Recording the narrator…');
       try {
         const vox = require('./voiceover');
@@ -2092,7 +2143,7 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
     const duration = at;
     const hook = String(P.hook_text || '').replace(/\s+/g, ' ').trim().slice(0, 60);
     const texts = hook ? [{ start: 0, end: round2(Math.min(duration, Math.max(2.4, shots[0].seconds + (shots[1] ? shots[1].seconds : 0)))), text: hook, role: 'hook' }] : [];
-    const fb = fromBrief(opts.brief);
+    const fb = fromBrief(briefText(opts));
     const plan = {
       concept: String(P.concept || '').slice(0, 300),
       title: String(P.title || hook || (fb && fb.hook) || '').slice(0, 100),
@@ -2110,6 +2161,7 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
       if (stage) stage('🎙 Laying the narrator on…');
       for (const f of [output, baseOf(output)]) if (fs.existsSync(f)) await laySpeech(ctx, f, voices, tmp);
     }
+    withAbout(plan, opts.about);   // the caption carries the call to action, speaker and church — in the saved edit too
     saveProject(output, projectOf(plan, cands.concat(broll), { aspect: opts.aspect, keepAudio: true, style: opts.style, full: false }, plan));
     return resultOf(plan, output, opts, {
       director: d.director, model: d.model, mode: 'talk', words: capWords,
@@ -2127,7 +2179,7 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
  * The whole job. `stage(name)` says what is happening (for the phone), and
  * `onProgress(pct)` how far through the whole thing it is.
  */
-async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, full, aspect, brief, keepAudio, keepOrder, output, onProgress, stage, log, mode, hear, voice }) {
+async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, full, aspect, brief, about, keepAudio, keepOrder, output, onProgress, stage, log, mode, hear, voice }) {
   const files = (mediaPaths || []).filter((p) => p && fs.existsSync(p)).slice(0, 60);
   if (!files.length) throw new Error('Add some videos or pictures first.');
   if (mode === 'talk') {
@@ -2137,6 +2189,7 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, ful
       lengthSec: clamp(Number(lengthSec) || 45, 10, 600),
       aspect: ASPECTS[aspect] ? aspect : '9:16',
       brief: cleanBrief(brief),
+      about: cleanAbout(about),
     };
     return makeTalk(ctx, getInfo, { files, opts: topts, hear, musicPath, output, onProgress, stage, log, keepAudio });
   }
@@ -2146,6 +2199,7 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, ful
     lengthSec: clamp(Number(lengthSec) || 30, 8, 600), // up to ten minutes
     aspect: ASPECTS[aspect] ? aspect : '9:16',
     brief: cleanBrief(brief),
+    about: cleanAbout(about),
     keepOrder: !!keepOrder,
   };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mw-montage-'));
@@ -2173,6 +2227,7 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, ful
     if (stage) stage(opts.full ? `🎞 Blending all ${files.length} together…` : `✂️ Cutting ${plan.shots.length} shots together…`);
     await render(ctx, plan, { aspect: opts.aspect, keepAudio: keepAudio !== false, output, base: baseOf(output), tmp, onProgress: part(50, 100) });
     // the edit itself, beside the video, so it can be rearranged later
+    withAbout(plan, opts.about);   // the caption carries the call to action, speaker and church — in the saved edit too
     saveProject(output, projectOf(plan, cands, { aspect: opts.aspect, keepAudio, style: opts.style, full: opts.full }, plan));
     return resultOf(plan, output, opts, { director: d.director, model: d.model, bpm: music ? music.bpm : null });
   } finally {
@@ -2187,4 +2242,4 @@ function directorStatus() {
   return { director: 'rules', model: '' };
 }
 
-module.exports = { phrasesOf, phraseScore, talkByRules, fromBrief, cleanBrief, make, remake, loadProject, sidecarOf, baseOf, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };
+module.exports = { cleanAbout, withAbout, aboutLines, phrasesOf, phraseScore, talkByRules, fromBrief, cleanBrief, make, remake, loadProject, sidecarOf, baseOf, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };

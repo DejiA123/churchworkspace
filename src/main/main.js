@@ -763,10 +763,12 @@ const phonecopy = require('./phonecopy');
 ipcMain.handle('montage:status', wrap(async () => Object.assign({}, montage.directorStatus(), { voiceover: require('./voiceover').status() })));
 /* The talk edit's ears: every word of a video, from the cloud (Groq's Whisper)
  * or, without it, this server's own speech model — through the Word Book. */
-async function montageHear(file, durationSec, onProgress) {
+async function montageHear(file, durationSec, onProgress, names) {
   if (cloudspeech.fileReady()) {
     let r = null;
-    try { r = await cloudspeech.transcribeWords({ input: file, startSec: 0, endSec: durationSec, onProgress }); } catch (err) {
+    // the speaker and church typed on the montage page, heard as names (spelt as typed)
+    const terms = (Array.isArray(names) ? names : []).map((x) => String(x || '').trim()).filter(Boolean).slice(0, 4);
+    try { r = await cloudspeech.transcribeWords({ input: file, startSec: 0, endSec: durationSec, onProgress, terms: terms.length ? terms : null }); } catch (err) {
       if (err && err.cancelled) throw new jobs.CancelledError();
       r = null;
     }
@@ -778,12 +780,12 @@ async function montageHear(file, durationSec, onProgress) {
   }
   return [];
 }
-ipcMain.handle('montage:create', wrap(async (e, { mediaPaths, musicPath, style, lengthSec, full, aspect, brief, keepAudio, keepOrder, mode, voice, jobId }) => {
+ipcMain.handle('montage:create', wrap(async (e, { mediaPaths, musicPath, style, lengthSec, full, aspect, brief, about, keepAudio, keepOrder, mode, voice, jobId }) => {
   const output = outPath(`montage-${stamp()}.mp4`);
   let pct = 0, stageName = '';
   const tell = () => { if (jobId && e && !e.sender.isDestroyed()) e.sender.send('job:progress', { jobId, percent: pct, stage: stageName }); };
   const made = await montage.make(getCtx(), video.getInfo, {
-    mediaPaths, musicPath, style, lengthSec, full, aspect, brief, keepAudio, keepOrder, output,
+    mediaPaths, musicPath, style, lengthSec, full, aspect, brief, about, keepAudio, keepOrder, output,
     mode: mode === 'talk' ? 'talk' : undefined, hear: montageHear, voice: mode === 'talk' && voice ? String(voice) : null,
     onProgress: (p) => { pct = p; tell(); },
     stage: (name) => { stageName = name; tell(); },
