@@ -199,7 +199,8 @@ const SCRIPT = {
     // then a "person" (a white figure) walks from the left of the stage to the right
     const S = make(['-f', 'lavfi', '-i', 'color=c=black:s=1280x720:r=30:d=20', '-f', 'lavfi', '-i', 'color=c=0x606060:s=1280x720:r=30:d=20',
       '-f', 'lavfi', '-i', 'sine=f=220:d=40', '-f', 'lavfi', '-i', 'color=c=white:s=110x420:r=30:d=20',
-      '-filter_complex', "[1:v][3:v]overlay=x='100+t*48':y=160[walk];[0:v][walk]concat=n=2:v=1:a=0[v]",
+      // …and at 29.5–31.5 s the camera cuts to a title graphic (dark, no one in it) in the middle of the talk
+      '-filter_complex', "[1:v][3:v]overlay=x='100+t*48':y=160[walk];[0:v][walk]concat=n=2:v=1:a=0,drawbox=x=0:y=0:w=iw:h=ih:color=black:t=fill:enable='between(t,29.5,31.5)'[v]",
       '-map', '[v]', '-map', '2:a', '-shortest', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast'], path.join(WORK, 'stage.mp4'));
     // speech all the way through — the strongest-sounding lines are in the EMPTY half
     const talk = say(['Listen to me now this is the word for you today church.', 'God is about to do something new in your life.', 'Do not be afraid of what is coming next.', 'He has never failed you and he never will.',
@@ -236,6 +237,7 @@ const SCRIPT = {
     const proj = montage.loadProject(outS);
     const lines = proj.shots.filter((x) => x.from != null && proj.cands[x.cid] && proj.cands[x.cid].kind === 'video');
     ok(lines.length > 0 && lines.every((x) => x.from >= 19.5), 'no moment from the empty stage is used — every shot is from when someone is on it', lines.map((x) => x.from));
+    ok(lines.every((x) => x.from + x.seconds <= 29.6 || x.from >= 31.4), 'and a cut to a title graphic in the middle of the talk is not used either', lines.map((x) => [x.from, +(x.from + x.seconds).toFixed(2)]));
     // tracking: wherever the edit is, the white figure is inside the 9:16 frame (the frame is bright near the middle)
     const clear = (t) => !(rs.overlays || []).some((o) => t >= o.at - 0.2 && t <= o.at + o.seconds + 0.2);
     const times = [];

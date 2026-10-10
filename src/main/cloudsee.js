@@ -158,7 +158,7 @@ const peopleSystemFor = (n) => [
   'The image is a grid of separate video frames. Each frame has a white capital LETTER on black in its top-right corner.',
   `Each frame is ruled into ${n} equal vertical columns, numbered 1 (left) to ${n} (right) along its bottom edge.`,
   'For each frame give two answers:',
-  'people: how many people can clearly be seen in the frame, up to 9. An empty stage or room, a screen, slides, song lyrics, a logo, lights, a building, or a black or blurred frame with no one in it is 0. A congregation or crowd counts as people.',
+  'people: how many real people can clearly be seen in the frame, up to 9. A frame with no person in it is 0: an empty stage or room, a screen, slides, song lyrics, a title graphic or designed text (an intro, a sermon title, a countdown, a lower third on its own), an animated or patterned background, a logo, lights, a building, or a black or blurred frame. A congregation or crowd counts as people.',
   "column: the column of the HEAD of the person the crop should keep: the one speaking or leading if you can tell (a microphone at the mouth, at the pulpit, addressing the room), otherwise the most prominent person (the closest, largest or most in focus). When people is 0, column is 0.",
   'Faces on posters, screens, backdrops or photos on the wall are NOT people.',
   `Reply with JSON only: {"frames":[{"frame":"A","people":<0..9>,"column":<0..${n}>,"sure":<true|false>}]}`,

@@ -1979,8 +1979,11 @@ function fxAtLook(p, t) {
   const L = (p.looks || []).filter((l) => l.fx != null && l.people !== 0).sort((a, b) => a.t - b.t);
   if (!L.length) return null;
   if (L.length === 1 || t <= L[0].t) return L[0].fx;
-  const a = L[0], b = L[L.length - 1];
-  if (t >= b.t) return b.fx;
+  if (t >= L[L.length - 1].t) return L[L.length - 1].fx;
+  // between the two looks either side of `t`, in proportion
+  let k = 0;
+  while (k < L.length - 2 && t > L[k + 1].t) k++;
+  const a = L[k], b = L[k + 1];
   return a.fx + (b.fx - a.fx) * ((t - a.t) / Math.max(0.01, b.t - a.t));
 }
 
@@ -2057,7 +2060,8 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
      * take its place. The looks are kept: they say where to cut each beat so
      * the person stays in the 9:16 frame, and how to pan with them (FULL SCREEN).
      */
-    const looksAt = (p) => { const len = p.end - p.start; return len < 2.2 ? [p.start + len / 2] : [p.start + len * 0.2, p.end - len * 0.2]; };
+    // near its start and its end — and in its middle when it runs on (a cut to a title graphic mid-sentence is caught too)
+    const looksAt = (p) => { const len = p.end - p.start; return len < 2.2 ? [p.start + len / 2] : len < 3.5 ? [p.start + len * 0.2, p.end - len * 0.2] : [p.start + len * 0.15, p.start + len / 2, p.end - len * 0.15]; };
     const lookLines = async (ps) => {
       const reqs = [], who = [];
       ps.forEach((p) => { p.looks = []; looksAt(p).forEach((t) => { reqs.push({ file: p.cand.file, t: round2(clamp(t, 0, Math.max(0, p.cand.fileDur - 0.1))), w: p.cand.w, h: p.cand.h }); who.push(p); }); });
