@@ -138,10 +138,57 @@ const SCRIPT = {
     // the narrator really is in the sound: loud 900 Hz in the first two seconds
     const m = /mean_volume: (-?[\d.]+)/.exec(String(require('child_process').spawnSync(ffmpeg, ['-hide_banner', '-t', '1.5', '-ss', '0.3', '-i', out3, '-af', 'bandpass=f=900:w=100,volumedetect', '-f', 'null', '-'], { encoding: 'utf8' }).stderr));
     ok(m && +m[1] > -35, 'the narrator\'s voice is in the finished sound', m && m[1]);
-    ok(r3.overlays.length >= 1 && r3.overlays.every((o) => o.file === A || o.file === B), 'with no photos, other moments of the videos are cut in as B-roll', r3.overlays.map((o) => path.basename(o.file)));
+    // (a snapshot comes as the still it froze, kept beside the montage: <name>.snap-N.jpg)
+    ok(r3.overlays.length >= 1 && r3.overlays.every((o) => o.file === A || o.file === B || (o.style === 'snapshot' && /\.snap-\d+\.jpg$/.test(o.file))), 'with no photos, other moments of the videos are cut in as B-roll', r3.overlays.map((o) => path.basename(o.file)));
     vox._setEngine({ generate: async () => { throw new Error('no model here'); } });
     const r4 = await montage.make(ctx, video.getInfo, { mediaPaths: [A], style: 'cinematic', lengthSec: 10, aspect: '9:16', output: path.join(WORK, 'm4.mp4'), mode: 'talk', hear, voice: 'am_michael' });
     ok(!r4.narrator && /no model here/.test(r4.narratorWhy), 'a voice that cannot be made leaves the narrator out, and says why — the edit still comes', r4.narratorWhy);
+  }
+
+  console.log('\nONE LANDSCAPE VIDEO: FULL SCREEN, ROUND THE SPEAKER — SHORT LINES, SNAPSHOTS');
+  {
+    // a 16:9 "service": red on the left, green in the middle, blue on the right (the speaker stands right)
+    const L = make(['-f', 'lavfi', '-i', 'color=c=red:s=1280x720:r=30:d=40', '-f', 'lavfi', '-i', 'color=c=0x00c000:s=1280x720:r=30:d=40', '-f', 'lavfi', '-i', 'color=c=blue:s=1280x720:r=30:d=40',
+      '-f', 'lavfi', '-i', 'sine=f=220:d=40', '-filter_complex', '[0:v]crop=427:720:0:0[a];[1:v]crop=426:720:427:0[b];[2:v]crop=427:720:853:0[c];[a][b][c]hstack=3[v]', '-map', '[v]', '-map', '3:a', '-shortest',
+      '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast'], path.join(WORK, 'service-16x9.mp4'));
+    // a long run of speech, as one hour of a service sounds: long sentences, short ones
+    const long = say(['This is a very long sentence that keeps going and going without stopping for breath at all.', 'Never give up!', 'God is faithful to every promise he has ever made to you and your house.', 'Why are you afraid?', 'Stop doubting and start believing today!', 'He will finish what he started in you.',
+      'Your miracle is on the way.', 'Praise him in the storm!', 'The enemy is a liar.', 'Lift your hands and worship.'], 0.5);
+    const hear1 = async () => long;
+    const see = require(path.join(ROOT, 'src/main/cloudsee'));
+    const realReady = see.ready, realWho = see.whoIsSpeaking;
+    const grids = [];
+    see.ready = () => true;
+    see.whoIsSpeaking = async ({ image, frames }) => { grids.push(image); return { ok: true, answers: Object.fromEntries(frames.map((f) => [f.label, { column: 7, sure: true }])) }; };
+    const outR = path.join(WORK, 'fill-right.mp4');
+    let r;
+    try { r = await montage.make(ctx, video.getInfo, { mediaPaths: [L], style: 'hype', lengthSec: 12, aspect: '9:16', output: outR, mode: 'talk', hear: hear1 }); }
+    finally { see.ready = realReady; see.whoIsSpeaking = realWho; }
+    const colourAt = (file, t, y) => {
+      const buf = execFileSync(ffmpeg, ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-vf', `crop=40:40:520:${y},scale=1:1`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']);
+      return [buf[0], buf[1], buf[2]];
+    };
+    const ir = await video.getInfo(ctx, outR);
+    ok(ir.width === 1080 && ir.height === 1920, 'a 9:16 edit of a 16:9 video is 1080×1920', [ir.width, ir.height]);
+    ok(grids.length >= 1, 'the speaker was looked for', grids.length);
+    // a moment with nothing laid over it (a snapshot shows the whole original picture, middle and all)
+    const clear = (res, t) => !(res.overlays || []).some((o) => t >= o.at - 0.2 && t <= o.at + o.seconds + 0.2);
+    let t = r.duration * 0.55;
+    for (let x = r.duration * 0.3; x < r.duration - 0.5; x += 0.25) if (clear(r, x)) { t = x; break; }
+    const top = colourAt(outR, t, 120), mid = colourAt(outR, t, 940), bot = colourAt(outR, t, 1760);
+    const blue = (c) => c[2] > 150 && c[0] < 90 && c[1] < 90;
+    ok(blue(top) && blue(mid) && blue(bot), 'the picture fills the frame top to bottom — no blurred bands — cropped round the speaker on the right', { top, mid, bot });
+    // with nothing to ask: still full screen, the middle of the picture
+    const outC = path.join(WORK, 'fill-centre.mp4');
+    const rc = await montage.make(ctx, video.getInfo, { mediaPaths: [L], style: 'hype', lengthSec: 15, aspect: '9:16', output: outC, mode: 'talk', hear: hear1 });
+    const green = (c) => c[1] > 120 && c[0] < 90 && c[2] < 90;
+    let tc = rc.duration * 0.55;
+    for (let x = rc.duration * 0.3; x < rc.duration - 0.5; x += 0.25) if (clear(rc, x)) { tc = x; break; }
+    ok(green(colourAt(outC, tc, 120)) && green(colourAt(outC, tc, 1760)), 'with no AI to ask, it still fills the frame (the middle of the picture)', [colourAt(outC, tc, 120), colourAt(outC, tc, 1760)]);
+    // short lines: nothing from a phrase longer than about 6.5 s
+    const lines = montage.phrasesOf(long, 6.5);
+    ok(lines.every((p) => p.end - p.start <= 7.6), 'a long run of speech is cut into short lines (≤ ~7 s)', lines.map((p) => +(p.end - p.start).toFixed(1)));
+    ok(r.overlays.some((o) => o.style === 'snapshot'), 'one video, no photos: its best moments come back as snapshots', r.overlays.map((o) => o.style));
   }
 
   console.log('\nNOTHING SAID');

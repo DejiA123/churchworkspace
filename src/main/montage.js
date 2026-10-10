@@ -1065,12 +1065,18 @@ function finalise(raw, cands, opts, music) {
 
 /* ------------------------------------------------------------------- render */
 
-function fitChain(c, W, H, focus, scale = 1, tag = '') {
+function fitChain(c, W, H, focus, scale = 1, tag = '', fx = null) {
   const w = W * scale, h = H * scale;
   const ar = c.w / c.h, tar = W / H;
   const y = focus === 'top' ? '0' : focus === 'bottom' ? '(ih-oh)' : '(ih-oh)/2';
   // close enough to the frame's shape: fill it; otherwise the whole picture
-  // over a blurred copy of itself (a landscape clip in a 9:16 short)
+  // over a blurred copy of itself (a landscape clip in a 9:16 short) — unless
+  // the shot says where its person stands (`fx`, 0 left … 1 right): then it
+  // FILLS the frame, cropped round them (the Viral Montage, findSpeakers)
+  if (typeof fx === 'number' && Number.isFinite(fx)) {
+    const x = `'min(max(iw*${clamp(fx, 0, 1).toFixed(3)}-ow/2,0),iw-ow)'`;
+    return `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}:${x}:${y},setsar=1`;
+  }
   if (Math.abs(Math.log(ar / tar)) < 0.42) {
     return `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}:(iw-ow)/2:${y},setsar=1`;
   }
@@ -1206,7 +1212,7 @@ async function renderPiece(ctx, s, W, H, keepAudio, out, next, { overlay = null,
   } else {
     args.push('-ss', String(s.from), '-t', String(s.need + 0.1), ...decodeOpts(c, W, H), '-i', c.file);
     const fx = effectChain(s.effect, W, H, effectDur || dur, t0);
-    base = `[0:v]${s.slow ? 'setpts=2.0*PTS,' : ''}${fitChain(c, W, H, s.focus, 1, 'b')}${fx ? ',' + fx : ''}${s.grade ? ',' + s.grade : ''},fps=${FPS}`;
+    base = `[0:v]${s.slow ? 'setpts=2.0*PTS,' : ''}${fitChain(c, W, H, s.focus, 1, 'b', s.fx)}${fx ? ',' + fx : ''}${s.grade ? ',' + s.grade : ''},fps=${FPS}`;
   }
   let graph;
   let nextInput = 1;
@@ -1264,7 +1270,7 @@ async function renderPiece(ctx, s, W, H, keepAudio, out, next, { overlay = null,
       const a = o.pos === 'left' ? '0.62-0.24*t/' : '0.38+0.24*t/';
       move = `crop=${W}:${H}:x='(iw-${W})*(${a}${o.len.toFixed(2)})':y=0`;
     } else {
-      fit = fitChain(oc, W, H, 'center', 1, 'o');
+      fit = fitChain(oc, W, H, 'center', 1, 'o', o.fx);
       move = `scale=w='trunc(${W}*(1+0.07*t/${o.len.toFixed(2)})/2)*2':h=-2:eval=frame,crop=${W}:${H}`;
     }
     const hold = (oc.kind === 'image' || snap) ? `,loop=loop=${Math.ceil((o.len + 0.2) * FPS)}:size=1:start=0,setpts=N/${FPS}/TB` : '';
@@ -1402,8 +1408,8 @@ function pieceKey(s, next, W, H, keepAudio) {
   const c = s.cand;
   return crypto.createHash('sha1').update(JSON.stringify({
     v: 3, f: c.file, sig: fileSig(c.file), k: c.kind, w: c.w, h: c.h, a: !!c.hasAudio,
-    sec: s.seconds, from: s.from, need: s.need, e: s.effect, fo: s.focus, sl: !!s.slow, tr: s.transition, nt: next ? next.transition : null, gr: s.grade || null, mu: !!s.mute,
-    ov: (s.overlays || []).map((o) => [o.cand.file, fileSig(o.cand.file), o.cand.kind, o.cand.w, o.cand.h, o.style, o.start, o.len, o.pos, o.from]),
+    sec: s.seconds, from: s.from, need: s.need, e: s.effect, fo: s.focus, fx: s.fx == null ? null : s.fx, sl: !!s.slow, tr: s.transition, nt: next ? next.transition : null, gr: s.grade || null, mu: !!s.mute,
+    ov: (s.overlays || []).map((o) => [o.cand.file, fileSig(o.cand.file), o.cand.kind, o.cand.w, o.cand.h, o.style, o.start, o.len, o.pos, o.from, o.fx == null ? null : o.fx]),
     W, H, keepAudio: !!keepAudio, enc: encodeOpts(),
   })).digest('hex');
 }
@@ -1610,6 +1616,7 @@ function resultOf(plan, output, opts, extra) {
  *              the studio puts captions on at once (word by word lit up) —
  *              they go into the export — with the hook as a headline.
  */
+const TALK_LINE_MAX = 6.5;
 const TALK_GRADES = {
   hype: 'eq=contrast=1.08:saturation=1.2',
   cinematic: 'eq=contrast=1.1:saturation=0.94:gamma=0.97,vignette=PI/4.6',
@@ -1632,7 +1639,7 @@ const FILLER_ANY = /\b(um+|uh+|er+|erm)\b/gi;
 const HOUSEKEEPING = /\b(turn to|page \w+|announcement|announcements|please be seated|be seated|good morning|good evening|welcome everyone|offering|tithes?|car park|parking|microphone|can you hear me|next slide)\b/i;
 
 /** Heard words → phrases: a pause, a full stop or nine seconds ends one. */
-function phrasesOf(words) {
+function phrasesOf(words, maxSec = 9) {
   const out = [];
   let cur = [];
   const flush = () => {
@@ -1646,14 +1653,14 @@ function phrasesOf(words) {
     const prev = cur[cur.length - 1];
     if (prev && (w.start - prev.end > 0.55
       || (cur.length >= 4 && /[.!?]["'”’)]?$/.test(String(prev.text).trim()))
-      || w.end - cur[0].start > 9)) flush();
+      || w.end - cur[0].start > maxSec)) flush();
     cur.push(w);
   }
   flush();
   // a two-word scrap joins the phrase it belongs to when they are close
   for (let i = out.length - 1; i > 0; i--) {
     const a = out[i - 1], b = out[i];
-    if ((b.end - b.start < 1.1 || b.words.length < 3) && b.start - a.end < 0.4 && b.end - a.start <= 10) {
+    if ((b.end - b.start < 1.1 || b.words.length < 3) && b.start - a.end < 0.4 && b.end - a.start <= maxSec + 1) {
       out.splice(i - 1, 2, { start: a.start, end: b.end, text: (a.text + ' ' + b.text).trim(), words: a.words.concat(b.words) });
     }
   }
@@ -1668,7 +1675,7 @@ function phraseScore(p, loud) {
     const xs = loud.filter((x) => x.t >= p.start && x.t <= p.end).map((x) => x.db);
     if (xs.length) s += clamp((xs.reduce((a, b) => a + b, 0) / xs.length + 40) / 25, 0, 1.2);
   }
-  s += len >= 2 && len <= 7 ? 0.6 : len < 1.2 ? -0.5 : 0.2;
+  s += len >= 2 && len <= 6 ? 0.6 : len < 1.2 ? -0.5 : len > 8 ? -0.1 : 0.2;
   s += Math.min(0.9, ((p.text.match(PUNCH) || []).length) * 0.18);
   if (/!/.test(p.text)) s += 0.3;
   if (/\?/.test(p.text)) s += 0.25;
@@ -1701,6 +1708,7 @@ You are given every phrase spoken in one or more videos (id, which video, when, 
 - THEN THE STORY: lines that follow on from each other so the whole thing reads as one clear message that rises. Every line must make sense after the one before it. Never use a line that starts mid-thought or depends on something left out. Lines from different videos may be mixed and matched when they continue the same thought.
 - THE PAYOFF LAST: end on the most quotable, memorable line — the one people will put in the comments.
 - No filler, no "um", no housekeeping (announcements, greetings, "turn to page"), no repeated points.
+- SHORT AND SNAPPY: every line a punch of about 2–6 seconds. More short lines beat fewer long ones — a line that runs on loses the scroll. Skip a long line unless it is the best thing said.
 - Fit the length asked for. Shorter and tighter beats longer.
 Use only ids that are given, each at most once, in the order they should play.
 hook_text: a 3–7 word on-screen headline that makes people stop scrolling (not a quote of the first line).
@@ -1785,6 +1793,81 @@ async function laySpeech(ctx, file, parts, tmp) {
   try { fs.rmSync(out, { force: true }); } catch (e) {}
 }
 
+/*
+ * ►► FULL SCREEN, ROUND THE SPEAKER. ◄◄ "I selected 9:16 … there is a blur top
+ * and bottom; the video is meant to cover the full screen." A landscape clip in
+ * a vertical edit was shown whole over a blurred copy of itself. In the Viral
+ * Montage it now FILLS the frame — cropped round the person speaking, found by
+ * the same eye the reframe uses (cloudsee.js: frames ruled into eight numbered
+ * columns, "which column is the speaker's head in"). Asked once per moment, six
+ * moments to a picture; whatever it cannot tell (or with no AI to ask), the
+ * middle of the picture. A wrong guess costs a centred crop, never the blur.
+ */
+const SPEAK_COLS = 8, SPEAK_TILE_W = 288, SPEAK_TILE_H = 162, SPEAK_MAX_FRAMES = 48;
+const needsCrop = (c, W, H) => c && c.kind === 'video' && c.w && c.h && Math.abs(Math.log((c.w / c.h) / (W / H))) >= 0.42;
+/* An ffmpeg that can draw text, for the column numbers: the bundled one cannot
+ * (no freetype), the system's usually can (the server image installs it). */
+let textFf = undefined;
+async function textFfmpeg(ctx) {
+  if (textFf !== undefined) return textFf;
+  textFf = null;
+  for (const bin of [ctx.ffmpeg, '/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg', 'ffmpeg']) {
+    try { const { stdout } = await collect(bin, ['-hide_banner', '-filters'], { stdout: true }); if (/\bdrawtext\b/.test(stdout.toString())) { textFf = bin; break; } }
+    catch (e) { /* not there */ }
+  }
+  return textFf;
+}
+async function findSpeakers(ctx, reqs, tmp, log) {
+  const out = reqs.map(() => 0.5);
+  let see = null;
+  try { see = require('./cloudsee'); } catch (e) { see = null; }
+  let font = null;
+  const tff = await textFfmpeg(ctx);
+  try { const f = path.join(require('./captioner').fontsDir(), 'Poppins-Bold.ttf'); if (fs.existsSync(f) && tff) font = f; } catch (e) {}
+  if (!see || !see.ready() || !font || !reqs.length) { if (log && reqs.length) log('speakers: ' + (!see || !see.ready() ? 'no AI to ask' : 'no ffmpeg here can draw the column numbers') + ' — the middle of the picture'); return out; }
+  ctx = Object.assign({}, ctx, { ffmpeg: tff });
+  const esc = (t) => String(t).replace(/[\\:']/g, '\\$&');
+  const T = SPEAK_TILE_W, TH = SPEAK_TILE_H, cw = T / SPEAK_COLS;
+  const LETTERS = 'ABCDEF';
+  const todo = reqs.slice(0, SPEAK_MAX_FRAMES).map((r, i) => Object.assign({ i }, r));
+  if (reqs.length > todo.length && log) log(`speakers: ${reqs.length - todo.length} moments past the first ${SPEAK_MAX_FRAMES} keep the middle`);
+  for (let g = 0; g * 6 < todo.length; g++) {
+    const part = todo.slice(g * 6, g * 6 + 6);
+    const dir = path.join(tmp, 'spk-' + g);
+    fs.mkdirSync(dir, { recursive: true });
+    for (let k = 0; k < part.length; k++) {
+      const r = part[k];
+      // the frame, ruled into numbered columns, its letter top right (as the reframe draws it)
+      const lines = Array.from({ length: SPEAK_COLS - 1 }, (_, j) => `drawbox=x=${Math.round(cw * (j + 1))}:y=0:w=1:h=ih:color=white@0.55:t=fill`).join(',');
+      const nums = Array.from({ length: SPEAK_COLS }, (_, j) => `drawtext=text='${j + 1}':fontfile='${esc(font)}':fontsize=13:fontcolor=white:box=1:boxcolor=black@0.7:boxborderw=2:x=${Math.round(cw * j + cw / 2 - 4)}:y=h-17`).join(',');
+      const letter = `drawtext=text='${LETTERS[k]}':fontfile='${esc(font)}':fontsize=18:fontcolor=white:box=1:boxcolor=black:boxborderw=4:x=w-tw-8:y=6`;
+      const vf = `scale=${T}:${TH}:force_original_aspect_ratio=decrease,pad=${T}:${TH}:(ow-iw)/2:(oh-ih)/2:color=black,${lines},${nums},${letter}`;
+      const fr = path.join(dir, `f${k + 1}.jpg`);
+      try { await collect(ctx.ffmpeg, ['-hide_banner', '-y', '-ss', String(Math.max(0, r.t)), '-i', r.file, '-frames:v', '1', '-vf', vf, '-q:v', '4', fr]); }
+      catch (e) { if (e instanceof jobs.CancelledError) throw e; }
+      // a frame that would not come out is a black tile, so every later letter stays on its own frame
+      if (!fs.existsSync(fr)) { try { await collect(ctx.ffmpeg, ['-hide_banner', '-y', '-f', 'lavfi', '-i', `color=c=black:s=${T}x${TH}:d=1`, '-vf', letter, '-frames:v', '1', fr]); } catch (e) { if (e instanceof jobs.CancelledError) throw e; } }
+    }
+    const grid = path.join(dir, 'grid.jpg');
+    try { await collect(ctx.ffmpeg, ['-hide_banner', '-y', '-framerate', '1', '-start_number', '1', '-i', path.join(dir, 'f%d.jpg'), '-vf', `tile=3x${Math.ceil(part.length / 3)}:padding=4:color=black`, '-frames:v', '1', '-q:v', '4', grid]); }
+    catch (e) { if (e instanceof jobs.CancelledError) throw e; continue; }
+    if (!fs.existsSync(grid)) continue;
+    let ans = null;
+    try { ans = await see.whoIsSpeaking({ image: 'data:image/jpeg;base64,' + fs.readFileSync(grid).toString('base64'), frames: part.map((_, k) => ({ label: LETTERS[k] })), columns: SPEAK_COLS }); }
+    catch (e) { ans = null; }
+    if (!ans || !ans.ok) { if (log) log('speakers: ' + ((ans && ans.why) || 'no answer') + ' — the middle of the picture'); break; }
+    part.forEach((r, k) => {
+      const a = ans.answers[LETTERS[k]];
+      if (!a || !(a.column > 0)) return;
+      // the column's middle on the ruled tile → across the clip's own picture (a tile pads a clip of another shape)
+      const ar = (r.w && r.h) ? r.w / r.h : 16 / 9;
+      const shown = Math.min(T, TH * ar), left = (T - shown) / 2;
+      out[r.i] = clamp(((a.column - 0.5) * cw - left) / shown, 0, 1);
+    });
+  }
+  return out;
+}
+
 async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, onProgress, stage, log, keepAudio }) {
   const say = (a, b) => (p) => onProgress && onProgress(Math.round(a + (b - a) * (clamp(p, 0, 100) / 100)));
   const infos = [];
@@ -1815,7 +1898,8 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
         hasAudio: !!v.info.hasAudio, w: v.info.width, h: v.info.height, name: path.basename(v.file), spoken: words.length >= 4 };
       try { c.thumb = await thumb(ctx, v.file, Math.min(1, D / 3), path.join(tmp, c.id + '.jpg'), false); } catch (e) { c.thumb = null; }
       cands.push(c);
-      for (const p of phrasesOf(words)) {
+      // short, snappy lines: a phrase ends by about 6 s (it used to run to 9–10)
+      for (const p of phrasesOf(words, TALK_LINE_MAX)) {
         if (p.end > D) continue;
         p.id = 'p' + (++k); p.vid = i + 1; p.cand = c; p.score = phraseScore(p, loud);
         phrases.push(p);
@@ -1939,7 +2023,7 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
         const effect = pi === 0 && bi === 0 && !vo.intro ? 'punch_in' : moves[m++ % moves.length];
         const hypeish = opts.style === 'hype' || opts.style === 'fun';
         const transition = first && hypeish && ((pi === 0 && vo.intro) || pi % 2 === 1) ? 'flash' : 'cut';
-        const sh = { cand: p.cand, seconds: need, from: round2(from), need, effect, focus: 'center', slow: false, transition, grade, overlays: [], at: round2(at) };
+        const sh = { cand: p.cand, seconds: need, from: round2(from), need, effect, focus: 'center', slow: false, transition, grade, overlays: [], at: round2(at), line: pi };
         for (const w of ws.slice(a, b + 1)) {
           const s0 = at + (w.start - from), s1 = at + (w.end - from);
           capWords.push({ text: w.text, start: round2(Math.max(at, s0)), end: round2(Math.min(at + need, Math.max(s0 + 0.05, s1))) });
@@ -1956,7 +2040,7 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
      * the picture cuts away to a photo, a silent clip, or another moment of the
      * videos (a different video where there is one), then back.
      */
-    let bi = 0;
+    let bi = 0, sb = 0;
     for (let i = speechFrom + 1; i < speechTo; i += 2) {
       const sh = shots[i];
       if (sh.seconds < 2) continue;
@@ -1964,10 +2048,21 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
       if (broll.length && bi < broll.length) {
         const o = broll[bi++];
         sh.overlays.push({ cand: o, style: 'cutaway', start: 0.25, len, pos: i % 4 === 1 ? 'right' : 'left', from: o.kind === 'video' ? round2(clamp(o.fileDur / 2 - len / 2, 0, Math.max(0, o.fileDur - len - 0.05))) : null });
-      } else if ((i - speechFrom) % 4 === 3) {
+      } else {
+        /*
+         * One video and no photos: the edit's own best unused moments go over it,
+         * on every other beat — mostly SNAPSHOTS (a still of the moment popping on
+         * with a camera flash, the best of them first: `spare` is in score order),
+         * now and then a cutaway that plays. Constant engagement, never a beat
+         * that runs on with nothing new to look at.
+         */
         const sp = nextSpare(sh.cand.file);
         if (!sp) continue;
-        sh.overlays.push({ cand: sp.cand, style: 'cutaway', start: 0.3, len, pos: 'right', from: round2(clamp(sp.start + 0.2, 0, Math.max(0, sp.cand.fileDur - len - 0.05))) });
+        const snap = sb++ % 3 !== 2;
+        const ol = snap ? round2(Math.min(1.5, sh.seconds - 0.5)) : len;
+        const at0 = snap ? sp.start + Math.min(1.2, (sp.end - sp.start) / 2) : sp.start + 0.2;
+        sh.overlays.push({ cand: sp.cand, style: snap ? 'snapshot' : 'cutaway', start: snap ? 0.35 : 0.3, len: ol, pos: sb % 2 ? 'left' : 'right',
+          from: round2(clamp(at0, 0, Math.max(0, sp.cand.fileDur - ol - 0.05))) });
       }
     }
     const duration = at;
@@ -1981,6 +2076,27 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
       hashtags: (Array.isArray(P.hashtags) ? P.hashtags : []).map((h) => String(h).replace(/^#+/, '').replace(/\s+/g, '')).filter(Boolean).slice(0, 10),
       shots, texts, duration,
     };
+    // FULL SCREEN: every landscape moment is cropped to fill, round its speaker
+    {
+      const { w: W, h: H } = ASPECTS[opts.aspect] || ASPECTS['9:16'];
+      const reqs = [], back = [];
+      const want = (cand, t, put) => { if (!needsCrop(cand, W, H)) return; reqs.push({ file: cand.file, t: round2(clamp(t, 0, Math.max(0, cand.fileDur - 0.1))), w: cand.w, h: cand.h }); back.push(put); };
+      const lineAt = new Map();
+      shots.forEach((sh) => {
+        if (sh.line != null) {
+          // one look per LINE, shared by its beats (it is the same speaker, a second or two apart)
+          if (!lineAt.has(sh.line)) { const p = picks[sh.line]; lineAt.set(sh.line, []); want(p.cand, (p.start + p.end) / 2, (fx) => lineAt.get(sh.line).forEach((x) => { x.fx = fx; })); }
+          if (needsCrop(sh.cand, W, H)) lineAt.get(sh.line).push(sh);
+        } else if (sh.cand.kind === 'video') want(sh.cand, (sh.from || 0) + sh.seconds / 2, (fx) => { sh.fx = fx; });
+        for (const o of sh.overlays || []) if (o.style === 'cutaway' && o.cand.kind === 'video') want(o.cand, (o.from || 0) + o.len / 2, (fx) => { o.fx = fx; });
+      });
+      if (reqs.length) {
+        if (stage) stage('🎯 Finding the speaker in every moment, to fill the frame…');
+        let fxs = reqs.map(() => 0.5);
+        try { fxs = await findSpeakers(ctx, reqs, tmp, log); } catch (e) { if (e instanceof jobs.CancelledError) throw e; if (log) log('speakers: ' + e.message); }
+        back.forEach((put, i) => put(fxs[i]));
+      }
+    }
     // 4) RENDER
     if (stage) stage(`✂️ Cutting ${picks.length} lines into ${shots.length} beats — zooms, grade and B-roll…`);
     await render(ctx, plan, { aspect: opts.aspect, keepAudio: true, output, base: baseOf(output), tmp, onProgress: say(50, 97) });
