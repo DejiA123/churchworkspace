@@ -102,6 +102,18 @@ async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise
     check(left.some((n) => n === 3), '[3] Delete 3 (asked twice) deletes exactly three', left);
     st = await page.evaluate(() => ({ selecting: document.getElementById('cloudFilesModal').classList.contains('cf-selecting'), saveAll: !!document.querySelector('[data-saveall]') }));
     check(!st.selecting && st.saveAll, '[3] and the list goes back to normal, Save all and all', st);
+    // [4] the video open in the Video Studio can be deleted too: the studio lets go of it first
+    await sleep(800);
+    const target = await page.evaluate(() => { const r = document.querySelector('#cloudFilesList .cf-row.can-del'); return r && r.dataset.path; });
+    await page.evaluate((p) => window.VideoEditor.openPath(p), target);
+    await page.waitForFunction((p) => window.VideoEditor.sourcePath() === p, target, { timeout: 20000 });
+    await page.click('#cloudFilesSelect'); await sleep(300);
+    await page.click(`#cloudFilesList .cf-row[data-path="${target.replace(/"/g, '\\"')}"] .cf-main`);
+    await page.click('#cloudFilesSelDelete'); await sleep(200);
+    await page.click('#cloudFilesSelDelete'); await sleep(2500);
+    st = await page.evaluate(() => ({ open: window.VideoEditor.hasVideo(), says: document.body.innerText }));
+    check(!fs.existsSync(target) && !st.open && /closed in the Video Studio/.test(st.says) && !/Not deleted/.test(st.says),
+      '[4] the video open in the studio is deleted when asked, and the studio is closed (not "Not deleted")', { gone: !fs.existsSync(target), open: st.open });
   } finally { await browser.close(); srv.kill(); }
   console.log(`${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FATAL', e); process.exit(1); });

@@ -254,6 +254,43 @@
   }
 
   /*
+   * ►► LET GO OF THE VIDEO. ◄◄ The studio back to empty ("Open a sermon or
+   * video"), as it is before anything is opened — for when the file it has open
+   * is deleted from Your files (cloud-boot.js deletePaths). Nothing is saved on
+   * the way out: the file is going, and so is its resume point (the server
+   * clears it).
+   */
+  function closeVideo() {
+    if (!ve.video) return false;
+    if (ve._sessionTimer) { clearTimeout(ve._sessionTimer); ve._sessionTimer = null; }
+    for (const el of [ve.refs.player, ve.refs.musicAudio]) {
+      if (!el) continue;
+      try { el.pause(); el.removeAttribute('src'); el.load(); } catch (e) { /* already empty */ }
+    }
+    ve.video = null;
+    ve.segments = []; ve.sel = null; ve.audio = []; ve.audioSel = null; ve.activeRow = 'video';
+    ve.sounds = []; ve.soundSel = null; ve.textOverlays = []; ve.textSel = null; ve.mediaThumbs = {};
+    ve.capWords = null; ve.capEvents = null; ve.capOffset = 0; ve._capSource = null; ve.capTarget = null;
+    ve.capSel = null; ve.capEditing = null; ve.capScope = null;
+    ve.history = []; ve.future = [];
+    dropObjectUrl(ve.filmstripUrl); ve.filmstripUrl = null;
+    ve.sessionId = null; ve.sessionName = null; ve.sessionThumb = null; ve.sessionDirty = false; ve.sessionAuto = false;
+    if (ve.refs.player) ve.refs.player.style.display = 'none';
+    const nv = $('#veNoVid'); if (nv) nv.style.display = '';
+    if (ve.refs.capOverlay) ve.refs.capOverlay.classList.add('hidden');
+    if (ve.refs.filmstrip) ve.refs.filmstrip.style.backgroundImage = '';
+    const name = $('#veName'); if (name) name.textContent = '';
+    const stats = $('#veStats'); if (stats) stats.textContent = '';
+    const hl = $('#veFindHighlights'); if (hl) hl.disabled = true;
+    const capAll = $('#veCapShorts'); if (capAll) capAll.disabled = true;
+    // each redraw on its own: one that assumed a video must not leave the rest undone
+    for (const fn of [updateUndoRedoButtons, updateSessionChip, renderTextOverlays, renderRuler, renderSegments, updatePlayhead, updateCropMask]) {
+      try { fn(); } catch (e) { /* nothing to draw */ }
+    }
+    return true;
+  }
+
+  /*
    * ►► A PICTURE PAINTED INTO MANY BLOCKS IS A SHORT LINK, NOT ITS BYTES. ◄◄
    * The filmstrip arrives as a data: URL of ~290 KB, and every clip block on
    * the video row carried a copy in its inline style. A montage has 150+
@@ -15874,6 +15911,8 @@
     },
     /** Is a video open? (The home screen says "continue" rather than "open".) */
     hasVideo() { return !!ve.video; },
+    /** Close the open video — the studio goes back to empty (its file is being deleted). */
+    closeVideo() { return closeVideo(); },
     /** The file the studio has open — the Cloud Studio will not delete it from under the edit. */
     sourcePath() { return (ve.video && ve.video.path) || null; },
     /** The montage file behind the copy the studio edits (montage.js baseOf), or the open file itself. */

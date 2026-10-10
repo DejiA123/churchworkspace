@@ -1739,8 +1739,13 @@ let _hideTimer = null;
     const ed = window.VideoEditor;
     const openNow = [ed && ed.sourcePath && ed.sourcePath(), ed && ed.montagePath && ed.montagePath()].filter(Boolean);
     const isOpen = (p) => openNow.includes(p);
-    const kept = paths.filter(isOpen);
-    const go = paths.filter((p) => !isOpen(p));
+    // the one the studio has open goes too (it was asked for, twice): the studio lets go of it first
+    const closing = paths.some(isOpen);
+    if (closing) {
+      try { ed.closeVideo && ed.closeVideo(); } catch (e) {}
+    }
+    const kept = ed && ed.closeVideo ? [] : paths.filter(isOpen);
+    const go = paths.filter((p) => !kept.includes(p));
     const rows = $$('#cloudFilesList .cf-row').filter((r) => go.includes(r.dataset.path));
     let out = { deleted: [], refused: [], freed: 0 };
     if (go.length) {
@@ -1777,7 +1782,7 @@ let _hideTimer = null;
       island({
         kind: refused.length ? 'warn' : 'good',
         title: gone.size > 1 ? `${gone.size} videos deleted` : 'Video deleted',
-        sub: (out.freed ? `${fmtSize(out.freed)} freed` : 'Removed') + (refused.length ? ` · ${refused.length} kept: ${refused[0].why}` : ''),
+        sub: (out.freed ? `${fmtSize(out.freed)} freed` : 'Removed') + (closing ? ' · closed in the Video Studio' : '') + (refused.length ? ` · ${refused.length} kept: ${refused[0].why}` : ''),
         ms: refused.length ? 9000 : 4000,
       });
     } else if (refused.length) {
