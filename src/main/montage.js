@@ -1067,21 +1067,16 @@ function finalise(raw, cands, opts, music) {
 
 function fitChain(c, W, H, focus, scale = 1, tag = '', fx = null) {
   const w = W * scale, h = H * scale;
-  const ar = c.w / c.h, tar = W / H;
   const y = focus === 'top' ? '0' : focus === 'bottom' ? '(ih-oh)' : '(ih-oh)/2';
-  // close enough to the frame's shape: fill it; otherwise the whole picture
-  // over a blurred copy of itself (a landscape clip in a 9:16 short) — unless
-  // the shot says where its person stands (`fx`, 0 left … 1 right): then it
-  // FILLS the frame, cropped round them (the Viral Montage, findSpeakers)
-  if (typeof fx === 'number' && Number.isFinite(fx)) {
-    const x = `'min(max(iw*${clamp(fx, 0, 1).toFixed(3)}-ow/2,0),iw-ow)'`;
-    return `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}:${x}:${y},setsar=1`;
-  }
-  if (Math.abs(Math.log(ar / tar)) < 0.42) {
-    return `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}:(iw-ow)/2:${y},setsar=1`;
-  }
-  return `split[fa${tag}][fb${tag}];[fa${tag}]scale=${Math.round(w / 4)}:${Math.round(h / 4)}:force_original_aspect_ratio=increase,crop=${Math.round(w / 4)}:${Math.round(h / 4)},boxblur=10:2,eq=brightness=-0.06,scale=${w}:${h}[bg${tag}];`
-    + `[fb${tag}]scale=${w}:${h}:force_original_aspect_ratio=decrease[fg${tag}];[bg${tag}][fg${tag}]overlay=(W-w)/2:(H-h)/2,setsar=1`;
+  // ALWAYS FULL SCREEN: "even if I upload a 16:9 video and select 9:16 … no
+  // gaps at the top and bottom, the video should just zoom in to cover the
+  // gap". The picture is zoomed until it covers the whole frame and the spare
+  // edges are cut off — never shown whole over a blurred copy of itself.
+  // Across, it is cut round the person in it when the shot knows where they
+  // stand (`fx`, 0 left … 1 right — findSpeakers), else round the middle.
+  const at = typeof fx === 'number' && Number.isFinite(fx) ? clamp(fx, 0, 1) : 0.5;
+  const x = at === 0.5 ? '(iw-ow)/2' : `'min(max(iw*${at.toFixed(3)}-ow/2,0),iw-ow)'`;
+  return `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}:${x}:${y},setsar=1`;
 }
 
 /** `t0`: where in the shot this piece starts, so a zoom carries on across the sections of one shot. */
@@ -1467,8 +1462,8 @@ function projectOf(plan, cands, { aspect, keepAudio, style, full }, meta = {}) {
     cands: C,
     shots: plan.shots.map((s) => ({
       cid: s.cand.id, seconds: s.seconds, from: s.from == null ? null : s.from, need: s.need == null ? null : s.need,
-      effect: s.effect, focus: s.focus, slow: !!s.slow, transition: s.transition, grade: s.grade || null, mute: !!s.mute,
-      overlays: (s.overlays || []).map((o) => ({ cid: o.cand.id, style: o.style, start: o.start, len: o.len, pos: o.pos, from: o.from == null ? null : o.from })),
+      effect: s.effect, focus: s.focus, fx: s.fx == null ? null : s.fx, slow: !!s.slow, transition: s.transition, grade: s.grade || null, mute: !!s.mute,
+      overlays: (s.overlays || []).map((o) => ({ cid: o.cand.id, style: o.style, start: o.start, len: o.len, pos: o.pos, from: o.from == null ? null : o.from, fx: o.fx == null ? null : o.fx })),
     })),
     texts: (plan.texts || []).map((t) => {
       const a = shotAt(t.start), b = shotAt(Math.max(t.start, t.end - 0.05));
@@ -1518,7 +1513,7 @@ async function remake(ctx, { project, edits, output, onProgress, stage }) {
     const c = C[base.cid];
     if (!c || !fs.existsSync(c.file)) return;
     const sh = {
-      cand: c, seconds: base.seconds, from: base.from, need: base.need, effect: base.effect, focus: base.focus, slow: !!base.slow, grade: base.grade || null, mute: !!base.mute,
+      cand: c, seconds: base.seconds, from: base.from, need: base.need, effect: base.effect, focus: base.focus, fx: typeof base.fx === 'number' ? base.fx : null, slow: !!base.slow, grade: base.grade || null, mute: !!base.mute,
       transition: TRANSITIONS.includes(w.transition) ? w.transition : base.transition, overlays: [],
     };
     // the pictures on it: kept as they were, or spaced again if they changed
@@ -1528,7 +1523,7 @@ async function remake(ctx, { project, edits, output, onProgress, stage }) {
       const list = asked.map((o, k) => {
         const was = same ? base.overlays[k] : null;
         return { cand: C[o.cid], style: OVERLAY_STYLES.includes(o.style) ? o.style : 'cutaway', start: was ? was.start : 0, len: was ? was.len : OV_LEN,
-          pos: (k % 2 ? 'left' : 'right'), from: was && was.from != null ? was.from : null };
+          pos: (k % 2 ? 'left' : 'right'), from: was && was.from != null ? was.from : null, fx: was && typeof was.fx === 'number' ? was.fx : null };
       });
       const firstShot = shots.length === 0;
       sh.overlays = (same && !(firstShot && list.some((o) => o.start < 1.2))) ? list : spaceOverlays(list, sh.seconds, firstShot);
@@ -1868,6 +1863,33 @@ async function findSpeakers(ctx, reqs, tmp, log) {
   return out;
 }
 
+/**
+ * Where across each shot to cut it so it fills the frame round its person:
+ * sets `fx` on every video shot (and every video cutaway laid over one) whose
+ * shape is not the frame's. A shot that is one beat of a spoken LINE (`line`,
+ * an index into `picks`) shares one look with the other beats of that line.
+ * With no AI to look, everything is cut round the middle — still full screen.
+ */
+async function aimShots(ctx, shots, aspect, { picks = null, tmp, log, stage } = {}) {
+  const { w: W, h: H } = ASPECTS[aspect] || ASPECTS['9:16'];
+  const reqs = [], back = [];
+  const want = (cand, t, put) => { if (!needsCrop(cand, W, H)) return; reqs.push({ file: cand.file, t: round2(clamp(t, 0, Math.max(0, (cand.fileDur || 0) - 0.1))), w: cand.w, h: cand.h }); back.push(put); };
+  const lineAt = new Map();
+  shots.forEach((sh) => {
+    if (sh.line != null && picks && picks[sh.line]) {
+      // one look per LINE, shared by its beats (it is the same speaker, a second or two apart)
+      if (!lineAt.has(sh.line)) { const p = picks[sh.line]; lineAt.set(sh.line, []); want(p.cand, (p.start + p.end) / 2, (fx) => lineAt.get(sh.line).forEach((x) => { x.fx = fx; })); }
+      if (needsCrop(sh.cand, W, H)) lineAt.get(sh.line).push(sh);
+    } else if (sh.cand.kind === 'video') want(sh.cand, (sh.from || 0) + (sh.need || sh.seconds) / 2, (fx) => { sh.fx = fx; });
+    for (const o of sh.overlays || []) if (o.style === 'cutaway' && o.cand.kind === 'video') want(o.cand, (o.from || 0) + o.len / 2, (fx) => { o.fx = fx; });
+  });
+  if (!reqs.length) return;
+  if (stage) stage('🎯 Finding the speaker in every moment, to fill the frame…');
+  let fxs = reqs.map(() => 0.5);
+  try { fxs = await findSpeakers(ctx, reqs, tmp, log); } catch (e) { if (e instanceof jobs.CancelledError) throw e; if (log) log('speakers: ' + e.message); }
+  back.forEach((put, i) => put(fxs[i] == null ? 0.5 : fxs[i]));
+}
+
 async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, onProgress, stage, log, keepAudio }) {
   const say = (a, b) => (p) => onProgress && onProgress(Math.round(a + (b - a) * (clamp(p, 0, 100) / 100)));
   const infos = [];
@@ -2077,26 +2099,7 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
       shots, texts, duration,
     };
     // FULL SCREEN: every landscape moment is cropped to fill, round its speaker
-    {
-      const { w: W, h: H } = ASPECTS[opts.aspect] || ASPECTS['9:16'];
-      const reqs = [], back = [];
-      const want = (cand, t, put) => { if (!needsCrop(cand, W, H)) return; reqs.push({ file: cand.file, t: round2(clamp(t, 0, Math.max(0, cand.fileDur - 0.1))), w: cand.w, h: cand.h }); back.push(put); };
-      const lineAt = new Map();
-      shots.forEach((sh) => {
-        if (sh.line != null) {
-          // one look per LINE, shared by its beats (it is the same speaker, a second or two apart)
-          if (!lineAt.has(sh.line)) { const p = picks[sh.line]; lineAt.set(sh.line, []); want(p.cand, (p.start + p.end) / 2, (fx) => lineAt.get(sh.line).forEach((x) => { x.fx = fx; })); }
-          if (needsCrop(sh.cand, W, H)) lineAt.get(sh.line).push(sh);
-        } else if (sh.cand.kind === 'video') want(sh.cand, (sh.from || 0) + sh.seconds / 2, (fx) => { sh.fx = fx; });
-        for (const o of sh.overlays || []) if (o.style === 'cutaway' && o.cand.kind === 'video') want(o.cand, (o.from || 0) + o.len / 2, (fx) => { o.fx = fx; });
-      });
-      if (reqs.length) {
-        if (stage) stage('🎯 Finding the speaker in every moment, to fill the frame…');
-        let fxs = reqs.map(() => 0.5);
-        try { fxs = await findSpeakers(ctx, reqs, tmp, log); } catch (e) { if (e instanceof jobs.CancelledError) throw e; if (log) log('speakers: ' + e.message); }
-        back.forEach((put, i) => put(fxs[i]));
-      }
-    }
+    await aimShots(ctx, shots, opts.aspect, { picks, tmp, log, stage });
     // 4) RENDER
     if (stage) stage(`✂️ Cutting ${picks.length} lines into ${shots.length} beats — zooms, grade and B-roll…`);
     await render(ctx, plan, { aspect: opts.aspect, keepAudio: true, output, base: baseOf(output), tmp, onProgress: say(50, 97) });
@@ -2163,6 +2166,8 @@ async function make(ctx, getInfo, { mediaPaths, musicPath, style, lengthSec, ful
     const d = await direct(cands, opts, music, log, ctx, tmp);
     if (onProgress) onProgress(50);
     const plan = finalise(d.plan, cands, opts, music);
+    // FULL SCREEN: a clip of another shape is cut to fill the frame, round its person
+    await aimShots(ctx, plan.shots, opts.aspect, { tmp, log, stage });
     if (stage) stage(opts.full ? `🎞 Blending all ${files.length} together…` : `✂️ Cutting ${plan.shots.length} shots together…`);
     await render(ctx, plan, { aspect: opts.aspect, keepAudio: keepAudio !== false, output, base: baseOf(output), tmp, onProgress: part(50, 100) });
     // the edit itself, beside the video, so it can be rearranged later

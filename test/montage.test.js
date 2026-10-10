@@ -293,6 +293,56 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
   const mean = parseFloat((vol.match(/mean_volume:\s*(-?[\d.]+)/) || [])[1]);
   log(mean > -40, 'and the clip’s sound keeps playing under it', mean + ' dB');
 
+  console.log('\nA 16:9 CLIP IN A 9:16 MONTAGE FILLS THE SCREEN (no blurred bands)');
+  {
+    // red | green | blue thirds: the speaker stands on the right (blue)
+    const L = make(['-f', 'lavfi', '-i', 'color=c=red:s=1280x720:r=30:d=8', '-f', 'lavfi', '-i', 'color=c=0x00c000:s=1280x720:r=30:d=8', '-f', 'lavfi', '-i', 'color=c=blue:s=1280x720:r=30:d=8',
+      '-filter_complex', '[0:v]crop=427:720:0:0[a];[1:v]crop=426:720:427:0[b];[2:v]crop=427:720:853:0[c];[a][b][c]hstack=3[v]', '-map', '[v]',
+      '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast'], path.join(WORK, 'thirds.mp4'));
+    const colourAt = (file, t, y) => {
+      const buf = execFileSync(ffmpeg, ['-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-vf', `crop=40:40:520:${y},scale=1:1`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']);
+      return [buf[0], buf[1], buf[2]];
+    };
+    const green = (c) => c[1] > 120 && c[0] < 90 && c[2] < 90;
+    const blue = (c) => c[2] > 150 && c[0] < 90 && c[1] < 90;
+    const rows = (file, t) => [120, 960, 1800].map((y) => colourAt(file, t, y));
+    // no AI to ask: zoomed in round the middle, top to bottom
+    const outC = path.join(WORK, 'fill-c.mp4');
+    const rC = await montage.make(ctx, video.getInfo, { mediaPaths: [L], full: true, style: 'worship', aspect: '9:16', keepAudio: true, output: outC, onProgress: () => {} });
+    const iC = await video.getInfo(ctx, outC);
+    const c3 = rows(outC, rC.duration / 2);
+    log(iC.width === 1080 && iC.height === 1920 && c3.every(green), 'the music montage zooms in to cover the whole 9:16 frame (no gap top or bottom)', JSON.stringify(c3));
+    // and the top and bottom are the picture itself, exactly as bright as the
+    // middle — the old blurred bands were a dimmed copy (174 against 193)
+    const same = (cs) => cs.every((c) => c.every((v, k) => Math.abs(v - cs[1][k]) <= 6));
+    log(same(c3), 'top, middle and bottom are the same picture — no dimmed, blurred band', JSON.stringify(c3));
+    // the AI says the speaker is on the right: the crop follows them
+    const see = require(path.join(ROOT, 'src/main/cloudsee'));
+    const realReady = see.ready, realWho = see.whoIsSpeaking;
+    see.ready = () => true;
+    see.whoIsSpeaking = async ({ frames }) => ({ ok: true, answers: Object.fromEntries(frames.map((f) => [f.label, { column: 7, sure: true }])) });
+    const outR = path.join(WORK, 'fill-r.mp4');
+    let rR;
+    try { rR = await montage.make(ctx, video.getInfo, { mediaPaths: [L], full: true, style: 'worship', aspect: '9:16', keepAudio: true, output: outR, onProgress: () => {} }); }
+    finally { see.ready = realReady; see.whoIsSpeaking = realWho; }
+    const r3 = rows(outR, rR.duration / 2);
+    log(r3.every(blue), 'and is cut round the person in it when the AI can see them', JSON.stringify(r3));
+    // rearranged later: the crop is kept (no AI is asked again)
+    const pjR = montage.loadProject(outR);
+    log(pjR && pjR.shots.some((x) => typeof x.fx === 'number' && x.fx > 0.6), 'the edit beside it remembers where each shot is cut', pjR && JSON.stringify(pjR.shots.map((x) => x.fx)));
+    const outRR = path.join(WORK, 'fill-rr.mp4');
+    const rRR = await montage.remake(ctx, { project: pjR, edits: { shots: pjR.shots.map((x, key) => ({ key, transition: 'fade', overlays: x.overlays })) }, output: outRR, onProgress: () => {} });
+    const rr3 = rows(outRR, rRR.duration / 2);
+    log(rr3.every(blue), 'and a remade montage is still full screen, round the same person', JSON.stringify(rr3));
+    // a tall clip in a 16:9 montage fills it too (no bands either side)
+    const T = make(['-f', 'lavfi', '-i', 'color=c=0x00c000:s=720x1280:r=30:d=5', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast'], path.join(WORK, 'tall-green.mp4'));
+    const outW = path.join(WORK, 'fill-w.mp4');
+    const rW = await montage.make(ctx, video.getInfo, { mediaPaths: [T], full: true, style: 'worship', aspect: '16:9', keepAudio: true, output: outW, onProgress: () => {} });
+    const sideAt = (x) => { const b = execFileSync(ffmpeg, ['-v', 'error', '-ss', String(rW.duration / 2), '-i', outW, '-frames:v', '1', '-vf', `crop=40:40:${x}:520,scale=1:1`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']); return [b[0], b[1], b[2]]; };
+    const sides = [40, 940, 1840].map(sideAt);
+    log(sides.every(green) && same(sides), 'a tall clip in a 16:9 montage fills it edge to edge too', JSON.stringify(sides));
+  }
+
   fs.rmSync(WORK, { recursive: true, force: true });
   console.log(failed ? '\n❌ montage test failed' : '\n✅ montage test passed');
   process.exit(failed ? 1 : 0);
