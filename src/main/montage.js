@@ -1978,6 +1978,59 @@ async function aimShots(ctx, shots, aspect, { picks = null, tmp, log, stage } = 
   back.forEach((put, i) => put(fxs[i] == null ? 0.5 : fxs[i]));
 }
 
+/*
+ * ►► THE POST CAPTION, WRITTEN FOR SOCIAL MEDIA. ◄◄ The director is asked for
+ * a caption along with its picks, and often leaves it thin or empty — and the
+ * fallback was the operator's own "What's it about?" words, copied. Now the
+ * caption is written on its own, once the edit is known, from the words that
+ * are actually SAID in it: a first line that stops the scroll, the message in
+ * a sentence or two, who and where, a question or a call to share, and
+ * hashtags people search. The operator's notes are background, never pasted.
+ */
+const POST_SYSTEM = `You write the captions for a church's short videos on Instagram, TikTok, Facebook and YouTube Shorts — captions people read to the end, comment on and share.
+Write ONE caption for the video whose spoken words you are given:
+- Line 1: a scroll-stopping hook — the most powerful idea of the video in your own words, or its best line quoted exactly. Max 12 words. One fitting emoji is fine.
+- Then 1–3 short lines on the message: what it means for the viewer's life, warm and direct ("you"), true to what is said. No sermon summary, no "in this video".
+- Name the speaker and church only if they are given, spelt exactly as given.
+- End with ONE call to engage: a question to answer in the comments, or "Share this with someone who needs it", or the call to action given.
+- Short lines with a blank line between them. 2–4 emojis in the whole caption at most. Never invent facts, dates, places or scripture references that are not in the words or the notes.
+- hashtags: 8–12, no # sign, no spaces — a mix of broad (faith, jesus, christian, church, sermon, motivation) and specific to the message (e.g. faithoverfear, breakthrough); include the church or speaker as a hashtag only if given.
+Reply with JSON only: {"caption":"…","hashtags":["…"]}`;
+async function writeTalkPost(picks, opts, P, hook) {
+  const said = picks.map((p) => String(p.text || (p.words || []).map((w) => w.text).join(' ')).trim()).filter(Boolean);
+  const a = opts.about || {};
+  const tags = (list) => (Array.isArray(list) ? list : []).map((h) => String(h).replace(/^#+/, '').replace(/[^\p{L}\p{N}_]+/gu, '')).filter((h) => h.length >= 2).slice(0, 12);
+  // the director's own, when it wrote a real one (not a copy of the notes)
+  const notes = cleanBrief(opts.brief).toLowerCase();
+  const directors = String(P.post_caption || '').trim();
+  const realOne = directors.length >= 60 && !(notes && directors.toLowerCase().includes(notes.slice(0, 40)));
+  try {
+    const cw = require('./cloudwrite');
+    if (cw.access && cw.access().key) {
+      const prompt = `The words spoken in the video, in order:\n${said.map((t, i) => `${i + 1}. ${t}`).join('\n')}`
+        + (hook ? `\n\nOn-screen headline: ${hook}` : '')
+        + (a.speaker ? `\nSpeaker: ${a.speaker}` : '') + (a.church ? `\nChurch: ${a.church}` : '') + (a.occasion ? `\nOccasion: ${a.occasion}` : '')
+        + (a.cta ? `\nCall to action to end with: ${a.cta}` : '')
+        + (opts.brief ? `\nThe church's own notes (background only — do not copy them): ${cleanBrief(opts.brief)}` : '')
+        + `\nStyle of the video: ${opts.style}.`;
+      const text = await cw.chat({ system: POST_SYSTEM, prompt, json: true, maxTokens: 700, temperature: 0.8, timeoutMs: 45000, evenIfOff: true });
+      const j = text ? cw.parseJson(text) : null;
+      const cap = j && String(j.caption || '').trim();
+      if (cap && cap.length >= 40) return { caption: cap, hashtags: tags(j.hashtags).length ? tags(j.hashtags) : tags(P.hashtags) };
+    }
+  } catch (e) { /* the fallback below */ }
+  if (realOne) return { caption: directors, hashtags: tags(P.hashtags) };
+  // no AI to write it: the strongest line actually said leads, then a call to share — never the notes, copied
+  const best = said.slice().sort((x, y) => Math.abs(x.split(' ').length - 12) - Math.abs(y.split(' ').length - 12))[0] || said[0] || '';
+  const quote = best.length > 160 ? best.slice(0, 157).replace(/\s+\S*$/, '') + '…' : best;
+  const lines = [quote ? `“${quote.replace(/^["“]|["”]$/g, '')}” 🙌` : (hook || '')];
+  if (said.length > 1 && said[0] !== best) lines.push(said[0].length > 140 ? said[0].slice(0, 137).replace(/\s+\S*$/, '') + '…' : said[0]);
+  lines.push('Which line spoke to you? Tell us in the comments 👇 — and share this with someone who needs it today.');
+  const base = tags(P.hashtags);
+  const fallbackTags = base.length ? base : ['faith', 'jesus', 'church', 'sermon', 'christian', 'gospel', 'hope', 'godisgood'];
+  return { caption: lines.filter(Boolean).join('\n\n'), hashtags: fallbackTags };
+}
+
 /** Where the person stands across a line's picture at source time `t`, from its looks (between two, in proportion); null when no look saw anyone. */
 function fxAtLook(p, t) {
   const L = (p.looks || []).filter((l) => l.fx != null && l.people !== 0).sort((a, b) => a.t - b.t);
@@ -2276,11 +2329,14 @@ async function makeTalk(ctx, getInfo, { files, opts, hear, musicPath, output, on
     const hook = String(P.hook_text || '').replace(/\s+/g, ' ').trim().slice(0, 60);
     const texts = hook ? [{ start: 0, end: round2(Math.min(duration, Math.max(2.4, shots[0].seconds + (shots[1] ? shots[1].seconds : 0)))), text: hook, role: 'hook' }] : [];
     const fb = fromBrief(briefText(opts));
+    // THE POST: written for social media from what is SAID in the edit (not the operator's notes, copied)
+    if (stage) stage('✍️ Writing the post caption and hashtags…');
+    const post = await writeTalkPost(picks, opts, P, hook);
     const plan = {
       concept: String(P.concept || '').slice(0, 300),
       title: String(P.title || hook || (fb && fb.hook) || '').slice(0, 100),
-      postCaption: String(P.post_caption || (fb && fb.caption) || '').slice(0, 600),
-      hashtags: (Array.isArray(P.hashtags) ? P.hashtags : []).map((h) => String(h).replace(/^#+/, '').replace(/\s+/g, '')).filter(Boolean).slice(0, 10),
+      postCaption: post.caption.slice(0, 900),
+      hashtags: post.hashtags,
       shots, texts, duration,
     };
     // FULL SCREEN: every landscape moment is cropped to fill, round its speaker

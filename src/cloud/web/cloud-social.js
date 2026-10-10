@@ -1461,6 +1461,7 @@
       <input type="file" id="mtSong" accept="audio/*,.mp3,.m4a,.wav,.aac" hidden />`;
     p.foot.innerHTML = `<button type="button" class="mt-go" data-mt="go"${ready ? '' : ' disabled'}>${mi('sparkles')} ${talk ? 'Make my Viral Montage' : 'Make my montage'}</button>`;
     if (!p._wired) { p._wired = true; mtWire(p); }
+    if (MT.preview) mtPreviewPaint();   // a sample still loading or playing keeps its line after a redraw
   }
 
   /* 🎁 the free shelf: songs that are safe to post (freemusic.js), by mood */

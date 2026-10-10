@@ -273,6 +273,30 @@ const SCRIPT = {
     ok(capt.length > 10 && capt.every((w) => spoken.has(w)), 'the captions are exactly the words that were said (nothing added)', capt.filter((w) => !spoken.has(w)));
   }
 
+  console.log('\nTHE POST CAPTION IS WRITTEN FOR SOCIAL MEDIA — NOT THE NOTES, COPIED');
+  {
+    const V = make(['-f', 'lavfi', '-i', 'testsrc2=s=360x640:r=30:d=16', '-f', 'lavfi', '-i', 'sine=f=220:d=16', '-shortest', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast'], path.join(WORK, 'post.mp4'));
+    const words = say(['God is not finished with you yet my friend.', 'Your story is still being written by his hand.', 'Do not quit in the middle of your miracle.'], 0.5);
+    const brief = 'youth service sunday at the hall';
+    const r0 = await montage.make(ctx, video.getInfo, { mediaPaths: [V], style: 'hype', lengthSec: 10, aspect: '9:16', output: path.join(WORK, 'post0.mp4'), mode: 'talk', hear: async () => words, brief });
+    ok(/[“"].+[”"]/.test(r0.postCaption) && !r0.postCaption.toLowerCase().includes(brief) && /comments|share/i.test(r0.postCaption) && r0.hashtags.length >= 6,
+      'with no AI: the caption leads with a line actually said, asks people to comment or share, and has hashtags — the notes are not pasted in', { c: r0.postCaption, h: r0.hashtags });
+    // with the caption writer: its words, from what was said
+    const cw = require(path.join(ROOT, 'src/main/cloudwrite'));
+    const realAccess = cw.access, realChat = cw.chat;
+    let asked = '';
+    cw.access = () => ({ key: 'test' });
+    cw.chat = async ({ system, prompt }) => {
+      if (/captions for a church/.test(system || '')) { asked = prompt; return JSON.stringify({ caption: 'God is not finished with you yet. 🙌\n\nWhatever you are walking through, your story is still being written.\n\nWho needs to hear this today? Tag them 👇', hashtags: ['#faith', 'jesus', 'neverquit', 'church', 'sermon', 'hope', 'christian', 'motivation'] }); }
+      return '';   // (the director: no answer, so the rules choose)
+    };
+    let r1;
+    try { r1 = await montage.make(ctx, video.getInfo, { mediaPaths: [V], style: 'hype', lengthSec: 10, aspect: '9:16', output: path.join(WORK, 'post1.mp4'), mode: 'talk', hear: async () => words, brief }); }
+    finally { cw.access = realAccess; cw.chat = realChat; }
+    ok(/still being written/.test(r1.postCaption) && r1.hashtags.includes('faith') && r1.hashtags.includes('neverquit'), 'with the AI: a real social caption and hashtags, written for this video', { c: r1.postCaption, h: r1.hashtags });
+    ok(/God is not finished with you/.test(asked) && /background only/.test(asked), 'the writer is given the words actually said; the notes only as background', asked.slice(0, 200));
+  }
+
   console.log('\nNOTHING SAID');
   let err = null;
   try {
