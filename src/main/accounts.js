@@ -1042,27 +1042,59 @@ class Accounts {
    * library. The same Instagram account, under the same key and profile; only
    * the sign-in differs (loginMethod=facebook_login).
    */
+  /*
+   * ►► INSTAGRAM, LINKED THROUGH FACEBOOK — FREE. ◄◄ Instagram's song
+   * library opens only to an account linked through a Facebook sign-in. Zernio
+   * counts a second link of the same Instagram as another account, so on the
+   * free plan (2 accounts each) it says "add a payment method". Zernio's own
+   * rule for switching the sign-in: disconnect the account first. So, only
+   * when Zernio says it is full — and only once the church has said yes
+   * (opts.unlink) — this Instagram is let go on Zernio (2 → 1) and linked again
+   * through Facebook (1 → 2): nothing to pay. What is remembered here
+   * (igRelink) lets the new link take the old one's place: the scheduled
+   * Instagram posts move over (main.js finishIgRelink).
+   */
   async _zoRelinkInstagram(accountId, opts = {}) {
     const acc = this.byId(accountId);
     if (!acc || acc.platform !== 'instagram' || acc.via !== 'zernio') throw new Error('Pick the Instagram account to link through Facebook.');
     const { apiBase, redirectUrl } = zoCfg(this.store, 'instagram');
     const auth = { authorization: 'Bearer ' + acc.token };
-    let profileId = '';
+    let profileId = '', me = null;
     try {
       const listed = zoAccountList(await getJson(`${apiBase}/accounts`, { headers: auth }));
-      const me = listed.find((a) => String(zoAccountId(a)) === String(acc.zoAccountId));
+      me = listed.find((a) => String(zoAccountId(a)) === String(acc.zoAccountId)) || null;
       const p = me && me.profileId;
       profileId = String((p && (p._id || p.id)) || p || '');
     } catch (e) { /* the default profile, then */ }
+    if (!profileId) profileId = String((this.store.get('igRelink') || {}).profileId || '');
     const q = { redirect_url: opts.redirectUrl || redirectUrl, loginMethod: 'facebook_login' };
     if (profileId) q.profileId = profileId;
+    const gen = async () => {
+      const r = await getJson(`${apiBase}/connect/instagram?` + new URLSearchParams(q), { headers: auth });
+      return r && (r.url || r.authUrl || r.connectUrl || r.access_url);
+    };
+    const full = (e) => e && (e.status === 402 || /payment|free_tier|more than 2 accounts|plan limit|upgrade/i.test(e.message || ''));
+    // remembered BEFORE anything is let go, so the new link always finds the old one's posts
+    this.store.set('igRelink', { oldId: acc.id, oldZoId: String(acc.zoAccountId), profileId, at: Date.now() });
     let url = '';
-    try {
-      const gen = await getJson(`${apiBase}/connect/instagram?` + new URLSearchParams(q), { headers: auth });
-      url = gen && (gen.url || gen.authUrl || gen.connectUrl || gen.access_url);
-    } catch (e) { throw new Error('Zernio could not start the Facebook sign-in (' + e.message + ') — try again in a moment.'); }
+    try { url = await gen(); }
+    catch (e) {
+      if (!full(e)) throw new Error('Zernio could not start the Facebook sign-in (' + e.message + ') — try again in a moment.');
+      if (me && !opts.unlink) {
+        // the church is asked first: Instagram is unlinked for the minute the sign-in takes
+        const err = new Error('Zernio’s free plan holds 2 accounts, and it counts this as a third. The free way: Instagram is unlinked for a moment and linked again through Facebook — your scheduled Instagram posts are moved over.');
+        err.needsUnlink = true;
+        throw err;
+      }
+      if (me) {
+        try { await publisher.del(`${apiBase}/accounts/${encodeURIComponent(acc.zoAccountId)}`, { headers: auth }); }
+        catch (e2) { if (!(e2.status === 404 || /not found/i.test(e2.message || ''))) throw new Error('Zernio could not unlink Instagram to make room (' + e2.message + ') — try again in a moment.'); }
+      }
+      try { url = await gen(); }
+      catch (e3) { throw new Error('Zernio could not start the Facebook sign-in (' + e3.message + '). Instagram is unlinked on Zernio — tap the button again to finish linking it through Facebook.'); }
+    }
     if (!url || !/^https:\/\//i.test(String(url))) throw new Error('Zernio did not return a sign-in link — try again.');
-    return { url: String(url), platform: 'instagram', label: 'Instagram' };
+    return { url: String(url), platform: 'instagram', label: 'Instagram', unlinked: !!(opts.unlink && me) };
   }
 
   /** Is it linked yet? Keeps the account when it is; `{ pending: true }` when not. */

@@ -869,7 +869,7 @@
       try { const l = await window.api.library.list(); st.songs = ((l && l.music) || []).filter((m) => !/^free:/.test(m.source || '')); } catch (e) { st.songs = []; }
       if (panel.el.isConnected && st.files.length) draw();
     })();
-    const panel = C.openPanel({ id: 'csCompose', title: edit ? 'Edit post' : 'New post', cls: 'cp-compose', onClose: () => { stopIgPreview(); clearTimeout(igTimer); } });
+    const panel = C.openPanel({ id: 'csCompose', title: edit ? 'Edit post' : 'New post', cls: 'cp-compose', onClose: () => { stopIgPreview(); clearTimeout(igTimer); clearInterval(igWatch); } });
     const ensure = async () => {
       if (st.accountIds != null) return;
       await loadSocial(true);
@@ -1118,6 +1118,10 @@
     function igListHtml() {
       const fm = st.fm;
       if (fm.igState === 'loading') return '<p class="cs-hint"><i class="csb-spin"></i> Finding songs…</p>';
+      if (fm.igState === 'needsUnlink') return `<p class="cs-hint">${esc(fm.igErr || '')}</p>`
+        + '<p class="cs-hint">Nothing to pay: Zernio’s own way to switch an account to a Facebook sign-in is to unlink it first. It takes a minute — sign in with Facebook on the page that opens and choose this Instagram.</p>'
+        + '<button type="button" class="cs-btn csb-igfb" data-c="fm-ig-fb2">Unlink and link through Facebook (free)</button>';
+      if (fm.igState === 'linking') return '<p class="cs-hint"><i class="csb-spin"></i> Sign in with Facebook on the page that opened and choose this Instagram — this page carries on by itself when it is linked.</p>';
       if (fm.igState === 'needsFb') return '<p class="cs-hint">Instagram opens its song library only to an account linked through Facebook. One sign-in, once:</p>'
         + `<button type="button" class="cs-btn csb-igfb" data-c="fm-ig-fb">Link Instagram through Facebook</button>`
         + '<p class="cs-hint">Until then Instagram gets the flyer as a picture (or with your own recording, if you chose one).</p>';
@@ -1151,6 +1155,29 @@
         else { fm.igState = ''; fm.igList = (r && r.songs) || []; }
       } catch (er) { if (my !== igSeq) return; fm.igState = 'error'; fm.igErr = (er && er.message) || ''; }
       paint();
+    }
+    // waiting for the Instagram linked through Facebook: it takes the old link's place, then its songs load
+    let igWatch = null;
+    function watchIgLink(oldId) {
+      clearInterval(igWatch);
+      const until = Date.now() + 10 * 60000;
+      igWatch = setInterval(async () => {
+        if (!panel.el.isConnected || Date.now() > until) {
+          clearInterval(igWatch);
+          if (panel.el.isConnected && st.fm.igState === 'linking') { st.fm.igState = 'needsFb'; const bx = panel.body.querySelector('#csbIgList'); if (bx) bx.innerHTML = igListHtml(); }
+          return;
+        }
+        let r = null;
+        try { r = await window.api.social.linkClaim('instagram', false); } catch (e) { return; }
+        if (!r || !r.account) return;
+        clearInterval(igWatch);
+        await loadSocial(true);
+        const nu = r.account.id;
+        if (nu && nu !== oldId) st.accountIds = picked().map((x) => (x === oldId ? nu : x)).filter((x, i, a) => a.indexOf(x) === i);
+        Object.assign(st.fm, { igState: '', igList: null, igErr: '', igFor: '', ig: null });
+        C.island({ kind: 'good', title: 'Instagram is linked through Facebook', sub: 'Its song library is open — your scheduled Instagram posts were moved over.', ms: 6000 });
+        draw();
+      }, 4000);
     }
     function stopIgPreview() { if (igAudioEl) { try { igAudioEl.pause(); } catch (e) {} igAudioEl = null; } }
     function whenBlock() {
@@ -1592,23 +1619,32 @@
         if (x) { st.fm.ig = Object.assign({}, x, { acc: st.fm.igFor }); stopIgPreview(); draw(); }
         return;
       }
-      if (c === 'fm-ig-fb') {
+      if (c === 'fm-ig-fb' || c === 'fm-ig-fb2') {
         const acc = linked().find((a) => picked().includes(a.id) && a.platform === 'instagram' && a.via === 'zernio');
         if (!acc) return;
+        const unlink = c === 'fm-ig-fb2';
         // opened on the tap, before anything is awaited — an iPhone blocks a window opened later
         let w = null;
         try { w = window.open('', '_blank'); if (w) w.opener = null; } catch (er) { w = null; }
         b.disabled = true; b.textContent = 'Opening…';
+        const box = () => panel.body.querySelector('#csbIgList');
         try {
-          const r = await window.api.social.igRelink(acc.id);
+          const r = await window.api.social.igRelink(acc.id, unlink);
+          if (r && r.needsUnlink) {
+            // Zernio's free plan counts it as a third account: the free way needs a yes first
+            if (w) try { w.close(); } catch (x) {}
+            st.fm.igState = 'needsUnlink'; st.fm.igErr = r.message || '';
+            const bx = box(); if (bx) bx.innerHTML = igListHtml();
+            return;
+          }
           if (w) w.location.href = r.url; else window.open(r.url, '_blank');
-          st.fm.igState = ''; st.fm.igList = null;
-          const box = panel.body.querySelector('#csbIgList');
-          if (box) box.innerHTML = '<p class="cs-hint">Sign in with Facebook on the page that opened, then come back and tap a search above.</p>';
+          st.fm.igState = 'linking';
+          const bx = box(); if (bx) bx.innerHTML = igListHtml();
+          watchIgLink(acc.id);
         } catch (er) {
           if (w) try { w.close(); } catch (x) {}
-          b.disabled = false; b.textContent = 'Link Instagram through Facebook';
-          C.island({ kind: 'error', title: 'Could not start the sign-in', sub: (er && er.message) || '', ms: 6000 });
+          b.disabled = false; b.textContent = unlink ? 'Unlink and link through Facebook (free)' : 'Link Instagram through Facebook';
+          C.island({ kind: 'error', title: 'Could not start the sign-in', sub: (er && er.message) || '', ms: 8000 });
         }
         return;
       }

@@ -1257,7 +1257,36 @@ ipcMain.handle('social:musicCheck', wrap(async () => {
 // Instagram's own song library, through Zernio (licensed by Meta — a song from it is never flagged)
 ipcMain.handle('social:igAudio', wrap(async (e, { accountId, q } = {}) => accounts.zernioIgAudio(accountId, q)));
 // that library needs the Instagram account linked through Facebook: the sign-in to do it
-ipcMain.handle('social:igRelink', wrap(async (e, { accountId } = {}) => accounts.zernioLinkStart('instagram', { relink: accountId })));
+ipcMain.handle('social:igRelink', wrap(async (e, { accountId, unlink } = {}) => {
+  try { return await accounts.zernioLinkStart('instagram', { relink: accountId, unlink: !!unlink }); }
+  catch (er) { if (er && er.needsUnlink) return { needsUnlink: true, message: er.message }; throw er; }
+}));
+/*
+ * The Instagram linked again through Facebook takes the old link's place:
+ * its scheduled posts move over to it (their old bookings went with the old
+ * link) and are booked again; the old one is let go here.
+ */
+function finishIgRelink(acct) {
+  const r = store.get('igRelink');
+  if (!r || !acct || acct.platform !== 'instagram') return acct;
+  store.set('igRelink', null);
+  if (acct.id === r.oldId) return acct;      // the same link, refreshed: nothing to move
+  for (const p of scheduler.list()) {
+    if (!(p.accountIds || []).includes(r.oldId)) continue;
+    const handoffs = { ...(p.handoffs || {}) }; delete handoffs[r.oldId];
+    const handoffErrors = { ...(p.handoffErrors || {}) }; delete handoffErrors[r.oldId];
+    const music = p.music && p.music.igAudio && p.music.igAudio.acc === r.oldZoId ? { ...p.music, igAudio: { ...p.music.igAudio, acc: String(acct.zoAccountId || '') } } : p.music;
+    try {
+      scheduler.update(p.id, { accountIds: p.accountIds.map((x) => (x === r.oldId ? acct.id : x)), handoffs, handoffErrors, music, nextHandoffAt: null });
+      if (p.status === 'scheduled') scheduler.handOff(p.id).catch(() => {});
+    } catch (e) { /* gone meanwhile */ }
+  }
+  // the old link's bookings went with it on Zernio: nothing left there to take back
+  store.set('cancelQueue', (store.get('cancelQueue') || []).filter((x) => x.accId !== r.oldId));
+  try { accounts.remove(r.oldId); } catch (e) {}
+  try { store.flushSync(); } catch (e) {}
+  return { ...acct, replaced: r.oldId };
+}
 ipcMain.handle('social:withMusic', wrap(async (e, { mediaPath, free, libId, volume, jobId } = {}) => {
   // never a free instrumental under a post — the church's own songs only
   if (free && !libId) throw new Error('Pick one of your own songs — free instrumentals are not put on posts.');
@@ -3205,7 +3234,11 @@ ipcMain.handle('social:setKeys', wrap(async (e, patch = {}) => {
   return Object.assign(socialKeyState(), { linked });
 }));
 ipcMain.handle('social:linkStart', wrap(async (e, { platform, another } = {}) => accounts.zernioLinkStart(platform, { another: !!another })));
-ipcMain.handle('social:linkClaim', wrap(async (e, { platform, another } = {}) => accounts.zernioLinkClaim(platform, { another: !!another })));
+ipcMain.handle('social:linkClaim', wrap(async (e, { platform, another } = {}) => {
+  const r = await accounts.zernioLinkClaim(platform, { another: !!another });
+  if (r && r.account && platform === 'instagram' && store.get('igRelink')) r.account = finishIgRelink(r.account);
+  return r;
+}));
 ipcMain.handle('social:unlink', wrap(async (e, { id } = {}) => accounts.remove(id)));
 ipcMain.handle('social:check', wrap(async (e, { id } = {}) => accounts.check(id)));
 

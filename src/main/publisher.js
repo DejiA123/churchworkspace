@@ -1803,7 +1803,7 @@ async function testFacebook({ pageId, token, apiBase }) {
 }
 
 module.exports = {
-  flyerAsJpeg, flyerAsShort, flyerAsStill, flyerPlan, songHookSec, zernioFind, withAppTags,
+  del, flyerAsJpeg, flyerAsShort, flyerAsStill, flyerPlan, songHookSec, zernioFind, withAppTags,
   publishToFacebook, publishToInstagram, publishToYouTube, publishToTikTok,
   publishViaUploadPost, publishViaZernio, publishTo, testFacebook,
   canSchedule, scheduleTo, cancelScheduled, FB_SCHEDULE_MIN_MS, FB_SCHEDULE_MAX_MS,
