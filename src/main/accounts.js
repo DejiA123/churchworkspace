@@ -888,6 +888,7 @@ class Accounts {
   async zernioLinkStart(platform, opts = {}) {
     const plat = ['youtube', 'facebook', 'instagram'].includes(platform) ? platform : 'tiktok';
     const label = ZO_LABEL[plat] || 'TikTok';
+    if (opts.relink) return this._zoRelinkInstagram(opts.relink, opts);
     const another = !!opts.another;
     // "Set up everything" sends each sign-in back to the studio's own page, which opens the next one
     const redirectUrl = opts.redirectUrl || zoCfg(this.store, plat).redirectUrl;
@@ -962,6 +963,76 @@ class Accounts {
     }
     if (!url || !/^https:\/\//i.test(String(url))) throw new Error('Zernio did not return a ' + label + ' connect link — try again.');
     return { url: String(url), platform: plat, label };
+  }
+
+  /*
+   * ►► INSTAGRAM'S OWN SONGS. ◄◄ Instagram's song library — trending songs,
+   * gospel, Travis Greene, whatever Meta has licensed — can be searched and a
+   * song put under a Reel through Zernio. Licensed by Meta, so the post is
+   * never muted or flagged for it. An empty search gives what is trending.
+   * Gives back { songs: [{ id, title, artist, cover, preview, seconds }] }, or
+   * { needsFacebookLogin: true } when the account was linked the other way
+   * (Instagram's library is reached only through a Facebook sign-in), or
+   * { unavailable: '…' } when Zernio offers no library to this account.
+   */
+  async zernioIgAudio(accountId, q) {
+    const acc = this.byId(accountId);
+    if (!acc || acc.platform !== 'instagram' || acc.via !== 'zernio' || !acc.zoAccountId) return { unavailable: 'Pick an Instagram account linked through Zernio.' };
+    const { apiBase } = zoCfg(this.store, 'instagram');
+    const query = String(q || '').trim().slice(0, 80);
+    let got;
+    try {
+      got = await getJson(`${apiBase}/accounts/${encodeURIComponent(acc.zoAccountId)}/instagram/audio` + (query ? '?' + new URLSearchParams({ q: query }) : ''),
+        { headers: { authorization: 'Bearer ' + acc.token } });
+    } catch (e) {
+      if (/facebook_login|facebook login/i.test(e.message || '')) return { needsFacebookLogin: true };
+      if (e.status === 404 || e.status === 405) return { unavailable: 'Zernio does not offer Instagram’s song library yet.' };
+      throw new Error('Instagram’s songs could not be loaded (' + e.message + ').');
+    }
+    const arr = Array.isArray(got) ? got : (got && (got.audio || got.audios || got.tracks || got.results || got.data || got.items)) || [];
+    const songs = (Array.isArray(arr) ? arr : []).map((x) => {
+      const a = x && (x.audio || x.track || x) || {};
+      const id = a.audioId || a.audio_id || a.id || a._id;
+      if (!id) return null;
+      const secs = +(a.durationSec || a.duration_sec || (a.durationMs || a.duration_ms ? (a.durationMs || a.duration_ms) / 1000 : a.duration)) || 0;
+      return {
+        id: String(id),
+        title: String(a.title || a.name || a.songTitle || 'Song').slice(0, 120),
+        artist: String(a.artist || a.displayArtist || a.display_artist || a.artistName || a.artist_name || (a.artists && a.artists[0] && (a.artists[0].name || a.artists[0])) || '').slice(0, 120),
+        cover: String(a.coverUrl || a.cover_url || a.coverArtworkUri || a.cover_artwork_uri || a.thumbnailUrl || a.imageUrl || '') || null,
+        preview: String(a.downloadUrl || a.download_url || a.previewUrl || a.preview_url || a.audioUrl || a.url || '') || null,
+        seconds: Math.round(secs),
+      };
+    }).filter(Boolean).slice(0, 40);
+    return { songs, trending: !query };
+  }
+
+  /*
+   * Instagram linked again, through Facebook — the way that opens its song
+   * library. The same Instagram account, under the same key and profile; only
+   * the sign-in differs (loginMethod=facebook_login).
+   */
+  async _zoRelinkInstagram(accountId, opts = {}) {
+    const acc = this.byId(accountId);
+    if (!acc || acc.platform !== 'instagram' || acc.via !== 'zernio') throw new Error('Pick the Instagram account to link through Facebook.');
+    const { apiBase, redirectUrl } = zoCfg(this.store, 'instagram');
+    const auth = { authorization: 'Bearer ' + acc.token };
+    let profileId = '';
+    try {
+      const listed = zoAccountList(await getJson(`${apiBase}/accounts`, { headers: auth }));
+      const me = listed.find((a) => String(zoAccountId(a)) === String(acc.zoAccountId));
+      const p = me && me.profileId;
+      profileId = String((p && (p._id || p.id)) || p || '');
+    } catch (e) { /* the default profile, then */ }
+    const q = { redirect_url: opts.redirectUrl || redirectUrl, loginMethod: 'facebook_login' };
+    if (profileId) q.profileId = profileId;
+    let url = '';
+    try {
+      const gen = await getJson(`${apiBase}/connect/instagram?` + new URLSearchParams(q), { headers: auth });
+      url = gen && (gen.url || gen.authUrl || gen.connectUrl || gen.access_url);
+    } catch (e) { throw new Error('Zernio could not start the Facebook sign-in (' + e.message + ') — try again in a moment.'); }
+    if (!url || !/^https:\/\//i.test(String(url))) throw new Error('Zernio did not return a sign-in link — try again.');
+    return { url: String(url), platform: 'instagram', label: 'Instagram' };
   }
 
   /** Is it linked yet? Keeps the account when it is; `{ pending: true }` when not. */

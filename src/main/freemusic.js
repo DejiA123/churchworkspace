@@ -23,7 +23,9 @@ const https = require('https');
 
 // a browser's name: some music hosts turn away requests that do not give one
 const UA = 'Mozilla/5.0 (compatible; ChurchWorkSpace/1.0; +https://incompetech.com)';
-const BASE = 'https://incompetech.com/music/royalty-free/mp3-royaltyfree/';
+// (MW_FREE_MUSIC_BASE: a stand-in for incompetech, in the tests)
+const BASE = process.env.MW_FREE_MUSIC_BASE || 'https://incompetech.com/music/royalty-free/mp3-royaltyfree/';
+const lib = (url) => (/^http:/i.test(url) ? require('http') : https);
 const MOODS = [
   ['uplift', '🙏 Worship & uplifting'],
   ['epic', '🎬 Epic & cinematic'],
@@ -53,7 +55,7 @@ const credit = (t) => `Music: “${t.title}” by Kevin MacLeod (incompetech.com
 let probe = { at: 0, ok: new Map(), running: null };
 function head(url, redirects = 0) {
   return new Promise((resolve) => {
-    const req = https.request(url, { method: 'HEAD', timeout: 8000, headers: { 'User-Agent': UA } }, (res) => {
+    const req = lib(url).request(url, { method: 'HEAD', timeout: 8000, headers: { 'User-Agent': UA } }, (res) => {
       res.resume();
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirects < 5) return resolve(head(new URL(res.headers.location, url).href, redirects + 1));
       // gone = the site says so (404/410); anything else (a block, a hiccup) is "don't know", and the song stays on the shelf
@@ -97,7 +99,7 @@ async function list(library, { wait = false } = {}) {
 function download(url, dest, redirects = 0) {
   return new Promise((resolve, reject) => {
     if (redirects > 5) return reject(new Error('Too many redirects.'));
-    https.get(url, { headers: { 'User-Agent': UA }, timeout: 60000 }, (res) => {
+    lib(url).get(url, { headers: { 'User-Agent': UA }, timeout: 60000 }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
         return resolve(download(new URL(res.headers.location, url).href, dest, redirects + 1));

@@ -2904,6 +2904,33 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .csb-fnote { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--cs-soft, rgba(127,127,127,.08)); display: grid; gap: 6px; font-size: 13px; }
 .csb-fnote > b { font-size: 12px; opacity: .7; font-weight: 600; }
 .csb-fnote-row { display: flex; align-items: center; gap: 8px; line-height: 1.3; }
+/* 🎵 music on a flyer */
+.csb-fm { display: grid; gap: 10px; }
+.csb-fm .csb-h3 b { display: inline-flex; align-items: center; gap: 6px; }
+.csb-fm-mode { margin: 2px 0 0; }
+.csb-fm-sec { border-radius: 14px; padding: 12px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); display: grid; gap: 8px; }
+.csb-fm-h { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.csb-fm-h small { opacity: .7; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.csb-fm-h .csb-link { margin-left: auto; }
+.csb-fm-h .mi { width: 18px; height: 18px; }
+.csb-fm .cs-hint { margin: 0; }
+.csb-igsearch { width: 100%; box-sizing: border-box; }
+.csb-igquick { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.csb-igquick::-webkit-scrollbar { display: none; }
+.csb-igquick .cs-chip { flex: none; }
+.csb-iglist { display: grid; gap: 6px; max-height: 360px; overflow-y: auto; }
+.csb-igsong { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 12px; background: rgba(255,255,255,.03); border: 1px solid transparent; cursor: pointer; min-width: 0; }
+.csb-igsong.on { border-color: #c13584; background: rgba(193,53,132,.14); }
+.csb-igsong img, .csb-igart { width: 42px; height: 42px; border-radius: 8px; object-fit: cover; flex: none; display: grid; place-items: center; background: linear-gradient(135deg, #833ab4, #fd1d1d 60%, #fcb045); }
+.csb-igart .mi { width: 18px; height: 18px; color: #fff; }
+.csb-igsong > span { flex: 1; min-width: 0; display: grid; }
+.csb-igsong > span b, .csb-igsong > span small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.csb-igsong > span small { opacity: .7; font-size: 12px; }
+.csb-igplay { flex: none; width: 36px; height: 36px; border-radius: 50%; border: 0; background: rgba(255,255,255,.1); color: #fff; display: grid; place-items: center; }
+.csb-igplay.on { background: #c13584; }
+.csb-igplay .mi { width: 16px; height: 16px; margin: 0; }
+.csb-igsong .csb-check { flex: none; }
+.csb-igfb { width: 100%; background: #1877f2; color: #fff; }
 .csb-acc-pill { max-width: 100%; height: 52px; padding: 0 12px 0 10px; border: 1.5px solid var(--b-line); border-radius: 26px; display: inline-flex; align-items: center; gap: 9px; background: var(--b-s1); color: var(--b-t2); font-size: 14px; font-weight: 650; }
 .csb-acc-pill > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .csb-check { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; border: 1.5px solid rgba(255,255,255,.25); color: transparent; }
@@ -2982,3 +3009,4 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .csb-plan { display: flex; gap: 10px; align-items: flex-start; margin: 14px 0 0; padding: 12px 14px; border-radius: 14px; background: rgba(139,92,246,.12); color: #e9d5ff; font-size: 13.5px; line-height: 1.4; }
 .csb-plan .mi { flex: none; width: 18px; height: 18px; margin-top: 1px; }
 .csb-plan b { display: block; color: #fff; font-size: 14.5px; }
+.csb-igsong.on .csb-check { border: 0; background: #fff; color: #111; }

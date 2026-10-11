@@ -730,7 +730,7 @@ async function publishToYouTube({ token, clientId, clientSecret }, post, opts = 
 
   if (!media) throw new Error('YouTube needs a video — add one to this post.');
   if (!fs.existsSync(media)) throw new Error('Media file not found: ' + media);
-  media = await flyerAsVideo(media, 'YouTube');
+  media = await flyerAsVideo(media, 'YouTube', flyerSongOf(post));
   if (!isVideoFile(media)) {
     throw new Error('YouTube auto-posts need a video file (MP4/MOV…) — this post has an image. Untick the YouTube account, or attach a video.');
   }
@@ -847,7 +847,7 @@ async function publishToTikTok({ token, clientKey, clientSecret, tokenProxy, pro
 
   if (!media) throw new Error('TikTok needs a video — add one to this post.');
   if (!fs.existsSync(media)) throw new Error('Media file not found: ' + media);
-  media = await flyerAsVideo(media, 'TikTok');
+  media = await flyerAsVideo(media, 'TikTok', flyerSongOf(post));
   if (!isVideoFile(media)) {
     throw new Error('TikTok auto-posts need a video file (MP4/MOV…) — this post has an image. Untick the TikTok account, or attach a video.');
   }
@@ -966,7 +966,7 @@ async function publishViaUploadPost({ apiKey, upUser, username, platform = 'tikt
   const videoOnly = platform === 'tiktok' || platform === 'youtube';
   if (!media) throw new Error(label + ' needs a ' + (videoOnly ? 'video' : 'photo or video') + ' — add one to this post.');
   if (!fs.existsSync(media)) throw new Error('Media file not found: ' + media);
-  if (videoOnly) media = await flyerAsVideo(media, label);
+  if (videoOnly || flyerSongOf(post)) media = await flyerAsVideo(media, label, flyerSongOf(post));
   else if (/\.(png|webp|gif)$/i.test(media)) media = await flyerAsJpeg(media).catch(() => media);
   const isVid = isVideoFile(media);
   if (videoOnly && !isVid) {
@@ -1140,30 +1140,120 @@ async function flyerAsJpeg(src) {
   return out;
 }
 // a flyer going somewhere that takes only video becomes a Short; a video is left alone
-async function flyerAsVideo(media, label) {
+async function flyerAsVideo(media, label, song) {
   if (!/\.(png|jpe?g|webp|gif)$/i.test(media)) return media;
-  try { return await flyerAsShort(media); }
+  try { return await flyerAsShort(media, song ? 15 : 10, song); }
   catch (e) { throw new Error(label + ': the flyer could not be made into a Short (' + (e.message || e) + ').'); }
 }
-async function flyerAsShort(src, seconds = 10) {
-  const out = flyerCachePath(src, `short${seconds}`, '.mp4');
+
+/*
+ * ►► THE BEST PART OF THE SONG. ◄◄ A flyer is up for 15 seconds, so it should
+ * get the song's lift — the chorus, the drop — not its quiet first bars. The
+ * song is read once (mono, low rate) and the loudest stretch of that length
+ * wins, started a beat before it so it arrives rather than cuts in. Kept per
+ * song file.
+ */
+const _hooks = new Map();
+async function songHookSec(songPath, seconds = 15) {
+  let st = null; try { st = fs.statSync(songPath); } catch (e) { return 0; }
+  const key = songPath + '|' + st.size + '|' + st.mtimeMs + '|' + seconds;
+  if (_hooks.has(key)) return _hooks.get(key);
+  const ff = require('./ffmpeg');
+  const RATE = 2000;
+  const pcm = await new Promise((resolve) => {
+    const cp = require('child_process').spawn(ff.resolveFfmpeg(), ['-v', 'error', '-t', '420', '-i', songPath, '-ac', '1', '-ar', String(RATE), '-f', 's16le', '-'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    const parts = []; cp.stdout.on('data', (d) => parts.push(d));
+    cp.on('close', () => resolve(Buffer.concat(parts))); cp.on('error', () => resolve(Buffer.alloc(0)));
+  });
+  const n = Math.floor(pcm.length / 2), per = RATE / 2;     // half-second blocks
+  const blocks = [];
+  for (let i = 0; i + per <= n; i += per) {
+    let e = 0; for (let j = i; j < i + per; j++) { const v = pcm.readInt16LE(j * 2); e += v * v; }
+    blocks.push(e / per);
+  }
+  const w = seconds * 2;
+  let best = 0;
+  if (blocks.length > w + 2) {
+    let sum = 0, top = -1;
+    for (let i = 0; i < blocks.length; i++) {
+      sum += blocks[i]; if (i >= w) sum -= blocks[i - w];
+      // never the fade-out at the very end
+      if (i >= w - 1 && i < blocks.length - 4 && sum > top * 1.03) { top = sum; best = i - w + 1; }
+    }
+  }
+  const start = Math.max(0, best / 2 - 1);
+  _hooks.set(key, start);
+  return start;
+}
+
+/**
+ * The flyer as a vertical video: its own colours, blurred, fill the 9:16
+ * frame; the whole flyer sits on top; a slow push-in. With a song, the song's
+ * best part plays under it, faded in and out at a steady loudness; without,
+ * a silent track (some platforms want one).
+ */
+async function flyerAsShort(src, seconds = 10, song = null) {
+  const songPath = song && (song.path || song.file) && fs.existsSync(song.path || song.file) ? (song.path || song.file) : null;
+  const tag = songPath ? 'm' + require('crypto').createHash('sha1').update(songPath).digest('hex').slice(0, 10) : '';
+  const out = flyerCachePath(src, `short${seconds}${tag}`, '.mp4');
   if (fs.existsSync(out)) return out;
   const ff = require('./ffmpeg');
   const tmp = out + '.part.mp4';
   const frames = seconds * 30;
+  const from = songPath ? await songHookSec(songPath, seconds) : 0;
+  const audioIn = songPath
+    ? ['-stream_loop', '-1', '-ss', from.toFixed(2), '-i', songPath]
+    : ['-f', 'lavfi', '-t', String(seconds), '-i', 'anullsrc=r=44100:cl=stereo'];
+  const audioChain = songPath
+    ? `;[1:a]atrim=0:${seconds},asetpts=PTS-STARTPTS,loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100,aformat=channel_layouts=stereo,`
+      + `afade=t=in:d=0.5,afade=t=out:st=${Math.max(0, seconds - 1.6)}:d=1.6[a]`
+    : '';
   await ff.runFfmpeg(ff.resolveFfmpeg(), ['-v', 'error',
     '-loop', '1', '-framerate', '30', '-t', String(seconds), '-i', src,
-    '-f', 'lavfi', '-t', String(seconds), '-i', 'anullsrc=r=44100:cl=stereo',
+    ...audioIn,
     '-filter_complex',
-    // the flyer's own colours, blurred, fill the 9:16 frame; the whole flyer sits on top; a slow push-in
     '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=40:4,eq=brightness=-0.12[bg];'
     + '[0:v]scale=1000:1780:force_original_aspect_ratio=decrease[fg];'
     + "[bg][fg]overlay=(W-w)/2:(H-h)/2,scale=1188:2112,"
-    + `zoompan=z='1+0.06*on/${frames}':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,format=yuv420p[v]`,
-    '-map', '[v]', '-map', '1:a', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-r', '30',
-    '-c:a', 'aac', '-b:a', '128k', '-shortest', '-movflags', '+faststart', '-y', tmp]);
+    + `zoompan=z='1+0.06*on/${frames}':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,format=yuv420p[v]`
+    + audioChain,
+    '-map', '[v]', '-map', songPath ? '[a]' : '1:a', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-r', '30',
+    '-c:a', 'aac', '-b:a', '160k', '-t', String(seconds), '-shortest', '-movflags', '+faststart', '-y', tmp]);
   fs.renameSync(tmp, out);
   return out;
+}
+
+/*
+ * ►► MUSIC ON A FLYER, WITHOUT A FLAG. ◄◄ A popular song baked into a file is
+ * found by YouTube's Content ID and Meta's matching and the post is muted or
+ * blocked — so the trending gospel songs come from each platform's OWN
+ * licensed library, the only way they post clean:
+ *   • TikTok — a photo post with TikTok's trending music added by TikTok
+ *     ('trending'); or sent to the church's TikTok inbox to pick the song
+ *     there — any song in TikTok's library, Travis Greene included ('draft');
+ *   • Instagram — a Reel with a song from Instagram's own library, chosen in
+ *     New post (igAudio: Zernio's audioConfiguration);
+ *   • Facebook and YouTube have no song library an app may use: the flyer
+ *     goes as a short video with a free-to-post song under it (song).
+ * post.music = { tiktok: 'trending'|'draft'|'free'|'none', igAudio: { id, title, artist }|null,
+ *                song: { path, title, credit }|null }. No post.music: as before.
+ */
+function flyerSongOf(post) {
+  const m = post && post.music;
+  return m && m.song && m.song.path && m.tiktok !== 'none' ? m.song : null;
+}
+function flyerPlan(platform, music) {
+  const m = music || null;
+  const song = m && m.song && m.song.path ? m.song : null;
+  if (!m) return { media: platform === 'youtube' ? 'short' : 'jpeg', song: null, tiktok: 'trending' };
+  if (platform === 'tiktok') {
+    const mode = m.tiktok || 'trending';
+    if (mode === 'free' && song) return { media: 'short', song, tiktok: 'free' };
+    return { media: 'jpeg', song: null, tiktok: mode === 'free' ? 'trending' : mode };
+  }
+  if (platform === 'instagram' && m.igAudio && m.igAudio.id) return { media: 'short', song: null, igAudio: m.igAudio, seconds: 15 };
+  if (song) return { media: 'short', song };
+  return { media: platform === 'youtube' ? 'short' : 'jpeg', song: null };
 }
 
 /**
@@ -1187,12 +1277,14 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
   const content = (post.caption || post.title || '').slice(0, 2200);
 
   if (original && !fs.existsSync(original)) throw new Error('Media file not found: ' + original);
-  // a flyer, made fit for this platform (see flyerAsJpeg / flyerAsShort)
+  // a flyer, made fit for this platform — and its music (see flyerPlan)
   let media = original;
   const flyer = !!original && zoMediaKind(original).type === 'image';
+  const plan = flyer ? flyerPlan(platform, opts.noIgAudio ? Object.assign({}, post.music, { igAudio: null }) : post.music) : null;
   if (flyer) {
-    try { media = platform === 'youtube' ? await flyerAsShort(original) : await flyerAsJpeg(original); }
-    catch (e) { throw new Error(label + ': the flyer could not be prepared (' + (e.message || e) + ').'); }
+    try {
+      media = plan.media === 'short' ? await flyerAsShort(original, plan.song || plan.igAudio ? 15 : 10, plan.song) : await flyerAsJpeg(original);
+    } catch (e) { throw new Error(label + ': the flyer could not be prepared (' + (e.message || e) + ').'); }
   }
   const needsVideo = platform === 'youtube';               // TikTok takes a flyer as a photo post
   const needsMedia = needsVideo || platform === 'instagram' || platform === 'tiktok'; // Facebook allows text-only
@@ -1236,6 +1328,8 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
     // publishes as a Reel by itself; shareToFeed puts it on the grid as well,
     // which is what a church wants for a sermon clip.
     platformEntry.platformSpecificData = { shareToFeed: true };
+    // a song from Instagram's own library under the flyer's Reel (licensed by Meta — no flag)
+    if (plan && plan.igAudio) platformEntry.platformSpecificData.audioConfiguration = { audioId: String(plan.igAudio.id), audioVolume: 100, videoVolume: 0 };
   }
   /*
    * Instagram and TikTok have NO scheduling of their own — Meta's content
@@ -1259,8 +1353,24 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
       content_preview_confirmed: true, express_consent_given: true,
       disable_duet: false, disable_comment: false, disable_stitch: false,
     };
-    // a flyer goes up as a TikTok PHOTO post, with TikTok's own music under it
-    if (kind && kind.type === 'image') Object.assign(body.tiktokSettings, { media_type: 'PHOTO', auto_add_music: true });
+    /*
+     * A flyer goes up as a TikTok PHOTO post with TikTok's own trending music
+     * under it — or, 'draft', into the church's TikTok inbox, to pick any song
+     * from TikTok's library in the app (Travis Greene included) and post it
+     * from there. TikTok adds music by itself only to a post it publishes.
+     */
+    const tkMode = (plan && plan.tiktok) || 'trending';
+    if (kind && kind.type === 'image') {
+      Object.assign(body.tiktokSettings, { media_type: 'PHOTO', auto_add_music: tkMode === 'trending' });
+    }
+    if (flyer && tkMode === 'draft') body.tiktokSettings.draft = true;
+    // Zernio's newer shape for the same settings, on the platform entry (flyers only — videos post as they always have)
+    if (flyer) platformEntry.platformSpecificData = {
+      privacyLevel: 'PUBLIC_TO_EVERYONE', allowComment: true, allowDuet: true, allowStitch: true,
+      contentPreviewConfirmed: true, expressConsentGiven: true,
+      draft: !!(flyer && tkMode === 'draft'),
+      ...(kind && kind.type === 'image' ? { mediaType: 'photo', autoAddMusic: tkMode === 'trending' } : {}),
+    };
   } else if (platform === 'facebook') {
     body.facebookSettings = { draft: false };
   } // instagram: platformSpecificData is optional for a plain feed post — omit.
@@ -1269,6 +1379,11 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
   try {
     res = (await postJson(`${base}/posts`, body, bearer)).json;
   } catch (e) {
+    // the Instagram song could not be used (gone, or this account can't): the flyer still goes, with the free song if there is one
+    if (plan && plan.igAudio && !opts.noIgAudio) {
+      const out = await publishViaZernio({ apiKey, accountId, username, platform }, post, { ...opts, noIgAudio: true });
+      return { ...out, note: 'Instagram would not take the song (' + (e.message || e) + ') — posted ' + (post.music && post.music.song ? 'with the free song instead.' : 'without it.') };
+    }
     throw new Error(zoFriendlyError(e.message, platform) + (platform === 'instagram' ? zoIgVideoNote(media) : ''));
   }
 
@@ -1281,9 +1396,11 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
   // A scheduled post's terminal state is "scheduled" — it is SUPPOSED to sit
   // there until its time. Waiting for "published" would poll for ten minutes
   // and then declare a perfectly good post a failure.
+  const toInbox = platform === 'tiktok' && !!(plan && plan.tiktok === 'draft');
   const doneStates = opts.scheduleAt
-    ? /^(scheduled|queued|pending|published|posted|success|completed|complete|live|done)$/i
-    : /^(published|posted|success|completed|complete|live|done)$/i;
+    ? /^(scheduled|queued|pending|published|posted|success|completed|complete|live|done|draft|sent_to_inbox|inbox)$/i
+    : toInbox ? /^(published|posted|success|completed|complete|live|done|draft|sent_to_inbox|inbox|send_to_user_inbox)$/i
+      : /^(published|posted|success|completed|complete|live|done)$/i;
   const failStates = /^(failed|error|errored|rejected)$/i;
   const stateOf = (x, r) => String((x && x.status) || (r && r.status) || '').trim();
 
@@ -1307,7 +1424,12 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
     }
   }
   if (failStates.test(st)) {
-    throw new Error(zoFriendlyError((tk && (tk.error || tk.message)) || (label + ' rejected the post.'), platform)
+    const why = (tk && (tk.error || tk.message)) || (label + ' rejected the post.');
+    if (plan && plan.igAudio && !opts.noIgAudio) {
+      const out = await publishViaZernio({ apiKey, accountId, username, platform }, post, { ...opts, noIgAudio: true });
+      return { ...out, note: 'Instagram would not take the song (' + why + ') — posted ' + (post.music && post.music.song ? 'with the free song instead.' : 'without it.') };
+    }
+    throw new Error(zoFriendlyError(why, platform)
       + (platform === 'instagram' ? zoIgVideoNote(media) : ''));
   }
 
@@ -1318,6 +1440,8 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
     zoPostId: postId || null,
     scheduled: !!opts.scheduleAt,
     privacy: platform === 'tiktok' ? 'PUBLIC_TO_EVERYONE' : 'public',
+    // in the church's TikTok inbox: open TikTok, add the song, post
+    ...(toInbox ? { inbox: true, note: 'In your TikTok inbox — open TikTok, tap the notification, add your song, and post.' } : {}),
   };
 }
 
@@ -1517,7 +1641,7 @@ async function testFacebook({ pageId, token, apiBase }) {
 }
 
 module.exports = {
-  flyerAsJpeg, flyerAsShort,
+  flyerAsJpeg, flyerAsShort, flyerPlan, songHookSec,
   publishToFacebook, publishToInstagram, publishToYouTube, publishToTikTok,
   publishViaUploadPost, publishViaZernio, publishTo, testFacebook,
   canSchedule, scheduleTo, cancelScheduled, FB_SCHEDULE_MIN_MS, FB_SCHEDULE_MAX_MS,

@@ -1076,6 +1076,39 @@ ipcMain.handle('library:rename', wrap(async (e, { kind, id, name }) => library.r
  * dipping under speech, and posts that copy. The credit a free song needs is
  * handed back for the caption.
  */
+/*
+ * ►► MUSIC ON A FLYER. ◄◄ "No one will engage a flyer with no music." A post
+ * carrying a flyer says how each place gets its song (publisher.js flyerPlan):
+ * TikTok's own trending music or its inbox, a song from Instagram's own
+ * library, and a free-to-post song under it for Facebook and YouTube. The
+ * free song is fetched here, on the server, by name — a path from the phone
+ * is never taken — and its credit goes on the caption.
+ */
+async function withFlyerMusic(post) {
+  if (!post || post.music === undefined) return post;
+  const m = post.music;
+  if (!m || typeof m !== 'object') { post.music = null; return post; }
+  const tiktok = ['trending', 'draft', 'free', 'none'].includes(m.tiktok) ? m.tiktok : 'trending';
+  const ig = m.igAudio && m.igAudio.id ? { id: String(m.igAudio.id).slice(0, 80), title: String(m.igAudio.title || '').slice(0, 120), artist: String(m.igAudio.artist || '').slice(0, 120) } : null;
+  let song = null;
+  const want = m.song || null;
+  if (want && (want.free || want.lib)) {
+    let entry = null;
+    if (want.free) entry = await freemusic.get(getCtx(), video, library, String(want.free));
+    else entry = (library.list().music || []).find((x) => x.id === want.lib) || null;
+    if (!entry || !entry.file || !fs.existsSync(entry.file)) throw new Error('The song for the flyer could not be found — pick another.');
+    song = { path: entry.file, title: entry.name || '', credit: entry.credit || freemusic.creditFor(entry) || '' };
+  }
+  post.music = { tiktok, igAudio: ig, song };
+  if (song && song.credit && typeof post.caption === 'string' && !post.caption.includes(song.credit)) {
+    post.caption = [post.caption.trim(), song.credit].filter(Boolean).join('\n\n');
+  }
+  return post;
+}
+// Instagram's own song library, through Zernio (licensed by Meta — a song from it is never flagged)
+ipcMain.handle('social:igAudio', wrap(async (e, { accountId, q } = {}) => accounts.zernioIgAudio(accountId, q)));
+// that library needs the Instagram account linked through Facebook: the sign-in to do it
+ipcMain.handle('social:igRelink', wrap(async (e, { accountId } = {}) => accounts.zernioLinkStart('instagram', { relink: accountId })));
 ipcMain.handle('social:withMusic', wrap(async (e, { mediaPath, free, libId, volume, jobId } = {}) => {
   if (!mediaPath || !fs.existsSync(mediaPath)) throw new Error('That video could not be found.');
   let entry = null;
@@ -2896,11 +2929,11 @@ const ownPost = (id) => {
   return id;
 };
 ipcMain.handle('scheduler:list', wrap(async () => myPosts()));
-ipcMain.handle('scheduler:add', wrap(async (e, { post }) => scheduler.add(Object.assign({}, post, { owner: space.current() }))));
+ipcMain.handle('scheduler:add', wrap(async (e, { post }) => scheduler.add(await withFlyerMusic(Object.assign({}, post, { owner: space.current() })))));
 // Moving or rewording a post gives back whatever booking a platform is
 // holding for it and takes a new one — see Scheduler.reschedule.
 ipcMain.handle('scheduler:update', wrap(async (e, { id, patch }) => {
-  const clean = Object.assign({}, patch); delete clean.owner;
+  const clean = await withFlyerMusic(Object.assign({}, patch)); delete clean.owner;
   return scheduler.reschedule(ownPost(id), clean);
 }));
 ipcMain.handle('scheduler:remove', wrap(async (e, { id }) => scheduler.remove(ownPost(id))));

@@ -105,6 +105,8 @@ class Scheduler {
       platforms: Array.isArray(post.platforms) ? post.platforms : [],
       accountIds: Array.isArray(post.accountIds) ? post.accountIds : [], // linked accounts to auto-post to
       mediaPaths: Array.isArray(post.mediaPaths) ? post.mediaPaths : [],
+      // a flyer's music, per platform (main.js withFlyerMusic / publisher.js flyerPlan)
+      music: post.music || null,
       scheduledAt: post.scheduledAt || now,
       status: post.status || 'scheduled', // scheduled | posting | posted | failed | draft
       notified: false,
