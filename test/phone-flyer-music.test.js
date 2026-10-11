@@ -90,6 +90,8 @@ function zernio() {
         const draft = j.tiktokSettings && j.tiktokSettings.draft;
         return send(200, { post: { _id: 'zp' + Z.posts.length, platforms: [{ platform: plat.platform, status: j.publishNow ? (draft ? 'sent_to_inbox' : 'published') : 'scheduled' }] } });
       }
+      m = u.pathname.match(/^\/api\/v1\/posts\/([^/]+)$/);
+      if (m && req.method === 'DELETE') { Z.deleted = (Z.deleted || []).concat(m[1]); return send(200, { ok: true }); }
       send(404, { error: 'not here: ' + u.pathname });
     });
   }).listen(ZPORT, '127.0.0.1');
@@ -222,6 +224,39 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
     // the song a post carries is its own copy: taken out of the library, the post keeps it
     check(!!made && made.music && made.music.song && /flyer-songs/.test(made.music.song.path), 'a booked flyer keeps its own copy of the song', made && made.music && made.music.song);
 
+    // the phone shows the TikTok-inbox booking for what it is
+    if (made) {
+      await page.evaluate(async () => { await window.MWSocial.go('scheduler'); }).catch(() => {});
+      await sleep(800);
+      await page.evaluate((id) => window.MWSocial.openPost(id), made.id).catch(() => {});
+      await sleep(600);
+      const rowTk = await page.evaluate(() => Array.from(document.querySelectorAll('.cs-d-accts li')).map((li) => li.innerText.replace(/\s+/g, ' ')).find((t) => /The Power House$|The Power House /.test(t) && /TikTok inbox/.test(t)) || '');
+      check(/Goes to your TikTok inbox at its time/.test(rowTk), 'the post shows TikTok as "goes to your TikTok inbox", not "will post it"', rowTk);
+      await page.evaluate(() => { const x = document.querySelector('.cp-x'); if (x) x.click(); });
+      await sleep(400);
+    }
+
+    // 🧪 Test music on my accounts — the whole chain, nothing left booked
+    await page.evaluate((f) => window.MWSocial.compose({ files: [f] }), FLY);
+    await page.waitForSelector('#csCompose [data-c="fm-check"]', { timeout: 15000 }).catch(() => {});
+    const posts0 = Z.posts.length, del0 = (Z.deleted || []).length;
+    await page.tap('#csCompose [data-c="fm-check"]');
+    await page.waitForSelector('#csCompose .csb-mres', { timeout: 240000 }).catch(() => {});
+    const res = await page.evaluate(() => Array.from(document.querySelectorAll('#csCompose .csb-mres li')).map((li) => li.className + ' | ' + li.innerText.replace(/\s+/g, ' ')));
+    const testPosts = Z.posts.slice(posts0).filter((p) => /^Music test/.test(p.body.content || ''));
+    const others = Z.posts.slice(posts0).filter((p) => !/^Music test/.test(p.body.content || '')).map((p) => (p.body.content || '').slice(0, 30) + ' @' + p.body.platforms[0].platform);
+    const booked = testPosts.filter((p) => !p.rejected).length, taken = (Z.deleted || []).length - del0;
+    check(res.length >= 6 && res.every((r) => /^ok/.test(r)), 'Test music on my accounts: every account checks out', res);
+    check(booked >= 6 && taken === booked, '…each test booking is taken straight back (nothing left to post)', { booked, taken });
+    check(res.some((r) => /Instagram’s song library answers/.test(r)) && res.some((r) => /TikTok inbox/.test(r)) && res.some((r) => /Free songs/.test(r)), '…and it says what was checked', res);
+    if (SHOTS) { await page.evaluate(() => { const n = document.querySelector('#csCompose .csb-check-sec'); if (n) n.scrollIntoView({ block: 'start' }); }); await sleep(300); await page.screenshot({ path: path.join(SHOTS, 'flyer-music-3-test.png') }); }
+    await page.evaluate(() => { const x = document.querySelector('#csCompose .cp-x'); if (x) x.click(); });
+    await sleep(500);
+
+    // never booked twice: each account got the Night of Worship post exactly once
+    const nw = Z.posts.filter((p) => !p.rejected && /^Night of Worship this Friday/.test(p.body.content || '')).map((p) => p.body.platforms[0].accountId);
+    check(nw.length === 5 && new Set(nw).size === 5, 'no account is booked twice for the same post (a slow first booking and the next tick never overlap)', nw);
+
     // [7] No music
     const before7 = Z.posts.length;
     await page.evaluate((f) => window.MWSocial.compose({ files: [f] }), FLY);
@@ -269,6 +304,28 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
     const tries = Z.posts.slice(n0);
     check(tries.length === 2 && tries[0].rejected && !tries[1].body.platforms[0].platformSpecificData.audioConfiguration && tries[1].body.mediaItems[0].type === 'video' && /free song instead/.test(out.note || '') && /^Friday!\n\nc$/.test(tries[1].body.content),
       'an Instagram song that can’t be used at posting time: the flyer still goes, with the free song (and its credit)', { out, n: tries.length, c: tries[1] && tries[1].body.content });
+    // a song from one Instagram account's library is not sent to another Instagram account
+    const n2 = Z.posts.length;
+    await publisher.publishViaZernio({ apiKey: 'k', accountId: '9', username: 'youth', platform: 'instagram' },
+      { caption: 'Friday!', mediaPaths: [FLY], music: { tiktok: 'trending', igAudio: { id: 'ig_made_a_way', title: 'Made a Way', artist: 'Travis Greene', acc: '3' }, song: { path: SONG, title: 'Free', credit: 'c' } } },
+      { zoApiBase: `http://127.0.0.1:${ZPORT}/api/v1`, scheduleAt: Date.now() + 3600e3 });
+    const other = Z.posts[n2];
+    check(!!other && !other.body.platforms[0].platformSpecificData.audioConfiguration && other.body.mediaItems[0].type === 'video',
+      'a song from one Instagram account’s library is not sent to another — that one gets the free song', other && other.body.platforms[0]);
+    // a long caption never loses the song's credit
+    const n3 = Z.posts.length;
+    await publisher.publishViaZernio({ apiKey: 'k', accountId: '2', username: 'p', platform: 'facebook' },
+      { caption: 'x'.repeat(2190), mediaPaths: [FLY], music: { tiktok: 'trending', igAudio: null, song: { path: SONG, title: 'Free', credit: 'Music: “Inspired” by Kevin MacLeod' } } },
+      { zoApiBase: `http://127.0.0.1:${ZPORT}/api/v1`, scheduleAt: Date.now() + 3600e3 });
+    const longC = Z.posts[n3] && Z.posts[n3].body.content;
+    check(!!longC && longC.length <= 2200 && /Kevin MacLeod$/.test(longC), 'a long caption never loses the song’s credit', longC && longC.length);
+    // a song whose file has gone: a picture post, no credit for music that does not play
+    const n4 = Z.posts.length;
+    await publisher.publishViaZernio({ apiKey: 'k', accountId: '2', username: 'p', platform: 'facebook' },
+      { caption: 'Hi', mediaPaths: [FLY], music: { tiktok: 'trending', igAudio: null, song: { path: '/nowhere/gone.mp3', title: 'Free', credit: 'CREDIT' } } },
+      { zoApiBase: `http://127.0.0.1:${ZPORT}/api/v1`, scheduleAt: Date.now() + 3600e3 });
+    const goneP = Z.posts[n4];
+    check(!!goneP && goneP.body.mediaItems[0].type === 'image' && !/CREDIT/.test(goneP.body.content), 'a song whose file has gone: the picture, and no credit for music that does not play', goneP && goneP.body);
     // a failure that is NOT about the song (Zernio down, a timeout): never posted a second time
     Z.fail500 = true;
     const n1 = Z.posts.length;

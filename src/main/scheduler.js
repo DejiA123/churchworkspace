@@ -267,7 +267,25 @@ class Scheduler {
    * is written to disk the moment each one succeeds, so a crash half-way
    * through never books the same account twice.
    */
-  async handOff(id) {
+  /*
+   * ONE BOOKING RUN PER POST AT A TIME, in this process too. The lock below
+   * keeps other processes out, but not a second run here — and a post's first
+   * run (when it is added) can take minutes (a sermon's upload, a flyer's
+   * video), long enough for the next tick to start another that books the same
+   * accounts again. So runs for a post queue: the second finds them booked.
+   */
+  handOff(id) {
+    this._handoffRuns = this._handoffRuns || new Map();
+    const prev = this._handoffRuns.get(id);
+    // nothing running for it: start now, as before; else after the one running
+    const run = prev ? prev.catch(() => {}).then(() => this._handOffNow(id)) : this._handOffNow(id);
+    this._handoffRuns.set(id, run);
+    const done = () => { if (this._handoffRuns.get(id) === run) this._handoffRuns.delete(id); };
+    run.then(done, done);
+    return run;
+  }
+
+  async _handOffNow(id) {
     const release = this._lock('handoff');
     if (!release) return { booked: 0, pending: true };
     try {

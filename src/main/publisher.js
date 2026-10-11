@@ -1132,18 +1132,31 @@ function flyerCachePath(src, tag, ext) {
   try { for (const f of fs.readdirSync(FLYER_CACHE)) { const fp = path.join(FLYER_CACHE, f); if (Date.now() - fs.statSync(fp).mtimeMs > 86400e3) fs.rmSync(fp, { force: true }); } } catch (e) {}
   return path.join(FLYER_CACHE, `${key}-${tag}${ext}`);
 }
+// the same flyer made twice at once (two accounts, a booking and a test) is made once
+const _making = new Map();
+function makeOnce(out, make) {
+  if (fs.existsSync(out)) return Promise.resolve(out);
+  if (_making.has(out)) return _making.get(out);
+  const p = (async () => {
+    // a name of its own for the half-made file: never two writers on one file
+    const tmp = out + '.' + process.pid + '-' + Math.random().toString(36).slice(2, 8) + '.part' + path.extname(out);
+    try { await make(tmp); fs.renameSync(tmp, out); }
+    finally { try { fs.rmSync(tmp, { force: true }); } catch (e) {} }
+    return out;
+  })();
+  _making.set(out, p);
+  const clear = () => { if (_making.get(out) === p) _making.delete(out); };
+  p.then(clear, clear);
+  return p;
+}
 async function flyerAsJpeg(src) {
   if (/\.jpe?g$/i.test(src)) return src;
   const out = flyerCachePath(src, 'photo', '.jpg');
-  if (fs.existsSync(out)) return out;
   const ff = require('./ffmpeg');
-  const tmp = out + '.part.jpg';
   // white under any see-through parts (a PNG with transparency would go black)
-  await ff.runFfmpeg(ff.resolveFfmpeg(), ['-v', 'error', '-i', src,
+  return makeOnce(out, (tmp) => ff.runFfmpeg(ff.resolveFfmpeg(), ['-v', 'error', '-i', src,
     '-filter_complex', "[0:v]scale='min(2160,iw)':-2,format=rgba,split[a][f];[a]lutrgb=r=255:g=255:b=255:a=255[bg];[bg][f]overlay=0:0:format=auto,format=yuvj420p",
-    '-frames:v', '1', '-q:v', '2', '-y', tmp]);
-  fs.renameSync(tmp, out);
-  return out;
+    '-frames:v', '1', '-q:v', '2', '-y', tmp]));
 }
 // a flyer going somewhere that takes only video becomes a Short; a video is left alone
 async function flyerAsVideo(media, label, song) {
@@ -1202,31 +1215,29 @@ async function flyerAsShort(src, seconds = 10, song = null) {
   const songPath = song && (song.path || song.file) && fs.existsSync(song.path || song.file) ? (song.path || song.file) : null;
   const tag = songPath ? 'm' + require('crypto').createHash('sha1').update(songPath).digest('hex').slice(0, 10) : '';
   const out = flyerCachePath(src, `short${seconds}${tag}`, '.mp4');
-  if (fs.existsSync(out)) return out;
   const ff = require('./ffmpeg');
-  const tmp = out + '.part.mp4';
-  const frames = seconds * 30;
-  const from = songPath ? await songHookSec(songPath, seconds) : 0;
-  const audioIn = songPath
-    ? ['-stream_loop', '-1', '-ss', from.toFixed(2), '-i', songPath]
-    : ['-f', 'lavfi', '-t', String(seconds), '-i', 'anullsrc=r=44100:cl=stereo'];
-  const audioChain = songPath
-    ? `;[1:a]atrim=0:${seconds},asetpts=PTS-STARTPTS,loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100,aformat=channel_layouts=stereo,`
-      + `afade=t=in:d=0.5,afade=t=out:st=${Math.max(0, seconds - 1.6)}:d=1.6[a]`
-    : '';
-  await ff.runFfmpeg(ff.resolveFfmpeg(), ['-v', 'error',
-    '-loop', '1', '-framerate', '30', '-t', String(seconds), '-i', src,
-    ...audioIn,
-    '-filter_complex',
-    '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=40:4,eq=brightness=-0.12[bg];'
-    + '[0:v]scale=1000:1780:force_original_aspect_ratio=decrease[fg];'
-    + "[bg][fg]overlay=(W-w)/2:(H-h)/2,scale=1188:2112,"
-    + `zoompan=z='1+0.06*on/${frames}':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,format=yuv420p[v]`
-    + audioChain,
-    '-map', '[v]', '-map', songPath ? '[a]' : '1:a', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-r', '30',
-    '-c:a', 'aac', '-b:a', '160k', '-t', String(seconds), '-shortest', '-movflags', '+faststart', '-y', tmp]);
-  fs.renameSync(tmp, out);
-  return out;
+  return makeOnce(out, async (tmp) => {
+    const frames = seconds * 30;
+    const from = songPath ? await songHookSec(songPath, seconds) : 0;
+    const audioIn = songPath
+      ? ['-stream_loop', '-1', '-ss', from.toFixed(2), '-i', songPath]
+      : ['-f', 'lavfi', '-t', String(seconds), '-i', 'anullsrc=r=44100:cl=stereo'];
+    const audioChain = songPath
+      ? `;[1:a]atrim=0:${seconds},asetpts=PTS-STARTPTS,loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100,aformat=channel_layouts=stereo,`
+        + `afade=t=in:d=0.5,afade=t=out:st=${Math.max(0, seconds - 1.6)}:d=1.6[a]`
+      : '';
+    await ff.runFfmpeg(ff.resolveFfmpeg(), ['-v', 'error',
+      '-loop', '1', '-framerate', '30', '-t', String(seconds), '-i', src,
+      ...audioIn,
+      '-filter_complex',
+      '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=40:4,eq=brightness=-0.12[bg];'
+      + '[0:v]scale=1000:1780:force_original_aspect_ratio=decrease[fg];'
+      + "[bg][fg]overlay=(W-w)/2:(H-h)/2,scale=1188:2112,"
+      + `zoompan=z='1+0.06*on/${frames}':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,format=yuv420p[v]`
+      + audioChain,
+      '-map', '[v]', '-map', songPath ? '[a]' : '1:a', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-r', '30',
+      '-c:a', 'aac', '-b:a', '160k', '-t', String(seconds), '-shortest', '-movflags', '+faststart', '-y', tmp]);
+  });
 }
 
 /*
@@ -1246,10 +1257,12 @@ async function flyerAsShort(src, seconds = 10, song = null) {
  */
 const IMAGE_RX = /\.(png|jpe?g|webp|gif)$/i;
 // the free song's credit, on the caption of the posts that carry it (and only those)
-function withSongCredit(text, song) {
+function withSongCredit(text, song, max = 2200) {
   const c = song && song.credit;
   const t = String(text || '');
-  return c && !t.includes(c) ? [t.trim(), c].filter(Boolean).join('\n\n') : t;
+  if (!c || t.includes(c)) return t;
+  // the credit the licence asks for is never what a long caption loses
+  return [t.trim().slice(0, Math.max(0, max - c.length - 2)).trim(), c].filter(Boolean).join('\n\n');
 }
 /*
  * A flyer with a song, for a route that posts a file as it is (Facebook's and
@@ -1259,24 +1272,30 @@ function withSongCredit(text, song) {
 async function flyerWithSong(post, media, label, force) {
   const song = flyerSongOf(post);
   if (!media || !IMAGE_RX.test(media) || (!song && !force)) return { post, media };
-  const out = await flyerAsVideo(media, label, song);
+  let out;
+  try { out = await flyerAsVideo(media, label, song); }
+  catch (e) { if (force) throw e; return { post, media }; }   // the picture still goes where a picture is fine
   return { media: out, post: song ? { ...post, caption: withSongCredit(post.caption, song) } : post };
 }
 function flyerSongOf(post) {
   const m = post && post.music;
-  return m && m.song && m.song.path && m.tiktok !== 'none' ? m.song : null;
+  return m && m.song && m.song.path && m.tiktok !== 'none' && fs.existsSync(m.song.path) ? m.song : null;
 }
 const IG_AUDIO_REJECT = /audio|music|song|track/i;
-function flyerPlan(platform, music) {
+function flyerPlan(platform, music, zoAccountId) {
   const m = music || null;
-  const song = m && m.song && m.song.path ? m.song : null;
+  // a song whose file has gone is no song (no silent video, no credit for music that does not play)
+  const song = m && m.song && m.song.path && fs.existsSync(m.song.path) ? m.song : null;
   if (!m) return { media: platform === 'youtube' ? 'short' : 'jpeg', song: null, tiktok: 'trending' };
   if (platform === 'tiktok') {
     const mode = m.tiktok || 'trending';
     if (mode === 'free' && song) return { media: 'short', song, tiktok: 'free' };
     return { media: 'jpeg', song: null, tiktok: mode === 'free' ? 'trending' : mode };
   }
-  if (platform === 'instagram' && m.igAudio && m.igAudio.id) return { media: 'short', song: null, igAudio: m.igAudio, seconds: 15 };
+  // Instagram's song is from one account's library: that account only
+  if (platform === 'instagram' && m.igAudio && m.igAudio.id && (!m.igAudio.acc || !zoAccountId || String(m.igAudio.acc) === String(zoAccountId))) {
+    return { media: 'short', song: null, igAudio: m.igAudio, seconds: 15 };
+  }
   if (song) return { media: 'short', song };
   return { media: platform === 'youtube' ? 'short' : 'jpeg', song: null };
 }
@@ -1303,7 +1322,7 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
   // a flyer, made fit for this platform — and its music (see flyerPlan)
   let media = original;
   const flyer = !!original && zoMediaKind(original).type === 'image';
-  const plan = flyer ? flyerPlan(platform, opts.noIgAudio ? Object.assign({}, post.music, { igAudio: null }) : post.music) : null;
+  const plan = flyer ? flyerPlan(platform, opts.noIgAudio ? Object.assign({}, post.music, { igAudio: null }) : post.music, accountId) : null;
   if (flyer) {
     try {
       media = plan.media === 'short' ? await flyerAsShort(original, plan.song || plan.igAudio ? 15 : 10, plan.song) : await flyerAsJpeg(original);

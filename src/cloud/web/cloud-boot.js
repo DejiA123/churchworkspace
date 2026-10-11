@@ -637,6 +637,7 @@ let _hideTimer = null;
       linkClaim: (platform, another) => call('social:linkClaim', { platform, another: !!another }),
       igAudio: (accountId, q) => call('social:igAudio', { accountId, q: q || '' }),
       igRelink: (accountId) => call('social:igRelink', { accountId }),
+      musicCheck: () => call('social:musicCheck', {}),
       unlink: (id) => call('social:unlink', { id }),
       check: (id) => call('social:check', { id }),
       // whether the cloud AI writer/judge has its key (never the key itself) — the Cloud AI picker needs it

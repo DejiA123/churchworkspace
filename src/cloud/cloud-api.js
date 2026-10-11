@@ -133,6 +133,7 @@ const SOCIAL = {
   'social:linkClaim': true,
   'social:igAudio': true,
   'social:igRelink': true,
+  'social:musicCheck': true,
   // one tap: every sign-in in turn (main.js); setupNext is reached only through /social/next/<code>
   'social:setupStart': { args: (a) => !a || a.platforms == null || (Array.isArray(a.platforms) && a.platforms.every((p) => typeof p === 'string')) },
   'social:setupStatus': { args: (a) => !!a && typeof a.code === 'string' && /^[0-9a-f]{36}$/.test(a.code) },

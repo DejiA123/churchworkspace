@@ -704,7 +704,12 @@
 
   function statusOf(p) {
     if (p.status === 'posting') return { cls: 'posting', tx: 'Posting now…' };
-    if (p.status === 'posted') return { cls: 'posted', tx: 'Posted' };
+    if (p.status === 'posted') {
+      // a flyer waiting in the TikTok inbox (for its song) is not out yet
+      const ok = Object.values(p.results || {}).filter((r) => r && r.ok);
+      if (ok.length && ok.every((r) => r.inbox)) return { cls: 'booked', tx: 'In TikTok inbox' };
+      return { cls: 'posted', tx: 'Posted' };
+    }
     if (p.status === 'failed') return { cls: 'failed', tx: 'Did not post' };
     const plan = S.plans[p.id];
     if (plan && plan.bookable && plan.bookable.length && plan.bookable.every((b) => b.booked) && !(plan.local || []).length) {
@@ -742,10 +747,13 @@
       const h = (p.handoffs || {})[aid];
       const he = (p.handoffErrors || {})[aid];
       let line = 'Waiting for its time', cls = '';
-      if (r && r.ok) { line = r.url ? `<a href="${escAttr(r.url)}" target="_blank" rel="noopener">Posted — open it ${mi('external')}</a>` : 'Posted'; cls = 'ok'; }
+      const note = (r && r.ok && r.note) || (h && h.ok && h.note) || '';
+      if ((r && r.ok && r.inbox) || (!r && h && h.ok && h.inbox)) { line = r ? 'In your TikTok inbox — open TikTok, tap the notification, add your song and post' : 'Goes to your TikTok inbox at its time — then open TikTok, add your song and post'; cls = 'warn'; }
+      else if (r && r.ok) { line = r.url ? `<a href="${escAttr(r.url)}" target="_blank" rel="noopener">Posted — open it ${mi('external')}</a>` : 'Posted'; cls = 'ok'; }
       else if (r && !r.ok) { line = esc(r.error || 'Did not post'); cls = 'bad'; }
       else if (h && h.ok) { line = `Booked — ${esc((PLAT[a.platform] || {}).name || 'the platform')} will post it at its time`; cls = 'ok'; }
       else if (he) { line = esc(he.why || 'Could not book it yet — it will try again'); cls = he.cannotSchedule ? '' : 'warn'; }
+      if (note && !(r && r.inbox) && !(h && h.inbox)) line += ` · ${esc(note)}`;
       return `<li class="${cls}">${platMark(a.platform)}<span><b>${esc(a.name)}</b><small>${line}</small></span></li>`;
     }).join('');
     panel.body.innerHTML = '<div class="cs-detail">'
@@ -804,7 +812,9 @@
     Promise.resolve(run).then(async () => {
       await loadSocial(true); renderSched(); renderHomeSocial();
       const now = S.posts.find((x) => x.id === id);
-      if (now && now.status === 'posted') C.island({ kind: 'good', title: 'Posted', sub: now.title || '', action: { label: 'View', onClick: () => { go('scheduler'); S.tab = 'posted'; renderSched(); } } });
+      const inboxOnly = now && now.status === 'posted' && statusOf(now).tx === 'In TikTok inbox';
+      if (inboxOnly) C.island({ kind: 'info', title: 'In your TikTok inbox', sub: 'Open TikTok, tap the notification, add your song and post.', ms: 9000 });
+      else if (now && now.status === 'posted') C.island({ kind: 'good', title: 'Posted', sub: now.title || '', action: { label: 'View', onClick: () => { go('scheduler'); S.tab = 'posted'; renderSched(); } } });
     }).catch(async (e) => {
       await loadSocial(true); renderSched();
       C.island({ kind: 'error', title: 'It did not post', sub: e.message || String(e), ms: 9000 });
@@ -990,11 +1000,26 @@
       }
       if (a.platform === 'instagram') {
         if (mode === 'none') return 'a picture post';
-        if (mode === 'trending' && fm.ig && zo) return `a Reel with “${fm.ig.title}”${fm.ig.artist ? ' — ' + fm.ig.artist : ''}`;
+        if (mode === 'trending' && igSongFor(a)) return `a Reel with “${fm.ig.title}”${fm.ig.artist ? ' — ' + fm.ig.artist : ''}`;
         return `a 15-second Reel with ${song}`;
       }
       if (a.platform === 'youtube') return mode === 'none' ? 'a 10-second Short, no music' : `a 15-second Short with ${song}`;
       return mode === 'none' ? 'a picture post' : `a 15-second video with ${song}`;
+    }
+    // the Instagram account whose library the chosen song is from — the only one that gets it
+    const igSongFor = (a) => !!(st.fm.ig && a.platform === 'instagram' && a.via === 'zernio' && (!st.fm.ig.acc || st.fm.ig.acc === a.id));
+    // which accounts play the free song (mode Trending): the ones with no library of their own
+    function usesFree(a) {
+      if (st.fm.mode === 'none') return false;
+      if (st.fm.mode === 'free') return true;
+      if (a.platform === 'tiktok') return a.via !== 'zernio';
+      if (a.platform === 'instagram') return !igSongFor(a);
+      return true;
+    }
+    // ...and which need it at all: those, and an Instagram with its own song (its backup) — main.js flyerNeedsSong
+    function needsFreeSong(accs) {
+      if (st.fm.mode === 'none') return false;
+      return st.fm.mode === 'free' || accs.some((a) => !(a.platform === 'tiktok' && a.via === 'zernio'));
     }
     function flyerBlock() {
       const pics = flyers();
@@ -1028,15 +1053,26 @@
           + '</div>';
       }
       if (fm.mode === 'trending' && ig.some((a) => a.via === 'zernio')) html += igPicker();
-      const needFree = fm.mode === 'free' || (fm.mode === 'trending' && accs.some((a) => a.platform === 'facebook' || a.platform === 'youtube'
-        || (a.platform === 'instagram' && !(fm.ig && a.via === 'zernio')) || (a.platform === 'tiktok' && a.via !== 'zernio')));
-      if (needFree) {
-        html += `<div class="csb-fm-sec"><div class="csb-fm-h">${mi('music')}<b>${fm.mode === 'free' ? 'The song' : 'Free song'}</b><small>${esc(freeSongName())}</small>`
+      const playsFree = fm.mode === 'free' || accs.some((a) => usesFree(a));
+      if (needsFreeSong(accs)) {
+        const backupOnly = fm.mode === 'trending' && !playsFree;
+        const noLib = accs.filter((a) => usesFree(a)).map((a) => (PLAT[a.platform] || {}).name || a.platform);
+        const names = Array.from(new Set(noLib));
+        html += `<div class="csb-fm-sec"><div class="csb-fm-h">${mi('music')}<b>${fm.mode === 'free' ? 'The song' : backupOnly ? 'Backup song' : 'Free song'}</b><small>${esc(freeSongName())}</small>`
           + `<button type="button" class="csb-link" data-c="fm-songs">${fm.pickSong ? 'Done' : 'Change'}</button></div>`
-          + (fm.mode === 'trending' ? `<p class="cs-hint">${accs.some((a) => a.platform === 'facebook') && accs.some((a) => a.platform === 'youtube') ? 'Facebook and YouTube have' : accs.some((a) => a.platform === 'youtube') ? 'YouTube has' : accs.some((a) => a.platform === 'facebook') ? 'Facebook has' : 'This one has'} no song library an app may use, so a song that is free to post goes under the flyer — never flagged. Its credit is added to the caption.</p>` : '');
+          + (backupOnly ? '<p class="cs-hint">Used only if Instagram will not take its song on the day — so the flyer still has music.</p>'
+            : fm.mode === 'trending' ? `<p class="cs-hint">${esc(names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] + ' have' : (names[0] || 'This one') + ' has')} no song library an app may use, so a song that is free to post goes under the flyer — never flagged. Its credit is added to the caption there.</p>` : '');
         if (fm.pickSong) html += songShelf();
         html += '</div>';
       }
+      // 🧪 the whole chain, on the real accounts, nothing public (main.js social:musicCheck)
+      const ck = st.check;
+      html += '<div class="csb-fm-sec csb-check-sec">'
+        + `<button type="button" class="cs-btn ghost csb-mcheck" data-c="fm-check"${ck && ck.busy ? ' disabled' : ''}>${ck && ck.busy ? '<i class="csb-spin"></i> Testing your accounts… (a minute)' : '🧪 Test music on my accounts'}</button>`
+        + (ck && ck.checks ? '<ul class="csb-mres">' + ck.checks.map((c) => `<li class="${c.ok ? 'ok' : 'bad'}">${c.platform ? platMark(c.platform, 'sm') : mi('music')}<span><b>${c.ok ? '✅' : '⚠️'} ${esc(c.name)}</b><small>${esc(c.what)}</small></span></li>`).join('') + '</ul>'
+          : ck && ck.error ? `<p class="cs-hint">${esc(ck.error)}</p>`
+            : '<p class="cs-hint">Books a test flyer with its music on each account a month ahead — so Zernio, Instagram and TikTok check it for real — then takes it straight back. Nothing is posted.</p>')
+        + '</div>';
       return html;
     }
     function songShelf() {
@@ -1468,7 +1504,7 @@
           st.aiText = null;
         }
         if (!edit && st.files.length === 1 && st.title === titleFromFile(st.files[0])) st.title = '';
-        st.files = []; st.ai = null; st.autoFor = ''; st.options = null; st.prev = null; st.batchCaps = {};
+        st.files = []; st.ai = null; st.autoFor = ''; st.options = null; st.prev = null; st.batchCaps = {}; st.booked = {};
         return draw();          // one file: offer both places again
       }
       if (c === 'device') return pickDevice();
@@ -1502,10 +1538,20 @@
       }
       if (c === 'spacing') { st.spacing = +b.dataset.h; st.spacingOther = false; return draw(); }
       if (c === 'spacing-other') { st.spacingOther = true; draw(); const i = panel.body.querySelector('input[data-c="gap"]'); if (i) { i.focus(); i.select(); } return; }
-      if (c === 'mus') { st.music = b.dataset.v ? { free: b.dataset.v } : null; return draw(); }
+      if (c === 'mus') { st.music = b.dataset.v ? { free: b.dataset.v } : null; st.musFree = null; return draw(); }
       // 🎵 a flyer's music
       if (c === 'fm-mode') { st.fm.mode = b.dataset.v; clearTimeout(igTimer); stopIgPreview(); return draw(); }
       if (c === 'fm-tk') { st.fm.tiktok = b.dataset.v === 'draft' ? 'draft' : 'trending'; return draw(); }
+      if (c === 'fm-check') {
+        if (st.check && st.check.busy) return;
+        st.check = { busy: true };
+        draw();
+        try { const r = await window.api.social.musicCheck(); st.check = { checks: (r && r.checks) || [] }; }
+        catch (er) { st.check = { error: 'The test could not run: ' + ((er && er.message) || er) }; }
+        if (panel.el.isConnected) draw();
+        const sec = panel.body.querySelector('.csb-check-sec'); if (sec) sec.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        return;
+      }
       if (c === 'fm-songs') { st.fm.pickSong = !st.fm.pickSong; return draw(); }
       if (c === 'fm-free') { st.fm.free = b.dataset.v || 'auto'; st.fm.lib = null; return draw(); }
       if (c === 'fm-lib') { st.fm.lib = b.dataset.v; return draw(); }
@@ -1596,14 +1642,20 @@
       if (!st.music || edit || !st.files.length || !st.files.every(isVideo)) return null;
       let free = st.music.free || null;
       if (free === 'auto') {
-        // the next worship song not used lately (see freeDeal)
-        const next = freeDeal((st.shelf && st.shelf.tracks) || [], 'uplift')[0];
-        free = next ? next.id : null;
-        if (!free) return null;
-        freeUsed(free);
+        // the next worship song not used lately (see freeDeal) — the same one again if this is a retry,
+        // so every post of a bulk has the same song and credit
+        if (!st.musFree) {
+          const next = freeDeal((st.shelf && st.shelf.tracks) || [], 'uplift')[0];
+          if (!next) return null;
+          st.musFree = next.id;
+          freeUsed(next.id);
+        }
+        free = st.musFree;
       }
       const out = { files: [], credit: '' };
       for (let i = 0; i < st.files.length; i++) {
+        // already booked (a retry after one failed): not mixed again
+        if (st.booked && st.booked[st.files[i]]) { out.files.push(st.files[i]); continue; }
         btn.innerHTML = `${mi('music')}Adding the music${st.files.length > 1 ? ` (${i + 1} of ${st.files.length})` : ''}…`;
         const r = await window.api.social.withMusic({ mediaPath: st.files[i], free: free || undefined, libId: st.music.lib || undefined });
         out.files.push(r.path);
@@ -1617,10 +1669,10 @@
       const fm = st.fm;
       if (fm.mode === 'none') return { tiktok: 'none', igAudio: null, song: null };
       const accs = linked().filter((a) => picked().includes(a.id));
-      const ig = fm.mode === 'trending' && fm.ig ? { id: fm.ig.id, title: fm.ig.title, artist: fm.ig.artist || '' } : null;
+      const ig = fm.mode === 'trending' && fm.ig ? { id: fm.ig.id, title: fm.ig.title, artist: fm.ig.artist || '', acc: fm.ig.acc || '' } : null;
       // everywhere but a TikTok that takes TikTok's own music — an Instagram with its own song keeps
       // the free one too, for if Instagram will not take its song on the day (main.js flyerNeedsSong)
-      const needFree = fm.mode === 'free' || accs.some((a) => !(a.platform === 'tiktok' && a.via === 'zernio'));
+      const needFree = needsFreeSong(accs);
       return { tiktok: fm.mode === 'free' ? 'free' : fm.tiktok, igAudio: ig, song: needFree ? (fm.lib ? { lib: fm.lib } : { free: fm.free || 'auto' }) : null };
     }
     // book it — a flyer with its music; "pick one for me" deals the next free song, and one that can't be fetched gives way to the next
@@ -1708,11 +1760,14 @@
           C.island({ kind: 'good', title: `${st.files.length} posts scheduled`, sub: `First one ${whenLabel(times[0])}` });
         } else {
           const when = chosenWhen();
-          const rec = await addPost({
+          st.booked = st.booked || {};
+          // dropped down to one after a bulk half-booked: that one is booked already
+          const rec = st.booked[st.files[0]] ? null : await addPost({
             title: st.title.trim() || titleFromFile(st.files[0]), caption: withCredit(st.caption, credit),
             mediaPaths: [fileAt(0)], accountIds: accs.map((a) => a.id), platforms,
             scheduledAt: when.toISOString(),
           }, st.files[0]);
+          if (rec) st.booked[st.files[0]] = rec;
           if (st.quick === 'now' && rec && rec.id) postNow(rec.id);
           else C.island({ kind: 'good', title: 'Post scheduled', sub: `${whenLabel(when)} · ${accs.map((a) => (PLAT[a.platform] || {}).name || a.platform).join(', ')}` });
         }
@@ -3064,5 +3119,5 @@
     }
   }
 
-  window.MWSocial = { busy: () => !!MT.busy, start, go, compose, openConnect, openMontage, editMontage, openProjects, openProject, deleteOpenProject, view: () => S.view, _state: S, _planTimes: planTimes, _titleFromFile: titleFromFile };
+  window.MWSocial = { busy: () => !!MT.busy, start, go, compose, openConnect, openMontage, editMontage, openProjects, openProject, deleteOpenProject, openPost, view: () => S.view, _state: S, _planTimes: planTimes, _titleFromFile: titleFromFile };
 })();

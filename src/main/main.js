@@ -1092,8 +1092,17 @@ function keepFlyerSong(file) {
   const st = fs.statSync(file);
   const out = path.join(dir, require('crypto').createHash('sha1').update(file + '|' + st.size + '|' + st.mtimeMs).digest('hex').slice(0, 20) + (path.extname(file) || '.mp3'));
   if (!fs.existsSync(out)) { fs.copyFileSync(file, out + '.part'); fs.renameSync(out + '.part', out); }
-  // three months is long past any post's day
-  try { for (const f of fs.readdirSync(dir)) { const fp = path.join(dir, f); if (Date.now() - fs.statSync(fp).mtimeMs > 90 * 86400e3) fs.rmSync(fp, { force: true }); } } catch (e) {}
+  // its date is today's (a copy keeps the original's on some systems), so the sweep below never takes it
+  try { const now = new Date(); fs.utimesSync(out, now, now); } catch (e) {}
+  // a copy no post still waiting uses, three months on, goes
+  try {
+    const inUse = new Set((scheduler.list() || []).filter((p) => p.status !== 'posted' && p.music && p.music.song && p.music.song.path).map((p) => path.resolve(p.music.song.path)));
+    for (const f of fs.readdirSync(dir)) {
+      const fp = path.join(dir, f);
+      if (fp === out || inUse.has(path.resolve(fp))) continue;
+      if (Date.now() - fs.statSync(fp).mtimeMs > 90 * 86400e3) fs.rmSync(fp, { force: true });
+    }
+  } catch (e) {}
   return out;
 }
 async function flyerSongEntry(want) {
@@ -1128,7 +1137,9 @@ async function withFlyerMusic(post, before) {
   const m = post.music;
   if (!m || typeof m !== 'object') { post.music = null; return post; }
   const tiktok = ['trending', 'draft', 'free', 'none'].includes(m.tiktok) ? m.tiktok : 'trending';
-  const ig = m.igAudio && m.igAudio.id ? { id: String(m.igAudio.id).slice(0, 80), title: String(m.igAudio.title || '').slice(0, 120), artist: String(m.igAudio.artist || '').slice(0, 120) } : null;
+  const ig = m.igAudio && m.igAudio.id ? { id: String(m.igAudio.id).slice(0, 80), title: String(m.igAudio.title || '').slice(0, 120), artist: String(m.igAudio.artist || '').slice(0, 120),
+    // the account whose library it is from (another Instagram account gets the free song)
+    acc: m.igAudio.acc && accounts.byId(String(m.igAudio.acc)) ? String(accounts.byId(String(m.igAudio.acc)).zoAccountId || '') : '' } : null;
   let song = null;
   const want = m.song || null;
   if (want && (want.free || want.lib) && tiktok !== 'none') {
@@ -1140,6 +1151,74 @@ async function withFlyerMusic(post, before) {
   post.music = { tiktok, igAudio: ig, song };
   return post;
 }
+/*
+ * ►► "IT MUST WORK — 100%." ◄◄ Test music on my accounts: the whole chain, on
+ * the church's REAL accounts, with nothing going public. For each account
+ * linked through Zernio a test flyer with its music is booked a month ahead —
+ * Zernio checks the post there and then (the song from Instagram's library,
+ * TikTok's music settings, the video with the free song) — and the booking is
+ * taken straight back. Also: can a free song be fetched, and does Instagram's
+ * song library answer. Gives back a line per check, in words.
+ */
+let musicCheckRun = null;
+ipcMain.handle('social:musicCheck', wrap(async () => {
+  if (musicCheckRun) return musicCheckRun;
+  musicCheckRun = (async () => {
+    const out = [];
+    const add = (name, platform, ok, what) => out.push({ name, platform, ok, what });
+    const accs = accounts.all().filter((a) => a.via === 'zernio' && a.token && a.zoAccountId);
+    if (!accs.length) return { checks: [{ name: 'Accounts', platform: '', ok: false, what: 'No account is linked through Zernio yet — link them in Accounts first.' }] };
+    // a test flyer
+    const img = path.join(app.getPath('temp'), 'mw-music-check-flyer.png');
+    const ff = require('./ffmpeg');
+    if (!fs.existsSync(img)) await ff.runFfmpeg(ff.resolveFfmpeg(), ['-v', 'error', '-f', 'lavfi', '-i', 'gradients=s=1080x1350:c0=0x2a0f3d:c1=0xff5c8a:d=1', '-frames:v', '1', '-y', img]);
+    // a free song
+    let song = null;
+    try {
+      const e = await flyerSongEntry({ free: 'auto' });
+      song = { path: keepFlyerSong(e.file), title: e.name || '', credit: e.credit || freemusic.creditFor(e) || '' };
+      add('Free songs', '', true, `A free song was fetched (${e.name || 'a song'}) — Facebook and YouTube get music.`);
+    } catch (e) { add('Free songs', '', false, 'No free song could be fetched (' + e.message + ') — Facebook and YouTube flyers would go without music until it answers.'); }
+    const opts = scheduler._pubOpts();
+    const when = Date.now() + 30 * 86400e3;
+    const book = async (a, music, label) => {
+      let res = null;
+      try {
+        res = await publisher.scheduleTo(a, { title: 'Music test', caption: 'Music test — removed straight away', mediaPaths: [img], music }, when, opts);
+      } catch (e) { add(a.name, a.platform, false, `${label}: Zernio did not accept it — ${e.message}`); return; }
+      let gone = true;
+      try { await publisher.cancelScheduled(a, { id: res.id, via: 'zernio', zoPostId: res.zoPostId }, opts); }
+      catch (e) { gone = false; }
+      const songRefused = /would not take the song/.test(res.note || '');
+      add(a.name, a.platform, gone && !songRefused, songRefused ? `${label}: Instagram would not take that song — ${res.note}`
+        : gone ? `${label}: works.`
+        : `${label}: works — but the test post could not be taken back. Delete “Music test” on zernio.com → Posts, or it goes out in 30 days.`);
+    };
+    for (const a of accs) {
+      if (a.platform === 'tiktok') {
+        await book(a, { tiktok: 'trending', igAudio: null, song: null }, 'Photo post with TikTok’s trending music');
+        await book(a, { tiktok: 'draft', igAudio: null, song: null }, 'Sent to the TikTok inbox to pick your song');
+      } else if (a.platform === 'instagram') {
+        let lib = null;
+        try { lib = await accounts.zernioIgAudio(a.id, 'gospel'); } catch (e) { lib = { unavailable: e.message }; }
+        if (lib && lib.songs && lib.songs.length) {
+          const s0 = lib.songs[0];
+          add(a.name, a.platform, true, `Instagram’s song library answers (e.g. “${s0.title}”${s0.artist ? ' — ' + s0.artist : ''}).`);
+          await book(a, { tiktok: 'trending', igAudio: { id: s0.id, title: s0.title, artist: s0.artist, acc: a.zoAccountId }, song }, 'Reel with a song from Instagram’s library');
+        } else {
+          add(a.name, a.platform, false, lib && lib.needsFacebookLogin
+            ? 'Instagram’s song library needs this account linked through Facebook — tap “Link Instagram through Facebook” in New post. Until then it gets the free song.'
+            : `Instagram’s song library is not available (${(lib && (lib.unavailable || (lib.songs && 'no songs came back'))) || 'no answer'}) — it gets the free song.`);
+        }
+        if (song) await book(a, { tiktok: 'trending', igAudio: null, song }, 'Reel with the free song');
+      } else if (song) {
+        await book(a, { tiktok: 'trending', igAudio: null, song }, a.platform === 'youtube' ? 'Short with the free song' : 'Video with the free song');
+      }
+    }
+    return { checks: out, ok: out.every((c) => c.ok) };
+  })().finally(() => { musicCheckRun = null; });
+  return musicCheckRun;
+}));
 // Instagram's own song library, through Zernio (licensed by Meta — a song from it is never flagged)
 ipcMain.handle('social:igAudio', wrap(async (e, { accountId, q } = {}) => accounts.zernioIgAudio(accountId, q)));
 // that library needs the Instagram account linked through Facebook: the sign-in to do it
