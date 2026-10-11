@@ -85,13 +85,16 @@ function zernio() {
         const plat = j.platforms && j.platforms[0];
         const ac = plat && plat.platformSpecificData && plat.platformSpecificData.audioConfiguration;
         if (Z.fail500) { Z.posts.push({ rejected: true, body: j }); return send(500, { error: 'Internal error' }); }
+        // made it, then no clear answer (a 504 after saving)
+        if (Z.failAfterMake) { Z.made = (Z.made || []).concat({ _id: 'zm' + (Z.made || []).length, content: j.content }); Z.posts.push({ rejected: true, body: j }); return send(504, { error: 'Gateway timeout' }); }
         if (ac && ac.audioId === 'ig_gone') { Z.posts.push({ rejected: true, body: j }); return send(400, { error: 'The audio is no longer available' }); }
         Z.posts.push({ body: j });
         const draft = j.tiktokSettings && j.tiktokSettings.draft;
         return send(200, { post: { _id: 'zp' + Z.posts.length, platforms: [{ platform: plat.platform, status: j.publishNow ? (draft ? 'sent_to_inbox' : 'published') : 'scheduled' }] } });
       }
+      if (u.pathname === '/api/v1/posts' && req.method === 'GET') return send(200, { posts: Z.made || [] });
       m = u.pathname.match(/^\/api\/v1\/posts\/([^/]+)$/);
-      if (m && req.method === 'DELETE') { Z.deleted = (Z.deleted || []).concat(m[1]); return send(200, { ok: true }); }
+      if (m && req.method === 'DELETE') { Z.deleted = (Z.deleted || []).concat(m[1]); Z.made = (Z.made || []).filter((x) => x._id !== m[1]); return send(200, { ok: true }); }
       send(404, { error: 'not here: ' + u.pathname });
     });
   }).listen(ZPORT, '127.0.0.1');
@@ -250,6 +253,13 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
     check(booked >= 6 && taken === booked, '…each test booking is taken straight back (nothing left to post)', { booked, taken });
     check(res.some((r) => /Instagram’s song library answers/.test(r)) && res.some((r) => /TikTok inbox/.test(r)) && res.some((r) => /Free songs/.test(r)), '…and it says what was checked', res);
     if (SHOTS) { await page.evaluate(() => { const n = document.querySelector('#csCompose .csb-check-sec'); if (n) n.scrollIntoView({ block: 'start' }); }); await sleep(300); await page.screenshot({ path: path.join(SHOTS, 'flyer-music-3-test.png') }); }
+    // no clear answer from Zernio (it saved the test post, then timed out): found by its mark and taken back
+    Z.failAfterMake = true;
+    const amb = await page.evaluate(async () => window.api.social.musicCheck());
+    Z.failAfterMake = false;
+    const ambLines = ((amb && amb.checks) || []).filter((c) => /no clear answer/.test(c.what));
+    check(ambLines.length >= 5 && ambLines.every((c) => !c.ok && /taken back/.test(c.what)) && !(Z.made || []).length,
+      'Test music with no clear answer from Zernio: said so, and any test post it made is taken back', { left: Z.made, lines: ambLines.map((c) => c.what) });
     await page.evaluate(() => { const x = document.querySelector('#csCompose .cp-x'); if (x) x.click(); });
     await sleep(500);
 

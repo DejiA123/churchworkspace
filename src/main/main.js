@@ -1181,11 +1181,30 @@ ipcMain.handle('social:musicCheck', wrap(async () => {
     } catch (e) { add('Free songs', '', false, 'No free song could be fetched (' + e.message + ') — Facebook and YouTube flyers would go without music until it answers.'); }
     const opts = scheduler._pubOpts();
     const when = Date.now() + 30 * 86400e3;
+    const base = (opts.zoApiBase || publisher.DEFAULT_ZO_API).replace(/\/+$/, '');
+    // a test post Zernio may have made without saying so (no clear answer): found by its mark and taken back
+    const sweep = async (a, mark) => {
+      try {
+        const got = await publisher.getJson(`${base}/posts?status=scheduled&limit=100`, { headers: { authorization: 'Bearer ' + a.token } });
+        const list = Array.isArray(got) ? got : (got && (got.posts || got.data || got.items)) || [];
+        const mine = list.filter((p) => String((p && p.content) || '').includes(mark));
+        for (const p of mine) await publisher.cancelScheduled(a, { id: p._id || p.id, via: 'zernio', zoPostId: p._id || p.id }, opts);
+        return true;
+      } catch (e) { return false; }
+    };
     const book = async (a, music, label) => {
       let res = null;
+      const mark = 'mwtest-' + require('crypto').randomBytes(4).toString('hex');
       try {
-        res = await publisher.scheduleTo(a, { title: 'Music test', caption: 'Music test — removed straight away', mediaPaths: [img], music }, when, opts);
-      } catch (e) { add(a.name, a.platform, false, `${label}: Zernio did not accept it — ${e.message}`); return; }
+        res = await publisher.scheduleTo(a, { title: 'Music test', caption: 'Music test — removed straight away · ' + mark, mediaPaths: [img], music }, when, opts);
+      } catch (e) {
+        if (e.zoMaybeMade && !e.cannotSchedule) {
+          const swept = await sweep(a, mark);
+          add(a.name, a.platform, false, `${label}: no clear answer from Zernio (${e.message}).` + (swept ? ' Any test post it made was taken back — tap Test again.'
+            : ' It may have booked the test post: delete “Music test” on zernio.com → Posts, or it goes out in 30 days.'));
+        } else add(a.name, a.platform, false, `${label}: Zernio did not accept it — ${e.message}`);
+        return;
+      }
       let gone = true;
       try { await publisher.cancelScheduled(a, { id: res.id, via: 'zernio', zoPostId: res.zoPostId }, opts); }
       catch (e) { gone = false; }

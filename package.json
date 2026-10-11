@@ -231,6 +231,7 @@
     "test:phone-social-setup": "node test/phone-social-setup.test.js",
     "test:phone-scheduler-studio": "node test/phone-scheduler-studio.test.js",
     "test:flyermusic": "node test/phone-flyer-music.test.js",
+    "test:handoff-race": "node test/handoff-race.test.js",
     "test:caption-names": "node test/caption-names.test.js",
     "test:phone-caption-touch": "node test/phone-caption-touch.test.js",
     "test:caption-second-opinion": "node test/caption-second-opinion.test.js"

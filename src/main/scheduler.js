@@ -146,7 +146,15 @@ class Scheduler {
    * how a church deletes something and watches it appear anyway on Sunday,
    * with nothing left in the app that even knows about it.
    */
+  // a booking run for this post still in flight, finished (its bookings on disk) — or at once
+  _afterRuns(id) {
+    const run = this._handoffRuns && this._handoffRuns.get(id);
+    return run ? run.catch(() => {}) : Promise.resolve();
+  }
+
   async remove(id) {
+    // a booking still uploading finishes first, so what it booked is given back too
+    await this._afterRuns(id);
     let warn = null;
     try {
       const res = await this.cancelHandoffs(id);
@@ -166,6 +174,9 @@ class Scheduler {
    * back and taken again at the new one.
    */
   async reschedule(id, patch) {
+    // a booking still uploading finishes first: what it booked (at the old time,
+    // with the old words) is then given back below, not left to go out
+    await this._afterRuns(id);
     const before = (this.store.get('posts') || []).find((p) => p.id === id);
     const moved = before && patch && patch.scheduledAt && patch.scheduledAt !== before.scheduledAt;
     const changed = moved || (patch && (patch.caption !== undefined || patch.mediaPaths !== undefined));
@@ -297,6 +308,7 @@ class Scheduler {
       if (!Number.isFinite(when) || when <= this._now()) return { booked: 0, why: 'due' };
 
       const handoffs = { ...(post.handoffs || {}) };
+      const bookedNow = new Set();   // what THIS run booked — the only entries it writes
       const errors = {};
       let booked = 0, retryable = false;
 
@@ -318,10 +330,27 @@ class Scheduler {
             ...(res.inbox ? { inbox: true } : {}), ...(res.note ? { note: res.note } : {}),
           };
           booked++;
-          // On disk per account: a booking this app forgets is a post that
-          // goes out anyway, with nothing here knowing it exists.
+          bookedNow.add(acc.id);
+          // the post as it stands NOW: moved, reworded, posted or deleted while this
+          // was uploading — then this booking is for something that no longer is
+          this._syncPosts(true);
+          const fresh = (this.store.get('posts') || []).find((p) => p.id === id);
+          const stale = fresh && (fresh.status !== 'scheduled' || fresh.scheduledAt !== post.scheduledAt || fresh.caption !== post.caption
+            || JSON.stringify(fresh.mediaPaths || []) !== JSON.stringify(post.mediaPaths || []) || JSON.stringify(fresh.music || null) !== JSON.stringify(post.music || null)
+            || ((fresh.results || {})[acc.id] && fresh.results[acc.id].ok));
+          if (stale) {
+            try { await publisher.cancelScheduled(acc, handoffs[acc.id], this._pubOpts()); } catch (e2) {}
+            delete handoffs[acc.id];
+            bookedNow.delete(acc.id);
+            booked--;
+            break;
+          }
+          // On disk per account, merged into what is there now (a booking taken
+          // back meanwhile is not brought back): a booking this app forgets is a
+          // post that goes out anyway, with nothing here knowing it exists.
           try {
-            this.update(id, { handoffs });
+            if (!fresh) throw new Error('gone');
+            this.update(id, { handoffs: { ...(fresh.handoffs || {}), [acc.id]: handoffs[acc.id] } });
             this._flush();
           } catch (gone) {
             /*
@@ -332,6 +361,7 @@ class Scheduler {
              */
             try { await publisher.cancelScheduled(acc, handoffs[acc.id], this._pubOpts()); } catch (e2) {}
             delete handoffs[acc.id];
+            bookedNow.delete(acc.id);
             booked--;
           }
         } catch (e) {
@@ -342,8 +372,14 @@ class Scheduler {
       }
 
       try {
+        // merged into what is on disk now: never brings back a booking that was given back meanwhile
+        this._syncPosts(true);
+        const now = (this.store.get('posts') || []).find((p) => p.id === id);
+        if (!now) throw new Error('gone');
+        const merged = { ...(now.handoffs || {}) };
+        for (const k of bookedNow) if (handoffs[k] && handoffs[k].ok) merged[k] = handoffs[k];
         this.update(id, {
-          handoffs, handoffErrors: errors,
+          handoffs: merged, handoffErrors: errors,
           nextHandoffAt: retryable ? new Date(this._now() + HANDOFF_BACKOFF_MS).toISOString() : null,
         });
         this._flush();
@@ -432,6 +468,9 @@ class Scheduler {
    * Handles retry counting + statuses.
    */
   async autoPublish(id) {
+    // came due while its booking was still uploading: that run finishes first, and what it
+    // booked counts as booked — publishing it here as well would post it twice
+    if (this._handoffRuns && this._handoffRuns.get(id)) { await this._afterRuns(id); this._syncPosts(true); }
     let post = (this.store.get('posts') || []).find((p) => p.id === id);
     if (!post) throw new Error('Post not found.');
     const targets = this.targetsFor(post);

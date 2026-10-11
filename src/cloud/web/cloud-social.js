@@ -1697,6 +1697,12 @@
       C.island({ kind: 'warn', title: 'The free song could not be fetched', sub: 'Posted without it where it was needed. ' + ((last && last.message) || ''), ms: 7000 });
       return window.api.scheduler.add(Object.assign({}, base, { music: Object.assign({}, m, { song: null }) }));
     }
+    // a post booked earlier in this sheet, brought up to the time, words and accounts chosen now
+    async function bookedAgain(rec, one) {
+      if (!rec || !rec.id) return rec;
+      await window.api.scheduler.update(rec.id, one);
+      return Object.assign({}, rec, one);
+    }
     const withCredit = (caption, credit) => (credit && !String(caption || '').includes(credit) ? [String(caption || '').trim(), credit].filter(Boolean).join('\n\n') : caption);
 
     async function submit(btn) {
@@ -1749,24 +1755,28 @@
             const own = st.batchCaps[f] || {};
             // tapped again after one failed: the ones already booked are not booked twice
             st.booked = st.booked || {};
-            if (st.booked[f]) continue;
-            st.booked[f] = (await addPost({
+            const one = {
               title: own.title || titleFromFile(f),
               caption: withCredit(own.caption || st.caption || titleFromFile(f), credit),
               mediaPaths: [fileAt(i)], accountIds: accs.map((a) => a.id), platforms,
               scheduledAt: times[i].toISOString(),
-            }, f)) || true;
+            };
+            // booked already (tapped again after one failed): brought up to what is chosen now, never booked twice
+            if (st.booked[f]) { await bookedAgain(st.booked[f], one); continue; }
+            st.booked[f] = (await addPost(one, f)) || true;
           }
           C.island({ kind: 'good', title: `${st.files.length} posts scheduled`, sub: `First one ${whenLabel(times[0])}` });
         } else {
           const when = chosenWhen();
           st.booked = st.booked || {};
-          // dropped down to one after a bulk half-booked: that one is booked already
-          const rec = st.booked[st.files[0]] ? null : await addPost({
+          const one = {
             title: st.title.trim() || titleFromFile(st.files[0]), caption: withCredit(st.caption, credit),
             mediaPaths: [fileAt(0)], accountIds: accs.map((a) => a.id), platforms,
             scheduledAt: when.toISOString(),
-          }, st.files[0]);
+          };
+          // dropped down to one after a bulk half-booked: that one is booked already — it gets what is chosen now
+          const had = st.booked[st.files[0]];
+          const rec = had ? await bookedAgain(had, one) : await addPost(one, st.files[0]);
           if (rec) st.booked[st.files[0]] = rec;
           if (st.quick === 'now' && rec && rec.id) postNow(rec.id);
           else C.island({ kind: 'good', title: 'Post scheduled', sub: `${whenLabel(when)} · ${accs.map((a) => (PLAT[a.platform] || {}).name || a.platform).join(', ')}` });

@@ -1429,7 +1429,11 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
       const out = await publishViaZernio({ apiKey, accountId, username, platform }, post, { ...opts, noIgAudio: true });
       return { ...out, note: 'Instagram would not take the song (' + (e.message || e) + ') — posted ' + (post.music && post.music.song ? 'with the free song instead.' : 'without it.') };
     }
-    throw new Error(zoFriendlyError(e.message, platform) + (platform === 'instagram' ? zoIgVideoNote(media) : ''));
+    const err = new Error(zoFriendlyError(e.message, platform) + (platform === 'instagram' ? zoIgVideoNote(media) : ''));
+    err.status = e.status;
+    // no clear answer (a timeout, a dropped line, a 5xx): Zernio may have made the post all the same
+    err.zoMaybeMade = !(e.status >= 400 && e.status < 500);
+    throw err;
   }
 
   const profileUrl = (ZO_PROFILE[platform] || (() => ''))(username);
