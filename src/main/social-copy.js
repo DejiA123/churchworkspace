@@ -504,6 +504,42 @@ function withPopularTags(caption, style, ctx) {
   return body ? body + '\n\n' + line : line;
 }
 
+/*
+ * ►► EACH APP ITS OWN TRENDING TAGS. ◄◄ "#fyp #foryoupage #foryou on TikTok,
+ * #instagood on Instagram." One caption is written; when it goes out, the
+ * hashtag line is made for the app it is going to: that app's own big
+ * discovery tags first, then the post's best church tags — five at most.
+ */
+const APP_TAGS = {
+  tiktok: ['#fyp', '#foryou', '#foryoupage'],
+  instagram: ['#instagood', '#explorepage', '#reels'],
+  facebook: ['#reels', '#viral', '#fbreels'],
+  youtube: ['#shorts', '#youtubeshorts'],
+  youtubeLong: ['#sermon'],
+};
+const ALL_APP_TAGS = new Set([].concat(APP_TAGS.tiktok, APP_TAGS.instagram, APP_TAGS.facebook, APP_TAGS.youtube, ['#fy', '#viralvideo', '#trending', '#explore', '#reelsinstagram', '#instadaily', '#youtube', '#facebookreels', '#reelsfb', '#christianreels', '#christiantiktok']).map((t) => t.toLowerCase()));
+function forPlatform(caption, platform, { short = true } = {}) {
+  const text = String(caption || '');
+  const set = platform === 'youtube' ? (short ? APP_TAGS.youtube : APP_TAGS.youtubeLong) : APP_TAGS[platform];
+  if (!set) return text;
+  // a song's credit at the end stays at the very end, under the tags
+  const cm = text.match(/\n+(Music: [^\n]+)\s*$/);
+  if (cm) return forPlatform(text.slice(0, cm.index), platform, { short }) + '\n\n' + cm[1];
+  const body = withoutTags(text);
+  // a caption written with no hashtags at all is left as it was written
+  if (body === text.replace(/\s+$/, '')) return text;
+  // the church tags already on it (first ones first), then ones about the subject, then the evergreen core
+  const own = (text.slice(body.length).match(/#[\wÀ-￿]+/g) || []).filter((t) => !ALL_APP_TAGS.has(t.toLowerCase()));
+  const tags = [];
+  const add = (t, own) => { const k = t.toLowerCase(); if (tags.length < MAX_TAGS && (own || !BANNED_TAGS.test(t)) && !tags.some((x) => x.toLowerCase() === k)) tags.push(t); };
+  // the app's own discovery tags (#fyp, #foryou… — kept off the AI's lines, right here)
+  set.forEach((t) => add(t, true));
+  own.forEach(add);
+  topicTagsFor(body, 2).forEach(add);
+  POPULAR_CORE.forEach(add);
+  return body ? body + '\n\n' + tags.join(' ') : tags.join(' ');
+}
+
 /* Closing lines that say something true about the reader instead of asking them
  * for something. Seeded off the clip so one file always reads the same way, and
  * three different ones never land on the same sentence. */
@@ -946,7 +982,7 @@ async function revise({ title = '', caption = '', action = 'rewrite', instructio
 }
 
 module.exports = {
-  suggest, revise, dropFaceless, realChurch, withPopularTags, withoutTags, POPULAR_CORE, ruleCopy, ruleOption, hookFromFilename, readTranscript, sentencesOf, hookScore,
+  suggest, revise, dropFaceless, realChurch, withPopularTags, withoutTags, POPULAR_CORE, forPlatform, APP_TAGS, ruleCopy, ruleOption, hookFromFilename, readTranscript, sentencesOf, hookScore,
   buildPrompt, buildPolishPrompt, tidy, houseStyle, tagOf, tagLine, whoIsSpeaking, asSentence,
   stripInventedNames, STYLES, TELLS,
 };

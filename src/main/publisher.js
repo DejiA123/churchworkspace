@@ -1673,8 +1673,28 @@ async function cancelScheduled(account, handoff, opts = {}) {
   return { cancelled: false, why: 'Nothing here knows how to cancel a ' + via + ' booking.' };
 }
 
+/*
+ * Each app its own trending hashtags (social-copy.js forPlatform): #fyp
+ * #foryou #foryoupage on TikTok, #instagood #explorepage on Instagram, #shorts
+ * on a YouTube Short… then the post's own church tags, five at most. Done as
+ * it goes out, so one caption written once suits every app.
+ */
+function withAppTags(account, post) {
+  if (!post) return post;
+  const media = (post.mediaPaths && post.mediaPaths[0]) || '';
+  let short = true;
+  if (account.platform === 'youtube' && media && isVideoFile(media)) {
+    const pr = probeMedia(media);
+    const d = pr && pr.format && +pr.format.duration;
+    short = !(d > 180);     // over three minutes is a video, not a Short
+  }
+  try { return { ...post, caption: require('./social-copy').forPlatform(post.caption || '', account.platform, { short }) }; }
+  catch (e) { return post; }
+}
+
 async function publishTo(account, post, opts = {}) {
   if (!account || !account.token) throw new Error('Account is not connected.');
+  post = withAppTags(account, post);
   const apiBase = opts.apiBase;
   if (account.platform === 'facebook') {
     if (account.via === 'zernio') {
@@ -1738,7 +1758,7 @@ async function testFacebook({ pageId, token, apiBase }) {
 }
 
 module.exports = {
-  flyerAsJpeg, flyerAsShort, flyerPlan, songHookSec, zernioFind,
+  flyerAsJpeg, flyerAsShort, flyerPlan, songHookSec, zernioFind, withAppTags,
   publishToFacebook, publishToInstagram, publishToYouTube, publishToTikTok,
   publishViaUploadPost, publishViaZernio, publishTo, testFacebook,
   canSchedule, scheduleTo, cancelScheduled, FB_SCHEDULE_MIN_MS, FB_SCHEDULE_MAX_MS,

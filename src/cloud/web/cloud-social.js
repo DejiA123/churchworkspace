@@ -949,7 +949,8 @@
       const f = st.files[0];
       const a = firstPlat();
       const lines = String(st.caption || '').split('\n').map((l) => l.trim()).filter(Boolean);
-      const tags = lines.filter((l) => /^#/.test(l)).join(' ');
+      // the preview shows the hashtags THIS app gets
+      const tags = a && APP_TAGS[a.platform] && lines.some((l) => /^#/.test(l)) ? tagsFor(st.caption, a.platform) : lines.filter((l) => /^#/.test(l)).join(' ');
       const body = lines.filter((l) => !/^#/.test(l)).join(' ');
       return `<div class="csb-prev${isVideo(f) ? '' : ' pic'}" data-thumb="${escAttr(f)}">`
         + `<span class="csb-pill">${a ? platMark(a.platform, 'sm') : mi('eye')}<span>${a ? esc((PLAT[a.platform] || {}).name || '') + ' preview' : 'Preview'}</span></span>`
@@ -1027,6 +1028,14 @@
       return st.fm.mode === 'free' || accs.some((a) => !(a.platform === 'tiktok' && a.via === 'zernio'));
     }
     function saveFlyerPrefs() { try { localStorage.setItem('mw.flyer.music', JSON.stringify({ mode: st.fm.mode, tiktok: st.fm.tiktok })); } catch (e) {} }
+    // the trending hashtags each chosen app gets (its own discovery tags, then the post's church tags)
+    function appTagsRow() {
+      const plats = Array.from(new Set(linked().filter((a) => picked().includes(a.id)).map((a) => a.platform))).filter((p) => APP_TAGS[p]);
+      // (a caption with no hashtags is posted as written)
+      if (!plats.length || !/#[\wÀ-￿]/.test(st.caption)) return '';
+      return '<div class="csb-apptags" id="csbAppTags"><small>Trending hashtags each app gets</small>'
+        + plats.map((p) => `<span class="csb-apptag" data-p="${p}">${platMark(p, 'sm')}<span>${esc(tagsFor(st.caption, p))}</span></span>`).join('') + '</div>';
+    }
     function flyerBlock() {
       const pics = flyers();
       if (!pics.length) return '';
@@ -1233,6 +1242,7 @@
             : `<button type="button" class="csb-act" data-c="write">${mi('sparkles')}Write it for me</button>`)
           + (st.prev ? `<button type="button" class="csb-act ghost" data-c="undo">${mi('undo')}Undo</button>` : '')
           + `<span class="cs-count">${st.caption.length}/2200</span></div>` : '')
+        + (!busy && st.caption.trim() ? appTagsRow() : '')
         + (!busy ? namesRow() : '')
         + (st.options && !busy ? '<div class="csb-styles"><small>Other styles</small>' + st.options.map((op, i) => `<button type="button" class="csb-style" data-c="opt" data-i="${i}">${esc(op.label || 'Option ' + (i + 1))}</button>`).join('') + '</div>' : '')
         + '</div>'
@@ -1489,7 +1499,9 @@
         // the preview follows the typing
         const lines = t.value.split('\n').map((l) => l.trim()).filter(Boolean);
         const cap = panel.body.querySelector('#csbPrevCap'); if (cap) cap.textContent = lines.filter((l) => !/^#/.test(l)).join(' ') || ' ';
-        const tg = panel.body.querySelector('#csbPrevTags'); if (tg) tg.textContent = lines.filter((l) => /^#/.test(l)).join(' ');
+        const a0 = firstPlat();
+        const tg = panel.body.querySelector('#csbPrevTags'); if (tg) tg.textContent = a0 && APP_TAGS[a0.platform] && lines.some((l) => /^#/.test(l)) ? tagsFor(t.value, a0.platform) : lines.filter((l) => /^#/.test(l)).join(' ');
+        panel.body.querySelectorAll('#csbAppTags .csb-apptag').forEach((n) => { const sp = n.querySelector('span:last-child'); if (sp) sp.textContent = tagsFor(t.value, n.dataset.p); });
       }
     });
     panel.body.addEventListener('change', (e) => {
@@ -2188,6 +2200,16 @@
    * the next instead of to no music.
    */
   const FREE_RECENT = 'mw-free-recent';
+  /* each app its own trending hashtags — what the server puts on as it posts (social-copy.js forPlatform) */
+  const APP_TAGS = { tiktok: ['#fyp', '#foryou', '#foryoupage'], instagram: ['#instagood', '#explorepage', '#reels'], facebook: ['#reels', '#viral', '#fbreels'], youtube: ['#shorts', '#youtubeshorts'] };
+  const APP_TAG_SET = new Set([].concat(...Object.values(APP_TAGS), ['#fy', '#viralvideo', '#trending', '#explore', '#reelsinstagram', '#instadaily', '#youtube', '#facebookreels', '#reelsfb', '#christianreels', '#christiantiktok']));
+  const CORE_TAGS = ['#jesus', '#faith', '#god', '#christian', '#church'];
+  function tagsFor(caption, platform) {
+    const own = (String(caption || '').match(/#[\wÀ-￿]+/g) || []).filter((t) => !APP_TAG_SET.has(t.toLowerCase()));
+    const out = [];
+    for (const t of [].concat(APP_TAGS[platform] || [], own, CORE_TAGS)) if (out.length < 5 && !out.some((x) => x.toLowerCase() === t.toLowerCase())) out.push(t);
+    return out.join(' ');
+  }
   // how this phone likes its flyers' music (Trending / free / none; TikTok's way), remembered
   function flyerPrefs() {
     try { const p = JSON.parse(localStorage.getItem('mw.flyer.music') || '{}') || {}; const o = {};

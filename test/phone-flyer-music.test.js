@@ -176,7 +176,12 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
       await page.screenshot({ path: path.join(SHOTS, 'flyer-music-2-instagram.png') });
     }
     // [5]
-    await page.fill('#csCompose .csb-cap', 'Night of Worship this Friday 🙌').catch(() => {});
+    await page.fill('#csCompose .csb-cap', 'Night of Worship this Friday 🙌\n\n#worship #sermon #jesus #faith #god').catch(() => {});
+    await sleep(200);
+    const appTags = await page.evaluate(() => Array.from(document.querySelectorAll('#csCompose #csbAppTags .csb-apptag')).map((n) => n.dataset.p + ': ' + n.innerText.trim()));
+    check(appTags.some((t) => /^tiktok: #fyp #foryou #foryoupage #worship #sermon$/.test(t)) && appTags.some((t) => /^instagram: #instagood #explorepage #reels/.test(t))
+      && appTags.some((t) => /^youtube: #shorts #youtubeshorts/.test(t)) && appTags.some((t) => /^facebook: #reels #viral #fbreels/.test(t)),
+      'New post shows the trending hashtags each app gets (TikTok #fyp #foryou #foryoupage, Instagram #instagood…)', appTags);
     await page.tap('#csCompose [data-c="go"]');
     await page.waitForFunction(() => !document.querySelector('#csCompose.on'), null, { timeout: 60000 }).catch(() => {});
     for (let k = 0; k < 240 && Z.posts.length < 5; k++) await sleep(500);
@@ -186,6 +191,10 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
       'the post carries its music: TikTok inbox, the Instagram song, and a free song fetched on the server', made && made.music);
     const by = (pl) => Z.posts.filter((p) => !p.rejected && p.body.platforms[0].platform === pl);
     const tk = by('tiktok')[0], ig = by('instagram')[0], fbs = by('facebook'), yt = by('youtube')[0];
+    const tagsOf = (p) => ((p && p.body.content) || '').split('\n').find((l) => /^#/.test(l)) || '';
+    check(tagsOf(tk) === '#fyp #foryou #foryoupage #worship #sermon' && /^#instagood #explorepage #reels #worship #sermon$/.test(tagsOf(ig))
+      && fbs.every((p) => /^#reels #viral #fbreels #worship #sermon$/.test(tagsOf(p))) && /^#shorts #youtubeshorts #worship #sermon #jesus$/.test(tagsOf(yt)),
+      'each app is posted with its own trending hashtags — five at most', { tk: tagsOf(tk), ig: tagsOf(ig), fb: fbs.map(tagsOf), yt: tagsOf(yt) });
     check(!!made && !/Kevin MacLeod/.test(made.caption) && fbs.length && fbs.every((p) => /Kevin MacLeod/.test(p.body.content)) && yt && /Kevin MacLeod/.test(yt.body.content)
       && tk && !/Kevin MacLeod/.test(tk.body.content) && ig && !/Kevin MacLeod/.test(ig.body.content),
       'the free song’s credit is on the posts that carry it (Facebook, YouTube) — not on TikTok’s or Instagram’s', { fb: fbs.map((p) => p.body.content), tk: tk && tk.body.content, ig: ig && ig.body.content });
