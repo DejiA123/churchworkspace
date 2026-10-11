@@ -351,9 +351,10 @@ const liveFor = (acc) => Array.from(live.values()).filter((b) => b.acc === acc);
     const s = mk();
     const p = s.add({ title: 'T', caption: 'c', accountIds: ['a1'], mediaPaths: [], scheduledAt: new Date(Date.now() + 3600e3).toISOString() });
     await sleep(150);
-    await s.autoPublish(p.id).catch(() => {});   // the desktop's "post now" on a booked post
+    await s.autoPublish(p.id).catch(() => {});   // the desktop's "post now" on a post booked for later
+    check(direct.length === 1 && live.size === 0, '[23] "post now" on a post booked for later: it goes out now, and the later booking is taken back (never posted twice)', { direct, live: Array.from(live.values()) });
     await s.remove(p.id);
-    check(live.size === 0, '[23] booked, "post now", then deleted: the booking is still taken back', Array.from(live.values()));
+    check(live.size === 0, '[23] …and deleting it afterwards leaves nothing booked', Array.from(live.values()));
   }
   // [24] the look for a maybe-made post never matches a post that is already out
   {
@@ -391,6 +392,50 @@ const liveFor = (acc) => Array.from(live.values()).filter((b) => b.acc === acc);
     s.store.set('cancelQueue', (s.store.get('cancelQueue') || []).map((x) => ({ ...x, tries: 2, why: 'network down', publishAt: undefined, booking: { ...x.booking, publishAt: new Date(Date.now() - 1000).toISOString() } })));
     await s._drainCancels('py');
     check(told.some((t) => /may have gone out/.test(t)) && !(s.store.get('cancelQueue') || []).length, '[26] could not be taken back before its time: the church is told it may have gone out', told);
+  }
+  // [27] a tick never waits behind another post's upload: a due post goes out on time
+  live = new Map(); direct = [];
+  {
+    const s = mk();
+    SLOW.a3 = 1500;
+    const slow = s.add({ title: 'Slow', caption: 's', accountIds: ['a3'], mediaPaths: [], scheduledAt: new Date(Date.now() + 3600e3).toISOString() });
+    await sleep(50);
+    s.handOff(slow.id);                        // a second run queued behind the uploading one
+    s.add({ title: 'Due', caption: 'now', accountIds: ['a1'], mediaPaths: [], scheduledAt: new Date(Date.now() - 1000).toISOString() });
+    const t0 = Date.now();
+    await s._tick();
+    const took = Date.now() - t0;
+    SLOW.a3 = 400;
+    check(direct.some((d) => d.caption === 'now') && took < 800, '[27] a tick never waits behind another post’s upload — the due post goes out on time', { took, direct });
+    await sleep(1600);
+  }
+  // [28] Facebook's "does not exist … or missing permissions" is not taken as gone
+  live = new Map(); direct = [];
+  {
+    const told = [];
+    const s = mk(); s.opts.notify = (t) => told.push(t);
+    const real = publisher.cancelScheduled;
+    publisher.cancelScheduled = async () => { const e = new Error("Unsupported delete request. Object with ID '1' does not exist, cannot be loaded due to missing permissions"); e.status = 400; throw e; };
+    s._cancelLater('pz', 'a1', { ok: true, id: 'k1', zoPostId: 'k1', name: 'Page 1', platform: 'facebook', publishAt: new Date(Date.now() + 3600e3).toISOString() }, 'T');
+    await s._drainCancels('pz');
+    publisher.cancelScheduled = real;
+    check((s.store.get('cancelQueue') || []).length === 1, '[28] "missing permissions" is not "gone": kept, to try again and to tell', s.store.get('cancelQueue'));
+  }
+  // [29] a save already being written never lands over a newer one written straight away
+  {
+    const { Store } = require('../src/main/store');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mw-st-')); const file = path.join(dir, 'w.json');
+    const st = new Store(file, { a: [] });
+    for (let k = 0; k < 20; k++) {
+      st.set('x', k);                                    // a background save on its way
+      await sleep(52 + (k % 5));
+      st.data.cancelQueue = ['E' + k]; st.flushSync();   // something that must be on disk now
+      await sleep(30);
+      const disk = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (!(disk.cancelQueue && disk.cancelQueue[0] === 'E' + k)) { check(false, '[29] an older background save never overwrites a newer immediate one', { k, disk: disk.cancelQueue }); break; }
+      if (k === 19) check(true, '[29] an older background save never overwrites a newer immediate one');
+    }
+    check(fs.readdirSync(dir).length === 1, '[29] …and leaves no half-written files behind', fs.readdirSync(dir));
   }
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

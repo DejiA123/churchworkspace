@@ -42,6 +42,7 @@ class Store {
     this._writing = false;
     this._again = false;
     this._dirty = false;
+    this._gen = 0;     // bumped by every immediate write: an older background write never lands over it
     this._load();
   }
 
@@ -98,15 +99,20 @@ class Store {
     if (this._writing) { this._again = true; return; }
     this._writing = true;
     this._dirty = false;
+    const gen = this._gen;
     const json = JSON.stringify(this.data, null, 2);
-    const tmp = this.path + '.tmp';
+    // a name of its own: an immediate write (flushSync) never shares the half-written file
+    const tmp = this.path + '.' + process.pid + '-' + Math.random().toString(36).slice(2, 8) + '.tmp';
     try {
       await fsp.mkdir(path.dirname(this.path), { recursive: true });
       await fsp.writeFile(tmp, json, 'utf-8');
-      await fsp.rename(tmp, this.path);
+      // written straight away meanwhile (newer than this snapshot): this one is dropped, not landed over it
+      if (this._gen !== gen) { await fsp.unlink(tmp).catch(() => {}); }
+      else await fsp.rename(tmp, this.path);
     } catch (e) {
-      // Last-resort direct write
-      try { await fsp.writeFile(this.path, json, 'utf-8'); } catch (e2) {}
+      // Last-resort direct write (only if nothing newer was written meanwhile)
+      await fsp.unlink(tmp).catch(() => {});
+      if (this._gen === gen) { try { await fsp.writeFile(this.path, json, 'utf-8'); } catch (e2) {} }
     }
     this._stamp();
     this._writing = false;
@@ -126,6 +132,7 @@ class Store {
   flushSync() {
     if (this._timer) { clearTimeout(this._timer); this._timer = null; }
     this._dirty = false;
+    this._gen++;
     try {
       fs.mkdirSync(path.dirname(this.path), { recursive: true });
       const tmp = this.path + '.tmp';

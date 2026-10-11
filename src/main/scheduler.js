@@ -190,7 +190,12 @@ class Scheduler {
     if (this.lockDir && this.store.path) {
       try {
         const raw = JSON.parse(fs.readFileSync(this.store.path, 'utf-8'));
-        if (raw && Array.isArray(raw.cancelQueue)) this.store.data.cancelQueue = raw.cancelQueue;
+        if (raw && Array.isArray(raw.cancelQueue)) {
+          // both: what the other process added, and what we added (a file a moment old must not drop ours)
+          const mine = this.store.data.cancelQueue || [];
+          const keys = new Set(raw.cancelQueue.map((x) => this._cqKey(x)));
+          this.store.data.cancelQueue = raw.cancelQueue.concat(mine.filter((x) => !keys.has(this._cqKey(x))));
+        }
       } catch (e) { /* mid-write or missing: what we have */ }
     }
     return (this.store.get('cancelQueue') || []).slice();
@@ -232,7 +237,7 @@ class Scheduler {
       const dueAt = x.booking.lookup ? x.booking.lookup.at : x.booking.publishAt;
       if (dueAt && new Date(dueAt).getTime() <= this._now()) {
         gone = true;   // its time has passed: it is out (or never was) — a DELETE now would take down a live post
-        if (x.tries > 0) this._notify('⚠️ An old booking may have gone out: ' + (x.title || 'a post'),
+        this._notify('⚠️ An old booking may have gone out: ' + (x.title || 'a post'),
           `${x.name} could not be reached to take back the old version (${x.why || 'no answer'}) before its time. Look on that account and delete it there if it went out.`, x.postId);
       } else if (!acc || !acc.token) {
         // the account is no longer linked here: nothing can be asked of it any more — said once, then let go
@@ -252,7 +257,8 @@ class Scheduler {
         } catch (e) {
           why = (e && e.message) || String(e);
           // already gone there (taken back before, or published and removed): nothing left to cancel
-          if ((e && (e.status === 404 || e.status === 410)) || /not found|does not exist|no longer exists/i.test(why)) gone = true;
+          // (Facebook's "does not exist … or missing permissions" is NOT gone — the booking may well still be there)
+        if ((e && (e.status === 404 || e.status === 410)) || (/not found|does not exist|no longer exists/i.test(why) && !/permission/i.test(why))) gone = true;
         }
       }
       const now = this._cq();
@@ -291,9 +297,10 @@ class Scheduler {
     this.store.set('posts', (this.store.get('posts') || []).filter((p) => p.id !== id));
     this._flush();
     const uploading = this._busyWith(id);
-    const work = this._q(id, () => this._drainCancels(id));
-    if (uploading) { work.catch(() => {}); return { ok: true, pending: true, note: 'Deleted. It was still uploading — what it booked is taken back as soon as that finishes.' }; }
-    const res = await work.catch((e) => ({ failed: [{ name: 'A platform', why: (e && e.message) || String(e) }] }));
+    // what it had booked is taken back NOW (never behind an upload — its old time may come first);
+    // an upload still going gives back what it books itself
+    const res = await this._drainCancels(id).catch((e) => ({ failed: [{ name: 'A platform', why: (e && e.message) || String(e) }] }));
+    if (uploading && !res.failed.length) return { ok: true, pending: true, note: 'Deleted. It was still uploading — what that upload books is taken back as soon as it finishes.' };
     // Told, not swallowed: the operator has to know, and that it is being tried again.
     return res.failed.length ? { ok: true, warning: res.failed.map((f) => `${f.name} still has it booked (${f.why})`).join(' · '), retrying: true } : true;
   }
@@ -323,13 +330,10 @@ class Scheduler {
     }
     const rec = this.update(id, { ...patch, handoffs, handoffErrors, nextHandoffAt: null });
     this._flush();
-    const uploading = this._busyWith(id);
-    const work = toCancel ? this._q(id, () => this._drainCancels(id)) : null;
+    // the old bookings are taken back NOW (never behind an upload); then it is booked again
+    const res = toCancel ? await this._drainCancels(id).catch(() => ({ failed: [] })) : { failed: [] };
     if (rec.status === 'scheduled') this.handOff(id).catch(() => {});
-    if (work && !uploading) {
-      const res = await work.catch(() => ({ failed: [] }));
-      if (res.failed.length) return { ...rec, warning: res.failed.map((f) => `${f.name} still has the old one booked (${f.why})`).join(' · '), retrying: true };
-    } else if (work) work.catch(() => {});
+    if (res.failed.length) return { ...rec, warning: res.failed.map((f) => `${f.name} still has the old one booked (${f.why})`).join(' · '), retrying: true };
     return rec;
   }
 
@@ -586,7 +590,7 @@ class Scheduler {
       if (h && h.ok) { this._cancelLater(id, accId, h, post.title); delete handoffs[accId]; n++; }
     }
     try { this.update(id, { handoffs }); this._flush(); } catch (e) { /* post may be gone */ }
-    const res = await this._q(id, () => this._drainCancels(id));
+    const res = await this._drainCancels(id);
     return { cancelled: n - res.failed.length, failed: res.failed };
   }
 
@@ -672,7 +676,7 @@ class Scheduler {
       this._flush();
       this._pushUpdate(id);
       const results = { ...(post.results || {}) };
-      const booked = post.handoffs || {};
+      const booked = { ...(post.handoffs || {}) };
       const errors = [];
       for (const acc of targets) {
         if (results[acc.id] && results[acc.id].ok) continue; // posted there already
@@ -682,6 +686,16 @@ class Scheduler {
          * retry — it is the same sermon on the Page twice. Record the booking
          * as the result and move on without touching the network.
          */
+        // "post now" on a post booked for LATER: that booking is taken back and it goes out now —
+        // never told "posted" while it waits for its old time
+        if (booked[acc.id] && booked[acc.id].ok && booked[acc.id].publishAt && new Date(booked[acc.id].publishAt).getTime() > this._now() + 2 * 60e3) {
+          this._cancelLater(id, acc.id, booked[acc.id], post.title);
+          const hs = { ...((this.store.get('posts') || []).find((p) => p.id === id) || {}).handoffs };
+          delete hs[acc.id];
+          try { this.update(id, { handoffs: hs }); this._flush(); } catch (e) {}
+          await this._drainCancels(id).catch(() => {});
+          delete booked[acc.id];
+        }
         if (booked[acc.id] && booked[acc.id].ok) {
           results[acc.id] = {
             ok: true, id: booked[acc.id].id, url: booked[acc.id].url,
@@ -807,7 +821,7 @@ class Scheduler {
         if (p.status !== 'scheduled') continue;
         if (new Date(p.scheduledAt).getTime() <= now) continue;         // due — publish, don't book
         if (p.nextHandoffAt && new Date(p.nextHandoffAt).getTime() > now) continue;
-        if (this._busyWith(p.id)) continue;   // already being booked: never waited on here (other posts are due)
+        if (this._handoffRuns && this._handoffRuns.has(p.id)) continue;   // something running for it: never waited on here (other posts are due)
         const plan = this.handoffPlan(p);
         if (!plan.bookable.some((b) => !b.booked)) continue;
         try { await this.handOff(p.id); } catch (e) { /* recorded on the post */ }
@@ -834,8 +848,8 @@ class Scheduler {
       // bookings still to be taken back (a cancel that failed, the app closed mid-way): tried
       // again — after the due posts are out, and each one less often as it keeps failing
       for (const pid of new Set(this._cq().map((x) => x.postId))) {
-        if (this._busyWith(pid)) continue;   // its own queue takes care of it
-        try { await this._q(pid, () => this._drainCancels(pid, { due: true })); } catch (e) {}
+        if (this._handoffRuns && this._handoffRuns.has(pid)) continue;   // its own queue takes care of it; never waited on here
+        try { await this._drainCancels(pid, { due: true }); } catch (e) {}
       }
     } finally {
       this._ticking = false;
