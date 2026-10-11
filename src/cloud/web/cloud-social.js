@@ -1655,12 +1655,13 @@
       const out = { files: [], credit: '' };
       for (let i = 0; i < st.files.length; i++) {
         // already booked (a retry after one failed): not mixed again
-        if (st.booked && st.booked[st.files[i]]) { out.files.push(st.files[i]); continue; }
+        if (st.booked && st.booked[st.files[i]]) { out.files.push(st.files[i]); out.credit = out.credit || st.musCredit || ''; continue; }
         btn.innerHTML = `${mi('music')}Adding the music${st.files.length > 1 ? ` (${i + 1} of ${st.files.length})` : ''}…`;
         const r = await window.api.social.withMusic({ mediaPath: st.files[i], free: free || undefined, libId: st.music.lib || undefined });
         out.files.push(r.path);
         out.credit = r.credit || out.credit;
       }
+      if (out.credit) st.musCredit = out.credit;
       return out;
     }
     /* a flyer's music, as the post carries it (main.js withFlyerMusic → publisher.js flyerPlan) */
@@ -1700,8 +1701,15 @@
     // a post booked earlier in this sheet, brought up to the time, words and accounts chosen now
     async function bookedAgain(rec, one) {
       if (!rec || !rec.id) return rec;
-      await window.api.scheduler.update(rec.id, one);
-      return Object.assign({}, rec, one);
+      // only what really changed (never the file: on a retry it is the one without its music) —
+      // nothing changed, nothing sent, so a good booking is never undone for nothing
+      const patch = {};
+      for (const k of ['title', 'caption', 'accountIds', 'platforms']) if (JSON.stringify(one[k]) !== JSON.stringify(rec[k])) patch[k] = one[k];
+      if (new Date(one.scheduledAt).getTime() !== new Date(rec.scheduledAt).getTime()) patch.scheduledAt = one.scheduledAt;
+      if (!Object.keys(patch).length) return rec;
+      const out = await window.api.scheduler.update(rec.id, patch);
+      if (out && out.warning) C.island({ kind: 'warn', title: 'An old booking is still being taken back', sub: out.warning, ms: 8000 });
+      return Object.assign({}, rec, patch);
     }
     const withCredit = (caption, credit) => (credit && !String(caption || '').includes(credit) ? [String(caption || '').trim(), credit].filter(Boolean).join('\n\n') : caption);
 

@@ -89,7 +89,9 @@ function collectJson(res, resolve, reject) {
     try { json = JSON.parse(out); } catch (e) { /* non-JSON body */ }
     if (res.statusCode >= 200 && res.statusCode < 300) return resolve(json || {});
     if (res.statusCode === 413) return reject(new Error(apiErrMsg(json) || TOO_BIG));
-    reject(new Error(apiErrMsg(json) || `HTTP ${res.statusCode}: ${out.slice(0, 300)}`));
+    const err = new Error(apiErrMsg(json) || `HTTP ${res.statusCode}: ${out.slice(0, 300)}`);
+    err.status = res.statusCode;
+    reject(err);
   });
 }
 
@@ -1330,6 +1332,30 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
   }
   // the free song's credit goes on the posts that carry the song, and only those
   const content = withSongCredit(post.caption || post.title || '', plan && plan.song).slice(0, 2200);
+
+  /*
+   * The last try got no clear answer (a timeout, a 5xx): Zernio may have made
+   * the post all the same. It is looked for first — same words, same account,
+   * same time — and if it is there, that is the post; nothing is sent again.
+   * If Zernio cannot be asked, nothing is sent either (tried again later).
+   */
+  if (opts.zoLookFirst) {
+    let listed;
+    try { listed = await getJson(`${base}/posts?limit=100`, { headers: { authorization: 'Bearer ' + apiKey }, timeoutMs: 30000 }); }
+    catch (e) { const er = new Error(label + ': Zernio did not answer clearly last time and cannot be checked right now (' + e.message + ') — trying again later.'); er.zoMaybeMade = true; throw er; }
+    const arr = Array.isArray(listed) ? listed : (listed && (listed.posts || listed.data || listed.items)) || [];
+    const want = opts.scheduleAt ? new Date(opts.scheduleAt).getTime() : null;
+    const accOf = (x) => String((x && x.accountId && (x.accountId._id || x.accountId.id || x.accountId)) || '');
+    const hit = arr.find((p) => p && String(p.content || '').trim() === content.trim()
+      && (p.platforms || []).some((x) => accOf(x) === String(accountId))
+      && (want == null ? (!p.createdAt || Date.now() - new Date(p.createdAt).getTime() < 6 * 3600e3)   // posting now: a recent one only, never last month's with the same words
+        : (!p.scheduledFor || new Date(p.scheduledFor).getTime() === want)));
+    if (hit) {
+      const pid = hit._id || hit.id;
+      return { id: pid, url: (ZO_PROFILE[platform] || (() => ''))(username), zoPostId: pid, scheduled: !!opts.scheduleAt, found: true,
+        privacy: platform === 'tiktok' ? 'PUBLIC_TO_EVERYONE' : 'public' };
+    }
+  }
   const needsVideo = platform === 'youtube';               // TikTok takes a flyer as a photo post
   const needsMedia = needsVideo || platform === 'instagram' || platform === 'tiktok'; // Facebook allows text-only
 

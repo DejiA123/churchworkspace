@@ -1183,14 +1183,23 @@ ipcMain.handle('social:musicCheck', wrap(async () => {
     const when = Date.now() + 30 * 86400e3;
     const base = (opts.zoApiBase || publisher.DEFAULT_ZO_API).replace(/\/+$/, '');
     // a test post Zernio may have made without saying so (no clear answer): found by its mark and taken back
+    // gives back how many it found and took back (0: none seen), or null when Zernio could not be asked
     const sweep = async (a, mark) => {
-      try {
-        const got = await publisher.getJson(`${base}/posts?status=scheduled&limit=100`, { headers: { authorization: 'Bearer ' + a.token } });
-        const list = Array.isArray(got) ? got : (got && (got.posts || got.data || got.items)) || [];
-        const mine = list.filter((p) => String((p && p.content) || '').includes(mark));
-        for (const p of mine) await publisher.cancelScheduled(a, { id: p._id || p.id, via: 'zernio', zoPostId: p._id || p.id }, opts);
-        return true;
-      } catch (e) { return false; }
+      let taken = 0, asked = false;
+      for (let t = 0; t < 3; t++) {
+        if (t) await new Promise((r) => setTimeout(r, Number(process.env.MW_SWEEP_WAIT_MS || 5000)));   // it may still be saving it
+        try {
+          const got = await publisher.getJson(`${base}/posts?limit=100`, { headers: { authorization: 'Bearer ' + a.token } });
+          asked = true;
+          const list = Array.isArray(got) ? got : (got && (got.posts || got.data || got.items)) || [];
+          for (const p of list.filter((x) => String((x && x.content) || '').includes(mark))) {
+            await publisher.cancelScheduled(a, { id: p._id || p.id, via: 'zernio', zoPostId: p._id || p.id }, opts);
+            taken++;
+          }
+          if (taken) return taken;
+        } catch (e) { /* asked again */ }
+      }
+      return asked ? 0 : null;
     };
     const book = async (a, music, label) => {
       let res = null;
@@ -1200,8 +1209,8 @@ ipcMain.handle('social:musicCheck', wrap(async () => {
       } catch (e) {
         if (e.zoMaybeMade && !e.cannotSchedule) {
           const swept = await sweep(a, mark);
-          add(a.name, a.platform, false, `${label}: no clear answer from Zernio (${e.message}).` + (swept ? ' Any test post it made was taken back — tap Test again.'
-            : ' It may have booked the test post: delete “Music test” on zernio.com → Posts, or it goes out in 30 days.'));
+          add(a.name, a.platform, false, `${label}: no clear answer from Zernio (${e.message}).` + (swept ? ' The test post it made was found and taken back — tap Test again.'
+            : ' It may still have booked the test post: look for “Music test” on zernio.com → Posts and delete it, or it goes out in 30 days.'));
         } else add(a.name, a.platform, false, `${label}: Zernio did not accept it — ${e.message}`);
         return;
       }
