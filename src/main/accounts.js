@@ -980,28 +980,58 @@ class Accounts {
     if (!acc || acc.platform !== 'instagram' || acc.via !== 'zernio' || !acc.zoAccountId) return { unavailable: 'Pick an Instagram account linked through Zernio.' };
     const { apiBase } = zoCfg(this.store, 'instagram');
     const query = String(q || '').trim().slice(0, 80);
-    let got;
-    try {
-      got = await getJson(`${apiBase}/accounts/${encodeURIComponent(acc.zoAccountId)}/instagram/audio` + (query ? '?' + new URLSearchParams({ q: query }) : ''),
-        { headers: { authorization: 'Bearer ' + acc.token } });
-    } catch (e) {
-      if (/facebook_login|facebook login/i.test(e.message || '')) return { needsFacebookLogin: true };
-      if (e.status === 404 || e.status === 405) return { unavailable: 'Zernio does not offer Instagram’s song library yet.' };
-      throw new Error('Instagram’s songs could not be loaded (' + e.message + ').');
+    /*
+     * Zernio wants to be told which KIND of audio: audioType=music (licensed
+     * songs — what a church wants) or original_sound (people's own clips).
+     * Without it Zernio answers 'Invalid option: expected one of "music"|
+     * "original_sound"'. The name it is asked by is remembered once one works
+     * (audioType is Zernio's; the others are what similar APIs call it).
+     */
+    const NAMES = ['audioType', 'audio_type', 'type'];
+    const tryFirst = this._igAudioParam && NAMES.includes(this._igAudioParam) ? [this._igAudioParam].concat(NAMES.filter((n) => n !== this._igAudioParam)) : NAMES;
+    const kindError = (e) => /expected one of|invalid option|audio_?type|"music"/i.test((e && e.message) || '') && !(e && (e.status === 401 || e.status === 403));
+    let got, lastErr = null;
+    for (const name of tryFirst) {
+      const qs = { [name]: 'music' };
+      if (query) qs.q = query;
+      try {
+        got = await getJson(`${apiBase}/accounts/${encodeURIComponent(acc.zoAccountId)}/instagram/audio?` + new URLSearchParams(qs),
+          { headers: { authorization: 'Bearer ' + acc.token } });
+        this._igAudioParam = name;
+        lastErr = null;
+        break;
+      } catch (e) {
+        lastErr = e;
+        if (/facebook_login|facebook login|FACEBOOK_LOGIN/i.test(e.message || '')) return { needsFacebookLogin: true };
+        if (e.status === 404 || e.status === 405) return { unavailable: 'Zernio does not offer Instagram’s song library yet.' };
+        if (!kindError(e)) break;     // a different trouble: no point asking another way
+      }
     }
-    const arr = Array.isArray(got) ? got : (got && (got.audio || got.audios || got.tracks || got.results || got.data || got.items)) || [];
-    const songs = (Array.isArray(arr) ? arr : []).map((x) => {
+    if (lastErr) throw new Error('Instagram’s songs could not be loaded (' + lastErr.message + ').');
+    // the list, wherever Zernio puts it ({ audio: [...] }, { data: [...] }, { data: { audio: [...] } } …)
+    const listIn = (o, depth = 0) => {
+      if (Array.isArray(o)) return o;
+      if (!o || typeof o !== 'object' || depth > 2) return [];
+      for (const k of ['audio', 'audios', 'tracks', 'results', 'items', 'data', 'songs', 'music']) {
+        const v = listIn(o[k], depth + 1); if (v.length) return v;
+      }
+      return [];
+    };
+    const arr = listIn(got);
+    const songs = arr.map((x) => {
       const a = x && (x.audio || x.track || x) || {};
-      const id = a.audioId || a.audio_id || a.id || a._id;
+      const id = a.audioId || a.audio_id || a.audioAssetId || a.audio_asset_id || a.id || a._id;
       if (!id) return null;
-      const secs = +(a.durationSec || a.duration_sec || (a.durationMs || a.duration_ms ? (a.durationMs || a.duration_ms) / 1000 : a.duration)) || 0;
+      const ms = a.durationInMs || a.duration_in_ms || a.durationMs || a.duration_ms;
+      const secs = +(a.durationSec || a.duration_sec || a.durationInSeconds || (ms ? ms / 1000 : a.duration)) || 0;
       return {
         id: String(id),
-        title: String(a.title || a.name || a.songTitle || 'Song').slice(0, 120),
-        artist: String(a.artist || a.displayArtist || a.display_artist || a.artistName || a.artist_name || (a.artists && a.artists[0] && (a.artists[0].name || a.artists[0])) || '').slice(0, 120),
-        cover: String(a.coverUrl || a.cover_url || a.coverArtworkUri || a.cover_artwork_uri || a.thumbnailUrl || a.imageUrl || '') || null,
-        preview: String(a.downloadUrl || a.download_url || a.previewUrl || a.preview_url || a.audioUrl || a.url || '') || null,
-        seconds: Math.round(secs),
+        title: String(a.title || a.name || a.songTitle || a.song_title || 'Song').slice(0, 120),
+        artist: String(a.displayArtist || a.display_artist || a.artist || a.artistName || a.artist_name || a.igUsername || a.ig_username
+          || (a.artists && a.artists[0] && (a.artists[0].name || a.artists[0])) || '').slice(0, 120),
+        cover: String(a.coverArtworkUri || a.cover_artwork_uri || a.coverArtworkUrl || a.coverUrl || a.cover_url || a.thumbnailUrl || a.imageUrl || a.artworkUrl || '') || null,
+        preview: String(a.downloadUrl || a.download_url || a.previewUrl || a.preview_url || a.audioUrl || a.progressiveDownloadUrl || a.url || '') || null,
+        seconds: Math.round(secs > 10000 ? secs / 1000 : secs),
       };
     }).filter(Boolean).slice(0, 40);
     return { songs, trending: !query };

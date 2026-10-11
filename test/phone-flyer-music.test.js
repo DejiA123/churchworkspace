@@ -53,7 +53,7 @@ const IG_SONGS = {
   gospel: [{ audioId: 'ig_gospel_1', title: 'Gospel Joy', artist: 'Choir Live', durationMs: 180000, coverUrl: '', downloadUrl: `http://127.0.0.1:${ZPORT}/preview/1.mp3` },
     { audioId: 'ig_gospel_2', title: 'Way Maker', artist: 'Sinach', durationMs: 240000 }],
   'travis greene': [{ audioId: 'ig_made_a_way', title: 'Made a Way', artist: 'Travis Greene', durationMs: 245000, downloadUrl: `http://127.0.0.1:${ZPORT}/preview/2.mp3` },
-    { audioId: 'ig_intentional', title: 'Intentional', artist: 'Travis Greene', durationMs: 290000 }],
+    { id: 'ig_intentional', title: 'Intentional', displayArtist: 'Travis Greene', durationInMs: 290000, coverArtworkUri: '' }],
   '': [{ audioId: 'ig_trend_1', title: 'Trending One', artist: 'Someone', durationMs: 150000 }],
 };
 function zernio() {
@@ -69,6 +69,8 @@ function zernio() {
       }
       let m = u.pathname.match(/^\/api\/v1\/accounts\/([^/]+)\/instagram\/audio$/);
       if (m) {
+        // as the real Zernio: the kind of audio must be asked for, or it refuses
+        if (u.searchParams.get('audioType') !== 'music') return send(400, { error: 'Invalid option: expected one of "music"|"original_sound"' });
         Z.audioQs.push({ id: m[1], q: u.searchParams.get('q') || '' });
         if (m[1] === 'fbneeded') return send(400, { error: 'instagram_audio_requires_facebook_login' });
         return send(200, { audio: IG_SONGS[(u.searchParams.get('q') || '').toLowerCase()] || [] });
