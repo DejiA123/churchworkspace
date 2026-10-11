@@ -1756,7 +1756,9 @@ async function refreshPosts() {
     // the one thing here the operator must not find out about on Sunday.
     const res = await api.scheduler.remove(b.dataset.del);
     if (res && res.warning) {
-      toast('⚠️ Deleted here, but ' + res.warning + '. Open that account and delete the scheduled post there too.', 'error', 15000);
+      toast('⚠️ Deleted here, but ' + res.warning + '. The app keeps trying to take it back — if it is still there before its time, delete it on that account by hand.', 'error', 15000);
+    } else if (res && res.pending) {
+      toast(res.note || 'Deleted. What it booked is taken back as soon as its upload finishes.', 'info', 8000);
     }
     refreshPosts();
   }));

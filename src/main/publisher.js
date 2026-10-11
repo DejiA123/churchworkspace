@@ -1314,6 +1314,34 @@ function flyerPlan(platform, music, zoAccountId) {
  * slow posts process async, so the post is polled until the platform reports.
  * Returns { id, url, privacy }.
  */
+/*
+ * A post Zernio may have made without answering, looked for: the same words,
+ * on the same account, for the same time (or, posting now, a recent one that
+ * is out or going out now — never one booked for later). Gives back its id,
+ * or null when Zernio has none; throws when Zernio cannot be asked.
+ */
+async function zernioFind(account, { content, at, exclude, accountId }, opts = {}) {
+  const base = (opts.zoApiBase || DEFAULT_ZO_API).replace(/\/+$/, '');
+  const listed = await getJson(`${base}/posts?limit=100`, { headers: { authorization: 'Bearer ' + account.token }, timeoutMs: 30000 });
+  const arr = Array.isArray(listed) ? listed : (listed && (listed.posts || listed.data || listed.items)) || [];
+  const want = at ? new Date(at).getTime() : null;
+  const acc = String(accountId || account.zoAccountId || '');
+  const skip = new Set((exclude || []).map(String));
+  const accOf = (x) => String((x && x.accountId && (x.accountId._id || x.accountId.id || x.accountId)) || '');
+  const hit = arr.find((p) => {
+    if (!p || skip.has(String(p._id || p.id))) return false;
+    if (String(p.content || '').trim() !== String(content || '').trim()) return false;
+    if (!(p.platforms || []).some((x) => accOf(x) === acc)) return false;
+    const sched = p.scheduledFor ? new Date(p.scheduledFor).getTime() : null;
+    if (want != null) return sched == null || sched === want;
+    // posting now: a recent one that is out or going out now — never last month's, never one booked for later
+    if (sched != null && sched > Date.now() + 2 * 60e3) return false;
+    if (/^scheduled$/i.test(String(p.status || '')) && sched != null && sched > Date.now()) return false;
+    return !p.createdAt || Date.now() - new Date(p.createdAt).getTime() < 6 * 3600e3;
+  });
+  return hit ? String(hit._id || hit.id) : null;
+}
+
 async function publishViaZernio({ apiKey, accountId, username, platform }, post, opts = {}) {
   platform = platform || 'tiktok';
   const label = ZO_LABELS[platform] || platform;
@@ -1340,22 +1368,15 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
    * If Zernio cannot be asked, nothing is sent either (tried again later).
    */
   if (opts.zoLookFirst) {
-    let listed;
-    try { listed = await getJson(`${base}/posts?limit=100`, { headers: { authorization: 'Bearer ' + apiKey }, timeoutMs: 30000 }); }
-    catch (e) { const er = new Error(label + ': Zernio did not answer clearly last time and cannot be checked right now (' + e.message + ') — trying again later.'); er.zoMaybeMade = true; throw er; }
-    const arr = Array.isArray(listed) ? listed : (listed && (listed.posts || listed.data || listed.items)) || [];
-    const want = opts.scheduleAt ? new Date(opts.scheduleAt).getTime() : null;
-    const accOf = (x) => String((x && x.accountId && (x.accountId._id || x.accountId.id || x.accountId)) || '');
-    const hit = arr.find((p) => p && String(p.content || '').trim() === content.trim()
-      && (p.platforms || []).some((x) => accOf(x) === String(accountId))
-      && (want == null ? (!p.createdAt || Date.now() - new Date(p.createdAt).getTime() < 6 * 3600e3)   // posting now: a recent one only, never last month's with the same words
-        : (!p.scheduledFor || new Date(p.scheduledFor).getTime() === want)));
-    if (hit) {
-      const pid = hit._id || hit.id;
-      return { id: pid, url: (ZO_PROFILE[platform] || (() => ''))(username), zoPostId: pid, scheduled: !!opts.scheduleAt, found: true,
+    let found;
+    try { found = await zernioFind({ token: apiKey, zoAccountId: accountId }, { content, at: opts.scheduleAt || null, exclude: opts.zoExclude }, opts); }
+    catch (e) { const er = new Error(label + ': Zernio did not answer clearly last time and cannot be checked right now (' + e.message + ') — trying again later.'); er.zoMaybeMade = true; er.zoContent = content; throw er; }
+    if (found) {
+      return { id: found, url: (ZO_PROFILE[platform] || (() => ''))(username), zoPostId: found, scheduled: !!opts.scheduleAt, found: true,
         privacy: platform === 'tiktok' ? 'PUBLIC_TO_EVERYONE' : 'public' };
     }
   }
+
   const needsVideo = platform === 'youtube';               // TikTok takes a flyer as a photo post
   const needsMedia = needsVideo || platform === 'instagram' || platform === 'tiktok'; // Facebook allows text-only
 
@@ -1457,6 +1478,7 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
     }
     const err = new Error(zoFriendlyError(e.message, platform) + (platform === 'instagram' ? zoIgVideoNote(media) : ''));
     err.status = e.status;
+    err.zoContent = content;   // what was sent: to look for it later
     // no clear answer (a timeout, a dropped line, a 5xx): Zernio may have made the post all the same
     err.zoMaybeMade = !(e.status >= 400 && e.status < 500);
     throw err;
@@ -1716,7 +1738,7 @@ async function testFacebook({ pageId, token, apiBase }) {
 }
 
 module.exports = {
-  flyerAsJpeg, flyerAsShort, flyerPlan, songHookSec,
+  flyerAsJpeg, flyerAsShort, flyerPlan, songHookSec, zernioFind,
   publishToFacebook, publishToInstagram, publishToYouTube, publishToTikTok,
   publishViaUploadPost, publishViaZernio, publishTo, testFacebook,
   canSchedule, scheduleTo, cancelScheduled, FB_SCHEDULE_MIN_MS, FB_SCHEDULE_MAX_MS,

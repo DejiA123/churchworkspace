@@ -782,7 +782,8 @@
         try {
           const r = await window.api.scheduler.remove(p.id);
           const warn = r && r.warning;
-          C.island({ kind: warn ? 'warn' : 'good', title: warn ? 'Deleted here — check the platform' : 'Post deleted', sub: warn || p.title || '', ms: warn ? 10000 : 3500 });
+          if (warn) C.island({ kind: 'warn', title: 'Deleted here — still being taken back there', sub: warn + ' — the app keeps trying; if it is still there before its time, delete it there by hand.', ms: 12000 });
+          else C.island({ kind: 'good', title: 'Post deleted', sub: (r && r.pending && r.note) || p.title || '', ms: r && r.pending ? 6000 : 3500 });
         } catch (er) { C.island({ kind: 'error', title: 'Could not delete it', sub: er.message }); }
         panel.close();
         await loadSocial(true); renderSched(); renderHomeSocial();
