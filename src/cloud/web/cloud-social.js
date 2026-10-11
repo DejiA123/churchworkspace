@@ -1005,14 +1005,14 @@
       }
       if (a.platform === 'instagram') {
         if (mode === 'none') return 'a picture post, no music';
-        if (igSongFor(a)) return `a Reel with “${fm.ig.title}”${fm.ig.artist ? ' — ' + fm.ig.artist : ''}`;
-        if (igAutoFor(a)) return 'a Reel with a real gospel song from Instagram’s library — picked for you, a different one each time';
-        return withOwn('a 15-second Reel') || 'a picture post, no music (Instagram’s songs are not reachable for it yet)';
+        if (igSongFor(a)) return `your flyer as it is (like a photo post) with “${fm.ig.title}”${fm.ig.artist ? ' — ' + fm.ig.artist : ''}`;
+        if (igAutoFor(a)) return 'your flyer as it is (like a photo post) with a real gospel song from Instagram’s library — a different one each time';
+        return withOwn('your flyer as it is') || 'a picture post, no music (Instagram’s songs are not reachable for it yet)';
       }
       if (mode === 'none') return a.platform === 'youtube' ? 'a 10-second Short, no music' : 'a picture post, no music';
       if (fromIg(a)) return 'gets your Instagram Reel with its gospel song — Instagram shares it to this Page';
       if (a.platform === 'youtube') return withOwn('a 15-second Short') || 'a 10-second Short, no music';
-      return withOwn('a 15-second video') || 'a picture post, no music';
+      return withOwn('your flyer as it is') || 'a picture post, no music';
     }
     // the Instagram account whose library the chosen song is from — the only one that gets it
     const igSongFor = (a) => !!(st.fm.ig && a.platform === 'instagram' && a.via === 'zernio' && (!st.fm.ig.acc || st.fm.ig.acc === a.id));

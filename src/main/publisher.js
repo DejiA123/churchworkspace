@@ -1213,6 +1213,44 @@ async function songHookSec(songPath, seconds = 15) {
  * best part plays under it, faded in and out at a steady loudness; without,
  * a silent track (some platforms want one).
  */
+/*
+ * ►► THE FLYER AS IT IS, WITH ITS SONG. ◄◄ "Like a photo post — not a blur
+ * top and bottom." Instagram lets an app put a song only on a Reel, so the
+ * flyer becomes a still Reel at the flyer's OWN shape (portrait 4:5 up to
+ * landscape 1.91:1 — the shapes the feed shows whole): no blurred bands, no
+ * zoom. In the feed it looks like the picture post, with the song's name
+ * above it.
+ */
+async function flyerAsStill(src, seconds = 30, song = null) {
+  const songPath = song && (song.path || song.file) && fs.existsSync(song.path || song.file) ? (song.path || song.file) : null;
+  const tag = songPath ? 'm' + require('crypto').createHash('sha1').update(songPath).digest('hex').slice(0, 10) : '';
+  const out = flyerCachePath(src, `still${seconds}${tag}`, '.mp4');
+  const ff = require('./ffmpeg');
+  return makeOnce(out, async (tmp) => {
+    src = await flyerAsJpeg(src);   // white under anything see-through, as on the picture post
+    const pr = probeMedia(src);
+    const vs = pr && (pr.streams || []).find((x) => x.width && x.height);
+    const ratio = Math.min(1.91, Math.max(0.8, vs ? vs.width / vs.height : 0.8));
+    const W = 1080, H = Math.round(W / ratio / 2) * 2;
+    const from = songPath ? await songHookSec(songPath, seconds) : 0;
+    const audioIn = songPath
+      ? ['-stream_loop', '-1', '-ss', from.toFixed(2), '-i', songPath]
+      : ['-f', 'lavfi', '-t', String(seconds), '-i', 'anullsrc=r=44100:cl=stereo'];
+    const audioChain = songPath
+      ? `;[1:a]atrim=0:${seconds},asetpts=PTS-STARTPTS,loudnorm=I=-14:TP=-1.5:LRA=11,aresample=44100,aformat=channel_layouts=stereo,`
+        + `afade=t=in:d=0.5,afade=t=out:st=${Math.max(0, seconds - 1.6)}:d=1.6[a]`
+      : '';
+    // the whole flyer, filling the frame (a flyer slightly outside 4:5…1.91:1 gets plain white edges, never blur)
+    await ff.runFfmpeg(ff.resolveFfmpeg(), ['-v', 'error',
+      '-loop', '1', '-framerate', '30', '-t', String(seconds), '-i', src,
+      ...audioIn,
+      '-filter_complex',
+      `[0:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=white,setsar=1,format=yuv420p[v]` + audioChain,
+      '-map', '[v]', '-map', songPath ? '[a]' : '1:a', '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'stillimage', '-crf', '20', '-r', '30',
+      '-c:a', 'aac', '-b:a', '160k', '-t', String(seconds), '-shortest', '-movflags', '+faststart', '-y', tmp]);
+  });
+}
+
 async function flyerAsShort(src, seconds = 10, song = null) {
   const songPath = song && (song.path || song.file) && fs.existsSync(song.path || song.file) ? (song.path || song.file) : null;
   const tag = songPath ? 'm' + require('crypto').createHash('sha1').update(songPath).digest('hex').slice(0, 10) : '';
@@ -1296,12 +1334,13 @@ function flyerPlan(platform, music, zoAccountId) {
     return { media: 'jpeg', song: null, tiktok: mode === 'free' ? 'trending' : mode };
   }
   // Instagram's song is from one account's library: that account only
+  // (Instagram and Facebook get the flyer at its own shape — like a photo post — with its song)
   if (platform === 'instagram' && m.igAudio && m.igAudio.id && (!m.igAudio.acc || !zoAccountId || String(m.igAudio.acc) === String(zoAccountId))) {
-    return { media: 'short', song: null, igAudio: m.igAudio, seconds: 15 };
+    return { media: 'still', song: null, igAudio: m.igAudio, seconds: 30 };
   }
   // Facebook and YouTube with no music asked for: the picture, or a silent Short
   if ((platform === 'facebook' || platform === 'youtube') && m.fbyt === 'none') return { media: platform === 'youtube' ? 'short' : 'jpeg', song: null };
-  if (song) return { media: 'short', song };
+  if (song) return { media: platform === 'youtube' ? 'short' : 'still', song, seconds: platform === 'youtube' ? 15 : 30 };
   return { media: platform === 'youtube' ? 'short' : 'jpeg', song: null };
 }
 
@@ -1359,7 +1398,8 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
   const plan = flyer ? flyerPlan(platform, opts.noIgAudio ? Object.assign({}, post.music, { igAudio: null }) : post.music, accountId) : null;
   if (flyer) {
     try {
-      media = plan.media === 'short' ? await flyerAsShort(original, plan.song || plan.igAudio ? 15 : 10, plan.song) : await flyerAsJpeg(original);
+      media = plan.media === 'still' ? await flyerAsStill(original, plan.seconds || 30, plan.song)
+        : plan.media === 'short' ? await flyerAsShort(original, plan.song || plan.igAudio ? 15 : 10, plan.song) : await flyerAsJpeg(original);
     } catch (e) { throw new Error(label + ': the flyer could not be prepared (' + (e.message || e) + ').'); }
   }
   // the free song's credit goes on the posts that carry the song, and only those
@@ -1422,7 +1462,8 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
     // not as a top-level block the way tiktokSettings does. A single video
     // publishes as a Reel by itself; shareToFeed puts it on the grid as well,
     // which is what a church wants for a sermon clip.
-    platformEntry.platformSpecificData = { shareToFeed: true };
+    // on the grid as well as Reels; the cover is the flyer itself
+    platformEntry.platformSpecificData = { shareToFeed: true, thumbOffset: 0 };
     // a song from Instagram's own library under the flyer's Reel (licensed by Meta — no flag)
     if (plan && plan.igAudio) platformEntry.platformSpecificData.audioConfiguration = { audioId: String(plan.igAudio.id), audioVolume: 100, videoVolume: 0 };
   }
@@ -1762,7 +1803,7 @@ async function testFacebook({ pageId, token, apiBase }) {
 }
 
 module.exports = {
-  flyerAsJpeg, flyerAsShort, flyerPlan, songHookSec, zernioFind, withAppTags,
+  flyerAsJpeg, flyerAsShort, flyerAsStill, flyerPlan, songHookSec, zernioFind, withAppTags,
   publishToFacebook, publishToInstagram, publishToYouTube, publishToTikTok,
   publishViaUploadPost, publishViaZernio, publishTo, testFacebook,
   canSchedule, scheduleTo, cancelScheduled, FB_SCHEDULE_MIN_MS, FB_SCHEDULE_MAX_MS,

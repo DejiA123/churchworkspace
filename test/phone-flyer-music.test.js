@@ -155,7 +155,7 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
     await page.tap('#csCompose #csbIgList .csb-igsong[data-i="0"]');
     await sleep(300);
     const igNote = await page.evaluate(() => (document.querySelector('#csCompose #csbFlyerNote') || {}).innerText || '');
-    check(/Instagram · a Reel with “Made a Way” — Travis Greene/.test(igNote.replace(/\s+/g, ' ')), 'tapping it chooses it: Instagram gets a Reel with that song', igNote);
+    check(/Instagram · your flyer as it is \(like a photo post\) with “Made a Way” — Travis Greene/.test(igNote.replace(/\s+/g, ' ')), 'tapping it chooses it: Instagram gets a Reel with that song', igNote);
     // [3]
     let note = (await page.evaluate(() => (document.querySelector('#csCompose #csbFlyerNote') || {}).innerText || '')).replace(/\s+/g, ' ');
     check(/TikTok · sent to your TikTok inbox/.test(note), 'TikTok: to start with, its inbox — so the church picks a GOSPEL song (TikTok’s own pick can be any genre)', note);
@@ -224,6 +224,9 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
       const f = path.join(WORK, 'ig-sent.mp4'); fs.writeFileSync(f, igUp.bytes);
       const vol = spawnSync(ffmpeg, ['-i', f, '-af', 'volumedetect', '-f', 'null', '-'], { encoding: 'utf8' }).stderr;
       check(/mean_volume: -9\d\.|mean_volume: -inf/.test(vol), '…and the Instagram Reel carries no other sound (Instagram’s song is the music)', vol.match(/mean_volume.*$/m));
+      const pr = probe(f);
+      // the test flyer is 720x900 (4:5): Instagram gets it at that shape — no blurred bands, like a photo post
+      check(/1080x1350/.test(pr) && /Duration: 00:00:30\./.test(pr), '…the flyer at its own shape (4:5, no blur) — 30 seconds with its song, like a photo post', pr.match(/Video:.*$/m) && pr.match(/Video:.*$/m)[0]);
     }
 
     // the song search, through the phone's own API
@@ -301,7 +304,7 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
       await sleep(600);
       if (k === 0) {
         const igLine = (await page.evaluate(() => (document.querySelector('#csCompose #csbFlyerNote') || {}).innerText || '')).replace(/\s+/g, ' ');
-        check(/Instagram · a Reel with a real gospel song from Instagram’s library/.test(igLine), '[G] no song chosen: the note says Instagram gets a REAL gospel song from its library', igLine);
+        check(/Instagram · your flyer as it is \(like a photo post\) with a real gospel song from Instagram’s library/.test(igLine), '[G] no song chosen: the note says Instagram gets a REAL gospel song from its library', igLine);
         await page.tap('#csCompose [data-c="fm-fromig"][data-id="zofb_2"]');
         await page.tap('#csCompose [data-c="fm-fbyt"][data-v="none"]');
         await sleep(200);
