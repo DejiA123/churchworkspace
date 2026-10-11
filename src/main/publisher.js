@@ -1336,7 +1336,8 @@ async function zernioFind(account, { content, at, exclude, accountId }, opts = {
     if (String(p.content || '').trim() !== String(content || '').trim()) return false;
     if (!(p.platforms || []).some((x) => accOf(x) === acc)) return false;
     const sched = p.scheduledFor ? new Date(p.scheduledFor).getTime() : null;
-    if (want != null) return sched == null || sched === want;
+    // a booking: one for exactly that time that has not gone out — never a live post with the same words
+    if (want != null) return sched === want && !/^(published|posted|live|failed|error)$/i.test(String(p.status || ''));
     // posting now: a recent one that is out or going out now — never last month's, never one booked for later
     if (sched != null && sched > Date.now() + 2 * 60e3) return false;
     if (/^scheduled$/i.test(String(p.status || '')) && sched != null && sched > Date.now()) return false;

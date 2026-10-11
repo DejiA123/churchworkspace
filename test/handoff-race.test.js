@@ -16,6 +16,8 @@
  *   node test/handoff-race.test.js
  */
 const publisher = require('../src/main/publisher');
+const realZernioFind = publisher.zernioFind;
+const http = require('http'), os = require('os'), path = require('path'), fs = require('fs');
 const { Scheduler } = require('../src/main/scheduler');
 let pass = 0, fail = 0;
 const check = (ok, name, d) => { console.log((ok ? '  PASS ' : '  FAIL ') + name + (!ok && d !== undefined ? '  -> ' + JSON.stringify(d) : '')); ok ? pass++ : fail++; };
@@ -328,6 +330,67 @@ const liveFor = (acc) => Array.from(live.values()).filter((b) => b.acc === acc);
     await s._tick();
     const rec = s.list().find((x) => x.id === p.id);
     check(liveFor('a1').length === 1 && rec.handoffs.a1 && live.has(rec.handoffs.a1.zoPostId), '[21] the look for a maybe-made post never takes down the post’s own good booking', { live: Array.from(live.values()), h: rec.handoffs, q: s.store.get('cancelQueue') });
+  }
+  // [22] no clear answer on one account, then the post is moved while another uploads: never out twice
+  live = new Map(); direct = [];
+  {
+    const s = mk();
+    M.maybeMade = 1;
+    const t2 = Date.now() + 7200e3;
+    const p = s.add({ title: 'T', caption: 'old', accountIds: ['a1', 'a2'], mediaPaths: [], scheduledAt: new Date(Date.now() + 3600e3).toISOString() });
+    await sleep(150);                          // a1: no clear answer (made); a2 uploading
+    await s.reschedule(p.id, { caption: 'new', scheduledAt: new Date(t2).toISOString() });
+    for (let k = 0; k < 60 && !(liveFor('a1').length === 1 && liveFor('a2').length === 1 && Array.from(live.values()).every((b) => b.when === t2)); k++) await sleep(50);
+    await sleep(300);
+    const all = Array.from(live.values());
+    check(all.length === 2 && all.every((b) => b.when === t2 && b.caption === 'new'), '[22] no clear answer, then moved during the run: only the new version stands', all);
+  }
+  // [23] "post now" on a booked post, then deleted: the booking is taken back
+  live = new Map(); direct = [];
+  {
+    const s = mk();
+    const p = s.add({ title: 'T', caption: 'c', accountIds: ['a1'], mediaPaths: [], scheduledAt: new Date(Date.now() + 3600e3).toISOString() });
+    await sleep(150);
+    await s.autoPublish(p.id).catch(() => {});   // the desktop's "post now" on a booked post
+    await s.remove(p.id);
+    check(live.size === 0, '[23] booked, "post now", then deleted: the booking is still taken back', Array.from(live.values()));
+  }
+  // [24] the look for a maybe-made post never matches a post that is already out
+  {
+    const srv = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ posts: [{ _id: 'LIVE', content: 'Join us Sunday!', status: 'published', platforms: [{ accountId: '1' }], createdAt: new Date(Date.now() - 90 * 86400e3).toISOString() }] })); }).listen(0);
+    await new Promise((r) => srv.once('listening', r));
+    const base = 'http://127.0.0.1:' + srv.address().port;
+    const hit = await realZernioFind({ token: 'k', zoAccountId: '1' }, { content: 'Join us Sunday!', at: Date.now() + 86400e3 }, { zoApiBase: base });
+    srv.close();
+    check(hit === null, '[24] a live post with the same words is never taken for "the one it may have made"', hit);
+  }
+  // [25] the studio and the background poster share the take-back list: neither wipes the other's
+  live = new Map(); direct = [];
+  {
+    const { Store } = require('../src/main/store');
+    const { Accounts } = require('../src/main/accounts');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mw-cq-')); const file = path.join(dir, 'workstation.json');
+    const seed = { posts: [], socialAccounts: [{ id: 'a1', platform: 'facebook', via: 'zernio', name: 'Page 1', token: 'k', zoAccountId: '1' }] };
+    fs.writeFileSync(file, JSON.stringify(seed));
+    const stA = new Store(file, seed), stB = new Store(file, seed);
+    const A = new Scheduler(stA, () => null, { notify: () => {}, intervalMs: 100000, accounts: new Accounts(stA), lockDir: dir, owner: 'A' });
+    const B = new Scheduler(stB, () => null, { notify: () => {}, intervalMs: 100000, accounts: new Accounts(stB), lockDir: dir, owner: 'B' });
+    B._cancelLater('px', 'a1', { ok: true, id: 'zz', zoPostId: 'zz', name: 'Page 1', platform: 'facebook', publishAt: new Date(Date.now() + 3600e3).toISOString() }, 'T');
+    const seen = A._cq();
+    A._cqSet(seen);
+    const disk = JSON.parse(fs.readFileSync(file, 'utf8')).cancelQueue || [];
+    check(seen.length === 1 && disk.length === 1, '[25] the background poster’s take-back list is seen, never written over', { seen: seen.length, disk: disk.length });
+  }
+  // [26] still failing when its time came: the church is told it may have gone out
+  live = new Map(); direct = [];
+  {
+    const told = [];
+    const s = mk(); s.opts.notify = (t, b) => told.push(t);
+    s._cancelLater('py', 'a1', { ok: true, id: 'q1', zoPostId: 'q1', name: 'Page 1', platform: 'facebook', publishAt: new Date(Date.now() + 60e3).toISOString() }, 'Old one');
+    s.store.set('cancelQueue', (s.store.get('cancelQueue') || []).map((x) => ({ ...x, tries: 2, why: 'network down', publishAt: undefined, booking: { ...x.booking, publishAt: new Date(Date.now() - 1000).toISOString() } })));
+    await s._drainCancels('py');
+    check(told.some((t) => /may have gone out/.test(t)) && !(s.store.get('cancelQueue') || []).length, '[26] could not be taken back before its time: the church is told it may have gone out', told);
   }
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

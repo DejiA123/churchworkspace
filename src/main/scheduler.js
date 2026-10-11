@@ -1,5 +1,6 @@
 'use strict';
 const path = require('path');
+const fs = require('fs');
 const publisher = require('./publisher');
 const { Accounts } = require('./accounts');
 const autopost = require('./autopost');
@@ -185,7 +186,13 @@ class Scheduler {
    * from disk before every change and written straight away.
    */
   _cq() {
-    if (this.lockDir && typeof this.store.reloadKey === 'function') { this._flush(); try { this.store.reloadKey('cancelQueue', true); } catch (e) {} }
+    // straight from the file (the other process may have added to it) — never our copy written over theirs first
+    if (this.lockDir && this.store.path) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(this.store.path, 'utf-8'));
+        if (raw && Array.isArray(raw.cancelQueue)) this.store.data.cancelQueue = raw.cancelQueue;
+      } catch (e) { /* mid-write or missing: what we have */ }
+    }
     return (this.store.get('cancelQueue') || []).slice();
   }
   _cqSet(list) { this.store.set('cancelQueue', list); this._flush(); }
@@ -203,7 +210,7 @@ class Scheduler {
   }
   // a booking Zernio may have made without answering: what to look for, to take it back
   _maybeMadeToCancel(post, accId) {
-    if (post.status === 'posted' || ((post.results || {})[accId] && post.results[accId].ok)) return;   // out already
+    if ((post.results || {})[accId] && post.results[accId].ok && !post.results[accId].byPlatform) return;   // out already
     const e = (post.handoffErrors || {})[accId];
     if (!e || !e.maybeMade || !e.maybeMade.content) return;
     const acc = this.accounts.byId(accId);
@@ -225,6 +232,8 @@ class Scheduler {
       const dueAt = x.booking.lookup ? x.booking.lookup.at : x.booking.publishAt;
       if (dueAt && new Date(dueAt).getTime() <= this._now()) {
         gone = true;   // its time has passed: it is out (or never was) — a DELETE now would take down a live post
+        if (x.tries > 0) this._notify('⚠️ An old booking may have gone out: ' + (x.title || 'a post'),
+          `${x.name} could not be reached to take back the old version (${x.why || 'no answer'}) before its time. Look on that account and delete it there if it went out.`, x.postId);
       } else if (!acc || !acc.token) {
         // the account is no longer linked here: nothing can be asked of it any more — said once, then let go
         why = 'that account is no longer linked here'; drop = true;
@@ -272,10 +281,11 @@ class Scheduler {
    * gives back what it booked itself, and books nothing more).
    */
   async remove(id) {
+    this._syncPosts(true);
     const post = (this.store.get('posts') || []).find((p) => p.id === id);
     if (!post) return true;
     // what has gone out stays out: removing a posted one from this list never touches the platform
-    const out = (accId) => post.status === 'posted' || ((post.results || {})[accId] && post.results[accId].ok);
+    const out = (accId) => (post.results || {})[accId] && post.results[accId].ok && !post.results[accId].byPlatform;
     for (const [accId, h] of Object.entries(post.handoffs || {})) if (!out(accId)) this._cancelLater(id, accId, h, post.title);
     for (const accId of Object.keys(post.handoffErrors || {})) this._maybeMadeToCancel(post, accId);
     this.store.set('posts', (this.store.get('posts') || []).filter((p) => p.id !== id));
@@ -510,10 +520,36 @@ class Scheduler {
           errors[acc.id] = { why, cannotSchedule: !!(e && e.cannotSchedule), name: acc.name, platform: acc.platform,
             // no clear answer: what was sent, so it can be looked for (and taken back if the post changes)
             ...(e && e.zoMaybeMade ? { maybeMade: { content: e.zoContent || (mm && mm.content) || '', at: when } } : {}) };
+          if (e && e.zoMaybeMade) {
+            // on the post at once (not at the end of the run), so a move or delete meanwhile sees it
+            const now = (this.store.get('posts') || []).find((p) => p.id === id);
+            if (now) { this.update(id, { handoffErrors: { ...(now.handoffErrors || {}), [acc.id]: errors[acc.id] } }); this._flush(); }
+          }
           if (!(e && e.cannotSchedule)) retryable = true;
         }
       }
 
+      // the post changed or went while this run was going: what it may have made (no clear answer)
+      // is for a version that no longer is — on the take-back list, not left on the post
+      {
+        this._syncPosts(true);
+        const after = (this.store.get('posts') || []).find((p) => p.id === id);
+        if (!after || after.status !== 'scheduled' || this._contentOf(after) !== content) {
+          let queued = false;
+          for (const [accId, er] of Object.entries(errors)) {
+            if (!er || !er.maybeMade) continue;
+            const a = this.accounts.byId(accId);
+            this._cancelLater(id, accId, { ok: true, name: er.name || accId, platform: er.platform, lookup: { content: er.maybeMade.content, at: er.maybeMade.at, accountId: a && a.zoAccountId } }, post.title);
+            delete errors[accId]; queued = true;
+          }
+          if (after) {
+            const he = { ...(after.handoffErrors || {}) };
+            for (const k of Object.keys(he)) if (he[k] && he[k].maybeMade && he[k].maybeMade.at === when && !errors[k]) delete he[k];
+            this.update(id, { handoffErrors: he }); this._flush();
+          }
+          if (queued) this._drainSoon(id);
+        }
+      }
       try {
         // each booking was written the moment it was made; this writes only how the run went —
         // never the bookings again (one taken off meanwhile, by a move, must stay off)
