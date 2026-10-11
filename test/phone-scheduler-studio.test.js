@@ -178,8 +178,12 @@ function aiServer() {
     // [4]
     const yt = await page.$eval('#csCompose .csb-yt-in', (n) => n.value).catch(() => null);
     check(yt === 'Night of Worship: Friday 7 pm 🙌', 'the YouTube title is written too, shown for the YouTube account', yt);
+    // a flyer can't go everywhere as it is: the sheet says what each place gets
+    const note = await page.evaluate(() => { const n = document.querySelector('#csCompose #csbFlyerNote'); return n ? n.innerText.replace(/\s+/g, ' ') : ''; });
+    check(/TikTok · a photo post/.test(note) && /YouTube · a 10-second Short/.test(note), 'the flyer note says TikTok gets a photo post and YouTube a 10-second Short', note);
     // scroll to see the rest, for the record
     if (SHOTS) { await page.evaluate(() => { const b = document.querySelector('#csCompose .cp-body'); if (b) b.scrollTop = 520; }); await sleep(300); await page.screenshot({ path: path.join(SHOTS, 'b-real-5-accounts.png') }); }
+    if (SHOTS) { await page.evaluate(() => { const n = document.querySelector('#csCompose #csbFlyerNote'); if (n) n.scrollIntoView({ block: 'center' }); }); await sleep(300); await page.screenshot({ path: path.join(SHOTS, 'b-real-5b-flyer-note.png') }); }
 
     // [5]
     await page.tap('#csCompose [data-c="go"]');

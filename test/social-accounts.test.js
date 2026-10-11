@@ -647,7 +647,9 @@ function httpFollow(urlStr, hops = 3) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mw-social-'));
 
   const photo = path.join(tmp, 'flyer.png');
-  fs.writeFileSync(photo, Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4, 5, 6, 7, 8]));
+  // a real (small) PNG flyer: Zernio routes turn it into a JPEG / a Short with ffmpeg
+  { const ff = require('../src/main/ffmpeg');
+    require('child_process').execFileSync(ff.resolveFfmpeg(), ['-v', 'error', '-f', 'lavfi', '-i', 'color=0x6a2bd9:s=320x400', '-frames:v', '1', '-y', photo]); }
   const videoF = path.join(tmp, 'sermon.mp4');
   fs.writeFileSync(videoF, Buffer.alloc(64 * 1024, 5)); // 64KB "video"
 
@@ -956,7 +958,7 @@ function httpFollow(urlStr, hops = 3) {
     await publisher.publishToTikTok({ token: 'TK_REFRESH', clientKey: 'tkkey', clientSecret: 'tksecret' },
       { caption: 'x', mediaPaths: [photo] }, { tkApiBase: origin });
   } catch (e) { tkImgErr = e.message; }
-  check('[F] TikTok photo gives a clear "needs a video" error', /video/i.test(tkImgErr || ''), tkImgErr);
+  check('[F] a flyer goes to TikTok (made into a 10-second video)', !tkImgErr, tkImgErr);
 
   /* === [H] TikTok Path A: own app + serverless token proxy (secret never shipped) === */
   const proxyUrl = origin + '/tkproxy/token';
@@ -1093,7 +1095,7 @@ function httpFollow(urlStr, hops = 3) {
     await publisher.publishViaUploadPost({ apiKey: UP_KEY, upUser: 'church-media', username: 'gracetok' },
       { caption: 'x', mediaPaths: [photo] }, { upApiBase: origin + '/api' });
   } catch (e) { upImgErr = e.message; }
-  check('[G] photo gives a clear "needs a video" error', /video/i.test(upImgErr || ''), upImgErr);
+  check('[G] a flyer goes to TikTok (made into a 10-second video)', !upImgErr, upImgErr);
 
   // A wrong key must fail loudly at connect time with a helpful message.
   const badStore = makeStore({ upApiKey: 'WRONG' });
@@ -1197,13 +1199,21 @@ function httpFollow(urlStr, hops = 3) {
     /Upload-Post|backup|roll/i.test(zoLimitErr || '') && !/HTTP \d/.test(zoLimitErr || ''), zoLimitErr);
   zoLimit = false;
 
-  // A photo (no video) is rejected with a clear message.
+  // A flyer goes to TikTok as a PHOTO post — as a JPEG (TikTok refuses PNG), with TikTok's music.
+  const zoImgBefore = received.length;
   let zoImgErr = null;
   try {
     await publisher.publishViaZernio({ apiKey: ZO_KEY, accountId: 'zoacc_1', username: 'gracetok' },
       { caption: 'x', mediaPaths: [photo] }, { zoApiBase: origin + '/zo/v1' });
   } catch (e) { zoImgErr = e.message; }
-  check('[I] photo gives a clear "needs a video" error', /video/i.test(zoImgErr || ''), zoImgErr);
+  const zoImgPre = received.slice(zoImgBefore).find((r) => r.url === '/zo/v1/media/presign');
+  const zoImgPut = received.slice(zoImgBefore).find((r) => r.url === '/zo/upload/u1');
+  const zoImgPost = received.slice(zoImgBefore).find((r) => r.url === '/zo/v1/posts');
+  check('[I] a flyer posts to TikTok', !zoImgErr, zoImgErr);
+  check('[I] ...sent as a JPEG, not the PNG', zoImgPre && zoImgPre.fields.contentType === 'image/jpeg' && /\.jpe?g$/i.test(zoImgPre.fields.filename)
+    && zoImgPut && zoImgPut.fileBytes && zoImgPut.fileBytes[0] === 0xff && zoImgPut.fileBytes[1] === 0xd8, zoImgPre && JSON.stringify(zoImgPre.fields));
+  check('[I] ...as a TikTok PHOTO post with music added', zoImgPost && zoImgPost.fields.tiktokSettings.media_type === 'PHOTO'
+    && zoImgPost.fields.tiktokSettings.auto_add_music === true && zoImgPost.fields.mediaItems[0].type === 'image', zoImgPost && JSON.stringify(zoImgPost.fields));
 
   // A wrong key must fail loudly at connect time with a helpful message.
   const zoBadStore = makeStore({ zoApiKey: 'WRONG' });
@@ -1257,13 +1267,24 @@ function httpFollow(urlStr, hops = 3) {
     && zoytPost.fields.youtubeSettings.visibility === 'public'
     && zoytPost.fields.youtubeSettings.madeForKids === false, zoytPost && JSON.stringify(zoytPost.fields.youtubeSettings));
 
-  // An image (no video) is rejected with a clear message.
+  // A flyer goes to YouTube as a 10-second vertical Short.
+  const zoytImgBefore = received.length;
   let zoytImgErr = null;
   try {
     await publisher.publishViaZernio({ apiKey: ZO_KEY, accountId: 'zoacc_yt', username: 'gracechannel', platform: 'youtube' },
       { caption: 'x', mediaPaths: [photo] }, { zoApiBase: origin + '/zo/v1' });
   } catch (e) { zoytImgErr = e.message; }
-  check('[J] YouTube photo gives a clear "needs a video" error', /video/i.test(zoytImgErr || '') && /YouTube/i.test(zoytImgErr || ''), zoytImgErr);
+  const zoytImgPre = received.slice(zoytImgBefore).find((r) => r.url === '/zo/v1/media/presign');
+  const zoytImgPut = received.slice(zoytImgBefore).find((r) => r.url === '/zo/upload/u1');
+  const zoytImgPost = received.slice(zoytImgBefore).find((r) => r.url === '/zo/v1/posts');
+  check('[J] a flyer posts to YouTube', !zoytImgErr, zoytImgErr);
+  check('[J] ...as a video (an MP4 Short)', zoytImgPre && zoytImgPre.fields.contentType === 'video/mp4'
+    && zoytImgPost && zoytImgPost.fields.mediaItems[0].type === 'video', zoytImgPre && JSON.stringify(zoytImgPre.fields));
+  if (zoytImgPut && zoytImgPut.fileBytes) {
+    const shortF = path.join(tmp, 'short-sent.mp4'); fs.writeFileSync(shortF, zoytImgPut.fileBytes);
+    const probe = require('child_process').spawnSync(require('../src/main/ffmpeg').resolveFfmpeg(), ['-i', shortF], { encoding: 'utf8' }).stderr;
+    check('[J] ...1080x1920, about 10 seconds', /1080x1920/.test(probe) && /Duration: 00:00:(09|10)\./.test(probe), probe.slice(-400));
+  } else check('[J] ...1080x1920, about 10 seconds', false, 'no upload');
 
   // Health check confirms the YouTube account still linked.
   const zoytHealth = await accounts.check('zoyt_zoacc_yt');

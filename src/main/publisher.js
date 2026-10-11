@@ -726,10 +726,11 @@ async function ytAccessToken({ clientId, clientSecret, refreshToken, tokenBase }
 async function publishToYouTube({ token, clientId, clientSecret }, post, opts = {}) {
   const tokenBase = opts.ytTokenBase || DEFAULT_YT_TOKEN;
   const apiBase = (opts.ytApiBase || DEFAULT_YT_API).replace(/\/+$/, '');
-  const media = (post.mediaPaths && post.mediaPaths[0]) || null;
+  let media = (post.mediaPaths && post.mediaPaths[0]) || null;
 
   if (!media) throw new Error('YouTube needs a video — add one to this post.');
   if (!fs.existsSync(media)) throw new Error('Media file not found: ' + media);
+  media = await flyerAsVideo(media, 'YouTube');
   if (!isVideoFile(media)) {
     throw new Error('YouTube auto-posts need a video file (MP4/MOV…) — this post has an image. Untick the YouTube account, or attach a video.');
   }
@@ -842,10 +843,11 @@ function putChunk(urlStr, filePath, start, end, total, headers, { timeoutMs = 15
  */
 async function publishToTikTok({ token, clientKey, clientSecret, tokenProxy, proxyToken, username }, post, opts = {}) {
   const base = (opts.tkApiBase || DEFAULT_TK_API).replace(/\/+$/, '');
-  const media = (post.mediaPaths && post.mediaPaths[0]) || null;
+  let media = (post.mediaPaths && post.mediaPaths[0]) || null;
 
   if (!media) throw new Error('TikTok needs a video — add one to this post.');
   if (!fs.existsSync(media)) throw new Error('Media file not found: ' + media);
+  media = await flyerAsVideo(media, 'TikTok');
   if (!isVideoFile(media)) {
     throw new Error('TikTok auto-posts need a video file (MP4/MOV…) — this post has an image. Untick the TikTok account, or attach a video.');
   }
@@ -958,12 +960,14 @@ async function publishViaUploadPost({ apiKey, upUser, username, platform = 'tikt
   const label = UP_LABEL[platform] || platform;
   if (!apiKey || !upUser) throw new Error(label + ' (easy connect) account is not connected.');
   const base = (opts.upApiBase || DEFAULT_UP_API).replace(/\/+$/, '');
-  const media = (post.mediaPaths && post.mediaPaths[0]) || null;
+  let media = (post.mediaPaths && post.mediaPaths[0]) || null;
 
-  // TikTok is video-only; Instagram takes a photo as well as a Reel.
+  // TikTok is video-only here; Instagram takes a photo as well as a Reel.
   const videoOnly = platform === 'tiktok' || platform === 'youtube';
   if (!media) throw new Error(label + ' needs a ' + (videoOnly ? 'video' : 'photo or video') + ' — add one to this post.');
   if (!fs.existsSync(media)) throw new Error('Media file not found: ' + media);
+  if (videoOnly) media = await flyerAsVideo(media, label);
+  else if (/\.(png|webp|gif)$/i.test(media)) media = await flyerAsJpeg(media).catch(() => media);
   const isVid = isVideoFile(media);
   if (videoOnly && !isVid) {
     throw new Error(label + ' auto-posts need a video file (MP4/MOV…) — this post has an image. Untick the ' + label + ' account, or attach a video.');
@@ -1104,6 +1108,64 @@ function zoFriendlyError(rawMsg, platform) {
   return label + ' (via Zernio): ' + msg + '.' + tip;
 }
 
+/*
+ * ►► A FLYER, MADE FIT FOR EVERY PLATFORM. ◄◄ "Does just posting a flyer
+ * work on all of them?" It did not: Instagram's API takes a JPEG and no
+ * PNG, TikTok takes JPEG or WebP and only as a PHOTO post, and YouTube takes
+ * no picture at all. So a flyer is sent as a JPEG everywhere, as a photo
+ * post on TikTok, and to YouTube as a 10-second Short — the flyer over its
+ * own blurred colours, with a slow push-in. Both copies are made once per
+ * flyer and kept for a day.
+ */
+const FLYER_CACHE = path.join(os.tmpdir(), 'mw-flyer-fit');
+function flyerCachePath(src, tag, ext) {
+  let st = null; try { st = fs.statSync(src); } catch (e) {}
+  const key = require('crypto').createHash('sha1').update(src + '|' + (st ? st.size + '|' + st.mtimeMs : '')).digest('hex').slice(0, 20);
+  try { fs.mkdirSync(FLYER_CACHE, { recursive: true }); } catch (e) {}
+  // a day is plenty: the post has gone, or it is made again
+  try { for (const f of fs.readdirSync(FLYER_CACHE)) { const fp = path.join(FLYER_CACHE, f); if (Date.now() - fs.statSync(fp).mtimeMs > 86400e3) fs.rmSync(fp, { force: true }); } } catch (e) {}
+  return path.join(FLYER_CACHE, `${key}-${tag}${ext}`);
+}
+async function flyerAsJpeg(src) {
+  if (/\.jpe?g$/i.test(src)) return src;
+  const out = flyerCachePath(src, 'photo', '.jpg');
+  if (fs.existsSync(out)) return out;
+  const ff = require('./ffmpeg');
+  const tmp = out + '.part.jpg';
+  // white under any see-through parts (a PNG with transparency would go black)
+  await ff.runFfmpeg(ff.resolveFfmpeg(), ['-v', 'error', '-i', src,
+    '-filter_complex', "[0:v]scale='min(2160,iw)':-2,format=rgba,split[a][f];[a]lutrgb=r=255:g=255:b=255:a=255[bg];[bg][f]overlay=0:0:format=auto,format=yuvj420p",
+    '-frames:v', '1', '-q:v', '2', '-y', tmp]);
+  fs.renameSync(tmp, out);
+  return out;
+}
+// a flyer going somewhere that takes only video becomes a Short; a video is left alone
+async function flyerAsVideo(media, label) {
+  if (!/\.(png|jpe?g|webp|gif)$/i.test(media)) return media;
+  try { return await flyerAsShort(media); }
+  catch (e) { throw new Error(label + ': the flyer could not be made into a Short (' + (e.message || e) + ').'); }
+}
+async function flyerAsShort(src, seconds = 10) {
+  const out = flyerCachePath(src, `short${seconds}`, '.mp4');
+  if (fs.existsSync(out)) return out;
+  const ff = require('./ffmpeg');
+  const tmp = out + '.part.mp4';
+  const frames = seconds * 30;
+  await ff.runFfmpeg(ff.resolveFfmpeg(), ['-v', 'error',
+    '-loop', '1', '-framerate', '30', '-t', String(seconds), '-i', src,
+    '-f', 'lavfi', '-t', String(seconds), '-i', 'anullsrc=r=44100:cl=stereo',
+    '-filter_complex',
+    // the flyer's own colours, blurred, fill the 9:16 frame; the whole flyer sits on top; a slow push-in
+    '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=40:4,eq=brightness=-0.12[bg];'
+    + '[0:v]scale=1000:1780:force_original_aspect_ratio=decrease[fg];'
+    + "[bg][fg]overlay=(W-w)/2:(H-h)/2,scale=1188:2112,"
+    + `zoompan=z='1+0.06*on/${frames}':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,format=yuv420p[v]`,
+    '-map', '[v]', '-map', '1:a', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-r', '30',
+    '-c:a', 'aac', '-b:a', '128k', '-shortest', '-movflags', '+faststart', '-y', tmp]);
+  fs.renameSync(tmp, out);
+  return out;
+}
+
 /**
  * Publish one post through Zernio ("Easy connect — free & unlimited") to TikTok,
  * YouTube, Facebook, or Instagram. Zernio's own developer apps are already
@@ -1121,14 +1183,22 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
   const label = ZO_LABELS[platform] || platform;
   if (!apiKey || !accountId) throw new Error(label + ' (easy connect) account is not connected.');
   const base = (opts.zoApiBase || DEFAULT_ZO_API).replace(/\/+$/, '');
-  const media = (post.mediaPaths && post.mediaPaths[0]) || null;
+  const original = (post.mediaPaths && post.mediaPaths[0]) || null;
   const content = (post.caption || post.title || '').slice(0, 2200);
 
-  const needsVideo = platform === 'tiktok' || platform === 'youtube';
-  const needsMedia = needsVideo || platform === 'instagram'; // Facebook allows text-only
+  if (original && !fs.existsSync(original)) throw new Error('Media file not found: ' + original);
+  // a flyer, made fit for this platform (see flyerAsJpeg / flyerAsShort)
+  let media = original;
+  const flyer = !!original && zoMediaKind(original).type === 'image';
+  if (flyer) {
+    try { media = platform === 'youtube' ? await flyerAsShort(original) : await flyerAsJpeg(original); }
+    catch (e) { throw new Error(label + ': the flyer could not be prepared (' + (e.message || e) + ').'); }
+  }
+  const needsVideo = platform === 'youtube';               // TikTok takes a flyer as a photo post
+  const needsMedia = needsVideo || platform === 'instagram' || platform === 'tiktok'; // Facebook allows text-only
 
-  if (media && !fs.existsSync(media)) throw new Error('Media file not found: ' + media);
   const kind = media ? zoMediaKind(media) : null;
+  if (platform === 'tiktok' && !media) throw new Error('TikTok needs a video or a picture — add one to this post.');
   if (needsVideo && (!media || kind.type !== 'video')) {
     throw new Error(label + ' auto-posts need a video file (MP4/MOV…)' + (media ? ' — this post has an image.' : '.') +
       ' Untick the ' + label + ' account, or attach a video.');
@@ -1189,6 +1259,8 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
       content_preview_confirmed: true, express_consent_given: true,
       disable_duet: false, disable_comment: false, disable_stitch: false,
     };
+    // a flyer goes up as a TikTok PHOTO post, with TikTok's own music under it
+    if (kind && kind.type === 'image') Object.assign(body.tiktokSettings, { media_type: 'PHOTO', auto_add_music: true });
   } else if (platform === 'facebook') {
     body.facebookSettings = { draft: false };
   } // instagram: platformSpecificData is optional for a plain feed post — omit.
@@ -1445,6 +1517,7 @@ async function testFacebook({ pageId, token, apiBase }) {
 }
 
 module.exports = {
+  flyerAsJpeg, flyerAsShort,
   publishToFacebook, publishToInstagram, publishToYouTube, publishToTikTok,
   publishViaUploadPost, publishViaZernio, publishTo, testFacebook,
   canSchedule, scheduleTo, cancelScheduled, FB_SCHEDULE_MIN_MS, FB_SCHEDULE_MAX_MS,

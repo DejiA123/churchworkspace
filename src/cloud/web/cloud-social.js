@@ -956,7 +956,25 @@
           const on = picked().includes(a.id);
           return `<button type="button" class="csb-acc-pill ${a.platform}${on ? ' on' : ''}" data-c="acct" data-id="${escAttr(a.id)}" aria-pressed="${on}">`
             + `${platMark(a.platform, 'md')}<span>${esc(a.name || a.platform)}</span><i class="csb-check">${mi('check')}</i></button>`;
-        }).join('') + '</div>';
+        }).join('') + '</div>' + flyerNote();
+    }
+    // a flyer can't go everywhere as it is — say up front what each place gets
+    function flyerNote() {
+      const pics = st.files.filter((f) => !isVideo(f));
+      if (!pics.length) return '';
+      const accs = linked().filter((a) => picked().includes(a.id));
+      const has = (p) => accs.filter((a) => a.platform === p);
+      const lines = [];
+      const tk = has('tiktok');
+      if (tk.length) lines.push(['tiktok', tk.every((a) => a.via === 'zernio') ? 'a photo post, with TikTok music added' : 'a 10-second video of the flyer']);
+      if (has('youtube').length) lines.push(['youtube', 'a 10-second Short — the flyer with a slow zoom']);
+      if (has('instagram').length) lines.push(['instagram', 'a picture post']);
+      if (has('facebook').length) lines.push(['facebook', 'a picture post']);
+      if (!lines.length) return '';
+      const what = pics.length === st.files.length ? (pics.length > 1 ? 'These flyers go' : 'This flyer goes') : 'Flyers go';
+      return `<div class="csb-fnote" id="csbFlyerNote"><b>${what} out as</b>`
+        + lines.map(([p, t]) => `<span class="csb-fnote-row" data-p="${p}">${platMark(p, 'sm')}<span><b>${esc((PLAT[p] || {}).name || p)}</b> · ${esc(t)}</span></span>`).join('')
+        + '</div>';
     }
     function whenBlock() {
       if (many()) {

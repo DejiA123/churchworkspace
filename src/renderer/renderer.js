@@ -1091,15 +1091,16 @@ $('#addPost').addEventListener('click', async () => {
   if (!accountIds.length && !platforms.length) {
     return toast('Pick at least one account to post to (or a reminder platform).', 'error');
   }
-  // YouTube + TikTok only accept video uploads; Instagram takes a photo OR a
-  // video but never text-only — catch it now, not at post time.
+  // YouTube + TikTok need something to show (a flyer is fine — it goes as a
+  // photo post or a 10-second Short); Instagram takes a photo OR a video but
+  // never text-only — catch it now, not at post time.
   const VIDEO_ONLY_NAMES = { youtube: 'YouTube', tiktok: 'TikTok' };
   const picked = accountIds.map((id) => state.accounts.find((x) => x.id === id)).filter(Boolean);
   const videoOnly = picked.filter((a) => VIDEO_ONLY_NAMES[a.platform]);
-  if (videoOnly.length && !VIDEO_MEDIA_RX.test(state.postMedia || '')) {
+  if (videoOnly.length && !state.postMedia) {
     const names = Array.from(new Set(videoOnly.map((a) => VIDEO_ONLY_NAMES[a.platform])));
     const list = names.length > 1 ? names.slice(0, -1).join(', ') + ' & ' + names[names.length - 1] : names[0];
-    return toast(list + ' auto-posts need a video — attach a video file, or untick ' + (videoOnly.length === 1 ? 'that account.' : 'those accounts.'), 'error');
+    return toast(list + ' auto-posts need a video or a flyer — attach one, or untick ' + (videoOnly.length === 1 ? 'that account.' : 'those accounts.'), 'error');
   }
   if (picked.some((a) => a.platform === 'instagram') && !state.postMedia) {
     return toast('Instagram auto-posts need a photo or video — attach media, or untick that account.', 'error');
