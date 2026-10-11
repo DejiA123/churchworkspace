@@ -1478,7 +1478,7 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
     // Anything else — a timeout, a 5xx — may have made the post already, so it is never sent twice.
     if (plan && plan.igAudio && !opts.noIgAudio && e.status >= 400 && e.status < 500 && e.status !== 401 && e.status !== 429 && IG_AUDIO_REJECT.test(e.message || '')) {
       const out = await publishViaZernio({ apiKey, accountId, username, platform }, post, { ...opts, noIgAudio: true });
-      return { ...out, note: 'Instagram would not take the song (' + (e.message || e) + ') — posted ' + (post.music && post.music.song ? 'with the free song instead.' : 'without it.') };
+      return { ...out, note: 'Instagram would not take the song (' + (e.message || e) + ') — posted ' + (post.music && post.music.song ? 'with your own recording instead.' : 'as a picture, without it.') };
     }
     const err = new Error(zoFriendlyError(e.message, platform) + (platform === 'instagram' ? zoIgVideoNote(media) : ''));
     err.status = e.status;
@@ -1528,7 +1528,7 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
     const why = (tk && (tk.error || tk.message)) || (label + ' rejected the post.');
     if (plan && plan.igAudio && !opts.noIgAudio && IG_AUDIO_REJECT.test(String(why))) {
       const out = await publishViaZernio({ apiKey, accountId, username, platform }, post, { ...opts, noIgAudio: true });
-      return { ...out, note: 'Instagram would not take the song (' + why + ') — posted ' + (post.music && post.music.song ? 'with the free song instead.' : 'without it.') };
+      return { ...out, note: 'Instagram would not take the song (' + why + ') — posted ' + (post.music && post.music.song ? 'with your own recording instead.' : 'as a picture, without it.') };
     }
     throw new Error(zoFriendlyError(why, platform)
       + (platform === 'instagram' ? zoIgVideoNote(media) : ''));

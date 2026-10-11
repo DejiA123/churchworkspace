@@ -850,7 +850,8 @@
       shelf: null, songs: [],
       // 🎵 a flyer's music, per platform (see flyerBlock): each app's own trending songs by default
       // (TikTok: the church picks a GOSPEL song in TikTok by default — TikTok's own pick can be any genre)
-      fm: Object.assign({ mode: 'trending', tiktok: 'draft', fbyt: 'song', fromIg: [], ig: null, igQ: '', igList: null, igState: '', igFor: '', free: 'auto', lib: null, pickSong: false }, flyerPrefs()),
+      // NO free instrumentals, ever: real songs from the apps' own libraries, the church's own recording, or none
+      fm: Object.assign({ mode: 'trending', tiktok: 'draft', fbyt: 'none', fromIg: [], ig: null, igQ: '', igList: null, igState: '', igFor: '', lib: null }, flyerPrefs()),
       // ✨ the AI caption: written by itself the moment something is chosen
       ai: null,             // { stage: 'listen'|'read'|'write'|'done'|'fail', pct, from: 'video'|'flyer'|'picture', by, note, flyer }
       autoFor: '',          // the file the caption on screen was written for (a re-pick drops a late answer)
@@ -982,7 +983,8 @@
      *   Instagram — a song from Instagram's own library, chosen right here;
      *   Facebook and YouTube have no library an app may use — a short video
      *     of the flyer with a free-to-post song under it.
-     * Then a free song for everything, or no music. publisher.js flyerPlan
+     * Or the church's own recording, or no music — never a free
+     * instrumental. publisher.js flyerPlan
      * does what this says.
      */
     const flyers = () => (edit ? [] : st.files.filter((f) => !isVideo(f)));
@@ -990,46 +992,36 @@
     const IG_QUICK = [['gospel', '🙏 Gospel'], ['Travis Greene', 'Travis Greene'], ['Maverick City Music', 'Maverick City'], ['Elevation Worship', 'Elevation Worship'],
       ['CeCe Winans', 'CeCe Winans'], ['Forrest Frank', 'Forrest Frank'], ['Moses Bliss', 'Moses Bliss'], ['Dunsin Oyekan', 'Dunsin Oyekan'],
       ['afro gospel', 'Afro gospel'], ['worship', 'Worship'], ['praise', 'Praise'], ['', '🔥 Trending (any genre)']];
-    function freeSongName() {
-      const fm = st.fm;
-      if (fm.lib) { const x = st.songs.find((m) => m.id === fm.lib); return x ? String(x.name || 'your song') : 'your song'; }
-      if (fm.free && fm.free !== 'auto') { const t = ((st.shelf && st.shelf.tracks) || []).find((x) => x.id === fm.free); if (t) return '“' + t.title + '”'; }
-      return 'a free song, picked for you';
-    }
+    // the church's own recording, when one is chosen (for Facebook, YouTube — never a free instrumental)
+    const ownSong = () => { const fm = st.fm; if (fm.fbyt !== 'own' || !fm.lib) return null; const x = st.songs.find((m) => m.id === fm.lib); return x ? '“' + String(x.name || 'your recording') + '”' : null; };
     // what each place gets — the same rules as publisher.js flyerPlan
     function flyerWhat(a) {
-      const fm = st.fm, mode = fm.mode, zo = a.via === 'zernio', song = freeSongName();
+      const fm = st.fm, mode = fm.mode, zo = a.via === 'zernio', own = ownSong();
+      const withOwn = (what) => (own ? `${what} with ${own} — your own recording` : null);
       if (a.platform === 'tiktok') {
-        if (mode === 'none') return zo ? 'a photo post, no music' : 'a 10-second video of the flyer';
-        if (mode === 'free' || !zo) return `a 15-second video with ${song}`;
-        return fm.tiktok === 'draft' ? 'sent to your TikTok inbox — you add the song there and post' : 'a photo post with a trending song TikTok adds';
+        if (mode === 'none') return zo ? 'a photo post, no music' : 'a 10-second video of the flyer, no music';
+        if (!zo) return withOwn('a 15-second video') || 'a 10-second video of the flyer, no music';
+        return fm.tiktok === 'draft' ? 'sent to your TikTok inbox — you add the gospel song there and post' : 'a photo post with a trending song TikTok adds';
       }
       if (a.platform === 'instagram') {
-        if (mode === 'none') return 'a picture post';
-        if (mode === 'trending' && igSongFor(a)) return `a Reel with “${fm.ig.title}”${fm.ig.artist ? ' — ' + fm.ig.artist : ''}`;
+        if (mode === 'none') return 'a picture post, no music';
+        if (igSongFor(a)) return `a Reel with “${fm.ig.title}”${fm.ig.artist ? ' — ' + fm.ig.artist : ''}`;
         if (igAutoFor(a)) return 'a Reel with a real gospel song from Instagram’s library — picked for you, a different one each time';
-        return `a 15-second Reel with ${song}`;
+        return withOwn('a 15-second Reel') || 'a picture post, no music (Instagram’s songs are not reachable for it yet)';
       }
+      if (mode === 'none') return a.platform === 'youtube' ? 'a 10-second Short, no music' : 'a picture post, no music';
       if (fromIg(a)) return 'gets your Instagram Reel with its gospel song — Instagram shares it to this Page';
-      const plain = mode === 'trending' && fm.fbyt === 'none';
-      if (a.platform === 'youtube') return mode === 'none' || plain ? 'a 10-second Short, no music' : `a 15-second Short with ${song}`;
-      return mode === 'none' || plain ? 'a picture post' : `a 15-second video with ${song}`;
+      if (a.platform === 'youtube') return withOwn('a 15-second Short') || 'a 10-second Short, no music';
+      return withOwn('a 15-second video') || 'a picture post, no music';
     }
     // the Instagram account whose library the chosen song is from — the only one that gets it
     const igSongFor = (a) => !!(st.fm.ig && a.platform === 'instagram' && a.via === 'zernio' && (!st.fm.ig.acc || st.fm.ig.acc === a.id));
-    // which accounts play the free song (mode Trending): the ones with no library of their own
-    function usesFree(a) {
+    // where the church's own recording would play (no app library there): Facebook, YouTube, a TikTok not on Zernio,
+    // an Instagram whose library cannot be reached — and an Instagram with its own song keeps it, for if Instagram
+    // will not take its song on the day
+    function wantsOwn(accs) {
       if (st.fm.mode === 'none') return false;
-      if (st.fm.mode === 'free') return true;
-      if (a.platform === 'tiktok') return a.via !== 'zernio';
-      if (a.platform === 'instagram') return !igSongFor(a) && !igAutoFor(a);
-      if (fromIg(a)) return false;
-      return st.fm.fbyt !== 'none';
-    }
-    // ...and which need it at all: those, and an Instagram with its own song (its backup) — main.js flyerNeedsSong
-    function needsFreeSong(accs) {
-      if (st.fm.mode === 'none') return false;
-      return st.fm.mode === 'free' || accs.some((a) => !(a.platform === 'tiktok' && a.via === 'zernio'));
+      return accs.some((a) => (a.platform === 'tiktok' && a.via !== 'zernio') || a.platform === 'instagram' || ((a.platform === 'facebook' && !fromIg(a)) || a.platform === 'youtube'));
     }
     function saveFlyerPrefs() { try { localStorage.setItem('mw.flyer.music', JSON.stringify({ mode: st.fm.mode, tiktok: st.fm.tiktok, fbyt: st.fm.fbyt, fromIg: st.fm.fromIg })); } catch (e) {} }
     // Instagram's own library answers for the chosen Instagram account (not "link through Facebook first" etc.)
@@ -1056,11 +1048,10 @@
       const what = pics.length === st.files.length ? (pics.length > 1 ? 'These flyers go' : 'This flyer goes') : 'Flyers go';
       let html = `<div class="csb-h3"><b>${mi('music')} Music on your flyer</b></div>`
         + '<div class="cs-chips csb-fm-mode">'
-        + chip(fm.mode === 'trending', 'data-c="fm-mode" data-v="trending"', '🔥 Trending songs')
-        + chip(fm.mode === 'free', 'data-c="fm-mode" data-v="free"', '♪ A free song')
+        + chip(fm.mode === 'trending', 'data-c="fm-mode" data-v="trending"', '🙏 Real gospel songs')
         + chip(fm.mode === 'none', 'data-c="fm-mode" data-v="none"', 'No music')
         + '</div>';
-      if (fm.mode === 'trending') html += '<p class="cs-hint">Real trending and gospel songs, from each app’s own library — licensed by the app, so never muted or flagged.</p>';
+      if (fm.mode === 'trending') html += '<p class="cs-hint">Real gospel songs from each app’s own library — licensed by the app, so never muted or flagged. No instrumentals, ever.</p>';
       const tk = accs.filter((a) => a.platform === 'tiktok');
       const ig = accs.filter((a) => a.platform === 'instagram');
       if (accs.length) {
@@ -1079,19 +1070,6 @@
           + '</div>';
       }
       if (fm.mode === 'trending' && ig.some((a) => a.via === 'zernio')) html += igPicker();
-      const playsFree = fm.mode === 'free' || accs.some((a) => usesFree(a));
-      if (needsFreeSong(accs)) {
-        const backupOnly = fm.mode === 'trending' && !playsFree;
-        const noLib = accs.filter((a) => usesFree(a)).map((a) => (PLAT[a.platform] || {}).name || a.platform);
-        const names = Array.from(new Set(noLib));
-        html += `<div class="csb-fm-sec"><div class="csb-fm-h">${mi('music')}<b>${fm.mode === 'free' ? 'The song' : backupOnly ? 'Backup song' : 'Free song'}</b><small>${esc(freeSongName())}</small>`
-          + `<button type="button" class="csb-link" data-c="fm-songs">${fm.pickSong ? 'Done' : 'Change'}</button></div>`
-          + (backupOnly ? '<p class="cs-hint">Used only if Instagram will not take its song on the day — so the flyer still has music.</p>'
-            : fm.mode === 'trending' ? `<p class="cs-hint">${esc(names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] + ' have' : (names[0] || 'This one') + ' has')} no song library an app may use, so a song that is free to post goes under the flyer — never flagged. Its credit is added to the caption there.</p>` : '');
-        if (fm.pickSong) html += songShelf();
-        html += '<p class="cs-hint">These free songs are uplifting instrumentals, not gospel recordings. For real gospel on Facebook and YouTube, free: put your choir’s or worship team’s own recordings (or songs you have the rights to) in <b>My music</b> — they show here under <b>Your songs</b>.</p>';
-        html += '</div>';
-      }
       // Facebook: the real gospel song, through Instagram's own sharing to the Page linked to it
       const fbs = accs.filter((a) => a.platform === 'facebook');
       if (fm.mode === 'trending' && fbs.length && igZo()) {
@@ -1102,16 +1080,15 @@
           + ((fm.fromIg || []).length ? '<p class="cs-hint">Once, in the Instagram app: <b>Settings → Accounts Center → Sharing across profiles</b> → choose this Page → turn on <b>Reels</b>. Check the Page after the first flyer: if the Reel is not there, untick it here and the Page gets the flyer as before.</p>' : '')
           + '</div>';
       }
-      // Facebook and YouTube (no song library any app may use): the free instrumental, your own recording, or none
-      if (fm.mode === 'trending' && accs.some((a) => (a.platform === 'facebook' && !fromIg(a)) || a.platform === 'youtube')) {
+      // Facebook and YouTube (no song library any app may use): the church's own gospel recording, or none
+      if (wantsOwn(accs)) {
         const chip2 = (on, attrs, label) => `<button type="button" class="cs-chip${on ? ' on' : ''}" ${attrs}>${label}</button>`;
         html += `<div class="csb-fm-sec"><div class="csb-fm-h">${mi('music')}<b>Facebook and YouTube</b></div><div class="cs-chips">`
-          + chip2(fm.fbyt !== 'none' && !fm.lib, 'data-c="fm-fbyt" data-v="free"', '♪ Instrumental (free)')
-          + chip2(fm.fbyt !== 'none' && !!fm.lib, 'data-c="fm-fbyt" data-v="own"', '🎵 Our own gospel recording')
-          + chip2(fm.fbyt === 'none', 'data-c="fm-fbyt" data-v="none"', 'No music')
+          + chip2(fm.fbyt === 'own', 'data-c="fm-fbyt" data-v="own"', '🎵 Our own gospel recording')
+          + chip2(fm.fbyt !== 'own', 'data-c="fm-fbyt" data-v="none"', 'No music')
           + '</div>'
-          + (fm.fbyt !== 'none' && fm.lib ? `<p class="cs-hint">${esc(freeSongName())} — your church’s own recording.</p>` : '')
-          + (fm.pickOwn ? (st.songs.length ? '<div class="cs-chips">' + st.songs.slice(0, 12).map((x) => `<button type="button" class="cs-chip${fm.lib === x.id ? ' on' : ''}" data-c="fm-lib" data-v="${escAttr(x.id)}">🎵 ${esc(String(x.name || 'song').slice(0, 24))}</button>`).join('') + '</div>'
+          + (ownSong() ? `<p class="cs-hint">${esc(ownSong())} — your church’s own recording.</p>` : '')
+          + (fm.fbyt === 'own' ? (st.songs.length ? '<div class="cs-chips">' + st.songs.slice(0, 12).map((x) => `<button type="button" class="cs-chip${fm.lib === x.id ? ' on' : ''}" data-c="fm-lib" data-v="${escAttr(x.id)}">🎵 ${esc(String(x.name || 'song').slice(0, 24))}</button>`).join('') + '</div>'
             : '<p class="cs-hint">Add your choir’s or worship team’s recording in <b>My music</b> first — it shows here.</p>') : '')
           + '<p class="cs-hint">Real hit gospel songs (Travis Greene…) cannot be put on Facebook or YouTube by any app — they get the post muted or flagged. Your own recordings are free and safe.</p>'
           + '</div>';
@@ -1125,19 +1102,6 @@
             : '<p class="cs-hint">Books a test flyer with its music on each account a month ahead — so Zernio, Instagram and TikTok check it for real — then takes it straight back. Nothing is posted.</p>')
         + '</div>';
       return html;
-    }
-    function songShelf() {
-      const F = st.shelf, fm = st.fm;
-      const chip = (on, attrs, label) => `<button type="button" class="cs-chip${on ? ' on' : ''}" ${attrs}>${label}</button>`;
-      let h = '';
-      if (F && F.tracks && F.tracks.length) {
-        h += '<div class="cs-chips">' + chip(!fm.lib && fm.free === 'auto', 'data-c="fm-free" data-v="auto"', '✨ Pick one for me') + '</div>'
-          + '<div class="cs-chips">' + F.moods.map((x) => chip(st.musicMood === x.id, `data-c="musmood" data-v="${escAttr(x.id)}"`, esc(x.name))).join('') + '</div>'
-          + '<div class="cs-chips">' + F.tracks.filter((t) => t.mood === st.musicMood).map((t) => chip(!fm.lib && fm.free === t.id, `data-c="fm-free" data-v="${escAttr(t.id)}"`, '♪ ' + esc(t.title))).join('') + '</div>';
-      } else h += '<p class="cs-hint">The free songs are loading…</p>';
-      if (st.songs.length) h += '<label class="cs-label">Your songs <small>— only ones you own the rights to; a well-known song gets the post muted or flagged</small></label><div class="cs-chips">'
-        + st.songs.slice(0, 10).map((x) => chip(fm.lib === x.id, `data-c="fm-lib" data-v="${escAttr(x.id)}"`, '🎵 ' + esc(String(x.name || 'song').slice(0, 24)))).join('') + '</div>';
-      return h;
     }
     function igPicker() {
       const fm = st.fm;
@@ -1156,8 +1120,8 @@
       if (fm.igState === 'loading') return '<p class="cs-hint"><i class="csb-spin"></i> Finding songs…</p>';
       if (fm.igState === 'needsFb') return '<p class="cs-hint">Instagram opens its song library only to an account linked through Facebook. One sign-in, once:</p>'
         + `<button type="button" class="cs-btn csb-igfb" data-c="fm-ig-fb">Link Instagram through Facebook</button>`
-        + '<p class="cs-hint">Until then Instagram gets the free song.</p>';
-      if (fm.igState === 'unavailable' || fm.igState === 'error') return `<p class="cs-hint">${esc(fm.igErr || 'Instagram’s songs could not be loaded just now.')} Instagram gets the free song meanwhile.</p>`;
+        + '<p class="cs-hint">Until then Instagram gets the flyer as a picture (or with your own recording, if you chose one).</p>';
+      if (fm.igState === 'unavailable' || fm.igState === 'error') return `<p class="cs-hint">${esc(fm.igErr || 'Instagram’s songs could not be loaded just now.')} Instagram gets the flyer as a picture meanwhile (or with your own recording).</p>`;
       if (!fm.igList) return '';
       if (!fm.igList.length) return '<p class="cs-hint">No songs found — try another name.</p>';
       return '<div class="csb-iglist">' + fm.igList.slice(0, 15).map((x, i) => `<div class="csb-igsong${fm.ig && fm.ig.id === x.id ? ' on' : ''}" data-c="fm-ig" data-i="${i}" role="button" tabindex="0">`
@@ -1292,21 +1256,15 @@
      * operator's own) is laid under the video on the server before it goes.
      */
     function musicBlock() {
+      // a video's music: the church's own songs only — never a free instrumental
       if (edit || !st.files.length || !st.files.every(isVideo)) return '';
-      const F = st.shelf;
       const chip = (on, attrs, label) => `<button type="button" class="cs-chip${on ? ' on' : ''}" ${attrs}>${label}</button>`;
       const m = st.music || {};
-      let html = '<div class="cs-chips">'
-        + chip(!st.music, 'data-c="mus" data-v=""', 'No music')
-        + (F && F.tracks && F.tracks.length ? chip(m.free === 'auto', 'data-c="mus" data-v="auto"', '✨ Pick a worship song for me') : '')
-        + '</div>';
-      if (F && F.tracks && F.tracks.length) {
-        html += '<div class="cs-chips">' + F.moods.map((x) => chip(st.musicMood === x.id, `data-c="musmood" data-v="${escAttr(x.id)}"`, esc(x.name))).join('') + '</div>'
-          + '<div class="cs-chips">' + F.tracks.filter((t) => t.mood === st.musicMood).map((t) => chip(m.free === t.id, `data-c="mus" data-v="${escAttr(t.id)}"`, '♪ ' + esc(t.title))).join('') + '</div>';
-      }
-      if (st.songs.length) html += '<label class="cs-label">Your songs <small>— only ones you have the rights to post</small></label><div class="cs-chips">'
+      let html = '<div class="cs-chips">' + chip(!st.music, 'data-c="mus" data-v=""', 'No music') + '</div>';
+      if (st.songs.length) html += '<label class="cs-label">Your songs <small>— your church’s own recordings, or ones you have the rights to post</small></label><div class="cs-chips">'
         + st.songs.slice(0, 10).map((x) => chip(m.lib === x.id, `data-c="muslib" data-v="${escAttr(x.id)}"`, '🎵 ' + esc(String(x.name || 'song').slice(0, 24)))).join('') + '</div>';
-      html += `<p class="cs-hint">${st.music ? 'Laid softly under your video — it dips whenever someone speaks. ' : ''}Free songs are safe to post (no muting or copyright flags); the artist credit is added to your caption by itself. Instagram’s and TikTok’s own song library can’t be added by any app.</p>`;
+      else html += '<p class="cs-hint">Add your choir’s or worship team’s recording in <b>My music</b> to put it under a video.</p>';
+      html += `<p class="cs-hint">${st.music ? 'Laid softly under your video — it dips whenever someone speaks. ' : ''}A well-known song added by any app gets a post muted or flagged.</p>`;
       return html;
     }
 
@@ -1333,7 +1291,7 @@
       panel.setTitle(edit ? 'Edit post' : many() ? `${st.files.length} posts` : 'New post');
       panel.el.classList.add('csb-sheet');
       const mus = musicBlock();
-      const musName = !st.music ? 'None' : st.music.free === 'auto' ? 'A worship song, picked for you' : st.music.lib ? 'Your song' : 'A free song';
+      const musName = !st.music ? 'None' : 'Your song';
       panel.body.innerHTML = '<div class="csb-form">'
         + mediaBlock()
         + (st.files.length ? textBlock() : '')
@@ -1592,7 +1550,7 @@
       }
       if (c === 'spacing') { st.spacing = +b.dataset.h; st.spacingOther = false; return draw(); }
       if (c === 'spacing-other') { st.spacingOther = true; draw(); const i = panel.body.querySelector('input[data-c="gap"]'); if (i) { i.focus(); i.select(); } return; }
-      if (c === 'mus') { st.music = b.dataset.v ? { free: b.dataset.v } : null; st.musFree = null; return draw(); }
+      if (c === 'mus') { st.music = null; return draw(); }   // (only "No music" — songs are the church's own: muslib)
       // 🎵 a flyer's music
       if (c === 'fm-mode') { st.fm.mode = b.dataset.v; saveFlyerPrefs(); clearTimeout(igTimer); stopIgPreview(); return draw(); }
       if (c === 'fm-tk') { st.fm.tiktok = b.dataset.v === 'draft' ? 'draft' : 'trending'; saveFlyerPrefs(); return draw(); }
@@ -1612,14 +1570,10 @@
         saveFlyerPrefs(); return draw();
       }
       if (c === 'fm-fbyt') {
-        const v = b.dataset.v;
-        if (v === 'none') { st.fm.fbyt = 'none'; st.fm.pickOwn = false; }
-        else if (v === 'own') { st.fm.fbyt = 'song'; st.fm.pickOwn = true; if (!st.fm.lib && st.songs[0]) st.fm.lib = st.songs[0].id; }
-        else { st.fm.fbyt = 'song'; st.fm.lib = null; st.fm.pickOwn = false; }
+        if (b.dataset.v === 'own') { st.fm.fbyt = 'own'; if (!st.fm.lib && st.songs[0]) st.fm.lib = st.songs[0].id; }
+        else st.fm.fbyt = 'none';
         saveFlyerPrefs(); return draw();
       }
-      if (c === 'fm-songs') { st.fm.pickSong = !st.fm.pickSong; return draw(); }
-      if (c === 'fm-free') { st.fm.free = b.dataset.v || 'auto'; st.fm.lib = null; return draw(); }
       if (c === 'fm-lib') { st.fm.lib = b.dataset.v; return draw(); }
       if (c === 'fm-igq') { const i = panel.body.querySelector('.csb-igsearch'); if (i) i.value = b.dataset.v; return loadIg(b.dataset.v); }
       if (c === 'fm-ig-clear') { st.fm.ig = null; stopIgPreview(); return draw(); }
@@ -1705,7 +1659,7 @@
     /* the chosen song laid under each video (on the server) — the files that will post, and the caption credit */
     async function withMusic(btn) {
       // (the video music: a flyer has its own, per platform — flyerMusicFor)
-      if (!st.music || edit || !st.files.length || !st.files.every(isVideo)) return null;
+      if (!st.music || !st.music.lib || edit || !st.files.length || !st.files.every(isVideo)) return null;   // never a free instrumental
       let free = st.music.free || null;
       if (free === 'auto') {
         // the next worship song not used lately (see freeDeal) — the same one again if this is a retry,
@@ -1738,46 +1692,14 @@
       const accs = linked().filter((a) => picked().includes(a.id));
       const ig = fm.mode === 'trending' && fm.ig ? { id: fm.ig.id, title: fm.ig.title, artist: fm.ig.artist || '', acc: fm.ig.acc || '' }
         : accs.some((a) => igAutoFor(a)) ? { auto: 'gospel' } : null;
-      // everywhere but a TikTok that takes TikTok's own music — an Instagram with its own song keeps
-      // the free one too, for if Instagram will not take its song on the day (main.js flyerNeedsSong)
-      const needFree = needsFreeSong(accs);
-      return { tiktok: fm.mode === 'free' ? 'free' : fm.tiktok, igAudio: ig, fbyt: fm.mode === 'trending' ? fm.fbyt : 'song',
-        song: needFree ? (fm.lib ? { lib: fm.lib } : { free: fm.free || 'auto' }) : null };
+      // never a free instrumental: the church's own recording where it was chosen, or none
+      const own = fm.fbyt === 'own' && fm.lib && wantsOwn(accs);
+      return { tiktok: fm.tiktok, igAudio: ig, fbyt: own ? 'song' : 'none', song: own ? { lib: fm.lib } : null };
     }
-    // book it — a flyer with its music; "pick one for me" deals the next free song, and one that can't be fetched gives way to the next
+    // book it — a flyer with its music (no free songs to deal: real ones from the apps, or the church's own)
     async function addPost(base, f) {
       const m = flyerMusicFor(f);
-      if (!m) return window.api.scheduler.add(base);
-      if (!m.song || m.song.lib || m.song.free !== 'auto') return window.api.scheduler.add(Object.assign({}, base, { music: m }));
-      const deal = freeDeal((st.shelf && st.shelf.tracks) || [], 'uplift').slice(0, 4);
-      if (!deal.length) return window.api.scheduler.add(Object.assign({}, base, { music: Object.assign({}, m, { song: null }) }));
-      let last = null;
-      for (const t of deal) {
-        try {
-          const r = await window.api.scheduler.add(Object.assign({}, base, { music: Object.assign({}, m, { song: { free: t.id } }) }));
-          freeUsed(t.id);
-          return r;
-        } catch (er) {
-          last = er;
-          if (!/could not be fetched|not on the free music shelf/i.test((er && er.message) || '')) throw er;
-        }
-      }
-      // the free-music site is not answering: the flyer still goes (each app's own songs are unaffected)
-      C.island({ kind: 'warn', title: 'The free song could not be fetched', sub: 'Posted without it where it was needed. ' + ((last && last.message) || ''), ms: 7000 });
-      return window.api.scheduler.add(Object.assign({}, base, { music: Object.assign({}, m, { song: null }) }));
-    }
-    // a post booked earlier in this sheet, brought up to the time, words and accounts chosen now
-    async function bookedAgain(rec, one) {
-      if (!rec || !rec.id) return rec;
-      // only what really changed (never the file: on a retry it is the one without its music) —
-      // nothing changed, nothing sent, so a good booking is never undone for nothing
-      const patch = {};
-      for (const k of ['title', 'caption', 'accountIds', 'platforms']) if (JSON.stringify(one[k]) !== JSON.stringify(rec[k])) patch[k] = one[k];
-      if (new Date(one.scheduledAt).getTime() !== new Date(rec.scheduledAt).getTime()) patch.scheduledAt = one.scheduledAt;
-      if (!Object.keys(patch).length) return rec;
-      const out = await window.api.scheduler.update(rec.id, patch);
-      if (out && out.warning) C.island({ kind: 'warn', title: 'An old booking is still being taken back', sub: out.warning, ms: 8000 });
-      return Object.assign({}, rec, patch);
+      return window.api.scheduler.add(m ? Object.assign({}, base, { music: m }) : base);
     }
     const withCredit = (caption, credit) => (credit && !String(caption || '').includes(credit) ? [String(caption || '').trim(), credit].filter(Boolean).join('\n\n') : caption);
 
@@ -2264,9 +2186,10 @@
   // how this phone likes its flyers' music (Trending / free / none; TikTok's way), remembered
   function flyerPrefs() {
     try { const p = JSON.parse(localStorage.getItem('mw.flyer.music') || '{}') || {}; const o = {};
-      if (['trending', 'free', 'none'].includes(p.mode)) o.mode = p.mode;
+      if (['trending', 'none'].includes(p.mode)) o.mode = p.mode;
+      else if (p.mode === 'free') o.mode = 'trending';   // (the free-instrumental choice is gone)
       if (['draft', 'trending'].includes(p.tiktok)) o.tiktok = p.tiktok;
-      if (['song', 'none'].includes(p.fbyt)) o.fbyt = p.fbyt;
+      if (p.fbyt === 'own') o.fbyt = 'own';   // anything else: no music (never an instrumental)
       if (Array.isArray(p.fromIg)) o.fromIg = p.fromIg.filter((x) => typeof x === 'string');
       return o; } catch (e) { return {}; }
   }

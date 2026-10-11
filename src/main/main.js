@@ -1124,17 +1124,7 @@ function flyerNeedsSong(music, accountIds) {
 }
 async function withFlyerMusic(post, before) {
   if (!post) return post;
-  if (post.music === undefined) {
-    // an edit that adds an account needing the free song (Facebook, YouTube…) to a flyer that had none: one is found
-    const m = before && before.music;
-    if (m && !m.song && post.accountIds && flyerNeedsSong(m, post.accountIds)) {
-      try {
-        const e = await flyerSongEntry({ free: 'auto' });
-        post.music = Object.assign({}, m, { song: { path: keepFlyerSong(e.file), title: e.name || '', credit: e.credit || freemusic.creditFor(e) || '' } });
-      } catch (e) { /* posted without it, as before */ }
-    }
-    return post;
-  }
+  if (post.music === undefined) return post;
   const m = post.music;
   if (!m || typeof m !== 'object') { post.music = null; return post; }
   const tiktok = ['trending', 'draft', 'free', 'none'].includes(m.tiktok) ? m.tiktok : 'trending';
@@ -1163,7 +1153,8 @@ async function withFlyerMusic(post, before) {
     acc: m.igAudio.acc && accounts.byId(String(m.igAudio.acc)) ? String(accounts.byId(String(m.igAudio.acc)).zoAccountId || '') : '' } : null;
   let song = null;
   const want = m.song || null;
-  if (want && (want.free || want.lib) && tiktok !== 'none') {
+  // the church's own recording only — a free instrumental is never put on a post
+  if (want && want.lib && tiktok !== 'none') {
     const entry = await flyerSongEntry(want);
     if (!entry || !entry.file || !fs.existsSync(entry.file)) throw new Error('The song for the flyer could not be found — pick another.');
     song = { path: keepFlyerSong(entry.file), title: entry.name || '', credit: entry.credit || freemusic.creditFor(entry) || '' };
@@ -1194,13 +1185,7 @@ ipcMain.handle('social:musicCheck', wrap(async () => {
     const img = path.join(app.getPath('temp'), 'mw-music-check-flyer.png');
     const ff = require('./ffmpeg');
     if (!fs.existsSync(img)) await ff.runFfmpeg(ff.resolveFfmpeg(), ['-v', 'error', '-f', 'lavfi', '-i', 'gradients=s=1080x1350:c0=0x2a0f3d:c1=0xff5c8a:d=1', '-frames:v', '1', '-y', img]);
-    // a free song
-    let song = null;
-    try {
-      const e = await flyerSongEntry({ free: 'auto' });
-      song = { path: keepFlyerSong(e.file), title: e.name || '', credit: e.credit || freemusic.creditFor(e) || '' };
-      add('Free songs', '', true, `A free song was fetched (${e.name || 'a song'}) — Facebook and YouTube get music.`);
-    } catch (e) { add('Free songs', '', false, 'No free song could be fetched (' + e.message + ') — Facebook and YouTube flyers would go without music until it answers.'); }
+    const song = null;   // (no free instrumentals: real songs from the apps' own libraries only)
     const opts = scheduler._pubOpts();
     const when = Date.now() + 30 * 86400e3;
     const base = (opts.zoApiBase || publisher.DEFAULT_ZO_API).replace(/\/+$/, '');
@@ -1257,12 +1242,12 @@ ipcMain.handle('social:musicCheck', wrap(async () => {
           await book(a, { tiktok: 'trending', igAudio: { id: s0.id, title: s0.title, artist: s0.artist, acc: a.zoAccountId }, song }, 'Reel with a song from Instagram’s library');
         } else {
           add(a.name, a.platform, false, lib && lib.needsFacebookLogin
-            ? 'Instagram’s song library needs this account linked through Facebook — tap “Link Instagram through Facebook” in New post. Until then it gets the free song.'
-            : `Instagram’s song library is not available (${(lib && (lib.unavailable || (lib.songs && 'no songs came back'))) || 'no answer'}) — it gets the free song.`);
+            ? 'Instagram’s song library needs this account linked through Facebook — tap “Link Instagram through Facebook” in New post. Until then it gets the flyer as a picture.'
+            : `Instagram’s song library is not available (${(lib && (lib.unavailable || (lib.songs && 'no songs came back'))) || 'no answer'}) — it gets the flyer as a picture.`);
         }
-        if (song) await book(a, { tiktok: 'trending', igAudio: null, song }, 'Reel with the free song');
-      } else if (song) {
-        await book(a, { tiktok: 'trending', igAudio: null, song }, a.platform === 'youtube' ? 'Short with the free song' : 'Video with the free song');
+      } else {
+        // Facebook and YouTube: no song library any app may use — the flyer itself goes (no instrumental)
+        await book(a, { tiktok: 'trending', igAudio: null, song: null, fbyt: 'none' }, a.platform === 'youtube' ? 'Flyer as a Short' : 'Flyer');
       }
     }
     return { checks: out, ok: out.every((c) => c.ok) };
@@ -1274,6 +1259,9 @@ ipcMain.handle('social:igAudio', wrap(async (e, { accountId, q } = {}) => accoun
 // that library needs the Instagram account linked through Facebook: the sign-in to do it
 ipcMain.handle('social:igRelink', wrap(async (e, { accountId } = {}) => accounts.zernioLinkStart('instagram', { relink: accountId })));
 ipcMain.handle('social:withMusic', wrap(async (e, { mediaPath, free, libId, volume, jobId } = {}) => {
+  // never a free instrumental under a post — the church's own songs only
+  if (free && !libId) throw new Error('Pick one of your own songs — free instrumentals are not put on posts.');
+  free = null;
   if (!mediaPath || !fs.existsSync(mediaPath)) throw new Error('That video could not be found.');
   let entry = null;
   if (free) entry = await freemusic.get(getCtx(), video, library, String(free));

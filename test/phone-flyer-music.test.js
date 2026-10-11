@@ -138,7 +138,9 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
     await page.evaluate((f) => window.MWSocial.compose({ files: [f] }), FLY);
     await page.waitForSelector('#csCompose #csbFlyerMusic', { timeout: 15000 }).catch(() => {});
     const mode = await page.evaluate(() => { const on = document.querySelector('#csCompose .csb-fm-mode .cs-chip.on'); return on ? on.textContent : ''; });
-    check(/Trending songs/.test(mode), 'a flyer gets a Music section, on Trending songs by itself', mode);
+    check(/Real gospel songs/.test(mode), 'a flyer gets a Music section, on Real gospel songs by itself', mode);
+    const sheetText = await page.evaluate(() => (document.querySelector('#csCompose #csbFlyerMusic') || {}).innerText || '');
+    check(!/instrumental \(free\)|A free song|Free song|free songs are/i.test(sheetText) && !/Instrumental/.test(sheetText.replace(/no instrumentals, ever/i, '')), 'no free instrumental is offered anywhere', sheetText.slice(0, 400));
     // [2]
     await page.waitForSelector('#csCompose #csbIgList .csb-igsong', { timeout: 15000 }).catch(() => {});
     const first = await page.evaluate(() => Array.from(document.querySelectorAll('#csCompose #csbIgList .csb-igsong b')).map((n) => n.textContent));
@@ -169,7 +171,9 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
     const hint = await page.evaluate(() => (document.querySelector('#csCompose #csbFlyerMusic') || {}).innerText || '');
     check(/TikTok · sent to your TikTok inbox/.test(note) && /Add sound/.test(hint) && /Travis Greene/.test(hint), '"I’ll pick the song in TikTok": its inbox, and how to add the song there', note);
     // [4]
-    check(/Facebook · a 15-second video with a free song/.test(note) && /YouTube · a 15-second Short with a free song/.test(note), 'Facebook and YouTube get a free-to-post song', note);
+    check(/Facebook · a picture post, no music/.test(note) && /YouTube · a 10-second Short, no music/.test(note), 'Facebook and YouTube: no instrumental — the flyer, no music (unless the church picks its own recording)', note);
+    const ownChips = await page.evaluate(() => Array.from(document.querySelectorAll('#csCompose [data-c="fm-fbyt"]')).map((b) => b.textContent));
+    check(ownChips.join('|') === '🎵 Our own gospel recording|No music', 'Facebook and YouTube choices: our own gospel recording, or no music', ownChips);
     if (SHOTS) {
       await page.evaluate(() => { const n = document.querySelector('#csCompose #csbFlyerMusic'); if (n) n.scrollIntoView({ block: 'start' }); }); await sleep(300);
       await page.screenshot({ path: path.join(SHOTS, 'flyer-music-1.png') });
@@ -188,17 +192,15 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
     for (let k = 0; k < 240 && Z.posts.length < 5; k++) await sleep(500);
     const posts = await page.evaluate(async () => window.api.scheduler.list());
     const made = posts.find((p) => /Night of Worship this Friday/.test(p.caption || ''));
-    check(!!made && made.music && made.music.tiktok === 'draft' && made.music.igAudio && made.music.igAudio.id === 'ig_made_a_way' && made.music.song && fs.existsSync(made.music.song.path),
-      'the post carries its music: TikTok inbox, the Instagram song, and a free song fetched on the server', made && made.music);
+    check(!!made && made.music && made.music.tiktok === 'draft' && made.music.igAudio && made.music.igAudio.id === 'ig_made_a_way' && made.music.song === null,
+      'the post carries its music: TikTok inbox, the Instagram song — and no instrumental', made && made.music);
     const by = (pl) => Z.posts.filter((p) => !p.rejected && p.body.platforms[0].platform === pl);
     const tk = by('tiktok')[0], ig = by('instagram')[0], fbs = by('facebook'), yt = by('youtube')[0];
     const tagsOf = (p) => ((p && p.body.content) || '').split('\n').find((l) => /^#/.test(l)) || '';
     check(tagsOf(tk) === '#fyp #foryou #foryoupage #worship #sermon' && /^#instagood #explorepage #reels #worship #sermon$/.test(tagsOf(ig))
       && fbs.every((p) => /^#reels #viral #fbreels #worship #sermon$/.test(tagsOf(p))) && /^#shorts #youtubeshorts #worship #sermon #jesus$/.test(tagsOf(yt)),
       'each app is posted with its own trending hashtags — five at most', { tk: tagsOf(tk), ig: tagsOf(ig), fb: fbs.map(tagsOf), yt: tagsOf(yt) });
-    check(!!made && !/Kevin MacLeod/.test(made.caption) && fbs.length && fbs.every((p) => /Kevin MacLeod/.test(p.body.content)) && yt && /Kevin MacLeod/.test(yt.body.content)
-      && tk && !/Kevin MacLeod/.test(tk.body.content) && ig && !/Kevin MacLeod/.test(ig.body.content),
-      'the free song’s credit is on the posts that carry it (Facebook, YouTube) — not on TikTok’s or Instagram’s', { fb: fbs.map((p) => p.body.content), tk: tk && tk.body.content, ig: ig && ig.body.content });
+    check([tk, ig, yt].concat(fbs).every((p) => p && !/Kevin MacLeod|Music:/.test(p.body.content)), 'no instrumental credit on any post — none was put on', { fb: fbs.map((p) => p.body.content) });
     const inboxNote = await page.evaluate(async () => { const l = await window.api.scheduler.list(); return l; });
     const mine = inboxNote.find((p) => p.id === (made && made.id));
     check(!!mine && mine.handoffs && mine.handoffs.zotk_1 && mine.handoffs.zotk_1.inbox === true && /TikTok inbox/.test(mine.handoffs.zotk_1.note || ''),
@@ -209,14 +211,14 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
     const igAc = ig && ig.body.platforms[0].platformSpecificData && ig.body.platforms[0].platformSpecificData.audioConfiguration;
     check(!!ig && igAc && igAc.audioId === 'ig_made_a_way' && igAc.videoVolume === 0 && ig.body.mediaItems[0].type === 'video',
       'Instagram: a Reel with “Made a Way” from Instagram’s own library', ig && ig.body.platforms[0]);
-    check(fbs.length === 2 && fbs.every((p) => p.body.mediaItems[0].type === 'video') && yt && yt.body.mediaItems[0].type === 'video',
-      'both Facebook pages and YouTube get a video of the flyer', { fb: fbs.length, yt: !!yt });
-    const fbUp = fbs[0] && uploadOf(fbs[0]);
-    if (fbUp) {
-      const f = path.join(WORK, 'fb-sent.mp4'); fs.writeFileSync(f, fbUp.bytes);
-      const pr = probe(f);
-      check(/Duration: 00:00:1[45]\./.test(pr) && /Audio: aac/.test(pr) && /1080x1920/.test(pr), '…15 seconds, 1080x1920, with the song under it', pr.slice(-500));
-    } else check(false, 'the Facebook video was uploaded', Z.uploads);
+    check(fbs.length === 2 && fbs.every((p) => p.body.mediaItems[0].type === 'image') && yt && yt.body.mediaItems[0].type === 'video',
+      'both Facebook pages get the flyer picture, YouTube a Short — no instrumental', { fb: fbs.map((p) => p.body.mediaItems[0].type), yt: !!yt });
+    const ytUp = yt && uploadOf(yt);
+    if (ytUp) {
+      const f = path.join(WORK, 'yt-sent.mp4'); fs.writeFileSync(f, ytUp.bytes);
+      const vol = spawnSync(ffmpeg, ['-i', f, '-af', 'volumedetect', '-f', 'null', '-'], { encoding: 'utf8' }).stderr;
+      check(/1080x1920/.test(probe(f)) && /mean_volume: -9\d\.|mean_volume: -inf/.test(vol), '…the YouTube Short is silent: no instrumental under it', vol.match(/mean_volume.*$/m));
+    } else check(false, 'the YouTube Short was uploaded', Z.uploads);
     const igUp = ig && uploadOf(ig);
     if (igUp) {
       const f = path.join(WORK, 'ig-sent.mp4'); fs.writeFileSync(f, igUp.bytes);
@@ -239,9 +241,15 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
       const after = (await window.api.scheduler.list()).find((p) => p.id === r.id);
       return { before, after: after && after.music };
     }, FLY);
-    check(!edited.before && edited.after && edited.after.song && /\.mp3$/.test(edited.after.song.path || ''), 'an edit that adds Facebook to a TikTok-only flyer gives it the free song', edited);
-    // the song a post carries is its own copy: taken out of the library, the post keeps it
-    check(!!made && made.music && made.music.song && /flyer-songs/.test(made.music.song.path), 'a booked flyer keeps its own copy of the song', made && made.music && made.music.song);
+    check(!edited.before && edited.after && !edited.after.song, 'an edit that adds Facebook never puts an instrumental on', edited);
+    // even an old phone page asking for a free song: the server never puts one on
+    const forced = await page.evaluate(async (f) => {
+      const r = await window.api.scheduler.add({ title: 'Old page', caption: 'x', mediaPaths: [f], accountIds: ['zofb_2'], platforms: ['facebook'],
+        scheduledAt: new Date(Date.now() + 3 * 86400e3).toISOString(), music: { tiktok: 'trending', igAudio: null, song: { free: 'auto' } } });
+      let vid = null; try { await window.api.social.withMusic({ mediaPath: f, free: 'inspired' }); vid = 'made'; } catch (e) { vid = e.message; }
+      return { song: r.music && r.music.song, vid };
+    }, FLY);
+    check(!forced.song && /not put on posts/.test(forced.vid || ''), 'the server refuses free instrumentals outright (flyers and videos)', forced);
 
     // the phone shows the TikTok-inbox booking for what it is
     if (made) {
@@ -267,7 +275,7 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
     const booked = testPosts.filter((p) => !p.rejected).length, taken = (Z.deleted || []).length - del0;
     check(res.length >= 6 && res.every((r) => /^ok/.test(r)), 'Test music on my accounts: every account checks out', res);
     check(booked >= 6 && taken === booked, '…each test booking is taken straight back (nothing left to post)', { booked, taken });
-    check(res.some((r) => /Instagram’s song library answers/.test(r)) && res.some((r) => /TikTok inbox/.test(r)) && res.some((r) => /Free songs/.test(r)), '…and it says what was checked', res);
+    check(res.some((r) => /Instagram’s song library answers/.test(r)) && res.some((r) => /TikTok inbox/.test(r)) && !res.some((r) => /free song/i.test(r)), '…and it says what was checked (no free songs anywhere)', res);
     if (SHOTS) { await page.evaluate(() => { const n = document.querySelector('#csCompose .csb-check-sec'); if (n) n.scrollIntoView({ block: 'start' }); }); await sleep(300); await page.screenshot({ path: path.join(SHOTS, 'flyer-music-3-test.png') }); }
     // no clear answer from Zernio (it saved the test post, then timed out): found by its mark and taken back
     Z.failAfterMake = true;
@@ -361,8 +369,8 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
       { caption: 'Friday!', mediaPaths: [FLY], music: { tiktok: 'trending', igAudio: { id: 'ig_gone', title: 'Gone', artist: 'X' }, song: { path: SONG, title: 'Free', credit: 'c' } } },
       { zoApiBase: `http://127.0.0.1:${ZPORT}/api/v1`, scheduleAt: Date.now() + 3600e3 });
     const tries = Z.posts.slice(n0);
-    check(tries.length === 2 && tries[0].rejected && !tries[1].body.platforms[0].platformSpecificData.audioConfiguration && tries[1].body.mediaItems[0].type === 'video' && /free song instead/.test(out.note || '') && /^Friday!\n\nc$/.test(tries[1].body.content),
-      'an Instagram song that can’t be used at posting time: the flyer still goes, with the free song (and its credit)', { out, n: tries.length, c: tries[1] && tries[1].body.content });
+    check(tries.length === 2 && tries[0].rejected && !tries[1].body.platforms[0].platformSpecificData.audioConfiguration && tries[1].body.mediaItems[0].type === 'video' && /own recording instead/.test(out.note || '') && /^Friday!\n\nc$/.test(tries[1].body.content),
+      'an Instagram song that can’t be used at posting time: the flyer still goes, with the church’s own recording (and its credit)', { out, n: tries.length, c: tries[1] && tries[1].body.content });
     // a song from one Instagram account's library is not sent to another Instagram account
     const n2 = Z.posts.length;
     await publisher.publishViaZernio({ apiKey: 'k', accountId: '9', username: 'youth', platform: 'instagram' },
