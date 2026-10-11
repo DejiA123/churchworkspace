@@ -120,7 +120,9 @@ function postJson(urlStr, obj, headers = {}, { timeoutMs = 30000 } = {}) {
         let json = null;
         try { json = JSON.parse(out); } catch (e) { /* empty/non-JSON body is fine */ }
         if (res.statusCode >= 200 && res.statusCode < 300) return resolve({ json: json || {}, headers: res.headers });
-        reject(new Error(apiErrMsg(json) || `HTTP ${res.statusCode}: ${out.slice(0, 300)}`));
+        const err = new Error(apiErrMsg(json) || `HTTP ${res.statusCode}: ${out.slice(0, 300)}`);
+        err.status = res.statusCode;
+        reject(err);
       });
     });
     req.setTimeout(timeoutMs, () => { req.destroy(new Error('Request timed out.')); });
@@ -330,12 +332,14 @@ async function fbUploadVideo(base, pageId, token, media, finishFields, opts = {}
 async function publishToFacebook({ pageId, token, apiBase }, post, opts = {}) {
   if (!pageId || !token) throw new Error('Facebook Page ID and access token are not set (Settings → Social accounts).');
   const base = (apiBase || DEFAULT_API).replace(/\/+$/, '');
-  const media = (post.mediaPaths && post.mediaPaths[0]) || null;
-  const caption = post.caption || post.title || '';
+  let media = (post.mediaPaths && post.mediaPaths[0]) || null;
 
   if (media && !fs.existsSync(media)) {
     throw new Error('Media file not found: ' + media);
   }
+  // a flyer with a song goes as the short video with it
+  ({ media, post } = await flyerWithSong(post, media, 'Facebook'));
+  const caption = post.caption || post.title || '';
 
   /*
    * HAND IT TO FACEBOOK INSTEAD OF PUBLISHING IT.
@@ -625,11 +629,13 @@ async function igVideoContainer({ base, igUserId, pageId, token, media, caption 
 async function publishToInstagram({ igUserId, pageId, token, apiBase }, post, opts = {}) {
   if (!igUserId || !token) throw new Error('Instagram account is not connected.');
   const base = (apiBase || DEFAULT_API).replace(/\/+$/, '');
-  const media = (post.mediaPaths && post.mediaPaths[0]) || null;
-  const caption = post.caption || post.title || '';
+  let media = (post.mediaPaths && post.mediaPaths[0]) || null;
 
   if (!media) throw new Error('Instagram needs a photo or video — add one to this post (text-only posts are Facebook-only).');
   if (!fs.existsSync(media)) throw new Error('Media file not found: ' + media);
+  // a flyer with a song goes as a Reel with it
+  ({ media, post } = await flyerWithSong(post, media, 'Instagram'));
+  const caption = post.caption || post.title || '';
   const isVideo = isVideoFile(media);
 
   let containerId;
@@ -730,7 +736,7 @@ async function publishToYouTube({ token, clientId, clientSecret }, post, opts = 
 
   if (!media) throw new Error('YouTube needs a video — add one to this post.');
   if (!fs.existsSync(media)) throw new Error('Media file not found: ' + media);
-  media = await flyerAsVideo(media, 'YouTube', flyerSongOf(post));
+  ({ media, post } = await flyerWithSong(post, media, 'YouTube', true));
   if (!isVideoFile(media)) {
     throw new Error('YouTube auto-posts need a video file (MP4/MOV…) — this post has an image. Untick the YouTube account, or attach a video.');
   }
@@ -847,7 +853,7 @@ async function publishToTikTok({ token, clientKey, clientSecret, tokenProxy, pro
 
   if (!media) throw new Error('TikTok needs a video — add one to this post.');
   if (!fs.existsSync(media)) throw new Error('Media file not found: ' + media);
-  media = await flyerAsVideo(media, 'TikTok', flyerSongOf(post));
+  ({ media, post } = await flyerWithSong(post, media, 'TikTok', true));
   if (!isVideoFile(media)) {
     throw new Error('TikTok auto-posts need a video file (MP4/MOV…) — this post has an image. Untick the TikTok account, or attach a video.');
   }
@@ -966,7 +972,7 @@ async function publishViaUploadPost({ apiKey, upUser, username, platform = 'tikt
   const videoOnly = platform === 'tiktok' || platform === 'youtube';
   if (!media) throw new Error(label + ' needs a ' + (videoOnly ? 'video' : 'photo or video') + ' — add one to this post.');
   if (!fs.existsSync(media)) throw new Error('Media file not found: ' + media);
-  if (videoOnly || flyerSongOf(post)) media = await flyerAsVideo(media, label, flyerSongOf(post));
+  if (videoOnly || flyerSongOf(post)) ({ media, post } = await flyerWithSong(post, media, label, true));
   else if (/\.(png|webp|gif)$/i.test(media)) media = await flyerAsJpeg(media).catch(() => media);
   const isVid = isVideoFile(media);
   if (videoOnly && !isVid) {
@@ -1238,10 +1244,29 @@ async function flyerAsShort(src, seconds = 10, song = null) {
  * post.music = { tiktok: 'trending'|'draft'|'free'|'none', igAudio: { id, title, artist }|null,
  *                song: { path, title, credit }|null }. No post.music: as before.
  */
+const IMAGE_RX = /\.(png|jpe?g|webp|gif)$/i;
+// the free song's credit, on the caption of the posts that carry it (and only those)
+function withSongCredit(text, song) {
+  const c = song && song.credit;
+  const t = String(text || '');
+  return c && !t.includes(c) ? [t.trim(), c].filter(Boolean).join('\n\n') : t;
+}
+/*
+ * A flyer with a song, for a route that posts a file as it is (Facebook's and
+ * Instagram's own, YouTube's, TikTok's, Upload-Post): the flyer becomes the
+ * 15-second video with the song, and the song's credit joins the caption.
+ */
+async function flyerWithSong(post, media, label, force) {
+  const song = flyerSongOf(post);
+  if (!media || !IMAGE_RX.test(media) || (!song && !force)) return { post, media };
+  const out = await flyerAsVideo(media, label, song);
+  return { media: out, post: song ? { ...post, caption: withSongCredit(post.caption, song) } : post };
+}
 function flyerSongOf(post) {
   const m = post && post.music;
   return m && m.song && m.song.path && m.tiktok !== 'none' ? m.song : null;
 }
+const IG_AUDIO_REJECT = /audio|music|song|track/i;
 function flyerPlan(platform, music) {
   const m = music || null;
   const song = m && m.song && m.song.path ? m.song : null;
@@ -1274,8 +1299,6 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
   if (!apiKey || !accountId) throw new Error(label + ' (easy connect) account is not connected.');
   const base = (opts.zoApiBase || DEFAULT_ZO_API).replace(/\/+$/, '');
   const original = (post.mediaPaths && post.mediaPaths[0]) || null;
-  const content = (post.caption || post.title || '').slice(0, 2200);
-
   if (original && !fs.existsSync(original)) throw new Error('Media file not found: ' + original);
   // a flyer, made fit for this platform — and its music (see flyerPlan)
   let media = original;
@@ -1286,6 +1309,8 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
       media = plan.media === 'short' ? await flyerAsShort(original, plan.song || plan.igAudio ? 15 : 10, plan.song) : await flyerAsJpeg(original);
     } catch (e) { throw new Error(label + ': the flyer could not be prepared (' + (e.message || e) + ').'); }
   }
+  // the free song's credit goes on the posts that carry the song, and only those
+  const content = withSongCredit(post.caption || post.title || '', plan && plan.song).slice(0, 2200);
   const needsVideo = platform === 'youtube';               // TikTok takes a flyer as a photo post
   const needsMedia = needsVideo || platform === 'instagram' || platform === 'tiktok'; // Facebook allows text-only
 
@@ -1379,8 +1404,9 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
   try {
     res = (await postJson(`${base}/posts`, body, bearer)).json;
   } catch (e) {
-    // the Instagram song could not be used (gone, or this account can't): the flyer still goes, with the free song if there is one
-    if (plan && plan.igAudio && !opts.noIgAudio) {
+    // Instagram refused the SONG (gone, or not for this account): the flyer still goes, with the free song if there is one.
+    // Anything else — a timeout, a 5xx — may have made the post already, so it is never sent twice.
+    if (plan && plan.igAudio && !opts.noIgAudio && e.status >= 400 && e.status < 500 && e.status !== 401 && e.status !== 429 && IG_AUDIO_REJECT.test(e.message || '')) {
       const out = await publishViaZernio({ apiKey, accountId, username, platform }, post, { ...opts, noIgAudio: true });
       return { ...out, note: 'Instagram would not take the song (' + (e.message || e) + ') — posted ' + (post.music && post.music.song ? 'with the free song instead.' : 'without it.') };
     }
@@ -1425,7 +1451,7 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
   }
   if (failStates.test(st)) {
     const why = (tk && (tk.error || tk.message)) || (label + ' rejected the post.');
-    if (plan && plan.igAudio && !opts.noIgAudio) {
+    if (plan && plan.igAudio && !opts.noIgAudio && IG_AUDIO_REJECT.test(String(why))) {
       const out = await publishViaZernio({ apiKey, accountId, username, platform }, post, { ...opts, noIgAudio: true });
       return { ...out, note: 'Instagram would not take the song (' + why + ') — posted ' + (post.music && post.music.song ? 'with the free song instead.' : 'without it.') };
     }

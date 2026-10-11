@@ -1084,25 +1084,60 @@ ipcMain.handle('library:rename', wrap(async (e, { kind, id, name }) => library.r
  * free song is fetched here, on the server, by name — a path from the phone
  * is never taken — and its credit goes on the caption.
  */
-async function withFlyerMusic(post) {
-  if (!post || post.music === undefined) return post;
+// the song a flyer post carries is kept with the posts — a song later taken out of the
+// music library must not leave a booked flyer silent (or failing) on the day
+function keepFlyerSong(file) {
+  const dir = path.join(app.getPath('userData'), 'flyer-songs');
+  fs.mkdirSync(dir, { recursive: true });
+  const st = fs.statSync(file);
+  const out = path.join(dir, require('crypto').createHash('sha1').update(file + '|' + st.size + '|' + st.mtimeMs).digest('hex').slice(0, 20) + (path.extname(file) || '.mp3'));
+  if (!fs.existsSync(out)) { fs.copyFileSync(file, out + '.part'); fs.renameSync(out + '.part', out); }
+  // three months is long past any post's day
+  try { for (const f of fs.readdirSync(dir)) { const fp = path.join(dir, f); if (Date.now() - fs.statSync(fp).mtimeMs > 90 * 86400e3) fs.rmSync(fp, { force: true }); } } catch (e) {}
+  return out;
+}
+async function flyerSongEntry(want) {
+  if (want.lib) return (library.list().music || []).find((x) => x.id === want.lib) || null;
+  if (want.free && want.free !== 'auto') return freemusic.get(getCtx(), video, library, String(want.free));
+  // "pick one for me" (an edit that now needs a song): a worship-style song that can be fetched
+  const pool = freemusic.TRACKS.filter((t) => t.mood === 'uplift').map((t) => [Math.random(), t]).sort((x, y) => x[0] - y[0]).map((x) => x[1]).slice(0, 4);
+  let last = null;
+  for (const t of pool) { try { return await freemusic.get(getCtx(), video, library, t.id); } catch (e) { last = e; } }
+  throw last || new Error('No free song could be fetched.');
+}
+// does this flyer need the free song anywhere? (everywhere but a TikTok that takes TikTok's own music;
+// an Instagram with its own song keeps it too, for if Instagram will not take that song)
+function flyerNeedsSong(music, accountIds) {
+  if (!music || music.tiktok === 'none') return false;
+  if (music.tiktok === 'free') return true;
+  return (accountIds || []).map((id) => accounts.byId(id)).filter(Boolean).some((a) => !(a.platform === 'tiktok' && a.via === 'zernio'));
+}
+async function withFlyerMusic(post, before) {
+  if (!post) return post;
+  if (post.music === undefined) {
+    // an edit that adds an account needing the free song (Facebook, YouTube…) to a flyer that had none: one is found
+    const m = before && before.music;
+    if (m && !m.song && post.accountIds && flyerNeedsSong(m, post.accountIds)) {
+      try {
+        const e = await flyerSongEntry({ free: 'auto' });
+        post.music = Object.assign({}, m, { song: { path: keepFlyerSong(e.file), title: e.name || '', credit: e.credit || freemusic.creditFor(e) || '' } });
+      } catch (e) { /* posted without it, as before */ }
+    }
+    return post;
+  }
   const m = post.music;
   if (!m || typeof m !== 'object') { post.music = null; return post; }
   const tiktok = ['trending', 'draft', 'free', 'none'].includes(m.tiktok) ? m.tiktok : 'trending';
   const ig = m.igAudio && m.igAudio.id ? { id: String(m.igAudio.id).slice(0, 80), title: String(m.igAudio.title || '').slice(0, 120), artist: String(m.igAudio.artist || '').slice(0, 120) } : null;
   let song = null;
   const want = m.song || null;
-  if (want && (want.free || want.lib)) {
-    let entry = null;
-    if (want.free) entry = await freemusic.get(getCtx(), video, library, String(want.free));
-    else entry = (library.list().music || []).find((x) => x.id === want.lib) || null;
+  if (want && (want.free || want.lib) && tiktok !== 'none') {
+    const entry = await flyerSongEntry(want);
     if (!entry || !entry.file || !fs.existsSync(entry.file)) throw new Error('The song for the flyer could not be found — pick another.');
-    song = { path: entry.file, title: entry.name || '', credit: entry.credit || freemusic.creditFor(entry) || '' };
+    song = { path: keepFlyerSong(entry.file), title: entry.name || '', credit: entry.credit || freemusic.creditFor(entry) || '' };
   }
+  // (its credit goes on the caption of each post that carries the song — publisher.js withSongCredit)
   post.music = { tiktok, igAudio: ig, song };
-  if (song && song.credit && typeof post.caption === 'string' && !post.caption.includes(song.credit)) {
-    post.caption = [post.caption.trim(), song.credit].filter(Boolean).join('\n\n');
-  }
   return post;
 }
 // Instagram's own song library, through Zernio (licensed by Meta — a song from it is never flagged)
@@ -2933,8 +2968,9 @@ ipcMain.handle('scheduler:add', wrap(async (e, { post }) => scheduler.add(await 
 // Moving or rewording a post gives back whatever booking a platform is
 // holding for it and takes a new one — see Scheduler.reschedule.
 ipcMain.handle('scheduler:update', wrap(async (e, { id, patch }) => {
-  const clean = await withFlyerMusic(Object.assign({}, patch)); delete clean.owner;
-  return scheduler.reschedule(ownPost(id), clean);
+  const own = ownPost(id);
+  const clean = await withFlyerMusic(Object.assign({}, patch), scheduler.list().find((p) => p.id === own)); delete clean.owner;
+  return scheduler.reschedule(own, clean);
 }));
 ipcMain.handle('scheduler:remove', wrap(async (e, { id }) => scheduler.remove(ownPost(id))));
 ipcMain.handle('scheduler:publish', wrap(async (e, { id }) => scheduler.publishNow(ownPost(id))));

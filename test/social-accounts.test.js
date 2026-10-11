@@ -1584,6 +1584,21 @@ function httpFollow(urlStr, hops = 3) {
     transfers.reduce((n, r) => n + (r.chunkLen || 0), 0) === bigBytes,
     String(transfers.reduce((n, r) => n + (r.chunkLen || 0), 0)));
 
+  /* --- a flyer with a song, to a Page linked directly: the 15-second video with it, credited --- */
+  {
+    const songF = path.join(tmp, 'song.mp3');
+    require('child_process').execFileSync(require('../src/main/ffmpeg').resolveFfmpeg(), ['-v', 'error', '-f', 'lavfi', '-i', 'sine=f=330:d=30', '-y', songF]);
+    const beforeFly = received.length;
+    const flyPost = await publisher.publishToFacebook(
+      { pageId: 'pagea', token: PAGE_TOKENS.pagea, apiBase: graph },
+      { caption: 'Night of Worship', mediaPaths: [photo], music: { tiktok: 'trending', igAudio: null, song: { path: songF, title: 'Inspired', credit: 'Music: “Inspired” by Kevin MacLeod' } } });
+    const flySes = fb.last();
+    const toPhotos = received.slice(beforeFly).some((r) => r.url === '/v19.0/pagea/photos');
+    check('[P] a flyer with a song goes to a directly linked Page as the video with it — credited',
+      !!(flyPost && flyPost.id) && !toPhotos && !!flySes && flySes.finished && /Kevin MacLeod/.test(flySes.description || '') && /Night of Worship/.test(flySes.description || ''),
+      { id: flyPost && flyPost.id, toPhotos, desc: flySes && flySes.description });
+  }
+
   /* --- P3: a reply lost mid-upload must not lose the post --------------- */
   const beforeDrop = received.length;
   fb.dropReplyAt = 3 * 1024 * 1024;   // the uplink eats one answer, once

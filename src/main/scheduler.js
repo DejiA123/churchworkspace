@@ -296,6 +296,8 @@ class Scheduler {
             ok: true, id: res.id, url: res.url, via: res.via, zoPostId: res.zoPostId || null,
             name: acc.name, platform: acc.platform,
             publishAt: res.publishAt, at: new Date().toISOString(),
+            // a flyer for the TikTok inbox, or a song Instagram would not take — told, not dropped
+            ...(res.inbox ? { inbox: true } : {}), ...(res.note ? { note: res.note } : {}),
           };
           booked++;
           // On disk per account: a booking this app forgets is a post that
@@ -455,6 +457,7 @@ class Scheduler {
             ok: true, id: booked[acc.id].id, url: booked[acc.id].url,
             name: acc.name, platform: acc.platform,
             postedAt: booked[acc.id].publishAt, byPlatform: true,
+            ...(booked[acc.id].inbox ? { inbox: true } : {}), ...(booked[acc.id].note ? { note: booked[acc.id].note } : {}),
           };
           continue;
         }
@@ -467,6 +470,7 @@ class Scheduler {
           results[acc.id] = {
             ok: true, id: res.id, url: res.url,
             name: acc.name, platform: acc.platform, postedAt: new Date().toISOString(),
+            ...(res.inbox ? { inbox: true } : {}), ...(res.note ? { note: res.note } : {}),
           };
         } catch (err) {
           const msg = (err && err.message) || String(err);
@@ -491,15 +495,21 @@ class Scheduler {
           status: 'posted', notified: true, autoPosted: true, results,
           ...legacyFields, postedAt: new Date().toISOString(), error: null, nextAttemptAt: null,
         });
-        const where = targets.map((t) => t.name).join(', ');
+        // a flyer in the TikTok inbox is not posted yet: someone adds the song there
+        const inbox = targets.filter((t) => results[t.id] && results[t.id].inbox);
+        const live = targets.filter((t) => !(results[t.id] && results[t.id].inbox));
+        const where = live.map((t) => t.name).join(', ');
+        const notes = targets.map((t) => results[t.id] && results[t.id].note && !results[t.id].inbox ? `${t.name}: ${results[t.id].note}` : '').filter(Boolean);
+        const inboxLine = inbox.length ? ` In ${inbox.map((t) => t.name).join(', ')}’s TikTok inbox — open TikTok, tap the notification, add your song and post.` : '';
         // Say which it was. "Posted" when the app did it and "the platform is
         // publishing it now" are different facts, and the operator deserves
         // the one that is true — especially if they never had the app open.
-        const allByPlatform = targets.every((t) => results[t.id] && results[t.id].byPlatform);
-        const how = allByPlatform
-          ? `${where} booked this in advance and ${targets.length > 1 ? 'are' : 'is'} publishing it now.`
-          : `Auto-published to ${where}.`;
-        this._notify('✅ Posted: ' + post.title,
+        const allByPlatform = live.every((t) => results[t.id] && results[t.id].byPlatform);
+        const how = (!live.length ? 'Waiting for you in TikTok.'
+          : allByPlatform
+            ? `${where} booked this in advance and ${live.length > 1 ? 'are' : 'is'} publishing it now.`
+            : `Auto-published to ${where}.`) + inboxLine + (notes.length ? ' ' + notes.join(' ') : '');
+        this._notify((live.length ? '✅ Posted: ' : '📥 In your TikTok inbox: ') + post.title,
           others.length
             ? `${how} ${others.join(', ')} still need a one-tap publish.`
             : how,

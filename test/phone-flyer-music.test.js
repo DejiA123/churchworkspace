@@ -84,9 +84,11 @@ function zernio() {
         const j = JSON.parse(body.toString() || '{}');
         const plat = j.platforms && j.platforms[0];
         const ac = plat && plat.platformSpecificData && plat.platformSpecificData.audioConfiguration;
+        if (Z.fail500) { Z.posts.push({ rejected: true, body: j }); return send(500, { error: 'Internal error' }); }
         if (ac && ac.audioId === 'ig_gone') { Z.posts.push({ rejected: true, body: j }); return send(400, { error: 'The audio is no longer available' }); }
         Z.posts.push({ body: j });
-        return send(200, { post: { _id: 'zp' + Z.posts.length, platforms: [{ platform: plat.platform, status: 'scheduled' }] } });
+        const draft = j.tiktokSettings && j.tiktokSettings.draft;
+        return send(200, { post: { _id: 'zp' + Z.posts.length, platforms: [{ platform: plat.platform, status: j.publishNow ? (draft ? 'sent_to_inbox' : 'published') : 'scheduled' }] } });
       }
       send(404, { error: 'not here: ' + u.pathname });
     });
@@ -171,9 +173,15 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
     const made = posts.find((p) => /Night of Worship this Friday/.test(p.caption || ''));
     check(!!made && made.music && made.music.tiktok === 'draft' && made.music.igAudio && made.music.igAudio.id === 'ig_made_a_way' && made.music.song && fs.existsSync(made.music.song.path),
       'the post carries its music: TikTok inbox, the Instagram song, and a free song fetched on the server', made && made.music);
-    check(!!made && /Kevin MacLeod/.test(made.caption), 'the free song’s credit is on the caption', made && made.caption);
     const by = (pl) => Z.posts.filter((p) => !p.rejected && p.body.platforms[0].platform === pl);
     const tk = by('tiktok')[0], ig = by('instagram')[0], fbs = by('facebook'), yt = by('youtube')[0];
+    check(!!made && !/Kevin MacLeod/.test(made.caption) && fbs.length && fbs.every((p) => /Kevin MacLeod/.test(p.body.content)) && yt && /Kevin MacLeod/.test(yt.body.content)
+      && tk && !/Kevin MacLeod/.test(tk.body.content) && ig && !/Kevin MacLeod/.test(ig.body.content),
+      'the free song’s credit is on the posts that carry it (Facebook, YouTube) — not on TikTok’s or Instagram’s', { fb: fbs.map((p) => p.body.content), tk: tk && tk.body.content, ig: ig && ig.body.content });
+    const inboxNote = await page.evaluate(async () => { const l = await window.api.scheduler.list(); return l; });
+    const mine = inboxNote.find((p) => p.id === (made && made.id));
+    check(!!mine && mine.handoffs && mine.handoffs.zotk_1 && mine.handoffs.zotk_1.inbox === true && /TikTok inbox/.test(mine.handoffs.zotk_1.note || ''),
+      'the TikTok booking is kept as "in your inbox", not as posted', mine && mine.handoffs && mine.handoffs.zotk_1);
     check(!!tk && tk.body.tiktokSettings.media_type === 'PHOTO' && tk.body.tiktokSettings.draft === true && tk.body.tiktokSettings.auto_add_music === false
       && tk.body.platforms[0].platformSpecificData.draft === true && tk.body.mediaItems[0].type === 'image',
       'TikTok: the flyer goes to its inbox as a photo post (the song is added there)', tk && { s: tk.body.tiktokSettings, p: tk.body.platforms[0].platformSpecificData });
@@ -200,6 +208,19 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
       try { const a = await window.api.social.igAudio('zoig_3', 'gospel'); return !!(a && a.songs && a.songs.length); } catch (e) { return e.message; }
     });
     check(viaApi === true, 'the Instagram song search answers through the phone API', viaApi);
+
+    // an edit that adds a Facebook page to a TikTok-only flyer: it gets the free song then
+    const edited = await page.evaluate(async (f) => {
+      const r = await window.api.scheduler.add({ title: 'TikTok only', caption: 'x', mediaPaths: [f], accountIds: ['zotk_1'], platforms: ['tiktok'],
+        scheduledAt: new Date(Date.now() + 2 * 86400e3).toISOString(), music: { tiktok: 'trending', igAudio: null, song: null } });
+      const before = r.music && r.music.song;
+      await window.api.scheduler.update(r.id, { accountIds: ['zotk_1', 'zofb_2'], platforms: ['tiktok', 'facebook'], caption: 'x' });
+      const after = (await window.api.scheduler.list()).find((p) => p.id === r.id);
+      return { before, after: after && after.music };
+    }, FLY);
+    check(!edited.before && edited.after && edited.after.song && /\.mp3$/.test(edited.after.song.path || ''), 'an edit that adds Facebook to a TikTok-only flyer gives it the free song', edited);
+    // the song a post carries is its own copy: taken out of the library, the post keeps it
+    check(!!made && made.music && made.music.song && /flyer-songs/.test(made.music.song.path), 'a booked flyer keeps its own copy of the song', made && made.music && made.music.song);
 
     // [7] No music
     const before7 = Z.posts.length;
@@ -246,8 +267,31 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
       { caption: 'Friday!', mediaPaths: [FLY], music: { tiktok: 'trending', igAudio: { id: 'ig_gone', title: 'Gone', artist: 'X' }, song: { path: SONG, title: 'Free', credit: 'c' } } },
       { zoApiBase: `http://127.0.0.1:${ZPORT}/api/v1`, scheduleAt: Date.now() + 3600e3 });
     const tries = Z.posts.slice(n0);
-    check(tries.length === 2 && tries[0].rejected && !tries[1].body.platforms[0].platformSpecificData.audioConfiguration && tries[1].body.mediaItems[0].type === 'video' && /free song instead/.test(out.note || ''),
-      'an Instagram song that can’t be used at posting time: the flyer still goes, with the free song', { out, n: tries.length });
+    check(tries.length === 2 && tries[0].rejected && !tries[1].body.platforms[0].platformSpecificData.audioConfiguration && tries[1].body.mediaItems[0].type === 'video' && /free song instead/.test(out.note || '') && /^Friday!\n\nc$/.test(tries[1].body.content),
+      'an Instagram song that can’t be used at posting time: the flyer still goes, with the free song (and its credit)', { out, n: tries.length, c: tries[1] && tries[1].body.content });
+    // a failure that is NOT about the song (Zernio down, a timeout): never posted a second time
+    Z.fail500 = true;
+    const n1 = Z.posts.length;
+    let err500 = null;
+    try {
+      await publisher.publishViaZernio({ apiKey: 'k', accountId: '3', username: 'x', platform: 'instagram' },
+        { caption: 'Friday!', mediaPaths: [FLY], music: { tiktok: 'trending', igAudio: { id: 'ig_made_a_way', title: 'Made a Way', artist: 'Travis Greene' }, song: { path: SONG, title: 'Free', credit: 'c' } } },
+        { zoApiBase: `http://127.0.0.1:${ZPORT}/api/v1`, scheduleAt: Date.now() + 3600e3 });
+    } catch (e) { err500 = e.message; }
+    Z.fail500 = false;
+    check(!!err500 && Z.posts.length === n1 + 1, 'a failure that is not about the song is not posted a second time', { err500, sent: Z.posts.length - n1 });
+    // the inbox told plainly: a TikTok flyer in the inbox is "waiting for you in TikTok", not "posted"
+    const { Scheduler } = require(ROOT + '/src/main/scheduler.js');
+    const told = [];
+    const mem2 = { posts: [], socialAccounts: [{ id: 'zotk_1', platform: 'tiktok', via: 'zernio', name: 'The Power House', token: 'k', zoAccountId: '1' }], settings: { accounts: { zoApiBase: `http://127.0.0.1:${ZPORT}/api/v1` } } };
+    const store2 = { get: (k) => mem2[k], set: (k, v) => { mem2[k] = v; } };
+    const acc2 = new Accounts(store2);
+    const sch = new Scheduler(store2, () => null, { notify: (t, b) => told.push(t + ' | ' + b), intervalMs: 100000, accounts: acc2 });
+    const rec = sch.add({ title: 'Inbox flyer', caption: 'x', accountIds: ['zotk_1'], mediaPaths: [FLY], music: { tiktok: 'draft', igAudio: null, song: null }, scheduledAt: new Date(Date.now() - 1000).toISOString() });
+    await sleep(300);
+    await sch.autoPublish(rec.id).catch((e) => told.push('ERR ' + e.message));
+    for (let k = 0; k < 40 && !told.length; k++) await sleep(250);
+    check(told.some((t) => /In your TikTok inbox: Inbox flyer/.test(t) && /add your song and post/.test(t)), 'the notice says it is waiting in the TikTok inbox, with what to do', told);
   } catch (e) { check(false, 'the server checks ran', e.stack || e.message); }
   zs.close();
   try { fs.rmSync(WORK, { recursive: true, force: true }); } catch (e) {}
