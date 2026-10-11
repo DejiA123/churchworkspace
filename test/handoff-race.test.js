@@ -27,7 +27,8 @@ const SLOW = { a1: 60, a2: 400, a3: 400 };
 const M = { cancelMs: 0, cancelFail: 0, maybeMade: 0, uploads: [] };
 // what Zernio would find for "the post it may have made": same words, same account, same time
 publisher.zernioFind = async (acc, look) => {
-  for (const [id, b] of live) if (b.acc === acc.id && b.caption === look.content && b.when === look.at) return id;
+  const skip = new Set((look.exclude || []).map(String));
+  for (const [id, b] of live) if (!skip.has(id) && b.acc === acc.id && b.caption === look.content && b.when === look.at) return id;
   return null;
 };
 publisher.canSchedule = () => ({ can: true, via: 'zernio' });
@@ -271,6 +272,62 @@ const liveFor = (acc) => Array.from(live.values()).filter((b) => b.acc === acc);
     s.add({ title: 'T', caption: 'now', accountIds: ['a1'], mediaPaths: [], scheduledAt: new Date(Date.now() - 1000).toISOString() });
     await s._tick();
     check(direct.length === 1, '[17] a due post is published by the next tick, not a tick later', direct);
+  }
+  // [18] removing a post that has gone out, from the list, never touches the live post
+  live = new Map(); direct = [];
+  {
+    const s = mk();
+    const p = s.add({ title: 'T', caption: 'c', accountIds: ['a1'], mediaPaths: [], scheduledAt: new Date(Date.now() + 400).toISOString() });
+    await sleep(200);                          // booked
+    await sleep(400);                          // its time comes
+    await s.autoPublish(p.id).catch(() => {});
+    const out = s.list().find((x) => x.id === p.id);
+    await s.remove(p.id);
+    await s._tick();
+    check(out.status === 'posted' && liveFor('a1').length === 1 && !(s.store.get('cancelQueue') || []).length, '[18] a posted post removed from the list: the live post is left alone', { status: out.status, live: Array.from(live.values()), q: s.store.get('cancelQueue') });
+  }
+  // [19] no clear answer while it is being deleted: what it may have made is still taken back
+  live = new Map(); direct = [];
+  {
+    const s = mk();
+    M.maybeMade = 1;
+    const p = s.add({ title: 'T', caption: 'gone', accountIds: ['a2'], mediaPaths: [], scheduledAt: new Date(Date.now() + 3600e3).toISOString() });
+    await sleep(100);                          // a2 uploading (400ms)
+    await s.remove(p.id);
+    await sleep(800);
+    check(live.size === 0, '[19] deleted during an upload that got no clear answer: what it made is found and taken back', { live: Array.from(live.values()), q: s.store.get('cancelQueue') });
+  }
+  // [20] reworded during an upload that got no clear answer: never out twice
+  live = new Map(); direct = [];
+  {
+    const s = mk();
+    M.maybeMade = 1;
+    const t2 = Date.now() + 7200e3;
+    const p = s.add({ title: 'T', caption: 'old', accountIds: ['a2'], mediaPaths: [], scheduledAt: new Date(Date.now() + 3600e3).toISOString() });
+    await sleep(100);
+    await s.reschedule(p.id, { caption: 'new', scheduledAt: new Date(t2).toISOString() });
+    for (let k = 0; k < 40 && !(liveFor('a2').length === 1 && liveFor('a2')[0].caption === 'new'); k++) await sleep(50);
+    await sleep(300);
+    check(liveFor('a2').length === 1 && liveFor('a2')[0].caption === 'new' && liveFor('a2')[0].when === t2, '[20] reworded during an upload with no clear answer: only the new version stands', Array.from(live.values()));
+  }
+  // [21] looking for "the one it may have made" never takes down the post's own good booking
+  live = new Map(); direct = [];
+  {
+    const s = mk();
+    M.maybeMade = 1;
+    const p = s.add({ title: 'T', caption: 'same', accountIds: ['a1'], mediaPaths: [], scheduledAt: new Date(Date.now() + 3600e3).toISOString() });
+    await sleep(200);
+    live.clear();                              // it was NOT made after all
+    const realFind = publisher.zernioFind;
+    publisher.zernioFind = async () => { throw new Error('Zernio busy'); };   // the first look fails: stays on the list
+    await s.reschedule(p.id, { title: 'New title' });   // same words and time, new title
+    publisher.zernioFind = realFind;
+    for (let k = 0; k < 40 && !liveFor('a1').length; k++) await sleep(50);
+    await sleep(200);
+    s.store.set('cancelQueue', (s.store.get('cancelQueue') || []).map((x) => ({ ...x, nextTry: null })));
+    await s._tick();
+    const rec = s.list().find((x) => x.id === p.id);
+    check(liveFor('a1').length === 1 && rec.handoffs.a1 && live.has(rec.handoffs.a1.zoPostId), '[21] the look for a maybe-made post never takes down the post’s own good booking', { live: Array.from(live.values()), h: rec.handoffs, q: s.store.get('cancelQueue') });
   }
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

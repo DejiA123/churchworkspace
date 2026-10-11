@@ -192,6 +192,9 @@ class Scheduler {
   _cqKey(x) { const b = x.booking || {}; return x.accId + '|' + (b.lookup ? 'look:' + b.lookup.at + ':' + b.lookup.content : String(b.zoPostId || b.id || '')); }
   _cancelLater(postId, accId, h, title) {
     if (!h || !h.ok) return;
+    // its time has come and gone: it is OUT — taking it back would delete the church's live post
+    const due = h.lookup ? h.lookup.at : h.publishAt;
+    if (due && new Date(due).getTime() <= this._now()) return;
     const entry = { postId, accId, booking: h, title: title || '', name: h.name || accId, platform: h.platform || '', tries: 0, at: new Date().toISOString() };
     const list = this._cq();
     if (list.some((x) => this._cqKey(x) === this._cqKey(entry))) return;
@@ -200,11 +203,14 @@ class Scheduler {
   }
   // a booking Zernio may have made without answering: what to look for, to take it back
   _maybeMadeToCancel(post, accId) {
+    if (post.status === 'posted' || ((post.results || {})[accId] && post.results[accId].ok)) return;   // out already
     const e = (post.handoffErrors || {})[accId];
     if (!e || !e.maybeMade || !e.maybeMade.content) return;
     const acc = this.accounts.byId(accId);
     this._cancelLater(post.id, accId, { ok: true, name: e.name || accId, platform: e.platform, lookup: { content: e.maybeMade.content, at: e.maybeMade.at, accountId: acc && acc.zoAccountId } }, post.title);
   }
+  // take back what is on the list for this post as soon as what is running for it has finished
+  _drainSoon(id) { this._q(id, () => this._drainCancels(id)).catch(() => {}); }
   _accFor(accId) {
     if (accId === 'legacy_fb') { const c = this.fbConfig(); return c ? { id: 'legacy_fb', platform: 'facebook', pageId: c.pageId, token: c.token } : null; }
     return this.accounts.byId(accId);
@@ -216,14 +222,20 @@ class Scheduler {
       if (due && x.nextTry && new Date(x.nextTry).getTime() > this._now()) continue;   // not yet: tried again less often each time
       const acc = this._accFor(x.accId);
       let gone = false, why = '', drop = false;
-      if (!acc || !acc.token) {
+      const dueAt = x.booking.lookup ? x.booking.lookup.at : x.booking.publishAt;
+      if (dueAt && new Date(dueAt).getTime() <= this._now()) {
+        gone = true;   // its time has passed: it is out (or never was) — a DELETE now would take down a live post
+      } else if (!acc || !acc.token) {
         // the account is no longer linked here: nothing can be asked of it any more — said once, then let go
         why = 'that account is no longer linked here'; drop = true;
       } else {
         try {
           let booking = x.booking;
           if (booking.lookup) {
-            const found = await publisher.zernioFind(acc, booking.lookup, this._pubOpts());
+            // never one this account is booked with now (the same words and time can be the post's good booking)
+            const keep = [];
+            for (const p of (this.store.get('posts') || [])) { const h = (p.handoffs || {})[x.accId]; if (h && h.ok) keep.push(String(h.zoPostId || h.id || '')); }
+            const found = await publisher.zernioFind(acc, { ...booking.lookup, exclude: keep }, this._pubOpts());
             if (!found) gone = true;     // looked, and Zernio has no such post: nothing to take back
             else booking = { ...booking, id: found, zoPostId: found, via: 'zernio' };
           }
@@ -262,7 +274,9 @@ class Scheduler {
   async remove(id) {
     const post = (this.store.get('posts') || []).find((p) => p.id === id);
     if (!post) return true;
-    for (const [accId, h] of Object.entries(post.handoffs || {})) this._cancelLater(id, accId, h, post.title);
+    // what has gone out stays out: removing a posted one from this list never touches the platform
+    const out = (accId) => post.status === 'posted' || ((post.results || {})[accId] && post.results[accId].ok);
+    for (const [accId, h] of Object.entries(post.handoffs || {})) if (!out(accId)) this._cancelLater(id, accId, h, post.title);
     for (const accId of Object.keys(post.handoffErrors || {})) this._maybeMadeToCancel(post, accId);
     this.store.set('posts', (this.store.get('posts') || []).filter((p) => p.id !== id));
     this._flush();
@@ -466,7 +480,7 @@ class Scheduler {
             || ((fresh.results || {})[acc.id] && fresh.results[acc.id].ok);
           const dropped = !outdated && !this.targetsFor(fresh).some((a) => a.id === acc.id);
           if (outdated || dropped) {
-            try { await publisher.cancelScheduled(acc, handoffs[acc.id], this._pubOpts()); } catch (e2) { this._cancelLater(id, acc.id, handoffs[acc.id], post.title); }
+            try { await publisher.cancelScheduled(acc, handoffs[acc.id], this._pubOpts()); } catch (e2) { this._cancelLater(id, acc.id, handoffs[acc.id], post.title); this._drainSoon(id); }
             delete handoffs[acc.id];
             booked--;
             if (outdated) break;    // the whole post changed (or went): nothing more for this version
@@ -479,6 +493,20 @@ class Scheduler {
           this._flush();
         } catch (e) {
           const why = (e && e.message) || String(e);
+          if (e && e.zoMaybeMade) {
+            // no clear answer — and the post changed or went while this was uploading: what it may
+            // have made is for something that no longer is, so it goes straight on the take-back list
+            this._syncPosts(true);
+            const fresh = (this.store.get('posts') || []).find((p) => p.id === id);
+            const outdated = !fresh || fresh.status !== 'scheduled' || this._contentOf(fresh) !== content;
+            if (outdated || !this.targetsFor(fresh).some((a) => a.id === acc.id)) {
+              this._cancelLater(id, acc.id, { ok: true, name: acc.name, platform: acc.platform,
+                lookup: { content: e.zoContent || (mm && mm.content) || '', at: when, accountId: acc.zoAccountId } }, post.title);
+              this._drainSoon(id);
+              if (outdated) break;
+              continue;
+            }
+          }
           errors[acc.id] = { why, cannotSchedule: !!(e && e.cannotSchedule), name: acc.name, platform: acc.platform,
             // no clear answer: what was sent, so it can be looked for (and taken back if the post changes)
             ...(e && e.zoMaybeMade ? { maybeMade: { content: e.zoContent || (mm && mm.content) || '', at: when } } : {}) };
@@ -492,12 +520,15 @@ class Scheduler {
         this._syncPosts(true);
         const now = (this.store.get('posts') || []).find((p) => p.id === id);
         if (!now) throw new Error('gone');
+        const tried = new Set(Object.keys(errors).concat(Object.keys(handoffs).filter((k) => handoffs[k] && handoffs[k].ok)));
+        const kept = {};
+        for (const [k, v] of Object.entries(now.handoffErrors || {})) if (!tried.has(k)) kept[k] = v;
         this.update(id, {
-          handoffErrors: errors,
+          handoffErrors: { ...kept, ...errors },
           nextHandoffAt: retryable ? new Date(this._now() + HANDOFF_BACKOFF_MS).toISOString() : null,
         });
         this._flush();
-      } catch (gone) { /* deleted mid-run; every booking was given back above */ }
+      } catch (gone) { /* deleted mid-run: what it booked (or may have) was put to be taken back above */ }
       if (booked) this._pushUpdate(id);
       return { booked, errors };
     } finally {
