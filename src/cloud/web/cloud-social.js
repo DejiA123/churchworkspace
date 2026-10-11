@@ -271,10 +271,7 @@
           <span class="ch-copy"><b>Video Studio</b><small>Edit the sermon, cut AI shorts, captions and exports</small></span>
           <span class="ch-foot"><span class="ch-foot-tx" id="chStudioFoot">Open a video to start</span><span class="ch-arrow">${mi('chev-right')}</span></span>
         </button>
-        <section class="ch-sec ch-projsec hidden" id="chProjects">
-          <h2>Your projects <button type="button" class="ch-link" data-home="projects">See all</button></h2>
-          <div class="pj-list" id="chProjList"></div>
-        </section>
+        <!-- (no project list here: the Video Studio card opens them all — "6 projects · open one or start new") -->
         <button type="button" class="ch-card ch-montage" data-home="montage">
           <span class="ch-glow"></span>
           <span class="ch-art">${mi('sparkles')}</span>
@@ -408,6 +405,7 @@
         + `<button type="button" class="pj-more pj-del" data-pjdel="${escAttr(r.id)}" aria-label="Delete">${mi('trash')}</button>` : '')
       + '</div>';
   }
+  // the home screen lists no projects (the Video Studio card says how many and opens them) — kept for a home that has the list
   function renderHomeProjects() {
     const sec = $('#chProjects'); if (!sec) return;
     const list = (S.projects || []).filter((r) => !r.videoMissing).slice(0, 3);

@@ -53,6 +53,15 @@ async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise
     // another project, which must survive
     const other = await page.evaluate(async (p) => (await window.api.sessions.save(null, 'Easter service', { video: { path: p } })).id, VID);
 
+    // the home screen: no project list (the Video Studio card says how many and opens them all)
+    await page.evaluate(() => window.MWSocial.go('home'));
+    await sleep(900);
+    const home = await page.evaluate(() => ({ list: !!document.querySelector('#cloudHome #chProjects'), text: (document.getElementById('cloudHome') || {}).innerText || '', foot: (document.getElementById('chStudioFoot') || {}).textContent || '' }));
+    check(!home.list && !/Your projects/.test(home.text) && /project/i.test(home.foot), 'the home screen lists no projects — the Video Studio card says how many and opens them', { foot: home.foot });
+    if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'home-no-projects.png') });
+    await page.evaluate(() => window.MWSocial.go('studio'));
+    await sleep(500);
+
     // open a video and change it: it becomes a project
     async function openAndEdit() {
       await page.evaluate((p) => window.VideoEditor.openPath(p), VID);
