@@ -12,7 +12,7 @@
  *       what each account gets
  *   [2] Instagram's own songs load by themselves (gospel first); a search for
  *       Travis Greene finds him; ▶ plays a preview; tapping one chooses it
- *   [3] TikTok: "TikTok picks a trending song", or "I'll pick the song in
+ *   [3] TikTok: "I'll pick a gospel song in TikTok" (by itself), or "TikTok picks a trending song" — or "I'll pick the song in
  *       TikTok" (its inbox — any song, Travis Greene and all)
  *   [4] Facebook and YouTube (no library an app may use) get a free song
  *   [5] scheduled: TikTok to the inbox as a photo post; Instagram a Reel with
@@ -155,7 +155,13 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
     check(/Instagram · a Reel with “Made a Way” — Travis Greene/.test(igNote.replace(/\s+/g, ' ')), 'tapping it chooses it: Instagram gets a Reel with that song', igNote);
     // [3]
     let note = (await page.evaluate(() => (document.querySelector('#csCompose #csbFlyerNote') || {}).innerText || '')).replace(/\s+/g, ' ');
-    check(/TikTok · a photo post with a trending song TikTok adds/.test(note), 'TikTok: a photo post with a trending song TikTok adds, to start with', note);
+    check(/TikTok · sent to your TikTok inbox/.test(note), 'TikTok: to start with, its inbox — so the church picks a GOSPEL song (TikTok’s own pick can be any genre)', note);
+    await page.tap('#csCompose [data-c="fm-tk"][data-v="trending"]');
+    await sleep(200);
+    const tkTrend = (await page.evaluate(() => (document.querySelector('#csCompose #csbFlyerMusic') || {}).innerText || '')).replace(/\s+/g, ' ');
+    check(/TikTok · a photo post with a trending song TikTok adds/.test(tkTrend) && /may not be gospel/.test(tkTrend), '…or TikTok picks a trending song — said plainly that it may not be gospel', tkTrend.slice(0, 300));
+    const quick = await page.evaluate(() => Array.from(document.querySelectorAll('#csCompose .csb-igquick .cs-chip')).map((c) => c.textContent));
+    check(/Gospel/.test(quick[0]) && quick.includes('Travis Greene') && quick.includes('Maverick City') && quick.includes('CeCe Winans'), 'Instagram’s song buttons: gospel first, then gospel artists trending now', quick);
     await page.tap('#csCompose [data-c="fm-tk"][data-v="draft"]');
     await sleep(200);
     note = (await page.evaluate(() => (document.querySelector('#csCompose #csbFlyerNote') || {}).innerText || '')).replace(/\s+/g, ' ');

@@ -180,7 +180,7 @@ function aiServer() {
     check(yt === 'Night of Worship: Friday 7 pm 🙌', 'the YouTube title is written too, shown for the YouTube account', yt);
     // a flyer can't go everywhere as it is: the sheet says what each place gets
     const note = await page.evaluate(() => { const n = document.querySelector('#csCompose #csbFlyerNote'); return n ? n.innerText.replace(/\s+/g, ' ') : ''; });
-    check(/TikTok · a photo post with a trending song TikTok adds/.test(note) && /YouTube · a 15-second Short with a free song/.test(note), 'the flyer note says TikTok gets a photo post with a trending song and YouTube a Short with a free song', note);
+    check(/TikTok · sent to your TikTok inbox/.test(note) && /YouTube · a 15-second Short with a free song/.test(note), 'the flyer note says TikTok goes to its inbox (to pick a gospel song) and YouTube gets a Short with a free song', note);
     // scroll to see the rest, for the record
     if (SHOTS) { await page.evaluate(() => { const b = document.querySelector('#csCompose .cp-body'); if (b) b.scrollTop = 520; }); await sleep(300); await page.screenshot({ path: path.join(SHOTS, 'b-real-5-accounts.png') }); }
     if (SHOTS) { await page.evaluate(() => { const n = document.querySelector('#csCompose #csbFlyerNote'); if (n) n.scrollIntoView({ block: 'center' }); }); await sleep(300); await page.screenshot({ path: path.join(SHOTS, 'b-real-5b-flyer-note.png') }); }

@@ -848,7 +848,8 @@
       musicMood: 'uplift',
       shelf: null, songs: [],
       // 🎵 a flyer's music, per platform (see flyerBlock): each app's own trending songs by default
-      fm: { mode: 'trending', tiktok: 'trending', ig: null, igQ: '', igList: null, igState: '', igFor: '', free: 'auto', lib: null, pickSong: false },
+      // (TikTok: the church picks a GOSPEL song in TikTok by default — TikTok's own pick can be any genre)
+      fm: Object.assign({ mode: 'trending', tiktok: 'draft', ig: null, igQ: '', igList: null, igState: '', igFor: '', free: 'auto', lib: null, pickSong: false }, flyerPrefs()),
       // ✨ the AI caption: written by itself the moment something is chosen
       ai: null,             // { stage: 'listen'|'read'|'write'|'done'|'fail', pct, from: 'video'|'flyer'|'picture', by, note, flyer }
       autoFor: '',          // the file the caption on screen was written for (a re-pick drops a late answer)
@@ -983,7 +984,10 @@
      * does what this says.
      */
     const flyers = () => (edit ? [] : st.files.filter((f) => !isVideo(f)));
-    const IG_QUICK = [['', '🔥 Trending'], ['gospel', 'Gospel'], ['worship', 'Worship'], ['Travis Greene', 'Travis Greene'], ['afro gospel', 'Afro gospel'], ['praise', 'Praise']];
+    // gospel first — then the gospel and worship artists trending now; "Trending" is everything (any genre)
+    const IG_QUICK = [['gospel', '🙏 Gospel'], ['Travis Greene', 'Travis Greene'], ['Maverick City Music', 'Maverick City'], ['Elevation Worship', 'Elevation Worship'],
+      ['CeCe Winans', 'CeCe Winans'], ['Forrest Frank', 'Forrest Frank'], ['Moses Bliss', 'Moses Bliss'], ['Dunsin Oyekan', 'Dunsin Oyekan'],
+      ['afro gospel', 'Afro gospel'], ['worship', 'Worship'], ['praise', 'Praise'], ['', '🔥 Trending (any genre)']];
     function freeSongName() {
       const fm = st.fm;
       if (fm.lib) { const x = st.songs.find((m) => m.id === fm.lib); return x ? String(x.name || 'your song') : 'your song'; }
@@ -1021,6 +1025,7 @@
       if (st.fm.mode === 'none') return false;
       return st.fm.mode === 'free' || accs.some((a) => !(a.platform === 'tiktok' && a.via === 'zernio'));
     }
+    function saveFlyerPrefs() { try { localStorage.setItem('mw.flyer.music', JSON.stringify({ mode: st.fm.mode, tiktok: st.fm.tiktok })); } catch (e) {} }
     function flyerBlock() {
       const pics = flyers();
       if (!pics.length) return '';
@@ -1044,12 +1049,12 @@
       }
       if (fm.mode === 'trending' && tk.some((a) => a.via === 'zernio')) {
         html += `<div class="csb-fm-sec"><div class="csb-fm-h">${platMark('tiktok', 'sm')}<b>TikTok song</b></div><div class="cs-chips">`
-          + chip(fm.tiktok === 'trending', 'data-c="fm-tk" data-v="trending"', '✨ TikTok picks a trending song')
-          + chip(fm.tiktok === 'draft', 'data-c="fm-tk" data-v="draft"', '🎯 I’ll pick the song in TikTok')
+          + chip(fm.tiktok === 'draft', 'data-c="fm-tk" data-v="draft"', '🙏 I’ll pick a gospel song in TikTok')
+          + chip(fm.tiktok === 'trending', 'data-c="fm-tk" data-v="trending"', '✨ TikTok picks a trending song (any genre)')
           + '</div>'
           + (fm.tiktok === 'draft'
-            ? '<p class="cs-hint">At its time it lands in your TikTok inbox: open TikTok → tap the notification → <b>Add sound</b> → search <b>Travis Greene</b> (or any song) → Post. Any song TikTok offers your account is licensed for it.</p>'
-            : '<p class="cs-hint">TikTok adds one of its trending songs by itself — it goes out on time with nothing for you to do.</p>')
+            ? '<p class="cs-hint">At its time it lands in your TikTok inbox: open TikTok → tap the notification → <b>Add sound</b> → search <b>Travis Greene</b> (or any gospel song) → Post. Any song TikTok offers your account is licensed for it — free, never flagged.</p>'
+            : '<p class="cs-hint">TikTok adds one of its trending songs by itself and it goes out on time — but TikTok chooses it, so it may not be gospel.</p>')
           + '</div>';
       }
       if (fm.mode === 'trending' && ig.some((a) => a.via === 'zernio')) html += igPicker();
@@ -1063,6 +1068,7 @@
           + (backupOnly ? '<p class="cs-hint">Used only if Instagram will not take its song on the day — so the flyer still has music.</p>'
             : fm.mode === 'trending' ? `<p class="cs-hint">${esc(names.length > 1 ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] + ' have' : (names[0] || 'This one') + ' has')} no song library an app may use, so a song that is free to post goes under the flyer — never flagged. Its credit is added to the caption there.</p>` : '');
         if (fm.pickSong) html += songShelf();
+        html += '<p class="cs-hint">These free songs are uplifting instrumentals, not gospel recordings. For real gospel on Facebook and YouTube, free: put your choir’s or worship team’s own recordings (or songs you have the rights to) in <b>My music</b> — they show here under <b>Your songs</b>.</p>';
         html += '</div>';
       }
       // 🧪 the whole chain, on the real accounts, nothing public (main.js social:musicCheck)
@@ -1540,8 +1546,8 @@
       if (c === 'spacing-other') { st.spacingOther = true; draw(); const i = panel.body.querySelector('input[data-c="gap"]'); if (i) { i.focus(); i.select(); } return; }
       if (c === 'mus') { st.music = b.dataset.v ? { free: b.dataset.v } : null; st.musFree = null; return draw(); }
       // 🎵 a flyer's music
-      if (c === 'fm-mode') { st.fm.mode = b.dataset.v; clearTimeout(igTimer); stopIgPreview(); return draw(); }
-      if (c === 'fm-tk') { st.fm.tiktok = b.dataset.v === 'draft' ? 'draft' : 'trending'; return draw(); }
+      if (c === 'fm-mode') { st.fm.mode = b.dataset.v; saveFlyerPrefs(); clearTimeout(igTimer); stopIgPreview(); return draw(); }
+      if (c === 'fm-tk') { st.fm.tiktok = b.dataset.v === 'draft' ? 'draft' : 'trending'; saveFlyerPrefs(); return draw(); }
       if (c === 'fm-check') {
         if (st.check && st.check.busy) return;
         st.check = { busy: true };
@@ -2181,6 +2187,13 @@
    * the next instead of to no music.
    */
   const FREE_RECENT = 'mw-free-recent';
+  // how this phone likes its flyers' music (Trending / free / none; TikTok's way), remembered
+  function flyerPrefs() {
+    try { const p = JSON.parse(localStorage.getItem('mw.flyer.music') || '{}') || {}; const o = {};
+      if (['trending', 'free', 'none'].includes(p.mode)) o.mode = p.mode;
+      if (['draft', 'trending'].includes(p.tiktok)) o.tiktok = p.tiktok;
+      return o; } catch (e) { return {}; }
+  }
   function freeDeal(tracks, mood) {
     const all = tracks || [];
     const pool = all.filter((t) => t.mood === mood);
