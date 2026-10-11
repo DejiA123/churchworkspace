@@ -974,7 +974,7 @@ async function publishViaUploadPost({ apiKey, upUser, username, platform = 'tikt
   const videoOnly = platform === 'tiktok' || platform === 'youtube';
   if (!media) throw new Error(label + ' needs a ' + (videoOnly ? 'video' : 'photo or video') + ' — add one to this post.');
   if (!fs.existsSync(media)) throw new Error('Media file not found: ' + media);
-  if (videoOnly || flyerSongOf(post)) ({ media, post } = await flyerWithSong(post, media, label, true));
+  if (videoOnly || flyerSongOf(post, label)) ({ media, post } = await flyerWithSong(post, media, label, true));
   else if (/\.(png|webp|gif)$/i.test(media)) media = await flyerAsJpeg(media).catch(() => media);
   const isVid = isVideoFile(media);
   if (videoOnly && !isVid) {
@@ -1272,15 +1272,16 @@ function withSongCredit(text, song, max = 2200) {
  * 15-second video with the song, and the song's credit joins the caption.
  */
 async function flyerWithSong(post, media, label, force) {
-  const song = flyerSongOf(post);
+  const song = flyerSongOf(post, label);
   if (!media || !IMAGE_RX.test(media) || (!song && !force)) return { post, media };
   let out;
   try { out = await flyerAsVideo(media, label, song); }
   catch (e) { if (force) throw e; return { post, media }; }   // the picture still goes where a picture is fine
   return { media: out, post: song ? { ...post, caption: withSongCredit(post.caption, song) } : post };
 }
-function flyerSongOf(post) {
+function flyerSongOf(post, label) {
   const m = post && post.music;
+  if (m && m.fbyt === 'none' && /^(facebook|youtube)$/i.test(String(label || ''))) return null;
   return m && m.song && m.song.path && m.tiktok !== 'none' && fs.existsSync(m.song.path) ? m.song : null;
 }
 const IG_AUDIO_REJECT = /audio|music|song|track/i;
@@ -1298,6 +1299,8 @@ function flyerPlan(platform, music, zoAccountId) {
   if (platform === 'instagram' && m.igAudio && m.igAudio.id && (!m.igAudio.acc || !zoAccountId || String(m.igAudio.acc) === String(zoAccountId))) {
     return { media: 'short', song: null, igAudio: m.igAudio, seconds: 15 };
   }
+  // Facebook and YouTube with no music asked for: the picture, or a silent Short
+  if ((platform === 'facebook' || platform === 'youtube') && m.fbyt === 'none') return { media: platform === 'youtube' ? 'short' : 'jpeg', song: null };
   if (song) return { media: 'short', song };
   return { media: platform === 'youtube' ? 'short' : 'jpeg', song: null };
 }

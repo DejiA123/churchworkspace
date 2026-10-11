@@ -1119,7 +1119,8 @@ async function flyerSongEntry(want) {
 function flyerNeedsSong(music, accountIds) {
   if (!music || music.tiktok === 'none') return false;
   if (music.tiktok === 'free') return true;
-  return (accountIds || []).map((id) => accounts.byId(id)).filter(Boolean).some((a) => !(a.platform === 'tiktok' && a.via === 'zernio'));
+  return (accountIds || []).map((id) => accounts.byId(id)).filter(Boolean).some((a) => !(a.platform === 'tiktok' && a.via === 'zernio')
+    && !(music.fbyt === 'none' && (a.platform === 'facebook' || a.platform === 'youtube')));
 }
 async function withFlyerMusic(post, before) {
   if (!post) return post;
@@ -1137,6 +1138,26 @@ async function withFlyerMusic(post, before) {
   const m = post.music;
   if (!m || typeof m !== 'object') { post.music = null; return post; }
   const tiktok = ['trending', 'draft', 'free', 'none'].includes(m.tiktok) ? m.tiktok : 'trending';
+  /*
+   * No song chosen for Instagram: a REAL gospel song from Instagram's own
+   * library, picked here — a different one each time (the last ones used are
+   * remembered). Licensed by Instagram, so never flagged. When the library
+   * cannot be reached, Instagram gets the free song instead.
+   */
+  if (m.igAudio && m.igAudio.auto && !m.igAudio.id && tiktok !== 'none') {
+    const igAcc = (post.accountIds || []).map((x) => accounts.byId(x)).find((a) => a && a.platform === 'instagram' && a.via === 'zernio');
+    let picked = null;
+    if (igAcc) {
+      try {
+        const r = await accounts.zernioIgAudio(igAcc.id, String(m.igAudio.auto).slice(0, 60) || 'gospel');
+        const songs = (r && r.songs) || [];
+        const recent = store.get('igSongsUsed') || [];
+        picked = songs.slice(0, 15).find((x) => !recent.includes(x.id)) || songs[0] || null;
+        if (picked) store.set('igSongsUsed', [picked.id].concat(recent.filter((x) => x !== picked.id)).slice(0, 12));
+      } catch (e) { picked = null; }
+    }
+    m.igAudio = picked ? { id: picked.id, title: picked.title, artist: picked.artist, acc: igAcc.id } : null;
+  }
   const ig = m.igAudio && m.igAudio.id ? { id: String(m.igAudio.id).slice(0, 80), title: String(m.igAudio.title || '').slice(0, 120), artist: String(m.igAudio.artist || '').slice(0, 120),
     // the account whose library it is from (another Instagram account gets the free song)
     acc: m.igAudio.acc && accounts.byId(String(m.igAudio.acc)) ? String(accounts.byId(String(m.igAudio.acc)).zoAccountId || '') : '' } : null;
@@ -1148,7 +1169,8 @@ async function withFlyerMusic(post, before) {
     song = { path: keepFlyerSong(entry.file), title: entry.name || '', credit: entry.credit || freemusic.creditFor(entry) || '' };
   }
   // (its credit goes on the caption of each post that carries the song — publisher.js withSongCredit)
-  post.music = { tiktok, igAudio: ig, song };
+  // Facebook and YouTube: the song (free or the church's own), or none
+  post.music = { tiktok, igAudio: ig, song, fbyt: m.fbyt === 'none' ? 'none' : 'song' };
   return post;
 }
 /*

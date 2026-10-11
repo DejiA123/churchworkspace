@@ -50,7 +50,8 @@ const probe = (file) => spawnSync(ffmpeg, ['-i', file], { encoding: 'utf8' }).st
 const Z = { posts: [], uploads: {}, audioQs: [], connects: [], n: 0 };
 const SONG = path.join(WORK, 'song.mp3');
 const IG_SONGS = {
-  gospel: [{ audioId: 'ig_gospel_1', title: 'Gospel Joy', artist: 'Choir Live', durationMs: 180000, coverUrl: '', downloadUrl: `http://127.0.0.1:${ZPORT}/preview/1.mp3` }],
+  gospel: [{ audioId: 'ig_gospel_1', title: 'Gospel Joy', artist: 'Choir Live', durationMs: 180000, coverUrl: '', downloadUrl: `http://127.0.0.1:${ZPORT}/preview/1.mp3` },
+    { audioId: 'ig_gospel_2', title: 'Way Maker', artist: 'Sinach', durationMs: 240000 }],
   'travis greene': [{ audioId: 'ig_made_a_way', title: 'Made a Way', artist: 'Travis Greene', durationMs: 245000, downloadUrl: `http://127.0.0.1:${ZPORT}/preview/2.mp3` },
     { audioId: 'ig_intentional', title: 'Intentional', artist: 'Travis Greene', durationMs: 290000 }],
   '': [{ audioId: 'ig_trend_1', title: 'Trending One', artist: 'Someone', durationMs: 150000 }],
@@ -281,6 +282,39 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
     // never booked twice: each account got the Night of Worship post exactly once
     const nw = Z.posts.filter((p) => !p.rejected && /^Night of Worship this Friday/.test(p.body.content || '')).map((p) => p.body.platforms[0].accountId);
     check(nw.length === 5 && new Set(nw).size === 5, 'no account is booked twice for the same post (a slow first booking and the next tick never overlap)', nw);
+
+    // [G] no Instagram song chosen: a REAL gospel song from Instagram's library, a different one each time;
+    //     a Facebook Page that gets the Instagram Reel through Instagram's sharing is not posted to again;
+    //     Facebook and YouTube with "No music": the picture and a silent Short, no credit
+    const gBefore = Z.posts.length;
+    for (const [k, cap] of [[0, 'Gospel auto one'], [1, 'Gospel auto two']]) {
+      await page.evaluate((f) => window.MWSocial.compose({ files: [f] }), FLY);
+      await page.waitForSelector('#csCompose #csbFlyerMusic', { timeout: 15000 }).catch(() => {});
+      await sleep(600);
+      if (k === 0) {
+        const igLine = (await page.evaluate(() => (document.querySelector('#csCompose #csbFlyerNote') || {}).innerText || '')).replace(/\s+/g, ' ');
+        check(/Instagram · a Reel with a real gospel song from Instagram’s library/.test(igLine), '[G] no song chosen: the note says Instagram gets a REAL gospel song from its library', igLine);
+        await page.tap('#csCompose [data-c="fm-fromig"][data-id="zofb_2"]');
+        await page.tap('#csCompose [data-c="fm-fbyt"][data-v="none"]');
+        await sleep(200);
+        const n2 = (await page.evaluate(() => (document.querySelector('#csCompose #csbFlyerNote') || {}).innerText || '')).replace(/\s+/g, ' ');
+        check(/Facebook · gets your Instagram Reel with its gospel song/.test(n2) && /Facebook · a picture post/.test(n2) && /YouTube · a 10-second Short, no music/.test(n2),
+          '[G] one Page gets the Instagram Reel (shared by Instagram); the other Facebook and YouTube: no music, as asked', n2);
+      }
+      await page.fill('#csCompose .csb-cap', cap + '\n\n#worship #jesus').catch(() => {});
+      await page.tap('#csCompose [data-c="go"]');
+      await page.waitForFunction(() => !document.querySelector('#csCompose.on'), null, { timeout: 60000 }).catch(() => {});
+      for (let t = 0; t < 120 && Z.posts.filter((p) => (p.body.content || '').startsWith(cap)).length < 4; t++) await sleep(500);
+    }
+    const gp = Z.posts.slice(gBefore);
+    const igs = gp.filter((p) => p.body.platforms[0].platform === 'instagram').map((p) => (p.body.platforms[0].platformSpecificData.audioConfiguration || {}).audioId);
+    check(igs.length === 2 && igs.every((x) => /^ig_gospel_/.test(x)) && igs[0] !== igs[1], '[G] Instagram got a real gospel song each time — a different one', igs);
+    const fbG = gp.filter((p) => p.body.platforms[0].platform === 'facebook');
+    check(fbG.length === 2 && fbG.every((p) => p.body.platforms[0].accountId === '4' && p.body.mediaItems[0].type === 'image' && !/MacLeod/.test(p.body.content)),
+      '[G] the Page that gets the Instagram Reel is not posted to; the other gets the picture, no instrumental', fbG.map((p) => [p.body.platforms[0].accountId, p.body.mediaItems[0].type]));
+    const ytG = gp.filter((p) => p.body.platforms[0].platform === 'youtube');
+    check(ytG.length === 2 && ytG.every((p) => p.body.mediaItems[0].type === 'video' && !/MacLeod/.test(p.body.content)), '[G] YouTube: a Short with no instrumental and no credit', ytG.length);
+    await page.evaluate(() => { try { localStorage.removeItem('mw.flyer.music'); } catch (e) {} });
 
     // [7] No music
     const before7 = Z.posts.length;
