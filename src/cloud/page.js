@@ -173,7 +173,7 @@ function build(opts = {}) {
   const scripts = RENDERER_SCRIPTS.map((f) => `  <script src="/r/${f}?v=${key}"></script>`).join('\n');
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en"${opts.topFull ? ' class="mw-topfull"' : ''}>
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
@@ -190,8 +190,9 @@ function build(opts = {}) {
        keeps the status bar's strip itself (black, like the studio's own top)
        and the app reaches the bottom edge. iOS reads this when the app is
        added to the home screen; cloud-boot.js (vpFix) tells an older install
-       to re-add it. -->
-  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+       to re-add it. (/?top=full asks for the see-through bar on one phone,
+       to try it: the app then runs up behind the clock — cloud-api.js.) -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="${opts.topFull ? 'black-translucent' : 'black'}" />
   <meta name="apple-mobile-web-app-title" content="Church Work Space" />
   <meta name="format-detection" content="telephone=no" />
   <link rel="manifest" href="/manifest.webmanifest" />

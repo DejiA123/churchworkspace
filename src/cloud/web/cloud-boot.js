@@ -4929,7 +4929,10 @@ let _hideTimer = null;
         island({
           id: 'vpshort', kind: 'info', ms: 14000,
           title: 'Re-add the app for the full screen',
-          sub: 'Your iPhone is leaving a strip at the bottom. Remove Church Work Space from your Home Screen, then add it again from Safari (Share → Add to Home Screen) and the tools sit on the bottom edge.',
+          // tried the see-through top (/?top=full) and this iPhone has the bug: the way back is the black bar
+          sub: document.documentElement.classList.contains('mw-topfull')
+            ? 'This iPhone cannot run the app up behind the clock without losing a strip at the bottom. In Safari, open ' + location.host + '/?top=bar, then remove Church Work Space from your Home Screen and add it again (Share → Add to Home Screen).'
+            : 'Your iPhone is leaving a strip at the bottom. Remove Church Work Space from your Home Screen, then add it again from Safari (Share → Add to Home Screen) and the tools sit on the bottom edge.',
         });
       };
       setTimeout(tell, 2500);

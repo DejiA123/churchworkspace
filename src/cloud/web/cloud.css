@@ -3687,3 +3687,16 @@ body.mw-cloud #vePresetModal .ve-pre-del.sure { background: #c62828; border-colo
 body.mw-cloud #vePresetModal .ve-pre-save input { background: #1c1d23; color: #fff; border: 1px solid rgba(255,255,255,.12); }
 body.mw-cloud #vePresetModal .ve-pre-card, body.mw-cloud #vePresetModal .ve-pre-save { background: #1c1d23; border-color: rgba(255,255,255,.08); }
 body.mw-cloud #vePresetModal .ve-pre-intro, body.mw-cloud #vePresetModal .ve-pre-line, body.mw-cloud #vePresetModal .ve-pre-empty, body.mw-cloud #vePresetModal .ve-pre-label { color: #a1a6b4; }
+
+/* ------------------------------------------------ up behind the clock (/?top=full)
+ * The see-through status bar draws the app under the clock — and iOS draws
+ * that clock WHITE, whatever is under it. So the strip it sits on is the
+ * app's blue (the same blue the Home banner and the sign-in page start with,
+ * so there it is seamless), and on a light page it keeps the time readable.
+ * In the studio its own dark top bar is already there.
+ */
+html.mw-topfull body.mw-cloud::before {
+  content: ''; position: fixed; left: 0; right: 0; top: 0; height: env(safe-area-inset-top);
+  z-index: 2147482000; pointer-events: none; background: var(--mw-top, #0a4fc4);
+}
+html.mw-topfull body.mw-cloud.mw-in-studio:not(.mw-panel) { --mw-top: transparent; }

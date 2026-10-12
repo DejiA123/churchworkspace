@@ -1020,8 +1020,22 @@ async function handle(req, res) {
   /* --- the app shell (open: it is a sign-in page until you sign in) ------ */
 
   if (p === '/' || p === '/index.html') {
-    const html = page.build({ version: cfg.appVersion || '0' });
-    return send(res, 200, 'text/html; charset=utf-8', html);
+    /*
+     * THE TOP OF THE SCREEN, ON AN iPHONE HOME-SCREEN APP. Opaque black by
+     * default (page.js says why: iOS 26's see-through bar left a dead strip
+     * at the bottom). /?top=full asks for the see-through bar on THIS phone
+     * — the app then runs up behind the clock, CapCut-style — and /?top=bar
+     * goes back. iOS takes the setting when the app is added to the Home
+     * Screen, so it is a cookie Safari hands to the app it adds.
+     */
+    const q = new URL(req.url, 'http://x').searchParams.get('top');
+    const had = /(?:^|;\s*)mw_top=full(?:;|$)/.test(String(req.headers.cookie || ''));
+    const full = q === 'full' || (q !== 'bar' && had);
+    const headers = {};
+    if (q === 'full') headers['Set-Cookie'] = 'mw_top=full; Path=/; Max-Age=31536000; SameSite=Lax; Secure';
+    if (q === 'bar') headers['Set-Cookie'] = 'mw_top=; Path=/; Max-Age=0; SameSite=Lax; Secure';
+    const html = page.build({ version: cfg.appVersion || '0', topFull: full });
+    return send(res, 200, 'text/html; charset=utf-8', html, headers);
   }
   if (p === '/cloud-boot.js') return sendWeb(req, res, 'cloud-boot.js');
   if (p === '/cloud-social.js') return sendWeb(req, res, 'cloud-social.js');
