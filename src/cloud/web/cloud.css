@@ -3643,3 +3643,29 @@ body.mw-cloud .mwg-reset { color: #1f6fe0; }
 .cp-panel .pf-tx small, .cp-panel .pf-sec > b { color: #6b7280; }
 .cp-panel .pf-mini { background: #f1f3f6; color: #0f1115; border: 0; box-shadow: none; }
 .cp-panel .pf-mini.danger { background: #fff1f0; color: #d92d20; }
+
+/* The Video Studio's projects: the page before the editor, light like Home
+   (the editor itself stays dark, as CapCut's does) */
+body.mw-cloud.mw-projects .cloud-proj { background: #fff !important; color: #0f1115; }
+.cloud-proj .cs-top h1 { color: #0f1115; }
+.cloud-proj .cs-back { background: #f1f3f6; color: #0f1115; }
+.cloud-proj .pv-new { background: #0f1115; color: #fff; box-shadow: none; }
+.cloud-proj .pv-new-art { background: rgba(255, 255, 255, .16); }
+.cloud-proj .pv-h { color: #0f1115; }
+.cloud-proj .pv-h small, .cloud-proj .pv-none, .cloud-proj .pj-hint { color: #6b7280; }
+.cloud-proj .pj-row { background: #f6f7f9; box-shadow: none; }
+.cloud-proj .pj-row.now { box-shadow: inset 0 0 0 1.5px #1f6fe0; }
+.cloud-proj .pj-main { color: #0f1115; }
+.cloud-proj .pj-pic { background-color: #e7e9ee; background-image: none; color: #1f6fe0; }
+.cloud-proj .pj-pic[style*="background-image"] { background-size: cover; background-position: center; }
+.cloud-proj .pj-tx small { color: #6b7280; }
+.cloud-proj .pj-now { color: #1f6fe0; }
+.cloud-proj .pj-go { background: #e9ecf1; }
+.cloud-proj .pj-more { background: #eef0f3; color: #0f1115; }
+.cloud-proj .pj-del { color: #d92d20; }
+.cloud-proj .pj-empty, .cloud-proj .pj-empty b { color: #0f1115; }
+.cloud-proj .pj-empty-art { background: #eaf2ff; color: #1f6fe0; }
+.cloud-proj .pv-cont { background: #f6f7f9; color: #0f1115; box-shadow: inset 0 0 0 1.5px #1f6fe0; }
+.cloud-proj .pv-cont-k { color: #1f6fe0; }
+.cloud-proj .pv-cont-go { background: #0f1115; color: #fff; }
+.cloud-proj .pv-cur-del { color: #d92d20; }

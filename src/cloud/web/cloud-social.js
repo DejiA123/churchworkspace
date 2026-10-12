@@ -687,7 +687,7 @@
       : `<span class="pj-pic" ${r.videoPath && !r.videoMissing ? `data-thumb="${escAttr(r.videoPath)}"` : ''}>${mi('film')}</span>`;
     return `<div class="pj-row${r.videoMissing ? ' missing' : ''}${openNow ? ' now' : ''}">`
       + `<button type="button" class="pj-main" data-proj="${escAttr(r.id)}"${r.videoMissing ? ' disabled' : ''}>${pic}`
-      + `<span class="pj-tx"><b>${esc(r.name || 'Untitled project')}</b>`
+      + `<span class="pj-tx"><b>${esc(projName(r.name))}</b>`
       + `<small>${openNow ? '<i class="pj-now">Open now</i> · ' : ''}${r.videoMissing ? 'Its video was deleted' : esc(`Edited ${agoWords(r.savedAt)}`) + (bits ? ' · ' + esc(bits) : '')}</small></span>`
       + (o.manage ? '' : `<span class="pj-go">${mi('chev-right')}</span>`) + '</button>'
       + (o.manage ? `<button type="button" class="pj-more" data-pjren="${escAttr(r.id)}" aria-label="Rename">${mi('pen')}</button>`
@@ -741,6 +741,13 @@
     if (S.view === 'projects') renderProjectsView(); else go('projects');
     return true;
   }
+  /* A project named after its video's file ("short-Test_short-20261012-154054")
+     reads as a person would say it; a name someone typed is left as it is. */
+  const projName = (n) => {
+    const t = String(n || '').trim();
+    if (!t) return 'Untitled project';
+    return /\d{8}[-_]\d{4,6}|^\d{12,14}[-_ ]|^(short|edited)[-_]|_/i.test(t) && C.friendlyName ? C.friendlyName(t) : t;
+  };
   function buildProjectsView() {
     const el = document.createElement('div');
     el.id = 'cloudProjView';
@@ -2721,7 +2728,7 @@
   const MT_MODES = [['talk', 'Viral'], ['music', 'Standard']];   // Viral first (on the left)
   const MT_KIND = {
     talk: { sub: 'The best lines, hook first — made to go viral' },
-    music: { sub: 'Your clips and photos, cut to music' },
+    music: { sub: 'Your clips and photos one after another, with music and words' },
   };
   const MT_TALK_LENS = [[15, '15s'], [30, '30s'], [45, '45s'], [60, '60s'], ['custom', 'Custom']];
   const MT_ORDERS = [['ai', 'AI decides'], ['mine', 'My order']];
@@ -2825,7 +2832,7 @@
       : `<div class="mt-empty">
           <span class="mt-empty-top"><span class="mt-empty-ic">${mi(talk ? 'film' : 'image')}</span>
             <span class="mt-empty-t"><b>${talk ? 'Add a video of someone speaking' : 'Add your clips and photos'}</b>
-            <small>${talk ? 'A sermon, a talk, a testimony — the AI finds the best lines' : 'Two or more — the AI cuts them to the music'}</small></span></span>
+            <small>${talk ? 'A sermon, a talk, a testimony — the AI finds the best lines' : 'Two or more. They play one after another, with music.'}</small></span></span>
           <span class="mt-empty-btns"><button type="button" class="mt-btn mt-btn-hi" data-mt="add">${mi('phone')}<span>From phone</span></button>
             <button type="button" class="mt-btn" data-mt="addsrv">${mi('folder')}<span>My videos</span></button></span></div>`;
 

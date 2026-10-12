@@ -328,7 +328,7 @@ app.whenReady().then(() => {
   require('./batch').init(path.join(userData, 'batches'), {
     onInterrupted: ({ space: who, label, since, made, keep }) => setTimeout(() => space.run(who, () => {
       const dirOut = ensureOutputDir();
-      const safe = (label || 'short').replace(/[^\w.-]+/g, '_').slice(0, 40);
+      const safe = fileSafeTitle(label || 'short');
       for (const f of fs.readdirSync(dirOut)) {
         const full = path.join(dirOut, f);
         if (keep.has(full)) continue;
@@ -542,6 +542,18 @@ function wrap(handler) {
 ipcMain.handle('job:cancel', wrap(async (e, { id }) => jobs.cancel(id)));
 
 const claimed = new Set(); // names handed out but not written yet (two exports in the same second)
+/**
+ * A short's title as a file name: "The Secret to Handling Constant Persecution"
+ * was cut to 40 characters wherever that fell ("…Constant_Persecut"), and the
+ * studio shows people that name. Up to 64 characters now, ending at a whole word.
+ */
+function fileSafeTitle(t) {
+  const s = String(t || '').replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '');
+  if (s.length <= 64) return s || 'short';
+  const cut = s.slice(0, 64);
+  const at = cut.lastIndexOf('_');
+  return (at > 30 ? cut.slice(0, at) : cut).replace(/_+$/, '');
+}
 function outPath(name) {
   const dirOut = ensureOutputDir();
   const ext = path.extname(name), base = name.slice(0, name.length - ext.length);
@@ -1628,7 +1640,7 @@ ipcMain.handle('llm:removeModel', wrap(async (e, { modelId }) => {
 // `pieces` (present when the user closed gaps on this clip) cuts the pauses out
 // inside the export's own pass — no joined intermediate to render first.
 ipcMain.handle('sermon:exportShort', wrap(async (e, { input, startSec, endSec, preset, quality, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, label, jobId, draft }) => {
-  const safe = (label || 'short').replace(/[^\w.-]+/g, '_').slice(0, 40);
+  const safe = fileSafeTitle(label || 'short');
   const output = outPath(`short-${safe}-${stamp()}.mp4`);
   await ffmod.asDraft(draft, () => video.exportShort(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, output, onProgress: onProgress(e, jobId) }));
   return output;
@@ -1657,7 +1669,7 @@ ipcMain.handle('fs:rmdir', wrap(async (e, { dir }) => { try { fs.rmSync(dir, { r
 
 // Export a speaker-following (auto-reframed) 9:16 short from face-track keyframes.
 ipcMain.handle('sermon:exportReframed', wrap(async (e, { input, startSec, endSec, preset, quality, keyframes, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, label, jobId, draft }) => {
-  const safe = (label || 'short').replace(/[^\w.-]+/g, '_').slice(0, 40);
+  const safe = fileSafeTitle(label || 'short');
   const output = outPath(`short-${safe}-${stamp()}.mp4`);
   await ffmod.asDraft(draft, () => video.exportShortReframed(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, keyframes, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, output, onProgress: onProgress(e, jobId) }));
   return output;
@@ -1665,7 +1677,7 @@ ipcMain.handle('sermon:exportReframed', wrap(async (e, { input, startSec, endSec
 
 // Export a short using a MANUAL pan/zoom crop the user dragged/zoomed in the preview.
 ipcMain.handle('sermon:exportFramed', wrap(async (e, { input, startSec, endSec, preset, quality, zoom, offsetX, offsetY, pieces, denoise, cover, fadeIn, fadeOut, motion, label, jobId, draft }) => {
-  const safe = (label || 'short').replace(/[^\w.-]+/g, '_').slice(0, 40);
+  const safe = fileSafeTitle(label || 'short');
   const output = outPath(`short-${safe}-${stamp()}.mp4`);
   const res = await ffmod.asDraft(draft, () => video.exportShortFramed(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, zoom, offsetX, offsetY, pieces, denoise, cover, fadeIn, fadeOut, motion, output, onProgress: onProgress(e, jobId) }));
   return res.output;

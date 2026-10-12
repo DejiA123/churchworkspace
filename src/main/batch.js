@@ -38,6 +38,10 @@ const STEPS = new Set([
   'video:overlayComposite', 'video:mixSounds', 'video:mixMusic', 'video:appendClips', 'video:attachThumb',
 ]);
 const KEEP_MS = 24 * 3600e3;
+/* A phone that stops handing shorts over (closed, locked, out of battery) left
+   its batch "Preparing on your phone… 0 of 18" for ever. Nothing to run and
+   nothing new for this long means it is not coming back. */
+const STALL_MS = 30 * 60e3;
 const batches = new Map();
 let seq = 0;
 let DIR = null;
@@ -64,7 +68,7 @@ function save() {
     try {
       const out = Array.from(batches.values()).map((b) => ({
         id: b.id, space: b.space, label: b.label, total: b.total, sealed: b.sealed, cancelled: b.cancelled,
-        createdAt: b.createdAt, finishedAt: b.finishedAt || null,
+        createdAt: b.createdAt, finishedAt: b.finishedAt || null, lastAt: b.lastAt || null, stalled: b.stalled || null,
         items: b.items.map((x) => ({ label: x.label, file: x.file, nSteps: x.nSteps, state: x.state, jobId: x.jobId, output: x.output || null, error: x.error || null, secs: x.secs || null, startedAt: x.startedAt || null, made: x.made || [] })),
       }));
       fs.writeFileSync(stateFile() + '.tmp', JSON.stringify(out));
@@ -118,7 +122,7 @@ function summary(b) {
   const pct = total ? Math.round(((done + failed + (running ? running.pct / 100 : 0)) / total) * 100) : 0;
   return {
     id: b.id, label: b.label, total, received: b.items.length, sealed: b.sealed,
-    done, failed, cancelled: b.cancelled, pct,
+    done, failed, cancelled: b.cancelled, pct, stalled: b.stalled || null,
     state: b.cancelled ? 'cancelled' : (b.sealed && done + failed === total ? 'done' : 'running'),
     current: running ? { label: running.label, pct: Math.round(running.pct), step: running.step } : null,
     items: b.items.map((x) => ({ label: x.label, state: x.state, output: x.output || null, error: x.error || null, secs: x.secs || null })),
@@ -133,6 +137,15 @@ function emit(b) {
 }
 
 function sweep() {
+  for (const b of batches.values()) {
+    if (b.sealed || b.cancelled || b.running) continue;
+    if (b.items.some((x) => x.state === 'queued' || x.state === 'running')) continue;
+    if (now() - (b.lastAt || b.createdAt) < STALL_MS) continue;
+    // the phone never finished handing over: keep what was made, close the rest
+    b.stalled = { planned: b.total, sent: b.items.length };
+    b.sealed = true; b.total = b.items.length; b.finishedAt = now();
+    emit(b);
+  }
   for (const [id, b] of batches) {
     if (b.finishedAt && now() - b.finishedAt > KEEP_MS) { batches.delete(id); save(); }
   }
@@ -169,6 +182,7 @@ function add({ id, label, steps } = {}, sender) {
   const file = path.join(dir(), `${b.id}-${n}.bin`);
   fs.writeFileSync(file, v8.serialize(steps));
   b.items.push({ label: String(label || `Short ${n + 1}`).slice(0, 120), file, nSteps: steps.length, state: 'queued', pct: 0, jobId: `${b.id}_${n}` });
+  b.lastAt = now();
   if (sender) b.sender = sender;
   emit(b);
   kick(b);

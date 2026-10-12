@@ -281,7 +281,13 @@ let _hideTimer = null;
     if (!b || !b.id || !window.__newTask) return;
     let tid = serverTasks.get(b.id);
     if (!tid) {
-      if (b.state !== 'running') return;
+      // a batch THIS phone started that never got all its shorts (the app was
+      // closed): said once, when the app is next opened, rather than vanishing
+      const toldKey = 'mw.batch.told.' + b.id;
+      let told = false; try { told = !!localStorage.getItem(toldKey); } catch (e) {}
+      const tellStalled = b.stalled && b.stalled.planned > b.stalled.sent && ownBatches().includes(b.id) && !told;
+      if (tellStalled) { try { localStorage.setItem(toldKey, '1'); } catch (e) {} }
+      if (b.state !== 'running' && !tellStalled) return;
       tid = window.__newTask(b.label || 'Exporting on the server', { background: true });
       serverTasks.set(b.id, tid);
       if (canSaveHere() && ownBatches().includes(b.id)) batchSaving.set(tid, 'export');
@@ -304,9 +310,12 @@ let _hideTimer = null;
       return;
     }
     batchSaving.delete(tid);
+    // the phone was closed before it handed every short over: say so, and what to do
+    const stalled = b.stalled && b.stalled.planned > b.stalled.sent;
     const note = b.state === 'cancelled' ? 'Stopped.'
+      : stalled ? `Stopped: the app was closed before all ${b.stalled.planned} shorts were sent. ${b.done ? `${b.done} made. ` : ''}Open the project and tap Export all to make the rest.`
       : `✅ ${b.done} short${b.done === 1 ? '' : 's'} exported on the server${b.failed ? ` · ${b.failed} could not be made` : ''}.`;
-    if (window.__endTask) window.__endTask(tid, { ok: b.state !== 'cancelled' && b.done > 0, state: b.state === 'cancelled' ? 'stopped' : (b.done ? 'done' : 'fail'), note });
+    if (window.__endTask) window.__endTask(tid, { ok: !stalled && b.state !== 'cancelled' && b.done > 0, state: b.state === 'cancelled' || stalled ? 'stopped' : (b.done ? 'done' : 'fail'), note });
     if (b.state === 'done') {
       const outs = (b.items || []).filter((it) => it.state === 'done' && it.output).map((it) => it.output);
       for (const o of outs.slice().reverse()) if (!cloud.downloads.some((d) => d.path === o)) cloud.downloads.unshift({ path: o, name: String(o).split(/[\\/]/).pop(), at: Date.now() });
@@ -5507,7 +5516,7 @@ let _hideTimer = null;
       };
     }
     const pick = async () => {
-      try { for (const b of (await window.__mwBatch.list()) || []) if (b.state === 'running' || serverTasks.has(b.id)) showServerBatch(b); } catch (e) {}
+      try { for (const b of (await window.__mwBatch.list()) || []) if (b.state === 'running' || serverTasks.has(b.id) || b.stalled) showServerBatch(b); } catch (e) {}
     };
     pick();
     document.addEventListener('visibilitychange', () => { if (!document.hidden) pick(); });

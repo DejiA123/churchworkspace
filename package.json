@@ -198,6 +198,7 @@
     "test:presentquote": "electron test/present-quote.test.js",
     "test:reframe-recovery": "node test/reframe-recovery.test.js",
     "test:trackclock": "node test/track-clock.test.js",
+    "test:batchstall": "node test/batch-stall.test.js",
     "test:reframe-lab": "node test/reframe-lab.js",
     "test:voice-sermon": "node test/voice-sermon.test.js",
     "test:voice-models": "node test/diag-voice-models.js",
