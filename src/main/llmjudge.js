@@ -294,7 +294,9 @@ function makeJudge({ model, maxEndingCalls = MAX_ENDING_CALLS } = {}) {
  */
 const CLOUD_RANK_W = 2.0;   // vs LLM_RANK_W 1.2 for the local reader — still not the last word
 function makeCloudJudge({ cloudwrite = require('./cloudwrite') } = {}) {
-  if (!cloudwrite.reachable()) return null;
+  // only resting for a moment (the free allowance refilling): the judge waits for it rather than being lost
+  const rest = cloudwrite.state();
+  if (!cloudwrite.reachable() && !(rest.hasKey && rest.cooling > 0 && rest.cooling <= 70000)) return null;
   const st0 = cloudwrite.state();
   const stats = { endings: 0, endingsChanged: 0, ranked: 0, titled: 0, failed: 0, calls: 0, why: '' };
   const ask = async (a) => {
@@ -305,7 +307,15 @@ function makeCloudJudge({ cloudwrite = require('./cloudwrite') } = {}) {
       system: a.system, prompt: a.prompt, temperature: 0, json: true, evenIfOff: true,
       maxTokens: Math.max(600, (a.maxTokens || 0) * 3), timeoutMs: 60000,
     });
+    // the allowance refilling (a few seconds to a minute): wait for it, then ask — never give the clip up for that
+    const refill = async () => {
+      const st = cloudwrite.state();
+      if (st.cooling > 0 && st.cooling <= 70000) { await new Promise((r) => setTimeout(r, st.cooling + 500)); return true; }
+      return false;
+    };
+    await refill();
     let out = await once();
+    if (!out && await refill()) out = await once();
     // a network blip gets one more go — measured on a real run, a single
     // "fetch failed" on the titles call left six clips with the rules' titles
     if (!out && /could not reach|did not answer/i.test(cloudwrite.state().why || '')) {
@@ -325,7 +335,7 @@ function makeCloudJudge({ cloudwrite = require('./cloudwrite') } = {}) {
     maxEndingCalls: 30,      // every candidate likely to be picked, not twelve
     endingScope: 30,
     maxOffer: 14,            // a big model can weigh a longer list of places to stop
-    parallel: 4,             // endings asked four at a time (highlights.js) — the ladder spreads them over models
+    parallel: 2,             // endings asked two at a time (highlights.js): four at once emptied a free plan's minute on a long sermon
     rankWeight: CLOUD_RANK_W,
     rejectBelow: 1,          // a 0-1 from this harsh critic means "not a short": left out (see highlights.js)
     fullText: true,

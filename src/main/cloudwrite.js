@@ -484,18 +484,36 @@ async function chat({ system, prompt, maxTokens = 1400, temperature = 0.8, json 
      */
     const said = (() => { try { const j = JSON.parse(errText); return (j && j.error && (j.error.message || j.error.code)) || ''; } catch (e) { return errText; } })();
     const why = 'the writing service answered ' + res.status + (said ? ' (' + String(said).replace(/\s+/g, ' ').slice(0, 160) + ')' : '');
-    if (res.status === 400 || res.status === 413 || res.status === 422) return { next: true, why };
+    // too long for THIS model (a small one, with a short memory): not a fault of the service
+    const tooBig = /reduce the length|too large|context length|context window|maximum context|too many tokens/i.test(errText) || res.status === 413;
+    if (res.status === 400 || res.status === 413 || res.status === 422) return { next: true, why, tooBig };
     return { stop: true, why };
   };
 
-  let lastWhy = '';
+  let lastWhy = '', allTooBig = list.length > 0;
   for (const model of list) {
     tried.push(model);
     let r = await askOnce(model, json);
     if (r.retryNoJson) r = await askOnce(model, false);
     if (r.text) { cleared(Date.now() - t0, r.model); return r.text; }
     if (r.stop) { trip(r.why, r.forMs); return ''; }
+    if (!r.tooBig && !limitedNow(model)) allTooBig = false;
     lastWhy = r.why || lastWhy;
+  }
+  /*
+   * THE BIG MODELS ARE ONLY FULL FOR THE MINUTE. Measured on a church's live
+   * server with a 50-minute sermon: the large models were out of their
+   * per-minute allowance, the small ones left on the ladder could not hold the
+   * sermon ("reduce the length"), and that was taken for a broken service — a
+   * five-minute stand-down that left the whole sermon judged without the AI.
+   * When the only models that said no were full or too small, it is the
+   * allowance: back as soon as the first big one refills.
+   */
+  const refills = Array.from(limited.values()).map((t) => t - Date.now()).filter((n) => n > 0);
+  if (allTooBig && refills.length) {
+    const w = Math.min(...refills);
+    trip('the free allowance is used up for the moment — it comes back in about ' + Math.max(1, Math.round(w / 1000)) + 's', Math.max(3000, w));
+    return '';
   }
   /*
    * Every model on the ladder is out of allowance — the only case that really is
