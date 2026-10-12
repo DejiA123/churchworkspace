@@ -34,6 +34,7 @@ function server() {
       const send = (code, obj, h = {}) => { res.writeHead(code, Object.assign({ 'content-type': 'application/json' }, h)); res.end(JSON.stringify(obj)); };
       if (m === 'refuse') return send(401, { message: 'Unauthorized' });
       if (m === 'busyOnce') { Z.mode[prov] = 'ok'; return send(429, { message: 'rate limited' }, { 'retry-after': '1' }); }
+      if (m === 'busyAlways') return send(429, { message: 'Requests rate limit exceeded' });
       if (m === 'nomodel' && j.model === 'mistral-large-latest') return send(400, { message: 'Invalid model: mistral-large-latest' });
       if (m === 'silent') return send(500, { message: 'down' });
       const reply = typeof Z.reply === 'function' ? Z.reply(j, prov) : (Z.reply || '{"ok":true}');
@@ -49,22 +50,33 @@ function server() {
   process.env.MISTRAL_API_KEY = 'mk-test';
   process.env.GEMINI_API_KEY = 'AIza-test';
   const big = require(ROOT + '/src/main/bigjudge.js');
+  // Gemini is asked the way the captions ask it (geminiear.ask) — a stand-in here
+  const G = { calls: [], reply: '{"ok":true}', fail: null };
+  big._setGemini(async (o) => { G.calls.push(o); if (G.fail) throw G.fail; return typeof Z.reply === 'function' ? Z.reply({ messages: [{ content: o.prompt }] }, 'gemini') : G.reply; });
+  // the waits for a busy minute, shortened for the test (each one is recorded)
+  const waited = [];
+  big._setSleep(async (ms) => { waited.push(ms); });
 
   // [1]
   check('[1] with a Mistral key the strong reader is ready, Mistral first', big.ready() && /Mistral Large/.test(big.name()), big.name());
   Z.calls = []; Z.reply = '{"moments":[]}';
   let out = await big.chat({ system: 's', prompt: 'p' });
   check('[1] it answers, as JSON, with Mistral Large', out === '{"moments":[]}' && Z.calls[0].prov === 'mistral' && Z.calls[0].model === 'mistral-large-latest' && Z.calls[0].json && Z.calls[0].auth === 'Bearer mk-test', Z.calls);
-  Z.calls = []; Z.mode.mistral = 'busyOnce';
-  const t0 = Date.now();
+  Z.calls = []; Z.mode.mistral = 'busyOnce'; waited.length = 0;
   out = await big.chat({ system: 's', prompt: 'p' });
-  check('[1] a busy minute (429) is waited out and asked again — not given up', !!out && Z.calls.length === 2 && Z.calls.every((c) => c.prov === 'mistral') && Date.now() - t0 >= 900, { n: Z.calls.length, ms: Date.now() - t0 });
+  check('[1] a busy minute (429) is waited out — as long as Mistral says — and asked again, not given up', !!out && Z.calls.length === 2 && Z.calls.every((c) => c.prov === 'mistral') && waited[0] >= 1000, { n: Z.calls.length, waited });
+  Z.calls = []; Z.mode.mistral = 'busyAlways'; waited.length = 0; G.calls = [];
+  out = await big.chat({ system: 's', prompt: 'p' });
+  check('[1] busy and busy again: it waits longer each time, tries Mistral Medium, waits for the minute to turn — then Gemini', !!out && Z.calls.some((c) => c.model === 'mistral-medium-latest') && waited.some((w) => w >= 30000) && waited.includes(45000) && G.calls.length === 1,
+    { waited, models: Z.calls.map((c) => c.model).join(), gem: G.calls.length });
+  check('[1] …and what each one answered is kept, in order (the scan shows it)', big.state.trail.some((t) => /Mistral mistral-large-latest: 429/.test(t)) && big.state.trail.some((t) => /every model busy/.test(t)), big.state.trail.slice(-4));
+  Z.mode = {};
   Z.calls = []; Z.mode.mistral = 'nomodel';
   out = await big.chat({ system: 's', prompt: 'p' });
   check('[1] a model that is not offered: the next model (Mistral Medium)', !!out && Z.calls.map((c) => c.model).join() === 'mistral-large-latest,mistral-medium-latest', Z.calls.map((c) => c.model));
-  big._benched.clear(); Z.calls = []; Z.mode.mistral = 'refuse';
+  big._benched.clear(); Z.calls = []; Z.mode.mistral = 'refuse'; G.calls = [];
   out = await big.chat({ system: 's', prompt: 'p' });
-  check('[1] a refused key: Gemini answers instead (its free key, Google\'s OpenAI-style door)', !!out && Z.calls.map((c) => c.prov).join() === 'mistral,gemini' && Z.calls[1].auth === 'Bearer AIza-test' && /gemini/.test(Z.calls[1].model), Z.calls.map((c) => c.prov + ':' + c.model));
+  check('[1] a refused key: Gemini answers instead — asked the way the captions ask it (the best Flash this key may use)', !!out && Z.calls.map((c) => c.prov).join() === 'mistral' && G.calls.length === 1 && G.calls[0].prompt === 'p', { m: Z.calls.map((c) => c.prov), g: G.calls.length });
   check('[1] …and the refused key is left alone for a while (not asked on every call)', big.providers().map((p) => p.id).join() === 'gemini');
   big._benched.clear(); Z.mode = {};
 
@@ -83,7 +95,10 @@ function server() {
   let judge = llmjudge.makeCloudJudge({ cloudwrite: groq, big });
   const plan = await judge.plan({ sents: S, minLen: 60, maxLen: 150, idealLen: 90, maxClips: 8 });
   const reads = Z.calls.filter((c) => /Find EVERY moment/.test(c.prompt));
-  check('[2] the strong reader reads the WHOLE sermon in one request (not ten minutes at a time)', reads.length === 1 && /Below is a whole sermon/.test(reads[0].prompt) && /\[0\]/.test(reads[0].prompt) && /\[299\]/.test(reads[0].prompt), { reads: reads.length });
+  const firstReads = reads.filter((c) => !/already chosen/.test(c.prompt));
+  check('[2] the strong reader reads the WHOLE sermon in one request (not ten minutes at a time)', firstReads.length === 1 && /Below is a whole sermon/.test(firstReads[0].prompt) && /\[0\]/.test(firstReads[0].prompt) && /\[299\]/.test(firstReads[0].prompt), { reads: firstReads.length });
+  const moreAsk = reads.find((c) => /already chosen/.test(c.prompt));
+  check('[2] fewer moments than shorts asked for: shown what it chose, it is asked once for more, different ones', !!moreAsk && /\[12\]–\[27\] "A whole thought"/.test(moreAsk.prompt) && /Find \d+ MORE moments/.test(moreAsk.prompt), moreAsk && moreAsk.prompt.slice(-400));
   check('[2] …told the length as a count of sentences, and that a story starts where the story starts', /about 10 to 25 sentences/.test(reads[0].prompt) && /The other day I went to meet him/.test(reads[0].prompt), reads[0] && reads[0].prompt.match(/LENGTH:[^\n]*/));
   check('[2] …with AssemblyAI\'s paragraphs shown (a blank line where a new one begins)', /\n\n\[6\]/.test(reads[0].prompt) && /blank line marks where the speaker paused/.test(reads[0].prompt));
   check('[2] the edges pass runs with it too, ¶ marking paragraph starts', Z.calls.some((c) => /"edges"/.test(c.prompt) && /¶\[12\]/.test(c.prompt)), Z.calls.length);
@@ -91,13 +106,13 @@ function server() {
   check('[2] …its edge choice is taken (the end moved to where the point lands)', !!plan && plan.moments[0].from === 12 && plan.moments[0].to === 26, plan && plan.moments[0]);
   check('[2] the judge is named for what read it', judge.modelName === 'Mistral Large (free)', judge.modelName);
   // the strong reader silent: Groq, ten minutes at a time
-  Z.mode = { mistral: 'silent', gemini: 'silent' }; Z.calls = [];
+  Z.mode = { mistral: 'silent' }; Z.calls = []; G.fail = Object.assign(new Error('Gemini is busy right now'), { passing: true });
   groq.reply = (o) => (/"edges"/.test(o.prompt) ? '{"edges":[]}' : '{"moments":[{"from":' + (o.prompt.match(/\[(\d+)\]/) || [0, 0])[1] + ',"to":' + (+(o.prompt.match(/\[(\d+)\]/) || [0, 0])[1] + 15) + ',"title":"t","point":"p","strength":8}]}');
   judge = llmjudge.makeCloudJudge({ cloudwrite: groq, big });
   const plan2 = await judge.plan({ sents: S, minLen: 60, maxLen: 150, idealLen: 90, maxClips: 8 });
   const groqReads = groq.calls.filter((c) => /Find EVERY moment/.test(c.prompt));
   check('[2] the strong reader silent: Groq reads it as before, ten minutes at a time', !!plan2 && groqReads.length >= 2 && groqReads.every((c) => /Below is part of a sermon/.test(c.prompt)) && judge.stats.plannedBy === 'Groq', { plan2: !!plan2, n: groqReads.length, by: judge.stats.plannedBy });
-  Z.mode = {};
+  Z.mode = {}; G.fail = null; big._benched.clear();
   // no strong reader at all: the judge is Groq's, as it was
   delete process.env.MISTRAL_API_KEY; delete process.env.GEMINI_API_KEY;
   judge = llmjudge.makeCloudJudge({ cloudwrite: groq, big });

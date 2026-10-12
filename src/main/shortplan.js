@@ -79,7 +79,7 @@ function promptFor(sents, [a, b], { minLen, maxLen, idealLen, wide = false }) {
 
 ${lines.join('\n')}
 
-Find EVERY moment in this ${wide ? 'sermon' : 'part'} that would work as a standalone short video: a complete thought someone who never heard the rest of the sermon would understand and remember — a teaching point, a declaration, a story WITH its point, a powerful line and what leads to it. ${wide ? 'A whole sermon usually has 10 to 20 such moments' : 'A part this size usually has 3 to 6 such moments'}; list them all, even the good-but-not-best ones (they are chosen from later). Do not skip a point because it is said quietly or simply — the main teaching of the sermon is often said calmly. A story must start where the story starts (who, where, what happened) — never on a line that leans on something not in the short ("The other day I went to meet him", "That is why…").
+Find EVERY moment in this ${wide ? 'sermon' : 'part'} that would work as a standalone short video: a complete thought someone who never heard the rest of the sermon would understand and remember — a teaching point, a declaration, a story WITH its point, a powerful line and what leads to it. ${wide ? 'A whole sermon usually has 10 to 20 such moments — list at least 12' : 'A part this size usually has 3 to 6 such moments'}; list them all, even the good-but-not-best ones (they are chosen from later). Do not skip a point because it is said quietly or simply — the main teaching of the sermon is often said calmly. A story must start where the story starts (who, where, what happened) — never on a line that leans on something not in the short ("The other day I went to meet him", "That is why…").
 
 For each moment:
 - "from": the number of the sentence where the thought STARTS. Never start on a filler ("Huh?", "Oh yes, yes", "Okay", "Amen"), on the preacher chatting with someone in the room ("How are you? You're looking so good"), on an announcement, or in the middle of a story or a list. If the line before is needed to understand it, start there.
@@ -266,7 +266,7 @@ async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, max
   // wide: a reader that holds the whole sermon reads it at once (a two-hour service in two halves)
   const secs = wide ? sections(S, WIDE_WORDS, OVERLAP_SENTS) : sections(S);
   const all = [];
-  let failed = 0, lastGot = true;
+  let failed = 0, lastGot = true, returned = 0, more = 0;
   for (let k = 0; k < secs.length; k++) {
     if (cancelled()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
     const { system, prompt } = promptFor(S, secs[k], { minLen, maxLen, idealLen, wide });
@@ -296,6 +296,7 @@ async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, max
     // sat waiting fifteen minutes). Stop and let the loudness scan run now.
     if (!got && k > 0 && !lastGot) return null;
     lastGot = !!got;
+    returned += (got || []).length;
     for (const m of got || []) {
       const v = vet(m, S, secs[k], { minLen, maxLen, idealLen });
       if (v) all.push(Object.assign(v, { sec: k }));
@@ -311,6 +312,26 @@ async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, max
     const dup = uniq.find((u) => overlaps(u, m) && Math.min(u.end, m.end) - Math.max(u.start, m.start) > 0.5 * Math.min(u.end - u.start, m.end - m.start));
     if (!dup) uniq.push(m);
   }
+  /*
+   * TOO FEW FOR THE SHORTS ASKED FOR. Measured: reading the whole sermon,
+   * Mistral Large named five moments — all good, but eight were asked for.
+   * Shown what it already chose, it is asked once for more, different ones.
+   */
+  if (wide && uniq.length < maxClips && secs.length === 1) {
+    if (cancelled()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
+    const { system, prompt } = promptFor(S, secs[0], { minLen, maxLen, idealLen, wide });
+    const had = uniq.map((m) => `[${m.from}]–[${m.to}] "${m.title || ''}"`).join('\n');
+    const want = Math.max(4, maxClips - uniq.length + 3);
+    let out = '';
+    try {
+      out = await ask({ system, maxTokens: 6000, prompt: prompt + `\n\nThese moments are already chosen:\n${had}\n\nFind ${want} MORE moments in this sermon — different ones, not overlapping any of these — following every rule above. Reply with only: {"moments":[{"from":0,"to":0,"title":"","point":"","strength":0}]}` });
+    } catch (e) { if (e && e.cancelled) throw e; out = ''; }
+    for (const m of parseMoments(out) || []) {
+      more++;
+      const v = vet(m, S, secs[0], { minLen, maxLen, idealLen });
+      if (v && !uniq.some((u) => overlaps(u, v) && Math.min(u.end, v.end) - Math.max(u.start, v.start) > 0.5 * Math.min(u.end - u.start, v.end - v.start))) uniq.push(Object.assign(v, { sec: 0 }));
+    }
+  }
   const picked = choose(uniq, maxClips, secs);
   let edgesMoved = 0;
   try { edgesMoved = await refineEdges(picked, S, { ask, minLen, maxLen, retryWaits }); } catch (e) { if (e && e.cancelled) throw e; }
@@ -324,7 +345,7 @@ async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, max
     sents: S.slice(m.from, m.to + 1),
     text: S.slice(m.from, m.to + 1).map((s) => s.text).join(' ').replace(/\s+/g, ' ').trim(),
   }));
-  return { moments, sections: secs.length, failed, found: uniq.length, edgesMoved };
+  return { moments, sections: secs.length, failed, found: uniq.length, returned, more, edgesMoved };
 }
 
 module.exports = { planShorts, sections, parseMoments, vet, choose, promptFor, refineEdges, edgePrompt, _rx: { FILLER_OPEN_RX, ASIDE_RX, NEW_STORY_RX } };

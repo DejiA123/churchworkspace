@@ -387,10 +387,12 @@ function makeCloudJudge({ cloudwrite = require('./cloudwrite'), big = require('.
       const sp = require('./shortplan');
       const note = (why) => { stats.why = why || 'no answer'; (stats.errors = stats.errors || []).push(stats.why); };
       // the strong free reader: the whole sermon in one reading (it holds it all, and a sermon cannot use up its allowance)
+      let by = '';   // the service that answered the reading of the sermon
       const bigAsk = async ({ system, prompt, maxTokens }) => {
         stats.calls++;
         const out = await viaBig({ system, prompt }, Math.max(4000, maxTokens || 0));
         if (!out) note(big.state.lastWhy);
+        else if (!by) by = big.state.lastProvider;
         return out;
       };
       // Groq: ten minutes at a time, with a budget that fits its free minute
@@ -405,10 +407,12 @@ function makeCloudJudge({ cloudwrite = require('./cloudwrite'), big = require('.
         return out;
       };
       let r = useBig ? await sp.planShorts({ ...a, ask: bigAsk, wide: true, retryWaits: [5000] }) : null;
-      if (r) stats.plannedBy = big.name();
+      if (r) stats.plannedBy = by === 'gemini' ? 'Gemini (free)' : by === 'mistral' ? 'Mistral Large (free)' : big.name();
       else if (groqOk) { r = await sp.planShorts({ ...a, ask: groqAsk }); if (r) stats.plannedBy = 'Groq'; }
-      if (r) { stats.planned = r.moments.length; stats.titled = r.moments.filter((m) => m.title).length; stats.ranked = r.found; stats.edgesMoved = r.edgesMoved; }
+      if (r) { stats.planned = r.moments.length; stats.titled = r.moments.filter((m) => m.title).length; stats.ranked = r.found; stats.edgesMoved = r.edgesMoved; stats.returned = r.returned; stats.more = r.more; }
       else stats.failed++;
+      // what each free service said, in order (for the scan's meta: read, not guessed)
+      if (useBig && big.state.trail.length) stats.bigTrail = big.state.trail.slice(-10);
       return r;
     }),
   };

@@ -11,30 +11,42 @@
  *
  *   Mistral — its free plan (no card, a phone number) takes every model,
  *     Mistral Large included, with about a billion tokens a month:
- *     MISTRAL_API_KEY.
- *   Google Gemini — a free key from AI Studio (the one the studio already
- *     asks for to check captions): GEMINI_API_KEY, through Google's
- *     OpenAI-compatible door; a million tokens of context.
+ *     MISTRAL_API_KEY. Its free plan allows only a few requests a minute,
+ *     so a "busy" answer is waited out (the studio is not in a hurry; the
+ *     sermon's shorts are worth the minute).
+ *   Google Gemini — the key the studio already has to check captions
+ *     (GEMINI_API_KEY), asked the way the captions ask it (geminiear.ask:
+ *     the best Flash this key may use, its daily allowance, its thinking
+ *     settings) — measured: guessing a model name ("gemini-2.5-flash") was
+ *     refused, "no longer available to new users".
  *
- * Both answer the same shape of request (OpenAI chat completions). Groq stays
- * where it was: the captions, and this reader's fallback (llmjudge.js).
- * Never throws: '' means "this reader did not answer".
+ * Groq stays where it was: the captions, and this reader's fallback
+ * (llmjudge.js). Never throws: '' means "this reader did not answer", and
+ * state.trail says what each service answered, for the scan's meta.
  */
-const PROVIDERS = [
-  { id: 'mistral', name: 'Mistral Large', env: 'MISTRAL_API_KEY',
-    url: 'https://api.mistral.ai/v1/chat/completions', models: ['mistral-large-latest', 'mistral-medium-latest'] },
-  { id: 'gemini', name: 'Gemini', env: 'GEMINI_API_KEY',
-    url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', models: ['gemini-flash-latest', 'gemini-2.5-flash'] },
-];
-// (MW_BIGJUDGE_API: a stand-in service for the tests — test/bigjudge.test.js)
-const urlOf = (p) => (process.env.MW_BIGJUDGE_API ? process.env.MW_BIGJUDGE_API.replace(/\/$/, '') + '/' + p.id : p.url);
+const MISTRAL = { id: 'mistral', name: 'Mistral Large', env: 'MISTRAL_API_KEY',
+  url: 'https://api.mistral.ai/v1/chat/completions', models: ['mistral-large-latest', 'mistral-medium-latest'] };
+const GEMINI = { id: 'gemini', name: 'Gemini', env: 'GEMINI_API_KEY' };
+const PROVIDERS = [MISTRAL, GEMINI];
+// (MW_BIGJUDGE_API: a stand-in Mistral for the tests — test/bigjudge.test.js)
+const mistralUrl = () => (process.env.MW_BIGJUDGE_API ? process.env.MW_BIGJUDGE_API.replace(/\/$/, '') + '/mistral' : MISTRAL.url);
 const keyOf = (p) => String(process.env[p.env] || '').trim();
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// a key refused, or a model that is not there: left alone for a while, not asked on every call
+// a key refused, a model that is not there, a service that is down: left alone for a while
 const benched = new Map();   // 'provider' or 'provider/model' -> until
 const isBenched = (k) => (benched.get(k) || 0) > Date.now();
-const state = { lastWhy: '', lastModel: '', lastProvider: '', ok: 0, failed: 0 };
+const state = { lastWhy: '', lastModel: '', lastProvider: '', ok: 0, failed: 0, trail: [] };
+const note = (s) => { state.lastWhy = s; state.trail.push(s); if (state.trail.length > 24) state.trail.shift(); };
+
+// Gemini, asked the way the captions ask it (replaceable for the tests)
+let geminiAsk = async ({ system, prompt, maxTokens }) => {
+  const g = require('./geminiear');
+  if (!g.ready()) return '';
+  const r = await g.ask([{ text: (system ? system + '\n\n' : '') + String(prompt || '') }],
+    { json: true, think: 'low', maxTokens: Math.max(8000, maxTokens || 0), waits: [10000, 30000], timeoutMs: 180000 });
+  return (r && r.text) || '';
+};
 
 function providers() { return PROVIDERS.filter((p) => keyOf(p) && !isBenched(p.id)); }
 function ready() { return providers().length > 0; }
@@ -47,65 +59,107 @@ function textOf(j) {
   if (Array.isArray(c)) return c.map((x) => (x && (x.text || x.content)) || '').join('');
   return '';
 }
+// Mistral's free plan: a few requests a minute — its own hint first, else a growing wait
+const BUSY_WAITS = [4000, 10000, 20000, 30000];
 function waitOf(res, attempt) {
   const ra = +(res.headers.get('retry-after') || 0);
-  if (ra > 0) return Math.min(30e3, ra * 1000);
-  return [2000, 6000, 15000][Math.min(2, attempt)];
+  if (ra > 0) return Math.min(60e3, ra * 1000 + 500);
+  const reset = +(res.headers.get('x-ratelimit-reset') || res.headers.get('ratelimit-reset') || 0);
+  if (reset > 0 && reset < 120) return reset * 1000 + 500;
+  return BUSY_WAITS[Math.min(BUSY_WAITS.length - 1, attempt)];
 }
+const short = (s) => String(s || '').replace(/\s+/g, ' ').slice(0, 160);
 
-/**
- * One prompt, the answer's text. A busy minute (429) is waited out — a few
- * seconds, then again — before the next model; a refused key benches that
- * service; anything else moves on to the next model, then the next service.
- */
-async function chat({ system, prompt, maxTokens = 3000, json = true, temperature = 0, timeoutMs = 120000, fetchImpl = fetch } = {}) {
-  for (const p of providers()) {
-    for (const model of p.models) {
-      if (isBenched(p.id + '/' + model)) continue;
-      for (let attempt = 0; attempt < 4; attempt++) {
+/** Mistral: '' when it did not answer, with why in state.trail. */
+async function askMistral({ system, prompt, maxTokens, json, temperature, timeoutMs, fetchImpl }) {
+  let sawBusy = false;
+  for (let round = 0; round < 2; round++) {
+    for (const model of MISTRAL.models) {
+      if (isBenched('mistral/' + model)) continue;
+      let useJson = json;
+      for (let attempt = 0; attempt < BUSY_WAITS.length + 1; attempt++) {
         const body = {
           model, temperature, max_tokens: maxTokens,
           messages: [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content: String(prompt || '') }],
         };
-        if (json) body.response_format = { type: 'json_object' };
+        if (useJson) body.response_format = { type: 'json_object' };
         const ac = new AbortController();
         const timer = setTimeout(() => ac.abort(), timeoutMs);
         let res = null, err = null;
         try {
-          res = await fetchImpl(urlOf(p), { method: 'POST', signal: ac.signal,
-            headers: { 'content-type': 'application/json', authorization: 'Bearer ' + keyOf(p) }, body: JSON.stringify(body) });
+          res = await fetchImpl(mistralUrl(), { method: 'POST', signal: ac.signal,
+            headers: { 'content-type': 'application/json', authorization: 'Bearer ' + keyOf(MISTRAL) }, body: JSON.stringify(body) });
         } catch (e) { err = e; } finally { clearTimeout(timer); }
         if (err || !res) {
-          state.lastWhy = p.name + ': ' + ((err && err.name === 'AbortError') ? 'did not answer in time' : 'could not be reached');
-          if (attempt === 0) { await sleep(2000); continue; }
-          benched.set(p.id, Date.now() + 3 * 60e3);   // down or unreachable: the next questions do not wait on it
-          break;
+          note('Mistral ' + model + ': ' + ((err && err.name === 'AbortError') ? 'did not answer in time' : 'could not be reached'));
+          if (attempt === 0) { await sleep(3000); continue; }
+          benched.set('mistral', Date.now() + 3 * 60e3);   // down or unreachable: the next questions do not wait on it
+          return '';
         }
         if (res.ok) {
           let j = null;
           try { j = await res.json(); } catch (e) { j = null; }
           const text = textOf(j);
-          if (text) { state.ok++; state.lastModel = model; state.lastProvider = p.id; state.lastWhy = ''; return text; }
+          if (text) { state.ok++; state.lastModel = model; state.lastProvider = 'mistral'; state.lastWhy = ''; return text; }
           // an empty answer under the JSON envelope: once more without it
-          if (json && attempt === 0) { json = false; continue; }
-          state.lastWhy = p.name + ': answered with nothing';
+          if (useJson) { useJson = false; note('Mistral ' + model + ': empty answer — asked again without JSON mode'); continue; }
+          note('Mistral ' + model + ': answered with nothing');
           break;
         }
         let said = '';
-        try { said = (await res.text()).slice(0, 300); } catch (e) { said = ''; }
-        if (res.status === 429) { state.lastWhy = p.name + ': busy for the moment'; await sleep(waitOf(res, attempt)); continue; }
-        if (res.status === 401 || res.status === 403) { benched.set(p.id, Date.now() + 10 * 60e3); state.lastWhy = p.name + ': the key was refused'; break; }
-        if (res.status === 404 || /model|not found|does not exist|unknown/i.test(said)) { benched.set(p.id + '/' + model, Date.now() + 60 * 60e3); state.lastWhy = p.name + ': ' + model + ' is not offered'; break; }
-        if (res.status >= 500 && attempt === 0) { await sleep(3000); continue; }
-        if (res.status >= 500) { benched.set(p.id, Date.now() + 3 * 60e3); state.lastWhy = p.name + ' is having trouble (' + res.status + ')'; break; }
-        state.lastWhy = p.name + ' answered ' + res.status + (said ? ' (' + said.replace(/\s+/g, ' ').slice(0, 140) + ')' : '');
+        try { said = (await res.text()).slice(0, 400); } catch (e) { said = ''; }
+        if (res.status === 429) {
+          sawBusy = true;
+          note('Mistral ' + model + ': 429 ' + short(said));
+          if (attempt < BUSY_WAITS.length) { await sleep(waitOf(res, attempt)); continue; }
+          break;   // still busy: the next model (its allowance may be its own)
+        }
+        if (res.status === 401 || res.status === 403) { benched.set('mistral', Date.now() + 10 * 60e3); note('Mistral: the key was refused (' + res.status + ' ' + short(said) + ')'); return ''; }
+        if (res.status === 404 || (res.status === 400 && /(model|invalid_model)[^.]{0,60}(not found|does not exist|invalid|unknown|not available|no access)|(not found|unknown|invalid|no access)[^.]{0,40}model/i.test(said))) {
+          benched.set('mistral/' + model, Date.now() + 60 * 60e3); note('Mistral ' + model + ': not offered (' + res.status + ' ' + short(said) + ')'); break;
+        }
+        // the JSON envelope refused: the same model, without it
+        if (res.status === 400 && useJson && /response_format|json/i.test(said)) { useJson = false; note('Mistral ' + model + ': 400 on JSON mode — asked again without it'); continue; }
+        if (res.status >= 500 && attempt === 0) { note('Mistral ' + model + ': ' + res.status + ' — once more'); await sleep(4000); continue; }
+        if (res.status >= 500) { benched.set('mistral', Date.now() + 3 * 60e3); note('Mistral is having trouble (' + res.status + ' ' + short(said) + ')'); return ''; }
+        note('Mistral ' + model + ' answered ' + res.status + ' ' + short(said));
         break;
       }
-      if (!providers().includes(p)) break;   // its key was refused: the next service
+    }
+    // every model busy: one longer wait for the minute to turn, then once more round
+    if (!sawBusy || round > 0) break;
+    note('Mistral: every model busy — waiting for the minute to turn');
+    await sleep(45000);
+    sawBusy = false;
+  }
+  return '';
+}
+
+/**
+ * One prompt, the answer's text — Mistral first, then Gemini. '' if neither
+ * answered; state.trail says what each one said.
+ */
+async function chat({ system, prompt, maxTokens = 3000, json = true, temperature = 0, timeoutMs = 150000, fetchImpl = fetch } = {}) {
+  for (const p of providers()) {
+    if (p.id === 'mistral') {
+      const out = await askMistral({ system, prompt, maxTokens, json, temperature, timeoutMs, fetchImpl });
+      if (out) return out;
+    } else if (p.id === 'gemini') {
+      try {
+        const out = await geminiAsk({ system, prompt, maxTokens });
+        if (out) { state.ok++; state.lastProvider = 'gemini'; state.lastWhy = ''; return out; }
+        note('Gemini: answered with nothing');
+      } catch (e) {
+        note('Gemini: ' + short(e && e.message));
+        if (e && e.exhausted) benched.set('gemini', Date.now() + 30 * 60e3);
+      }
     }
   }
   state.failed++;
   return '';
 }
 
-module.exports = { ready, name, chat, state, providers, PROVIDERS, _benched: benched };
+module.exports = {
+  ready, name, chat, state, providers, PROVIDERS, _benched: benched,
+  _setGemini: (fn) => { geminiAsk = fn; }, _setSleep: (fn) => { sleep = fn; },
+};
