@@ -282,12 +282,13 @@
     if (ve.refs.player) ve.refs.player.style.display = 'none';
     const nv = $('#veNoVid');
     if (nv) {
-      // "Preparing a smooth preview" (an iPhone video) replaced the empty-studio prompt: put it back, Browse and all
+      // "Getting your video ready to play" (an iPhone video) replaced the empty-studio prompt: put it back, Browse and all
       if (ve._noVidHtml != null && !nv.querySelector('#veOpen2')) {
         nv.innerHTML = ve._noVidHtml;
         const b = nv.querySelector('#veOpen2'); if (b && ve._openFn) b.addEventListener('click', ve._openFn);
       }
       nv.style.display = '';
+      previewWaiting(false);
       try { resumePromptQuiet(false); } catch (e) {}
     }
     if (ve.refs.capOverlay) ve.refs.capOverlay.classList.add('hidden');
@@ -350,7 +351,7 @@
     const hevc = /hevc|h265|hev1|hvc1/i.test(info.vcodec || '');
     const playsHevc = hevc && !!(player.canPlayType('video/mp4; codecs="hvc1.1.6.L93.B0"') || player.canPlayType('video/mp4; codecs="hev1.1.6.L93.B0"'));
     if (codecUnplayable && !playsHevc) { showPreparing(nov, player, info.vcodec); makeProxyBg(origPath); return; }
-    player.src = fileUrl(origPath); player.load(); nov.style.display = 'none'; player.style.display = 'block';
+    player.src = fileUrl(origPath); player.load(); nov.style.display = 'none'; player.style.display = 'block'; previewWaiting(false);
     if (playsHevc) {
       const fallBack = () => {
         if (!ve.video || ve.video.path !== origPath || ve.video.proxy || ve.video.proxying) return;
@@ -361,11 +362,23 @@
       player.addEventListener('loadeddata', () => { if (!player.videoWidth) fallBack(); }, { once: true });
     }
   }
+  /*
+   * No picture yet (the preview is still being made, or cannot be): the 9:16
+   * export frame has nothing to frame, so it steps aside and the message gets
+   * the whole preview. Drawn over it, the frame's edges ran through the words
+   * and its black surround cut them off on a phone.
+   */
+  function previewWaiting(on) {
+    const nv = $('#veNoVid'), pv = $('#veDrop');
+    if (nv) nv.classList.toggle('ve-wait', !!on);
+    if (pv) pv.classList.toggle('ve-waiting', !!on);
+  }
   function showPreparing(nov, player, codec) {
     player.style.display = 'none'; nov.style.display = 'flex';
-    nov.innerHTML = `<div style="font-size:44px">⏳</div>
-      <p style="text-align:center;max-width:100%;padding:0 10px;white-space:normal;overflow-wrap:anywhere">Preparing a smooth preview &nbsp;<b class="ve-prep-pct">0%</b><br><span class="muted small">(${(codec || 'this format').toUpperCase()} can't play directly — building an H.264 preview)</span><br>
-      <span class="muted small">You can already make Long to short clips &amp; edit — this only affects playback.</span></p>`;
+    previewWaiting(true);
+    nov.innerHTML = `<div class="ve-wait-ic">⏳</div>
+      <p class="ve-wait-title">Getting your video ready to play… <b class="ve-prep-pct">0%</b></p>
+      <p class="ve-wait-sub">You can already make shorts, add captions and edit while this finishes.</p>`;
   }
   async function makeProxyBg(origPath) {
     if (ve.video) ve.video.proxying = true;
@@ -377,11 +390,14 @@
         ve.video.proxy = proxy; ve.video.proxying = false;
         ve.refs.player.src = fileUrl(proxy); ve.refs.player.load();
         $('#veNoVid').style.display = 'none'; ve.refs.player.style.display = 'block';
+        previewWaiting(false);
       }
     } catch (e) {
       if (!ve.video || ve.video.path !== origPath) return;   // closed or replaced meanwhile
       ve.video.proxying = false;
-      $('#veNoVid').innerHTML = `<div style="font-size:44px">🎬</div><p class="muted">Preview unavailable for this format, but <b>Long to short clips</b>, editing &amp; export all still work.</p>`;
+      previewWaiting(true);
+      $('#veNoVid').innerHTML = `<div class="ve-wait-ic">🎬</div><p class="ve-wait-title">This video can't be previewed here</p>
+        <p class="ve-wait-sub">Making shorts, captions, editing and exporting all still work.</p>`;
     }
   }
 
@@ -1509,6 +1525,18 @@
     }
     return null;
   }
+  /** skipRemovedAt, looking `ahead` seconds forward: a removed pause that starts
+   *  before the next frame is due is hopped now, so none of it is shown. */
+  function removedAhead(t, ahead) {
+    for (const s of ve.segments) {
+      if ((s.lane || 0) !== 0 || t >= s.end || t + ahead < s.start) continue;
+      for (const c of cutsOf(s)) {
+        const a = Math.max(s.start, c.start), b = Math.min(s.end, c.end);
+        if (b > a && t < b && t + ahead >= a && b < dur() - 0.02) return b + 0.001;
+      }
+    }
+    return null;
+  }
 
   /** Live captions on the preview player (before any export). */
   /*
@@ -1634,7 +1662,7 @@
    * is playing the overlay is driven off requestAnimationFrame instead — and
    * because updateCapOverlay bails out when nothing changed, a still caption
    * costs a string compare per frame and no DOM work at all. */
-  let capRaf = null;
+  let capRaf = null, capLastTick = 0;
   function capTick() {
     capRaf = null;
     const p = ve.refs.player;
@@ -1644,6 +1672,17 @@
     // desk is a loop stealing frames from the projector.
     const view = document.getElementById('view-video');
     if (!view || !view.classList.contains('active')) return;
+    // Hop a removed pause BEFORE it plays. `timeupdate` (four times a second)
+    // only noticed one a quarter-second in, so every closed pause flashed by
+    // and the sound stuttered; looked for every frame, a frame ahead, the
+    // pause is never shown at all.
+    const now = performance.now();
+    const step = capLastTick ? Math.min(0.1, (now - capLastTick) / 1000) : 1 / 60;
+    capLastTick = now;
+    if (ve.tailT == null && !p.seeking) {
+      const hop = removedAhead(p.currentTime || 0, Math.max(0.04, 1.5 * step * (p.playbackRate || 1)));
+      if (hop != null) { p.currentTime = hop; updatePlayhead(); capRaf = requestAnimationFrame(capTick); return; }
+    }
     updateCapOverlay(p.currentTime || 0);
     // The picture has stopped to buffer ('waiting' can lag by a few tenths), or
     // has run into a removed pause it is about to hop over: the music bed stops
@@ -1655,7 +1694,7 @@
     frameTick(p.currentTime || 0);
     capRaf = requestAnimationFrame(capTick);
   }
-  function startCapTick() { if (capRaf == null) capRaf = requestAnimationFrame(capTick); }
+  function startCapTick() { if (capRaf == null) { capLastTick = 0; capRaf = requestAnimationFrame(capTick); } }
   /** The per-frame work while playing. Each piece bails out cheaply when it has
    *  nothing to do, so a plain video costs a few comparisons a frame. */
   function frameTick(t) {

@@ -295,5 +295,23 @@ const travelStats = (kf) => {
   check('a still speaker collapses to a handful of keyframes', pts2.length <= 6, `${pts2.length} keyframes`);
 }
 
+// ---------- SNAP ON THE CUT'S OWN FRAME, NOT THE NEXT SAMPLE ----------
+// A real sermon short: a closed pause at 5.074s, the preacher a step further
+// left after it, the scene pass timing the new picture's first frame at 5.105.
+// The camera used to snap 20ms before the next 6fps SAMPLE (5.25) — five
+// frames of the new picture with the old framing, preacher against the edge.
+{
+  const S6 = 6, CUT = 5.105;
+  const dets = [];
+  for (let i = 0; i < 10 * S6; i++) { const t = (i + 0.5) / S6; dets.push({ t, cxNorm: t < CUT ? 0.56 : 0.38, cyNorm: 0.5 }); }
+  const kf = FT.buildKeyframes(dets, 1280, 720, { targetAR: 9 / 16, cuts: [{ t: CUT, score: 0.2 }] });
+  const at = (t) => camAt(kf, t) / 1280;
+  const frame = 1 / 29.97;
+  check('the frame before the cut keeps the old framing', Math.abs(at(CUT - frame) - 0.56) < 0.02, at(CUT - frame).toFixed(3));
+  check('the cut frame itself already has the new framing', Math.abs(at(CUT + 0.001) - 0.38) < 0.02, at(CUT + 0.001).toFixed(3));
+  let mono = true; for (let i = 1; i < kf.length; i++) if (kf[i].t < kf[i - 1].t) mono = false;
+  check('…and the keyframes still run forwards in time', mono);
+}
+
 console.log(`\n==================  ${pass} passed, ${fail} failed  ==================`);
 process.exit(fail ? 1 : 0);

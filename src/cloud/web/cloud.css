@@ -1481,6 +1481,9 @@ body.mw-cloud #cloudPass:focus { border-color: #6366f1; box-shadow: 0 0 0 3px rg
     -webkit-tap-highlight-color: transparent;
   }
   body.mw-cloud .overlay-later:active { background: rgba(255, 255, 255, .06); }
+  /* A job's progress box over the open sheet (210/215), not under it: under
+     it, the AI Shorts sheet hid the box's Cancel and half its progress. */
+  body.mw-cloud .overlay:not(.on-top) { z-index: 220; }
   /* Messages float over the bottom of the PICTURE, as CapCut's do — never over
      the timeline — and a finger goes straight through them: one sitting on a
      clip's edge for four seconds was a clip that could not be trimmed. */
@@ -2070,10 +2073,14 @@ body.mw-cloud.mw-projects .cloud-proj {
   body.mw-cloud .cloud-bar .cloud-chip, body.mw-cloud .cloud-bar .cloud-jobchip,
   body.mw-cloud .cloud-q, body.mw-cloud .cloud-export { flex: none; }
 }
-/* a narrow phone with a job running: Saved steps aside for the chip (it is in
-   the jobs sheet and the Project row as well), so Export never leaves the screen */
-@media (max-width: 380px) {
+/* a phone with a job running: Saved steps aside for the chip (it is in the
+   jobs sheet and the Project row as well), so Export never leaves the screen.
+   Every iPhone, not only the narrow ones: with the ? beside it, a 390px
+   iPhone 13–16 had Export cut off at "Expo" while a short exported. */
+@media (max-width: 440px) {
   body.mw-cloud .cloud-bar:has(#cloudJobsChip:not(.hidden)) #cloudDownloads { display: none; }
+}
+@media (max-width: 380px) {
   body.mw-cloud .cloud-q { padding: 0 22px 0 10px; }
   body.mw-cloud .cloud-q::after { right: 8px; }
   body.mw-cloud .cloud-export { padding: 0 13px; }

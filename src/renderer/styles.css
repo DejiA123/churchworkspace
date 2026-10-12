@@ -431,6 +431,14 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .ve-fs-exit:hover { background: rgba(0,0,0,.85); border-color: #fff; }
 #vePlayer { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; background: #000; }
 .ve-novid { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--muted); }
+/* No picture yet: the export frame and its black surround step aside (see
+   previewWaiting) and the message sits on its own, inside the preview. */
+.ve-preview.ve-waiting .ve-crop-mask { display: none !important; }
+.ve-novid.ve-wait { z-index: 5; gap: 8px; padding: 0 24px; text-align: center; }
+.ve-novid.ve-wait .ve-wait-ic { font-size: 40px; line-height: 1; margin-bottom: 4px; }
+.ve-novid.ve-wait .ve-wait-title { margin: 0; max-width: 320px; font-size: 16px; font-weight: 600; line-height: 1.35; color: var(--text, #eee); }
+.ve-novid.ve-wait .ve-wait-title b { font-variant-numeric: tabular-nums; }
+.ve-novid.ve-wait .ve-wait-sub { margin: 0; max-width: 300px; font-size: 13px; line-height: 1.4; color: var(--muted); }
 
 /* live caption overlay on the preview */
 /* The caption layer IS the export frame — sized in JS to canvasFrameRect() — so

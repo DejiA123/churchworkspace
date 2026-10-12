@@ -1640,16 +1640,35 @@ async function attachThumbnail(ctx, { input, imagePath, atSec = 0, output }) {
  */
 const PAIR_DT = 0.034;
 
+/*
+ * THE TRACKER'S CLOCK MUST BE THE EXPORT'S CLOCK. The export joins the kept
+ * pieces WITH their sound (cutPlan(pieces, info)), and a join with sound starts
+ * each piece where the audio of the last one ended; joined without it, the
+ * pictures are packed frame against frame and drift up to a frame from the
+ * export at every closed pause. The crop is timed on this clock, so on a short
+ * with fifteen closed pauses the camera snapped a frame early or late at the
+ * joins — the new picture shown for a frame with the old framing. Cutting here
+ * exactly as the export does (the sound is joined, then thrown away) puts
+ * every frame and every cut on the export's own times.
+ */
+async function trackCut(ctx, input, pieces) {
+  if (!pieces || !pieces.length) return null;
+  let info = {};
+  try { info = await getInfo(ctx, input); } catch (e) { /* plan without it, as before */ }
+  return cutPlan(pieces, { durationSec: info.durationSec, hasAudio: !!info.hasAudio, fps: info.fps, noFx: true });
+}
+const sinkAudio = (cut) => (cut && cut.chain && cut.a ? `;[${cut.a}]anullsink` : '');
+
 async function extractFrames(ctx, { input, startSec, endSec, fps = 2, height = 360, outDir, pieces, pairs = false }) {
   fs.mkdirSync(outDir, { recursive: true });
-  const cut = cutPlan(pieces, { hasAudio: false, noFx: true });
+  const cut = await trackCut(ctx, input, pieces);
   const dur = cut ? cut.dur : Math.max(0.3, endSec - startSec);
   const pattern = path.join(outDir, 'f_%05d.jpg');
   const pairPattern = path.join(outDir, 'q_%05d.jpg');
   const chain = `fps=${fps},scale=-2:${height}`;
   const pairChain = `setpts=PTS-${PAIR_DT}/TB,${chain}`;
   const inArgs = cut ? cut.inputArgs(input) : ['-ss', String(startSec), '-i', input];
-  const src = cut && cut.chain ? `${cut.chain};[${cut.v}]` : '[0:v]';
+  const src = cut && cut.chain ? `${cut.chain}${sinkAudio(cut)};[${cut.v}]` : '[0:v]';
   /*
    * `-t` is an OUTPUT option, and with two outputs it has to be written on both.
    * Given once (as it used to be, tucked in after -i) it bounds only the first
@@ -1667,11 +1686,11 @@ async function extractFrames(ctx, { input, startSec, endSec, fps = 2, height = 3
     ? [...inArgs, '-filter_complex', `${src}split=2[pa][pb];[pa]${chain}[fo];[pb]${pairChain}[fq]`,
        ...outArgs('[fo]', pattern), ...outArgs('[fq]', pairPattern)]
     : cut && cut.chain
-      ? [...inArgs, '-filter_complex', `${cut.chain};[${cut.v}]${chain}[fo]`, ...outArgs('[fo]', pattern)]
+      ? [...inArgs, '-filter_complex', `${cut.chain}${sinkAudio(cut)};[${cut.v}]${chain}[fo]`, ...outArgs('[fo]', pattern)]
       : [...inArgs, '-vf', chain, ...outArgs(null, pattern)];
   const [, cuts] = await Promise.all([
     ff.runFfmpeg(ctx.ffmpeg, args, {}),
-    detectSceneCuts(ctx, { input, startSec, dur, pieces }),
+    detectSceneCuts(ctx, { input, startSec, dur, pieces, cut }),
   ]);
   const files = fs.readdirSync(outDir).filter((f) => /^f_\d+\.jpg$/.test(f)).sort();
   const frames = files.map((f, i) => {
@@ -1693,15 +1712,15 @@ async function extractFrames(ctx, { input, startSec, endSec, fps = 2, height = 3
  * finds those moments (clip-relative seconds). Returns [{t, score}]; failure
  * returns [] (tracking then behaves as before — single-shot assumption).
  */
-async function detectSceneCuts(ctx, { input, startSec, dur, pieces }) {
+async function detectSceneCuts(ctx, { input, startSec, dur, pieces, cut: given }) {
   try {
-    const cut = cutPlan(pieces, { hasAudio: false, noFx: true });
+    const cut = given !== undefined ? given : await trackCut(ctx, input, pieces);
     // Each closed gap is itself a hard cut in the finished short, so scoring the
     // JOINED footage (not the original range) is what makes the crop snap at a
     // splice instead of gliding across it.
     const sceneVf = 'scale=-2:180,select=gt(scene\\,0.10),metadata=print';
     const args = cut && cut.chain
-      ? [...cut.inputArgs(input), '-filter_complex', `${cut.chain};[${cut.v}]${sceneVf}[so]`, '-map', '[so]', '-f', 'null', '-']
+      ? [...cut.inputArgs(input), '-filter_complex', `${cut.chain}${sinkAudio(cut)};[${cut.v}]${sceneVf}[so]`, '-map', '[so]', '-f', 'null', '-']
       : ['-ss', String(startSec), '-t', String(dur), '-i', input, '-vf', sceneVf, '-f', 'null', '-'];
     const log = await ff.runFfmpegCollect(ctx.ffmpeg, args);
     const cuts = [];

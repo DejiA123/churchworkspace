@@ -2122,11 +2122,15 @@
       return xs.length ? xs[Math.floor(xs.length / 2)] : null;
     };
     const out = [];
+    // Boundaries that came from the scene pass carry the cut's own time: the
+    // first frame of the new picture. A teleport found between two samples
+    // only knows the cut is somewhere between them.
+    const exact = new Set();
     for (const g of groups) {
       const before = medNear(g.end, -1), after = medNear(g.end, +1);
       if (before != null && after != null
         ? Math.abs(after - before) > Math.max(0.5 * minJump, 0.04)
-        : g.score >= HARD) out.push(g.end + 0.001);
+        : g.score >= HARD) { out.push(g.end + 0.001); exact.add(g.end + 0.001); }
     }
     let pv = null;
     for (const d of dets) {
@@ -2138,7 +2142,9 @@
       }
       pv = d;
     }
-    return out.sort((a, b) => a - b);
+    out.sort((a, b) => a - b);
+    out.exact = exact;
+    return out;
   }
 
   /*
@@ -2213,12 +2219,15 @@
       const camPath = [];
       let prevEnd = null;
       let lo = 0;
+      let cutAt = null;   // the boundary this slice starts at
       const bounds = boundaries.concat([Infinity]);
       for (const b of bounds) {
         let hi = lo;
         while (hi < dets.length && dets[hi].t < b) hi++;
         const slice = dets.slice(lo, hi);
         lo = hi;
+        const from = cutAt;
+        cutAt = b;
         if (!slice.length) continue;
         const hasDet = slice.some((d) => d.cxNorm != null);
         let segPath;
@@ -2234,9 +2243,25 @@
         }
         if (prevEnd && segPath.length) {
           // snap: hold the old framing until just before the boundary, then be
-          // AT the new shot's framing right away (ffmpeg lerps over ~20ms)
-          const bt = segPath[0].t;
-          camPath.push({ t: Math.max(0, bt - 0.02), cx: prevEnd.cx, cy: prevEnd.cy });
+          // AT the new shot's framing right away.
+          //
+          // AT THE CUT ITSELF when the scene pass timed it. Snapping at the new
+          // shot's first SAMPLE instead landed up to 1/6s late — on a real
+          // sermon, five frames of every camera change and closed pause showed
+          // the new picture with the old framing, the preacher jammed against
+          // the edge of the short. `from` is the new picture's first frame
+          // (+1ms): be there 2ms before it and hold 4ms before that, so the
+          // frame before the cut is still all old framing and the cut frame is
+          // all new — ffmpeg reads these times to the millisecond.
+          const timed = from != null && boundaries.exact && boundaries.exact.has(from) && from <= segPath[0].t;
+          if (timed) {
+            const bt = from - 0.002;
+            camPath.push({ t: Math.max(0, bt - 0.004), cx: prevEnd.cx, cy: prevEnd.cy });
+            camPath.push({ t: Math.max(0, bt), cx: segPath[0].cx, cy: segPath[0].cy });
+          } else {
+            const bt = segPath[0].t;
+            camPath.push({ t: Math.max(0, bt - 0.02), cx: prevEnd.cx, cy: prevEnd.cy });
+          }
         }
         camPath.push(...segPath);
         if (segPath.length) prevEnd = { cx: segPath[segPath.length - 1].cx, cy: segPath[segPath.length - 1].cy };
