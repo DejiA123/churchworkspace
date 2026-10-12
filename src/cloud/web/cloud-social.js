@@ -251,67 +251,45 @@
     return h < 5 ? 'Good evening' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
   }
 
-  /*
-   * ►► HOME, THE WAY CAPCUT DOES IT. ◄◄ "The buttons look like every other
-   * AI-made app": glowing pills, glass cards, gradients everywhere. CapCut's
-   * front page is calm instead — a banner whose titles roll by, two soft cards
-   * for the two big things, then the tools as plain line icons in a grid, on
-   * white. So is this one. Every door it had is still here: the Video Studio
-   * (and its projects), AI Montage, Post online, your files — and AI Shorts
-   * and Captions straight from the front page.
-   */
-  const HOME_HERO = [
-    { k: 'shorts', name: 'Long video to shorts', title: 'Turn a sermon into shorts', act: () => homeTool('shorts') },
-    { k: 'caps', name: 'Auto captions', title: 'Captions, word by word', act: () => homeTool('captions') },
-    { k: 'montage', name: 'AI Montage', title: 'Your clips, edited by AI', act: () => openMontage() },
-    { k: 'post', name: 'Post everywhere', title: 'Post to every app at once', act: () => go('scheduler') },
-  ];
-  function heroArt(k) {
-    if (k === 'shorts') return '<span class="hs-wide"><i></i></span><span class="hs-tall"><i class="hs-play"></i><span class="hs-cap"><i></i><i></i><i></i></span></span>';
-    if (k === 'caps') return '<span class="hs-words"><b>FAITH OVER</b><b><em>FEAR</em></b></span>';
-    if (k === 'montage') return `<span class="hs-film"><i></i><i></i><i></i></span><span class="hs-note">${mi('music')}</span>`;
-    return `<span class="hs-plats">${['tiktok', 'youtube', 'instagram', 'facebook'].map((p) => `<i>${platMark(p, 'sm')}</i>`).join('')}</span>`;
-  }
-
   function buildHome() {
     const el = document.createElement('div');
     el.id = 'cloudHome';
     el.className = 'cloud-home';
-    const n = HOME_HERO.length;
     el.innerHTML = `
+      <header class="ch-top">
+        <div class="ch-brand"><span class="ch-logo">✝</span><span class="ch-name">Church Work Space</span></div>
+        <div class="ch-acts"><span class="ch-chip-slot"></span>
+          <button type="button" class="ch-round" data-home="files" aria-label="Your files">${mi('folder')}</button>
+          <button type="button" class="ch-round ch-me" data-home="me" aria-label="Your space"><b id="chMeInitial">${esc(((C.me && C.me.name) || '').charAt(0).toUpperCase()) || mi('user')}</b></button>
+        </div>
+      </header>
       <main class="ch-scroll">
-        <section class="ch-banner" id="chBanner">
-          <header class="ch-top">
-            <div class="ch-brand"><span class="ch-logo">✝</span><span class="ch-name">Church Work Space</span></div>
-            <div class="ch-acts"><span class="ch-chip-slot"></span><span class="ch-ask" id="chAsk"></span>
-              <button type="button" class="ch-round" data-home="files" aria-label="Your files">${mi('folder')}</button>
-              <button type="button" class="ch-round ch-me" data-home="me" aria-label="Your space"><b id="chMeInitial">${esc(((C.me && C.me.name) || '').charAt(0).toUpperCase()) || mi('user')}</b></button>
-            </div>
-          </header>
-          <div class="ch-wheel" aria-hidden="true"><ul>${[0, 1, 2].map(() => HOME_HERO.map((h, i) => `<li data-hero="${i}">${esc(h.name)}</li>`).join('')).join('')}</ul></div>
-          <div class="ch-shots" aria-hidden="true">${HOME_HERO.map((h, i) => `<span class="ch-shot ch-shot-${h.k}" data-i="${i}">${heroArt(h.k)}</span>`).join('')}</div>
-          <div class="ch-banner-tx"><small id="chHello"></small>
-            <button type="button" class="ch-banner-go" data-hero-go><b id="chHeroTitle">${esc(HOME_HERO[0].title)}</b><span>${mi('chev-right')}</span></button></div>
-        </section>
-        <!-- the two big things, as two soft cards (no project list here: the Video Studio card says how many and opens them) -->
+        <section class="ch-hello"><div class="ch-hello-t"><h1 id="chHello"></h1><p>What will you make today?</p></div><span class="ch-ask" id="chAsk"></span></section>
+        <div id="chInvite"></div>
+        <!--
+          ►► ONE BIG DOOR, TWO SMALL ONES. ◄◄ "The UI is confusing… a lot is going
+          on." Three loud cards of the same size asked to be read one by one; now
+          the studio is the one big door (what most visits are for) and AI Montage
+          and Post online sit side by side under it — all three on one screen.
+          (No project list here: the Video Studio card says how many and opens them.)
+        -->
+        <button type="button" class="ch-card ch-studio" data-go="projects">
+          <span class="ch-glow"></span>
+          <span class="ch-copy"><b>Video Studio</b><small>Edit, make shorts, add captions</small></span>
+          <span class="ch-hero" aria-hidden="true"><span class="ch-hero-frame"><i class="ch-hero-play"></i><span class="ch-hero-cap"><i></i><i></i><i></i></span></span>
+            <span class="ch-hero-tl"><i></i><i></i><i></i><b></b></span></span>
+          <span class="ch-foot"><span class="ch-foot-tx" id="chStudioFoot">Open a video to start</span><span class="ch-arrow">${mi('chev-right')}</span></span>
+        </button>
         <div class="ch-duo">
-          <button type="button" class="ch-card ch-studio" data-go="projects">
-            <span class="ch-card-ic">${mi('film')}</span><b>Video Studio</b><small id="chStudioFoot">Open a video to start</small>
+          <button type="button" class="ch-door ch-montage" data-home="montage">
+            <span class="ch-door-ic">${mi('sparkles')}</span><span class="ch-door-go">${mi('chev-right')}</span>
+            <b>AI Montage</b><small>Your clips, edited by AI</small>
           </button>
-          <button type="button" class="ch-card ch-montage" data-home="montage">
-            <span class="ch-card-ic">${mi('sparkles')}</span><b>AI Montage</b><small>Your clips, edited by AI</small>
+          <button type="button" class="ch-door ch-social" data-go="scheduler" id="chSocialCard">
+            <span class="ch-door-ic">${mi('calendar')}</span><span class="ch-door-go">${mi('chev-right')}</span>
+            <b>Post online</b><small id="chSocialFoot">Plan your first post</small><span class="ch-marks" id="chMarks"></span>
           </button>
         </div>
-        <div id="chInvite"></div>
-        <nav class="ch-tools" aria-label="Tools">
-          <button type="button" class="ch-tool" data-tool="shorts"><span class="ch-tool-ic">${mi('scissors')}<i class="ch-spark">${mi('sparkles')}</i></span><span class="ch-tool-tx">AI Shorts</span></button>
-          <button type="button" class="ch-tool" data-tool="captions"><span class="ch-tool-ic">${mi('captions')}<i class="ch-spark">${mi('sparkles')}</i></span><span class="ch-tool-tx">Auto captions</span></button>
-          <button type="button" class="ch-tool ch-social" data-go="scheduler" id="chSocialCard"><span class="ch-tool-ic">${mi('calendar')}<i class="ch-badge hidden" id="chSocialBadge"></i></span><span class="ch-tool-tx">Post online</span>
-            <small id="chSocialFoot"></small><span class="ch-marks" id="chMarks"></span></button>
-          <button type="button" class="ch-tool" data-tool="saved"><span class="ch-tool-ic">${mi('download')}</span><span class="ch-tool-tx">Saved</span></button>
-          <button type="button" class="ch-tool" data-home="files"><span class="ch-tool-ic">${mi('folder')}</span><span class="ch-tool-tx">Your files</span></button>
-          <button type="button" class="ch-tool" data-tool="help"><span class="ch-tool-ic"><i class="ch-q">?</i></span><span class="ch-tool-tx">How to</span></button>
-        </nav>
         <section class="ch-sec hidden" id="chJobs"><h2>Running now</h2><div class="ch-jobs"></div></section>
         <section class="ch-sec hidden" id="chReady">
           <h2>Ready to post <button type="button" class="ch-link" data-home="files">All files</button></h2>
@@ -322,13 +300,8 @@
     document.body.appendChild(el);
     el.querySelector('.ch-chip-slot').appendChild(C.jobChip());
     el.addEventListener('click', (e) => {
-      const b = e.target.closest('[data-go],[data-home],[data-post],[data-job],[data-view],[data-proj],[data-tool],[data-hero],[data-hero-go]');
+      const b = e.target.closest('[data-go],[data-home],[data-post],[data-job],[data-view],[data-proj]');
       if (!b) return;
-      if (b.dataset.heroGo != null) return HOME_HERO[heroAt() % n].act();
-      if (b.dataset.hero != null) return heroShow(+b.dataset.hero, true);
-      if (b.dataset.tool === 'shorts' || b.dataset.tool === 'captions') return homeTool(b.dataset.tool);
-      if (b.dataset.tool === 'saved') { const d = document.getElementById('cloudDownloads'); return d && d.click(); }
-      if (b.dataset.tool === 'help') return window.MWGuide && window.MWGuide.openHelp && window.MWGuide.openHelp();
       if (b.dataset.proj) return openProject(b.dataset.proj);
       if (b.dataset.home === 'projects') return openProjects();
       if (b.dataset.view) return C.viewFile && C.viewFile(b.dataset.view);
@@ -339,63 +312,7 @@
       if (b.dataset.post) return compose({ files: [b.dataset.post] });
       if (b.dataset.job) return C.openJobs();
     });
-    heroStart();
     return el;
-  }
-
-  /*
-   * THE BANNER'S TITLES ROLL BY (CapCut's front page): the names of what the
-   * studio does go past one by one, the one in the middle lit, its picture
-   * beside it and its line under them — tap the line to go straight there.
-   * It only moves while the home screen is on show.
-   */
-  const HERO = { pos: HOME_HERO.length, timer: 0 };
-  const heroAt = () => HERO.pos;
-  function heroShow(i, fromTap) {
-    const n = HOME_HERO.length;
-    const home = $('#cloudHome'); if (!home) return;
-    if (i != null) HERO.pos = n + (((i % n) + n) % n);
-    const ul = $('.ch-wheel ul', home);
-    const k = HERO.pos % n;
-    ul.style.transform = `translateY(${-(HERO.pos - 1) * 38}px)`;
-    $$('.ch-wheel li', home).forEach((li, j) => li.classList.toggle('on', j === HERO.pos));
-    $$('.ch-shot', home).forEach((s) => {
-      const d = ((+s.dataset.i - k) % n + n) % n;
-      s.classList.toggle('on', d === 0);
-      s.classList.toggle('next', d === 1);
-      s.classList.toggle('prev', d === n - 1);
-    });
-    const t = $('#chHeroTitle', home); if (t) t.textContent = HOME_HERO[k].title;
-    if (fromTap) { clearInterval(HERO.timer); HERO.timer = 0; heroStart(); }
-  }
-  function heroStart() {
-    heroShow();
-    if (HERO.timer) return;
-    HERO.timer = setInterval(() => {
-      if (document.hidden || !document.body.classList.contains('mw-home')) return;
-      const n = HOME_HERO.length;
-      const ul = $('#cloudHome .ch-wheel ul'); if (!ul) return;
-      HERO.pos++;
-      heroShow();
-      // past the middle copy of the names: back to it, unseen (the same names stand there)
-      if (HERO.pos >= 2 * n) setTimeout(() => { ul.style.transition = 'none'; HERO.pos -= n; heroShow(); void ul.offsetHeight; ul.style.transition = ''; }, 700);
-    }, 2600);
-  }
-  /* AI Shorts or Captions from the front page: straight to the tool — a video first when none is open */
-  function homeTool(kind) {
-    const ed = window.VideoEditor;
-    const nth = kind === 'captions' ? 2 : 1;
-    const tap = () => { const b = document.querySelector(`#cloudDock .cloud-dock-row[data-row="main"] .cloud-tool:nth-child(${nth})`); if (b) b.click(); };
-    const had = !!(ed && ed.hasVideo && ed.hasVideo());
-    go('studio');
-    if (had) return setTimeout(tap, 250);
-    // (the picker straight from the tap — a phone opens one only from a tap); the tool opens once the video is in
-    const o = document.getElementById('veOpen'); if (o) o.click();
-    const t0 = Date.now();
-    const wait = setInterval(() => {
-      if (ed && ed.hasVideo && ed.hasVideo()) { clearInterval(wait); setTimeout(tap, 700); }
-      else if (Date.now() - t0 > 180000 || !document.body.classList.contains('mw-in-studio')) clearInterval(wait);
-    }, 500);
   }
 
   /* "Show me around" — the screens say what things are in a word, the tours
@@ -474,17 +391,13 @@
   }
   function renderHomeSocial() {
     if (!$('#cloudHome')) return;
-    // the Post online tile: a word or two under its name — what is next, or what needs a look (a red badge)
     const up = upcoming();
     const foot = $('#chSocialFoot');
+    if (up.length) foot.textContent = `Next: ${whenLabel(up[0].scheduledAt)} · ${up.length} planned`;
+    else if (failed().length) foot.textContent = `${failed().length} post${failed().length > 1 ? 's' : ''} need a look`;
+    else foot.textContent = linked().length ? 'Nothing planned yet' : 'Connect your accounts to start';
     const due = handTodos().find(handDue);
-    const bad = failed().length;
-    if (due) foot.textContent = 'Add its song';
-    else if (bad) foot.textContent = `${bad} need${bad > 1 ? '' : 's'} a look`;
-    else if (up.length) foot.textContent = `Next: ${whenLabel(up[0].scheduledAt)}`;
-    else foot.textContent = '';
-    const badge = $('#chSocialBadge');
-    if (badge) { badge.textContent = due || bad ? '!' : up.length ? String(up.length) : ''; badge.classList.toggle('hidden', !(due || bad || up.length)); badge.classList.toggle('warn', !!(due || bad)); }
+    if (due) foot.textContent = `🎵 ${appNames(due)} ${due.apps.length > 1 ? 'are' : 'is'} waiting for its gospel song — tap to finish`;
     const plats = Array.from(new Set(linked().map((a) => a.platform)));
     $('#chMarks').innerHTML = plats.map((p) => platMark(p, 'sm')).join('');
   }
