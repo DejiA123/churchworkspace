@@ -103,5 +103,22 @@ const oneMin = h.refineToSentences(0, 60, minSents, 40, 80, 60, {});
 check('"1 minute" mode lands close to 60s (not a 40s stub)', oneMin && Math.abs((oneMin.end - oneMin.start) - 60, 0) <= 12, oneMin && `${(oneMin.end - oneMin.start).toFixed(1)}s`);
 check('"1 minute" clip still starts/ends on sentence edges', oneMin && minSents.some((s) => s.start === oneMin.start) && minSents.some((s) => s.end === oneMin.end));
 
-console.log(`\n==================  ${pass} passed, ${fail} failed  ==================`);
-process.exit(fail ? 1 : 0);
+// THE PAUSE NEVER CROSSES INTO ANOTHER SENTENCE (planWholeSermon). Measured on a live
+// sermon: with no breath near the end, the snap rode up to 3 s on — "…you understand what
+// I'm saying? | So that's" — into the next sentence. The words' times now bound it.
+(async () => {
+  const words = [];
+  for (let k = 0; k < 40; k++) {
+    // a sentence of 5 words every 3 s, the next one starting straight after (no breath)
+    for (let j = 0; j < 5; j++) words.push({ start: k * 3 + j * 0.56, end: k * 3 + j * 0.56 + 0.5, text: j === 4 ? 'done.' : 'word' });
+  }
+  const greedy = { start: (t) => t - 2.5, end: (t) => t + 2.9, startOk: () => false, endOk: () => false };   // a snapper with no breath near: rides into the neighbours
+  const judge = { plan: async ({ sents }) => ({ moments: [{ start: sents[10].start, end: sents[29].end, sents: sents.slice(10, 30), text: 'x', strength: 7, title: 'T' }], sections: 1, found: 1 }) };
+  const r = await h._internals.planWholeSermon({ transcribeRange: async () => ({ segs: words }), judge, concurrency: 1 },
+    { totalDur: 120, OFF: 0, snap: greedy, minLen: 20, maxLen: 150, idealLen: 60, maxClips: 1 });
+  const c = r && r.picked[0];
+  check('the end stays before the next sentence\'s first word (no breath to snap to)', c && c.end <= 90 && c.end >= 89.74, c && c.end);
+  check('the start stays after the last word of the sentence before', c && c.start >= 29.74 && c.start <= 30, c && c.start);
+  console.log(`\n==================  ${pass} passed, ${fail} failed  ==================`);
+  process.exit(fail ? 1 : 0);
+})();

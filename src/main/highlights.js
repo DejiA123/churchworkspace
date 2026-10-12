@@ -1730,9 +1730,24 @@ async function planWholeSermon(opts, { totalDur, OFF, snap, minLen, maxLen, idea
     if (opts.onProgress) opts.onProgress(at, '');   // the rules take over: no step left on the screen that is not happening
     return null;
   }
+  /*
+   * ►► THE PAUSE NEVER CROSSES INTO ANOTHER SENTENCE. ◄◄ Snapping to the
+   * nearest breath (makeSnapper) keeps a cut off a voiced frame — but with no
+   * breath close by it rode up to 3 s forward, into the next sentence.
+   * Measured on a live sermon: "…you understand what I'm saying? | So that's"
+   * and "…You understand what I'm saying? | I remember one place in Nigeria."
+   * The words' own times say where the neighbouring sentences are: the start
+   * stays after the last word before the short, the end before the first word
+   * after it.
+   */
+  const idxOf = (x) => sents.indexOf(x);
   const picked = res.moments.map((m) => {
-    const start = snap.start(m.start, 0.6, 0.5);
-    const end = snap.end(m.end, 0.5, 0.9, 0.35, start + maxLen + 6);
+    const i0 = m.sents && m.sents.length ? idxOf(m.sents[0]) : -1;
+    const i1 = m.sents && m.sents.length ? idxOf(m.sents[m.sents.length - 1]) : -1;
+    const prevEnd = i0 > 0 ? sents[i0 - 1].end : -Infinity;
+    const nextStart = i1 >= 0 && i1 + 1 < sents.length ? sents[i1 + 1].start : Infinity;
+    const start = Math.min(m.start, Math.max(snap.start(m.start, 0.6, 0.5), prevEnd + 0.02));
+    const end = Math.max(m.end, Math.min(snap.end(m.end, 0.5, 0.9, 0.35, start + maxLen + 6), nextStart - 0.02));
     return {
       start, end, score: m.strength, total: m.strength, aiScore: m.strength,
       text: m.text, sentsArr: m.sents, cleanCut: true, acousticClean: snap.startOk(m.start) && snap.endOk(m.end),
@@ -1910,4 +1925,4 @@ function viralityAndReasons(c, aTop, contentUsed, norm) {
 
 module.exports = { analyzeSermon, contentScore, contentScoreV2, buildSentences, refineToSentences, selectWithCoverage, titleFromClip, viralityAndReasons, trimLeadIn,
   scoreLikeAnEditor, openerPenalty, closerPenalty, loopiness, transitionGap, topicSeam, cohesion, anaphora, quotableLine, readingAloud,
-  _internals: { buildEnvelope, extractPcm, extractEnvelope, pauseWindows, makeSnapper, SR, HOP } };
+  _internals: { buildEnvelope, extractPcm, extractEnvelope, pauseWindows, makeSnapper, planWholeSermon, SR, HOP } };
