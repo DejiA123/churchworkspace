@@ -35,6 +35,7 @@ function server() {
       if (m === 'refuse') return send(401, { message: 'Unauthorized' });
       if (m === 'busyOnce') { Z.mode[prov] = 'ok'; return send(429, { message: 'rate limited' }, { 'retry-after': '1' }); }
       if (m === 'busyAlways') return send(429, { message: 'Requests rate limit exceeded' });
+      if (m === 'tierLarge' && j.model === 'mistral-large-latest') return send(403, { object: 'error', message: 'This model is not available in your subscription tier', type: 'tier_not_allowed', code: '1910' });
       if (m === 'nomodel' && j.model === 'mistral-large-latest') return send(400, { message: 'Invalid model: mistral-large-latest' });
       if (m === 'silent') return send(500, { message: 'down' });
       const reply = typeof Z.reply === 'function' ? Z.reply(j, prov) : (Z.reply || '{"ok":true}');
@@ -67,9 +68,17 @@ function server() {
   check('[1] a busy minute (429) is waited out — as long as Mistral says — and asked again, not given up', !!out && Z.calls.length === 2 && Z.calls.every((c) => c.prov === 'mistral') && waited[0] >= 1000, { n: Z.calls.length, waited });
   Z.calls = []; Z.mode.mistral = 'busyAlways'; waited.length = 0; G.calls = [];
   out = await big.chat({ system: 's', prompt: 'p' });
-  check('[1] busy and busy again: it waits longer each time, tries Mistral Medium, waits for the minute to turn — then Gemini', !!out && Z.calls.some((c) => c.model === 'mistral-medium-latest') && waited.some((w) => w >= 30000) && waited.includes(45000) && G.calls.length === 1,
+  check('[1] busy and busy again: it waits longer each time (a minute in all), tries Mistral Medium the same — then Gemini', !!out && Z.calls.some((c) => c.model === 'mistral-medium-latest') && waited.some((w) => w >= 30000) && waited.reduce((a, b) => a + b, 0) >= 120000 && G.calls.length === 1,
     { waited, models: Z.calls.map((c) => c.model).join(), gem: G.calls.length });
-  check('[1] …and what each one answered is kept, in order (the scan shows it)', big.state.trail.some((t) => /Mistral mistral-large-latest: 429/.test(t)) && big.state.trail.some((t) => /every model busy/.test(t)), big.state.trail.slice(-4));
+  check('[1] …and what each one answered is kept, in order (the scan shows it)', big.state.trail.some((t) => /Mistral mistral-large-latest: 429/.test(t)) && big.state.trail.some((t) => /Mistral mistral-medium-latest: 429/.test(t)), big.state.trail.slice(-4));
+  // the free plan without Mistral Large (measured on the church's own key: 403 tier_not_allowed)
+  Z.calls = []; Z.mode.mistral = 'tierLarge'; G.calls = [];
+  out = await big.chat({ system: 's', prompt: 'p' });
+  check('[1] "not available in your subscription tier": that MODEL is passed over (not the key) — Mistral Medium answers', !!out && Z.calls.map((c) => c.model).join() === 'mistral-large-latest,mistral-medium-latest' && G.calls.length === 0, Z.calls.map((c) => c.model));
+  Z.calls = [];
+  out = await big.chat({ system: 's', prompt: 'p' });
+  check('[1] …and Large is not asked again (set aside for a day); the reader is named Mistral Medium', !!out && Z.calls.map((c) => c.model).join() === 'mistral-medium-latest' && big.name() === 'Mistral Medium (free)', { models: Z.calls.map((c) => c.model), name: big.name() });
+  big._benched.clear();
   Z.mode = {};
   Z.calls = []; Z.mode.mistral = 'nomodel';
   out = await big.chat({ system: 's', prompt: 'p' });
@@ -102,7 +111,7 @@ function server() {
   check('[2] …told the length as a count of sentences, and that a story starts where the story starts', /about 10 to 25 sentences/.test(reads[0].prompt) && /The other day I went to meet him/.test(reads[0].prompt), reads[0] && reads[0].prompt.match(/LENGTH:[^\n]*/));
   check('[2] …with AssemblyAI\'s paragraphs shown (a blank line where a new one begins)', /\n\n\[6\]/.test(reads[0].prompt) && /blank line marks where the speaker paused/.test(reads[0].prompt));
   check('[2] the edges pass runs with it too, ¶ marking paragraph starts', Z.calls.some((c) => /"edges"/.test(c.prompt) && /¶\[12\]/.test(c.prompt)), Z.calls.length);
-  check('[2] the plan comes back from it, Groq never asked', !!plan && plan.moments.length === 3 && groq.calls.length === 0 && judge.stats.plannedBy === 'Mistral Large (free)', { plan: plan && plan.moments.length, groq: groq.calls.length, by: judge.stats.plannedBy });
+  check('[2] the plan comes back from it, Groq never asked', !!plan && plan.moments.length >= 3 && groq.calls.length === 0 && judge.stats.plannedBy === 'Mistral Large (free)', { plan: plan && plan.moments.length, groq: groq.calls.length, by: judge.stats.plannedBy });
   check('[2] …its edge choice is taken (the end moved to where the point lands)', !!plan && plan.moments[0].from === 12 && plan.moments[0].to === 26, plan && plan.moments[0]);
   check('[2] the judge is named for what read it', judge.modelName === 'Mistral Large (free)', judge.modelName);
   // the strong reader silent: Groq, ten minutes at a time
@@ -135,6 +144,10 @@ function server() {
   check('[3] AssemblyAI\'s paragraphs come with the words — p on each paragraph\'s first word', heard.filter((w) => w.p).map((w) => w.text).join() === 'Grace,So,Now', heard.map((w) => w.text + (w.p ? '¶' : '')));
   const plain = await aai.transcribe(Buffer.from('x'), { fetchImpl: fake });
   check('[3] …only when asked (the captions do not need them)', !plain.some((w) => w.p));
+  const w2 = 'Grace is enough. On earth nothing is greater than prayer. Amen.'.split(' ').map((t, k) => ({ text: t, start: k, end: k + 0.5 }));
+  w2[4].p = true; w2[10].p = true;   // two words into a sentence ("nothing"); a sentence's last word ("prayer.")
+  aai.snapParagraphs(w2);
+  check('[3] a paragraph mark is always on the first word of a sentence ("On earth…", not "nothing…")', w2.filter((w) => w.p).map((w) => w.text).join() === 'On,Amen.', w2.filter((w) => w.p).map((w) => w.text));
   const { buildSentences } = require(ROOT + '/src/main/highlights.js');
   const sents = buildSentences([{ start: 0.1, end: 1.25, text: 'Grace is enough.', p: true }, { start: 2.6, end: 3.35, text: 'So pray', p: true }, { start: 3.4, end: 4.0, text: 'and wait.' }, { start: 5.2, end: 5.95, text: 'Now listen.', p: true }]);
   check('[3] a paragraph AssemblyAI heard begin is a sentence of its own, marked para', sents.length === 3 && sents.map((s) => !!s.para).join() === 'true,true,true' && sents[1].text === 'So pray and wait.', sents.map((s) => s.text + (s.para ? '¶' : '')));

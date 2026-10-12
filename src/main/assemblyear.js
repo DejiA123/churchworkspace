@@ -93,12 +93,23 @@ async function transcribe(audio, { terms = [], models = null, cancelled = () => 
         try {
           const pr = await call('/transcript/' + job.id + '/paragraphs', { fetchImpl });
           const starts = (pr.paragraphs || []).map((x) => (+x.start || 0) / 1000).filter((t) => t > 0).sort((a, b) => a - b);
-          // each paragraph's first word: the word that starts at (or just after) the paragraph's start
+          /*
+           * Each paragraph's first word — and always the first word of a
+           * SENTENCE. Measured on a live sermon: marked by time alone, a mark
+           * fell two words in ("…nothing is greater than the prayer of
+           * saints", "On earth" left behind), and a short began mid-sentence.
+           * So the word nearest the paragraph's start is found, then moved to
+           * where its sentence begins; a mark with no sentence start near it
+           * is dropped rather than cut a sentence in two.
+           */
           let i = 0;
           for (const t of starts) {
-            while (i < words.length && words[i].start < t - 0.05) i++;
-            if (i < words.length) words[i].p = true;
+            while (i < words.length - 1 && words[i + 1].start <= t) i++;
+            let best = i;
+            if (i + 1 < words.length && Math.abs(words[i + 1].start - t) < Math.abs(words[i].start - t)) best = i + 1;
+            words[best].p = true;
           }
+          snapParagraphs(words);
         } catch (e) { /* the words stand without them */ }
       }
       return words;
@@ -107,4 +118,27 @@ async function transcribe(audio, { terms = [], models = null, cancelled = () => 
   }
 }
 
-module.exports = { ready, transcribe };
+/*
+ * A paragraph mark on the first word of its SENTENCE. Measured on a live
+ * sermon: marked by time alone, a mark fell two words in ("…nothing is
+ * greater than the prayer of saints", "On earth" left behind) and a short
+ * began mid-sentence. Each mark moves to where its sentence begins (or, on a
+ * sentence's last word, to the next one); a mark with no sentence start near
+ * it is dropped rather than cut a sentence in two. Also run on a transcript
+ * kept from before this (main.js), so it need not be heard again.
+ */
+function snapParagraphs(words) {
+  const ends = (w) => /[.!?…]["')\]]?$/.test(String((w && w.text) || ''));
+  const marked = [];
+  words.forEach((w, k) => { if (w && w.p) { marked.push(k); delete w.p; } });
+  for (let k of marked) {
+    if (ends(words[k]) && k + 1 < words.length) k++;
+    let j = k;
+    for (let n = 0; n < 12 && j > 0 && !ends(words[j - 1]); n++) j--;
+    if (j > 0 && !ends(words[j - 1])) continue;
+    words[j].p = true;
+  }
+  return words;
+}
+
+module.exports = { ready, transcribe, snapParagraphs };

@@ -1501,7 +1501,7 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
       const heardAll = () => all || (all = (async () => {
         const dur = await video.getInfo(getCtx(), input).then((i) => i.durationSec || 0).catch(() => 0);
         const kept = dur > 0 ? aaiCache.get(0, dur) : null;
-        if (kept && kept.length) return kept;
+        if (kept && kept.length) return aai.snapParagraphs(kept.map((w) => Object.assign({}, w)));
         const audio = await geminiear.encodeFlac(input, 0, dur);
         const ws = await aai.transcribe(audio, { terms: aaiTerms(), cancelled: () => jobs.isCancelled(), paragraphs: true });
         if (dur > 0 && ws.length) aaiCache.add(0, dur, ws.map((w) => Object.assign({ start: w.start, end: w.end, text: w.text }, w.p ? { p: true } : {})));

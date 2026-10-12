@@ -53,6 +53,22 @@ S[330].text = 'There is no prosperity gospel, there is only one gospel.';
   // Auto (about 1:30, never under 1:00): a strong moment the AI cut to its punchline takes the thought around it
   const grown = P.vet({ from: 60, to: 62, title: 'x', strength: 8 }, S, sec, Object.assign({}, band, { minLen: 60, idealLen: 90, maxLen: 150 }));
   check('a strong moment shorter than asked grows by whole lines to the length asked (setup first)', !!grown && grown.end - grown.start >= 60 && grown.end - grown.start <= 150 && grown.from < 60 && grown.to > 62, grown && { from: grown.from, to: grown.to, secs: Math.round(grown.end - grown.start) });
+  // the live sermon's misses: a start mid-sentence, an end on a comma, a misheard swear word
+  const L = S.map((x) => Object.assign({}, x));
+  L[320].text = 'On earth'; L[321].text = 'nothing is greater than the prayer of saints on earth.';
+  const mid = P.vet({ from: 321, to: 334, title: 'x', strength: 8 }, L, sec, band);
+  check('a start mid-sentence ("nothing is greater…") goes back to where its sentence starts', !!mid && mid.from === 320, mid && mid.from);
+  const C = S.map((x) => Object.assign({}, x));
+  C[240].text = 'That is how we win.'; C[241].text = 'The devil cannot understand our winning formula.'; C[242].text = 'He cannot understand it,';
+  for (let k = 243; k < 250; k++) C[k].text = 'Hallelujah.';
+  const comma = P.vet({ from: 228, to: 242, title: 'x', strength: 8 }, C, sec, band);
+  check('an end on a comma ("He cannot understand it,") goes back to the last whole sentence', !!comma && comma.to === 241, comma && comma.to);
+  const F = S.map((x) => Object.assign({}, x));
+  F[275].text = 'If you do not kill me today, then fuck it.';
+  const swearEnd = P.vet({ from: 262, to: 275, title: 'x', strength: 8 }, F, sec, band);
+  check('a misheard swear word never closes a church short (it ends on the line before)', !!swearEnd && swearEnd.to === 274, swearEnd && swearEnd.to);
+  const swearIn = P.vet({ from: 268, to: 282, title: 'x', strength: 8 }, F, sec, band);
+  check('…and a short with one inside it is left out', swearIn === null, swearIn && [swearIn.from, swearIn.to]);
   check('short but one of the strongest: kept', !!P.vet({ from: 330, to: 334, strength: 9 }, S, sec, band));
   check('a title is tidied ("…" quotes and the full stop go)', P.vet({ from: 330, to: 345, title: '"There is only one gospel."', strength: 9 }, S, sec, band).title === 'There is only one gospel');
 

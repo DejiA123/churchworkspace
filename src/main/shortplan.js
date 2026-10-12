@@ -46,6 +46,14 @@ const NEW_STORY_RX = /\b(i went to|one day|(?:a|some|many|two|three|few) (?:days
 const words = (t) => String(t || '').split(/\s+/).filter(Boolean).length;
 // opens by pointing back at something said before it
 const LEANS_RX = /^(that'?s?|this|these|those|it|he|she|they|him|her|them|which|so that|and that|but that)\b(?! is why| is how| is what)/i;
+/*
+ * A word no church short may carry. In a sermon it is a mishearing (measured:
+ * AssemblyAI wrote "…then f— it" for a line the preacher did not swear in) —
+ * but the captions would show it: such a line never opens or closes a short,
+ * and a short with one inside it is left out.
+ */
+const PROFANE_RX = /\b(f+u+c+k\w*|sh[i1]t+\w*|bitch\w*|bastard\w*|asshole\w*|motherf\w*|dickhead\w*|goddamn\w*|damn it)\b/i;
+const STOPS_RX = /[.!?…]["')\]]?\s*$/;
 const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 /** The sermon in sections the model can read in one go (sentence indexes). */
@@ -83,7 +91,7 @@ Find EVERY moment in this ${wide ? 'sermon' : 'part'} that would work as a stand
 
 For each moment:
 - "from": the number of the sentence where the thought STARTS. Never start on a filler ("Huh?", "Oh yes, yes", "Okay", "Amen"), on the preacher chatting with someone in the room ("How are you? You're looking so good"), on an announcement, or in the middle of a story or a list. If the line before is needed to understand it, start there.
-- "to": the number of the sentence where its point LANDS — the payoff, the conclusion, the line that makes it worth sharing. Never stop one sentence before the payoff, and never end on the first line of a new story or a new point ("I went to a church about two years ago.").
+- "to": the number of the sentence where its point LANDS — the payoff, the conclusion, the line that makes it worth sharing. Never stop one sentence before the payoff, and never end on the first line of a new story or a new point ("I went to a church about two years ago."). A moment never STARTS on the conclusion of the point before it ("That response is what you call answer.") — that line belongs to the previous moment.
 - LENGTH: it must run between ${minLen} and ${maxLen} seconds, ideally about ${idealLen}. Here that is about ${nMin} to ${nMax} sentences (ideally about ${nIdeal}) — so "to" minus "from" should be at least ${Math.max(1, nMin - 1)}. A single strong line is NOT a moment on its own: take in the setup before it and the follow-through after it until the whole stretch is one complete piece of teaching or one whole story with its point. Check the times: shorter than ${minLen} seconds is too short.
 - "title": 3 to 10 words a person would put on the video to make people watch — a natural phrase or a short question in the preacher's own words, never a list of keywords.
 - "point": the point of the moment, in one short sentence.
@@ -117,6 +125,8 @@ function vet(m, sents, [a, b], { minLen, maxLen, idealLen, noGrow = false }) {
   // a start that leans on the line before it ("That exactly how God is…",
   // "He said…") takes that line too, while it fits
   for (let k = 0; k < 2 && from > 0 && LEANS_RX.test(sents[from].text.trim()) && sents[to].end - sents[from - 1].start <= maxLen; k++) from--;
+  // a start mid-sentence ("nothing is greater than…" — "On earth" left on the line before): its sentence's start
+  for (let k = 0; k < 2 && from > 0 && /^[a-z]/.test(sents[from].text.trim()) && !STOPS_RX.test(sents[from - 1].text.trim()) && sents[to].end - sents[from - 1].start <= maxLen * 1.05; k++) from--;
   // an ending with no full stop was cut mid-phrase ("…What you effect"): the
   // sentence it belongs to is finished, while it fits
   for (let k = 0; k < 2 && to + 1 < sents.length && !/[.!?…]["')\]]?\s*$/.test(sents[to].text.trim()) && sents[to + 1].end - sents[from].start <= maxLen * 1.05; k++) to++;
@@ -128,6 +138,17 @@ function vet(m, sents, [a, b], { minLen, maxLen, idealLen, noGrow = false }) {
   // the short question that opens the NEXT point ("Where did you see Jesus?")
   const setupQ = (t) => /\?\s*$/.test(t) && words(t) <= 7 && /^(where|what|how|who|why|when|which|do you|did you|have you|are you|is it)\b/i.test(t.trim());
   while (to > from && (NEW_STORY_RX.test(sents[to].text) || FILLER_OPEN_RX.test(sents[to].text.trim()) || words(sents[to].text) <= 1 || setupQ(sents[to].text))) to--;
+  // never open or close on a word no church short may carry; one inside it: not a short
+  while (to > from && PROFANE_RX.test(sents[to].text)) to--;
+  while (from < to && PROFANE_RX.test(sents[from].text)) from++;
+  for (let k = from; k <= to; k++) if (PROFANE_RX.test(sents[k].text)) return null;
+  // it lands on a full stop: an end left on a comma ("He cannot understand it,") goes back to the last
+  // whole sentence — three lines at most, never into the setup
+  if (!STOPS_RX.test(sents[to].text.trim())) {
+    let k = to;
+    while (k > from + 2 && to - k < 3 && !STOPS_RX.test(sents[k].text.trim())) k--;
+    if (STOPS_RX.test(sents[k].text.trim())) to = k;
+  }
   // too long: the payoff is kept and the run-up shortened
   while (dur() > maxLen * 1.08 && from < to) from++;
   if (dur() > maxLen * 1.08) return null;
@@ -147,8 +168,8 @@ function vet(m, sents, [a, b], { minLen, maxLen, idealLen, noGrow = false }) {
     for (let k = 0; k < 80 && dur() < want; k++) {
       // a story's first line is where it starts — nothing before it; a long pause is where one thing ends and the next begins
       const gap = (i) => sents[i + 1].start - sents[i].end;
-      const back = from > 0 && !NEW_STORY_RX.test(sents[from].text) && gap(from - 1) < 2 && !ASIDE_RX.test(sents[from - 1].text) && !FILLER_OPEN_RX.test(sents[from - 1].text.trim()) && sents[to].end - sents[from - 1].start <= maxLen;
-      const fwd = to + 1 < sents.length && gap(to) < 2 && !NEW_STORY_RX.test(sents[to + 1].text) && sents[to + 1].end - sents[from].start <= maxLen;
+      const back = from > 0 && !NEW_STORY_RX.test(sents[from].text) && gap(from - 1) < 2 && !ASIDE_RX.test(sents[from - 1].text) && !PROFANE_RX.test(sents[from - 1].text) && !FILLER_OPEN_RX.test(sents[from - 1].text.trim()) && sents[to].end - sents[from - 1].start <= maxLen;
+      const fwd = to + 1 < sents.length && gap(to) < 2 && !NEW_STORY_RX.test(sents[to + 1].text) && !PROFANE_RX.test(sents[to + 1].text) && sents[to + 1].end - sents[from].start <= maxLen;
       // the run-up no longer than what follows: a payoff keeps its setup, the point keeps going
       const before = sents[f0].start - (from > 0 ? sents[from - 1].start : sents[from].start);
       const after = (to + 1 < sents.length ? sents[to + 1].end : sents[to].end) - sents[t0].end;
@@ -156,7 +177,7 @@ function vet(m, sents, [a, b], { minLen, maxLen, idealLen, noGrow = false }) {
       else if (fwd) to++;
       else break;
     }
-    for (let k = 0; k < 3 && to + 1 < sents.length && !/[.!?…]["')\]]?\s*$/.test(sents[to].text.trim()) && sents[to + 1].end - sents[from].start <= maxLen; k++) to++;
+    for (let k = 0; k < 3 && to + 1 < sents.length && !/[.!?…]["')\]]?\s*$/.test(sents[to].text.trim()) && !PROFANE_RX.test(sents[to + 1].text) && sents[to + 1].end - sents[from].start <= maxLen; k++) to++;
     while (from < t0 && (FILLER_OPEN_RX.test(sents[from].text.trim()) || ASIDE_RX.test(sents[from].text) || words(sents[from].text) <= 1)) from++;
   }
   // too short to be a short — unless it is one of the strongest moments
@@ -348,4 +369,4 @@ async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, max
   return { moments, sections: secs.length, failed, found: uniq.length, returned, more, edgesMoved };
 }
 
-module.exports = { planShorts, sections, parseMoments, vet, choose, promptFor, refineEdges, edgePrompt, _rx: { FILLER_OPEN_RX, ASIDE_RX, NEW_STORY_RX } };
+module.exports = { planShorts, sections, parseMoments, vet, choose, promptFor, refineEdges, edgePrompt, _rx: { FILLER_OPEN_RX, ASIDE_RX, NEW_STORY_RX, PROFANE_RX } };

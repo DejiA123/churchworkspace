@@ -24,10 +24,23 @@
  * (llmjudge.js). Never throws: '' means "this reader did not answer", and
  * state.trail says what each service answered, for the scan's meta.
  */
-const MISTRAL = { id: 'mistral', name: 'Mistral Large', env: 'MISTRAL_API_KEY',
-  url: 'https://api.mistral.ai/v1/chat/completions', models: ['mistral-large-latest', 'mistral-medium-latest'] };
+const MISTRAL = { id: 'mistral', name: 'Mistral', env: 'MISTRAL_API_KEY', url: 'https://api.mistral.ai/v1/chat/completions' };
 const GEMINI = { id: 'gemini', name: 'Gemini', env: 'GEMINI_API_KEY' };
 const PROVIDERS = [MISTRAL, GEMINI];
+/*
+ * THE READERS, STRONGEST FIRST. Measured on the church's own key: Mistral's
+ * free plan answered "This model is not available in your subscription tier"
+ * (403 tier_not_allowed) for Mistral Large — a refusal of the MODEL, not the
+ * key. So each Mistral model is tried in turn, one the plan does not include
+ * is set aside for a day, and Gemini Flash (which the key does take) sits
+ * above Mistral's small model.
+ */
+const LADDER = [
+  { prov: MISTRAL, model: 'mistral-large-latest', label: 'Mistral Large' },
+  { prov: MISTRAL, model: 'mistral-medium-latest', label: 'Mistral Medium' },
+  { prov: GEMINI, label: 'Gemini Flash' },
+  { prov: MISTRAL, model: 'mistral-small-latest', label: 'Mistral Small' },
+];
 // (MW_BIGJUDGE_API: a stand-in Mistral for the tests — test/bigjudge.test.js)
 const mistralUrl = () => (process.env.MW_BIGJUDGE_API ? process.env.MW_BIGJUDGE_API.replace(/\/$/, '') + '/mistral' : MISTRAL.url);
 const keyOf = (p) => String(process.env[p.env] || '').trim();
@@ -49,9 +62,10 @@ let geminiAsk = async ({ system, prompt, maxTokens }) => {
 };
 
 function providers() { return PROVIDERS.filter((p) => keyOf(p) && !isBenched(p.id)); }
-function ready() { return providers().length > 0; }
+const open = () => LADDER.filter((r) => keyOf(r.prov) && !isBenched(r.prov.id) && !(r.model && isBenched(r.prov.id + '/' + r.model)));
+function ready() { return open().length > 0; }
 /** The reader that will be asked first, for the label: "Mistral Large (free)". */
-function name() { const p = providers()[0]; return p ? p.name + ' (free)' : ''; }
+function name() { const r = open()[0]; return r ? r.label + ' (free)' : ''; }
 
 function textOf(j) {
   const c = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
@@ -70,67 +84,59 @@ function waitOf(res, attempt) {
 }
 const short = (s) => String(s || '').replace(/\s+/g, ' ').slice(0, 160);
 
-/** Mistral: '' when it did not answer, with why in state.trail. */
-async function askMistral({ system, prompt, maxTokens, json, temperature, timeoutMs, fetchImpl }) {
-  let sawBusy = false;
-  for (let round = 0; round < 2; round++) {
-    for (const model of MISTRAL.models) {
-      if (isBenched('mistral/' + model)) continue;
-      let useJson = json;
-      for (let attempt = 0; attempt < BUSY_WAITS.length + 1; attempt++) {
-        const body = {
-          model, temperature, max_tokens: maxTokens,
-          messages: [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content: String(prompt || '') }],
-        };
-        if (useJson) body.response_format = { type: 'json_object' };
-        const ac = new AbortController();
-        const timer = setTimeout(() => ac.abort(), timeoutMs);
-        let res = null, err = null;
-        try {
-          res = await fetchImpl(mistralUrl(), { method: 'POST', signal: ac.signal,
-            headers: { 'content-type': 'application/json', authorization: 'Bearer ' + keyOf(MISTRAL) }, body: JSON.stringify(body) });
-        } catch (e) { err = e; } finally { clearTimeout(timer); }
-        if (err || !res) {
-          note('Mistral ' + model + ': ' + ((err && err.name === 'AbortError') ? 'did not answer in time' : 'could not be reached'));
-          if (attempt === 0) { await sleep(3000); continue; }
-          benched.set('mistral', Date.now() + 3 * 60e3);   // down or unreachable: the next questions do not wait on it
-          return '';
-        }
-        if (res.ok) {
-          let j = null;
-          try { j = await res.json(); } catch (e) { j = null; }
-          const text = textOf(j);
-          if (text) { state.ok++; state.lastModel = model; state.lastProvider = 'mistral'; state.lastWhy = ''; return text; }
-          // an empty answer under the JSON envelope: once more without it
-          if (useJson) { useJson = false; note('Mistral ' + model + ': empty answer — asked again without JSON mode'); continue; }
-          note('Mistral ' + model + ': answered with nothing');
-          break;
-        }
-        let said = '';
-        try { said = (await res.text()).slice(0, 400); } catch (e) { said = ''; }
-        if (res.status === 429) {
-          sawBusy = true;
-          note('Mistral ' + model + ': 429 ' + short(said));
-          if (attempt < BUSY_WAITS.length) { await sleep(waitOf(res, attempt)); continue; }
-          break;   // still busy: the next model (its allowance may be its own)
-        }
-        if (res.status === 401 || res.status === 403) { benched.set('mistral', Date.now() + 10 * 60e3); note('Mistral: the key was refused (' + res.status + ' ' + short(said) + ')'); return ''; }
-        if (res.status === 404 || (res.status === 400 && /(model|invalid_model)[^.]{0,60}(not found|does not exist|invalid|unknown|not available|no access)|(not found|unknown|invalid|no access)[^.]{0,40}model/i.test(said))) {
-          benched.set('mistral/' + model, Date.now() + 60 * 60e3); note('Mistral ' + model + ': not offered (' + res.status + ' ' + short(said) + ')'); break;
-        }
-        // the JSON envelope refused: the same model, without it
-        if (res.status === 400 && useJson && /response_format|json/i.test(said)) { useJson = false; note('Mistral ' + model + ': 400 on JSON mode — asked again without it'); continue; }
-        if (res.status >= 500 && attempt === 0) { note('Mistral ' + model + ': ' + res.status + ' — once more'); await sleep(4000); continue; }
-        if (res.status >= 500) { benched.set('mistral', Date.now() + 3 * 60e3); note('Mistral is having trouble (' + res.status + ' ' + short(said) + ')'); return ''; }
-        note('Mistral ' + model + ' answered ' + res.status + ' ' + short(said));
-        break;
-      }
+/** One Mistral model: '' when it did not answer, with why in state.trail. */
+async function askMistral(model, { system, prompt, maxTokens, json, temperature, timeoutMs, fetchImpl }) {
+  let useJson = json;
+  for (let attempt = 0; attempt < BUSY_WAITS.length + 1; attempt++) {
+    const body = {
+      model, temperature, max_tokens: maxTokens,
+      messages: [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content: String(prompt || '') }],
+    };
+    if (useJson) body.response_format = { type: 'json_object' };
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), timeoutMs);
+    let res = null, err = null;
+    try {
+      res = await fetchImpl(mistralUrl(), { method: 'POST', signal: ac.signal,
+        headers: { 'content-type': 'application/json', authorization: 'Bearer ' + keyOf(MISTRAL) }, body: JSON.stringify(body) });
+    } catch (e) { err = e; } finally { clearTimeout(timer); }
+    if (err || !res) {
+      note('Mistral ' + model + ': ' + ((err && err.name === 'AbortError') ? 'did not answer in time' : 'could not be reached'));
+      if (attempt === 0) { await sleep(3000); continue; }
+      benched.set('mistral', Date.now() + 3 * 60e3);   // down or unreachable: the next questions do not wait on it
+      return '';
     }
-    // every model busy: one longer wait for the minute to turn, then once more round
-    if (!sawBusy || round > 0) break;
-    note('Mistral: every model busy — waiting for the minute to turn');
-    await sleep(45000);
-    sawBusy = false;
+    if (res.ok) {
+      let j = null;
+      try { j = await res.json(); } catch (e) { j = null; }
+      const text = textOf(j);
+      if (text) { state.ok++; state.lastModel = model; state.lastProvider = 'mistral'; state.lastWhy = ''; return text; }
+      // an empty answer under the JSON envelope: once more without it
+      if (useJson) { useJson = false; note('Mistral ' + model + ': empty answer — asked again without JSON mode'); continue; }
+      note('Mistral ' + model + ': answered with nothing');
+      return '';
+    }
+    let said = '';
+    try { said = (await res.text()).slice(0, 400); } catch (e) { said = ''; }
+    if (res.status === 429) {
+      note('Mistral ' + model + ': 429 ' + short(said));
+      if (attempt < BUSY_WAITS.length) { await sleep(waitOf(res, attempt)); continue; }
+      return '';   // still busy after a minute: the next reader
+    }
+    // the plan does not include THIS model (measured: Mistral Large on the free plan): set aside for a day
+    if ((res.status === 403 || res.status === 401 || res.status === 400) && /tier_not_allowed|subscription tier|not available in your/i.test(said)) {
+      benched.set('mistral/' + model, Date.now() + 24 * 3600e3); note('Mistral ' + model + ': not in this plan (' + short(said) + ')'); return '';
+    }
+    if (res.status === 401 || res.status === 403) { benched.set('mistral', Date.now() + 10 * 60e3); note('Mistral: the key was refused (' + res.status + ' ' + short(said) + ')'); return ''; }
+    if (res.status === 404 || (res.status === 400 && /(model|invalid_model)[^.]{0,60}(not found|does not exist|invalid|unknown|not available|no access)|(not found|unknown|invalid|no access)[^.]{0,40}model/i.test(said))) {
+      benched.set('mistral/' + model, Date.now() + 24 * 3600e3); note('Mistral ' + model + ': not offered (' + res.status + ' ' + short(said) + ')'); return '';
+    }
+    // the JSON envelope refused: the same model, without it
+    if (res.status === 400 && useJson && /response_format|json/i.test(said)) { useJson = false; note('Mistral ' + model + ': 400 on JSON mode — asked again without it'); continue; }
+    if (res.status >= 500 && attempt === 0) { note('Mistral ' + model + ': ' + res.status + ' — once more'); await sleep(4000); continue; }
+    if (res.status >= 500) { benched.set('mistral', Date.now() + 3 * 60e3); note('Mistral is having trouble (' + res.status + ' ' + short(said) + ')'); return ''; }
+    note('Mistral ' + model + ' answered ' + res.status + ' ' + short(said));
+    return '';
   }
   return '';
 }
@@ -140,14 +146,16 @@ async function askMistral({ system, prompt, maxTokens, json, temperature, timeou
  * answered; state.trail says what each one said.
  */
 async function chat({ system, prompt, maxTokens = 3000, json = true, temperature = 0, timeoutMs = 150000, fetchImpl = fetch } = {}) {
-  for (const p of providers()) {
-    if (p.id === 'mistral') {
-      const out = await askMistral({ system, prompt, maxTokens, json, temperature, timeoutMs, fetchImpl });
-      if (out) return out;
-    } else if (p.id === 'gemini') {
+  for (const r of open()) {
+    if (r.prov === MISTRAL) {
+      if (isBenched('mistral') || isBenched('mistral/' + r.model)) continue;
+      const out = await askMistral(r.model, { system, prompt, maxTokens, json, temperature, timeoutMs, fetchImpl });
+      if (out) { state.lastLabel = r.label; return out; }
+    } else if (r.prov === GEMINI) {
+      if (isBenched('gemini')) continue;
       try {
         const out = await geminiAsk({ system, prompt, maxTokens });
-        if (out) { state.ok++; state.lastProvider = 'gemini'; state.lastWhy = ''; return out; }
+        if (out) { state.ok++; state.lastProvider = 'gemini'; state.lastLabel = r.label; state.lastWhy = ''; return out; }
         note('Gemini: answered with nothing');
       } catch (e) {
         note('Gemini: ' + short(e && e.message));
@@ -160,6 +168,6 @@ async function chat({ system, prompt, maxTokens = 3000, json = true, temperature
 }
 
 module.exports = {
-  ready, name, chat, state, providers, PROVIDERS, _benched: benched,
+  ready, name, chat, state, providers, PROVIDERS, LADDER, _benched: benched,
   _setGemini: (fn) => { geminiAsk = fn; }, _setSleep: (fn) => { sleep = fn; },
 };
