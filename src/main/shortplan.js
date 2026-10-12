@@ -64,6 +64,9 @@ function sections(sents, perSection = SECTION_WORDS, overlap = OVERLAP_SENTS) {
 function promptFor(sents, [a, b], { minLen, maxLen, idealLen }) {
   const lines = [];
   for (let k = a; k <= b; k++) lines.push(`[${k}] (${clock(sents[k].start)}) ${sents[k].text}`);
+  // seconds turned into sentences for THIS part (a model adds up times badly; it counts lines well)
+  const per = Math.max(1, (sents[b].end - sents[a].start) / Math.max(1, b - a + 1));
+  const nMin = Math.max(2, Math.round(minLen / per)), nIdeal = Math.max(nMin, Math.round(idealLen / per)), nMax = Math.max(nIdeal, Math.round(maxLen / per));
   const system = 'You are the best short-form video editor for church and ministry content. You find the moments in a sermon that work on their own as short videos, and you cut them exactly where a thought starts and where its point lands. You reply with JSON only.';
   const prompt = `Below is part of a sermon, one sentence per line: [number] (time) words. The transcript is automatic, so a few words may be misheard.
 
@@ -74,7 +77,7 @@ Find EVERY moment in this part that would work as a standalone short video: a co
 For each moment:
 - "from": the number of the sentence where the thought STARTS. Never start on a filler ("Huh?", "Oh yes, yes", "Okay", "Amen"), on the preacher chatting with someone in the room ("How are you? You're looking so good"), on an announcement, or in the middle of a story or a list. If the line before is needed to understand it, start there.
 - "to": the number of the sentence where its point LANDS — the payoff, the conclusion, the line that makes it worth sharing. Never stop one sentence before the payoff, and never end on the first line of a new story or a new point ("I went to a church about two years ago.").
-- It should run between ${minLen} and ${maxLen} seconds (use the times), ideally about ${idealLen}.
+- LENGTH: it must run between ${minLen} and ${maxLen} seconds, ideally about ${idealLen}. Here that is about ${nMin} to ${nMax} sentences (ideally about ${nIdeal}) — so "to" minus "from" should be at least ${Math.max(1, nMin - 1)}. A single strong line is NOT a moment on its own: take in the setup before it and the follow-through after it until the whole stretch is one complete piece of teaching or one whole story with its point. Check the times: shorter than ${minLen} seconds is too short.
 - "title": 3 to 10 words a person would put on the video to make people watch — a natural phrase or a short question in the preacher's own words, never a list of keywords.
 - "point": the point of the moment, in one short sentence.
 - "strength": 1 to 10, how strongly it works as a short on its own.
@@ -135,8 +138,10 @@ function vet(m, sents, [a, b], { minLen, maxLen, idealLen }) {
   if (dur() < minLen && (m.strength || 0) >= 6) {
     const f0 = from, t0 = to;
     for (let k = 0; k < 80 && dur() < want; k++) {
-      const back = from > 0 && !ASIDE_RX.test(sents[from - 1].text) && !FILLER_OPEN_RX.test(sents[from - 1].text.trim()) && sents[to].end - sents[from - 1].start <= maxLen;
-      const fwd = to + 1 < sents.length && !NEW_STORY_RX.test(sents[to + 1].text) && sents[to + 1].end - sents[from].start <= maxLen;
+      // a story's first line is where it starts — nothing before it; a long pause is where one thing ends and the next begins
+      const gap = (i) => sents[i + 1].start - sents[i].end;
+      const back = from > 0 && !NEW_STORY_RX.test(sents[from].text) && gap(from - 1) < 2 && !ASIDE_RX.test(sents[from - 1].text) && !FILLER_OPEN_RX.test(sents[from - 1].text.trim()) && sents[to].end - sents[from - 1].start <= maxLen;
+      const fwd = to + 1 < sents.length && gap(to) < 2 && !NEW_STORY_RX.test(sents[to + 1].text) && sents[to + 1].end - sents[from].start <= maxLen;
       // the run-up no longer than what follows: a payoff keeps its setup, the point keeps going
       const before = sents[f0].start - (from > 0 ? sents[from - 1].start : sents[from].start);
       const after = (to + 1 < sents.length ? sents[to + 1].end : sents[to].end) - sents[t0].end;
