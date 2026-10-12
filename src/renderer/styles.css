@@ -2712,3 +2712,12 @@ body.ve-pfull .ve-preview .ve-fs-exit {
 .set-how > summary::before { content: '? '; }
 .set-how[open] > summary { margin-bottom: 4px; }
 .set-how > p { margin: 0 0 6px; }
+
+/* "Finding the speaker in this short…" — while its camera path is worked out
+   (the preview follows the live guess meanwhile, then the path) */
+.ve-cam-busy { position: absolute; left: 50%; top: 10px; z-index: 6; transform: translate(-50%, -6px); opacity: 0; pointer-events: none;
+  display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px; white-space: nowrap;
+  background: rgba(0, 0, 0, .72); color: #fff; font-size: 12.5px; font-weight: 600; transition: opacity .25s ease, transform .25s ease; }
+.ve-cam-busy.on { opacity: 1; transform: translate(-50%, 0); }
+.ve-cam-busy i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .35); border-top-color: #fff; animation: veCamSpin .8s linear infinite; }
+@keyframes veCamSpin { to { transform: rotate(360deg); } }

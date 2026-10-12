@@ -1953,8 +1953,10 @@
     const ch = (srcAR < tAR ? srcAR / tAR : 1) / z;
     // auto mode reads the RENDER position (smoothed every animation frame — see stepLiveRender
     // above), not the raw ~220ms target directly, so the crop glides instead of hopping.
-    const liveX = liveRenderCx != null ? liveRenderCx : ve.liveFaceCx;
-    const liveY = liveRenderCy != null ? liveRenderCy : ve.liveFaceCy;
+    // the short's own camera path when there is one — the export's, exactly
+    const cam = !manual && ve.video && ve.refs.player ? camPreviewAt(ve.refs.player.currentTime || 0) : null;
+    const liveX = cam ? cam.cx : liveRenderCx != null ? liveRenderCx : ve.liveFaceCx;
+    const liveY = cam ? cam.cy : liveRenderCy != null ? liveRenderCy : ve.liveFaceCy;
     let ox = manual ? clamp(ve.framing.offsetX, 0, 1) : (liveX != null ? clamp(liveX, 0, 1) : 0.5);
     let oy = manual ? clamp(ve.framing.offsetY, 0, 1) : (liveY != null ? clamp(liveY, 0, 1) : 0.5);
     ox = clamp(ox, cw / 2, 1 - cw / 2);
@@ -2759,6 +2761,13 @@
    *  just tuned faster since the target itself already moves in leash-bounded ~0.08 hops
    *  every ~220ms (up to ~0.36/s); this is a glide-shape guard, not a pace-setter. */
   function tickLiveRender(dt) {
+    // a short with its camera path: drawn from the path whenever the picture's
+    // time changes — every frame while it plays, and on a pause, a seek or a scrub
+    if (reframeOn() && ve.video && !ve.cropDrag && ve.refs.player && $('#view-video').classList.contains('active')) {
+      const t = ve.refs.player.currentTime || 0;
+      if (t !== ve._camDrawT && camPreviewAt(t)) { ve._camDrawT = t; updateCropMask(); return true; }
+      if (ve._camDrawT === t && camPreviewAt(t)) return false;
+    }
     const idle = ve.liveFaceCx == null || !reframeOn() || !ve.video || ve.cropDrag || !$('#view-video').classList.contains('active');
     if (idle) { liveRenderLastT = null; return false; }
     if (liveRenderCx == null) { liveRenderCx = ve.liveFaceCx; liveRenderCy = ve.liveFaceCy; }
@@ -2961,7 +2970,12 @@
     const cwin = cropWindow();
     if (cwin.cw >= 0.995 && cwin.ch >= 0.995) return;
     const p = ve.refs.player;
-    if (!p || p.paused || p.readyState < 2 || liveTrackBusy || p._nudging) return;
+    ensurePreviewCam();
+    if (p && camPreviewAt(p.currentTime || 0)) return;   // the short's camera path frames it
+    if (!p || p.readyState < 2 || liveTrackBusy || p._nudging) return;
+    // paused: one fresh look each time the picture is somewhere new (a pause,
+    // a seek, a scrub), instead of leaving the frame wherever it last was
+    if (p.paused) { const t = p.currentTime || 0; if (t === ve._livePausedT) return; ve._livePausedT = t; }
     /*
      * NEVER WHILE AN EXPORT IS TRACKING. A tap on the preview or the timeline
      * during Export all played the video, and the live tracker started a second
@@ -9188,6 +9202,110 @@
     return kf;
   }
 
+  /*
+   * ►► ONE CAMERA PATH, FOR THE PREVIEW AND THE EXPORT. ◄◄ "Follow the speaker
+   * is shocking — sometimes he is in the frame, sometimes it is his shoulder."
+   * That was the PREVIEW: a quick live guess four times a second, only while
+   * playing — paused or scrubbing, the frame stayed wherever it last was — and
+   * never the path the export uses (the AI's pick of who is preaching, the
+   * snap on the cut's own frame). Now a short's path is worked out ONCE, by
+   * exactly the export's tracking, kept on the short (and saved with the
+   * project), and the preview follows it frame by frame, playing or not. The
+   * export uses the same path instead of tracking again. It is worked out
+   * again only when what it depends on changes.
+   */
+  function camKey(s) {
+    let h = 0;
+    const add = (v) => { const t = String(v); for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0; };
+    add(ve.video ? ve.video.path : ''); add(s.start.toFixed(3)); add(s.end.toFixed(3)); add(ve.aspect); add(reframeAiMode());
+    for (const c of cutsOf(s)) { add(c.start.toFixed(3)); add(c.end.toFixed(3)); }
+    add(s.subject && s.subject.sig ? s.subject.sig : ''); add(ve.subject && ve.subject.sig ? ve.subject.sig : '');
+    return 'c' + (h >>> 0).toString(36);
+  }
+  function camCached(s) {
+    const c = s && s._cam;
+    if (!c || !Array.isArray(c.kf) || !c.kf.length || c.key !== camKey(s)) return null;
+    const kf = c.kf.slice();
+    if (c.noSpeaker) kf.noSpeaker = true;
+    return kf;
+  }
+  /** The short's camera path: the one already worked out, or worked out now (and kept). */
+  async function camPath(s, input, ss, ee, pieces, giveUp) {
+    const have = camCached(s);
+    if (have) return have;
+    const key = camKey(s);
+    const kf = await computeReframeKeyframes(s, input, ss, ee, pieces, giveUp);
+    // kept only when the short is still what it was when tracking started
+    if (kf && kf.length && camKey(s) === key) {
+      s._cam = { key, kf: kf.map((k) => ({ t: +k.t.toFixed(3), x: k.x, y: k.y })), noSpeaker: !!kf.noSpeaker };
+      try { touchSession(); } catch (e) {}
+    }
+    return kf;
+  }
+  /** The camera at time t (seconds into the short), as the export draws it: straight lines between keyframes. */
+  function camAt(kf, t) {
+    if (!kf.length) return null;
+    if (t <= kf[0].t) return kf[0];
+    for (let i = 1; i < kf.length; i++) {
+      if (t <= kf[i].t) {
+        const a = kf[i - 1], b = kf[i], r = (t - a.t) / Math.max(1e-6, b.t - a.t);
+        return { x: a.x + (b.x - a.x) * r, y: a.y + (b.y - a.y) * r };
+      }
+    }
+    return kf[kf.length - 1];
+  }
+  /** The short the playhead is in (the shortest main-lane clip under it: a short sits over "Full video"). */
+  const CAM_MAX_LEN = 600;
+  function shortAt(t) {
+    let best = null;
+    for (const s of ve.segments) {
+      if ((s.lane || 0) !== 0 || t < s.start || t >= s.end || s.end - s.start > CAM_MAX_LEN) continue;
+      if (!best || s.end - s.start < best.end - best.start) best = s;
+    }
+    return best;
+  }
+  /** Where the preview's crop goes right now, from the short's camera path — null when there is none yet. */
+  function camPreviewAt(t) {
+    const s = shortAt(t);
+    const kf = s ? camCached(s) : null;
+    if (!kf) return null;
+    let o = srcToOut(s, t);
+    if (o == null) {   // inside a removed pause: the frame it jumps to
+      const c = cutAt(s, t); o = c ? srcToOut(s, Math.min(s.end - 0.001, c.end + 0.001)) : null;
+    }
+    if (o == null) return null;
+    const k = camAt(kf, o);
+    if (!k) return null;
+    return { cx: k.x / ve.video.info.width, cy: k.y / ve.video.info.height };
+  }
+  /*
+   * Working the path out for the short the playhead is in, in the background,
+   * one at a time, and never beside an export's own tracking.
+   */
+  const camJob = { busy: false, failed: new Set() };
+  function ensurePreviewCam() {
+    if (camJob.busy || !ve.video || !reframeOn() || !window.FaceTrack) return;
+    if (ve._exportingAll || (window.__tasksBusy && window.__tasksBusy())) return;
+    if (!$('#view-video').classList.contains('active')) return;
+    const p = ve.refs.player;
+    const s = shortAt((p && p.currentTime) || 0);
+    if (!s || camCached(s) || camJob.failed.has(camKey(s))) return;
+    const key = camKey(s);
+    camJob.busy = true;
+    setCamBusy(true);
+    const { input, ss, ee, pieces } = clipFootage(s);
+    camPath(s, input, ss, ee, pieces, () => !reframeOn())
+      .then((kf) => { if (!kf || !kf.length) camJob.failed.add(key); })
+      .catch(() => camJob.failed.add(key))
+      .then(() => { camJob.busy = false; setCamBusy(false); updateCropMask(); });
+  }
+  function setCamBusy(on) {
+    const host = ve.refs.drop; if (!host) return;
+    let el = host.querySelector('.ve-cam-busy');
+    if (!el) { el = document.createElement('div'); el.className = 've-cam-busy'; el.innerHTML = '<i></i><span>Finding the speaker in this short…</span>'; host.appendChild(el); }
+    el.classList.toggle('on', !!on);
+  }
+
   /** Overlay-lane (PiP) clips whose timeline window overlaps [s.start, s.end]. */
   function overlaysIntersecting(s) {
     return overlayClips().filter((o) => o.id !== s.id && tlPos(o) < s.end && (tlPos(o) + (o.end - o.start)) > s.start);
@@ -9564,7 +9682,7 @@
     if (reframeOn()) {
       const keyframes = pre && pre.keyframes
         ? pre.keyframes
-        : await window.__runJob(`🎯 Tracking the speaker in "${s.label}"…`, window.__newJobId(), () => computeReframeKeyframes(s, input, ss, ee, pieces), J(s, 'track'));
+        : (camCached(s) || await window.__runJob(`🎯 Tracking the speaker in "${s.label}"…`, window.__newJobId(), () => camPath(s, input, ss, ee, pieces), J(s, 'track')));
       const jobId = window.__newJobId();
       // nobody to follow (see computeReframeKeyframes): one steady shot
       const steady = keyframes && keyframes.noSpeaker;
@@ -10186,7 +10304,7 @@
     const ahead = makeLookAhead(list, async (s, cancelled) => {
       if (!reframeOn() || !window.FaceTrack) return null;
       const { input, ss, ee, pieces } = clipFootage(s);
-      const kf = await computeReframeKeyframes(s, input, ss, ee, pieces, cancelled);
+      const kf = await camPath(s, input, ss, ee, pieces, cancelled);
       return kf && kf.length ? { keyframes: kf } : null;
     });
     /*
@@ -16895,6 +17013,10 @@
       setCuts(id, cuts) { const s = ve.segments.find((x) => x.id === id); if (s) { s.cuts = cuts; renderSegments(); } },
       // real export of one clip (pauses joined out) — returns the written file
       exportClip(id) { const s = ve.segments.find((x) => x.id === id); return s ? exportOneClip(s) : null; },
+      // the short's kept camera path, and where the preview's crop is right now
+      camOf(id) { const s = ve.segments.find((x) => x.id === id); const kf = s ? camCached(s) : null; return kf ? { n: kf.length, kf, noSpeaker: !!kf.noSpeaker } : null; },
+      cropNow() { const w = cropWindow(); return { ox: w.ox, oy: w.oy, cw: w.cw }; },
+      camBusy() { return camJob.busy; },
       // the FULL per-short export path (text burn + captions + music + outro)
       exportSegmentFull(id) { return exportSegment(id); },
       // --- gap-aware preview + text visibility ---
