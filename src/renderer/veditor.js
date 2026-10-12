@@ -195,7 +195,7 @@
       ve.capWords = null; ve.capEvents = null; ve.capOffset = 0; ve._capSource = null; ve.capTarget = null;
       ve.capSel = null; ve.capEditing = null; ve.capScope = null;
       ve.framing = { zoom: 1, offsetX: 0.5, offsetY: 0.5 };
-      ve.textOverlays = []; ve.textSel = null;
+      ve.textOverlays = []; ve.textSel = null; ve.shortFx = null;
       ve.mediaThumbs = {};   // a new recording is a new project — nothing is on top of it yet
       ve.history = []; ve.future = []; updateUndoRedoButtons();
       setFollow(true, true); // a fresh video starts following the playhead again
@@ -6810,6 +6810,7 @@
   /* ---------------- segments ---------------- */
   function addSegment(start, end, label, ai) {
     const s = { id: uid(), start: Math.max(0, start), end: Math.min(dur(), end), label: label || ('Clip ' + (ve.segments.length + 1)), color: COLORS[ve.segments.length % COLORS.length], ai: !!ai };
+    if (ai && ve.shortFx) s.fx = Object.assign({}, ve.shortFx);   // ⭐ a preset's video quality, on shorts made after it
     ve.segments.push(s); selectSeg(s.id); renderSegments(); return s;
   }
   function removeSeg(id) { pushHistory(); ve.segments = ve.segments.filter((s) => s.id !== id); if (ve.sel === id) ve.sel = null; renderSegments(); }
@@ -7517,6 +7518,7 @@
         aspect: ve.aspect, quality: ve.quality, fps: ve.fps || 0, bitrate: ve.bitrate || 'recommended',
         fill: ve.fill, denoise: ve.denoise, fade: ve.fade, cover: ve.cover,
         framing: ve.framing,
+        shortFx: ve.shortFx || null,
         reframe: !!(($('#veAutoReframe') || {}).checked),
         subject: ve.subject ? { sig: ve.subject.sig, thumb: ve.subject.thumb, at: ve.subject.at } : null,
       },
@@ -7601,6 +7603,7 @@
     if (lk.cover) ve.cover = lk.cover;
     if (lk.fade) ve.fade = lk.fade;
     if (lk.framing) ve.framing = lk.framing;
+    ve.shortFx = lk.shortFx || null;
     const rf = $('#veAutoReframe'); if (rf && lk.reframe != null) rf.checked = !!lk.reframe;
     ve.subject = lk.subject && lk.subject.sig ? lk.subject : null;
 
@@ -14316,6 +14319,269 @@
     renderLibrary(); renderSegments(); updateMusicButton();
   }
 
+  /* ======================= ⭐ PRESETS: ONE TAP FOR THE NEXT SERMON =======================
+   *
+   * "Save my edit so whenever I edit a different sermon, all I need is one tap."
+   * A preset is this video's finishing touches, kept as plain data on the
+   * studio (library.js, one file per person, so every phone sees the same list):
+   *
+   *   • the text — a name banner that ran the whole video runs the whole of the
+   *     next one, and text that ran to the end still runs to the end
+   *   • the background music and how loud it is, by its id in My music
+   *   • the ending (outro), by its id in My clips
+   *   • the caption look, the video quality (Filters / Adjust), the shape,
+   *     the background and Follow
+   *
+   * Using a preset twice does not stack: text a preset put on is swapped for
+   * the new preset's, and text typed by hand is never touched.
+   */
+  const presetFont = (sel) => { const el = $(sel); return el ? el.value : null; };
+  function collectPreset(name) {
+    const D = dur();
+    const text = (ve.textOverlays || []).filter((o) => (o.text || '').trim()).map((o) => {
+      const c = JSON.parse(JSON.stringify(o));
+      delete c.id; delete c.fromPreset;
+      c.whole = o.start <= 1 && o.end >= D - 1;
+      c.toEnd = !c.whole && o.end >= D - 1;
+      return c;
+    });
+    // the look on the footage: the main clip's, or a short's when only the shorts have one
+    const fx = fxClips().map((s) => cleanFx(s.fx)).find(Boolean)
+      || ve.segments.filter((x) => x.ai).map((s) => cleanFx(s.fx)).find(Boolean) || null;
+    const m = ve.music;
+    return {
+      name: String(name || '').trim() || 'My preset',
+      from: { durationSec: D, video: ve.video ? ve.video.path.split(/[\\/]/).pop() : '' },
+      text,
+      music: m ? { id: m.id, name: m.name, volume: m.volume, fadeIn: m.fadeIn, fadeOut: m.fadeOut, duck: !!m.duck, bed: m.bed !== false } : null,
+      outro: ve.outro ? { id: ve.outro.id, name: ve.outro.name, all: ve.outroAll !== false } : null,
+      captions: {
+        styleId: ve.capStyleId || null,
+        font: presetFont('#capFont'), size: presetFont('#capSize'), sizePct: presetFont('#capSizePct'),
+        words: presetFont('#capWords'), case: presetFont('#capCase'), colour: presetFont('#capColor'),
+        pos: ve.capPos ? { x: ve.capPos.x, y: ve.capPos.y } : null, width: ve.capWidth || null,
+      },
+      fx,
+      look: {
+        aspect: ve.aspect, fill: ve.fill && ve.fill.mode,
+        follow: !!(($('#veAutoReframe') || {}).checked),
+      },
+    };
+  }
+  const FX_WORDS = { look: 'filter', bri: 'brightness', con: 'contrast', sat: 'saturation', sharp: 'sharpen', vol: 'volume' };
+  const ASPECT_WORDS = { 'reel-9x16': '9:16', 'square-1x1': '1:1', 'portrait-4x5': '4:5', 'wide-16x9': '16:9' };
+  /** What is in a preset, in plain words — the card's lines and the save sheet's list. */
+  function presetParts(p) {
+    const out = [];
+    const tx = (p.text || []).map((t) => (t.caps ? String(t.text).toUpperCase() : String(t.text)).replace(/\s+/g, ' ').trim()).filter(Boolean);
+    if (tx.length) out.push({ k: 'text', icon: 'T', label: tx.length === 1 ? `Text: “${tx[0].slice(0, 40)}”` : `${tx.length} texts: “${tx[0].slice(0, 28)}” …` });
+    if (p.music) out.push({ k: 'music', icon: '♫', label: `Music: ${p.music.name || 'a song from My music'}` });
+    if (p.outro) out.push({ k: 'outro', icon: '⏭', label: `Ending: ${p.outro.name || 'a clip from My clips'}` });
+    if (p.fx) out.push({ k: 'fx', icon: '✦', label: 'Video quality: ' + Object.keys(p.fx).map((k) => (k === 'look' ? p.fx.look : FX_WORDS[k] || k)).join(', ') });
+    if (p.captions && p.captions.styleId) out.push({ k: 'captions', icon: 'CC', label: 'Caption style' });
+    if (p.look && p.look.aspect) {
+      const fill = { crop: 'fill the frame', bars: 'black bars', blur: 'blurred background' }[p.look.fill] || '';
+      out.push({ k: 'look', icon: '▭', label: `Shape: ${ASPECT_WORDS[p.look.aspect] || p.look.aspect}${fill ? ', ' + fill : ''}${p.look.follow ? ', follow the speaker' : ''}` });
+    }
+    return out;
+  }
+
+  async function applyPreset(p) {
+    if (!ve.video || !p) return null;
+    const D = dur();
+    const notes = [];
+    pushHistory();
+    // ── the text
+    ve.textOverlays = (ve.textOverlays || []).filter((o) => !o.fromPreset);
+    for (const t of p.text || []) {
+      const o = JSON.parse(JSON.stringify(t));
+      delete o.whole; delete o.toEnd;
+      o.id = uid(); o.fromPreset = p.id || true;
+      if (t.whole) { o.start = 0; o.end = D; }
+      else {
+        if (!(o.start < D - 0.2)) continue;   // it began after this video ends
+        o.end = t.toEnd ? D : Math.min(D, o.end);
+      }
+      ve.textOverlays.push(o);
+    }
+    ve.textSel = null; ve.textEditing = null;
+    // ── the music and the ending, from this person's library
+    if (p.music || p.outro) { try { await libRefresh(); } catch (e) {} }
+    if (p.music) {
+      const entry = ((ve.lib && ve.lib.music) || []).find((m) => m.id === p.music.id);
+      if (entry) {
+        ve.music = musicFrom(entry, p.music);
+        saveMusicPref(); primeMusic(musicFile(ve.music));
+        syncMusicPreview(true);
+      } else notes.push(`the song “${p.music.name || ''}” is no longer in My music`);
+    }
+    if (p.outro) {
+      const entry = ((ve.lib && ve.lib.clips) || []).find((c) => c.id === p.outro.id);
+      if (entry) { ve.outro = entry; ve.outroAll = p.outro.all !== false; saveOutroPref(); }
+      else notes.push(`the ending “${p.outro.name || ''}” is no longer in My clips`);
+    }
+    // ── video quality, on every clip — and on the shorts made from here on
+    if (p.fx) {
+      const fx = cleanFx(p.fx);
+      fxClips().concat(ve.segments.filter((x) => x.ai)).forEach((s) => { if (fx) s.fx = Object.assign({}, fx); else delete s.fx; });
+      ve.shortFx = fx ? Object.assign({}, fx) : null;
+    }
+    // ── caption look
+    const c = p.captions;
+    if (c) {
+      if (c.styleId) setCapStyle(c.styleId);
+      for (const [sel, v] of [['#capFont', c.font], ['#capSize', c.size], ['#capSizePct', c.sizePct], ['#capWords', c.words], ['#capCase', c.case], ['#capColor', c.colour]]) {
+        const el = $(sel);
+        if (!el || v == null || el.value === String(v)) continue;
+        el.value = v; el.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      if (c.pos && Number.isFinite(c.pos.x) && Number.isFinite(c.pos.y)) ve.capPos = { x: c.pos.x, y: c.pos.y };
+      if (Number.isFinite(c.width) && window.CapLayout) ve.capWidth = clamp(c.width, window.CapLayout.MIN_WIDTH, window.CapLayout.MAX_WIDTH);
+      if (c.pos || c.width) saveCapLook();
+    }
+    // ── shape, background, follow
+    const lk = p.look || {};
+    if (lk.aspect && ve.presets[lk.aspect] && ve.aspect !== lk.aspect) {
+      ve.aspect = lk.aspect; const sel = $('#veAspect'); if (sel) sel.value = lk.aspect;
+    }
+    if (lk.fill && ve.fill && ve.fill.mode !== lk.fill) setFillMode(lk.fill);
+    const rf = $('#veAutoReframe');
+    if (rf && typeof lk.follow === 'boolean' && rf.checked !== lk.follow) { rf.checked = lk.follow; rf.dispatchEvent(new Event('change', { bubbles: true })); }
+
+    renderTextOverlays(); renderTextTrack();
+    renderLibrary(); renderMusicLane(); renderSegments(); updateMusicButton();
+    updateCropMask(); renderFollowRow();
+    if (typeof updateFxPreview === 'function') updateFxPreview();
+    updateCapOverlay(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
+    touchSession();
+    return { notes };
+  }
+
+  /* the sheet */
+  function presetModal() {
+    let m = document.getElementById('vePresetModal');
+    if (m) return m;
+    m = document.createElement('div');
+    m.id = 'vePresetModal';
+    m.className = 'cap-modal hidden';
+    m.innerHTML = `
+      <div class="cap-box ve-pre-box" role="dialog" aria-label="Presets">
+        <div class="cap-head"><h2>Presets</h2><button type="button" class="ghost-btn small" data-pre-close aria-label="Close">✕</button></div>
+        <div class="ve-pre-body">
+          <p class="ve-pre-intro">Save this video's text, music, ending and looks. On your next sermon, tap <b>Use</b> and they are all added at once.</p>
+          <button type="button" class="primary-btn ve-pre-new" data-pre-new>＋ Save this edit as a preset</button>
+          <div class="ve-pre-save hidden" data-pre-form>
+            <label class="ve-pre-label" for="vePreName">Name</label>
+            <input id="vePreName" type="text" maxlength="50" autocomplete="off" enterkeyhint="done" placeholder="e.g. Sunday sermon" />
+            <div class="ve-pre-what" data-pre-what></div>
+            <div class="ve-pre-row">
+              <button type="button" class="ghost-btn" data-pre-cancel>Cancel</button>
+              <button type="button" class="primary-btn" data-pre-save>Save preset</button>
+            </div>
+          </div>
+          <div class="ve-pre-list" data-pre-list></div>
+        </div>
+      </div>`;
+    document.body.appendChild(m);
+    const form = m.querySelector('[data-pre-form]'), name = m.querySelector('#vePreName');
+    const showForm = (on) => {
+      form.classList.toggle('hidden', !on);
+      m.querySelector('[data-pre-new]').classList.toggle('hidden', on);
+      if (!on) return;
+      const parts = presetParts(collectPreset(''));
+      m.querySelector('[data-pre-what]').innerHTML = parts.length
+        ? '<p class="ve-pre-label">What it will add</p>' + parts.map((x) => `<div class="ve-pre-part"><span class="ve-pre-ic">${escape2(x.icon)}</span>${escape2(x.label)}</div>`).join('')
+        : '<p class="ve-pre-empty">There is nothing on this video to save yet. Add your text, music or ending first.</p>';
+      m.querySelector('[data-pre-save]').disabled = !parts.length;
+      name.value = name.value || '';
+      setTimeout(() => { try { name.focus(); } catch (e) {} }, 50);
+    };
+    m.addEventListener('click', async (e) => {
+      if (e.target === m || e.target.closest('[data-pre-close]')) return closePresets();
+      if (e.target.closest('[data-pre-new]')) return showForm(true);
+      if (e.target.closest('[data-pre-cancel]')) { name.value = ''; return showForm(false); }
+      if (e.target.closest('[data-pre-save]')) return savePresetNow(name.value).then((ok) => { if (ok) { name.value = ''; showForm(false); } });
+      const use = e.target.closest('[data-pre-use]');
+      if (use) return usePreset(use.dataset.preUse);
+      const del = e.target.closest('[data-pre-del]');
+      if (del) {
+        // two taps: the first asks, the second deletes
+        if (del.dataset.sure !== '1') { del.dataset.sure = '1'; del.textContent = 'Delete?'; del.classList.add('sure'); setTimeout(() => { if (del.isConnected) { del.dataset.sure = ''; del.textContent = '🗑'; del.classList.remove('sure'); } }, 3500); return; }
+        try { await window.api.presets.remove(del.dataset.preDel); } catch (er) {}
+        return refreshPresets();
+      }
+    });
+    name.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); m.querySelector('[data-pre-save]').click(); } });
+    return m;
+  }
+  function renderPresetList() {
+    const m = document.getElementById('vePresetModal'); if (!m) return;
+    const el = m.querySelector('[data-pre-list]');
+    const list = ve.presetList || [];
+    if (!list.length) {
+      el.innerHTML = '<p class="ve-pre-empty">No presets yet. Edit one sermon the way you like it, then save it here.</p>';
+      return;
+    }
+    el.innerHTML = '<p class="ve-pre-label">Your presets</p>' + list.map((p) => `
+      <div class="ve-pre-card" data-id="${attr2(p.id)}">
+        <div class="ve-pre-main">
+          <b>${escape2(p.name)}</b>
+          ${presetParts(p).map((x) => `<span class="ve-pre-line"><span class="ve-pre-ic">${escape2(x.icon)}</span>${escape2(x.label)}</span>`).join('')}
+        </div>
+        <div class="ve-pre-btns">
+          <button type="button" class="primary-btn" data-pre-use="${attr2(p.id)}">Use</button>
+          <button type="button" class="ghost-btn ve-pre-del" data-pre-del="${attr2(p.id)}" aria-label="Delete this preset">🗑</button>
+        </div>
+      </div>`).join('');
+  }
+  async function refreshPresets() {
+    try { ve.presetList = await window.api.presets.list(); } catch (e) { ve.presetList = ve.presetList || []; }
+    renderPresetList();
+    return ve.presetList;
+  }
+  async function savePresetNow(name) {
+    if (!ve.video) return false;
+    const p = collectPreset(name);
+    if (!presetParts(p).length) return false;
+    // the same name again is that preset brought up to date, not a twin
+    const same = (ve.presetList || []).find((x) => x.name.toLowerCase() === p.name.toLowerCase());
+    if (same) p.id = same.id;
+    try {
+      const saved = await window.api.presets.save(p);
+      await refreshPresets();
+      window.__toast && window.__toast(`⭐ Saved “${saved.name}”. On your next sermon: Presets → Use.`, 'good', 6000);
+      return true;
+    } catch (e) {
+      window.__toast && window.__toast('⚠️ ' + (e.message || 'Could not save the preset.'), 'error');
+      return false;
+    }
+  }
+  async function usePreset(id) {
+    const p = (ve.presetList || []).find((x) => x.id === id);
+    if (!p) return null;
+    const r = await applyPreset(p);
+    closePresets();
+    if (!r) return null;
+    const what = presetParts(p).map((x) => x.k).filter((k) => !r.notes.some((n) => n.includes(k === 'music' ? 'song' : k === 'outro' ? 'ending' : '\u0000')));
+    const words = { text: 'the text', music: 'the music', outro: 'the ending', fx: 'the video quality', captions: 'the caption style', look: 'the shape' };
+    const list = what.map((k) => words[k]).filter(Boolean);
+    const said = list.length > 1 ? list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1] : (list[0] || 'it');
+    window.__toast && window.__toast(`⭐ “${p.name}” is on this video: ${said}.`
+      + (r.notes.length ? ` Not added: ${r.notes.join('; ')}.` : ''), r.notes.length ? 'error' : 'good', 8000);
+    return r;
+  }
+  async function openPresets() {
+    if (!ve.video) { window.__toast && window.__toast('Open a sermon first — then save its edit, or use a preset on it.', 'error'); return; }
+    const m = presetModal();
+    m.classList.remove('hidden');
+    renderPresetList();
+    await refreshPresets();
+  }
+  function closePresets() {
+    const m = document.getElementById('vePresetModal');
+    if (m) m.classList.add('hidden');
+  }
+
   /** Listen to a library track without committing to it. */
   function auditionMusic(id) {
     const entry = ((ve.lib && ve.lib.music) || []).find((m) => m.id === id); if (!entry) return;
@@ -15770,6 +16036,7 @@
       saveSession(false);
     });
     const clipsBtn = $("#veClips"); if (clipsBtn) clipsBtn.addEventListener('click', () => openLibrary('clips'));
+    const presetsBtn = $('#vePresets'); if (presetsBtn) presetsBtn.addEventListener('click', () => openPresets());
     const thumbCloseBtn = $('#thumbClose'); if (thumbCloseBtn) thumbCloseBtn.addEventListener('click', closeThumbPicker);
     const thumbModalEl = $('#thumbModal'); if (thumbModalEl) thumbModalEl.addEventListener('click', (e) => { if (e.target === thumbModalEl) closeThumbPicker(); });
     $$('#thumbModal [data-thsrc]').forEach((b) => b.addEventListener('click', () => thSetSrc(b.dataset.thsrc)));
@@ -16455,6 +16722,7 @@
     keyframes() { return openKeyframes(); },
     /** The phone's Text row: ready-made titles, and how a text arrives. */
     textTemplates() { openTextTemplates(); },
+    presets() { return openPresets(); },
     textAnimation() { openTextAnimPicker(); },
     // test hooks (no real ffmpeg/player needed)
     __test: {
@@ -17023,6 +17291,14 @@
       },
       setCuts(id, cuts) { const s = ve.segments.find((x) => x.id === id); if (s) { s.cuts = cuts; renderSegments(); } },
       // real export of one clip (pauses joined out) — returns the written file
+      // ⭐ presets
+      collectPreset(name) { return collectPreset(name); },
+      presetParts(p) { return presetParts(p); },
+      applyPreset(p) { return applyPreset(p); },
+      savePreset(name) { return savePresetNow(name); },
+      usePreset(id) { return usePreset(id); },
+      async presetList() { return refreshPresets(); },
+      shortFx() { return ve.shortFx || null; },
       exportClip(id) { const s = ve.segments.find((x) => x.id === id); return s ? exportOneClip(s) : null; },
       // …and with its added text burned on, the way Export does it
       async exportClipWithText(id) {

@@ -108,6 +108,11 @@ contextBridge.exposeInMainWorld('api', {
     remove: (kind, id) => call('library:remove', { kind, id }),
     rename: (kind, id, name) => call('library:rename', { kind, id, name }),
   },
+  presets: {
+    list: () => call('presets:list'),
+    save: (preset) => call('presets:save', { preset }),
+    remove: (id) => call('presets:remove', { id }),
+  },
   /* songs that are safe to post (freemusic.js) */
   freeMusic: {
     list: (wait) => call('music:free', { wait: !!wait }),

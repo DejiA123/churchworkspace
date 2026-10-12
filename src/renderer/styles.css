@@ -2721,3 +2721,27 @@ body.ve-pfull .ve-preview .ve-fs-exit {
 .ve-cam-busy.on { opacity: 1; transform: translate(-50%, 0); }
 .ve-cam-busy i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .35); border-top-color: #fff; animation: veCamSpin .8s linear infinite; }
 @keyframes veCamSpin { to { transform: rotate(360deg); } }
+
+/* ⭐ Presets — a sermon's text, music, ending and looks, on the next one in one tap */
+.ve-pre-box { width: 560px; max-width: 94vw; max-height: 86vh; }
+.ve-pre-body { padding: 14px 18px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.ve-pre-intro { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; }
+.ve-pre-new { width: 100%; min-height: 46px; font-size: 15px; font-weight: 800; }
+.ve-pre-save { display: flex; flex-direction: column; gap: 8px; padding: 14px; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid var(--border); }
+.ve-pre-save.hidden, .ve-pre-new.hidden { display: none; }
+.ve-pre-save input { width: 100%; min-height: 44px; font-size: 16px; padding: 0 12px; border-radius: 10px; margin: 0; }
+.ve-pre-label { margin: 4px 0 0; font-size: 12px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.ve-pre-part, .ve-pre-line { display: flex; align-items: center; gap: 8px; font-size: 14px; line-height: 1.35; color: var(--text); overflow-wrap: anywhere; }
+.ve-pre-line { font-size: 13px; color: var(--muted); }
+.ve-pre-ic { flex: 0 0 24px; height: 24px; display: grid; place-items: center; border-radius: 7px; background: rgba(31,111,224,.18); color: #7fb0ff; font-size: 11px; font-weight: 900; }
+.ve-pre-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.ve-pre-row button { min-height: 44px; padding: 0 18px; }
+.ve-pre-empty { margin: 4px 0; color: var(--muted); font-size: 14px; line-height: 1.45; }
+.ve-pre-list { display: flex; flex-direction: column; gap: 10px; }
+.ve-pre-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid var(--border); }
+.ve-pre-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ve-pre-main > b { font-size: 16px; overflow-wrap: anywhere; }
+.ve-pre-btns { flex: 0 0 auto; display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+.ve-pre-btns .primary-btn { min-height: 44px; min-width: 76px; font-weight: 800; }
+.ve-pre-del { min-height: 40px; }
+.ve-pre-del.sure { background: #c62828; border-color: #c62828; color: #fff; font-weight: 800; }

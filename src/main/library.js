@@ -232,6 +232,44 @@ function rename({ kind, id, name }) {
   return hit || null;
 }
 
+/* ============================== Presets ==============================
+ * "Save my edit so the next sermon is one tap": the name text, the music bed,
+ * the ending, the caption look and the picture settings, kept as plain data
+ * (the editor decides what goes in one — see veditor.js collectPreset). They
+ * point at music and endings in this library by id, so a preset never holds a
+ * copy of a song. One file per person, next to their music.
+ */
+const PRESET_MAX = 60, PRESET_BYTES = 256 * 1024;
+const presetsPath = () => path.join(root(), 'presets.json');
+function presetList() {
+  try {
+    const d = JSON.parse(fs.readFileSync(presetsPath(), 'utf-8'));
+    return Array.isArray(d) ? d.filter((x) => x && x.id && x.name) : [];
+  } catch (e) { return []; }
+}
+function presetWrite(list) {
+  fs.mkdirSync(root(), { recursive: true });
+  const tmp = presetsPath() + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(list, null, 2), 'utf-8');
+  fs.renameSync(tmp, presetsPath());
+  return list;
+}
+function presetSave(preset) {
+  if (!preset || typeof preset !== 'object' || Array.isArray(preset)) throw new Error('Nothing to save in this preset.');
+  const name = safeName(preset.name || 'My preset').slice(0, 50);
+  const p = Object.assign({}, preset, { name, savedAt: Date.now() });
+  if (!p.id || !/^[\w-]{1,40}$/.test(String(p.id))) p.id = uid();
+  if (Buffer.byteLength(JSON.stringify(p)) > PRESET_BYTES) throw new Error('This preset is too big to save — take some of the text off and try again.');
+  const list = presetList().filter((x) => x.id !== p.id);
+  list.unshift(p);
+  presetWrite(list.slice(0, PRESET_MAX));
+  return p;
+}
+function presetRemove(id) {
+  presetWrite(presetList().filter((x) => x.id !== id));
+  return true;
+}
+
 /* ============================== YouTube ==============================
  * Search + audio import go through yt-dlp. It is NOT bundled (it needs frequent
  * updates to keep working, and shipping a stale copy would just break), so the
@@ -505,6 +543,7 @@ async function ytImport(ctx, video, { url, title, onProgress }) {
 
 module.exports = {
   init, list, add, remove, rename, root, toolsDir, relevel,
+  presetList, presetSave, presetRemove,
   ytPath, ytStatus, ytInstall, ytSearch, ytImport, looksCopyrightFree, ytAuthArgs, isBotCheck,
   MUSIC_EXT, CLIP_EXT, STILL_EXT, STILL_SEC, safeName,
 };

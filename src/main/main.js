@@ -1081,6 +1081,10 @@ ipcMain.handle('library:add', wrap(async (e, { kind, path: p, name, source }) =>
   library.add(getCtx(), video, { kind, path: p, name, source })));
 ipcMain.handle('library:remove', wrap(async (e, { kind, id }) => library.remove({ kind, id })));
 ipcMain.handle('library:rename', wrap(async (e, { kind, id, name }) => library.rename({ kind, id, name })));
+// ⭐ presets: a sermon's edit (text, music, ending, looks) to put on the next one
+ipcMain.handle('presets:list', wrap(async () => library.presetList()));
+ipcMain.handle('presets:save', wrap(async (e, { preset }) => library.presetSave(preset)));
+ipcMain.handle('presets:remove', wrap(async (e, { id }) => library.presetRemove(id)));
 /*
  * ►► A POST WITH MUSIC, WITHOUT ADDING IT BY HAND. ◄◄ No app may attach
  * Instagram's or TikTok's own library songs to a post it publishes (their

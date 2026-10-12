@@ -3677,3 +3677,16 @@ body.mw-cloud.mw-projects .cloud-proj { background: #fff !important; color: #0f1
 .cloud-proj .pv-cont-k { color: #1f6fe0; }
 .cloud-proj .pv-cont-go { background: #0f1115; color: #fff; }
 .cloud-proj .pv-cur-del { color: #d92d20; }
+
+/* ⭐ Presets on a phone: the studio's dark sheet, its blue buttons */
+body.mw-cloud #vePresetModal .ve-pre-box { background: #15161b; border: 0; }
+body.mw-cloud #vePresetModal .cap-head { padding: 16px 18px 12px; border-bottom: 1px solid rgba(255,255,255,.08); }
+body.mw-cloud #vePresetModal .cap-head h2 { font-size: 20px; font-weight: 800; color: #fff; }
+body.mw-cloud #vePresetModal .cap-head .ghost-btn { width: 40px; height: 40px; border-radius: 12px; font-size: 16px; }
+body.mw-cloud #vePresetModal .ve-pre-body { padding: 14px 16px calc(18px + env(safe-area-inset-bottom)); }
+body.mw-cloud #vePresetModal .primary-btn { background: #1f6fe0; border-color: #1f6fe0; color: #fff; border-radius: 12px; }
+body.mw-cloud #vePresetModal .ghost-btn { background: #1c1d23; border: 1px solid rgba(255,255,255,.08); color: #fff; border-radius: 12px; }
+body.mw-cloud #vePresetModal .ve-pre-del.sure { background: #c62828; border-color: #c62828; }
+body.mw-cloud #vePresetModal .ve-pre-save input { background: #1c1d23; color: #fff; border: 1px solid rgba(255,255,255,.12); }
+body.mw-cloud #vePresetModal .ve-pre-card, body.mw-cloud #vePresetModal .ve-pre-save { background: #1c1d23; border-color: rgba(255,255,255,.08); }
+body.mw-cloud #vePresetModal .ve-pre-intro, body.mw-cloud #vePresetModal .ve-pre-line, body.mw-cloud #vePresetModal .ve-pre-empty, body.mw-cloud #vePresetModal .ve-pre-label { color: #a1a6b4; }

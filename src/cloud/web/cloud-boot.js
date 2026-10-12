@@ -544,6 +544,11 @@ let _hideTimer = null;
       remove: (kind, id) => call('library:remove', { kind, id }),
       rename: (kind, id, name) => call('library:rename', { kind, id, name }),
     },
+    presets: {
+      list: () => call('presets:list'),
+      save: (preset) => call('presets:save', { preset }),
+      remove: (id) => call('presets:remove', { id }),
+    },
     /* songs that are safe to post (freemusic.js) */
     freeMusic: {
       list: (wait) => call('music:free', { wait: !!wait }),
@@ -3946,6 +3951,7 @@ let _hideTimer = null;
     chroma: '<rect width="18" height="14" x="3" y="5" rx="2.5"/><path d="M12 16.5c-2 0-3.2-1.4-3.2-3.1 0-1.9 1.5-3.4 3.2-3.4s3.2 1.5 3.2 3.4c0 1.7-1.2 3.1-3.2 3.1z"/><path d="M8 19v-1.2a4 4 0 0 1 8 0V19"/>',
     template: '<rect width="18" height="18" x="3" y="3" rx="2.5"/><path d="M3 9h18"/><path d="M9 21V9"/>',
     animate: '<path d="M5 18h6"/><path d="M3 13h5"/><path d="M5 8h4"/><path d="M14.5 6.5 19 12l-4.5 5.5"/><circle cx="15" cy="12" r="0.6"/>',
+    preset: '<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/><path d="m12 6.6 1.1 2.2 2.4.35-1.75 1.7.42 2.4L12 12.1l-2.17 1.15.42-2.4L8.5 9.15l2.4-.35z"/>',
     sliders: '<line x1="4" x2="20" y1="7" y2="7"/><line x1="4" x2="20" y1="17" y2="17"/><circle cx="9" cy="7" r="2.4" fill="#fff"/><circle cx="15" cy="17" r="2.4" fill="#fff"/>',
   };
   const fineUri = (body) => 'url("data:image/svg+xml,' + encodeURIComponent(
@@ -3969,12 +3975,15 @@ let _hideTimer = null;
   /* What the dock holds. `press` is a desk button; `sheet` opens a sheet;
      `row` swaps the dock for that row of tools; `check` toggles a desk box. */
   const DOCK = {
-    /* Nine doors, most used first, each one word. The rest is one tap in:
+    /* Ten doors, most used first, each one word. The rest is one tap in:
+       Presets puts a saved edit on this video in one tap.
        Style holds the looks (Filters, Adjust, Look), Shape holds the frame
        (Ratio, Background, Reframe), and Montage sits with the Project things. */
     main: [
       { icon: 'sparkles', label: 'AI Shorts', ai: true, sheet: 'shorts', count: true },
       { icon: 'captions', label: 'Captions', ai: true, sheet: 'insp', tab: '#veInspTabCaptions' },
+      // ⭐ the last sermon's text, music, ending and looks, on this one in a tap
+      { icon: 'preset', label: 'Presets', call: 'presets' },
       { icon: 'scissors', label: 'Edit', row: 'edit' },
       { icon: 'type', label: 'Text', row: 'text' },
       { icon: 'music', label: 'Sound', row: 'audio' },
