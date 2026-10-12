@@ -50,6 +50,9 @@ S[330].text = 'There is no prosperity gospel, there is only one gospel.';
   const cut = P.vet({ from: 418, to: 430, title: 'x', strength: 8 }, S, sec, band);
   check('an ending cut mid-phrase ("…What you effect") finishes its sentence', cut && cut.to === 431, cut);
   check('too short and not strong: left out', P.vet({ from: 50, to: 52, strength: 5 }, S, sec, band) === null);
+  // Auto (about 1:30, never under 1:00): a strong moment the AI cut to its punchline takes the thought around it
+  const grown = P.vet({ from: 60, to: 62, title: 'x', strength: 8 }, S, sec, Object.assign({}, band, { minLen: 60, idealLen: 90, maxLen: 150 }));
+  check('a strong moment shorter than asked grows by whole lines to the length asked (setup first)', !!grown && grown.end - grown.start >= 60 && grown.end - grown.start <= 150 && grown.from < 60 && grown.to > 62, grown && { from: grown.from, to: grown.to, secs: Math.round(grown.end - grown.start) });
   check('short but one of the strongest: kept', !!P.vet({ from: 330, to: 334, strength: 9 }, S, sec, band));
   check('a title is tidied ("…" quotes and the full stop go)', P.vet({ from: 330, to: 345, title: '"There is only one gospel."', strength: 9 }, S, sec, band).title === 'There is only one gospel');
 

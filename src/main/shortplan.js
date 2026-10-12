@@ -100,7 +100,7 @@ function parseMoments(text) {
 }
 
 /** Hold a moment to the rules; returns the repaired moment or null. */
-function vet(m, sents, [a, b], { minLen, maxLen }) {
+function vet(m, sents, [a, b], { minLen, maxLen, idealLen }) {
   let from = Math.max(a, m.from), to = Math.min(b, m.to);
   if (to < from) return null;
   const dur = () => sents[to].end - sents[from].start;
@@ -121,6 +121,32 @@ function vet(m, sents, [a, b], { minLen, maxLen }) {
   // too long: the payoff is kept and the run-up shortened
   while (dur() > maxLen * 1.08 && from < to) from++;
   if (dur() > maxLen * 1.08) return null;
+  /*
+   * SHORTER THAN ASKED: THE THOUGHT AROUND IT. Measured on a church's
+   * 50-minute sermon with Auto (about 1:30, never under 1:00): the AI's
+   * moments came back 28-39 seconds — the punchline alone — and were kept.
+   * A moment shorter than the length asked for takes whole lines around it —
+   * the run-up first (the setup a payoff needs), then what follows — toward
+   * the ideal length, never past the longest, never across an aside or into
+   * the next story; then it finishes on a full stop.
+   */
+  const want = Math.min(maxLen, Math.max(minLen, idealLen || minLen));
+  // (a weak moment is not stretched into a short: only one the AI rated strong grows)
+  if (dur() < minLen && (m.strength || 0) >= 6) {
+    const f0 = from, t0 = to;
+    for (let k = 0; k < 80 && dur() < want; k++) {
+      const back = from > 0 && !ASIDE_RX.test(sents[from - 1].text) && !FILLER_OPEN_RX.test(sents[from - 1].text.trim()) && sents[to].end - sents[from - 1].start <= maxLen;
+      const fwd = to + 1 < sents.length && !NEW_STORY_RX.test(sents[to + 1].text) && sents[to + 1].end - sents[from].start <= maxLen;
+      // the run-up no longer than what follows: a payoff keeps its setup, the point keeps going
+      const before = sents[f0].start - (from > 0 ? sents[from - 1].start : sents[from].start);
+      const after = (to + 1 < sents.length ? sents[to + 1].end : sents[to].end) - sents[t0].end;
+      if (back && (!fwd || before <= after)) from--;
+      else if (fwd) to++;
+      else break;
+    }
+    for (let k = 0; k < 3 && to + 1 < sents.length && !/[.!?…]["')\]]?\s*$/.test(sents[to].text.trim()) && sents[to + 1].end - sents[from].start <= maxLen; k++) to++;
+    while (from < t0 && (FILLER_OPEN_RX.test(sents[from].text.trim()) || ASIDE_RX.test(sents[from].text) || words(sents[from].text) <= 1)) from++;
+  }
   // too short to be a short — unless it is one of the strongest moments
   const floor = m.strength >= 8 ? Math.max(15, minLen * 0.45) : Math.max(20, minLen * 0.75);
   if (dur() < floor) return null;
@@ -258,7 +284,7 @@ async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, max
     if (!got && k > 0 && !lastGot) return null;
     lastGot = !!got;
     for (const m of got || []) {
-      const v = vet(m, S, secs[k], { minLen, maxLen });
+      const v = vet(m, S, secs[k], { minLen, maxLen, idealLen });
       if (v) all.push(Object.assign(v, { sec: k }));
     }
     if (onProgress) { try { onProgress((k + 1) / secs.length); } catch (e) {} }
