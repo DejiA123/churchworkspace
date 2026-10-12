@@ -300,9 +300,8 @@
             </div>
           </header>
           <div class="ch-wheel" aria-hidden="true"><ul>${[0, 1, 2].map(() => HOME_HERO.map((h, i) => `<li data-hero="${i}">${esc(h.name)}</li>`).join('')).join('')}</ul></div>
-          <div class="ch-shots" aria-hidden="true">${HOME_HERO.map((h, i) => `<span class="ch-shot ch-shot-${h.k}" data-i="${i}">${heroArt(h.k)}</span>`).join('')}</div>
-          <div class="ch-banner-tx"><small id="chHello"></small>
-            <button type="button" class="ch-banner-go" data-hero-go><b id="chHeroTitle">${esc(HOME_HERO[0].title)}</b><span>${mi('chev-right')}</span></button></div>
+          <div class="ch-shots" aria-hidden="true" data-hero-go>${HOME_HERO.map((h, i) => `<span class="ch-shot ch-shot-${h.k}" data-i="${i}">${heroArt(h.k)}</span>`).join('')}</div>
+          <div class="ch-banner-tx"><small id="chHello"></small></div>
         </section>
         <!-- the two big things, as two soft cards (no project list here: the Video Studio card says how many and opens them) -->
         <div class="ch-duo">
@@ -359,7 +358,8 @@
   /*
    * THE BANNER'S TITLES ROLL BY (CapCut's front page): the names of what the
    * studio does go past one by one, the one in the middle lit, its picture
-   * beside it and its line under them — tap the line to go straight there.
+   * beside it — tap the picture to go straight there. (The line of words that
+   * stood under the greeting is gone: the names already say it.)
    * It only moves while the home screen is on show.
    */
   const HERO = { pos: HOME_HERO.length, timer: 0 };
@@ -378,7 +378,6 @@
       s.classList.toggle('next', d === 1);
       s.classList.toggle('prev', d === n - 1);
     });
-    const t = $('#chHeroTitle', home); if (t) t.textContent = HOME_HERO[k].title;
     if (fromTap) { clearInterval(HERO.timer); HERO.timer = 0; heroStart(); }
   }
   function heroStart() {

@@ -45,9 +45,10 @@ const up = async () => { for (let k = 0; k < 80; k++) { try { await new Promise(
     await page.waitForFunction(() => window.MWSocial && window.MWSocial.openMontage && document.getElementById('cloudHome'), null, { timeout: 30000 });
     await sleep(1200);
     if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'home.png') });
-    const t1 = await page.evaluate(() => document.getElementById('chHeroTitle').textContent);
+    const t1 = await page.evaluate(() => (document.querySelector('#cloudHome .ch-wheel li.on') || {}).textContent);
+    check(await page.evaluate(() => !document.querySelector('#cloudHome .ch-banner-go, #chHeroTitle')), 'no line of words under the greeting');
     await sleep(2900);
-    const t2 = await page.evaluate(() => ({ t: document.getElementById('chHeroTitle').textContent, on: (document.querySelector('#cloudHome .ch-wheel li.on') || {}).textContent, shots: document.querySelectorAll('#cloudHome .ch-shot.on').length }));
+    const t2 = await page.evaluate(() => ({ t: (document.querySelector('#cloudHome .ch-wheel li.on') || {}).textContent, on: (document.querySelector('#cloudHome .ch-wheel li.on') || {}).textContent, shots: document.querySelectorAll('#cloudHome .ch-shot.on').length }));
     check(t1 !== t2.t && t2.shots === 1 && !!t2.on, 'the banner rolls on by itself: a new title, its name lit, one picture in front', { t1, t2 });
     // tap the lit name's line: it goes to that thing
     const hello = await page.evaluate(() => document.getElementById('chHello').textContent);

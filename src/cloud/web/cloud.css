@@ -1942,11 +1942,8 @@ body.mw-cloud.mw-home .cloud-home { background: #fff; color: #111318; }
 .hs-plats .cs-mark { width: 28px; height: 28px; }
 .ch-banner-tx { grid-area: tx; margin-top: 2px; }
 .ch-banner-tx small { display: block; font-size: 15px; font-weight: 500; color: rgba(255, 255, 255, .86); }
-.ch-banner-go { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; margin: 3px 0 0; padding: 0; border: 0; background: none; color: #fff; text-align: left; cursor: pointer; }
-.ch-banner-go b { font-size: 27px; font-weight: 750; letter-spacing: -.5px; line-height: 1.15; }
-/* the arrow is a real button: a white circle you cannot miss, not a faint square */
-.ch-banner-go span { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: #fff; color: #0a4fc4; box-shadow: 0 4px 14px rgba(5, 40, 110, .3); }
-.ch-banner-go span .mi { width: 18px; height: 18px; margin: 0; }
+/* the banner's picture opens what it shows */
+.ch-shots[data-hero-go] { cursor: pointer; }
 /* the two big things: soft cards on the banner's edge, a black icon and a name */
 .ch-duo { position: relative; z-index: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: -44px; }
 .ch-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-width: 0; min-height: 126px; margin: 0; padding: 16px 10px;
