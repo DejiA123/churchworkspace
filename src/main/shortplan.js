@@ -283,7 +283,7 @@ async function refineEdges(moments, S, { ask, minLen, maxLen, retryWaits }) {
  * sents: [{start, end, text}] — the whole sermon, in order.
  * Returns { moments: [...], sections, failed } or null.
  */
-async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, maxClips = 20, ask, onProgress = null, cancelled = () => false, retryWaits = [15000, 30000], wide = false } = {}) {
+async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, maxClips = 20, ask, onProgress = null, cancelled = () => false, retryWaits = [15000, 30000], wide = false, onUnread = null } = {}) {
   const S = (sents || []).filter((s) => s && s.text && s.end > s.start);
   if (S.length < 8 || typeof ask !== 'function') return null;
   // wide: a reader that holds the whole sermon reads it at once (a two-hour service in two halves)
@@ -298,6 +298,9 @@ async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, max
       let out = '';
       try { out = await ask({ system, prompt, maxTokens: wide ? 6000 : 3000 }); } catch (e) { if (e && e.cancelled) throw e; out = ''; }
       got = parseMoments(out);
+      // an answer that came but could not be read: said (measured — two such answers, and the
+      // whole-sermon reading silently gave way to ten-minute pieces)
+      if (out && !got && typeof onUnread === 'function') { try { onUnread(String(out).slice(0, 160)); } catch (e) {} }
       if (got || attempt >= retryWaits.length) break;
       // the free allowance refills by the minute: wait, then ask again
       const until = Date.now() + retryWaits[attempt];

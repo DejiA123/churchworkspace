@@ -58,10 +58,12 @@ const note = (s) => { state.lastWhy = s; state.trail.push(s); if (state.trail.le
 let geminiAsk = async ({ system, prompt, maxTokens, effort }) => {
   const g = require('./geminiear');
   if (!g.ready()) return '';
-  // effort 'high': choosing a sermon's shorts is a judgement worth thinking over (measured: the same
-  // sermon read twice on 'low' gave two different sets, one with three shorts opening on "But…")
+  // (measured: asked to think 'high' on the whole sermon, Gemini answered twice and neither answer
+  // could be read — the thinking took the room the answer needed; 'low' reads it well)
   const r = await g.ask([{ text: (system ? system + '\n\n' : '') + String(prompt || '') }],
-    { json: true, think: effort || 'low', maxTokens: Math.max(effort === 'high' ? 16000 : 8000, maxTokens || 0), waits: [10000, 30000], timeoutMs: 240000 });
+    { json: true, think: effort || 'low', maxTokens: Math.max(12000, maxTokens || 0), waits: [10000, 30000], timeoutMs: 240000 });
+  // an answer cut short (its token budget spent) is said, not passed on as if whole
+  if (r && r.finish && !/^(STOP|)$/i.test(String(r.finish))) note('Gemini ' + (r.model || '') + ': stopped early (' + r.finish + ')');
   return (r && r.text) || '';
 };
 

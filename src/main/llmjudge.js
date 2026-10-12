@@ -391,8 +391,7 @@ function makeCloudJudge({ cloudwrite = require('./cloudwrite'), big = require('.
       let by = '';   // the service that answered the reading of the sermon
       const bigAsk = async ({ system, prompt, maxTokens }) => {
         stats.calls++;
-        // choosing the shorts and their edges: the reader is asked to think it over
-        const out = await viaBig({ system, prompt }, Math.max(4000, maxTokens || 0), 'high');
+        const out = await viaBig({ system, prompt }, Math.max(4000, maxTokens || 0));
         if (!out) note(big.state.lastWhy);
         else if (!by) by = big.state.lastLabel || '';
         return out;
@@ -408,7 +407,8 @@ function makeCloudJudge({ cloudwrite = require('./cloudwrite'), big = require('.
         if (!out) note(cloudwrite.state().why);
         return out;
       };
-      let r = useBig ? await sp.planShorts({ ...a, ask: bigAsk, wide: true, retryWaits: [5000] }) : null;
+      const unread = (t) => { (stats.unread = stats.unread || []).push(t); };
+      let r = useBig ? await sp.planShorts({ ...a, ask: bigAsk, wide: true, retryWaits: [5000], onUnread: unread }) : null;
       if (r) stats.plannedBy = by ? by + ' (free)' : big.name();
       else if (groqOk) { r = await sp.planShorts({ ...a, ask: groqAsk }); if (r) stats.plannedBy = 'Groq'; }
       if (r) { stats.planned = r.moments.length; stats.titled = r.moments.filter((m) => m.title).length; stats.ranked = r.found; stats.edgesMoved = r.edgesMoved; stats.returned = r.returned; stats.more = r.more; }
