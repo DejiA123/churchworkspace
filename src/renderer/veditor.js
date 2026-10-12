@@ -2677,10 +2677,11 @@
     const plain = (t) => String(t || '').replace(/[\u2190-\u2bff\u2600-\u27bf\u{1F000}-\u{1FAFF}\ufe0f]/gu, '').replace(/\s+/g, ' ').trim();
     const opt = (id) => { const s = document.getElementById(id); return s && s.options[s.selectedIndex] ? plain(s.options[s.selectedIndex].textContent) : ''; };
     const box = (id) => { const c = document.getElementById(id); return !!(c && c.checked); };
+    // Only what a person chose for themselves: how long, and whether the pauses
+    // go. Which speech model and which judge ("AssemblyAI · Rules") meant
+    // nothing to most people; they are still one tap away in the settings.
     const len = opt('veShortLen').replace(/ shorts$/, '').replace(/^✨ /, '');
-    const how = (document.getElementById('vePauseHow') || {}).value;
-    const bits = [len, opt('veAsrPicker'), opt('veAiPicker'),
-      box('veRemovePauses') ? (how === 'cloud' ? 'pauses by words' : 'pauses by silence') : 'pauses kept'];
+    const bits = [len ? 'Length: ' + len : '', box('veRemovePauses') ? 'pauses taken out' : 'pauses kept'];
     setText('#veFindSum', '⚙ ' + bits.filter(Boolean).join(' · '));
   }
   function wireFindMore() {

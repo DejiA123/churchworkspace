@@ -3982,12 +3982,12 @@ let _hideTimer = null;
     shape: [
       { icon: 'crop', label: 'Ratio', row: 'ratio' },
       { icon: 'layers', label: 'Background', row: 'background' },
-      { icon: 'target', label: 'Reframe', ai: true, sheet: 'insp', tab: '#veInspTabReframe' },
+      { icon: 'target', label: 'Follow', ai: true, sheet: 'insp', tab: '#veInspTabReframe' },
     ],
     edit: [
       { icon: 'scissors', label: 'Split', press: '#veSplit' },
       { icon: 'transition', label: 'Transition', call: 'transitionAtPlayhead' },
-      { icon: 'keyframe', label: 'Keyframe', call: 'keyframes' },
+      { icon: 'keyframe', label: 'Zoom & move', call: 'keyframes' },
       { icon: 'zap', label: 'Speed', fx: '#fxSpeed' },
       { icon: 'volume', label: 'Volume', fx: '#fxVol' },
       { icon: 'trash', label: 'Delete', press: '#veDelClip' },
@@ -4046,7 +4046,7 @@ let _hideTimer = null;
       { icon: 'image', label: 'Add media', press: '#veAddMedia' },
       { icon: 'overlay', label: 'To overlay', press: '#veOverlay' },
       { icon: 'fullscreen', label: 'Fill frame', press: '#veOvFill', on: true },
-      { icon: 'chroma', label: 'Chroma key', call: 'chromaKey' },
+      { icon: 'chroma', label: 'Green screen', call: 'chromaKey' },
       { icon: 'eraser', label: 'Cut out', press: '#veCutOut' },
       { icon: 'volume', label: 'Sound', press: '#veOvSound' },
       { icon: 'filters', label: 'Blur behind', press: '#veOvBlur' },
@@ -4058,7 +4058,7 @@ let _hideTimer = null;
       { icon: 'layers', label: 'Projects', projects: true },
       { icon: 'clapper', label: 'Outros', press: '#veClips' },
       { icon: 'package', label: 'Batch', press: '#veBulk' },
-      { icon: 'download', label: 'Saved', press: '#cloudDownloads' },
+      { icon: 'folder', label: 'My videos', press: '#cloudDownloads' },
       { icon: 'book', label: 'Help', press: '#cloudHelp' },
       { icon: 'trash', label: 'Delete', deleteProject: true },
     ],
@@ -4261,7 +4261,8 @@ let _hideTimer = null;
       b.setAttribute('aria-label', label);
     };
     chip('#cloudFiles', 'folder', 'Files');
-    chip('#cloudDownloads', 'download', 'Saved');
+    // one place for videos, by one name, everywhere: My videos (finished ones first, each with Save)
+    chip('#cloudDownloads', 'folder', 'My videos');
 
     const actions = $('#cloudBar .cloud-bar-actions') || $('#cloudBar');
     const qWrap = document.createElement('label');
@@ -4475,9 +4476,7 @@ let _hideTimer = null;
     xs.innerHTML = `
       <button type="button" class="cloud-xp-main" data-xp="shorts">${mi('sparkles')}<span>Export all shorts<small id="cloudXpShortsSub"></small></span></button>
       <button type="button" class="cloud-xp-main alt" data-xp="video">${mi('film')}<span>Export video<small id="cloudXpVideoSub"></small></span></button>
-      <div class="cloud-xp-row"><span>Resolution</span><select id="cloudXpQuality" aria-label="Export resolution"></select></div>
-      <div class="cloud-xp-row"><span>Frame rate</span><select data-mirror-sel="#veFps" aria-label="Frame rate"></select></div>
-      <div class="cloud-xp-row"><span>Bitrate</span><select data-mirror-sel="#veBitrate" aria-label="Bitrate"></select></div>
+      <div class="cloud-xp-row"><span>Quality</span><select id="cloudXpQuality" aria-label="Export quality"></select></div>
       <div class="cloud-xp-ending" id="cloudXpEnding">
         <button type="button" class="cloud-xp-end-thumb" data-xp="ending-pick" aria-label="Choose the ending clip"><i></i></button>
         <button type="button" class="cloud-xp-end-text" data-xp="ending-pick"><b>Ending</b><small id="cloudXpEndSub">Add your outro to the end of every short</small></button>
@@ -4489,7 +4488,7 @@ let _hideTimer = null;
         <span class="cloud-xp-chev" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
       </div>
       <label class="cloud-xp-row"><span>Keep editing while it exports</span><input type="checkbox" data-mirror="#veBgExport" /></label>
-      <button type="button" class="cloud-xp-link" data-xp="saved">Finished files — save them to this phone</button>
+      <button type="button" class="cloud-xp-link" data-xp="saved">My videos — save finished ones to this phone</button>
       <button type="button" class="cloud-xp-link" data-xp="more">More export settings</button>`;
     document.body.appendChild(xs);
     // The library's "from my PC" is the desk talking; here it is this phone.
@@ -5329,7 +5328,7 @@ let _hideTimer = null;
       const b = ev.target.closest('[data-upstop]');
       if (b) stopUpload(b.dataset.upstop);
     });
-    on('#cloudDownloads', 'click', () => { renderDownloads(); raiseSheet($('#cloudDownloadsModal')); $('#cloudDownloadsModal').classList.remove('hidden'); });
+    on('#cloudDownloads', 'click', () => { const n = $('#cloudDlCount'); if (n) n.classList.add('hidden'); openFilesModal(); });
     on('#cloudDownloadsClose', 'click', () => $('#cloudDownloadsModal').classList.add('hidden'));
     on('#cloudHelp', 'click', () => {
       $('#cloudHelpBody').innerHTML = HELP;

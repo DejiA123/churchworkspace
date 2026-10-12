@@ -289,7 +289,7 @@ ${styles}
   <div id="cloudDownloadsModal" class="cap-modal hidden cloud-sheet-modal">
     <div class="cap-box cloud-files-box">
       <div class="cloud-files-top">
-        <strong class="cloud-files-title">Finished in this session</strong>
+        <strong class="cloud-files-title">Just finished</strong>
         <button id="cloudDownloadsClose" type="button" class="cloud-files-x" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button>
       </div>
       <div id="cloudDownloadsList" class="cloud-files-list"></div>
