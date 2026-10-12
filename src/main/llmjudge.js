@@ -306,9 +306,9 @@ function makeCloudJudge({ cloudwrite = require('./cloudwrite'), big = require('.
   if (!useBig && !groqOk) return null;
   const st0 = cloudwrite.state();
   const stats = { endings: 0, endingsChanged: 0, ranked: 0, titled: 0, failed: 0, calls: 0, why: '', reader: useBig ? big.name() : '' };
-  const viaBig = async (a, maxTokens) => {
+  const viaBig = async (a, maxTokens, effort) => {
     if (!useBig) return '';
-    const out = await big.chat({ system: a.system, prompt: a.prompt, maxTokens, json: true });
+    const out = await big.chat({ system: a.system, prompt: a.prompt, maxTokens, json: true, effort });
     if (out) stats.bigAnswered = (stats.bigAnswered || 0) + 1;
     else { stats.bigMissed = (stats.bigMissed || 0) + 1; stats.bigWhy = big.state.lastWhy; }
     return out;
@@ -391,7 +391,8 @@ function makeCloudJudge({ cloudwrite = require('./cloudwrite'), big = require('.
       let by = '';   // the service that answered the reading of the sermon
       const bigAsk = async ({ system, prompt, maxTokens }) => {
         stats.calls++;
-        const out = await viaBig({ system, prompt }, Math.max(4000, maxTokens || 0));
+        // choosing the shorts and their edges: the reader is asked to think it over
+        const out = await viaBig({ system, prompt }, Math.max(4000, maxTokens || 0), 'high');
         if (!out) note(big.state.lastWhy);
         else if (!by) by = big.state.lastLabel || '';
         return out;

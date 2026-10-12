@@ -55,11 +55,13 @@ const state = { lastWhy: '', lastModel: '', lastProvider: '', ok: 0, failed: 0, 
 const note = (s) => { state.lastWhy = s; state.trail.push(s); if (state.trail.length > 24) state.trail.shift(); };
 
 // Gemini, asked the way the captions ask it (replaceable for the tests)
-let geminiAsk = async ({ system, prompt, maxTokens }) => {
+let geminiAsk = async ({ system, prompt, maxTokens, effort }) => {
   const g = require('./geminiear');
   if (!g.ready()) return '';
+  // effort 'high': choosing a sermon's shorts is a judgement worth thinking over (measured: the same
+  // sermon read twice on 'low' gave two different sets, one with three shorts opening on "But…")
   const r = await g.ask([{ text: (system ? system + '\n\n' : '') + String(prompt || '') }],
-    { json: true, think: 'low', maxTokens: Math.max(8000, maxTokens || 0), waits: [10000, 30000], timeoutMs: 180000 });
+    { json: true, think: effort || 'low', maxTokens: Math.max(effort === 'high' ? 16000 : 8000, maxTokens || 0), waits: [10000, 30000], timeoutMs: 240000 });
   return (r && r.text) || '';
 };
 
@@ -149,7 +151,7 @@ async function askMistral(model, { system, prompt, maxTokens, json, temperature,
  * One prompt, the answer's text — Mistral first, then Gemini. '' if neither
  * answered; state.trail says what each one said.
  */
-async function chat({ system, prompt, maxTokens = 3000, json = true, temperature = 0, timeoutMs = 150000, fetchImpl = fetch } = {}) {
+async function chat({ system, prompt, maxTokens = 3000, json = true, temperature = 0, timeoutMs = 150000, fetchImpl = fetch, effort = null } = {}) {
   for (const r of open()) {
     if (r.prov === MISTRAL) {
       if (isBenched('mistral') || isBenched('mistral/' + r.model)) continue;
@@ -158,7 +160,7 @@ async function chat({ system, prompt, maxTokens = 3000, json = true, temperature
     } else if (r.prov === GEMINI) {
       if (isBenched('gemini')) continue;
       try {
-        const out = await geminiAsk({ system, prompt, maxTokens });
+        const out = await geminiAsk({ system, prompt, maxTokens, effort });
         if (out) { state.ok++; state.lastProvider = 'gemini'; state.lastLabel = r.label; state.lastWhy = ''; return out; }
         note('Gemini: answered with nothing');
       } catch (e) {

@@ -69,6 +69,10 @@ S[330].text = 'There is no prosperity gospel, there is only one gospel.';
   check('a misheard swear word never closes a church short (it ends on the line before)', !!swearEnd && swearEnd.to === 274, swearEnd && swearEnd.to);
   const swearIn = P.vet({ from: 268, to: 282, title: 'x', strength: 8 }, F, sec, band);
   check('…and a short with one inside it is left out', swearIn === null, swearIn && [swearIn.from, swearIn.to]);
+  const A = S.map((x) => Object.assign({}, x));
+  A[360].text = 'Are you here, young lady?'; A[375].text = "Can you see what I'm talking about?";
+  const aside = P.vet({ from: 360, to: 375, title: 'x', strength: 8 }, A, sec, band);
+  check('a word to someone in the room never opens or closes a short ("Are you here, young lady?")', !!aside && aside.from === 361 && aside.to === 374, aside && [aside.from, aside.to]);
   check('short but one of the strongest: kept', !!P.vet({ from: 330, to: 334, strength: 9 }, S, sec, band));
   check('a title is tidied ("…" quotes and the full stop go)', P.vet({ from: 330, to: 345, title: '"There is only one gospel."', strength: 9 }, S, sec, band).title === 'There is only one gospel');
 

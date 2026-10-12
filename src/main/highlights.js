@@ -1722,6 +1722,50 @@ async function planWholeSermon(opts, { totalDur, OFF, snap, minLen, maxLen, idea
   return { picked, meta: { sections: res.sections, found: res.found, failed: res.failed, edgesMoved: res.edgesMoved || 0, sentences: sents.length } };
 }
 
+/*
+ * ►► A SHORT NEVER OPENS ON "BUT". ◄◄ Measured on a live sermon: three of
+ * seven shorts the reader chose opened on a connective — "But under normal
+ * circumstances…", "But you see, the nature of God in us…", "But they
+ * self-destruct…" — a word leaning on a point the viewer never heard, even
+ * with the reader told not to. An editor starts on the word after it. With
+ * the words' own times (AssemblyAI's), the short now does: "Under normal
+ * circumstances, whatever is born of God overcomes the world."
+ * "But" and "And" always; "So,", "Now,", "Well,", "Then,", "Also," only with
+ * their comma (a "So many…" or "Now the Lord said" keeps them); "you see," /
+ * "you know," after one goes with it. Never "Because" — that changes the
+ * meaning. Returns true when the start moved.
+ */
+function trimLeadIn(c) {
+  const w = c && c.words;
+  if (!Array.isArray(w) || w.length < 8) return false;
+  const raw = (x) => String((x && x.text) || '').trim();
+  const bare = (x) => raw(x).toLowerCase().replace(/[^a-z']/g, '');
+  const lead = (x) => /^(but|and)$/.test(bare(x)) || (/^(so|now|well|then|also)$/.test(bare(x)) && /,$/.test(raw(x)));
+  let k = 0;
+  while (k < 2 && lead(w[k])) k++;
+  if (!k) return false;
+  if (bare(w[k]) === 'you' && /^(see|know)$/.test(bare(w[k + 1])) && /,$/.test(raw(w[k + 1]))) k += 2;
+  const first = w[k];
+  if (!first || w.length - k < 6) return false;
+  const cut = Math.max(w[k - 1].end, first.start - 0.06);
+  if (!(cut > c.start && cut < c.end - 5)) return false;
+  c.start = Math.round(cut * 100) / 100;
+  c.words = w.slice(k);
+  const cap = (t) => t.replace(/^([^A-Za-z]*)([a-z])/, (m, a, b) => a + b.toUpperCase());
+  const drop = (t) => {
+    if (typeof t !== 'string' || !t) return t;
+    const toks = t.trim().split(/\s+/);
+    const lead2 = w.slice(0, k).map((x) => bare(x));
+    if (toks.length > k && toks.slice(0, k).every((x, i) => x.toLowerCase().replace(/[^a-z']/g, '') === lead2[i])) return cap(toks.slice(k).join(' '));
+    return t;
+  };
+  c.text = drop(c.text);
+  c.quote = drop(c.quote);
+  if (typeof c.durationSec === 'number') c.durationSec = Math.round((c.end - c.start) * 10) / 10;
+  c.leadTrimmed = w.slice(0, k).map((x) => raw(x)).join(' ');
+  return true;
+}
+
 /** Make a short human label from the clip's transcript (first few meaningful words). */
 function labelFromText(text, idx) {
   const clean = text.replace(/\s+/g, ' ').trim();
@@ -1838,6 +1882,6 @@ function viralityAndReasons(c, aTop, contentUsed, norm) {
   return { virality: Math.max(35, Math.min(99, Math.round(v))), reasons: reasons.slice(0, 3) };
 }
 
-module.exports = { analyzeSermon, contentScore, contentScoreV2, buildSentences, refineToSentences, selectWithCoverage, titleFromClip, viralityAndReasons,
+module.exports = { analyzeSermon, contentScore, contentScoreV2, buildSentences, refineToSentences, selectWithCoverage, titleFromClip, viralityAndReasons, trimLeadIn,
   scoreLikeAnEditor, openerPenalty, closerPenalty, loopiness, transitionGap, topicSeam, cohesion, anaphora, quotableLine, readingAloud,
   _internals: { buildEnvelope, extractPcm, extractEnvelope, pauseWindows, makeSnapper, SR, HOP } };

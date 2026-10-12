@@ -39,7 +39,9 @@ const OVERLAP_SENTS = 8;
 
 // openings that are never the start of a thought
 const FILLER_OPEN_RX = /^(?:(?:huh|hmm+|oh|ah|uh|um|okay|ok|yes|yeah|no|alright|all right|right|amen|hallelujah|come on|you know|so|well|and|thank you|praise the lord|praise god|glory)[\s.,!?…-]*)+$/i;
-const ASIDE_RX = /\b(how are you|you'?re looking (?:so )?(?:good|nice|beautiful)|good (?:morning|afternoon|evening)|turn to your neighbou?r|give (?:god|the lord|him) a (?:hand|clap|shout)|please (?:sit|be seated)|can you hear me|is (?:the|this) (?:mic|microphone)|testing)\b/i;
+// (and the preacher checking on the room — measured on a live sermon: a short opened on
+// "Are you here, young lady?" and another closed on "can you see what I'm talking about?")
+const ASIDE_RX = /\b(how are you|you'?re looking (?:so )?(?:good|nice|beautiful)|good (?:morning|afternoon|evening)|turn to your neighbou?r|give (?:god|the lord|him) a (?:hand|clap|shout)|please (?:sit|be seated)|can you hear me|is (?:the|this) (?:mic|microphone)|testing|are you (?:here|there|with me|with here|listening|following)|can you see what i'?m (?:talking about|saying)|are you listening to what|is that clear)\b|\b(?:do you (?:understand|get it)|you understand)\s*\??\s*$/i;
 // a closing sentence that is really the first line of something new
 const NEW_STORY_RX = /\b(i went to|one day|(?:a|some|many|two|three|few) (?:days?|weeks?|months?|years?) ago|let me tell you|there was a (?:man|woman|boy|girl|time|lady|guy)|i remember (?:when|the)|when i was|i met a|the other day)\b/i;
 
@@ -137,7 +139,7 @@ function vet(m, sents, [a, b], { minLen, maxLen, idealLen, noGrow = false }) {
   // no closing on the first line of something new, a filler, a lone word, or
   // the short question that opens the NEXT point ("Where did you see Jesus?")
   const setupQ = (t) => /\?\s*$/.test(t) && words(t) <= 7 && /^(where|what|how|who|why|when|which|do you|did you|have you|are you|is it)\b/i.test(t.trim());
-  while (to > from && (NEW_STORY_RX.test(sents[to].text) || FILLER_OPEN_RX.test(sents[to].text.trim()) || words(sents[to].text) <= 1 || setupQ(sents[to].text))) to--;
+  while (to > from && (NEW_STORY_RX.test(sents[to].text) || FILLER_OPEN_RX.test(sents[to].text.trim()) || ASIDE_RX.test(sents[to].text) || words(sents[to].text) <= 1 || setupQ(sents[to].text))) to--;
   // never open or close on a word no church short may carry; one inside it: not a short
   while (to > from && PROFANE_RX.test(sents[to].text)) to--;
   while (from < to && PROFANE_RX.test(sents[from].text)) from++;

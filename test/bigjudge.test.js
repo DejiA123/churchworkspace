@@ -159,6 +159,18 @@ function server() {
   const sents = buildSentences([{ start: 0.1, end: 1.25, text: 'Grace is enough.', p: true }, { start: 2.6, end: 3.35, text: 'So pray', p: true }, { start: 3.4, end: 4.0, text: 'and wait.' }, { start: 5.2, end: 5.95, text: 'Now listen.', p: true }]);
   check('[3] a paragraph AssemblyAI heard begin is a sentence of its own, marked para', sents.length === 3 && sents.map((s) => !!s.para).join() === 'true,true,true' && sents[1].text === 'So pray and wait.', sents.map((s) => s.text + (s.para ? '¶' : '')));
 
+  // [4] a short never opens on "But…" (the words' own times: it starts on the word after)
+  const { trimLeadIn } = require(ROOT + '/src/main/highlights.js');
+  const mk = (t, s0) => t.split(' ').map((x, i) => ({ text: x, start: s0 + i * 0.4, end: s0 + i * 0.4 + 0.3 }));
+  let c = { start: 100, end: 200, text: 'But under normal circumstances, whatever is born of God overcomes the world.', words: mk('But under normal circumstances, whatever is born of God overcomes the world.', 100) };
+  check('[4] "But under normal circumstances…" starts on "Under…" — on the next word\'s own time', trimLeadIn(c) && c.text.startsWith('Under normal circumstances') && Math.abs(c.start - 100.34) < 0.01 && c.words[0].text === 'under', { start: c.start, text: c.text });
+  c = { start: 100, end: 200, text: 'But you see, the nature of God in us, there is a way we win.', words: mk('But you see, the nature of God in us, there is a way we win.', 100) };
+  check('[4] "But you see, …" goes with it: "The nature of God in us…"', trimLeadIn(c) && c.text.startsWith('The nature of God'), c.text);
+  for (const t of ['So many big churches are big for nothing at all today.', 'Because God is good, we will win every battle today.', 'Now the Lord said to Moses, go down to the river.']) {
+    c = { start: 100, end: 200, text: t, words: mk(t, 100) };
+    check('[4] …but not where cutting changes the meaning: "' + t.slice(0, 22) + '…"', !trimLeadIn(c) && c.start === 100 && c.text === t, c.text);
+  }
+
   srv.close();
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

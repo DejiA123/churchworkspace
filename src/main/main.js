@@ -1586,6 +1586,8 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
           seen.add(k); c.words.push(w);
         }
         c.words.sort((p, q) => p.start - q.start);
+        // a short never opens on "But…" / "And…": it starts on the word after (highlights.trimLeadIn)
+        highlights.trimLeadIn(c);
       }
     }
     // asked for the cloud judge and did not get one: say why, never silently
