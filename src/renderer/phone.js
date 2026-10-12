@@ -35,7 +35,7 @@
   const DEFAULTS = {
     aspect: 'reel-9x16', fill: 'crop', denoise: '', fadeIn: 0, fadeOut: 0,
     reframe: true, deep: true, pauses: true, len: 'auto',
-    capAuto: false, capStyle: 'outline', capFont: 'Bebas Neue', capSize: 'm', capTrans: 'pop',
+    capAuto: false, capStyle: 'outline', capFont: 'Montserrat', capSize: 'xs', capTrans: 'pop',
     capPos: 'bottom', capWords: '3', capCase: 'upper',
     musicId: '', musicVol: 0.25, outroId: '',
   };

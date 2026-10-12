@@ -5,7 +5,7 @@
  *  1. Auto-reframe should already be ticked when the app opens.
  *  2. The preview should expand, and go full screen, to preview the export.
  *  3. Captions default to ALL CAPS.
- *  4. …in Bebas Neue.
+ *  4. …in Montserrat, size XS.
  *  5. …with the Outline look.
  *  6. Zooming and trimming on the timeline must not lag.
  *  7. While the video plays, scrolling the timeline must not snap back.
@@ -47,7 +47,7 @@ ipcMain.handle('fonts:data', () => ok([]));
 ipcMain.handle('photos:list', () => ok([]));
 ipcMain.handle('captions:available', () => ok(false));
 // the real font list the app ships (see src/main/captioner.js FONTS)
-ipcMain.handle('captions:fonts', () => ok(['Arial', 'Anton', 'Bebas Neue', 'Poppins', 'Bangers']));
+ipcMain.handle('captions:fonts', () => ok(['Arial', 'Anton', 'Bebas Neue', 'Montserrat', 'Poppins', 'Bangers']));
 ipcMain.handle('video:thumbnail', () => ({ ok: false, error: 'thumbs not needed' }));
 ipcMain.handle('video:info', async (_e, { input }) => ok(await video.getInfo(ctx, input)));
 ipcMain.handle('video:waveform', async (_e, { input, width, height }) => {
@@ -117,7 +117,7 @@ app.whenReady().then(async () => {
   log(rf.reframeOn === true, 'the exporter sees auto-reframe as ON');
 
   /* ---------- [3][4][5] caption defaults ---------------------------------- */
-  console.log('\n[2] Caption defaults: ALL CAPS · Bebas Neue · Outline');
+  console.log('\n[2] Caption defaults: ALL CAPS · Montserrat · XS · Outline');
   const caps = await js(win, `
     const T = window.VideoEditor.__test;
     // a fresh install has nothing saved — that is what "by default" means
@@ -127,7 +127,8 @@ app.whenReady().then(async () => {
     return d;`);
   if (caps.__error) console.error('[2] ' + caps.__error);
   log(caps.case === 'upper', 'Case is ALL CAPS', caps.case);
-  log(caps.font === 'Bebas Neue', 'Font is Bebas Neue', caps.font);
+  log(caps.font === 'Montserrat', 'Font is Montserrat', caps.font);
+  log(caps.size === 'xs', 'Size is XS', caps.size);
   log(caps.style === 'outline' && caps.fresh === 'outline', 'Style is Outline', caps.style);
   log(caps.key === 'mw-cap-style-v2',
     'the saved-style key was bumped, so an old stored look cannot override the new default', caps.key);
@@ -143,7 +144,7 @@ app.whenReady().then(async () => {
   log(sticky.picked === 'neon' && sticky.stored === 'neon',
     'but a look you pick yourself is still remembered', `${sticky.picked} / stored=${sticky.stored}`);
   log(sticky.back === 'outline', 'and you can switch back to Outline');
-  log(caps.cfg.font === 'Bebas Neue' && caps.cfg.style === 'outline' && caps.cfg.styleId === 'outline',
+  log(caps.cfg.font === 'Montserrat' && caps.cfg.style === 'outline' && caps.cfg.styleId === 'outline',
     'and that is what the BURNER is handed, not just what the dropdown shows',
     `font=${caps.cfg.font} style=${caps.cfg.style} outline=${caps.cfg.outline}`);
   log(caps.cfg.outline === '#000000', 'the outline is black — readable over any footage', caps.cfg.outline);

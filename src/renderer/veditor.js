@@ -11247,11 +11247,12 @@
     { id: 'preach', name: 'Preach', style: 'box', color: '#ffffff', outline: '#c1121f' },
   ];
   /* What a caption looks like out of the box, before anyone touches a control:
-   * Bebas Neue in ALL CAPS with a black outline — the shorts look, and the one
-   * that survives being posted over any background. Case lives on #capCase and
+   * Montserrat in ALL CAPS at size XS with a black outline — clean and easy to
+   * read on a phone, and it survives being posted over any background (the
+   * church asked for Montserrat and XS as the starting point; Size is #capSize). Case lives on #capCase and
    * the font on #capFont (both set in the markup / font list); this is the look. */
   const DEFAULT_CAP_STYLE = 'outline';
-  const DEFAULT_CAP_FONT = 'Bebas Neue';
+  const DEFAULT_CAP_FONT = 'Montserrat';
   const DEFAULT_CAP_TRANS = 'pop';
   /*
    * The fonts, as the main process knows them: display name, the family libass
@@ -15915,8 +15916,7 @@
       window.__toast && window.__toast('👁 Captions are now live on the preview — tweak them any time via 💬 Auto-captions.', 'good');
     });
     // Every caption face is loaded into the page first, so the picker can show
-    // each name IN that face. Bebas Neue stays the default — tall, condensed and
-    // all-caps by design, which is the shorts look.
+    // each name IN that face. Montserrat is the default (DEFAULT_CAP_FONT).
     // The list is there after one round trip (the faces follow on their own —
     // see loadCapFonts), so the Font picker is never an empty box to tap.
     loadCapFonts().then(() => {
@@ -15924,7 +15924,7 @@
       renderCapFontPicker();
       // the default only when nothing was chosen (a restored session's font stays)
       if (!sel.dataset.want && !CAP_FONTS.some((x) => x.name === sel.value && x.name !== DEFAULT_CAP_FONT)) {
-        const want = [DEFAULT_CAP_FONT, 'Anton'].find((f) => CAP_FONTS.some((x) => x.name === f));
+        const want = [DEFAULT_CAP_FONT, 'Bebas Neue', 'Anton'].find((f) => CAP_FONTS.some((x) => x.name === f));
         if (want) sel.value = want;
         renderCapFontPicker();
       }
@@ -17716,7 +17716,7 @@
       // --- caption defaults ---
       capDefaults() {
         return {
-          style: ve.capStyleId, font: $('#capFont').value, case: $('#capCase').value,
+          style: ve.capStyleId, font: $('#capFont').value, size: $('#capSize').value, case: $('#capCase').value,
           cfg: capStyleCfg(), reframe: reframeOn(),
         };
       },
