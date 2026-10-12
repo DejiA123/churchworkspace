@@ -21,16 +21,17 @@
         </div>
       </div>
       <nav class="nav">
-        <button class="nav-item active" data-view="dashboard" title="Dashboard"><span>🏠</span><span class="nav-label">Dashboard</span></button>
-        <button class="nav-item" data-view="present" title="Presentation"><span>📖</span><span class="nav-label">Presentation</span></button>
-        <button class="nav-item" data-view="video" title="Video Studio"><span>🎬</span><span class="nav-label">Video Studio</span></button>
-        <button class="nav-item" data-view="flyer" title="Flyer Maker"><span>🎨</span><span class="nav-label">Flyer Maker</span></button>
+        <button class="nav-item active" data-view="dashboard" title="Home"><span>🏠</span><span class="nav-label">Home</span></button>
+        <button class="nav-item" data-view="present" title="Slides — Bible, songs and words on the screen"><span>📖</span><span class="nav-label">Slides</span></button>
+        <button class="nav-item" data-view="video" title="Video Studio"><span>🎬</span><span class="nav-label">Video</span></button>
+        <button class="nav-item" data-view="flyer" title="Flyer Maker"><span>🎨</span><span class="nav-label">Flyer</span></button>
         <button class="nav-item" data-view="live" title="Go Live"><span>🔴</span><span class="nav-label">Go Live</span></button>
-        <button class="nav-item" data-view="scheduler" title="Social Scheduler"><span>📅</span><span class="nav-label">Social Scheduler</span></button>
+        <button class="nav-item" data-view="scheduler" title="Posts — plan posts for social media"><span>📅</span><span class="nav-label">Posts</span></button>
         <button class="nav-item" data-view="settings" title="Settings"><span>⚙️</span><span class="nav-label">Settings</span></button>
       </nav>
       <div class="sidebar-foot">
-        <button id="openOutput" class="ghost-btn small" title="Open output folder"><span>📂</span><span class="nav-label"> Open output folder</span></button>
+        <button id="openHelp" class="ghost-btn small help-btn" title="How do I…?"><span>❓</span><span class="nav-label"> Help</span></button>
+        <button id="openOutput" class="ghost-btn small" title="Open the folder where your work is saved"><span>📂</span><span class="nav-label"> My files</span></button>
         <!-- filled in from the packaged app's real version at startup -->
         <div class="version">…</div>
       </div>
@@ -41,40 +42,32 @@
     <main class="content">
       <!-- DASHBOARD -->
       <section class="view active" id="view-dashboard">
-        <header class="view-head">
+        <header class="view-head dash-head">
           <h1>Welcome back 👋</h1>
-          <p class="muted">Your all-in-one studio for videos, flyers, and social posts.</p>
+          <span class="dash-ask" id="dashAsk"></span>
         </header>
-        <div class="cards">
-          <div class="card action" data-goto="present">
-            <div class="card-icon">📖</div>
-            <h3>Put it on the Screen</h3>
-            <p>Bible verses, song words and slides — straight to the projector.</p>
-          </div>
-          <div class="card action" data-goto="video">
-            <div class="card-icon">🎬</div>
-            <h3>Cut a Video</h3>
-            <p>Trim, reshape for Reels/TikTok, auto-remove dead air, merge clips.</p>
-          </div>
-          <div class="card action" data-goto="flyer">
-            <div class="card-icon">🎨</div>
-            <h3>Design a Flyer</h3>
-            <p>Pick a template, fill in your event, export print + social ready.</p>
-          </div>
-          <div class="card action" data-goto="live">
+        <div id="dashInvite"></div>
+        <div class="cards dash-tiles">
+          <button type="button" class="card action dash-tile t-present" data-goto="present" title="Bible verses, song words and slides on the screen">
+            <span class="card-icon">📖</span><span class="card-title">Show slides</span>
+          </button>
+          <button type="button" class="card action dash-tile t-video" data-goto="video" title="Edit a video, make shorts, add captions">
+            <span class="card-icon">🎬</span><span class="card-title">Make a video</span>
+          </button>
+          <button type="button" class="card action dash-tile t-flyer" data-goto="flyer" title="Make a flyer for your event">
+            <span class="card-icon">🎨</span><span class="card-title">Make a flyer</span>
+          </button>
+          <button type="button" class="card action dash-tile t-live" data-goto="live" title="Stream or record your service">
             <span id="dashLiveBadge" class="dash-live-badge hidden">LIVE</span>
-            <div class="card-icon">🔴</div>
-            <h3>Go Live</h3>
-            <p id="dashLiveDesc">Switch cameras, run titles, and stream or record your service.</p>
-          </div>
-          <div class="card action" data-goto="scheduler">
-            <div class="card-icon">📅</div>
-            <h3>Schedule a Post</h3>
-            <p>Plan posts for Instagram, TikTok &amp; Facebook with reminders.</p>
-          </div>
+            <span class="card-icon">🔴</span><span class="card-title">Go live</span>
+            <span id="dashLiveDesc" class="card-status"></span>
+          </button>
+          <button type="button" class="card action dash-tile t-posts" data-goto="scheduler" title="Plan posts for Instagram, TikTok, YouTube and Facebook">
+            <span class="card-icon">📅</span><span class="card-title">Post online</span>
+          </button>
         </div>
-        <div class="panel">
-          <div class="panel-head"><h2>📌 Upcoming posts</h2></div>
+        <div class="panel dash-next">
+          <div class="panel-head"><h2>📌 Coming up</h2></div>
           <div id="dashUpcoming" class="upcoming-list"><p class="muted">Loading…</p></div>
         </div>
       </section>
@@ -2264,5 +2257,7 @@
   <script src="tasks.js"></script>
   <script src="rasterize.js"></script>
   <script src="renderer.js"></script>
+  <script src="guide.js"></script>
+  <script src="tours-desk.js"></script>
 </body>
 </html>

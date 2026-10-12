@@ -1795,9 +1795,10 @@ function refreshDashLive() {
   if (s.streaming && s.recording) { badge.textContent = 'LIVE + REC'; }
   else if (s.streaming) { badge.textContent = s.streamCount > 1 ? `LIVE ×${s.streamCount}` : 'LIVE'; }
   else if (s.recording) { badge.textContent = 'REC'; }
+  // only a live status — nothing to read while it is off
   desc.textContent = s.live
-    ? `Currently ${s.streaming ? 'streaming' : 'recording'}${s.programName ? ' — ' + s.programName + ' on program' : ''}.`
-    : 'Switch cameras, run titles, and stream or record your service.';
+    ? `${s.streaming ? 'Streaming' : 'Recording'}${s.programName ? ' · ' + s.programName : ''}`
+    : '';
 }
 async function refreshDashboard() {
   refreshDashLive();
@@ -1805,7 +1806,12 @@ async function refreshDashboard() {
   _dashLiveTimer = setInterval(refreshDashLive, 2000);
   const posts = (await api.scheduler.list()).filter((p) => p.status === 'scheduled').slice(0, 5);
   const el = $('#dashUpcoming');
-  if (!posts.length) { el.innerHTML = '<p class="muted">No upcoming posts. Head to the Scheduler to plan one!</p>'; return; }
+  if (!posts.length) {
+    el.innerHTML = '<div class="dash-empty"><span class="dash-empty-ico">🗓️</span><b>Nothing planned yet</b>'
+      + '<button type="button" class="primary-btn" data-goto="scheduler">＋ Plan a post</button></div>';
+    el.querySelector('[data-goto]').addEventListener('click', () => goto('scheduler'));
+    return;
+  }
   el.innerHTML = posts.map((p) => `<div class="post"><div class="post-main">
     <div class="post-title">${esc(p.title)}</div>
     <div class="post-when">${new Date(p.scheduledAt).toLocaleString()}</div>

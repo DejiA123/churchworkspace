@@ -124,6 +124,48 @@ body {
 }
 @keyframes dashLivePulse { 50% { opacity: .55; } }
 
+/* Home: five big doors — an emoji and two words each, nothing to read */
+.dash-head { display: flex; align-items: center; gap: 14px; }
+.dash-head h1 { font-size: 30px; letter-spacing: -.01em; }
+.dash-head .dash-ask { margin-left: auto; }
+.dash-head .mwg-ask { width: 46px; height: 46px; font-size: 21px; }
+#dashInvite { max-width: 720px; }
+.cards.dash-tiles { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 18px; margin: 18px 0 26px; }
+.card.dash-tile {
+  font: inherit; color: var(--text); text-align: left; cursor: pointer;
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between;
+  min-height: 170px; padding: 22px; border-radius: 22px; overflow: hidden;
+  --tile: 79,124,255;
+  background: radial-gradient(140% 120% at 0% 0%, rgba(var(--tile), .34), rgba(var(--tile), .08) 55%, transparent 80%), linear-gradient(180deg, var(--panel-2), var(--panel));
+  border: 1px solid rgba(var(--tile), .35);
+}
+.card.dash-tile:hover { border-color: rgba(var(--tile), .9); box-shadow: 0 16px 38px rgba(var(--tile), .28); }
+.card.dash-tile:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.card.dash-tile .card-icon {
+  font-size: 40px; line-height: 1; margin: 0; width: 72px; height: 72px; border-radius: 20px;
+  display: grid; place-items: center; background: rgba(var(--tile), .22); box-shadow: inset 0 0 0 1px rgba(var(--tile), .35);
+}
+.card.dash-tile .card-title { font-size: 20px; font-weight: 800; letter-spacing: -.01em; margin-top: 18px; }
+.card.dash-tile .card-status { font-size: 13px; font-weight: 600; color: #ffb4ae; margin-top: 4px; }
+.card.dash-tile .card-status:empty { display: none; }
+.dash-tile.t-present { --tile: 255,176,46; }
+.dash-tile.t-video   { --tile: 139,92,246; }
+.dash-tile.t-flyer   { --tile: 236,72,153; }
+.dash-tile.t-live    { --tile: 255,90,82; }
+.dash-tile.t-posts   { --tile: 56,189,248; }
+.dash-empty { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 6px 0; }
+.dash-empty-ico { font-size: 30px; }
+.dash-empty b { font-size: 16px; flex: 1; min-width: 140px; }
+.dash-empty .primary-btn { padding: 12px 18px; font-size: 15px; border-radius: 12px; }
+.sidebar-foot .help-btn { font-size: 13px; }
+/* each room's ? (src/renderer/tours-desk.js) */
+.view-head:has(> .view-ask) { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 14px; }
+.view-head:has(> .view-ask) > p { flex-basis: 100%; order: 3; }
+.view-head > .view-ask { margin-left: auto; order: 2; }
+.ve-top-actions > .view-ask, .pv-tb-right > .view-ask, .ed-toolbar > .view-ask { width: 34px; height: 34px; font-size: 16px; margin-left: 6px; align-self: center; }
+.ed-toolbar > .view-ask { margin-left: auto; }
+@media (prefers-reduced-motion: reduce) { .card.dash-tile { transition: none; } .card.action:hover { transform: none; } }
+
 /* Panels */
 .panel {
   background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--border-soft);
