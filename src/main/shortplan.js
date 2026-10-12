@@ -34,6 +34,7 @@
 // words came back with two moments each — eight from 45 minutes, and the core
 // point of the sermon among those left out.
 const SECTION_WORDS = 1300;
+const WIDE_WORDS = 12000;   // about 80 minutes of preaching in one reading
 const OVERLAP_SENTS = 8;
 
 // openings that are never the start of a thought
@@ -61,18 +62,24 @@ function sections(sents, perSection = SECTION_WORDS, overlap = OVERLAP_SENTS) {
   return out;
 }
 
-function promptFor(sents, [a, b], { minLen, maxLen, idealLen }) {
+function promptFor(sents, [a, b], { minLen, maxLen, idealLen, wide = false }) {
   const lines = [];
-  for (let k = a; k <= b; k++) lines.push(`[${k}] (${clock(sents[k].start)}) ${sents[k].text}`);
+  // a blank line where AssemblyAI heard a new paragraph begin (a pause, a turn in the thought)
+  const paras = sents.slice(a, b + 1).some((x) => x.para);
+  for (let k = a; k <= b; k++) {
+    if (paras && k > a && sents[k].para) lines.push('');
+    lines.push(`[${k}] (${clock(sents[k].start)}) ${sents[k].text}`);
+  }
   // seconds turned into sentences for THIS part (a model adds up times badly; it counts lines well)
   const per = Math.max(1, (sents[b].end - sents[a].start) / Math.max(1, b - a + 1));
   const nMin = Math.max(2, Math.round(minLen / per)), nIdeal = Math.max(nMin, Math.round(idealLen / per)), nMax = Math.max(nIdeal, Math.round(maxLen / per));
   const system = 'You are the best short-form video editor for church and ministry content. You find the moments in a sermon that work on their own as short videos, and you cut them exactly where a thought starts and where its point lands. You reply with JSON only.';
-  const prompt = `Below is part of a sermon, one sentence per line: [number] (time) words. The transcript is automatic, so a few words may be misheard.
+  const what = wide ? 'Below is a whole sermon' : 'Below is part of a sermon';
+  const prompt = `${what}, one sentence per line: [number] (time) words. The transcript is automatic, so a few words may be misheard.${paras ? ' A blank line marks where the speaker paused and moved on — a new paragraph; a moment usually starts at the start of a paragraph and ends at the end of one.' : ''}
 
 ${lines.join('\n')}
 
-Find EVERY moment in this part that would work as a standalone short video: a complete thought someone who never heard the rest of the sermon would understand and remember — a teaching point, a declaration, a story WITH its point, a powerful line and what leads to it. A part this size usually has 3 to 6 such moments; list them all, even the good-but-not-best ones (they are chosen from later). Do not skip a point because it is said quietly or simply — the main teaching of the sermon is often said calmly.
+Find EVERY moment in this ${wide ? 'sermon' : 'part'} that would work as a standalone short video: a complete thought someone who never heard the rest of the sermon would understand and remember — a teaching point, a declaration, a story WITH its point, a powerful line and what leads to it. ${wide ? 'A whole sermon usually has 10 to 20 such moments' : 'A part this size usually has 3 to 6 such moments'}; list them all, even the good-but-not-best ones (they are chosen from later). Do not skip a point because it is said quietly or simply — the main teaching of the sermon is often said calmly. A story must start where the story starts (who, where, what happened) — never on a line that leans on something not in the short ("The other day I went to meet him", "That is why…").
 
 For each moment:
 - "from": the number of the sentence where the thought STARTS. Never start on a filler ("Huh?", "Oh yes, yes", "Okay", "Amen"), on the preacher chatting with someone in the room ("How are you? You're looking so good"), on an announcement, or in the middle of a story or a list. If the line before is needed to understand it, start there.
@@ -103,7 +110,7 @@ function parseMoments(text) {
 }
 
 /** Hold a moment to the rules; returns the repaired moment or null. */
-function vet(m, sents, [a, b], { minLen, maxLen, idealLen }) {
+function vet(m, sents, [a, b], { minLen, maxLen, idealLen, noGrow = false }) {
   let from = Math.max(a, m.from), to = Math.min(b, m.to);
   if (to < from) return null;
   const dur = () => sents[to].end - sents[from].start;
@@ -135,7 +142,7 @@ function vet(m, sents, [a, b], { minLen, maxLen, idealLen }) {
    */
   const want = Math.min(maxLen, Math.max(minLen, idealLen || minLen));
   // (a weak moment is not stretched into a short: only one the AI rated strong grows)
-  if (dur() < minLen && (m.strength || 0) >= 6) {
+  if (!noGrow && dur() < minLen && (m.strength || 0) >= 6) {
     const f0 = from, t0 = to;
     for (let k = 0; k < 80 && dur() < want; k++) {
       // a story's first line is where it starts — nothing before it; a long pause is where one thing ends and the next begins
@@ -199,8 +206,8 @@ function choose(moments, maxClips, secs, gap = 2) {
  */
 function edgePrompt(items) {
   const blocks = items.map((it) => {
-    const s = it.startLines.map(([n, t]) => `  [${n}] ${t}`).join('\n');
-    const e = it.endLines.map(([n, t]) => `  [${n}] ${t}`).join('\n');
+    const s = it.startLines.map(([n, t, p]) => `  ${p ? '¶' : ' '}[${n}] ${t}`).join('\n');
+    const e = it.endLines.map(([n, t, p]) => `  ${p ? '¶' : ' '}[${n}] ${t}`).join('\n');
     return `Short ${it.id} — "${it.title}" (now starts at [${it.from}], ends at [${it.to}])\nAround the START:\n${s}\nAround the END:\n${e}`;
   });
   const system = 'You are the best short-form video editor for sermons. You decide exactly where a short starts and ends. You reply with JSON only.';
@@ -211,15 +218,15 @@ ${blocks.join('\n\n')}
 For every short choose:
 - "from": the sentence where the thought really STARTS — not mid-story, not on a filler or an aside to someone in the room, and not so early that it begins with the end of the previous point.
 - "to": the sentence where its point really LANDS — the payoff that makes it worth sharing. If the point is completed one or two sentences after the current end, end there. Never end on the first line of a new story or point, or on a question that opens the next point.
-Use only the sentence numbers shown. Reply with only: {"edges":[{"id":1,"from":0,"to":0}]}`;
+Use only the sentence numbers shown.${items.some((it) => it.startLines.concat(it.endLines).some((x) => x[2])) ? ' ¶ marks a sentence that starts a new paragraph (the speaker paused and moved on): a good start is usually one, and a good end is usually the sentence just before one.' : ''} Reply with only: {"edges":[{"id":1,"from":0,"to":0}]}`;
   return { system, prompt };
 }
 async function refineEdges(moments, S, { ask, minLen, maxLen, retryWaits }) {
   if (!moments.length) return 0;
   const items = moments.map((m, k) => {
     const sl = [], el = [];
-    for (let n = Math.max(0, m.from - 3); n <= Math.min(S.length - 1, m.from + 2); n++) sl.push([n, S[n].text]);
-    for (let n = Math.max(0, m.to - 2); n <= Math.min(S.length - 1, m.to + 4); n++) el.push([n, S[n].text]);
+    for (let n = Math.max(0, m.from - 4); n <= Math.min(S.length - 1, m.from + 3); n++) sl.push([n, S[n].text, !!S[n].para]);
+    for (let n = Math.max(0, m.to - 3); n <= Math.min(S.length - 1, m.to + 4); n++) el.push([n, S[n].text, !!S[n].para]);
     return { id: k + 1, title: m.title, from: m.from, to: m.to, startLines: sl, endLines: el, sMin: sl[0][0], sMax: sl[sl.length - 1][0], eMin: el[0][0], eMax: el[el.length - 1][0] };
   });
   const { system, prompt } = edgePrompt(items);
@@ -241,7 +248,7 @@ async function refineEdges(moments, S, { ask, minLen, maxLen, retryWaits }) {
     const from = Math.round(+e.from), to = Math.round(+e.to);
     if (!(from >= it.sMin && from <= it.sMax && to >= it.eMin && to <= it.eMax && to > from)) continue;
     if (from === m.from && to === m.to) continue;
-    const v = vet({ from, to, title: m.title, point: m.point, strength: m.strength }, S, [Math.min(it.sMin, m.from), Math.max(it.eMax, m.to)], { minLen, maxLen });
+    const v = vet({ from, to, title: m.title, point: m.point, strength: m.strength }, S, [Math.min(it.sMin, m.from), Math.max(it.eMax, m.to)], { minLen, maxLen, noGrow: true });
     if (!v) continue;
     Object.assign(m, { from: v.from, to: v.to, start: v.start, end: v.end });
     moved++;
@@ -253,19 +260,20 @@ async function refineEdges(moments, S, { ask, minLen, maxLen, retryWaits }) {
  * sents: [{start, end, text}] — the whole sermon, in order.
  * Returns { moments: [...], sections, failed } or null.
  */
-async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, maxClips = 20, ask, onProgress = null, cancelled = () => false, retryWaits = [15000, 30000] } = {}) {
+async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, maxClips = 20, ask, onProgress = null, cancelled = () => false, retryWaits = [15000, 30000], wide = false } = {}) {
   const S = (sents || []).filter((s) => s && s.text && s.end > s.start);
   if (S.length < 8 || typeof ask !== 'function') return null;
-  const secs = sections(S);
+  // wide: a reader that holds the whole sermon reads it at once (a two-hour service in two halves)
+  const secs = wide ? sections(S, WIDE_WORDS, OVERLAP_SENTS) : sections(S);
   const all = [];
   let failed = 0, lastGot = true;
   for (let k = 0; k < secs.length; k++) {
     if (cancelled()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
-    const { system, prompt } = promptFor(S, secs[k], { minLen, maxLen, idealLen });
+    const { system, prompt } = promptFor(S, secs[k], { minLen, maxLen, idealLen, wide });
     let got = null;
     for (let attempt = 0; ; attempt++) {
       let out = '';
-      try { out = await ask({ system, prompt, maxTokens: 3000 }); } catch (e) { if (e && e.cancelled) throw e; out = ''; }
+      try { out = await ask({ system, prompt, maxTokens: wide ? 6000 : 3000 }); } catch (e) { if (e && e.cancelled) throw e; out = ''; }
       got = parseMoments(out);
       if (got || attempt >= retryWaits.length) break;
       // the free allowance refills by the minute: wait, then ask again

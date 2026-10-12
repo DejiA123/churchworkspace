@@ -1491,17 +1491,29 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
     const aai = require('./assemblyear');
     if (contentAware && aai.ready()) {
       let all = null;
+      /*
+       * Heard ONCE per recording and kept: a second scan of the same sermon
+       * (another length, another try) used to send the whole of it to
+       * AssemblyAI again and pay for it again. The paragraphs it hears come
+       * with the words (p: true on each one's first word).
+       */
+      const aaiCache = new TransCache(cacheDir, input, 'assemblyai|words+paragraphs|v1');
       const heardAll = () => all || (all = (async () => {
         const dur = await video.getInfo(getCtx(), input).then((i) => i.durationSec || 0).catch(() => 0);
+        const kept = dur > 0 ? aaiCache.get(0, dur) : null;
+        if (kept && kept.length) return kept;
         const audio = await geminiear.encodeFlac(input, 0, dur);
-        return aai.transcribe(audio, { terms: aaiTerms(), cancelled: () => jobs.isCancelled() });
+        const ws = await aai.transcribe(audio, { terms: aaiTerms(), cancelled: () => jobs.isCancelled(), paragraphs: true });
+        if (dur > 0 && ws.length) aaiCache.add(0, dur, ws.map((w) => Object.assign({ start: w.start, end: w.end, text: w.text }, w.p ? { p: true } : {})));
+        return ws;
       })());
       const toSegs = (ws, s) => {
         const segs = [];
         let cur = null;
         for (const w of ws) {
-          if (cur && (w.start - cur.end > 1.0)) { segs.push(cur); cur = null; }
-          if (!cur) cur = { start: w.start - s, end: w.end - s, text: w.text };
+          // a paragraph AssemblyAI heard begin starts a piece of its own, marked
+          if (cur && (w.start - cur.end > 1.0 || w.p)) { segs.push(cur); cur = null; }
+          if (!cur) cur = Object.assign({ start: w.start - s, end: w.end - s, text: w.text }, w.p ? { p: true } : {});
           else { cur.end = w.end - s; cur.text += ' ' + w.text; }
           if (/[.?!]$/.test(w.text)) { segs.push(cur); cur = null; }
         }

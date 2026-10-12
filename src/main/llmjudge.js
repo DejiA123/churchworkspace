@@ -293,14 +293,31 @@ function makeJudge({ model, maxEndingCalls = MAX_ENDING_CALLS } = {}) {
  * did not happen, for the studio to say out loud.
  */
 const CLOUD_RANK_W = 2.0;   // vs LLM_RANK_W 1.2 for the local reader — still not the last word
-function makeCloudJudge({ cloudwrite = require('./cloudwrite') } = {}) {
+function makeCloudJudge({ cloudwrite = require('./cloudwrite'), big = require('./bigjudge') } = {}) {
+  /*
+   * THE FREE, STRONG READER FIRST (bigjudge.js — Mistral Large or Gemini on
+   * their free plans): it holds the whole sermon at once and its allowance is
+   * not used up by one. Groq (cloudwrite) answers whatever it does not.
+   */
+  const useBig = big.ready();
   // only resting for a moment (the free allowance refilling): the judge waits for it rather than being lost
   const rest = cloudwrite.state();
-  if (!cloudwrite.reachable() && !(rest.hasKey && rest.cooling > 0 && rest.cooling <= 70000)) return null;
+  const groqOk = cloudwrite.reachable() || (rest.hasKey && rest.cooling > 0 && rest.cooling <= 70000);
+  if (!useBig && !groqOk) return null;
   const st0 = cloudwrite.state();
-  const stats = { endings: 0, endingsChanged: 0, ranked: 0, titled: 0, failed: 0, calls: 0, why: '' };
+  const stats = { endings: 0, endingsChanged: 0, ranked: 0, titled: 0, failed: 0, calls: 0, why: '', reader: useBig ? big.name() : '' };
+  const viaBig = async (a, maxTokens) => {
+    if (!useBig) return '';
+    const out = await big.chat({ system: a.system, prompt: a.prompt, maxTokens, json: true });
+    if (out) stats.bigAnswered = (stats.bigAnswered || 0) + 1;
+    else { stats.bigMissed = (stats.bigMissed || 0) + 1; stats.bigWhy = big.state.lastWhy; }
+    return out;
+  };
   const ask = async (a) => {
     stats.calls++;
+    const first = await viaBig(a, Math.max(600, (a.maxTokens || 0) * 3));
+    if (first) return first;
+    if (!groqOk) { stats.failed++; stats.why = big.state.lastWhy || 'no answer'; return ''; }
     // Reasoning models spend tokens before they answer: the small budgets the
     // local prompts ask for would leave them nothing to answer WITH.
     const once = () => cloudwrite.chat({
@@ -331,7 +348,7 @@ function makeCloudJudge({ cloudwrite = require('./cloudwrite') } = {}) {
   return {
     cloud: true,
     modelId: 'cloud',
-    modelName: (st0.usingModel || st0.model || 'a large model').split('/').pop() + ' (' + st0.providerName + ')',
+    modelName: useBig ? big.name() : (st0.usingModel || st0.model || 'a large model').split('/').pop() + ' (' + st0.providerName + ')',
     maxEndingCalls: 30,      // every candidate likely to be picked, not twelve
     endingScope: 30,
     maxOffer: 14,            // a big model can weigh a longer list of places to stop
@@ -367,18 +384,30 @@ function makeCloudJudge({ cloudwrite = require('./cloudwrite') } = {}) {
      * titles were measured silently doing nothing on a real sermon.
      */
     plan: (a) => guard(async () => {
-      const planAsk = async ({ system, prompt, maxTokens }) => {
+      const sp = require('./shortplan');
+      const note = (why) => { stats.why = why || 'no answer'; (stats.errors = stats.errors || []).push(stats.why); };
+      // the strong free reader: the whole sermon in one reading (it holds it all, and a sermon cannot use up its allowance)
+      const bigAsk = async ({ system, prompt, maxTokens }) => {
+        stats.calls++;
+        const out = await viaBig({ system, prompt }, Math.max(4000, maxTokens || 0));
+        if (!out) note(big.state.lastWhy);
+        return out;
+      };
+      // Groq: ten minutes at a time, with a budget that fits its free minute
+      const groqAsk = async ({ system, prompt, maxTokens }) => {
         stats.calls++;
         const out = await cloudwrite.chat({
           system, prompt, temperature: 0, json: true, evenIfOff: true,
           maxTokens: maxTokens || 3000, timeoutMs: 120000,
           prefer: ['openai/gpt-oss-120b', 'moonshotai/kimi-k2-instruct', 'llama-3.3-70b-versatile'],
         });
-        if (!out) { stats.why = cloudwrite.state().why || 'no answer'; (stats.errors = stats.errors || []).push(stats.why); }
+        if (!out) note(cloudwrite.state().why);
         return out;
       };
-      const r = await require('./shortplan').planShorts({ ...a, ask: planAsk });
-      if (r) { stats.planned = r.moments.length; stats.titled = r.moments.filter((m) => m.title).length; stats.ranked = r.found; }
+      let r = useBig ? await sp.planShorts({ ...a, ask: bigAsk, wide: true, retryWaits: [5000] }) : null;
+      if (r) stats.plannedBy = big.name();
+      else if (groqOk) { r = await sp.planShorts({ ...a, ask: groqAsk }); if (r) stats.plannedBy = 'Groq'; }
+      if (r) { stats.planned = r.moments.length; stats.titled = r.moments.filter((m) => m.title).length; stats.ranked = r.found; stats.edgesMoved = r.edgesMoved; }
       else stats.failed++;
       return r;
     }),

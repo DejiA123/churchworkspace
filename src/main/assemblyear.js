@@ -36,7 +36,13 @@ async function call(path, { method = 'GET', body, headers = {}, fetchImpl = fetc
  * said (its "key phrases", ranked) — the Viral Montage leans on them to find
  * the strongest moments. Given back as words.highlights [{text, rank, at:[[s,e]]}].
  */
-async function transcribe(audio, { terms = [], models = null, cancelled = () => false, fetchImpl = fetch, timeoutMs = 15 * 60e3, highlights = false } = {}) {
+/*
+ * `paragraphs`: AssemblyAI also splits what was said into paragraphs (its
+ * /paragraphs answer, free with the transcript — from the pauses, the length
+ * of speaking and the text). The first word of each is marked p: true — the
+ * places a thought turns, which the shorts are cut on (shortplan.js).
+ */
+async function transcribe(audio, { terms = [], models = null, cancelled = () => false, fetchImpl = fetch, timeoutMs = 15 * 60e3, highlights = false, paragraphs = false } = {}) {
   if (!ready()) throw new Error('no AssemblyAI key');
   const up = await call('/upload', { method: 'POST', body: audio, headers: { 'content-type': 'application/octet-stream' }, fetchImpl });
   if (!up.upload_url) throw new Error('AssemblyAI took no audio');
@@ -83,6 +89,18 @@ async function transcribe(audio, { terms = [], models = null, cancelled = () => 
         .filter((h) => h && h.text).map((h) => ({ text: String(h.text), rank: Math.round((+h.rank || 0) * 1000) / 1000,
           at: (h.timestamps || []).map((x) => [(+x.start || 0) / 1000, (+x.end || 0) / 1000]) }));
       Object.defineProperty(words, 'highlights', { value: hl, enumerable: false });
+      if (paragraphs && words.length) {
+        try {
+          const pr = await call('/transcript/' + job.id + '/paragraphs', { fetchImpl });
+          const starts = (pr.paragraphs || []).map((x) => (+x.start || 0) / 1000).filter((t) => t > 0).sort((a, b) => a - b);
+          // each paragraph's first word: the word that starts at (or just after) the paragraph's start
+          let i = 0;
+          for (const t of starts) {
+            while (i < words.length && words[i].start < t - 0.05) i++;
+            if (i < words.length) words[i].p = true;
+          }
+        } catch (e) { /* the words stand without them */ }
+      }
       return words;
     }
     if (r.status === 'error') throw new Error('AssemblyAI: ' + String(r.error || 'failed').slice(0, 160));

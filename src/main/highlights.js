@@ -388,7 +388,7 @@ function splitChunk(c) {
   let t = c.start;
   for (const p of parts) {
     const d = (c.end - c.start) * (p.length / total);
-    out.push({ start: t, end: t + d, text: p });
+    out.push(Object.assign({ start: t, end: t + d, text: p }, c.p && !out.length ? { p: true } : {}));
     t += d;
   }
   out[out.length - 1].end = c.end;
@@ -414,8 +414,10 @@ function buildSentences(rawChunks) {
     if (!cleaned) { heardTo = Math.max(heardTo == null ? c.end : heardTo, c.end); continue; }
     const silentBefore = heardTo == null ? 0 : Math.max(0, c.start - heardTo);
     heardTo = c.end;
-    c = { start: c.start, end: c.end, text: cleaned };
-    if (!cur) cur = { start: c.start, end: c.end, text: c.text, gapBefore: silentBefore };
+    // a paragraph AssemblyAI heard begin (c.p) begins a sentence of its own, marked as such
+    if (c.p && cur) { sents.push(cur); cur = null; }
+    c = { start: c.start, end: c.end, text: cleaned, p: !!c.p };
+    if (!cur) cur = Object.assign({ start: c.start, end: c.end, text: c.text, gapBefore: silentBefore }, c.p ? { para: true } : {});
     else { cur.end = c.end; cur.text = (cur.text + ' ' + c.text).replace(/\s+/g, ' ').trim(); }
     const endsPunct = /[.!?…]["')\]]?$/.test(c.text.trim());
     const gapNext = (i + 1 < chunks.length) ? (chunks[i + 1].start - c.end) : 99;
@@ -1693,7 +1695,7 @@ async function planWholeSermon(opts, { totalDur, OFF, snap, minLen, maxLen, idea
       const { from, to } = parts[k];
       try {
         const r = await opts.transcribeRange(from + OFF, to + OFF);
-        got[k] = ((r && r.segs) || []).map((w) => ({ start: w.start + from, end: w.end + from, text: w.text }));
+        got[k] = ((r && r.segs) || []).map((w) => Object.assign({ start: w.start + from, end: w.end + from, text: w.text }, w.p ? { p: true } : {}));
       } catch (e) { if (jobs.isCancelError(e)) throw e; got[k] = []; missing++; }
       done++;
       if (opts.onProgress) opts.onProgress(42 + Math.round((done / n) * 38));
