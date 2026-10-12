@@ -190,6 +190,40 @@ function zoAccountOf(listed, platform) {
   return zoAccountList(listed).find((a) =>
     String((a && (a.platform || a.provider)) || '').toLowerCase() === platform && zoAccountId(a)) || null;
 }
+/* a song by this artist (every word of the name in its artist line: "Travis Greene" — not "Greene Day") */
+function byArtist(song, name) {
+  const words = String(name || '').toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+  const who = String((song && song.artist) || '').toLowerCase();
+  return words.length > 0 && words.every((w) => who.includes(w));
+}
+/* Instagram songs out of whatever shape Zernio's reply has ({ audio: [...] }, { data: [...] }, …) */
+function igSongsOf(got) {
+  const listIn = (o, depth = 0) => {
+    if (Array.isArray(o)) return o;
+    if (!o || typeof o !== 'object' || depth > 2) return [];
+    for (const k of ['audio', 'audios', 'tracks', 'results', 'items', 'data', 'songs', 'music']) { const v = listIn(o[k], depth + 1); if (v.length) return v; }
+    return [];
+  };
+  return listIn(got).map((x) => {
+    const a = (x && (x.audio || x.track || x)) || {};
+    const id = a.audioId || a.audio_id || a.audioAssetId || a.audio_asset_id || a.id || a._id;
+    if (!id) return null;
+    const ms = a.durationInMs || a.duration_in_ms || a.durationMs || a.duration_ms;
+    const secs = +(a.durationSec || a.duration_sec || a.durationInSeconds || (ms ? ms / 1000 : a.duration)) || 0;
+    const media = /\.(mp3|m4a|mp4|aac|wav|ogg)(\?|$)/i;
+    const pre = a.downloadUrl || a.download_url || a.previewUrl || a.preview_url || a.audioUrl || a.audio_url || a.progressiveDownloadUrl || a.fastStartProgressiveDownloadUrl
+      || (media.test(String(a.url || '')) ? a.url : '');
+    return {
+      id: String(id),
+      title: String(a.title || a.name || a.songTitle || a.song_title || 'Song').slice(0, 120),
+      artist: String(a.displayArtist || a.display_artist || a.artist || a.artistName || a.artist_name || a.igUsername || a.ig_username
+        || (a.artists && a.artists[0] && (a.artists[0].name || a.artists[0])) || '').slice(0, 120),
+      cover: String(a.coverArtworkThumbnailUrl || a.coverArtworkUri || a.cover_artwork_uri || a.coverArtworkUrl || a.coverUrl || a.cover_url || a.thumbnailUrl || a.imageUrl || a.artworkUrl || '') || null,
+      preview: String(pre || '') || null,
+      seconds: Math.round(secs > 10000 ? secs / 1000 : secs),
+    };
+  }).filter(Boolean).slice(0, 40);
+}
 /** Stable per-platform id prefix for Zernio "easy connect" accounts. */
 const ZO_ID_PREFIX = { tiktok: 'zotk_', youtube: 'zoyt_', facebook: 'zofb_', instagram: 'zoig_' };
 function zoIdPrefix(platform) { return ZO_ID_PREFIX[platform] || 'zo_'; }
@@ -975,66 +1009,143 @@ class Accounts {
    * (Instagram's library is reached only through a Facebook sign-in), or
    * { unavailable: '…' } when Zernio offers no library to this account.
    */
-  async zernioIgAudio(accountId, q) {
+  async zernioIgAudio(accountId, q, { covers = true } = {}) {
     const acc = this.byId(accountId);
     if (!acc || acc.platform !== 'instagram' || acc.via !== 'zernio' || !acc.zoAccountId) return { unavailable: 'Pick an Instagram account linked through Zernio.' };
-    const { apiBase } = zoCfg(this.store, 'instagram');
-    const query = String(q || '').trim().slice(0, 80);
-    /*
-     * Zernio wants to be told which KIND of audio: audioType=music (licensed
-     * songs — what a church wants) or original_sound (people's own clips).
-     * Without it Zernio answers 'Invalid option: expected one of "music"|
-     * "original_sound"'. The name it is asked by is remembered once one works
-     * (audioType is Zernio's; the others are what similar APIs call it).
-     */
-    const NAMES = ['audioType', 'audio_type', 'type'];
-    const tryFirst = this._igAudioParam && NAMES.includes(this._igAudioParam) ? [this._igAudioParam].concat(NAMES.filter((n) => n !== this._igAudioParam)) : NAMES;
-    const kindError = (e) => /expected one of|invalid option|audio_?type|"music"/i.test((e && e.message) || '') && !(e && (e.status === 401 || e.status === 403));
-    let got, lastErr = null;
-    for (const name of tryFirst) {
-      const qs = { [name]: 'music' };
-      if (query) qs.q = query;
-      try {
-        got = await getJson(`${apiBase}/accounts/${encodeURIComponent(acc.zoAccountId)}/instagram/audio?` + new URLSearchParams(qs),
-          { headers: { authorization: 'Bearer ' + acc.token } });
-        this._igAudioParam = name;
-        lastErr = null;
-        break;
-      } catch (e) {
-        lastErr = e;
-        if (/facebook_login|facebook login|FACEBOOK_LOGIN/i.test(e.message || '')) return { needsFacebookLogin: true };
-        if (e.status === 404 || e.status === 405) return { unavailable: 'Zernio does not offer Instagram’s song library yet.' };
-        if (!kindError(e)) break;     // a different trouble: no point asking another way
-      }
+    const want = String(q || '').trim().slice(0, 80);
+    try {
+      // "🙏 Gospel": songs BY gospel artists — a search for the word "gospel" brings back whatever is trending
+      const cv = (r) => (covers ? this._igCovers(r) : r);   // (the pictures only for a phone to show)
+      if (/^(__gospel|gospel)$/i.test(want)) return await cv(await this._igGospelMix(acc));
+      const r = await this._igSearch(acc, want);
+      if (!want) return await cv({ songs: r.songs, trending: true });
+      if (r.ignored) return { songs: [], unmatched: true };
+      // an artist's name: that artist's songs only (a search brings near-matches too); else a title, as found
+      const theirs = r.songs.filter((s) => byArtist(s, want));
+      return await cv({ songs: theirs.length ? theirs : r.songs, trending: false });
+    } catch (e) {
+      if (e.needsFacebookLogin) return { needsFacebookLogin: true };
+      if (e.unavailable) return { unavailable: e.message };
+      throw e;
     }
-    if (lastErr) throw new Error('Instagram’s songs could not be loaded (' + lastErr.message + ').');
-    // the list, wherever Zernio puts it ({ audio: [...] }, { data: [...] }, { data: { audio: [...] } } …)
-    const listIn = (o, depth = 0) => {
-      if (Array.isArray(o)) return o;
-      if (!o || typeof o !== 'object' || depth > 2) return [];
-      for (const k of ['audio', 'audios', 'tracks', 'results', 'items', 'data', 'songs', 'music']) {
-        const v = listIn(o[k], depth + 1); if (v.length) return v;
+  }
+
+  /*
+   * One search of Instagram's library through Zernio — GET
+   * /accounts/{id}/instagram/audio?audioType=music&q=… (Zernio's own SDK:
+   * audioType "music" is licensed songs, q the words; no q is what Instagram
+   * calls trending, ~30 songs). A search Instagram could not match comes back
+   * as that very trending list: that is "nothing found", never songs to show
+   * as if they matched. Each answer is kept a quarter of an hour.
+   */
+  async _igSearch(acc, query) {
+    const { apiBase } = zoCfg(this.store, 'instagram');
+    const ask = async (q) => {
+      const qs = { audioType: 'music' };
+      if (q) qs.q = q;
+      try {
+        return igSongsOf(await getJson(`${apiBase}/accounts/${encodeURIComponent(acc.zoAccountId)}/instagram/audio?` + new URLSearchParams(qs),
+          { headers: { authorization: 'Bearer ' + acc.token } }));
+      } catch (e) {
+        if (/facebook_login|facebook login|FACEBOOK_LOGIN/i.test(e.message || '')) { const er = new Error('needs Facebook login'); er.needsFacebookLogin = true; throw er; }
+        if (e.status === 404 || e.status === 405) { const er = new Error('Zernio does not offer Instagram’s song library yet.'); er.unavailable = true; throw er; }
+        throw new Error('Instagram’s songs could not be loaded (' + (e.message || 'no answer') + ').');
       }
-      return [];
     };
-    const arr = listIn(got);
-    const songs = arr.map((x) => {
-      const a = x && (x.audio || x.track || x) || {};
-      const id = a.audioId || a.audio_id || a.audioAssetId || a.audio_asset_id || a.id || a._id;
-      if (!id) return null;
-      const ms = a.durationInMs || a.duration_in_ms || a.durationMs || a.duration_ms;
-      const secs = +(a.durationSec || a.duration_sec || a.durationInSeconds || (ms ? ms / 1000 : a.duration)) || 0;
-      return {
-        id: String(id),
-        title: String(a.title || a.name || a.songTitle || a.song_title || 'Song').slice(0, 120),
-        artist: String(a.displayArtist || a.display_artist || a.artist || a.artistName || a.artist_name || a.igUsername || a.ig_username
-          || (a.artists && a.artists[0] && (a.artists[0].name || a.artists[0])) || '').slice(0, 120),
-        cover: String(a.coverArtworkUri || a.cover_artwork_uri || a.coverArtworkUrl || a.coverUrl || a.cover_url || a.thumbnailUrl || a.imageUrl || a.artworkUrl || '') || null,
-        preview: String(a.downloadUrl || a.download_url || a.previewUrl || a.preview_url || a.audioUrl || a.progressiveDownloadUrl || a.url || '') || null,
-        seconds: Math.round(secs > 10000 ? secs / 1000 : secs),
-      };
-    }).filter(Boolean).slice(0, 40);
-    return { songs, trending: !query };
+    const now = Date.now(), KEEP = 15 * 60e3;
+    this._igCache = this._igCache || new Map();
+    const kept = async (q) => {
+      const k = acc.id + '\n' + q.toLowerCase();
+      const hit = this._igCache.get(k);
+      if (hit && now - hit.at < KEEP) return hit.songs;
+      const songs = await ask(q);
+      if (this._igCache.size > 300) this._igCache.clear();
+      this._igCache.set(k, { at: Date.now(), songs });
+      return songs;
+    };
+    const trend = await kept('');
+    if (!query) return { songs: trend };
+    const list = await kept(query);
+    const sameAsTrend = list.length && trend.length && list.slice(0, 6).map((x) => x.id).join() === trend.slice(0, 6).map((x) => x.id).join();
+    return sameAsTrend || !list.length ? { songs: [], ignored: true } : { songs: list };
+  }
+
+  /*
+   * Gospel artists whose songs are in the library Instagram opens to apps —
+   * five searched at a time, only THEIR songs kept, one from each in turn.
+   * Five that bring nothing: the next five (all twenty at most), so a library
+   * holding only some of them still shows those. The next load starts after
+   * the five that answered: other artists each time.
+   */
+  async _igGospelMix(acc) {
+    const ARTISTS = ['Travis Greene', 'Maverick City Music', 'CeCe Winans', 'Dunsin Oyekan', 'Sinach', 'Nathaniel Bassey', 'Mercy Chinwo',
+      'Elevation Worship', 'Tasha Cobbs Leonard', 'Moses Bliss', 'Kirk Franklin', 'Brandon Lake', 'Forrest Frank', 'Tim Godfrey', 'Ada Ehi',
+      'Hillsong Worship', 'Jonathan McReynolds', 'Tye Tribbett', 'Limoblaze', 'Victoria Orenze'];
+    const N = ARTISTS.length, start = (this._igMixAt || 0) % N;
+    await this._igSearch(acc, '');   // the trending list first, once — so the searches do not each fetch it
+    for (let round = 0; round * 5 < N; round++) {
+      const at = (start + round * 5) % N;
+      const pick = [0, 1, 2, 3, 4].map((i) => ARTISTS[(at + i) % N]);
+      const lists = await Promise.all(pick.map(async (name) => {
+        try {
+          const r = await this._igSearch(acc, name);
+          return r.songs.filter((s) => byArtist(s, name)).slice(0, 4);
+        } catch (e) { if (e.needsFacebookLogin || e.unavailable) throw e; return []; }
+      }));
+      if (!lists.some((l) => l.length)) continue;
+      this._igMixAt = (at + 5) % N;
+      const out = [], seen = new Set();
+      for (let i = 0; i < 4; i++) for (const l of lists) { const s = l[i]; if (s && !seen.has(s.id)) { seen.add(s.id); out.push(s); } }
+      return { songs: out, gospel: true };
+    }
+    return { songs: [], unmatched: true };
+  }
+
+  /*
+   * The covers, as pictures the phone may show: the studio's page loads no
+   * picture from elsewhere (its Content-Security-Policy), so the first ones
+   * are fetched here and handed over inline (small, kept an hour).
+   */
+  async _igCovers(r) {
+    // copies: the songs themselves are kept for the next search, with Instagram's own links
+    const list = ((r && r.songs) || []).map((x) => Object.assign({}, x));
+    this._igCoverCache = this._igCoverCache || new Map();
+    const cache = this._igCoverCache, HOUR = 3600e3;
+    const meta = /^https:\/\/([\w-]+\.)*(fbcdn\.net|cdninstagram\.com|facebook\.com|instagram\.com|fbsbx\.com)(:443)?\//i;
+    await Promise.all(list.map(async (s, i) => {
+      const url = s.cover;
+      if (!url || i >= 15 || !meta.test(url)) { s.cover = null; return; }
+      const hit = cache.get(url);
+      if (hit && Date.now() - hit.at < HOUR) { s.cover = hit.data; return; }
+      try {
+        const { buf, mime } = await getBinary(url, { maxBytes: 120 * 1024, redirects: 3, timeoutMs: 6000 });
+        const type = /^image\/(jpeg|png|webp|gif)$/i.test(mime || '') ? mime.toLowerCase() : 'image/jpeg';
+        s.cover = buf && buf.length > 100 ? `data:${type};base64,${buf.toString('base64')}` : null;
+      } catch (e) { s.cover = null; }
+      if (cache.size > 200) cache.clear();
+      cache.set(url, { at: Date.now(), data: s.cover });
+    }));
+    return Object.assign({}, r, { songs: list });
+  }
+
+  /* A song's preview, fresh from Zernio (its link expires after a day or so): { buf, mime } */
+  async zernioIgPreview(accountId, audioId, hint) {
+    const acc = this.byId(accountId);
+    if (!acc || acc.platform !== 'instagram' || acc.via !== 'zernio') throw new Error('Pick the Instagram account.');
+    const { apiBase } = zoCfg(this.store, 'instagram');
+    let url = '';
+    try {
+      const got = await getJson(`${apiBase}/accounts/${encodeURIComponent(acc.zoAccountId)}/instagram/audio/${encodeURIComponent(audioId)}`, { headers: { authorization: 'Bearer ' + acc.token } });
+      const one = igSongsOf(got)[0] || igSongsOf({ audio: [got && (got.audio || got.data || got)] })[0];
+      url = (one && one.preview) || '';
+    } catch (e) { /* the link from the list, then */ }
+    // the phone's copy of the link only if it is Meta's own (the studio fetches nothing else for a phone)
+    const meta = /^https:\/\/([\w-]+\.)*(fbcdn\.net|cdninstagram\.com|facebook\.com|instagram\.com|fbsbx\.com)(:443)?\//i;
+    if (!url && meta.test(String(hint || ''))) url = String(hint);
+    if (!/^https?:\/\//i.test(url)) throw new Error('Instagram has no preview of this song.');
+    const r = await getBinary(url, { maxBytes: 25 * 1024 * 1024, redirects: 5, timeoutMs: 30000 });
+    if (!r.buf || r.buf.length < 2000) throw new Error('Instagram’s preview of this song came back empty.');
+    return r;
   }
 
   /*

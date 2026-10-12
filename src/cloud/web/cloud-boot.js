@@ -636,6 +636,7 @@ let _hideTimer = null;
       linkStart: (platform, another) => call('social:linkStart', { platform, another: !!another }),
       linkClaim: (platform, another) => call('social:linkClaim', { platform, another: !!another }),
       igAudio: (accountId, q) => call('social:igAudio', { accountId, q: q || '' }),
+      igPreview: (accountId, audioId, url) => call('social:igPreview', { accountId, audioId, url: url || '' }),
       igRelink: (accountId, unlink) => call('social:igRelink', { accountId, unlink: !!unlink }),
       musicCheck: () => call('social:musicCheck', {}),
       unlink: (id) => call('social:unlink', { id }),

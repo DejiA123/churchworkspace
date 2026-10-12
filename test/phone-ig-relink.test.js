@@ -55,7 +55,9 @@ function zernio() {
         if (u.searchParams.get('audioType') !== 'music') return send(400, { error: 'Invalid option: expected one of "music"|"original_sound"' });
         const a = Z.accounts.find((x) => x._id === m[1]);
         if (!a || a.loginMethod !== 'facebook_login') return send(400, { error: 'instagram_audio_requires_facebook_login' });
-        return send(200, { audio: [{ id: 'ig_dunsin', title: 'Do to Me What You Want', displayArtist: 'Dunsin Oyekan', durationInMs: 300000 }] });
+        // (searched by name, the gospel artist; nothing searched, what is trending)
+        if (!u.searchParams.get('q')) return send(200, { audio: [{ audioId: 'ig_trend', title: 'Trending', displayArtist: 'Someone', durationInMs: 150000 }] });
+        return send(200, { audio: [{ audioId: 'ig_dunsin', title: 'Do to Me What You Want', displayArtist: 'Dunsin Oyekan', durationInMs: 300000 }] });
       }
       if (u.pathname === '/api/v1/connect/instagram') {
         Z.connects.push(Object.fromEntries(u.searchParams.entries()));

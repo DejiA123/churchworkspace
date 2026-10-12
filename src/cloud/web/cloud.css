@@ -2931,6 +2931,31 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .csb-igplay .mi { width: 16px; height: 16px; margin: 0; }
 .csb-igsong .csb-check { flex: none; }
 .csb-igfb { width: 100%; background: #1877f2; color: #fff; }
+.csb-igplay.busy { background: rgba(255,255,255,.18); }
+.csb-igplay .csb-spin { width: 14px; height: 14px; }
+/* 🙏 the song added in the app itself: Facebook (and Instagram) handed the flyer and caption */
+.csb-handtodos { display: grid; gap: 8px; margin: 0 0 14px; }
+.csb-handtodos:empty { display: none; }
+.csb-handtodo { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border-radius: 16px; border: 1px solid rgba(24,119,242,.45); background: rgba(24,119,242,.12); color: var(--b-t1, #fff); text-align: left; }
+.csb-handtodo.due { border-color: #1877f2; background: rgba(24,119,242,.24); box-shadow: 0 0 0 3px rgba(24,119,242,.18); }
+.csb-handtodo > span:nth-child(2) { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.csb-handtodo b { font-size: 14px; }
+.csb-handtodo small { opacity: .75; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.csb-hand { display: grid; gap: 12px; }
+.csb-hand .cs-hint { margin: 0; }
+.csb-handrow { display: grid; grid-template-columns: 64px 1fr; gap: 8px 12px; align-items: center; padding: 10px; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); }
+.csb-handrow img { width: 64px; height: 80px; object-fit: cover; border-radius: 8px; background: rgba(255,255,255,.06); }
+.csb-handrow > span { display: grid; gap: 2px; min-width: 0; }
+.csb-handrow > span b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.csb-handrow > span small { opacity: .7; font-size: 12px; }
+.csb-handbtns { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.csb-handbtns .cs-btn { flex: 1 1 140px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.csb-handbtns .cs-btn.done { border-color: #22c55e; color: #22c55e; }
+.csb-handbtns .mi { width: 16px; height: 16px; margin: 0; }
+.csb-handapp { border-radius: 14px; padding: 12px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); display: grid; gap: 8px; }
+.csb-handsteps { margin: 0; padding-left: 20px; display: grid; gap: 8px; font-size: 14px; line-height: 1.4; }
+.csb-handopen { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; color: #fff; background: #1877f2; border-color: transparent; padding: 6px 12px; border-radius: 999px; }
+.csb-handopen.instagram { background: linear-gradient(135deg, #833ab4, #fd1d1d 60%, #fcb045); }
 .csb-acc-pill { max-width: 100%; height: 52px; padding: 0 12px 0 10px; border: 1.5px solid var(--b-line); border-radius: 26px; display: inline-flex; align-items: center; gap: 9px; background: var(--b-s1); color: var(--b-t2); font-size: 14px; font-weight: 650; }
 .csb-acc-pill > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .csb-check { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; border: 1.5px solid rgba(255,255,255,.25); color: transparent; }

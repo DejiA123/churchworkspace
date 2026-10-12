@@ -191,7 +191,12 @@ function aiServer() {
     await sleep(1000);
     const posts = await page.evaluate(async () => window.api.scheduler.list());
     const made = posts.find((p) => /One night to lift His name/.test(p.caption || ''));
-    check(!!made && made.title === 'Night of Worship: Friday 7 pm 🙌' && made.accountIds.length === 5, 'it is scheduled with that caption, title and all five accounts', made && { title: made.title, n: made.accountIds.length });
+    check(!!made && made.title === 'Night of Worship: Friday 7 pm 🙌' && made.accountIds.length === 3 && !made.accountIds.some((x) => /^zofb_/.test(x)),
+      'it is scheduled with that caption and title — on the three accounts posted from here (Facebook gets its gospel song in its own app)', made && { title: made.title, a: made.accountIds });
+    await page.waitForSelector('#csHandOff', { timeout: 8000 }).catch(() => {});
+    check(await page.evaluate(() => /Finish on Facebook/.test((document.querySelector('#csHandOff') || {}).innerText || '')), '…and Facebook’s part is handed over right after (the flyer and caption, to add the song there)');
+    await page.tap('#csHandOff [data-f="done"]').catch(() => {});
+    await sleep(300);
 
     // [6] typed before the AI answers: kept
     AI.slow = 3000;

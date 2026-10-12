@@ -345,6 +345,8 @@
     if (up.length) foot.textContent = `Next: ${whenLabel(up[0].scheduledAt)} · ${up.length} planned`;
     else if (failed().length) foot.textContent = `${failed().length} post${failed().length > 1 ? 's' : ''} need a look`;
     else foot.textContent = linked().length ? 'Nothing planned yet' : 'Connect your accounts to start';
+    const due = handTodos().find(handDue);
+    if (due) foot.textContent = `🎵 ${appNames(due)} ${due.apps.length > 1 ? 'are' : 'is'} waiting for its gospel song — tap to finish`;
     const plats = Array.from(new Set(linked().map((a) => a.platform)));
     $('#chMarks').innerHTML = plats.map((p) => platMark(p, 'sm')).join('');
   }
@@ -360,6 +362,141 @@
         + `<span class="ch-arrow">${mi('chev-right')}</span></button>`;
     }).join('');
   }
+  /*
+   * 🙏 THE SONG ADDED IN THE APP ITSELF. No app may put a song on a Facebook
+   * post — Meta lets none (Zernio has no audio for Facebook; Facebook's Reels
+   * API takes the video alone). And the library Instagram opens to apps is
+   * mostly Meta's royalty-free collection: the hit gospel songs (Travis
+   * Greene…) are in the apps' OWN libraries, free and licensed, never muted.
+   * So, the way TikTok's inbox works, a flyer's Facebook (and, if chosen, its
+   * Instagram) is handed over: the flyer to Photos, the caption to the
+   * clipboard, the app opened, the taps there said. Kept on this phone until
+   * done — a scheduled one waits at the top of the Scheduler (and on the home
+   * screen) for its time.
+   */
+  const HAND_KEY = 'mw.app.handoff';
+  const HAND_APPS = {
+    facebook: {
+      name: 'Facebook', open: 'fb://',
+      where: 'on your Page (tap your picture → your Page)',
+      steps: (song) => `Tap <b>＋</b> → <b>Reel</b> → pick the flyer → <b>♫ Music</b> → ${song} → <b>Next</b>.`,
+      share: (later) => `Paste the caption → <b>Share now</b>${later ? ' — or, on a Page, <b>Schedule</b> it for its time' : ''}.`,
+    },
+    instagram: {
+      name: 'Instagram', open: 'instagram://app',
+      where: 'on the church’s account',
+      steps: (song) => `Tap <b>＋</b> → <b>Post</b> → pick the flyer → <b>Next</b> → <b>♫ Add music</b> → ${song} → <b>Done</b>.`,
+      share: () => 'Paste the caption → <b>Share</b>. It shows like a photo post, the song’s name above it.',
+    },
+  };
+  function handTodos() {
+    try {
+      const l = JSON.parse(localStorage.getItem(HAND_KEY) || '[]');
+      return Array.isArray(l) ? l.filter((x) => x && x.id && Array.isArray(x.items) && x.items.length && Array.isArray(x.apps) && x.apps.some((a) => HAND_APPS[a])) : [];
+    } catch (e) { return []; }
+  }
+  function saveHandTodos(l) { try { localStorage.setItem(HAND_KEY, JSON.stringify(l.slice(-12))); } catch (e) {} }
+  function addHandTodo(t) {
+    const rec = Object.assign({ id: 'h' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), at: new Date().toISOString() }, t);
+    // two days past its time (or its making), one never finished is let go
+    const cut = Date.now() - 2 * 864e5;
+    const alive = (x) => new Date(x.at).getTime() > cut || x.items.some((i) => i.when && new Date(i.when).getTime() > cut);
+    saveHandTodos(handTodos().filter(alive).concat(rec));
+    return rec;
+  }
+  const doneHandTodo = (id) => saveHandTodos(handTodos().filter((x) => x.id !== id));
+  // its time has come (or is a quarter of an hour off)
+  const handDue = (t) => t.items.some((i) => !i.when || new Date(i.when).getTime() <= Date.now() + 15 * 60e3);
+  const appNames = (t) => t.apps.filter((a) => HAND_APPS[a]).map((a) => HAND_APPS[a].name).join(' and ');
+  // the caption as the app gets it from here: its own trending tags in place of the app-neutral ones
+  function appCaption(caption, app) {
+    const t = String(caption || '').trim();
+    if (!/#[\wÀ-￿]/.test(t)) return t;
+    const body = t.replace(/(\s*#[\wÀ-￿]+)+\s*$/, '').trim();
+    return (body ? body + '\n\n' : '') + tagsFor(t, app);
+  }
+  function renderHandTodo() {
+    const box = $('#csHandTodo'); if (!box) return;
+    box.innerHTML = handTodos().map((t) => {
+      const it = t.items[0], due = handDue(t);
+      return `<button type="button" class="csb-handtodo${due ? ' due' : ''}" data-handtodo="${escAttr(t.id)}">`
+        + `<span class="csb-stack">${t.apps.filter((a) => HAND_APPS[a]).map((a) => platMark(a, 'sm')).join('')}</span>`
+        + `<span><b>${esc(appNames(t))}: add your gospel song${due ? ' now' : ''}</b>`
+        + `<small>${esc(it.title || 'Flyer')}${t.items.length > 1 ? ` + ${t.items.length - 1} more` : ''} · ${it.when ? esc(whenLabel(it.when)) : 'now'}</small></span>`
+        + `<span class="ch-arrow">${mi('chev-right')}</span></button>`;
+    }).join('');
+  }
+  function openHandOff(t) {
+    const apps = t.apps.filter((a) => HAND_APPS[a]);
+    const panel = C.openPanel({ id: 'csHandOff', title: `Finish on ${appNames(t)}`, cls: 'cp-handoff' });
+    // the flyers, fetched ahead: an iPhone opens the share sheet only inside the tap, with the file already in hand
+    const files = new Map();
+    t.items.forEach((it, i) => {
+      fetch(C.fileUrl(it.file)).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); }).then((blob) => {
+        const ext = String(blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg').replace(/[^a-z0-9]/gi, '') || 'jpg';
+        files.set(i, new File([blob], `flyer-${i + 1}.${ext}`, { type: blob.type || 'image/jpeg' }));
+      }).catch(() => files.set(i, null));
+    });
+    const later = t.items.some((i) => i.when && new Date(i.when).getTime() > Date.now() + 15 * 60e3);
+    const song = t.song ? `search <b>${esc(t.song)}</b> (or any gospel song)` : 'search <b>Travis Greene</b> (or any gospel song)';
+    const copyBtn = (i, a) => `<button type="button" class="cs-btn" data-f="copy" data-i="${i}" data-app="${a}">${mi('copy')}${apps.length > 1 ? 'Caption · ' + HAND_APPS[a].name : 'Copy caption'}</button>`;
+    panel.body.innerHTML = '<div class="csb-hand">'
+      + `<p class="cs-hint">The hit gospel songs are in ${esc(appNames(t))}’s own library — free there, licensed, never muted or flagged. No app may add them from outside, so here is everything for the app:</p>`
+      + t.items.map((it, i) => `<div class="csb-handrow"><img src="${escAttr(C.fileUrl(it.file))}" alt=""><span><b>${esc(it.title || 'Flyer')}</b><small>${it.when ? 'For ' + esc(whenLabel(it.when)) : 'Now'}</small></span>`
+        + `<div class="csb-handbtns"><button type="button" class="cs-btn" data-f="save" data-i="${i}">${mi('download')}Save flyer</button>`
+        + apps.map((a) => copyBtn(i, a)).join('') + '</div></div>').join('')
+      + apps.map((a) => {
+        const A = HAND_APPS[a];
+        return `<div class="csb-handapp"><div class="csb-fm-h">${platMark(a, 'sm')}<b>${A.name}</b></div><ol class="csb-handsteps">`
+          + `<li><b>Save flyer</b> → <b>Save Image</b>, and copy its caption (above).</li>`
+          + `<li><a class="cs-btn csb-handopen ${a}" href="${A.open}">${platMark(a, 'sm')}Open ${A.name}</a> ${A.where}.</li>`
+          + `<li>${A.steps(song)}</li><li>${A.share(later)}</li></ol></div>`;
+      }).join('')
+      + '</div>';
+    panel.foot.innerHTML = `<button type="button" class="cs-btn primary" data-f="done">✓ Done — it is on ${esc(appNames(t))}</button>`
+      + '<button type="button" class="cs-btn ghost" data-f="later">Later</button>';
+    const copyOld = (text) => {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+      document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, text.length);
+      let ok = false; try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      ta.remove(); return ok;
+    };
+    const copied = (b) => { b.classList.add('done'); C.island({ kind: 'good', title: 'Caption copied', sub: 'Paste it in the app', ms: 2500 }); };
+    panel.el.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-f]'); if (!b) return;
+      const f = b.dataset.f, i = +b.dataset.i || 0, it = t.items[i];
+      if (f === 'save') {
+        const file = files.get(i);
+        if (file === undefined) { C.island({ kind: 'info', title: 'One moment — the flyer is still coming', ms: 2500 }); return; }
+        if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+          navigator.share({ files: [file] }).then(() => { b.innerHTML = mi('check') + 'Saved'; b.classList.add('done'); },
+            (er) => { if (!(er && er.name === 'AbortError')) openFlyer(it); });
+        } else openFlyer(it);
+        return;
+      }
+      if (f === 'copy') {
+        const text = appCaption(it.caption, b.dataset.app);
+        // the clipboard, inside the tap; the old way if this phone says no
+        let p = null;
+        try { if (navigator.clipboard && navigator.clipboard.writeText) p = navigator.clipboard.writeText(text); } catch (er) { p = null; }
+        if (p && p.then) p.then(() => copied(b), () => { if (copyOld(text)) copied(b); else C.island({ kind: 'warn', title: 'This phone would not copy it', sub: 'Type the caption in the app instead', ms: 4000 }); });
+        else if (copyOld(text)) copied(b);
+        return;
+      }
+      if (f === 'done') {
+        doneHandTodo(t.id); panel.close(); renderSched(); renderHomeSocial();
+        C.island({ kind: 'good', title: `${appNames(t)} done`, sub: 'With its gospel song', ms: 2500 });
+        return;
+      }
+      if (f === 'later') { panel.close(); renderSched(); }
+    });
+    function openFlyer(it) {
+      window.open(C.fileUrl(it.file), '_blank');
+      C.island({ kind: 'info', title: 'Press and hold the flyer → Save to Photos', ms: 6000 });
+    }
+  }
+
   /* ------------------------------------------------------------- projects */
 
   /*
@@ -571,6 +708,7 @@
           <div><small class="csb-eyebrow">Post everywhere</small><h1>Scheduler</h1></div>
           <button type="button" class="csb-plus" data-sched="new" aria-label="New post">${mi('plus')}</button>
         </div>
+        <div class="csb-handtodos" id="csHandTodo"></div>
         <div class="csb-h2"><h2>Accounts</h2><button type="button" class="csb-link" data-sched="connect">Manage</button></div>
         <section class="csb-accts" id="csAccts"></section>
         <nav class="csb-seg" id="csTabs" role="tablist">
@@ -586,6 +724,7 @@
       const b = e.target.closest('button,[data-open-post]');
       if (!b) return;
       if (b.dataset.go) return go(b.dataset.go);
+      if (b.dataset.handtodo) { const t = handTodos().find((x) => x.id === b.dataset.handtodo); return t ? openHandOff(t) : renderSched(); }
       if (b.dataset.sched === 'new') return compose({});
       if (b.dataset.sched === 'slot') return compose({ when: new Date(+b.dataset.at) });
       if (b.dataset.sched === 'connect') return openConnect();
@@ -620,6 +759,7 @@
   function renderSched() {
     if (S.view !== 'scheduler') return;
     const el = $('#cloudSched') || buildSched();
+    renderHandTodo();
     // the accounts, as cards: who they are and where
     const acc = linked();
     $('#csAccts').innerHTML = acc.map((a) => `<button type="button" class="csb-acc" data-sched="connect">`
@@ -849,7 +989,7 @@
       // 🎵 a flyer's music, per platform (see flyerBlock): each app's own trending songs by default
       // (TikTok: the church picks a GOSPEL song in TikTok by default — TikTok's own pick can be any genre)
       // NO free instrumentals, ever: real songs from the apps' own libraries, the church's own recording, or none
-      fm: Object.assign({ mode: 'trending', tiktok: 'draft', fbyt: 'none', fromIg: [], ig: null, igQ: '', igList: null, igState: '', igFor: '', lib: null }, flyerPrefs()),
+      fm: Object.assign({ mode: 'trending', tiktok: 'draft', fbyt: 'none', fb: 'app', igWay: 'lib', fromIg: [], ig: null, igQ: '', igList: null, igState: '', igFor: '', lib: null }, flyerPrefs()),
       // ✨ the AI caption: written by itself the moment something is chosen
       ai: null,             // { stage: 'listen'|'read'|'write'|'done'|'fail', pct, from: 'video'|'flyer'|'picture', by, note, flyer }
       autoFor: '',          // the file the caption on screen was written for (a re-pick drops a late answer)
@@ -978,18 +1118,26 @@
      * only way they never get a post muted or flagged:
      *   TikTok — TikTok's trending music added by TikTok, or the post sent to
      *     the TikTok inbox to pick any song there (Travis Greene and all);
-     *   Instagram — a song from Instagram's own library, chosen right here;
-     *   Facebook and YouTube have no library an app may use — a short video
-     *     of the flyer with a free-to-post song under it.
+     *   Instagram — a song from the library Instagram opens to apps, chosen
+     *     right here (🙏 Gospel: songs BY gospel artists — accounts.js
+     *     _igGospelMix), or added in the Instagram app itself (openHandOff);
+     *   Facebook — no app may put a song there, so the flyer and caption are
+     *     handed over right after Post and the song is added in the Facebook
+     *     app, from Facebook's own library (openHandOff);
+     *   YouTube — no library an app may use.
      * Or the church's own recording, or no music — never a free
      * instrumental. publisher.js flyerPlan
      * does what this says.
      */
     const flyers = () => (edit ? [] : st.files.filter((f) => !isVideo(f)));
-    // gospel first — then the gospel and worship artists trending now; "Trending" is everything (any genre)
-    const IG_QUICK = [['gospel', '🙏 Gospel'], ['Travis Greene', 'Travis Greene'], ['Maverick City Music', 'Maverick City'], ['Elevation Worship', 'Elevation Worship'],
-      ['CeCe Winans', 'CeCe Winans'], ['Forrest Frank', 'Forrest Frank'], ['Moses Bliss', 'Moses Bliss'], ['Dunsin Oyekan', 'Dunsin Oyekan'],
-      ['afro gospel', 'Afro gospel'], ['worship', 'Worship'], ['praise', 'Praise'], ['', '🔥 Trending (any genre)']];
+    // gospel first (songs BY gospel artists), then the artists one by one — never a word search like "praise",
+    // which brings back any song with the word in it; "Trending" is everything Instagram has trending (any genre)
+    const IG_QUICK = [['__gospel', '🙏 Gospel'], ['Travis Greene', 'Travis Greene'], ['Maverick City Music', 'Maverick City'], ['Elevation Worship', 'Elevation Worship'],
+      ['CeCe Winans', 'CeCe Winans'], ['Dunsin Oyekan', 'Dunsin Oyekan'], ['Nathaniel Bassey', 'Nathaniel Bassey'], ['Sinach', 'Sinach'],
+      ['Mercy Chinwo', 'Mercy Chinwo'], ['Moses Bliss', 'Moses Bliss'], ['Forrest Frank', 'Forrest Frank'], ['Brandon Lake', 'Brandon Lake'],
+      ['', '🔥 Trending (any genre)']];
+    // what the search box shows for a chip ("🙏 Gospel" is a mix of gospel artists, not the word)
+    const igQShown = (q) => (String(q || '').startsWith('__') ? '' : String(q || ''));
     // the church's own recording, when one is chosen (for Facebook, YouTube — never a free instrumental)
     const ownSong = () => { const fm = st.fm; if (fm.fbyt !== 'own' || !fm.lib) return null; const x = st.songs.find((m) => m.id === fm.lib); return x ? '“' + String(x.name || 'your recording') + '”' : null; };
     // what each place gets — the same rules as publisher.js flyerPlan
@@ -1003,32 +1151,41 @@
       }
       if (a.platform === 'instagram') {
         if (mode === 'none') return 'a picture post, no music';
+        if (igApp(a)) return 'you add the gospel song in the Instagram app (any song — Travis Greene…) — the flyer and caption are handed to you right after Post';
         if (igSongFor(a)) return `your flyer as it is (like a photo post) with “${fm.ig.title}”${fm.ig.artist ? ' — ' + fm.ig.artist : ''}`;
         if (igAutoFor(a)) return 'your flyer as it is (like a photo post) with a real gospel song from Instagram’s library — a different one each time';
+        if (igNoGospel()) return withOwn('your flyer as it is') || 'a picture post, no music — Instagram’s library for apps has no gospel artists for this account (see below)';
         return withOwn('your flyer as it is') || 'a picture post, no music (Instagram’s songs are not reachable for it yet)';
       }
       if (mode === 'none') return a.platform === 'youtube' ? 'a 10-second Short, no music' : 'a picture post, no music';
       if (fromIg(a)) return 'gets your Instagram Reel with its gospel song — Instagram shares it to this Page';
+      if (fbApp(a)) return 'you add a real gospel song in the Facebook app — the flyer and caption are handed to you right after Post';
       if (a.platform === 'youtube') return withOwn('a 15-second Short') || 'a 10-second Short, no music';
       return withOwn('your flyer as it is') || 'a picture post, no music';
     }
     // the Instagram account whose library the chosen song is from — the only one that gets it
-    const igSongFor = (a) => !!(st.fm.ig && a.platform === 'instagram' && a.via === 'zernio' && (!st.fm.ig.acc || st.fm.ig.acc === a.id));
+    const igSongFor = (a) => !!(st.fm.ig && st.fm.igWay !== 'app' && a.platform === 'instagram' && a.via === 'zernio' && (!st.fm.ig.acc || st.fm.ig.acc === a.id));
+    // an Instagram whose song is added in the Instagram app (any song there): handed over right after Post
+    const igApp = (a) => !!(a.platform === 'instagram' && st.fm.mode === 'trending' && st.fm.igWay === 'app');
+    // the gospel artists were searched and Instagram's library for apps has none of them for this account
+    const igNoGospel = () => st.fm.igQ === '__gospel' && Array.isArray(st.fm.igList) && !st.fm.igList.length && !st.fm.igState;
     // where the church's own recording would play (no app library there): Facebook, YouTube, a TikTok not on Zernio,
     // an Instagram whose library cannot be reached — and an Instagram with its own song keeps it, for if Instagram
     // will not take its song on the day
     function wantsOwn(accs) {
       if (st.fm.mode === 'none') return false;
-      return accs.some((a) => (a.platform === 'tiktok' && a.via !== 'zernio') || a.platform === 'instagram' || ((a.platform === 'facebook' && !fromIg(a)) || a.platform === 'youtube'));
+      return accs.some((a) => (a.platform === 'tiktok' && a.via !== 'zernio') || (a.platform === 'instagram' && !igApp(a)) || ((a.platform === 'facebook' && !fromIg(a) && !fbApp(a)) || a.platform === 'youtube'));
     }
-    function saveFlyerPrefs() { try { localStorage.setItem('mw.flyer.music', JSON.stringify({ mode: st.fm.mode, tiktok: st.fm.tiktok, fbyt: st.fm.fbyt, fromIg: st.fm.fromIg })); } catch (e) {} }
+    function saveFlyerPrefs() { try { localStorage.setItem('mw.flyer.music', JSON.stringify({ mode: st.fm.mode, tiktok: st.fm.tiktok, fbyt: st.fm.fbyt, fb: st.fm.fb, igWay: st.fm.igWay, fromIg: st.fm.fromIg })); } catch (e) {} }
     // Instagram's own library answers for the chosen Instagram account (not "link through Facebook first" etc.)
     const igLibOk = () => !['needsFb', 'unavailable', 'error'].includes(st.fm.igState);
     const igZo = () => linked().find((x) => picked().includes(x.id) && x.platform === 'instagram' && x.via === 'zernio');
     // a REAL gospel song picked from Instagram's library for an Instagram with none chosen (main.js withFlyerMusic)
-    const igAutoFor = (a) => !!(st.fm.mode === 'trending' && a.platform === 'instagram' && a.via === 'zernio' && !igSongFor(a) && igLibOk());
+    const igAutoFor = (a) => !!(st.fm.mode === 'trending' && st.fm.igWay !== 'app' && a.platform === 'instagram' && a.via === 'zernio' && !igSongFor(a) && igLibOk() && !igNoGospel());
     // a Facebook Page that gets the Instagram Reel (with its gospel song) through Instagram's own sharing
-    const fromIg = (a) => !!(a.platform === 'facebook' && st.fm.mode === 'trending' && igZo() && (st.fm.fromIg || []).includes(a.id));
+    const fromIg = (a) => !!(a.platform === 'facebook' && st.fm.mode === 'trending' && st.fm.fb !== 'app' && igZo() && (st.fm.fromIg || []).includes(a.id));
+    // a Facebook that gets its gospel song in the Facebook app: not posted from here — handed over right after Post
+    const fbApp = (a) => !!(a.platform === 'facebook' && st.fm.mode === 'trending' && st.fm.fb === 'app');
     // the trending hashtags each chosen app gets (its own discovery tags, then the post's church tags)
     function appTagsRow() {
       const plats = Array.from(new Set(linked().filter((a) => picked().includes(a.id)).map((a) => a.platform))).filter((p) => APP_TAGS[p]);
@@ -1067,12 +1224,23 @@
             : '<p class="cs-hint">TikTok adds one of its trending songs by itself and it goes out on time — but TikTok chooses it, so it may not be gospel.</p>')
           + '</div>';
       }
-      if (fm.mode === 'trending' && ig.some((a) => a.via === 'zernio')) html += igPicker();
-      // Facebook: the real gospel song, through Instagram's own sharing to the Page linked to it
+      if (fm.mode === 'trending' && ig.length) html += igPicker(ig.some((a) => a.via === 'zernio'));
+      // Facebook: no app may put a song there — the Facebook app can, from its own library: the flyer is handed over
       const fbs = accs.filter((a) => a.platform === 'facebook');
-      if (fm.mode === 'trending' && fbs.length && igZo()) {
-        html += `<div class="csb-fm-sec"><div class="csb-fm-h">${platMark('facebook', 'sm')}<b>Real gospel on Facebook too</b></div>`
-          + '<p class="cs-hint">No app may add a song on Facebook — but Instagram can share its Reel, with its gospel song, to the Facebook Page linked to it. Tap the Page that is linked:</p><div class="cs-chips">'
+      if (fm.mode === 'trending' && fbs.length) {
+        html += `<div class="csb-fm-sec"><div class="csb-fm-h">${platMark('facebook', 'sm')}<b>Facebook song</b></div><div class="cs-chips">`
+          + chip(fm.fb === 'app', 'data-c="fm-fb" data-v="app"', '🙏 I’ll add the gospel song in Facebook')
+          + chip(fm.fb !== 'app', 'data-c="fm-fb" data-v="here"', 'Post it from here')
+          + '</div>'
+          + (fm.fb === 'app'
+            ? '<p class="cs-hint">Facebook lets no app put a song on a post — but its own app can, free, from Facebook’s licensed library (never muted or flagged). Right after you tap Post, the studio hands you the flyer and the caption: Facebook → <b>＋ → Reel</b> → pick the flyer → <b>♫ Music</b> → search <b>Travis Greene</b> (or any gospel song) → Share. Half a minute.</p>'
+            : '<p class="cs-hint">Facebook gets the flyer as a picture post from here (or with your own recording, below).</p>')
+          + '</div>';
+      }
+      // …or the Instagram Reel, with its gospel song, shared by Instagram to the Page linked to it
+      if (fm.mode === 'trending' && fm.fb !== 'app' && fbs.length && igZo()) {
+        html += `<div class="csb-fm-sec"><div class="csb-fm-h">${platMark('facebook', 'sm')}<b>Or: Instagram shares its Reel</b></div>`
+          + '<p class="cs-hint">Instagram can share its Reel, with its gospel song, to the Facebook Page linked to it. Tap the Page that is linked:</p><div class="cs-chips">'
           + fbs.map((a) => `<button type="button" class="cs-chip${(fm.fromIg || []).includes(a.id) ? ' on' : ''}" data-c="fm-fromig" data-id="${escAttr(a.id)}">${(fm.fromIg || []).includes(a.id) ? '✓ ' : ''}${esc(a.name || 'Facebook')} gets the Instagram Reel</button>`).join('')
           + '</div>'
           + ((fm.fromIg || []).length ? '<p class="cs-hint">Once, in the Instagram app: <b>Settings → Accounts Center → Sharing across profiles</b> → choose this Page → turn on <b>Reels</b>. Check the Page after the first flyer: if the Reel is not there, untick it here and the Page gets the flyer as before.</p>' : '')
@@ -1081,7 +1249,9 @@
       // Facebook and YouTube (no song library any app may use): the church's own gospel recording, or none
       if (wantsOwn(accs)) {
         const chip2 = (on, attrs, label) => `<button type="button" class="cs-chip${on ? ' on' : ''}" ${attrs}>${label}</button>`;
-        html += `<div class="csb-fm-sec"><div class="csb-fm-h">${mi('music')}<b>Facebook and YouTube</b></div><div class="cs-chips">`
+        const ownWhere = Array.from(new Set(accs.filter((a) => (a.platform === 'facebook' && !fromIg(a) && !fbApp(a)) || a.platform === 'youtube'
+          || (a.platform === 'tiktok' && a.via !== 'zernio') || (a.platform === 'instagram' && !igApp(a))).map((a) => (PLAT[a.platform] || {}).name || a.platform)));
+        html += `<div class="csb-fm-sec"><div class="csb-fm-h">${mi('music')}<b>Your own recording · ${esc(ownWhere.join(', '))}</b></div><div class="cs-chips">`
           + chip2(fm.fbyt === 'own', 'data-c="fm-fbyt" data-v="own"', '🎵 Our own gospel recording')
           + chip2(fm.fbyt !== 'own', 'data-c="fm-fbyt" data-v="none"', 'No music')
           + '</div>'
@@ -1101,14 +1271,23 @@
         + '</div>';
       return html;
     }
-    function igPicker() {
+    function igPicker(zo) {
       const fm = st.fm;
+      const chip = (on, attrs, label) => `<button type="button" class="cs-chip${on ? ' on' : ''}" ${attrs}>${label}</button>`;
+      const app = fm.igWay === 'app' || !zo;
       let h = `<div class="csb-fm-sec" id="csbIgPick"><div class="csb-fm-h">${platMark('instagram', 'sm')}<b>Instagram song</b>`
-        + (fm.ig ? `<button type="button" class="csb-link" data-c="fm-ig-clear">Remove</button>` : '') + '</div>';
+        + (fm.ig && !app ? `<button type="button" class="csb-link" data-c="fm-ig-clear">Remove</button>` : '') + '</div>'
+        + '<div class="cs-chips">'
+        + (zo ? chip(!app, 'data-c="fm-igway" data-v="lib"', '🎵 Pick it here — posts by itself') : '')
+        + chip(app, 'data-c="fm-igway" data-v="app"', '🙏 I’ll add it in Instagram (any song)')
+        + '</div>';
+      if (app) {
+        return h + '<p class="cs-hint">Every song is in the Instagram app’s own library — Travis Greene, Dunsin Oyekan, CeCe Winans… free and licensed, never muted. Right after you tap Post, the studio hands you the flyer and the caption: Instagram → <b>＋ → Post</b> → pick the flyer → <b>♫ Add music</b> → search the song → Share. It shows like a photo post with the song’s name above it.</p></div>';
+      }
       if (fm.ig) {
         h += `<div class="csb-igsong on">${fm.ig.cover ? `<img src="${escAttr(fm.ig.cover)}" alt="">` : `<i class="csb-igart">${mi('music')}</i>`}<span><b>${esc(fm.ig.title)}</b><small>${esc(fm.ig.artist || '')}</small></span><i class="csb-check">${mi('check')}</i></div>`;
       }
-      h += `<input class="cs-input csb-igsearch" type="search" enterkeyhint="search" placeholder="Search Instagram’s songs — e.g. Travis Greene" value="${escAttr(fm.igQ)}" data-c="fm-igq-in">`
+      h += `<input class="cs-input csb-igsearch" type="search" enterkeyhint="search" placeholder="Search Instagram’s songs — e.g. Travis Greene" value="${escAttr(igQShown(fm.igQ))}" data-c="fm-igq-in">`
         + '<div class="cs-chips csb-igquick">' + IG_QUICK.map(([q, l]) => `<button type="button" class="cs-chip${fm.igQ === q ? ' on' : ''}" data-c="fm-igq" data-v="${escAttr(q)}">${esc(l)}</button>`).join('') + '</div>'
         + `<div id="csbIgList">${igListHtml()}</div></div>`;
       return h;
@@ -1125,14 +1304,22 @@
         + '<p class="cs-hint">Until then Instagram gets the flyer as a picture (or with your own recording, if you chose one).</p>';
       if (fm.igState === 'unavailable' || fm.igState === 'error') return `<p class="cs-hint">${esc(fm.igErr || 'Instagram’s songs could not be loaded just now.')} Instagram gets the flyer as a picture meanwhile (or with your own recording).</p>`;
       if (!fm.igList) return '';
-      if (!fm.igList.length) return '<p class="cs-hint">No songs found — try another name.</p>';
+      if (!fm.igList.length) {
+        return fm.igQ === '__gospel'
+          ? '<p class="cs-hint">The library Instagram opens to apps has none of the gospel artists for this account (on a Business account it is mostly Meta’s royalty-free music). Two ways to real gospel:</p>'
+            + '<p class="cs-hint">• Add the song in the Instagram app yourself — every song is there: <button type="button" class="csb-link" data-c="fm-igway" data-v="app">I’ll add it in Instagram</button></p>'
+            + '<p class="cs-hint">• Or, once, in Instagram: <b>Settings → Account type and tools → Switch to creator account</b> (free — Creator accounts get the licensed music), then tap 🙏 Gospel again.</p>'
+          : `<p class="cs-hint">Instagram has no song matching “${esc(igQShown(fm.igQ))}” — try a gospel artist’s name (Travis Greene, CeCe Winans, Dunsin Oyekan…).</p>`;
+      }
       return '<div class="csb-iglist">' + fm.igList.slice(0, 15).map((x, i) => `<div class="csb-igsong${fm.ig && fm.ig.id === x.id ? ' on' : ''}" data-c="fm-ig" data-i="${i}" role="button" tabindex="0">`
         + (x.cover ? `<img src="${escAttr(x.cover)}" alt="" loading="lazy">` : `<i class="csb-igart">${mi('music')}</i>`)
         + `<span><b>${esc(x.title)}</b><small>${esc(x.artist || '')}${x.seconds ? ' · ' + Math.floor(x.seconds / 60) + ':' + String(x.seconds % 60).padStart(2, '0') : ''}</small></span>`
-        + (x.preview ? `<button type="button" class="csb-igplay" data-c="fm-ig-play" data-i="${i}" aria-label="Listen">${mi('play')}</button>` : '')
+        + `<button type="button" class="csb-igplay${igPlaying === x.id ? ' on' : ''}" data-c="fm-ig-play" data-i="${i}" aria-label="Listen">${igPlaying === x.id ? mi('pause') : mi('play')}</button>`
         + '</div>').join('') + '</div>';
     }
-    let igTimer = null, igSeq = 0, igAudioEl = null;
+    // ▶ a song: one <audio> for the sheet, started inside the tap (an iPhone plays nothing started later) and fed
+    // the studio's copy of the preview (main.js social:igPreview — Instagram's own link expires and is fussy)
+    let igTimer = null, igSeq = 0, igAudioEl = null, igPlaying = null, igPlaySeq = 0;
     async function loadIg(q) {
       clearTimeout(igTimer);
       const acc = linked().find((a) => picked().includes(a.id) && a.platform === 'instagram' && a.via === 'zernio');
@@ -1142,7 +1329,7 @@
       const paint = () => {
         const box = panel.body.querySelector('#csbIgList'); if (box) box.innerHTML = igListHtml();
         panel.body.querySelectorAll('.csb-igquick .cs-chip').forEach((c) => c.classList.toggle('on', c.dataset.v === fm.igQ));
-        const inp = panel.body.querySelector('.csb-igsearch'); if (inp && document.activeElement !== inp) inp.value = fm.igQ;
+        const inp = panel.body.querySelector('.csb-igsearch'); if (inp && document.activeElement !== inp) inp.value = igQShown(fm.igQ);
       };
       paint();
       try {
@@ -1150,7 +1337,7 @@
         if (my !== igSeq) return;
         if (r && r.needsFacebookLogin) fm.igState = 'needsFb';
         else if (r && r.unavailable) { fm.igState = 'unavailable'; fm.igErr = r.unavailable; }
-        else { fm.igState = ''; fm.igList = (r && r.songs) || []; }
+        else { fm.igState = ''; fm.igList = (r && r.songs) || []; }   // (nothing matched: an empty list, said as such)
       } catch (er) { if (my !== igSeq) return; fm.igState = 'error'; fm.igErr = (er && er.message) || ''; }
       paint();
     }
@@ -1177,7 +1364,33 @@
         draw();
       }, 4000);
     }
-    function stopIgPreview() { if (igAudioEl) { try { igAudioEl.pause(); } catch (e) {} igAudioEl = null; } }
+    function stopIgPreview() {
+      igPlaySeq++; igPlaying = null;
+      if (igAudioEl) { try { igAudioEl.pause(); } catch (e) {} }
+      if (panel.el.isConnected) panel.body.querySelectorAll('.csb-igplay.on, .csb-igplay.busy').forEach((n) => { n.classList.remove('on', 'busy'); n.innerHTML = mi('play'); });
+    }
+    function playIg(x, b) {
+      const acc = linked().find((a) => a.id === st.fm.igFor) || igZo();
+      if (!acc) return;
+      if (!igAudioEl) { igAudioEl = new Audio(); igAudioEl.preload = 'auto'; }
+      const el = igAudioEl, my = igPlaySeq;
+      // unlocked by this very tap: a moment of silence now, the song when it is here
+      try { el.src = SILENCE; const pr = el.play(); if (pr && pr.catch) pr.catch(() => {}); } catch (e) {}
+      igPlaying = x.id;
+      b.classList.add('on', 'busy'); b.innerHTML = '<i class="csb-spin"></i>';
+      window.api.social.igPreview(acc.id, x.id, x.preview || '').then((r) => {
+        if (my !== igPlaySeq || !r || !r.path) return;
+        el.src = C.fileUrl(r.path);
+        el.onended = () => { if (my === igPlaySeq) stopIgPreview(); };
+        const pr = el.play();
+        if (pr && pr.catch) pr.catch(() => { if (my === igPlaySeq) { stopIgPreview(); C.island({ kind: 'warn', title: 'Tap ▶ once more to listen', ms: 3500 }); } });
+        b.classList.remove('busy'); b.innerHTML = mi('pause');
+      }, (er) => {
+        if (my !== igPlaySeq) return;
+        stopIgPreview();
+        C.island({ kind: 'warn', title: 'That song cannot be played here', sub: (er && er.message) || 'Instagram gave no preview of it — it still posts with it.', ms: 5000 });
+      });
+    }
     function whenBlock() {
       if (many()) {
         const times = batchTimes();
@@ -1325,15 +1538,20 @@
         + (mus ? `<details class="csb-more"${st.music ? ' open' : ''}><summary>${mi('music')}<span>Music</span><small>${esc(musName)}</small>${mi('chev-right')}</summary><div class="csb-more-in">${mus}</div></details>` : '')
         + `<section class="csb-sec" id="csbWhen"><div class="csb-h3"><b>When</b></div>${whenBlock()}</section>`
         + '</div>';
-      const n = picked().length * Math.max(1, st.files.length);
+      // flyers whose Facebook (or Instagram) gets its song in the app itself: not posted from here, handed over after
+      const handAccs = !edit && flyers().length === st.files.length ? linked().filter((a) => picked().includes(a.id) && (fbApp(a) || igApp(a))) : [];
+      const handTo = Array.from(new Set(handAccs.map((a) => (PLAT[a.platform] || {}).name || a.platform))).join(' and ');
+      const n = (picked().length - handAccs.length) * Math.max(1, st.files.length);
       const ready = st.files.length && picked().length;
       const busy = !many() && st.ai && st.ai.stage && st.ai.stage !== 'done' && st.ai.stage !== 'fail';
-      const label = edit ? 'Save changes' : many() ? `Schedule ${st.files.length} posts` : st.quick === 'now' ? `Post ${n > 1 ? n + ' now' : 'now'}` : `Schedule ${n > 1 ? n + ' posts' : 'post'}`;
+      const label = edit ? 'Save changes' : n === 0 && handTo ? `Continue to ${handTo}` : many() ? `Schedule ${st.files.length} posts`
+        : st.quick === 'now' ? `Post ${n > 1 ? n + ' now' : 'now'}` : `Schedule ${n > 1 ? n + ' posts' : 'post'}`;
       const ws = whenSummary();
       panel.foot.innerHTML = '<div class="csb-bar">'
         + `<button type="button" class="csb-when" data-c="whenjump">${mi('clock')}<span><b>${esc(ws.main)}</b><small>${esc(ws.sub)}</small></span></button>`
         + `<button type="button" class="csb-go" data-c="go"${ready && !st.submitting ? '' : ' disabled'}>${st.submitting ? 'Scheduling…' : label}</button></div>`
-        + (ready ? (busy ? '<p class="cs-hint">You can tap it now — it waits for the caption to be written.</p>' : '')
+        + (ready ? (busy ? '<p class="cs-hint">You can tap it now — it waits for the caption to be written.</p>'
+          : handTo && n ? `<p class="cs-hint">Then ${esc(handTo)}: the flyer and caption are handed to you, to add the gospel song in the app.</p>` : '')
           : `<p class="cs-hint">${st.sending ? (st.sending.items.length > 1 ? 'Your videos are on their way — the captions start as each one lands.' : 'Your video is on its way — the caption starts as soon as it lands.') : !st.files.length ? 'Choose a video or a flyer first.' : 'Choose at least one account to post to.'}</p>`);
       paintThumbs(panel.body);
       // the search box keeps its place and what was typed when the sheet is drawn again
@@ -1343,7 +1561,7 @@
       }
       if (!panel.body.querySelector('#csbIgPick')) { stopIgPreview(); clearTimeout(igTimer); }
       // Instagram's songs, the first time its picker shows: gospel first
-      if (panel.body.querySelector('#csbIgPick') && st.fm.igList == null && !st.fm.igState) loadIg('gospel');
+      if (panel.body.querySelector('#csbIgPick') && st.fm.igList == null && !st.fm.igState) loadIg('__gospel');
     }
 
     /*
@@ -1600,18 +1818,19 @@
         saveFlyerPrefs(); return draw();
       }
       if (c === 'fm-lib') { st.fm.lib = b.dataset.v; return draw(); }
-      if (c === 'fm-igq') { const i = panel.body.querySelector('.csb-igsearch'); if (i) i.value = b.dataset.v; return loadIg(b.dataset.v); }
+      if (c === 'fm-igq') { const i = panel.body.querySelector('.csb-igsearch'); if (i) i.value = igQShown(b.dataset.v); return loadIg(b.dataset.v); }
       if (c === 'fm-ig-clear') { st.fm.ig = null; stopIgPreview(); return draw(); }
       if (c === 'fm-ig-play') {
+        e.stopPropagation();
         const x = st.fm.igList && st.fm.igList[+b.dataset.i];
-        if (!x || !x.preview) return;
-        const same = igAudioEl && igAudioEl.dataset && igAudioEl.dataset.id === x.id;
+        if (!x) return;
+        const same = igPlaying === x.id;
         stopIgPreview();
-        panel.body.querySelectorAll('.csb-igplay.on').forEach((n) => n.classList.remove('on'));
-        if (same) return;
-        try { igAudioEl = new Audio(x.preview); igAudioEl.dataset.id = x.id; igAudioEl.play().catch(() => {}); b.classList.add('on'); igAudioEl.onended = () => b.classList.remove('on'); } catch (er) { igAudioEl = null; }
+        if (!same) playIg(x, b);
         return;
       }
+      if (c === 'fm-fb') { st.fm.fb = b.dataset.v === 'app' ? 'app' : 'here'; saveFlyerPrefs(); return draw(); }
+      if (c === 'fm-igway') { st.fm.igWay = b.dataset.v === 'app' ? 'app' : 'lib'; stopIgPreview(); saveFlyerPrefs(); return draw(); }
       if (c === 'fm-ig') {
         const x = st.fm.igList && st.fm.igList[+b.dataset.i];
         if (x) { st.fm.ig = Object.assign({}, x, { acc: st.fm.igFor }); stopIgPreview(); draw(); }
@@ -1725,7 +1944,7 @@
       if (fm.mode === 'none') return { tiktok: 'none', igAudio: null, song: null };
       const accs = linked().filter((a) => picked().includes(a.id));
       const ig = fm.mode === 'trending' && fm.ig ? { id: fm.ig.id, title: fm.ig.title, artist: fm.ig.artist || '', acc: fm.ig.acc || '' }
-        : accs.some((a) => igAutoFor(a)) ? { auto: 'gospel' } : null;
+        : accs.some((a) => igAutoFor(a)) ? { auto: '__gospel' } : null;
       // never a free instrumental: the church's own recording where it was chosen, or none
       const own = fm.fbyt === 'own' && fm.lib && wantsOwn(accs);
       return { tiktok: fm.tiktok, igAudio: ig, fbyt: own ? 'song' : 'none', song: own ? { lib: fm.lib } : null };
@@ -1762,8 +1981,12 @@
       const accs = linked().filter((a) => picked().includes(a.id));
       const platforms = Array.from(new Set(accs.map((a) => a.platform)));
       stopIgPreview();
-      // a flyer: a Facebook Page that gets the Instagram Reel (shared by Instagram) is not posted to again
-      const accsFor = (f) => (isVideo(f) ? accs : accs.filter((a) => !fromIg(a)));
+      // a flyer: a Facebook Page that gets the Instagram Reel (shared by Instagram) is not posted to again, and a
+      // Facebook that gets its song in the Facebook app is handed the flyer instead (openHandOff)
+      const accsFor = (f) => (isVideo(f) || edit ? accs : accs.filter((a) => !fromIg(a) && !fbApp(a) && !igApp(a)));
+      const platsFor = (list) => Array.from(new Set(list.map((a) => a.platform)));
+      const fbHand = edit ? [] : accs.filter((a) => fbApp(a) || igApp(a));
+      const hand = [];
       if (flyers().length && st.fm.mode !== 'none') btn.innerHTML = `${mi('music')}Putting the music on…`;
       try {
         let mus = null;
@@ -1792,34 +2015,44 @@
             const one = {
               title: own.title || titleFromFile(f),
               caption: withCredit(own.caption || st.caption || titleFromFile(f), credit),
-              mediaPaths: [fileAt(i)], accountIds: accsFor(f).map((a) => a.id), platforms,
+              mediaPaths: [fileAt(i)], accountIds: accsFor(f).map((a) => a.id), platforms: platsFor(accsFor(f)),
               scheduledAt: times[i].toISOString(),
             };
+            if (fbHand.length && !isVideo(f) && !hand.some((h) => h.file === f)) hand.push({ file: f, when: times[i].toISOString(), title: one.title, caption: own.caption || st.caption || titleFromFile(f) });
+            if (!one.accountIds.length) continue;   // only Facebook, through its own app: nothing to book here
             // booked already (tapped again after one failed): brought up to what is chosen now, never booked twice
             if (st.booked[f]) { await bookedAgain(st.booked[f], one); continue; }
             st.booked[f] = (await addPost(one, f)) || true;
           }
-          C.island({ kind: 'good', title: `${st.files.length} posts scheduled`, sub: `First one ${whenLabel(times[0])}` });
+          if (st.files.some((f) => accsFor(f).length)) C.island({ kind: 'good', title: `${st.files.length} posts scheduled`, sub: `First one ${whenLabel(times[0])}` });
         } else {
           const when = chosenWhen();
           st.booked = st.booked || {};
+          const booked = accsFor(st.files[0]);
           const one = {
             title: st.title.trim() || titleFromFile(st.files[0]), caption: withCredit(st.caption, credit),
-            mediaPaths: [fileAt(0)], accountIds: accsFor(st.files[0]).map((a) => a.id), platforms,
+            mediaPaths: [fileAt(0)], accountIds: booked.map((a) => a.id), platforms: platsFor(booked),
             scheduledAt: when.toISOString(),
           };
+          if (fbHand.length && !isVideo(st.files[0])) hand.push({ file: st.files[0], when: st.quick === 'now' ? null : when.toISOString(), title: one.title, caption: st.caption });
           // dropped down to one after a bulk half-booked: that one is booked already — it gets what is chosen now
           const had = st.booked[st.files[0]];
-          const rec = had ? await bookedAgain(had, one) : await addPost(one, st.files[0]);
-          if (rec) st.booked[st.files[0]] = rec;
-          if (st.quick === 'now' && rec && rec.id) postNow(rec.id);
-          else C.island({ kind: 'good', title: 'Post scheduled', sub: `${whenLabel(when)} · ${accs.map((a) => (PLAT[a.platform] || {}).name || a.platform).join(', ')}` });
+          if (booked.length) {
+            const rec = had ? await bookedAgain(had, one) : await addPost(one, st.files[0]);
+            if (rec) st.booked[st.files[0]] = rec;
+            if (st.quick === 'now' && rec && rec.id) postNow(rec.id);
+            else C.island({ kind: 'good', title: 'Post scheduled', sub: `${whenLabel(when)} · ${booked.map((a) => (PLAT[a.platform] || {}).name || a.platform).join(', ')}` });
+          }
         }
         panel.close();
+        // Facebook's (and Instagram's) part, with its song: kept on this phone until it is done, and handed over now
+        const todo = hand.length ? addHandTodo({ items: hand, apps: platsFor(fbHand).sort((x, y) => (x === 'instagram' ? -1 : y === 'instagram' ? 1 : 0)),
+          song: st.fm.ig && st.fm.igWay !== 'app' ? st.fm.ig.title + (st.fm.ig.artist ? ' — ' + st.fm.ig.artist : '') : '' }) : null;
         if (S.view !== 'scheduler') go('scheduler');
         S.tab = 'upcoming';
         await loadSocial(true);
         renderSched(); renderHomeSocial();
+        if (todo) openHandOff(todo);
       } catch (er) {
         btn.disabled = false;
         draw();
@@ -2207,6 +2440,8 @@
    * the next instead of to no music.
    */
   const FREE_RECENT = 'mw-free-recent';
+  // a twentieth of a second of silence: what an iPhone is given to play inside the tap, so the song may play after
+  const SILENCE = 'data:audio/wav;base64,UklGRrQBAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YZABAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA';
   /* each app its own trending hashtags — what the server puts on as it posts (social-copy.js forPlatform) */
   const APP_TAGS = { tiktok: ['#fyp', '#foryou', '#foryoupage'], instagram: ['#instagood', '#explorepage', '#reels'], facebook: ['#reels', '#viral', '#fbreels'], youtube: ['#shorts', '#youtubeshorts'] };
   const APP_TAG_SET = new Set([].concat(...Object.values(APP_TAGS), ['#fy', '#viralvideo', '#trending', '#explore', '#reelsinstagram', '#instadaily', '#youtube', '#facebookreels', '#reelsfb', '#christianreels', '#christiantiktok']));
@@ -2224,6 +2459,8 @@
       else if (p.mode === 'free') o.mode = 'trending';   // (the free-instrumental choice is gone)
       if (['draft', 'trending'].includes(p.tiktok)) o.tiktok = p.tiktok;
       if (p.fbyt === 'own') o.fbyt = 'own';   // anything else: no music (never an instrumental)
+      if (['app', 'here'].includes(p.fb)) o.fb = p.fb;
+      if (['lib', 'app'].includes(p.igWay)) o.igWay = p.igWay;
       if (Array.isArray(p.fromIg)) o.fromIg = p.fromIg.filter((x) => typeof x === 'string');
       return o; } catch (e) { return {}; }
   }

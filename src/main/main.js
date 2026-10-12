@@ -1129,17 +1129,19 @@ async function withFlyerMusic(post, before) {
   if (!m || typeof m !== 'object') { post.music = null; return post; }
   const tiktok = ['trending', 'draft', 'free', 'none'].includes(m.tiktok) ? m.tiktok : 'trending';
   /*
-   * No song chosen for Instagram: a REAL gospel song from Instagram's own
-   * library, picked here — a different one each time (the last ones used are
-   * remembered). Licensed by Instagram, so never flagged. When the library
-   * cannot be reached, Instagram gets the free song instead.
+   * No song chosen for Instagram: a song BY a gospel artist from the library
+   * Instagram opens to apps (accounts.js _igGospelMix — never whatever is
+   * trending), picked here, a different one each time (the last ones used
+   * are remembered). Licensed by Instagram, so never flagged. When the
+   * library has none of them for this account, Instagram gets the flyer
+   * without a song (or the church's own recording) — never an instrumental.
    */
   if (m.igAudio && m.igAudio.auto && !m.igAudio.id && tiktok !== 'none') {
     const igAcc = (post.accountIds || []).map((x) => accounts.byId(x)).find((a) => a && a.platform === 'instagram' && a.via === 'zernio');
     let picked = null;
     if (igAcc) {
       try {
-        const r = await accounts.zernioIgAudio(igAcc.id, String(m.igAudio.auto).slice(0, 60) || 'gospel');
+        const r = await accounts.zernioIgAudio(igAcc.id, String(m.igAudio.auto).slice(0, 60) || '__gospel', { covers: false });
         const songs = (r && r.songs) || [];
         const recent = store.get('igSongsUsed') || [];
         picked = songs.slice(0, 15).find((x) => !recent.includes(x.id)) || songs[0] || null;
@@ -1234,11 +1236,17 @@ ipcMain.handle('social:musicCheck', wrap(async () => {
         await book(a, { tiktok: 'trending', igAudio: null, song: null }, 'Photo post with TikTok’s trending music');
         await book(a, { tiktok: 'draft', igAudio: null, song: null }, 'Sent to the TikTok inbox to pick your song');
       } else if (a.platform === 'instagram') {
-        let lib = null;
-        try { lib = await accounts.zernioIgAudio(a.id, 'gospel'); } catch (e) { lib = { unavailable: e.message }; }
-        if (lib && lib.songs && lib.songs.length) {
-          const s0 = lib.songs[0];
-          add(a.name, a.platform, true, `Instagram’s song library answers (e.g. “${s0.title}”${s0.artist ? ' — ' + s0.artist : ''}).`);
+        let lib = null, any = null;
+        try { lib = await accounts.zernioIgAudio(a.id, '__gospel', { covers: false }); } catch (e) { lib = { unavailable: e.message }; }
+        // songs BY gospel artists — or, when the library has none for this account, whether it answers at all
+        if (lib && lib.unmatched) { try { any = await accounts.zernioIgAudio(a.id, '', { covers: false }); } catch (e) { any = null; } }
+        const s0 = (lib && lib.songs && lib.songs[0]) || (any && any.songs && any.songs[0]) || null;
+        if (s0) {
+          if (lib.songs && lib.songs.length) add(a.name, a.platform, true, `Instagram’s library has gospel songs for this account (e.g. “${s0.title}” — ${s0.artist}).`);
+          else {
+            add(a.name, a.platform, false, 'The library Instagram opens to apps has none of the gospel artists for this account (a Business account gets mostly Meta’s royalty-free music). '
+              + 'Real gospel either way: in New post choose “I’ll add it in Instagram” (every song is in the app), or switch the account to a Creator account in Instagram (free) and test again.');
+          }
           await book(a, { tiktok: 'trending', igAudio: { id: s0.id, title: s0.title, artist: s0.artist, acc: a.zoAccountId }, song }, 'Reel with a song from Instagram’s library');
         } else {
           add(a.name, a.platform, false, lib && lib.needsFacebookLogin
@@ -1248,6 +1256,10 @@ ipcMain.handle('social:musicCheck', wrap(async () => {
       } else {
         // Facebook and YouTube: no song library any app may use — the flyer itself goes (no instrumental)
         await book(a, { tiktok: 'trending', igAudio: null, song: null, fbyt: 'none' }, a.platform === 'youtube' ? 'Flyer as a Short' : 'Flyer');
+        if (a.platform === 'facebook') {
+          add(a.name, a.platform, true, 'A gospel song on Facebook: no app may add one (Meta lets none) — choose “I’ll add the gospel song in Facebook” in New post: '
+            + 'right after Post the studio hands you the flyer and caption, and the song is picked in the Facebook app, from its own licensed library.');
+        }
       }
     }
     return { checks: out, ok: out.every((c) => c.ok) };
@@ -1256,6 +1268,36 @@ ipcMain.handle('social:musicCheck', wrap(async () => {
 }));
 // Instagram's own song library, through Zernio (licensed by Meta — a song from it is never flagged)
 ipcMain.handle('social:igAudio', wrap(async (e, { accountId, q } = {}) => accounts.zernioIgAudio(accountId, q)));
+/*
+ * ▶ an Instagram song, on the phone. Instagram's preview link expires in a
+ * day or so and its CDN is fussy about who asks, so the studio fetches a
+ * fresh one and the phone plays it from here (a day's worth kept).
+ */
+ipcMain.handle('social:igPreview', wrap(async (e, { accountId, audioId, url } = {}) => {
+  const id = String(audioId || '').replace(/[^\w-]/g, '').slice(0, 60);
+  if (!id) throw new Error('Which song?');
+  const dir = path.join(app.getPath('temp'), 'mw-ig-previews');
+  fs.mkdirSync(dir, { recursive: true });
+  const DAY = 24 * 3600e3, now = Date.now();
+  for (const n of fs.readdirSync(dir)) {
+    const f = path.join(dir, n);
+    try {
+      const s = fs.statSync(f);
+      if (n.startsWith(id + '.') && !n.endsWith('.part') && now - s.mtimeMs < DAY && s.size > 2000) return { path: f };
+      if (now - s.mtimeMs > DAY) fs.unlinkSync(f);
+    } catch (er) { /* gone meanwhile */ }
+  }
+  const { buf, mime } = await accounts.zernioIgPreview(accountId, id, url);
+  // what it is, by its bytes first (a CDN's content-type is often generic)
+  const head = buf.slice(0, 12).toString('latin1');
+  const ext = head.slice(4, 8) === 'ftyp' ? '.m4a' : (head.startsWith('ID3') || (buf[0] === 0xff && (buf[1] & 0xe0) === 0xe0)) ? '.mp3'
+    : head.startsWith('OggS') ? '.ogg' : head.startsWith('RIFF') ? '.wav'
+      : /mp4|m4a|aac/i.test(mime || '') ? '.m4a' : '.mp3';
+  const out = path.join(dir, id + ext);
+  fs.writeFileSync(out + '.part', buf);
+  fs.renameSync(out + '.part', out);
+  return { path: out };
+}));
 // that library needs the Instagram account linked through Facebook: the sign-in to do it
 ipcMain.handle('social:igRelink', wrap(async (e, { accountId, unlink } = {}) => {
   try { return await accounts.zernioLinkStart('instagram', { relink: accountId, unlink: !!unlink }); }

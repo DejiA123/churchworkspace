@@ -132,6 +132,7 @@ const SOCIAL = {
   'social:linkStart': true,
   'social:linkClaim': true,
   'social:igAudio': true,
+  'social:igPreview': true,
   'social:igRelink': true,
   'social:musicCheck': true,
   // one tap: every sign-in in turn (main.js); setupNext is reached only through /social/next/<code>

@@ -39,6 +39,8 @@ const check = (ok, name, d) => { console.log((ok ? '  PASS ' : '  FAIL ') + name
 const WORK = path.join(os.tmpdir(), 'mw-flymus-' + process.pid);
 const DATA = path.join(WORK, 'data'), MEDIA = path.join(WORK, 'media');
 fs.mkdirSync(DATA, { recursive: true }); fs.mkdirSync(MEDIA, { recursive: true });
+// the studio keeps a day of song previews (main.js social:igPreview): none left from an earlier run
+try { fs.rmSync(path.join(os.tmpdir(), 'church-work-space', 'mw-ig-previews'), { recursive: true, force: true }); } catch (e) {}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function post(p, body) { return new Promise((resolve, reject) => { const data = Buffer.from(JSON.stringify(body));
   const req = http.request({ host: '127.0.0.1', port: PORT, path: p, method: 'POST', agent: false, headers: { 'content-type': 'application/json', 'content-length': data.length } }, (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => { try { resolve(JSON.parse(b)); } catch (e) { reject(e); } }); });
@@ -47,15 +49,29 @@ async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise
 const probe = (file) => spawnSync(ffmpeg, ['-i', file], { encoding: 'utf8' }).stderr;
 
 /* a stand-in Zernio (and a stand-in incompetech under /music/) */
-const Z = { posts: [], uploads: {}, audioQs: [], connects: [], n: 0 };
+const Z = { posts: [], uploads: {}, audioQs: [], connects: [], n: 0, previews: [], details: [] };
 const SONG = path.join(WORK, 'song.mp3');
-const IG_SONGS = {
-  gospel: [{ audioId: 'ig_gospel_1', title: 'Gospel Joy', artist: 'Choir Live', durationMs: 180000, coverUrl: '', downloadUrl: `http://127.0.0.1:${ZPORT}/preview/1.mp3` },
-    { audioId: 'ig_gospel_2', title: 'Way Maker', artist: 'Sinach', durationMs: 240000 }],
-  'travis greene': [{ audioId: 'ig_made_a_way', title: 'Made a Way', artist: 'Travis Greene', durationMs: 245000, downloadUrl: `http://127.0.0.1:${ZPORT}/preview/2.mp3` },
-    { id: 'ig_intentional', title: 'Intentional', displayArtist: 'Travis Greene', durationInMs: 290000, coverArtworkUri: '' }],
-  '': [{ audioId: 'ig_trend_1', title: 'Trending One', artist: 'Someone', durationMs: 150000 }],
-};
+/*
+ * Instagram's library as Zernio gives it (its SDK: { audio: [InstagramAudioAsset] }
+ * — audioId, title, displayArtist, durationInMs, coverArtworkThumbnailUrl,
+ * downloadUrl). A search is by words: the gospel artists are found by name;
+ * an unknown search brings back the trending list (never gospel).
+ */
+const GOSPEL = ['Travis Greene', 'Maverick City Music', 'CeCe Winans', 'Dunsin Oyekan', 'Sinach', 'Nathaniel Bassey', 'Mercy Chinwo',
+  'Elevation Worship', 'Tasha Cobbs Leonard', 'Moses Bliss', 'Kirk Franklin', 'Brandon Lake', 'Forrest Frank', 'Tim Godfrey', 'Ada Ehi',
+  'Hillsong Worship', 'Jonathan McReynolds', 'Tye Tribbett', 'Limoblaze', 'Victoria Orenze'];
+const asset = (id, title, artist, ms) => ({ audioId: id, title, audioType: 'music', displayArtist: artist, durationInMs: ms || 200000,
+  coverArtworkThumbnailUrl: `http://127.0.0.1:${ZPORT}/cover/${id}.jpg`, downloadUrl: `http://127.0.0.1:${ZPORT}/preview/${id}.mp3`, onPlatformAudioPreviewLink: 'https://www.instagram.com/reels/audio/' + id });
+const IG_SONGS = { '': [asset('ig_trend_1', 'Beautiful', 'Giulio Cercato'), asset('ig_trend_2', 'Grudge (Reels Sound - Listicle)', 'Tash'), asset('ig_trend_3', 'Thanks', 'Man DeLorean')] };
+for (const name of GOSPEL) {
+  const slug = name.toLowerCase().replace(/\W+/g, '_');
+  IG_SONGS[name.toLowerCase()] = [asset('ig_gospel_' + slug + '_1', name + ' Song One', name), asset('ig_gospel_' + slug + '_2', name + ' Song Two', name + ' & Friends'),
+    asset('ig_near_' + slug, 'Not Theirs', 'Someone Else')];   // a near-match a search brings too
+}
+IG_SONGS['travis greene'] = [asset('ig_made_a_way', 'Made a Way', 'Travis Greene', 245000), asset('ig_intentional', 'Intentional', 'Travis Greene', 290000),
+  asset('ig_greene_day', 'Holiday', 'Greene Day Band')];
+const ALL_IG = Object.values(IG_SONGS).reduce((a, l) => a.concat(l), []);
+const isGospelId = (id) => /^ig_gospel_|^ig_made_a_way$|^ig_intentional$/.test(id || '');
 function zernio() {
   return http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x');
@@ -63,6 +79,7 @@ function zernio() {
       const body = Buffer.concat(parts);
       const send = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
       if (u.pathname.startsWith('/music/') || u.pathname.startsWith('/preview/')) {
+        if (u.pathname.startsWith('/preview/')) Z.previews.push(u.pathname);
         res.writeHead(200, { 'content-type': 'audio/mpeg' });
         if (req.method === 'HEAD') return res.end();
         return res.end(fs.readFileSync(SONG));
@@ -73,7 +90,15 @@ function zernio() {
         if (u.searchParams.get('audioType') !== 'music') return send(400, { error: 'Invalid option: expected one of "music"|"original_sound"' });
         Z.audioQs.push({ id: m[1], q: u.searchParams.get('q') || '' });
         if (m[1] === 'fbneeded') return send(400, { error: 'instagram_audio_requires_facebook_login' });
-        return send(200, { audio: IG_SONGS[(u.searchParams.get('q') || '').toLowerCase()] || [] });
+        // a Business account: only the royalty-free library — whatever is searched, the trending list comes back
+        if (m[1] === 'nogospel') return send(200, { audio: IG_SONGS[''] });
+        return send(200, { audio: IG_SONGS[(u.searchParams.get('q') || '').toLowerCase()] || IG_SONGS[''] });
+      }
+      m = u.pathname.match(/^\/api\/v1\/accounts\/([^/]+)\/instagram\/audio\/([^/]+)$/);
+      if (m) {
+        Z.details.push(m[2]);
+        const one = ALL_IG.find((x) => x.audioId === decodeURIComponent(m[2]));
+        return one ? send(200, { audio: one }) : send(404, { error: 'audio not found' });
       }
       if (u.pathname === '/api/v1/accounts') return send(200, { accounts: [{ _id: '3', platform: 'instagram', profileId: 'prof1' }, { _id: 'fbneeded', platform: 'instagram', profileId: 'prof2' }] });
       if (u.pathname === '/api/v1/connect/instagram') { Z.connects.push(Object.fromEntries(u.searchParams.entries())); return send(200, { authUrl: 'https://example.com/fb-login' }); }
@@ -146,14 +171,25 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
     // [2]
     await page.waitForSelector('#csCompose #csbIgList .csb-igsong', { timeout: 15000 }).catch(() => {});
     const first = await page.evaluate(() => Array.from(document.querySelectorAll('#csCompose #csbIgList .csb-igsong b')).map((n) => n.textContent));
-    check(first.includes('Gospel Joy') && Z.audioQs.some((q) => q.id === '3' && q.q === 'gospel'), 'Instagram’s own songs load by themselves — gospel first', { first, qs: Z.audioQs });
+    const firstBy = await page.evaluate(() => Array.from(document.querySelectorAll('#csCompose #csbIgList .csb-igsong small')).map((n) => n.textContent));
+    check(first.length >= 5 && first.includes('Made a Way') && firstBy.every((a) => /Travis Greene|Maverick City Music|CeCe Winans|Dunsin Oyekan|Sinach/.test(a))
+      && Z.audioQs.some((q) => q.id === '3' && q.q === 'Travis Greene') && !Z.audioQs.some((q) => q.q === 'gospel'),
+    'Instagram’s songs load by themselves — 🙏 Gospel is songs BY gospel artists (searched by name), never the trending list', { first, firstBy, qs: Z.audioQs.slice(0, 8) });
+    check(!first.some((t) => /Beautiful|Grudge|Thanks|Not Theirs|Holiday/.test(t)), '…none of the trending or near-match songs (Beautiful – Giulio Cercato, …) is in it', first);
+    check(await page.evaluate(() => (document.querySelector('#csCompose .csb-igsearch') || {}).value === ''), '…and the search box shows nothing for it (not "__gospel")');
     await page.fill('#csCompose .csb-igsearch', 'Travis Greene');
     await page.waitForFunction(() => /Made a Way/.test((document.querySelector('#csCompose #csbIgList') || {}).innerText || ''), null, { timeout: 8000 }).catch(() => {});
     const found = await page.evaluate(() => (document.querySelector('#csCompose #csbIgList') || {}).innerText || '');
-    check(/Made a Way/.test(found) && /Travis Greene/.test(found), 'a search for Travis Greene finds him in Instagram’s library', found.slice(0, 200));
+    check(/Made a Way/.test(found) && /Travis Greene/.test(found) && !/Greene Day Band/.test(found), 'a search for Travis Greene finds him in Instagram’s library — his songs only', found.slice(0, 200));
+    const prev0 = Z.previews.length;
     await page.tap('#csCompose #csbIgList .csb-igsong[data-i="0"] [data-c="fm-ig-play"]');
-    await sleep(300);
-    check(await page.evaluate(() => !!document.querySelector('#csCompose .csb-igplay.on')), '▶ plays a preview of the song');
+    await page.waitForFunction(() => { const b = document.querySelector('#csCompose .csb-igplay.on'); return b && !b.classList.contains('busy'); }, null, { timeout: 15000 }).catch(() => {});
+    const playing = await page.evaluate(() => { const b = document.querySelector('#csCompose .csb-igplay.on'); return b ? b.innerHTML : ''; });
+    check(/data-i="pause"/.test(playing) && Z.previews.slice(prev0).some((p) => /ig_made_a_way/.test(p)) && Z.details.includes('ig_made_a_way'),
+      '▶ plays the song: a fresh preview fetched by the studio (Instagram’s link expires), played from there', { playing, previews: Z.previews.slice(prev0), details: Z.details });
+    await page.tap('#csCompose #csbIgList .csb-igsong[data-i="0"] [data-c="fm-ig-play"]');
+    await sleep(200);
+    check(await page.evaluate(() => !document.querySelector('#csCompose .csb-igplay.on')), '…and tapped again, it stops');
     await page.tap('#csCompose #csbIgList .csb-igsong[data-i="0"]');
     await sleep(300);
     const igNote = await page.evaluate(() => (document.querySelector('#csCompose #csbFlyerNote') || {}).innerText || '');
@@ -166,14 +202,18 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
     const tkTrend = (await page.evaluate(() => (document.querySelector('#csCompose #csbFlyerMusic') || {}).innerText || '')).replace(/\s+/g, ' ');
     check(/TikTok · a photo post with a trending song TikTok adds/.test(tkTrend) && /may not be gospel/.test(tkTrend), '…or TikTok picks a trending song — said plainly that it may not be gospel', tkTrend.slice(0, 300));
     const quick = await page.evaluate(() => Array.from(document.querySelectorAll('#csCompose .csb-igquick .cs-chip')).map((c) => c.textContent));
-    check(/Gospel/.test(quick[0]) && quick.includes('Travis Greene') && quick.includes('Maverick City') && quick.includes('CeCe Winans'), 'Instagram’s song buttons: gospel first, then gospel artists trending now', quick);
+    check(/Gospel/.test(quick[0]) && quick.includes('Travis Greene') && quick.includes('Maverick City') && quick.includes('CeCe Winans') && !quick.some((q) => /^(Worship|Praise|Afro gospel)$/.test(q)),
+      'Instagram’s song buttons: gospel first, then gospel artists by name (no word searches that bring any song)', quick);
     await page.tap('#csCompose [data-c="fm-tk"][data-v="draft"]');
     await sleep(200);
     note = (await page.evaluate(() => (document.querySelector('#csCompose #csbFlyerNote') || {}).innerText || '')).replace(/\s+/g, ' ');
     const hint = await page.evaluate(() => (document.querySelector('#csCompose #csbFlyerMusic') || {}).innerText || '');
     check(/TikTok · sent to your TikTok inbox/.test(note) && /Add sound/.test(hint) && /Travis Greene/.test(hint), '"I’ll pick the song in TikTok": its inbox, and how to add the song there', note);
     // [4]
-    check(/Facebook · a picture post, no music/.test(note) && /YouTube · a 10-second Short, no music/.test(note), 'Facebook and YouTube: no instrumental — the flyer, no music (unless the church picks its own recording)', note);
+    check(/Facebook · you add a real gospel song in the Facebook app/.test(note) && /YouTube · a 10-second Short, no music/.test(note),
+      'Facebook: the gospel song is added in the Facebook app (no app may add one) — YouTube: no instrumental', note);
+    const fbChips = await page.evaluate(() => Array.from(document.querySelectorAll('#csCompose [data-c="fm-fb"]')).map((b) => b.className + ' ' + b.textContent));
+    check(fbChips.length === 2 && /on/.test(fbChips[0]) && /I’ll add the gospel song in Facebook/.test(fbChips[0]), 'Facebook: “I’ll add the gospel song in Facebook”, by itself', fbChips);
     const ownChips = await page.evaluate(() => Array.from(document.querySelectorAll('#csCompose [data-c="fm-fbyt"]')).map((b) => b.textContent));
     check(ownChips.join('|') === '🎵 Our own gospel recording|No music', 'Facebook and YouTube choices: our own gospel recording, or no music', ownChips);
     if (SHOTS) {
@@ -189,9 +229,31 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
     check(appTags.some((t) => /^tiktok: #fyp #foryou #foryoupage #worship #sermon$/.test(t)) && appTags.some((t) => /^instagram: #instagood #explorepage #reels/.test(t))
       && appTags.some((t) => /^youtube: #shorts #youtubeshorts/.test(t)) && appTags.some((t) => /^facebook: #reels #viral #fbreels/.test(t)),
       'New post shows the trending hashtags each app gets (TikTok #fyp #foryou #foryoupage, Instagram #instagood…)', appTags);
+    await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: `http://127.0.0.1:${PORT}` }).catch(() => {});
     await page.tap('#csCompose [data-c="go"]');
     await page.waitForFunction(() => !document.querySelector('#csCompose.on'), null, { timeout: 60000 }).catch(() => {});
-    for (let k = 0; k < 240 && Z.posts.length < 5; k++) await sleep(500);
+    for (let k = 0; k < 240 && Z.posts.length < 3; k++) await sleep(500);
+    // Facebook's part, handed over: the flyer, its caption, Facebook opened, the taps there
+    await page.waitForSelector('#csHandOff', { timeout: 15000 }).catch(() => {});
+    const hand = (await page.evaluate(() => (document.querySelector('#csHandOff') || {}).innerText || '')).replace(/\s+/g, ' ');
+    const fbLink = await page.evaluate(() => { const a = document.querySelector('#csHandOff a.csb-handopen.facebook'); return a ? a.getAttribute('href') : ''; });
+    check(/Finish on Facebook/.test(hand) && /Save flyer/.test(hand) && /Copy caption/.test(hand) && /Reel/.test(hand) && /♫ Music/.test(hand) && /Made a Way — Travis Greene/.test(hand) && fbLink === 'fb://',
+      'right after Post: Facebook’s part handed over — save the flyer, copy the caption, open Facebook, add the song there', { hand: hand.slice(0, 500), fbLink });
+    check(await page.evaluate(() => { const i = document.querySelector('#csHandOff .csb-handrow img'); return !!(i && i.complete && i.naturalWidth > 0); }), '…with the flyer itself shown');
+    await page.tap('#csHandOff [data-f="copy"]');
+    await sleep(400);
+    const clip = await page.evaluate(() => navigator.clipboard.readText().catch((e) => 'ERR ' + e.message));
+    check(/^Night of Worship this Friday 🙌\n\n#reels #viral #fbreels #worship #sermon$/.test(clip), '…Copy caption: Facebook’s caption, with its own trending hashtags', clip);
+    await page.tap('#csHandOff [data-f="later"]');
+    await sleep(500);
+    const todo = (await page.evaluate(() => (document.querySelector('#csHandTodo') || {}).innerText || '')).replace(/\s+/g, ' ');
+    check(/Facebook: add your gospel song/.test(todo), '“Later”: it waits at the top of the Scheduler until it is done', todo);
+    if (SHOTS) { await page.tap('#csHandTodo .csb-handtodo'); await sleep(500); await page.screenshot({ path: path.join(SHOTS, 'flyer-music-4-facebook.png') }); await page.tap('#csHandOff [data-f="later"]'); await sleep(400); }
+    await page.tap('#csHandTodo .csb-handtodo');
+    await page.waitForSelector('#csHandOff', { timeout: 5000 }).catch(() => {});
+    await page.tap('#csHandOff [data-f="done"]');
+    await sleep(500);
+    check(await page.evaluate(() => !document.querySelector('#csHandTodo .csb-handtodo') && !document.querySelector('#csHandOff')), '…opened from there and Done: gone');
     const posts = await page.evaluate(async () => window.api.scheduler.list());
     const made = posts.find((p) => /Night of Worship this Friday/.test(p.caption || ''));
     check(!!made && made.music && made.music.tiktok === 'draft' && made.music.igAudio && made.music.igAudio.id === 'ig_made_a_way' && made.music.song === null,
@@ -200,7 +262,7 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
     const tk = by('tiktok')[0], ig = by('instagram')[0], fbs = by('facebook'), yt = by('youtube')[0];
     const tagsOf = (p) => ((p && p.body.content) || '').split('\n').find((l) => /^#/.test(l)) || '';
     check(tagsOf(tk) === '#fyp #foryou #foryoupage #worship #sermon' && /^#instagood #explorepage #reels #worship #sermon$/.test(tagsOf(ig))
-      && fbs.every((p) => /^#reels #viral #fbreels #worship #sermon$/.test(tagsOf(p))) && /^#shorts #youtubeshorts #worship #sermon #jesus$/.test(tagsOf(yt)),
+      && /^#shorts #youtubeshorts #worship #sermon #jesus$/.test(tagsOf(yt)),
       'each app is posted with its own trending hashtags — five at most', { tk: tagsOf(tk), ig: tagsOf(ig), fb: fbs.map(tagsOf), yt: tagsOf(yt) });
     check([tk, ig, yt].concat(fbs).every((p) => p && !/Kevin MacLeod|Music:/.test(p.body.content)), 'no instrumental credit on any post — none was put on', { fb: fbs.map((p) => p.body.content) });
     const inboxNote = await page.evaluate(async () => { const l = await window.api.scheduler.list(); return l; });
@@ -213,8 +275,9 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
     const igAc = ig && ig.body.platforms[0].platformSpecificData && ig.body.platforms[0].platformSpecificData.audioConfiguration;
     check(!!ig && igAc && igAc.audioId === 'ig_made_a_way' && igAc.videoVolume === 0 && ig.body.mediaItems[0].type === 'video',
       'Instagram: a Reel with “Made a Way” from Instagram’s own library', ig && ig.body.platforms[0]);
-    check(fbs.length === 2 && fbs.every((p) => p.body.mediaItems[0].type === 'image') && yt && yt.body.mediaItems[0].type === 'video',
-      'both Facebook pages get the flyer picture, YouTube a Short — no instrumental', { fb: fbs.map((p) => p.body.mediaItems[0].type), yt: !!yt });
+    check(fbs.length === 0 && yt && yt.body.mediaItems[0].type === 'video',
+      'neither Facebook page is posted a silent picture from here (each gets its song in the app) — YouTube a Short, no instrumental', { fb: fbs.length, yt: !!yt });
+    check(!!made && !(made.accountIds || []).some((x) => /^zofb_/.test(x)) && !(made.platforms || []).includes('facebook'), '…and the booked post is for the others only', made && { a: made.accountIds, p: made.platforms });
     const ytUp = yt && uploadOf(yt);
     if (ytUp) {
       const f = path.join(WORK, 'yt-sent.mp4'); fs.writeFileSync(f, ytUp.bytes);
@@ -280,7 +343,8 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
     const booked = testPosts.filter((p) => !p.rejected).length, taken = (Z.deleted || []).length - del0;
     check(res.length >= 6 && res.every((r) => /^ok/.test(r)), 'Test music on my accounts: every account checks out', res);
     check(booked >= 6 && taken === booked, '…each test booking is taken straight back (nothing left to post)', { booked, taken });
-    check(res.some((r) => /Instagram’s song library answers/.test(r)) && res.some((r) => /TikTok inbox/.test(r)) && !res.some((r) => /free song/i.test(r)), '…and it says what was checked (no free songs anywhere)', res);
+    check(res.some((r) => /Instagram’s library has gospel songs for this account/.test(r)) && res.some((r) => /TikTok inbox/.test(r)) && res.some((r) => /gospel song on Facebook/.test(r))
+      && !res.some((r) => /free song/i.test(r)), '…and it says what was checked (gospel in Instagram’s library; Facebook’s song in its app; no free songs anywhere)', res);
     if (SHOTS) { await page.evaluate(() => { const n = document.querySelector('#csCompose .csb-check-sec'); if (n) n.scrollIntoView({ block: 'start' }); }); await sleep(300); await page.screenshot({ path: path.join(SHOTS, 'flyer-music-3-test.png') }); }
     // no clear answer from Zernio (it saved the test post, then timed out): found by its mark and taken back
     Z.failAfterMake = true;
@@ -294,7 +358,7 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
 
     // never booked twice: each account got the Night of Worship post exactly once
     const nw = Z.posts.filter((p) => !p.rejected && /^Night of Worship this Friday/.test(p.body.content || '')).map((p) => p.body.platforms[0].accountId);
-    check(nw.length === 5 && new Set(nw).size === 5, 'no account is booked twice for the same post (a slow first booking and the next tick never overlap)', nw);
+    check(nw.length === 3 && new Set(nw).size === 3, 'no account is booked twice for the same post (a slow first booking and the next tick never overlap)', nw);
 
     // [G] no Instagram song chosen: a REAL gospel song from Instagram's library, a different one each time;
     //     a Facebook Page that gets the Instagram Reel through Instagram's sharing is not posted to again;
@@ -307,6 +371,8 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
       if (k === 0) {
         const igLine = (await page.evaluate(() => (document.querySelector('#csCompose #csbFlyerNote') || {}).innerText || '')).replace(/\s+/g, ' ');
         check(/Instagram · your flyer as it is \(like a photo post\) with a real gospel song from Instagram’s library/.test(igLine), '[G] no song chosen: the note says Instagram gets a REAL gospel song from its library', igLine);
+        await page.tap('#csCompose [data-c="fm-fb"][data-v="here"]');
+        await sleep(150);
         await page.tap('#csCompose [data-c="fm-fromig"][data-id="zofb_2"]');
         await page.tap('#csCompose [data-c="fm-fbyt"][data-v="none"]');
         await sleep(200);
@@ -321,12 +387,39 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
     }
     const gp = Z.posts.slice(gBefore);
     const igs = gp.filter((p) => p.body.platforms[0].platform === 'instagram').map((p) => (p.body.platforms[0].platformSpecificData.audioConfiguration || {}).audioId);
-    check(igs.length === 2 && igs.every((x) => /^ig_gospel_/.test(x)) && igs[0] !== igs[1], '[G] Instagram got a real gospel song each time — a different one', igs);
+    check(igs.length === 2 && igs.every(isGospelId) && igs[0] !== igs[1], '[G] Instagram got a song BY a gospel artist each time — a different one', igs);
     const fbG = gp.filter((p) => p.body.platforms[0].platform === 'facebook');
-    check(fbG.length === 2 && fbG.every((p) => p.body.platforms[0].accountId === '4' && p.body.mediaItems[0].type === 'image' && !/MacLeod/.test(p.body.content)),
+    check(fbG.length === 2 && fbG.every((p) => p.body.platforms[0].accountId === '4' && p.body.mediaItems[0].type === 'image' && !/MacLeod/.test(p.body.content)
+      && /#reels #viral #fbreels #worship #jesus/.test(p.body.content)),
       '[G] the Page that gets the Instagram Reel is not posted to; the other gets the picture, no instrumental', fbG.map((p) => [p.body.platforms[0].accountId, p.body.mediaItems[0].type]));
     const ytG = gp.filter((p) => p.body.platforms[0].platform === 'youtube');
     check(ytG.length === 2 && ytG.every((p) => p.body.mediaItems[0].type === 'video' && !/MacLeod/.test(p.body.content)), '[G] YouTube: a Short with no instrumental and no credit', ytG.length);
+    await page.evaluate(() => { try { localStorage.removeItem('mw.flyer.music'); } catch (e) {} });
+
+    // [H] Instagram's song added in the Instagram app too (any song there): both handed over, neither posted from here
+    const beforeH = Z.posts.length;
+    await page.evaluate((f) => window.MWSocial.compose({ files: [f] }), FLY);
+    await page.waitForSelector('#csCompose #csbFlyerMusic', { timeout: 15000 }).catch(() => {});
+    await page.tap('#csCompose [data-c="fm-igway"][data-v="app"]');
+    await sleep(200);
+    const hNote = (await page.evaluate(() => (document.querySelector('#csCompose #csbFlyerNote') || {}).innerText || '')).replace(/\s+/g, ' ');
+    const hPick = (await page.evaluate(() => (document.querySelector('#csCompose #csbIgPick') || {}).innerText || '')).replace(/\s+/g, ' ');
+    check(/Instagram · you add the gospel song in the Instagram app/.test(hNote) && /Add music/.test(hPick) && !/Search Instagram/.test(hPick), '[H] “I’ll add it in Instagram”: said plainly, with the taps there', { hNote, hPick });
+    await page.fill('#csCompose .csb-cap', 'Hand both\n\n#worship').catch(() => {});
+    await page.tap('#csCompose [data-c="go"]');
+    await page.waitForSelector('#csHandOff', { timeout: 30000 }).catch(() => {});
+    for (let k = 0; k < 60 && Z.posts.filter((p) => /^Hand both/.test(p.body.content || '')).length < 2; k++) await sleep(500);
+    const hp = Z.posts.slice(beforeH).filter((p) => /^Hand both/.test(p.body.content || '')).map((p) => p.body.platforms[0].platform).sort();
+    const h2 = (await page.evaluate(() => (document.querySelector('#csHandOff') || {}).innerText || '')).replace(/\s+/g, ' ');
+    const links = await page.evaluate(() => Array.from(document.querySelectorAll('#csHandOff a.csb-handopen')).map((a) => a.getAttribute('href')));
+    check(hp.join() === 'tiktok,youtube' && /Finish on Instagram and Facebook/.test(h2) && links.join() === 'instagram://app,fb://' && /Caption · Instagram/.test(h2) && /Add music/.test(h2),
+      '[H] Instagram and Facebook both handed over (each its own caption and taps) — only TikTok and YouTube posted from here', { hp, links, h2: h2.slice(0, 300) });
+    await page.tap('#csHandOff [data-f="copy"][data-app="instagram"]');
+    await sleep(300);
+    const igClip = await page.evaluate(() => navigator.clipboard.readText().catch((e) => 'ERR ' + e.message));
+    check(/^Hand both\n\n#instagood #explorepage #reels #worship/.test(igClip), '[H] Instagram’s caption carries Instagram’s own hashtags', igClip);
+    await page.tap('#csHandOff [data-f="done"]');
+    await sleep(300);
     await page.evaluate(() => { try { localStorage.removeItem('mw.flyer.music'); } catch (e) {} });
 
     // [7] No music
@@ -361,6 +454,26 @@ const uploadOf = (p) => { const k = (String(p.body.mediaItems && p.body.mediaIte
     const accounts = new Accounts(store);
     const r = await accounts.zernioIgAudio('zoig_x', 'gospel');
     check(r && r.needsFacebookLogin === true, 'an Instagram linked without Facebook: the studio knows to ask for the Facebook sign-in', r);
+    mem.socialAccounts.push({ id: 'zoig_ok', platform: 'instagram', via: 'zernio', name: '@ok', token: 'k', zoAccountId: '3' },
+      { id: 'zoig_biz', platform: 'instagram', via: 'zernio', name: '@biz', token: 'k', zoAccountId: 'nogospel' });
+    const mix = await accounts.zernioIgAudio('zoig_ok', '__gospel');
+    check(mix.gospel === true && mix.songs.length >= 5 && mix.songs.every((x) => isGospelId(x.id)) && new Set(mix.songs.map((x) => x.artist.split(' & ')[0])).size >= 4,
+      '🙏 Gospel: a mix of songs BY gospel artists — nothing trending, nothing by someone else', mix.songs.map((x) => x.artist));
+    const mix2 = await accounts.zernioIgAudio('zoig_ok', '__gospel');
+    check(mix2.songs.length >= 5 && mix2.songs[0].id !== mix.songs[0].id, '…and the next time, other gospel artists', [mix.songs[0].artist, mix2.songs[0].artist]);
+    const odd = await accounts.zernioIgAudio('zoig_ok', 'qwerty nonsense');
+    check(odd.unmatched === true && !odd.songs.length, 'a search Instagram cannot match (it sends back its trending list): said as “nothing found” — never shown as if it matched', odd);
+    const biz = await accounts.zernioIgAudio('zoig_biz', '__gospel');
+    check(biz.unmatched === true && !biz.songs.length, 'a library with none of the gospel artists (a Business account): nothing — not the trending songs dressed up as gospel', biz);
+    const tg = await accounts.zernioIgAudio('zoig_ok', 'Travis Greene');
+    check(tg.songs.map((x) => x.id).join() === 'ig_made_a_way,ig_intentional', 'an artist’s name: that artist’s songs only (not “Greene Day Band”)', tg.songs.map((x) => x.artist));
+    check(tg.songs.every((x) => x.cover === null), 'covers from anywhere but Meta’s own servers are not passed on (the page could not show them anyway)', tg.songs.map((x) => x.cover));
+    const d0 = Z.details.length;
+    const pv = await accounts.zernioIgPreview('zoig_ok', 'ig_intentional', 'http://evil.example/steal');
+    check(pv.buf.length > 2000 && Z.details.slice(d0).includes('ig_intentional'), 'a song’s preview: a fresh link from Zernio, fetched by the studio', { n: pv.buf.length, details: Z.details.slice(d0) });
+    let refused = null;
+    try { await accounts.zernioIgPreview('zoig_ok', 'no_such_song', 'http://169.254.169.254/latest/meta-data'); } catch (e) { refused = e.message; }
+    check(/no preview/.test(refused || ''), '…and a link from the phone that is not Meta’s own is never fetched', refused);
     const link = await accounts.zernioLinkStart('instagram', { relink: 'zoig_x' });
     const asked = Z.connects[Z.connects.length - 1] || {};
     check(link && /^https:/.test(link.url) && asked.loginMethod === 'facebook_login' && asked.profileId === 'prof2',
