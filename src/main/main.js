@@ -1455,7 +1455,8 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
   // …and the word timings from the same answers, for ✂️ Remove pauses (see below)
   const wordCache = useCloudEar ? new TransCache(cacheDir, input, `cloud:${cloudspeech.state().model || 'whisper'}|words|v1`) : null;
   let cloudDown = false;
-  const transcribeRange = !contentAware ? null : !useCloudEar ? localRange : (async (s, en) => {
+  // (with AssemblyAI set up, Groq's Whisper is never asked: AssemblyAI hears it, else the server's own model)
+  const transcribeRange = !contentAware ? null : (!useCloudEar || aaiSet()) ? localRange : (async (s, en) => {
     const hit = cloudCache.get(s, en);
     if (hit) { ear.cloud++; return { segs: hit.map((g) => ({ start: g.start - s, end: g.end - s, text: g.text })), cached: true }; }
     if (!cloudDown) {
@@ -1542,7 +1543,8 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
   // rules alone. Each returns null when it cannot run, and analyzeSermon simply
   // checks whether it got one — so "is this on?" is decided in exactly one place.
   const judge = !(ai && contentAware) ? null
-    : aiModel === 'cloud' ? llmjudge.makeCloudJudge() : llmjudge.makeJudge({ model: aiModel });
+    // ☁️ Cloud AI for shorts = Gemini or Mistral, never Groq (the church asked to be sure Groq does nothing here)
+    : aiModel === 'cloud' ? llmjudge.makeCloudJudge({ groq: false }) : llmjudge.makeJudge({ model: aiModel });
   const res = await highlights.analyzeSermon(ctx, {
     input, minLen, maxLen, idealLen, maxClips, autoLen, contentAware, transcribeRange: scanRange,
     // the sound is decoded in pieces at once (highlights.extractPcm): 66 min 55 s -> 24 s
@@ -1592,7 +1594,9 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
     }
     // asked for the cloud judge and did not get one: say why, never silently
     if (ai && contentAware && aiModel === 'cloud' && !judge) {
-      res.meta.aiMissing = cloudwrite.state().hasKey || cloudwrite.reachable() ? 'the cloud AI is resting after errors — try again in a few minutes' : 'no AI key yet';
+      res.meta.aiMissing = require('./bigjudge').ready()
+        ? 'Gemini and Mistral could not answer just now — the studio\'s own rules chose these; try again in a few minutes'
+        : 'no Gemini or Mistral key yet — the studio\'s own rules chose these';
     }
   }
   return res;
@@ -1803,6 +1807,8 @@ function captionTerms(max = 40) {
  * "what is BISHOP?" (this).
  */
 const AAI_UNSURE = 0.5;     // AssemblyAI less sure of a word than this: its line is listed to check
+// AssemblyAI is set up on this server (its key): then Groq is never asked to listen (see cloudCaptions)
+const aaiSet = () => { try { return require('./assemblyear').ready(); } catch (e) { return false; } };
 function aaiTerms() {
   try { return (wordbook.view().terms || []).filter((t) => t && t.src !== 'learned').map((t) => t.text || t.term).filter(Boolean).slice(0, 1000); }
   catch (e) { return []; }
@@ -1847,9 +1853,16 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
       }
     } catch (e) {
       if (e && e.cancelled) throw new jobs.CancelledError();
-      console.log('  AssemblyAI could not hear it (' + ((e && e.message) || e) + ') — Groq hears it');
+      console.log('  AssemblyAI could not hear it (' + ((e && e.message) || e) + ') — ' + (aaiSet() ? 'the server hears it (Groq is not asked while AssemblyAI is set up)' : 'Groq hears it'));
     }
   }
+  /*
+   * ►► WITH ASSEMBLYAI SET UP, GROQ NEVER LISTENS. ◄◄ The church asked to be
+   * sure Groq does nothing in its shorts. AssemblyAI hears first; if it cannot,
+   * the server's own model gives the timing and Gemini the words (the PC path
+   * the caller takes when this answers null) — Groq is not asked.
+   */
+  if (!r && aaiSet()) return null;
   if (!r) {
     try {
       r = await cloudspeech.transcribeWords({ input, startSec: from, endSec: to, terms: captionTerms(), plain, onProgress: (p) => prog && prog(Math.round(p * 0.6)) });
@@ -1938,7 +1951,7 @@ async function cloudCaptions({ input, startSec, endSec, denoise, localModel, pla
   let stopped = false;
   const settle = (e, fallback) => { if (e && e.cancelled) { stopped = true; return null; } return fallback; };
   const [second, third] = await Promise.all([
-    (!pcSec && !aaiFirst && book.entries.length) ? cloudspeech.secondOpinion({
+    (!pcSec && !aaiFirst && !aaiSet() && book.entries.length) ? cloudspeech.secondOpinion({
       input, from, to, words: [],      // compared below, after the Word Book
       terms: captionTerms(), plain, notAssembly: aaiFirst,   // (AssemblyAI already heard it: Whisper is the other ear)
       onProgress: (p) => { heard[0] = p / 100; both(); },

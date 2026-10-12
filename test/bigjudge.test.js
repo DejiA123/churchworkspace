@@ -129,10 +129,17 @@ function server() {
   const groqReads = groq.calls.filter((c) => /Find EVERY moment/.test(c.prompt));
   check('[2] the strong reader silent: Groq reads it as before, ten minutes at a time', !!plan2 && groqReads.length >= 2 && groqReads.every((c) => /Below is part of a sermon/.test(c.prompt)) && judge.stats.plannedBy === 'Groq', { plan2: !!plan2, n: groqReads.length, by: judge.stats.plannedBy });
   Z.mode = {}; G.fail = null; big._benched.clear();
+  // Long-to-shorts asks the judge with groq: false — Groq is never asked, even when both free readers are silent
+  Z.mode = { mistral: 'silent' }; Z.calls = []; G.fail = Object.assign(new Error('Gemini is busy right now'), { passing: true }); groq.calls = [];
+  judge = llmjudge.makeCloudJudge({ cloudwrite: groq, big, groq: false });
+  const plan3 = await judge.plan({ sents: S, minLen: 60, maxLen: 150, idealLen: 90, maxClips: 8 });
+  check('[2] for shorts (groq: false), with Gemini and Mistral silent, Groq is never asked — the studio\'s own rules choose', !plan3 && groq.calls.length === 0, { plan3: !!plan3, groq: groq.calls.length });
+  Z.mode = {}; G.fail = null; big._benched.clear();
   // no strong reader at all: the judge is Groq's, as it was
   delete process.env.MISTRAL_API_KEY; delete process.env.GEMINI_API_KEY;
   judge = llmjudge.makeCloudJudge({ cloudwrite: groq, big });
   check('[2] with no Mistral or Gemini key the judge is Groq\'s, as before', !!judge && /Groq/.test(judge.modelName), judge && judge.modelName);
+  check('[2] …and for shorts (groq: false) there is no judge at all — never Groq', llmjudge.makeCloudJudge({ cloudwrite: groq, big, groq: false }) === null);
 
   // [3] AssemblyAI's paragraphs
   process.env.ASSEMBLYAI_API_KEY = 'aai-test';

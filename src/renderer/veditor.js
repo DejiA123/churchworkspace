@@ -8623,8 +8623,8 @@
       if (cloudKey) localStorage.setItem('mw-ve-cloudai-default', '1');
     } catch (e) {}
     const opts = [`<option value="cloud">☁️ Cloud AI${cloudKey ? '' : ' 🔑'}</option>`, '<option value="">⚡ Rules</option>'];
-    sel.title = "Who judges the clips. ☁️ Cloud AI is the best: Groq's large Whisper hears the sermon and a large AI model decides where "
-      + 'each clip ends, which ones stand alone, and what to call them (free Groq key). ⚡ Rules and 🤖 run on this PC.';
+    sel.title = "Who judges the clips. ☁️ Cloud AI is the best: AssemblyAI hears the sermon and Gemini or Mistral (free) reads all of it to decide where "
+      + 'each clip starts and ends, which ones stand alone, and what to call them — Groq is not used for shorts. ⚡ Rules and 🤖 run on this PC.';
     for (const m of st.models) {
       const nm = escape2(m.name.split(' —')[0]);
       opts.push(m.installed
@@ -8856,7 +8856,7 @@
      */
     if (cloud) {
       opts.push(cloud.ready
-        ? (cloud.assembly ? '<option value="cloud">☁️ AssemblyAI (most accurate) — Groq Whisper as backup</option>'
+        ? (cloud.assembly ? '<option value="cloud">☁️ AssemblyAI (most accurate) — this server as backup</option>'
           : '<option value="cloud">☁️ Groq cloud — Whisper Large v3 Turbo (free, most accurate)</option>')
         : '<option value="setup:cloud">☁️ Groq cloud (free, most accurate) — add your free key…</option>');
     }
@@ -8902,7 +8902,7 @@
   /** Say which model is listening, wherever there is room to say it. */
   function updateCapModelNow() {
     const el = $('#capModelNow'); if (!el) return;
-    if (capHearsInCloud()) { el.textContent = ve._capCloud && ve._capCloud.assembly ? 'Listening with ☁️ AssemblyAI (Groq Whisper as backup)' : 'Listening with ☁️ Groq — Whisper Large v3 Turbo (free)'; return; }
+    if (capHearsInCloud()) { el.textContent = ve._capCloud && ve._capCloud.assembly ? 'Listening with ☁️ AssemblyAI (this server as backup — Groq is not asked)' : 'Listening with ☁️ Groq — Whisper Large v3 Turbo (free)'; return; }
     const list = ve._capModelAll || [];
     const picked = ve.capModel ? list.find((m) => m.id === ve.capModel) : null;
     const auto = list.find((m) => m.inUse);
@@ -13170,13 +13170,15 @@
     const cloud = capHearsInCloud();
     // In the cloud a long video is a minute or two, not hours — but two hours of
     // audio is Groq's whole free allowance for an hour, so THAT is what is said.
-    if (!scope && cloud && mins > 100 && !window.confirm(`This video is ${Math.round(mins)} min long. Groq's free cloud Whisper hears it in a minute or two, but that uses most of this hour's free allowance (2 hours of audio an hour).\n\nTip: make your shorts first, then press 💬 Auto-caption all shorts — that only listens to the clips you're posting. Transcribe the whole video anyway?`)) return;
+    // (AssemblyAI has no hourly allowance to warn about — only Groq does)
+    if (!scope && cloud && mins > 100 && cloudEarName() !== 'AssemblyAI' && !window.confirm(`This video is ${Math.round(mins)} min long. Groq's free cloud Whisper hears it in a minute or two, but that uses most of this hour's free allowance (2 hours of audio an hour).\n\nTip: make your shorts first, then press 💬 Auto-caption all shorts — that only listens to the clips you're posting. Transcribe the whole video anyway?`)) return;
     if (!scope && !cloud && mins > 10 && !window.confirm(`This video is ${Math.round(mins)} min long, so transcribing all of it takes around ${estText} on this PC.\n\nTip: ✂️ make your shorts first, then press 💬 Auto-caption all shorts — that only listens to the clips you're actually posting, which is far quicker. Transcribe the whole video anyway?`)) return;
     const jobId = window.__newJobId();
     // A short whose pauses were just found by the words has been heard already.
     let res = scope && cloud ? cachedCloudWords(scope) : null;
     if (!res) try {
-      res = await window.__runJob(cloud ? '☁️ Groq’s free cloud Whisper is listening… (word-by-word timing)' : '🎧 Transcribing speech on your PC… (word-by-word timing)', jobId,
+      // named for the ear that really listens: AssemblyAI when it is set up (Groq is then never asked)
+      res = await window.__runJob(cloud ? `☁️ ${cloudEarName() === 'AssemblyAI' ? 'AssemblyAI' : 'Groq’s free cloud Whisper'} is listening… (word-by-word timing)` : '🎧 Transcribing speech on your PC… (word-by-word timing)', jobId,
         () => window.api.captions.transcribe(Object.assign(
           { input: ve.video.path, model: capModelCfg(), jobId },
           scope ? { startSec: scope.start, endSec: scope.end } : {})));

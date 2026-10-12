@@ -293,7 +293,7 @@ function makeJudge({ model, maxEndingCalls = MAX_ENDING_CALLS } = {}) {
  * did not happen, for the studio to say out loud.
  */
 const CLOUD_RANK_W = 2.0;   // vs LLM_RANK_W 1.2 for the local reader — still not the last word
-function makeCloudJudge({ cloudwrite = require('./cloudwrite'), big = require('./bigjudge') } = {}) {
+function makeCloudJudge({ cloudwrite = require('./cloudwrite'), big = require('./bigjudge'), groq = true } = {}) {
   /*
    * THE FREE, STRONG READER FIRST (bigjudge.js — Mistral Large or Gemini on
    * their free plans): it holds the whole sermon at once and its allowance is
@@ -302,7 +302,8 @@ function makeCloudJudge({ cloudwrite = require('./cloudwrite'), big = require('.
   const useBig = big.ready();
   // only resting for a moment (the free allowance refilling): the judge waits for it rather than being lost
   const rest = cloudwrite.state();
-  const groqOk = cloudwrite.reachable() || (rest.hasKey && rest.cooling > 0 && rest.cooling <= 70000);
+  // groq: false — Groq is never asked (Long-to-shorts: the church asked to be sure it does nothing there)
+  const groqOk = groq !== false && (cloudwrite.reachable() || (rest.hasKey && rest.cooling > 0 && rest.cooling <= 70000));
   if (!useBig && !groqOk) return null;
   const st0 = cloudwrite.state();
   const stats = { endings: 0, endingsChanged: 0, ranked: 0, titled: 0, failed: 0, calls: 0, why: '', reader: useBig ? big.name() : '' };
