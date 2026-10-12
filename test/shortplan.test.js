@@ -165,6 +165,9 @@ S[330].text = 'There is no prosperity gospel, there is only one gospel.';
     const okLong = lng && lng.end - lng.start <= P.ceilFor(150) && /[.!?]$/.test(T[lng.to].text) && (lng.from === 0 || /[.!?]$/.test(T[lng.from - 1].text));
     check('a moment longer than the band is shortened on whole sentences, never past 150 + 4 s (the cut stops at +6)', okLong, lng && [lng.from, lng.to, lng.end - lng.start]);
     check('the limit is the cut\'s, not 8% over it (150 s band: 154 s, not 162 s)', P.ceilFor(150) === 154 && Math.abs(P.ceilFor(45) - 48.6) < 1e-9, [P.ceilFor(150), P.ceilFor(45)]);
+    T[60].text = "You understand what I'm saying?"; T[61].text = "You understand what I'm saying?";
+    const ck = P.vet({ from: 45, to: 61, strength: 7 }, T, sec2, band2);
+    check('a short does not end on the preacher checking on the room ("You understand what I\'m saying?")', ck && ck.to === 59, ck && [ck.from, ck.to]);
     const fw = P.finishWhole(T, 21, 41, 154);
     check('finishWhole: both edges whole', fw && fw.from === 20 && fw.to === 41, fw);
   }
