@@ -87,7 +87,7 @@ function promptFor(sents, [a, b], { minLen, maxLen, idealLen, wide = false }) {
 
 ${lines.join('\n')}
 
-Find EVERY moment in this ${wide ? 'sermon' : 'part'} that would work as a standalone short video: a complete thought someone who never heard the rest of the sermon would understand and remember — a teaching point, a declaration, a story WITH its point, a powerful line and what leads to it. ${wide ? 'A whole sermon usually has 10 to 20 such moments — list at least 12' : 'A part this size usually has 3 to 6 such moments'}; list them all, even the good-but-not-best ones (they are chosen from later). Do not skip a point because it is said quietly or simply — the main teaching of the sermon is often said calmly. A story must start where the story starts (who, where, what happened) — never on a line that leans on something not in the short ("The other day I went to meet him", "That is why…").
+Find EVERY moment in this ${wide ? 'sermon' : 'part'} that would work as a standalone short video: a complete thought someone who never heard the rest of the sermon would understand and remember — a teaching point, a declaration, a story WITH its point, a powerful line and what leads to it. ${wide ? 'A whole sermon usually has 10 to 20 such moments — list at least 12' : 'A part this size usually has 3 to 6 such moments'}; list them all, even the good-but-not-best ones (they are chosen from later). Do not skip a point because it is said quietly or simply — the main teaching of the sermon is often said calmly. A story must start where the story starts (who, where, what happened) — never on a line that leans on something not in the short ("The other day I went to meet him", "That is why…", or a sentence opening with "But", "And" or "So" that continues the point before).
 
 For each moment:
 - "from": the number of the sentence where the thought STARTS. Never start on a filler ("Huh?", "Oh yes, yes", "Okay", "Amen"), on the preacher chatting with someone in the room ("How are you? You're looking so good"), on an announcement, or in the middle of a story or a list. If the line before is needed to understand it, start there.
@@ -229,7 +229,7 @@ function edgePrompt(items) {
   const blocks = items.map((it) => {
     const s = it.startLines.map(([n, t, p]) => `  ${p ? '¶' : ' '}[${n}] ${t}`).join('\n');
     const e = it.endLines.map(([n, t, p]) => `  ${p ? '¶' : ' '}[${n}] ${t}`).join('\n');
-    return `Short ${it.id} — "${it.title}" (now starts at [${it.from}], ends at [${it.to}])\nAround the START:\n${s}\nAround the END:\n${e}`;
+    return `Short ${it.id} — "${it.title}"${it.point ? ' — its point: ' + it.point : ''} (now starts at [${it.from}], ends at [${it.to}])\nAround the START:\n${s}\nAround the END:\n${e}`;
   });
   const system = 'You are the best short-form video editor for sermons. You decide exactly where a short starts and ends. You reply with JSON only.';
   const prompt = `Each short below is a moment cut from a sermon. For each, you see the numbered sentences around where it starts and around where it ends.
@@ -237,8 +237,8 @@ function edgePrompt(items) {
 ${blocks.join('\n\n')}
 
 For every short choose:
-- "from": the sentence where the thought really STARTS — not mid-story, not on a filler or an aside to someone in the room, and not so early that it begins with the end of the previous point.
-- "to": the sentence where its point really LANDS — the payoff that makes it worth sharing. If the point is completed one or two sentences after the current end, end there. Never end on the first line of a new story or point, or on a question that opens the next point.
+- "from": the sentence where the thought really STARTS — not mid-story, not on a filler or an aside to someone in the room, and not so early that it begins with the end of the previous point. Not on a sentence that opens with "But", "And", "So" or "Because" leaning on what came before — start where the thought itself begins.
+- "to": the sentence where ITS POINT (given above) really LANDS — the payoff that makes it worth sharing. If the point is completed one or two sentences after the current end, end there; if the current end runs on into another story, a side remark or a word to someone in the room ("Are you here, young lady?"), end earlier, on the line that lands the point. Never end on the first line of a new story or point, or on a question that opens the next point.
 Use only the sentence numbers shown.${items.some((it) => it.startLines.concat(it.endLines).some((x) => x[2])) ? ' ¶ marks a sentence that starts a new paragraph (the speaker paused and moved on): a good start is usually one, and a good end is usually the sentence just before one.' : ''} Reply with only: {"edges":[{"id":1,"from":0,"to":0}]}`;
   return { system, prompt };
 }
@@ -246,9 +246,9 @@ async function refineEdges(moments, S, { ask, minLen, maxLen, retryWaits }) {
   if (!moments.length) return 0;
   const items = moments.map((m, k) => {
     const sl = [], el = [];
-    for (let n = Math.max(0, m.from - 4); n <= Math.min(S.length - 1, m.from + 3); n++) sl.push([n, S[n].text, !!S[n].para]);
-    for (let n = Math.max(0, m.to - 3); n <= Math.min(S.length - 1, m.to + 4); n++) el.push([n, S[n].text, !!S[n].para]);
-    return { id: k + 1, title: m.title, from: m.from, to: m.to, startLines: sl, endLines: el, sMin: sl[0][0], sMax: sl[sl.length - 1][0], eMin: el[0][0], eMax: el[el.length - 1][0] };
+    for (let n = Math.max(0, m.from - 5); n <= Math.min(S.length - 1, m.from + 3); n++) sl.push([n, S[n].text, !!S[n].para]);
+    for (let n = Math.max(0, m.to - 7); n <= Math.min(S.length - 1, m.to + 4); n++) el.push([n, S[n].text, !!S[n].para]);
+    return { id: k + 1, title: m.title, point: m.point, from: m.from, to: m.to, startLines: sl, endLines: el, sMin: sl[0][0], sMax: sl[sl.length - 1][0], eMin: el[0][0], eMax: el[el.length - 1][0] };
   });
   const { system, prompt } = edgePrompt(items);
   let j = null;

@@ -68,21 +68,28 @@ function server() {
   check('[1] a busy minute (429) is waited out — as long as Mistral says — and asked again, not given up', !!out && Z.calls.length === 2 && Z.calls.every((c) => c.prov === 'mistral') && waited[0] >= 1000, { n: Z.calls.length, waited });
   Z.calls = []; Z.mode.mistral = 'busyAlways'; waited.length = 0; G.calls = [];
   out = await big.chat({ system: 's', prompt: 'p' });
-  check('[1] busy and busy again: it waits longer each time (a minute in all), tries Mistral Medium the same — then Gemini', !!out && Z.calls.some((c) => c.model === 'mistral-medium-latest') && waited.some((w) => w >= 30000) && waited.reduce((a, b) => a + b, 0) >= 120000 && G.calls.length === 1,
+  check('[1] busy and busy again: it waits longer each time (a minute in all) — then Gemini Flash, the next reader', !!out && Z.calls.every((c) => c.model === 'mistral-large-latest') && waited.some((w) => w >= 30000) && waited.reduce((a, b) => a + b, 0) >= 60000 && G.calls.length === 1,
     { waited, models: Z.calls.map((c) => c.model).join(), gem: G.calls.length });
-  check('[1] …and what each one answered is kept, in order (the scan shows it)', big.state.trail.some((t) => /Mistral mistral-large-latest: 429/.test(t)) && big.state.trail.some((t) => /Mistral mistral-medium-latest: 429/.test(t)), big.state.trail.slice(-4));
+  check('[1] …and what each one answered is kept, in order (the scan shows it)', big.state.trail.some((t) => /Mistral mistral-large-latest: 429/.test(t)), big.state.trail.slice(-4));
+  Z.calls = []; G.calls = [];
+  out = await big.chat({ system: 's', prompt: 'p' });
+  check('[1] …a model busy for a whole minute is not waited on again for a while: straight to Gemini', !!out && Z.calls.length === 0 && G.calls.length === 1, { m: Z.calls.length, g: G.calls.length });
+  big._benched.clear(); Z.mode = {};
   // the free plan without Mistral Large (measured on the church's own key: 403 tier_not_allowed)
   Z.calls = []; Z.mode.mistral = 'tierLarge'; G.calls = [];
   out = await big.chat({ system: 's', prompt: 'p' });
-  check('[1] "not available in your subscription tier": that MODEL is passed over (not the key) — Mistral Medium answers', !!out && Z.calls.map((c) => c.model).join() === 'mistral-large-latest,mistral-medium-latest' && G.calls.length === 0, Z.calls.map((c) => c.model));
-  Z.calls = [];
+  check('[1] "not available in your subscription tier": that MODEL is passed over (not the key) — Gemini Flash answers', !!out && Z.calls.map((c) => c.model).join() === 'mistral-large-latest' && G.calls.length === 1, { m: Z.calls.map((c) => c.model), g: G.calls.length });
+  Z.calls = []; G.fail = Object.assign(new Error('the free Gemini allowance is used up for today'), { exhausted: true });
   out = await big.chat({ system: 's', prompt: 'p' });
-  check('[1] …and Large is not asked again (set aside for a day); the reader is named Mistral Medium', !!out && Z.calls.map((c) => c.model).join() === 'mistral-medium-latest' && big.name() === 'Mistral Medium (free)', { models: Z.calls.map((c) => c.model), name: big.name() });
+  check('[1] …Large is not asked again (set aside for a day); with Gemini used up, Mistral Medium reads it', !!out && Z.calls.map((c) => c.model).join() === 'mistral-medium-latest', { models: Z.calls.map((c) => c.model) });
+  check('[1] …and the reader is named for what is left: Mistral Medium', big.name() === 'Mistral Medium (free)', big.name());
+  G.fail = null;
   big._benched.clear();
   Z.mode = {};
-  Z.calls = []; Z.mode.mistral = 'nomodel';
+  Z.calls = []; Z.mode.mistral = 'nomodel'; G.calls = [];
   out = await big.chat({ system: 's', prompt: 'p' });
-  check('[1] a model that is not offered: the next model (Mistral Medium)', !!out && Z.calls.map((c) => c.model).join() === 'mistral-large-latest,mistral-medium-latest', Z.calls.map((c) => c.model));
+  check('[1] a model that is not offered: the next reader (Gemini Flash)', !!out && Z.calls.map((c) => c.model).join() === 'mistral-large-latest' && G.calls.length === 1, { m: Z.calls.map((c) => c.model), g: G.calls.length });
+  big._benched.clear();
   big._benched.clear(); Z.calls = []; Z.mode.mistral = 'refuse'; G.calls = [];
   out = await big.chat({ system: 's', prompt: 'p' });
   check('[1] a refused key: Gemini answers instead — asked the way the captions ask it (the best Flash this key may use)', !!out && Z.calls.map((c) => c.prov).join() === 'mistral' && G.calls.length === 1 && G.calls[0].prompt === 'p', { m: Z.calls.map((c) => c.prov), g: G.calls.length });

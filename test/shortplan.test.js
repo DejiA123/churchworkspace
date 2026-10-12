@@ -84,7 +84,9 @@ S[330].text = 'There is no prosperity gospel, there is only one gospel.';
     if (/Around the START/.test(prompt)) {
       edgeAsked++;
       // the payoff of "There is only one gospel" lands one sentence later than first marked
-      const ids = [...prompt.matchAll(/^Short (\d+) — "([^"]*)" \(now starts at \[(\d+)\], ends at \[(\d+)\]\)/gm)];
+      // (each short's point is shown with it now: "… — its point: …")
+      const ids = [...prompt.matchAll(/^Short (\d+) — "([^"]*)"(?: — its point: [^\n]*?)? \(now starts at \[(\d+)\], ends at \[(\d+)\]\)/gm)];
+      if (ids.length && !/its point: /.test(prompt)) edgeIds = -1;
       edgeIds = ids.length;
       return JSON.stringify({ edges: ids.map((m) => ({ id: +m[1], from: +m[3], to: m[2] === 'There is only one gospel' ? +m[4] + 1 : +m[4] })) });
     }
@@ -99,7 +101,7 @@ S[330].text = 'There is no prosperity gospel, there is only one gospel.';
   };
   const r = await P.planShorts({ sents: S, maxClips: 12, ask: fake, retryWaits: [5, 5, 5] });
   check('a section the allowance turned away is asked again', r && r.failed === 0 && asked.length === secs.length + 1, { asked: asked.length, secs: secs.length, failed: r && r.failed });
-  check('every chosen short\'s edges are looked at again, in one call', edgeAsked === 1 && edgeIds === r.moments.length, { edgeAsked, edgeIds });
+  check('every chosen short\'s edges are looked at again, in one call — each with its point', edgeAsked === 1 && edgeIds === r.moments.length, { edgeAsked, edgeIds });
   const og = r.moments.find((m) => m.title === 'There is only one gospel');
   check('…and an ending one sentence short of the payoff is moved onto it', og && og.to === 345 && r.edgesMoved >= 1, og && { to: og.to, moved: r.edgesMoved });
   check('12 shorts chosen', r && r.moments.length === 12, r && r.moments.length);

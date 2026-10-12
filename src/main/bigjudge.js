@@ -35,10 +35,12 @@ const PROVIDERS = [MISTRAL, GEMINI];
  * is set aside for a day, and Gemini Flash (which the key does take) sits
  * above Mistral's small model.
  */
+// (measured next: Mistral Medium on the free plan answered "Rate limit exceeded" for a whole
+// minute of waiting, twice — Gemini Flash read the sermon well; so it comes before Medium)
 const LADDER = [
   { prov: MISTRAL, model: 'mistral-large-latest', label: 'Mistral Large' },
-  { prov: MISTRAL, model: 'mistral-medium-latest', label: 'Mistral Medium' },
   { prov: GEMINI, label: 'Gemini Flash' },
+  { prov: MISTRAL, model: 'mistral-medium-latest', label: 'Mistral Medium' },
   { prov: MISTRAL, model: 'mistral-small-latest', label: 'Mistral Small' },
 ];
 // (MW_BIGJUDGE_API: a stand-in Mistral for the tests — test/bigjudge.test.js)
@@ -121,7 +123,9 @@ async function askMistral(model, { system, prompt, maxTokens, json, temperature,
     if (res.status === 429) {
       note('Mistral ' + model + ': 429 ' + short(said));
       if (attempt < BUSY_WAITS.length) { await sleep(waitOf(res, attempt)); continue; }
-      return '';   // still busy after a minute: the next reader
+      // still busy after a minute: the next reader — and this model is not waited on again for a while
+      benched.set('mistral/' + model, Date.now() + 10 * 60e3);
+      return '';
     }
     // the plan does not include THIS model (measured: Mistral Large on the free plan): set aside for a day
     if ((res.status === 403 || res.status === 401 || res.status === 400) && /tier_not_allowed|subscription tier|not available in your/i.test(said)) {
