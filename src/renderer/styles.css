@@ -2694,3 +2694,11 @@ body.ve-pfull .ve-preview .ve-fs-exit {
 .cap-search input { flex: 1; min-width: 0; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border, #333); background: var(--bg-2, #15171d); color: inherit; font-size: 15px; }
 .cap-search span:empty { display: none; }
 .cap-search-none { padding: 18px 8px; text-align: center; }
+
+/* Settings: the setup steps folded away — a tap on "How?" opens them */
+.set-how { margin: 4px 0 8px; }
+.set-how > summary { cursor: pointer; display: inline-block; font-size: 12px; font-weight: 600; color: var(--accent, #8b5cf6); list-style: none; }
+.set-how > summary::-webkit-details-marker { display: none; }
+.set-how > summary::before { content: '? '; }
+.set-how[open] > summary { margin-bottom: 4px; }
+.set-how > p { margin: 0 0 6px; }

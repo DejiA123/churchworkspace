@@ -1403,7 +1403,6 @@
       <section class="view" id="view-scheduler">
         <header class="view-head">
           <h1>📅 Social Scheduler</h1>
-          <p class="muted">Link your accounts once — then schedule, and the app posts for you at the right time.</p>
           <div id="schedAutoBanner" class="sched-banner off">⚡ <b>Connect an account</b> below and scheduled posts publish <b>by themselves</b> — photos, videos, Reels, and text.</div>
         </header>
         <div class="panel acct-panel">
@@ -1498,7 +1497,6 @@
       <section class="view" id="view-settings">
         <header class="view-head">
           <h1>⚙️ Settings</h1>
-          <p class="muted">Set your brand, output folder, and (optional) AI keys.</p>
         </header>
         <div class="panel">
           <div class="panel-head"><h2>Brand</h2></div>
@@ -1513,7 +1511,6 @@
              event and the speaker get their own hashtag. -->
         <div class="panel">
           <div class="panel-head"><h2>✨ Social captions</h2></div>
-          <p class="muted small">These two turn a caption that could be from anywhere into one that is worth posting. Leave them blank and the writer simply does not mention them.</p>
           <label>Event or series name<input type="text" id="setEventName" placeholder="e.g. All Ireland Outpouring" title="Named in every caption, and used as a hashtag. This is the single biggest difference between a generic caption and one that plants a flag." /></label>
           <label>Speakers<textarea id="setSpeakers" rows="3" placeholder="Bishop Francis Wale Oke&#10;Pastor John Ahern&#10;Bishop David Richman" title="One per line. The writer works out which of them is in each clip from the words that are actually spoken, and credits that one."></textarea></label>
           <label class="cap-inline"><input type="checkbox" id="setAllowBait" /> Let it ask for engagement <span class="muted small">(“Drop an AMEN in the comments”). Off by default: it makes a church account read like a content farm.</span></label>
@@ -1552,7 +1549,6 @@
         </div>
         <div class="panel" id="cloudPanel">
           <div class="panel-head"><h2>☁️ Cloud Studio — edit from anywhere in the world</h2></div>
-          <p class="muted small">Phone Studio is this PC on the church wifi. <b>Cloud Studio is this PC from anywhere</b>: open a web address on any phone, tablet or laptop and you get the <b>whole Video Studio</b> — the same buttons, the same AI clips, the same captions — while this PC does the encoding. Add it to your phone's home screen and it opens like an app. Nothing to install on the phone, and nothing to open on your router.</p>
           <div class="path-row">
             <label class="cap-inline"><input type="checkbox" id="cloudOn" /> <b>Cloud Studio is on</b></label>
             <span id="cloudStatus" class="muted small">Off</span>
@@ -1573,17 +1569,15 @@
                 <label class="cap-inline"><input type="checkbox" id="cloudTunnelOn" /> <b>Give it a public address</b> <span class="muted small">(so it works away from the church wifi)</span></label>
                 <span id="cloudTunnelStatus" class="muted small"></span>
               </div>
-              <p class="muted small">This PC dials out to Cloudflare and gets back an <b>https://…</b> address that works from anywhere. Your router is not opened and nothing here is exposed — the only way in is the address plus the code above. The first time, a free helper (~50 MB) downloads.</p>
-              <p class="muted small">The free address is random and <b>changes each time it starts</b>. For an address that stays the same — <i>studio.yourchurch.org</i> — make a free tunnel in your Cloudflare account and paste its token here.</p>
+              <details class="set-how"><summary>How?</summary><p class="muted small">This PC dials out to Cloudflare and gets back an <b>https://…</b> address that works from anywhere. Your router is not opened and nothing here is exposed — the only way in is the address plus the code above. The first time, a free helper (~50 MB) downloads.</p></details>
+              <details class="set-how"><summary>How?</summary><p class="muted small">The free address is random and <b>changes each time it starts</b>. For an address that stays the same — <i>studio.yourchurch.org</i> — make a free tunnel in your Cloudflare account and paste its token here.</p></details>
               <label>Cloudflare tunnel token <span class="muted small">(optional, for a fixed address)</span><input type="password" id="cloudTunnelToken" placeholder="leave empty for a free random address" /></label>
             </div>
             <p class="muted small" id="cloudSignedIn"></p>
-            <p class="muted small">Go Live and Presentation are not in the cloud: they drive cameras, projectors and NDI on the church network, which a browser somewhere else cannot reach.</p>
           </div>
         </div>
         <div class="panel" id="phonePanel">
           <div class="panel-head"><h2>📱 Phone Studio — edit from your phone</h2></div>
-          <p class="muted small">Turn this on and any phone on the same wifi can open the Video Studio in its browser: pick a sermon, scrub it, run <b>Long to short clips</b>, fix the captions and export — while <b>this PC</b> does all the encoding at full speed. Finished shorts download straight to the phone. This PC has to stay on and awake.</p>
           <div class="path-row">
             <label class="cap-inline"><input type="checkbox" id="phoneOn" /> <b>Phone Studio is on</b></label>
             <span id="phoneStatus" class="muted small">Off</span>
@@ -1603,32 +1597,31 @@
         </div>
         <div class="panel">
           <div class="panel-head"><h2>Social accounts</h2></div>
-          <p class="muted small">Auto-posting accounts are linked in <b>📅 Social Scheduler → ＋ Connect account</b>. The names below are only used on flyers and captions.</p>
           <label>Instagram username<input type="text" id="setIg" placeholder="@ourchurch" /></label>
           <label>TikTok username<input type="text" id="setTt" placeholder="@ourchurch" /></label>
           <label>Facebook Page<input type="text" id="setFb" placeholder="Our Church" /></label>
         </div>
         <div class="panel">
           <div class="panel-head"><h2>📘 Meta — Facebook &amp; Instagram (for “Connect account”)</h2></div>
-          <p class="muted small">One-time setup so the app can link your Facebook &amp; Instagram: at <b>developers.facebook.com/apps</b> create ONE free app (<i>Other → Business</i>), add the <b>Facebook Login</b> product and in its Settings turn ON <b>Client OAuth login</b> + <b>Embedded browser OAuth login</b> (leave redirect URIs empty, save + verify). Then paste the app's <b>App ID</b> + <b>App Secret</b> (App settings → Basic) here. Development mode is enough for Pages you admin. The full walkthrough is in <b>Social Scheduler → ＋ Connect account</b>.</p>
+          <details class="set-how"><summary>How?</summary><p class="muted small">One-time setup so the app can link your Facebook &amp; Instagram: at <b>developers.facebook.com/apps</b> create ONE free app (<i>Other → Business</i>), add the <b>Facebook Login</b> product and in its Settings turn ON <b>Client OAuth login</b> + <b>Embedded browser OAuth login</b> (leave redirect URIs empty, save + verify). Then paste the app's <b>App ID</b> + <b>App Secret</b> (App settings → Basic) here. Development mode is enough for Pages you admin. The full walkthrough is in <b>Social Scheduler → ＋ Connect account</b>.</p></details>
           <label>Meta App ID<input type="text" id="setFbAppId" placeholder="e.g. 1089…" /></label>
           <label>Meta App Secret <span class="muted small">(recommended)</span><input type="password" id="setFbAppSecret" placeholder="optional but keeps the link from expiring" /></label>
         </div>
         <div class="panel">
           <div class="panel-head"><h2>▶️ YouTube — advanced (your own Google app)</h2></div>
-          <p class="muted small">⚡ <b>Easiest way:</b> skip all this and use the free <b>Zernio API key</b> from the TikTok section above — the same key connects YouTube too (just sign into YouTube once, no Google Cloud Console). Only fill this in if you want the app to upload straight to Google instead.</p>
-          <p class="muted small">Advanced setup so the app can upload directly to your channel: at <b>console.cloud.google.com</b> enable the <b>YouTube Data API v3</b>, then create an <b>OAuth client ID</b> (type: <i>Desktop app</i>) and paste it here.</p>
+          <details class="set-how"><summary>How?</summary><p class="muted small">⚡ <b>Easiest way:</b> skip all this and use the free <b>Zernio API key</b> from the TikTok section above — the same key connects YouTube too (just sign into YouTube once, no Google Cloud Console). Only fill this in if you want the app to upload straight to Google instead.</p></details>
+          <details class="set-how"><summary>How?</summary><p class="muted small">Advanced setup so the app can upload directly to your channel: at <b>console.cloud.google.com</b> enable the <b>YouTube Data API v3</b>, then create an <b>OAuth client ID</b> (type: <i>Desktop app</i>) and paste it here.</p></details>
           <label>Google Client ID<input type="text" id="setYtClientId" placeholder="e.g. 1234…apps.googleusercontent.com" /></label>
           <label>Google Client Secret<input type="password" id="setYtClientSecret" placeholder="GOCSPX-…" /></label>
         </div>
         <div class="panel">
           <div class="panel-head"><h2>🎵 TikTok — easy connect, free &amp; unlimited (recommended)</h2></div>
-          <p class="muted small">The 1-minute way: sign up free at <b>zernio.com</b> (no card), create a key under <b>API keys</b> in its menu, paste it here, then hit “＋ Connect account”. Public posting works right away — no TikTok developer portal, no audit wait, and <b>no monthly post limit</b>. Heads-up: videos upload via Zernio's servers.</p>
+          <details class="set-how"><summary>How?</summary><p class="muted small">The 1-minute way: sign up free at <b>zernio.com</b> (no card), create a key under <b>API keys</b> in its menu, paste it here, then hit “＋ Connect account”. Public posting works right away — no TikTok developer portal, no audit wait, and <b>no monthly post limit</b>. Heads-up: videos upload via Zernio's servers.</p></details>
           <label>Zernio API key<input type="password" id="setZoApiKey" placeholder="paste it here" /></label>
         </div>
         <div class="panel">
           <div class="panel-head"><h2>⚙️ Advanced: manual Facebook token</h2></div>
-          <p class="muted small">Prefer not to use “Connect account”? Paste a Page ID + Page access token (needs <code>pages_manage_posts</code>) and scheduled Facebook posts publish by themselves — photos, videos, and text.</p>
+          <details class="set-how"><summary>How?</summary><p class="muted small">Prefer not to use “Connect account”? Paste a Page ID + Page access token (needs <code>pages_manage_posts</code>) and scheduled Facebook posts publish by themselves — photos, videos, and text.</p></details>
           <label>Page ID<input type="text" id="setFbPageId" placeholder="e.g. 1234567890" /></label>
           <label>Page access token<input type="password" id="setFbToken" placeholder="EAAB…" /></label>
           <div class="path-row">
@@ -1638,7 +1631,6 @@
         </div>
         <div class="panel">
           <div class="panel-head"><h2>AI keys (optional)</h2></div>
-          <p class="muted small">Not needed for anything in the app today — every AI feature (shorts, captions, face tracking) runs free on your own PC. These are here for future optional extras.</p>
           <label>Claude API key<input type="password" id="setAnthropic" placeholder="sk-ant-…" /></label>
           <label>Image generation key<input type="password" id="setImage" placeholder="optional" /></label>
         </div>
