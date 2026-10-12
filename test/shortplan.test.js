@@ -146,6 +146,29 @@ S[330].text = 'There is no prosperity gospel, there is only one gospel.';
   await new Promise((r) => setTimeout(r, 300));
   check('a wait over within a second says nothing (no flash of a step)', quick.length === 0 && stop() === 70, quick);
 
+  console.log('\n[7] every short opens on a sentence and lands on a full stop — never chopped by the clock');
+  {
+    // a pause at a comma breaks a "sentence" in two (highlights.buildSentences): the halves of a live sermon's lines
+    const T = [];
+    for (let k = 0; k < 120; k++) T.push({ start: k * 6, end: k * 6 + 5.6, text: `Line ${k} is a whole sentence about prayer and faith.` });
+    T[40].text = 'Especially when the children of God gather, individual issues will be solved,';
+    T[41].text = 'whether they be sicknesses or difficulty in marriage.';
+    T[20].text = 'I am coming to the feet of Jesus, the feet of the cross,';
+    T[21].text = 'to obtain mercy and find grace to help in time of need.';
+    const sec2 = [0, T.length - 1], band2 = { minLen: 60, maxLen: 150 };
+    const e = P.vet({ from: 26, to: 40, strength: 7 }, T, sec2, band2);
+    check('an end on a comma ("…will be solved,") finishes its sentence', e && e.to === 41, e && [e.from, e.to]);
+    const st = P.vet({ from: 21, to: 34, strength: 7 }, T, sec2, band2);
+    check('a start mid-sentence ("to obtain mercy…") goes back to where the sentence began', st && st.from === 20, st && [st.from, st.to]);
+    // too long for the band: 40 lines of 6 s is 240 s — it is cut back on whole sentences, inside the cut's own limit
+    const lng = P.vet({ from: 5, to: 45, strength: 7 }, T, sec2, band2);
+    const okLong = lng && lng.end - lng.start <= P.ceilFor(150) && /[.!?]$/.test(T[lng.to].text) && (lng.from === 0 || /[.!?]$/.test(T[lng.from - 1].text));
+    check('a moment longer than the band is shortened on whole sentences, never past 150 + 4 s (the cut stops at +6)', okLong, lng && [lng.from, lng.to, lng.end - lng.start]);
+    check('the limit is the cut\'s, not 8% over it (150 s band: 154 s, not 162 s)', P.ceilFor(150) === 154 && Math.abs(P.ceilFor(45) - 48.6) < 1e-9, [P.ceilFor(150), P.ceilFor(45)]);
+    const fw = P.finishWhole(T, 21, 41, 154);
+    check('finishWhole: both edges whole', fw && fw.from === 20 && fw.to === 41, fw);
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FATAL', e); process.exit(1); });

@@ -58,6 +58,25 @@ const LEANS_RX = /^(that'?s?|this|these|those|it|he|she|they|him|her|them|which|
  */
 const PROFANE_RX = /\b(f+u+c+k\w*|sh[i1]t+\w*|bitch\w*|bastard\w*|asshole\w*|motherf\w*|dickhead\w*|goddamn\w*|damn it)\b/i;
 const STOPS_RX = /[.!?…]["')\]]?\s*$/;
+/*
+ * ►► A SHORT STARTS ON A SENTENCE AND LANDS ON A FULL STOP. ◄◄ The "sentences"
+ * here are also broken at a pause (highlights.buildSentences: a gap of 0.85 s),
+ * so one can be half a sentence — a preacher breathing at a comma ("individual
+ * issues will be solved, | whether they be sicknesses…"). Measured on a live
+ * 50-minute sermon: of 32 edges, one short ended on that comma and four in the
+ * prayer section were chopped mid-sentence. A line OPENS a thought only when
+ * the line before it finished one (or a new paragraph begins there).
+ */
+const opens = (S, k) => k <= 0 || !!S[k].para || STOPS_RX.test(String(S[k - 1].text || '').trim());
+const lands = (S, k) => STOPS_RX.test(String(S[k].text || '').trim());
+/*
+ * The longest a planned short may be. It was 8% over the length asked for —
+ * but the cut itself is held to 6 s over it (highlights.planWholeSermon: the
+ * end is snapped no later than start + maxLen + 6), so a 160-second moment in a
+ * 150-second band was chopped at 156 s, mid-word ("…where God could answer |
+ * them."). Planned inside the cut's own limit, nothing is ever chopped.
+ */
+const ceilFor = (maxLen) => Math.min(maxLen * 1.08, maxLen + 4);
 const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 /** The sermon in sections the model can read in one go (sentence indexes). */
@@ -126,14 +145,15 @@ function vet(m, sents, [a, b], { minLen, maxLen, idealLen, noGrow = false }) {
   let from = Math.max(a, m.from), to = Math.min(b, m.to);
   if (to < from) return null;
   const dur = () => sents[to].end - sents[from].start;
+  const ceil = ceilFor(maxLen);
   // a start that leans on the line before it ("That exactly how God is…",
   // "He said…") takes that line too, while it fits
   for (let k = 0; k < 2 && from > 0 && LEANS_RX.test(sents[from].text.trim()) && sents[to].end - sents[from - 1].start <= maxLen; k++) from--;
   // a start mid-sentence ("nothing is greater than…" — "On earth" left on the line before): its sentence's start
-  for (let k = 0; k < 2 && from > 0 && /^[a-z]/.test(sents[from].text.trim()) && !STOPS_RX.test(sents[from - 1].text.trim()) && sents[to].end - sents[from - 1].start <= maxLen * 1.05; k++) from--;
+  for (let k = 0; k < 2 && from > 0 && /^[a-z]/.test(sents[from].text.trim()) && !STOPS_RX.test(sents[from - 1].text.trim()) && sents[to].end - sents[from - 1].start <= ceil; k++) from--;
   // an ending with no full stop was cut mid-phrase ("…What you effect"): the
   // sentence it belongs to is finished, while it fits
-  for (let k = 0; k < 2 && to + 1 < sents.length && !/[.!?…]["')\]]?\s*$/.test(sents[to].text.trim()) && sents[to + 1].end - sents[from].start <= maxLen * 1.05; k++) to++;
+  for (let k = 0; k < 2 && to + 1 < sents.length && !/[.!?…]["')\]]?\s*$/.test(sents[to].text.trim()) && sents[to + 1].end - sents[from].start <= ceil; k++) to++;
   // no opening on a filler or an aside — nor with an aside a line or two in
   // ("Let me be serious. A pastor has to… Faithful, how are you?")
   for (let k = from; k <= Math.min(to - 1, from + 2); k++) if (ASIDE_RX.test(sents[k].text)) from = k + 1;
@@ -153,9 +173,11 @@ function vet(m, sents, [a, b], { minLen, maxLen, idealLen, noGrow = false }) {
     while (k > from + 2 && to - k < 3 && !STOPS_RX.test(sents[k].text.trim())) k--;
     if (STOPS_RX.test(sents[k].text.trim())) to = k;
   }
-  // too long: the payoff is kept and the run-up shortened
-  while (dur() > maxLen * 1.08 && from < to) from++;
-  if (dur() > maxLen * 1.08) return null;
+  // too long: the payoff is kept and the run-up shortened — to where a sentence starts
+  while (dur() > ceil && from < to) { from++; while (from < to && !opens(sents, from)) from++; }
+  // …or, when the payoff alone is longer, it lands on an earlier full stop
+  while (dur() > ceil && to > from) { to--; while (to > from && !lands(sents, to)) to--; }
+  if (dur() > ceil) return null;
   /*
    * SHORTER THAN ASKED: THE THOUGHT AROUND IT. Measured on a church's
    * 50-minute sermon with Auto (about 1:30, never under 1:00): the AI's
@@ -184,11 +206,38 @@ function vet(m, sents, [a, b], { minLen, maxLen, idealLen, noGrow = false }) {
     for (let k = 0; k < 3 && to + 1 < sents.length && !/[.!?…]["')\]]?\s*$/.test(sents[to].text.trim()) && !PROFANE_RX.test(sents[to + 1].text) && sents[to + 1].end - sents[from].start <= maxLen; k++) to++;
     while (from < t0 && (FILLER_OPEN_RX.test(sents[from].text.trim()) || ASIDE_RX.test(sents[from].text) || words(sents[from].text) <= 1)) from++;
   }
+  const whole = finishWhole(sents, from, to, ceil);
+  if (!whole) return null;
+  ({ from, to } = whole);
   // too short to be a short — unless it is one of the strongest moments
   const floor = m.strength >= 8 ? Math.max(15, minLen * 0.45) : Math.max(20, minLen * 0.75);
   if (dur() < floor) return null;
   const title = cleanTitle(m.title);
   return { from, to, start: sents[from].start, end: sents[to].end, title, point: m.point, strength: m.strength };
+}
+
+/**
+ * The last word on a short's edges: it opens on the first line of a sentence
+ * and closes on one that ends with a full stop. A start mid-sentence goes back
+ * to where the sentence began (a few lines, while it fits), else forward to the
+ * next sentence; an end on a comma finishes its sentence (while it fits), else
+ * comes back to the last full stop. Null when no whole sentence is left.
+ */
+function finishWhole(sents, from, to, ceil) {
+  if (!opens(sents, from)) {
+    let k = from;
+    while (k > 0 && from - k < 4 && !opens(sents, k) && sents[to].end - sents[k - 1].start <= ceil && !PROFANE_RX.test(sents[k - 1].text)) k--;
+    if (opens(sents, k)) from = k;
+    else { k = from; while (k < to && !opens(sents, k)) k++; from = k; }
+  }
+  if (!lands(sents, to)) {
+    let k = to;
+    while (k + 1 < sents.length && k - to < 3 && !lands(sents, k) && sents[k + 1].end - sents[from].start <= ceil && !PROFANE_RX.test(sents[k + 1].text)) k++;
+    if (lands(sents, k)) to = k;
+    else { k = to; while (k > from && !lands(sents, k)) k--; to = k; }
+  }
+  if (to < from || !lands(sents, to) || !opens(sents, from)) return null;
+  return { from, to };
 }
 
 function cleanTitle(s) {
@@ -383,7 +432,11 @@ async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, max
   picked.sort((x, y) => x.start - y.start);
   for (let k = 1; k < picked.length; k++) {
     const p = picked[k - 1], m = picked[k];
-    if (m.from <= p.to) { m.from = p.to + 1; if (m.from <= m.to) m.start = S[m.from].start; }
+    if (m.from <= p.to) {
+      m.from = p.to + 1;
+      while (m.from < m.to && !opens(S, m.from)) m.from++;
+      if (m.from <= m.to) m.start = S[m.from].start;
+    }
   }
   const moments = picked.filter((m) => m.from <= m.to).map((m) => Object.assign(m, {
     sents: S.slice(m.from, m.to + 1),
@@ -393,4 +446,4 @@ async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, max
   return { moments, sections: secs.length, failed, found: uniq.length, returned, more, edgesMoved };
 }
 
-module.exports = { planShorts, sections, parseMoments, vet, choose, promptFor, refineEdges, edgePrompt, _rx: { FILLER_OPEN_RX, ASIDE_RX, NEW_STORY_RX, PROFANE_RX } };
+module.exports = { planShorts, sections, parseMoments, vet, finishWhole, ceilFor, choose, promptFor, refineEdges, edgePrompt, _rx: { FILLER_OPEN_RX, ASIDE_RX, NEW_STORY_RX, PROFANE_RX } };
