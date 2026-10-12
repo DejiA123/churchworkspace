@@ -9161,6 +9161,15 @@
     if (referee && dets && dets.referee) noteReframeAi(dets.referee);   // null = nobody in shot to ask about
     if (res.dir) window.api.sermon.rmdir(res.dir).catch(() => {});
     if (!dets.length) return [];
+    // Nobody is speaking on camera (a slide, an empty stage): following
+    // whoever happens to be in the picture is worse than showing all of it.
+    // exportOneClip shows the whole picture over a blurred fill instead.
+    if (dets.noSpeaker) {
+      const kf = [{ t: 0, x: Math.round(ve.video.info.width / 2), y: Math.round(ve.video.info.height / 2) }];
+      kf.noSpeaker = true;
+      window.__toast && window.__toast(`🎯 Nobody is speaking on camera in "${s.label}", so it shows the whole picture instead of following someone.`, 'good', 9000);
+      return kf;
+    }
     // Pass the export aspect ratio so the camera's safe-zone leash matches the real
     // crop width — this is what keeps the speaker inside the 9:16 frame.
     const preset = ve.presets[ve.aspect] || { w: 9, h: 16 };
@@ -9555,8 +9564,11 @@
         ? pre.keyframes
         : await window.__runJob(`🎯 Tracking the speaker in "${s.label}"…`, window.__newJobId(), () => computeReframeKeyframes(s, input, ss, ee, pieces), J(s, 'track'));
       const jobId = window.__newJobId();
-      return burnOverlaysIntoShort(s, await window.__runJob(`Exporting "${s.label}" (face-tracked)${gaps}${clean}…`, jobId,
-        () => window.api.sermon.exportReframed({ input, startSec: ss, endSec: ee, preset, quality: qualityCfg(), keyframes, pieces, fill, denoise, cover: coverCfg(), fadeIn, fadeOut, motion: motionOf(s), label: s.label, jobId, draft: !!draft }), J(s, 'encode')));
+      // nobody to follow (see computeReframeKeyframes): the whole picture, unless a fill was already chosen
+      const whole = keyframes && keyframes.noSpeaker;
+      const fillUse = whole && !fill ? { mode: 'blur', strength: ve.fill.strength, dim: ve.fill.dim } : fill;
+      return burnOverlaysIntoShort(s, await window.__runJob(`Exporting "${s.label}" (${whole ? 'whole picture' : 'face-tracked'})${gaps}${clean}…`, jobId,
+        () => window.api.sermon.exportReframed({ input, startSec: ss, endSec: ee, preset, quality: qualityCfg(), keyframes, pieces, fill: fillUse, denoise, cover: coverCfg(), fadeIn, fadeOut, motion: motionOf(s), label: s.label, jobId, draft: !!draft }), J(s, 'encode')));
     }
     // A blurred/letterboxed fill shows the WHOLE picture, so a manual pan/zoom
     // crop would contradict it — the fill wins, same as it does over reframing.

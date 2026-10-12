@@ -2055,6 +2055,23 @@
     // the runners-up and why they lost).
     out.signals = raw;
     out.referee = !opts.lock && typeof opts.referee === 'function' ? (raw.referee || null) : null;
+    /*
+     * NOBODY IS SPEAKING ON CAMERA. The sermon goes on while the stream shows a
+     * slide, or a fixed wide camera holds an empty stage while the preacher
+     * prays off it. The PC still finds SOMEBODY — a man at the sound desk, a
+     * hoodie crossing the room, a "face" in the artwork — and followed them: on
+     * a real sermon two of eighteen shorts were a minute of passers-by and a
+     * crop of a cross graphic. The referee is asked exactly this and answers it
+     * reliably: on that sermon it said "not in this frame" for every frame of
+     * those two shorts and placed the preacher in every frame of the six real
+     * ones it was asked about. So when it has answered, and never once placed
+     * the speaker, and says they are not in shot in most of what it saw, the
+     * clip has no one to follow. Without its answer nothing changes here.
+     */
+    const rr = out.referee;
+    if (rr && rr.ok && rr.answered >= 2 && !rr.vouched && !rr.hinted && rr.none >= Math.ceil(0.75 * rr.answered)) {
+      out.noSpeaker = { none: rr.none, answered: rr.answered };
+    }
     out.subject = pick ? {
       id: pick.chosen.id, why: pick.why, sig: packSig(pick.chosen.sig), drives: subjectDrives, blips: pick.track.blips || 0,
       frames: raw.reduce((n, f) => n + (f.subject ? 1 : 0), 0),
