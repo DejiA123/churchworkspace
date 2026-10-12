@@ -769,7 +769,7 @@ app.whenReady().then(async () => {
     } catch (e) { return { __error: e.message + '\\n' + e.stack }; }
   })()`);
   if (p.__error) { console.error('P SCRIPT ERROR:\\n' + p.__error); }
-  log(/Long to short clips/i.test(p.btnText), 'AI button renamed to "Long to short clips"', `"${(p.btnText || '').trim()}"`);
+  log(/Make Shorts/i.test(p.btnText), 'AI button says "Make Shorts"', `"${(p.btnText || '').trim()}"`);
   log(p.handles === 2, 'audio clip has 2 trim handles (start + end)', p.handles + ' handles');
   log(p.trimmed && p.trimmed.end < 144.9, 'dragging the audio right edge trims where the sound ends', `end=${p.trimmed && Math.round(p.trimmed.end)}s`);
   log(p.mutedInAudioGap === true, 'the preview goes SILENT over an audio gap (trimmed-away region)');

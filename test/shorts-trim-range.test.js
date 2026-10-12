@@ -323,7 +323,7 @@ app.whenReady().then(async () => {
   log(loaded.segs && loaded.segs.length === 1, 'the video lands on the timeline as one clip', JSON.stringify(loaded.segs && loaded.segs[0]));
   log(loaded.ranges.length === 1 && loaded.ranges[0][0] < 1 && loaded.ranges[0][1] > TOTAL - 2,
     'untouched, the whole recording is what will be searched', JSON.stringify(loaded.ranges));
-  log(!loaded.label.trimmed && /Long to short/.test(loaded.label.text), 'and the button says so', loaded.label.text);
+  log(!loaded.label.trimmed && /Make Shorts/.test(loaded.label.text), 'and the button says so', loaded.label.text);
 
   // The actual gesture: grab the left trim handle and drag it right to 145s.
   const dragged = await js(win, `

@@ -50,6 +50,7 @@ const SHELL = [
   '/r/flyerai.js?v=' + VERSION,
   '/r/rasterize.js?v=' + VERSION,
   '/r/veditor.js?v=' + VERSION,
+  '/r/guide.js?v=' + VERSION,
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',

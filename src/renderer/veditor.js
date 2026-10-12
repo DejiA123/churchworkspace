@@ -882,7 +882,7 @@
       ? 'Searches the WHOLE video for its best moments.\nTip: drag the clip’s edge on the timeline and only the part you keep is searched.'
       : `Searches only what you left on the timeline: ${rs.map(([a, c]) => fmt(a) + '–' + fmt(c)).join(', ')}.\nDrag the clip’s edges to change it.`;
     b.classList.toggle('ve-trimmed', !whole);
-    putText(b, whole ? '✂️ Long to short clips (AI)' : `✂️ Shorts from ${fmt(rs[0][0])}–${fmt(rs[rs.length - 1][1])}`);
+    putText(b, whole ? '✨ Make Shorts' : `✂️ Shorts from ${fmt(rs[0][0])}–${fmt(rs[rs.length - 1][1])}`);
   }
 
   /**
@@ -1211,8 +1211,7 @@
     }
     el.__clipSig = sig;
     if (!shorts.length) {
-      el.innerHTML = `<p class="muted small">No shorts yet. Click <b>✂️ Long to short clips</b> and the AI will drop them here.<br><br>`
-        + `Clips you make yourself on the timeline (Split, ＋ Clip, dragging) stay on the timeline — they’re part of the video you’re editing, and you save that with <b>💾 Export video</b>.</p>`;
+      el.innerHTML = `<p class="muted small">No shorts yet. Tap <b>✨ Make Shorts</b>.</p>`;
       return;
     }
     const best = shorts.reduce((m, s) => (s.ai && s.score != null && (m == null || s.score > m.score) ? s : m), null);

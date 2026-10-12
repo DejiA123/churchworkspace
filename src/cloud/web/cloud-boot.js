@@ -3899,21 +3899,29 @@ let _hideTimer = null;
   /* What the dock holds. `press` is a desk button; `sheet` opens a sheet;
      `row` swaps the dock for that row of tools; `check` toggles a desk box. */
   const DOCK = {
+    /* Nine doors, most used first, each one word. The rest is one tap in:
+       Style holds the looks (Filters, Adjust, Look), Shape holds the frame
+       (Ratio, Background, Reframe), and Montage sits with the Project things. */
     main: [
       { icon: 'sparkles', label: 'AI Shorts', ai: true, sheet: 'shorts', count: true },
-      { icon: 'wand-sparkle', label: 'Montage', ai: true, montage: true },
-      { icon: 'scissors', label: 'Edit', row: 'edit' },
-      { icon: 'music', label: 'Audio', row: 'audio' },
-      { icon: 'type', label: 'Text', row: 'text' },
       { icon: 'captions', label: 'Captions', ai: true, sheet: 'insp', tab: '#veInspTabCaptions' },
+      { icon: 'scissors', label: 'Edit', row: 'edit' },
+      { icon: 'type', label: 'Text', row: 'text' },
+      { icon: 'music', label: 'Sound', row: 'audio' },
+      { icon: 'palette', label: 'Style', row: 'style' },
+      { icon: 'crop', label: 'Shape', row: 'shape' },
       { icon: 'overlay', label: 'Overlay', row: 'overlay' },
+      { icon: 'folder', label: 'Project', row: 'project' },
+    ],
+    style: [
       { icon: 'filters', label: 'Filters', fx: '#fxLook' },
       { icon: 'sliders', label: 'Adjust', fx: '#fxBri' },
+      { icon: 'palette', label: 'Look', sheet: 'insp', tab: '#veInspTabLook' },
+    ],
+    shape: [
       { icon: 'crop', label: 'Ratio', row: 'ratio' },
       { icon: 'layers', label: 'Background', row: 'background' },
       { icon: 'target', label: 'Reframe', ai: true, sheet: 'insp', tab: '#veInspTabReframe' },
-      { icon: 'palette', label: 'Look', sheet: 'insp', tab: '#veInspTabLook' },
-      { icon: 'folder', label: 'Project', row: 'project' },
     ],
     edit: [
       { icon: 'scissors', label: 'Split', press: '#veSplit' },
@@ -3984,6 +3992,7 @@ let _hideTimer = null;
     ],
     project: [
       { icon: 'folder', label: 'Open', press: '#veOpen' },
+      { icon: 'wand-sparkle', label: 'Montage', ai: true, montage: true },
       { icon: 'save', label: 'Save', press: '#veSaveSession' },
       { icon: 'layers', label: 'Projects', projects: true },
       { icon: 'clapper', label: 'Outros', press: '#veClips' },
@@ -3993,6 +4002,9 @@ let _hideTimer = null;
       { icon: 'trash', label: 'Delete', deleteProject: true },
     ],
   };
+
+  // the row a sub-row's Back returns to (anything not listed goes back to main)
+  const DOCK_PARENT = { ratio: 'shape', background: 'shape' };
 
   const SHEET_KINDS = ['shorts', 'insp', 'export'];
   function closeSheet() {
@@ -4245,7 +4257,7 @@ let _hideTimer = null;
         back.className = 'cloud-tool cloud-tool-back';
         back.setAttribute('aria-label', 'Back');
         back.innerHTML = mi('chev-left');
-        back.addEventListener('click', () => showRow('main'));
+        back.addEventListener('click', () => showRow(DOCK_PARENT[name] || 'main'));
         row.appendChild(back);
       }
       const items = name === 'ratio' ? ratioRow() : DOCK[name];

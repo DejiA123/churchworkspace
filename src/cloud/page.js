@@ -59,6 +59,7 @@ const RENDERER_SCRIPTS = [
   'rasterize.js',    // the ONE rasteriser behind text overlays and WYSIWYG captions
   'tasks.js',        // background exports + the one honest progress number
   'veditor.js',      // the Video Studio itself
+  'guide.js',        // "show me around": the spotlight tours and the How do I…? sheet
 ];
 
 /** Stylesheets the studio's markup expects. */

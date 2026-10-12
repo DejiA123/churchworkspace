@@ -88,7 +88,8 @@
   font:600 16px/1.3 Inter,-apple-system,"Segoe UI",sans-serif}
 .mwg-invite .mwg-wave{font-size:28px;line-height:1;animation:mwgWave 2.4s ease-in-out infinite;transform-origin:70% 70%}
 @keyframes mwgWave{0%,60%,100%{transform:rotate(0)}10%,30%{transform:rotate(14deg)}20%,40%{transform:rotate(-8deg)}}
-.mwg-invite b{flex:1;font-weight:700}
+.mwg-invite b{flex:1;min-width:0;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:420px){.mwg-invite{gap:10px;padding:12px}.mwg-invite .mwg-go{padding:11px 13px;font-size:14px}}
 .mwg-invite .mwg-go{appearance:none;border:0;border-radius:14px;padding:11px 16px;min-height:44px;cursor:pointer;
   background:#facc15;color:#1e1b4b;font-weight:800;font-size:15px;line-height:1;font-family:inherit;white-space:nowrap}
 .mwg-invite .mwg-x{appearance:none;border:0;background:transparent;color:inherit;opacity:.6;font-size:22px;width:36px;height:36px;cursor:pointer;flex:none}

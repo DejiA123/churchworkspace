@@ -3045,3 +3045,34 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .csb-apptags { display: grid; gap: 6px; margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,.04); font-size: 13px; }
 .csb-apptags > small { opacity: .7; font-weight: 600; }
 .csb-apptag { display: flex; gap: 8px; align-items: center; color: #9ecbff; }
+
+/* ===================================================================== */
+/* Friendly: every icon in the studio's top bar has its word under it, the
+   quality pill steps aside (Export's sheet has Resolution), the green dot
+   only shows when the link is lost, and a ? runs the tour. */
+@media (max-width: 900px) {
+  body.mw-cloud .cloud-bar #cloudHomeBtn, body.mw-cloud .cloud-bar #cloudProjBtn, body.mw-cloud .cloud-bar #cloudDownloads {
+    position: relative; width: auto; min-width: 52px; height: 50px; padding: 2px 6px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  }
+  body.mw-cloud .cloud-bar .cloud-chip .cloud-chip-tx { display: block; font-size: 11px; font-weight: 600; line-height: 1; letter-spacing: .01em; color: var(--ph-text); opacity: .8; }
+  body.mw-cloud .cloud-bar .cloud-home-btn .mi { margin: 0; }
+  body.mw-cloud .cloud-q { display: none; }
+  body.mw-cloud #cloudLink:not(.bad) { display: none; }
+  body.mw-cloud #cloudLink { margin-right: 0; }
+  body.mw-cloud .cloud-bar .cloud-ask { order: 8; margin-left: auto; width: 40px; height: 40px; }
+}
+@media (min-width: 901px) {
+  body.mw-cloud .cloud-bar .cloud-ask { display: none; }   /* the bar's own ? is there */
+}
+/* Home: a ? beside the hello, and the one-time "New here?" card */
+.ch-hello { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.ch-copy b { font-size: 25px; }
+.ch-hello h1 { flex: 1; min-width: 0; }
+.ch-ask .mwg-ask { width: 44px; height: 44px; font-size: 20px; }
+#chInvite:empty { display: none; }
+/* Posts: New post says so, and a ? beside it */
+.csb-head { align-items: center; gap: 10px; }
+.csb-head > div { flex: 1; }
+.csb-plus { width: auto; padding: 0 18px 0 14px; border-radius: 24px; display: inline-flex; gap: 6px; align-items: center; font-weight: 750; font-size: 16px; }
+.csb-ask .mwg-ask { width: 44px; height: 44px; font-size: 20px; }

@@ -264,24 +264,25 @@
         </div>
       </header>
       <main class="ch-scroll">
-        <section class="ch-hello"><h1 id="chHello"></h1><p>What are we making today?</p></section>
+        <section class="ch-hello"><h1 id="chHello"></h1><span class="ch-ask" id="chAsk"></span></section>
+        <div id="chInvite"></div>
         <button type="button" class="ch-card ch-studio" data-go="projects">
           <span class="ch-glow"></span>
           <span class="ch-art">${mi('film')}</span>
-          <span class="ch-copy"><b>Video Studio</b><small>Edit the sermon, cut AI shorts, captions and exports</small></span>
+          <span class="ch-copy"><b>Video Studio</b></span>
           <span class="ch-foot"><span class="ch-foot-tx" id="chStudioFoot">Open a video to start</span><span class="ch-arrow">${mi('chev-right')}</span></span>
         </button>
         <!-- (no project list here: the Video Studio card opens them all — "6 projects · open one or start new") -->
         <button type="button" class="ch-card ch-montage" data-home="montage">
           <span class="ch-glow"></span>
           <span class="ch-art">${mi('sparkles')}</span>
-          <span class="ch-copy"><b>AI Montage</b><small>Drop in videos and photos — AI cuts a scroll-stopping edit to your music</small></span>
-          <span class="ch-foot"><span class="ch-foot-tx">Make one in a few taps</span><span class="ch-arrow">${mi('chev-right')}</span></span>
+          <span class="ch-copy"><b>AI Montage</b></span>
+          <span class="ch-foot"><span class="ch-foot-tx">Start</span><span class="ch-arrow">${mi('chev-right')}</span></span>
         </button>
         <button type="button" class="ch-card ch-social" data-go="scheduler" id="chSocialCard">
           <span class="ch-glow"></span>
           <span class="ch-art">${mi('calendar')}</span>
-          <span class="ch-copy"><b>Social Scheduler</b><small>Plan posts to TikTok, YouTube, Instagram and Facebook</small></span>
+          <span class="ch-copy"><b>Post online</b></span>
           <span class="ch-foot"><span class="ch-foot-tx" id="chSocialFoot">Plan your first post</span><span class="ch-marks" id="chMarks"></span><span class="ch-arrow">${mi('chev-right')}</span></span>
         </button>
         <section class="ch-sec hidden" id="chJobs"><h2>Running now</h2><div class="ch-jobs"></div></section>
@@ -309,8 +310,53 @@
     return el;
   }
 
+  /* "Show me around" — the screens say what things are in a word, the tours
+     say the rest (src/renderer/guide.js). They never start by themselves. */
+  function registerTours() {
+    const G = window.MWGuide;
+    if (!G || G.has('home')) return;
+    G.register('home', {
+      title: 'Find your way', emoji: '🧭', before: () => go('home'),
+      steps: [
+        { emoji: '👋', title: 'Welcome!', body: 'Here is a quick look around.' },
+        { target: '#cloudHome .ch-studio', emoji: '🎬', title: 'Make a video', body: 'Edit a video, make shorts, add captions.' },
+        { target: '#cloudHome .ch-montage', emoji: '✨', title: 'AI Montage', body: 'Pick photos and videos. The AI makes the edit.' },
+        { target: '#chSocialCard', emoji: '📅', title: 'Post online', body: 'Send your videos and flyers to social media.' },
+        { target: '#cloudHome [data-home="files"]', emoji: '📁', title: 'Your files', body: 'All your videos are kept here.' },
+        { target: '#chAsk .mwg-ask', emoji: '❓', title: 'Need help?', body: 'Tap ? any time to see these tips again.' },
+      ],
+    });
+    G.register('studio', {
+      title: 'Edit a video', emoji: '✂️', before: () => go('studio'),
+      steps: [
+        { target: '#vePlayer || #veMonitors', emoji: '▶️', title: 'Your video', body: 'Tap play to watch it.' },
+        { target: '#veTlScroll', emoji: '👆', title: 'Timeline', body: 'Slide it left and right to move through.' },
+        { target: '#cloudDock .cloud-dock-row[data-row="main"] .cloud-tool:nth-child(1) || #veFindHighlights', emoji: '✨', title: 'AI Shorts', body: 'The AI finds the best short clips.' },
+        { target: '#cloudDock .cloud-dock-row[data-row="main"] .cloud-tool:nth-child(2) || #veAutoCaptions', emoji: '💬', title: 'Captions', body: 'Words on your video, by themselves.' },
+        { target: '#cloudDock .cloud-dock-row.on', emoji: '🧰', title: 'All the tools', body: 'Swipe for more. Tap one to open it.' },
+        { target: '#cloudExport || #veExportEdited', emoji: '💾', title: 'Export', body: 'Save your finished video to your phone.' },
+        { target: '#cloudHomeBtn', emoji: '🏠', title: 'Home', body: 'Go back to the start.' },
+      ],
+    });
+    G.register('scheduler', {
+      title: 'Post online', emoji: '📅', before: () => go('scheduler'),
+      available: () => S.social,
+      steps: [
+        { target: '#cloudSched .csb-plus', emoji: '➕', title: 'New post', body: 'Pick a video or flyer to post.' },
+        { target: '#csAccts', emoji: '🔗', title: 'Your accounts', body: 'Link Instagram, TikTok and more, once.' },
+        { target: '#csTabs', emoji: '🗓️', title: 'Your posts', body: 'Planned, posted, and any that need a look.' },
+      ],
+    });
+  }
+
   async function renderHome(refresh) {
+    registerTours();
     const el = $('#cloudHome') || buildHome();
+    if (window.MWGuide) {
+      const ask = $('#chAsk');
+      if (ask && !ask.firstChild) ask.appendChild(window.MWGuide.helpButton('', { title: 'How do I…?' }));
+      window.MWGuide.invite('home', $('#chInvite'));
+    }
     $('#chHello').textContent = greeting() + (C.me && C.me.name ? ', ' + C.me.name.split(' ')[0] : '');
     const where = (C.hello && C.hello.standalone) ? 'Working on the church’s cloud server' : 'Working on the church’s studio machine';
     $('#chWhere').textContent = where + (C.hello && C.hello.version ? ` · v${C.hello.version}` : '');
@@ -602,7 +648,7 @@
       <main class="cs-scroll pv-scroll">
         <button type="button" class="pv-new" data-pv="new">
           <span class="pv-new-art">${mi('plus')}</span>
-          <span class="pv-new-tx"><b>New project</b><small>Open a video to edit — a sermon, a clip, anything</small></span>
+          <span class="pv-new-tx"><b>New project</b></span>
         </button>
         <section class="pv-cur hidden" id="pvCur"></section>
         <h2 class="pv-h">Your projects <small id="pvCount"></small></h2>
@@ -669,7 +715,7 @@
     list.innerHTML = others.length
       ? others.map((r) => projRow(r, { manage: true })).join('')
       : (rows.length ? '<p class="pv-none">This is your only project so far.</p>'
-        : `<div class="pj-empty"><span class="pj-empty-art">${mi('layers')}</span><b>No projects yet</b><p>Tap <b>New project</b> and open a video — every video you edit is kept here, to carry on any time.</p></div>`);
+        : `<div class="pj-empty"><span class="pj-empty-art">${mi('layers')}</span><b>No projects yet</b></div>`);
     paintThumbs(el);
   }
 
@@ -705,8 +751,9 @@
       </header>
       <main class="cs-scroll csb-scroll">
         <div class="csb-head">
-          <div><small class="csb-eyebrow">Post everywhere</small><h1>Scheduler</h1></div>
-          <button type="button" class="csb-plus" data-sched="new" aria-label="New post">${mi('plus')}</button>
+          <div><h1>Posts</h1></div>
+          <span class="csb-ask" id="csAsk"></span>
+          <button type="button" class="csb-plus" data-sched="new" aria-label="New post">${mi('plus')}<span>New post</span></button>
         </div>
         <div class="csb-handtodos" id="csHandTodo"></div>
         <div class="csb-h2"><h2>Accounts</h2><button type="button" class="csb-link" data-sched="connect">Manage</button></div>
@@ -720,6 +767,7 @@
       </main>`;
     document.body.appendChild(el);
     el.querySelector('.cs-chip-slot').appendChild(C.jobChip());
+    if (window.MWGuide) el.querySelector('#csAsk').appendChild(window.MWGuide.helpButton('scheduler', { title: 'Show me around' }));
     el.addEventListener('click', (e) => {
       const b = e.target.closest('button,[data-open-post]');
       if (!b) return;
@@ -2382,6 +2430,7 @@
     S.started = true;
     S.social = !hello || hello.social !== false;
     C.hello = hello || null;
+    registerTours();
     // Home lives in the studio's top bar on a phone, where Files used to be
     // (the home screen has Files now).
     const bar = $('#cloudBar .cloud-bar-actions') || $('#cloudBar');
@@ -2403,6 +2452,7 @@
       pj.innerHTML = `${mi('layers', 'mi-l')}<span class="cloud-chip-tx">Projects</span>`;
       pj.addEventListener('click', () => go('projects'));
       h.after(pj);
+      if (window.MWGuide) bar.appendChild(window.MWGuide.helpButton('studio', { title: 'Show me around', className: 'cloud-ask' }));
     }
     C.jobListeners.push((list) => { if (S.view === 'home') renderHomeJobs(list); });
     // a video deleted in Files leaves the home screen too — and an edit whose
