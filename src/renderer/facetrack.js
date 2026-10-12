@@ -2066,7 +2066,8 @@
      * those two shorts and placed the preacher in every frame of the six real
      * ones it was asked about. So when it has answered, and never once placed
      * the speaker, and says they are not in shot in most of what it saw, the
-     * clip has no one to follow. Without its answer nothing changes here.
+     * clip has no one to follow, and the short holds one steady shot. Without
+     * its answer nothing changes here.
      */
     const rr = out.referee;
     if (rr && rr.ok && rr.answered >= 2 && !rr.vouched && !rr.hinted && rr.none >= Math.ceil(0.75 * rr.answered)) {
