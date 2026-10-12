@@ -33,6 +33,8 @@
 // About eight minutes of preaching a section: measured, sections of ~2,000
 // words came back with two moments each — eight from 45 minutes, and the core
 // point of the sermon among those left out.
+const { creep } = require('./jobs');
+
 const SECTION_WORDS = 1300;
 const WIDE_WORDS = 12000;   // about 80 minutes of preaching in one reading
 const OVERLAP_SENTS = 8;
@@ -288,34 +290,49 @@ async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, max
   if (S.length < 8 || typeof ask !== 'function') return null;
   // wide: a reader that holds the whole sermon reads it at once (a two-hour service in two halves)
   const secs = wide ? sections(S, WIDE_WORDS, OVERLAP_SENTS) : sections(S);
+  /*
+   * THE BAR, STEP BY STEP (0..1 of this reading), moving while each answer is
+   * awaited and saying which step it is (jobs.creep) — "stuck on 84%" was the
+   * whole-sermon reading and the look at each short's edges, a minute or more
+   * each, with nothing said between them.
+   */
+  const READ = 0.62, MORE = 0.74;
+  const tell = (f, stage) => { if (onProgress) { try { onProgress(f, stage); } catch (e) {} } };
+  const during = async (from, to, stage, fn) => {
+    const stop = creep(onProgress ? tell : null, from, to, stage);
+    try { return await fn(); } finally { stop(); tell(to, stage); }
+  };
   const all = [];
   let failed = 0, lastGot = true, returned = 0, more = 0;
   for (let k = 0; k < secs.length; k++) {
     if (cancelled()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
     const { system, prompt } = promptFor(S, secs[k], { minLen, maxLen, idealLen, wide });
     let got = null;
-    for (let attempt = 0; ; attempt++) {
-      let out = '';
-      try { out = await ask({ system, prompt, maxTokens: wide ? 6000 : 3000 }); } catch (e) { if (e && e.cancelled) throw e; out = ''; }
-      got = parseMoments(out);
-      // an answer that came but could not be read: said (measured — two such answers, and the
-      // whole-sermon reading silently gave way to ten-minute pieces)
-      if (out && !got && typeof onUnread === 'function') { try { onUnread(String(out).slice(0, 160)); } catch (e) {} }
-      if (got || attempt >= retryWaits.length) break;
-      // the free allowance refills by the minute: wait, then ask again
-      const until = Date.now() + retryWaits[attempt];
-      while (Date.now() < until) {
-        if (cancelled()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
-        await new Promise((r) => setTimeout(r, 250));
+    await during(READ * k / secs.length, READ * (k + 1) / secs.length,
+      secs.length === 1 ? 'AI is reading the sermon…' : `AI is reading part ${k + 1} of ${secs.length}…`, async () => {
+      for (let attempt = 0; ; attempt++) {
+        let out = '';
+        try { out = await ask({ system, prompt, maxTokens: wide ? 6000 : 3000 }); } catch (e) { if (e && e.cancelled) throw e; out = ''; }
+        got = parseMoments(out);
+        // an answer that came but could not be read: said (measured — two such answers, and the
+        // whole-sermon reading silently gave way to ten-minute pieces)
+        if (out && !got && typeof onUnread === 'function') { try { onUnread(String(out).slice(0, 160)); } catch (e) {} }
+        if (got || attempt >= retryWaits.length) break;
+        // the free allowance refills by the minute: wait, then ask again
+        const until = Date.now() + retryWaits[attempt];
+        while (Date.now() < until) {
+          if (cancelled()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
+          await new Promise((r) => setTimeout(r, 250));
+        }
       }
-    }
-    // every part of a sermon has something worth a short: an empty answer is asked once more, for the best few
-    if (got && !got.length) {
-      try {
-        const again = await ask({ system, prompt: prompt + '\n\nYou returned no moments. Every part of a sermon has some. Return the 3 best moments in this part, following all the rules above.', maxTokens: 3000 });
-        got = parseMoments(again) || got;
-      } catch (e) { if (e && e.cancelled) throw e; }
-    }
+      // every part of a sermon has something worth a short: an empty answer is asked once more, for the best few
+      if (got && !got.length) {
+        try {
+          const again = await ask({ system, prompt: prompt + '\n\nYou returned no moments. Every part of a sermon has some. Return the 3 best moments in this part, following all the rules above.', maxTokens: 3000 });
+          got = parseMoments(again) || got;
+        } catch (e) { if (e && e.cancelled) throw e; }
+      }
+    });
     if (!got) failed++;
     // Two sections in a row with no answer at all: the free allowance is spent
     // (measured: a day of heavy testing left every model refusing, and the scan
@@ -327,7 +344,6 @@ async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, max
       const v = vet(m, S, secs[k], { minLen, maxLen, idealLen });
       if (v) all.push(Object.assign(v, { sec: k }));
     }
-    if (onProgress) { try { onProgress((k + 1) / secs.length); } catch (e) {} }
   }
   // a section the model never answered is a hole in the sermon: say so (the caller falls back if too many)
   if (failed > secs.length / 2) return null;
@@ -350,7 +366,7 @@ async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, max
     const want = Math.max(4, maxClips - uniq.length + 3);
     let out = '';
     try {
-      out = await ask({ system, maxTokens: 6000, prompt: prompt + `\n\nThese moments are already chosen:\n${had}\n\nFind ${want} MORE moments in this sermon — different ones, not overlapping any of these — following every rule above. Reply with only: {"moments":[{"from":0,"to":0,"title":"","point":"","strength":0}]}` });
+      out = await during(READ, MORE, 'AI is finding more moments…', () => ask({ system, maxTokens: 6000, prompt: prompt + `\n\nThese moments are already chosen:\n${had}\n\nFind ${want} MORE moments in this sermon — different ones, not overlapping any of these — following every rule above. Reply with only: {"moments":[{"from":0,"to":0,"title":"","point":"","strength":0}]}` }));
     } catch (e) { if (e && e.cancelled) throw e; out = ''; }
     for (const m of parseMoments(out) || []) {
       more++;
@@ -360,7 +376,9 @@ async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, max
   }
   const picked = choose(uniq, maxClips, secs);
   let edgesMoved = 0;
-  try { edgesMoved = await refineEdges(picked, S, { ask, minLen, maxLen, retryWaits }); } catch (e) { if (e && e.cancelled) throw e; }
+  try {
+    edgesMoved = await during(MORE, 0.98, 'Perfecting each start and end…', () => refineEdges(picked, S, { ask, minLen, maxLen, retryWaits }));
+  } catch (e) { if (e && e.cancelled) throw e; }
   // an edge that moved may now touch a neighbour: the later one gives way at the seam
   picked.sort((x, y) => x.start - y.start);
   for (let k = 1; k < picked.length; k++) {
@@ -371,6 +389,7 @@ async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, max
     sents: S.slice(m.from, m.to + 1),
     text: S.slice(m.from, m.to + 1).map((s) => s.text).join(' ').replace(/\s+/g, ' ').trim(),
   }));
+  tell(1, '');
   return { moments, sections: secs.length, failed, found: uniq.length, returned, more, edgesMoved };
 }
 

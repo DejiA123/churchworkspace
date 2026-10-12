@@ -1177,6 +1177,19 @@ async function analyzeSermon(ctx, opts = {}) {
   let judgeUsed = false;
 
   /*
+   * ☁️ THE WHOLE SERMON HEARD FIRST (AssemblyAI: one upload — a minute or two
+   * for a recording it has not heard, nothing for one it has). It used to be
+   * heard inside the first piece asked for, and the bar sat still the whole
+   * time; now the bar moves and says so while it listens.
+   */
+  let heardTo = 42;
+  if (deepMode && typeof opts.prehear === 'function') {
+    const stop = jobs.creep((p, st) => opts.onProgress && opts.onProgress(Math.round(p * 10) / 10, st), 42, 64, opts.prehearStage || 'Listening…', 45000);
+    try { await opts.prehear(); } catch (e) { if (jobs.isCancelError(e)) throw e; /* each piece asks again, and says why */ }
+    heardTo = Math.max(42, Math.round(stop() * 10) / 10);
+    if (heardTo > 42 && opts.onProgress) opts.onProgress(heardTo, '');   // heard: the step line is cleared
+  }
+  /*
    * ►► PLANNED FROM THE WHOLE SERMON (shortplan.js), when a strong reader is on. ◄◄
    * Every word is heard, and the reader marks where each thought starts and
    * where its point lands — so a strong point said quietly is not missed and
@@ -1185,7 +1198,7 @@ async function analyzeSermon(ctx, opts = {}) {
    */
   let planned = null;
   if (opts.transcribeRange && opts.contentAware !== false && opts.judge && typeof opts.judge.plan === 'function' && !keep.length) {
-    try { planned = await planWholeSermon(opts, { totalDur, OFF, snap, minLen, maxLen, idealLen, maxClips }); }
+    try { planned = await planWholeSermon(opts, { totalDur, OFF, snap, minLen, maxLen, idealLen, maxClips, heardTo }); }
     catch (e) { if (jobs.isCancelError(e)) throw e; planned = null; }
     if (planned) meta2.planned = planned.meta;
   }
@@ -1272,7 +1285,7 @@ async function analyzeSermon(ctx, opts = {}) {
         }
         regionSegs[ri] = (regionSegs[ri] || []).concat(segs);
         doneDur += to - from;
-        if (opts.onProgress) opts.onProgress(42 + Math.round((doneDur / totalRegionDur) * 56));
+        if (opts.onProgress) opts.onProgress(heardTo + Math.round((doneDur / totalRegionDur) * (98 - heardTo)));
       }
     }));
     mark('transcribed');
@@ -1680,8 +1693,10 @@ async function analyzeSermon(ctx, opts = {}) {
  * a short call, not a long one), build its sentences, and let the reader plan
  * the shorts. Returns { picked, meta } or null.
  */
-async function planWholeSermon(opts, { totalDur, OFF, snap, minLen, maxLen, idealLen, maxClips }) {
+async function planWholeSermon(opts, { totalDur, OFF, snap, minLen, maxLen, idealLen, maxClips, heardTo = 42 }) {
   const MAX_SPAN = 240;
+  // the bar: the words (to 70%), then the AI's reading — the longer wait — to 98%
+  const READ_FROM = 70;
   const n = Math.max(1, Math.ceil(totalDur / MAX_SPAN));
   const step = totalDur / n;
   const parts = Array.from({ length: n }, (_, k) => ({ from: k * step, to: k === n - 1 ? totalDur : (k + 1) * step }));
@@ -1698,17 +1713,23 @@ async function planWholeSermon(opts, { totalDur, OFF, snap, minLen, maxLen, idea
         got[k] = ((r && r.segs) || []).map((w) => Object.assign({ start: w.start + from, end: w.end + from, text: w.text }, w.p ? { p: true } : {}));
       } catch (e) { if (jobs.isCancelError(e)) throw e; got[k] = []; missing++; }
       done++;
-      if (opts.onProgress) opts.onProgress(42 + Math.round((done / n) * 38));
+      if (opts.onProgress) opts.onProgress(heardTo + Math.round((done / n) * Math.max(0, READ_FROM - heardTo)));
     }
   }));
   // a sermon half of which was never heard cannot be planned honestly
   if (missing > n / 4) return null;
   const sents = buildSentences([].concat(...got).sort((a, b) => a.start - b.start));
+  const from = Math.max(READ_FROM, heardTo);
+  let at = from;
   const res = await opts.judge.plan({
     sents, minLen, maxLen, idealLen, maxClips,
-    onProgress: (f) => { if (opts.onProgress) opts.onProgress(80 + Math.round(f * 18)); },
+    // (f: 0..1 of the reading; stage: which step, in plain words — shortplan.js)
+    onProgress: (f, stage) => { at = Math.round((from + f * (98 - from)) * 10) / 10; if (opts.onProgress) opts.onProgress(at, stage); },
   });
-  if (!res || !res.moments || res.moments.length < Math.min(3, maxClips)) return null;
+  if (!res || !res.moments || res.moments.length < Math.min(3, maxClips)) {
+    if (opts.onProgress) opts.onProgress(at, '');   // the rules take over: no step left on the screen that is not happening
+    return null;
+  }
   const picked = res.moments.map((m) => {
     const start = snap.start(m.start, 0.6, 0.5);
     const end = snap.end(m.end, 0.5, 0.9, 0.35, start + maxLen + 6);

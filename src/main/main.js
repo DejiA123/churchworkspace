@@ -511,9 +511,11 @@ app.on('window-all-closed', () => {
 
 /* ----------------------------- IPC: helpers ----------------------------- */
 
-const onProgress = (event, jobId) => (percent) => {
+// (stage: what is happening now, in plain words, for the line under the bar — only ever a string,
+// so a library that passes something else as a second argument cannot put it on screen)
+const onProgress = (event, jobId) => (percent, stage) => {
   if (jobId && event && !event.sender.isDestroyed()) {
-    event.sender.send('job:progress', { jobId, percent });
+    event.sender.send('job:progress', typeof stage === 'string' ? { jobId, percent, stage } : { jobId, percent });
   }
 };
 
@@ -1488,6 +1490,7 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
    * Groq or this PC hear it only if AssemblyAI cannot.
    */
   let scanRange = transcribeRange;
+  let prehear = null;   // the whole sermon heard up front, so the bar can say so (highlights.analyzeSermon)
   try {
     const aai = require('./assemblyear');
     if (contentAware && aai.ready()) {
@@ -1521,6 +1524,7 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
         if (cur) segs.push(cur);
         return segs;
       };
+      prehear = () => heardAll();
       let aaiDown = false;
       scanRange = async (s, en) => {
         if (!aaiDown) {
@@ -1558,6 +1562,7 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
     judge,
     // only the stretch left on the timeline is searched (see analyzeSermon)
     startSec, endSec, ranges,
+    prehear, prehearStage: 'AssemblyAI is listening…',
     onProgress: onProgress(e, jobId),
   });
   if (res && res.meta) {

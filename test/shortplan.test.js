@@ -121,6 +121,31 @@ S[330].text = 'There is no prosperity gospel, there is only one gospel.';
   const none = await P.planShorts({ sents: S, ask: async () => '', retryWaits: [1] });
   check('null, so the caller falls back', none === null);
 
+  console.log('\n[6] "stuck on 84%": the bar keeps moving while the AI reads, and says which step it is on');
+  const told = [];
+  const slow = async ({ prompt }) => {
+    await new Promise((r) => setTimeout(r, 2700));   // a reader that takes its time (the real one: a minute or more)
+    if (/Around the START/.test(prompt)) return JSON.stringify({ edges: [] });
+    const out = [];
+    for (let f = 5; f + 18 < S.length; f += 45) out.push({ from: f, to: f + 15, title: `Moment at ${f}`, point: 'p', strength: 7 });
+    return JSON.stringify({ moments: out });
+  };
+  const t0 = Date.now();
+  const w = await P.planShorts({ sents: S, maxClips: 8, ask: slow, wide: true, retryWaits: [5], onProgress: (f, stage) => told.push({ f, stage, at: Date.now() - t0 }) });
+  const stages = [...new Set(told.map((x) => x.stage).filter(Boolean))];
+  check('the whole sermon is planned in one reading', w && w.sections === 1 && w.moments.length === 8, w && { sections: w.sections, n: w.moments.length });
+  check('it says what it is doing: reading the sermon, then perfecting each short\'s start and end',
+    stages.length === 2 && /reading the sermon/i.test(stages[0]) && /start and end/i.test(stages[1]), stages);
+  const during = told.filter((x) => /reading the sermon/i.test(x.stage) && x.at < 2700);
+  check('while the answer is awaited, the bar moves (more than once) — no waiting on one number', during.length >= 2 && during[during.length - 1].f > during[0].f, during);
+  check('it never goes backwards', told.every((x, i) => !i || x.f >= told[i - 1].f - 1e-9), told.map((x) => +x.f.toFixed(3)));
+  check('…and ends at the end, the step line cleared', told.length && told[told.length - 1].f === 1 && told[told.length - 1].stage === '', told[told.length - 1]);
+  const J = require('../src/main/jobs.js');
+  const quick = [];
+  const stop = J.creep((p, st) => quick.push([p, st]), 70, 98, 'x');
+  await new Promise((r) => setTimeout(r, 300));
+  check('a wait over within a second says nothing (no flash of a step)', quick.length === 0 && stop() === 70, quick);
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FATAL', e); process.exit(1); });

@@ -748,13 +748,17 @@
    * So it is routed by job id, and only an unclaimed reading falls through to the
    * overlay (there are still a few callers that show it by hand).
    */
-  api.onJobProgress(({ jobId, percent }) => {
+  api.onJobProgress(({ jobId, percent, stage }) => {
     const t = jobId && _tasks.get(_taskOfJob.get(jobId));
     // A job reports ITS OWN 0-100; what the operator is shown is how far the whole
     // export has got (chainPct). Without a chain the two are the same thing.
     const shown = t ? chainPct(t, percent) : percent;
     if (t) { t.percent = shown; if (t.bg) return scheduleDock(); }
-    if (!jobId || !_fgJobId || jobId === _fgJobId) setProgress(shown);
+    if (!jobId || !_fgJobId || jobId === _fgJobId) {
+      setProgress(shown);
+      // the step it is on, said by the server ("Perfecting each start and end…")
+      if (typeof stage === 'string' && window.__setStage) window.__setStage(stage);
+    }
   });
 
 })();

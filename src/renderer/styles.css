@@ -326,6 +326,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 /* The two ways out of a long job: walk away from it, or stop it. */
 .overlay-pct { margin-top: 8px; font-size: 13px; font-weight: 700; color: var(--primary-2);
   font-variant-numeric: tabular-nums; }
+/* the step a long job is on, under its message */
+.overlay-stage { margin-top: 10px; font-size: 13px; font-weight: 600; line-height: 1.4; color: var(--primary-2); }
 .overlay-acts { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 18px; }
 .overlay-acts .overlay-cancel { margin: 0; }
 .overlay-bg {

@@ -79,6 +79,7 @@ function showOverlay(msg) {
   // overlay while the next job was still running, so exports looked "invisible".
   clearTimeout(_hideTimer); _hideTimer = null;
   $('#overlayMsg').textContent = msg || 'Working…';
+  setStage('');
   $('#progressBar').style.width = '0%';
   { const el = $('#overlayPct'); if (el) el.textContent = '0%'; }
   /*
@@ -112,6 +113,14 @@ function setProgress(p) {
   $('#progressBar').style.width = Math.max(2, pct) + '%';
   const el = $('#overlayPct');
   if (el) el.textContent = pct + '%';
+}
+/* The step a long job is on ("Perfecting each start and end…"), under its message. */
+function setStage(text) {
+  const el = $('#overlayStage');
+  if (!el) return;
+  const t = String(text || '');
+  if (el.textContent !== t) el.textContent = t;
+  el.classList.toggle('hidden', !t);
 }
 function hideOverlay() {
   clearTimeout(_hideTimer); _hideTimer = null;
@@ -177,6 +186,7 @@ window.__showOverlay = showOverlay;
 window.__hideOverlay = hideOverlay;
 window.__setJobBatch = setJobBatch;
 window.__setProgress = setProgress;
+window.__setStage = setStage;
 // finishedFile moved to tasks.js with the rest of the task layer (the dock shows
 // it), and a file cannot export a function it no longer has.
 /* ===================== navigation ===================== */

@@ -116,4 +116,26 @@ function killAll() {
   return n;
 }
 
-module.exports = { killAll, run, track, cancel, isCancelled, throwIfCancelled, currentJob, CancelledError, isCancelError };
+/*
+ * ►► A BAR THAT KEEPS MOVING WHILE ONE LONG THING HAPPENS. ◄◄ Measured on a
+ * phone: "stuck on 84%" — the AI reading the whole sermon, then each short's
+ * start and end, a minute or more each, with nothing to report in between. While
+ * such a wait runs, say(p, stage) is told every second and a half: p eases from
+ * `from` towards `to` (never reaching it — the real figure does that) and stage
+ * says in plain words what is happening. A wait over within a second says
+ * nothing. Returns stop(), which gives the last figure said (or `from`).
+ */
+function creep(say, from, to, stage, tauMs = 60000) {
+  if (typeof say !== 'function') return () => from;
+  const t0 = Date.now();
+  let last = from, timer = null;
+  const tell = () => {
+    last = from + (to - from) * 0.92 * (1 - Math.exp(-(Date.now() - t0) / tauMs));
+    try { say(last, stage); } catch (e) { /* the bar is not worth a failed job */ }
+  };
+  const first = setTimeout(() => { tell(); timer = setInterval(tell, 1500); if (timer.unref) timer.unref(); }, 1000);
+  if (first.unref) first.unref();
+  return () => { clearTimeout(first); clearInterval(timer); return last; };
+}
+
+module.exports = { killAll, run, track, cancel, isCancelled, throwIfCancelled, currentJob, CancelledError, isCancelError, creep };

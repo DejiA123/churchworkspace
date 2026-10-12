@@ -847,6 +847,7 @@ let _hideTimer = null;
     clearTimeout(_hideTimer); _hideTimer = null;
     clearOverlaySave();   // the last export's "Save to Photos" card never greets the next job
     const m = $('#overlayMsg'); if (m) m.textContent = msg || 'Working…';
+    setStage('');
     showWaiting(0);
     resetProgress();
     const o = $('#overlay');
@@ -890,6 +891,14 @@ let _hideTimer = null;
     drawProgress(0);
   }
   function stopProgress() { clearInterval(prog.timer); prog.timer = null; }
+  /* The step a long job is on ("Perfecting each start and end…"), under its message. */
+  function setStage(text) {
+    const el = $('#overlayStage');
+    if (!el) return;
+    const t = String(text || '');
+    if (el.textContent !== t) el.textContent = t;
+    el.classList.toggle('hidden', !t);
+  }
   function setProgress(p) {
     const pct = Math.max(0, Math.min(100, Number(p) || 0));
     if (!prog.timer) resetProgress();
@@ -1175,6 +1184,7 @@ let _hideTimer = null;
   window.__hideOverlay = hideOverlay;
   window.__setJobBatch = setJobBatch;
   window.__setProgress = setProgress;
+  window.__setStage = setStage;
 
   /* ------------------------------------------------------ live connection */
 

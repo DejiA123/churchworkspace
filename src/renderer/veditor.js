@@ -7019,30 +7019,16 @@
       const fit = Math.floor(keptSec / ((p.idealLen || 50) + 8));
       const maxClips = clamp(Math.min(TARGET_CLIPS, fit), 3, TARGET_CLIPS);
       const where = whole ? 'across the whole sermon' : `in ${fmt(from)}–${fmt(to)} (the part you kept)`;
-      // Name the speech model in the label — the bigger ones are both noticeably
-      // better and noticeably slower, so the wait is explained rather than
-      // mysterious. Mirrors captioner.pickScanModel: a named choice wins, and
-      // automatic climbs to Small and stops.
-      let asr = '';
-      if (deep) {
-        try {
-          const list = await window.api.captions.models();
-          const chosen = ve.asrModel && list.find((m) => m.id === ve.asrModel && m.installed);
-          const best = chosen || ['small.en', 'base.en'].map((id) => list.find((m) => m.id === id && m.installed)).find(Boolean);
-          if (best) asr = ` with ${best.name.split(' ')[0]}`;
-        } catch (e) {}
-        // ☁️ the cloud ear (see sermon:analyze): chosen outright, or implied by the
-        // cloud judge with the ear left on Auto
-        if (ve.asrModel === 'cloud' || (ve.aiModel === 'cloud' && !ve.asrModel)) asr = ' with ☁️ ' + cloudEarName();
-      }
-      // The AI reader only has anything to read in Deep mode, and it is the one
-      // thing here that visibly changes how long the operator waits — so it is
-      // named in the label rather than being a mysterious extra few minutes.
+      // The AI reader only has anything to read in Deep mode.
       const useAi = !!(deep && ve.aiModel);
-      const aiNote = !useAi ? '' : ve.aiModel === 'cloud' ? ', then weighing every clip with ☁️ Cloud AI' : ', then weighing every clip with the AI reader';
-      const label = deep
-        ? `🧠 Deep analysis — reading the sermon${asr} ${where} for its key points${aiNote}… (re-runs reuse the cached transcript and are much faster)`
-        : `🤖 Finding the best moments ${where}…`;
+      /*
+       * ONE SHORT LINE. This named the ear, the reader and a tip about re-runs —
+       * three lines of text on a phone, and still nothing said while the AI read
+       * ("stuck on 84%"). The step it is on is now said under it as it happens
+       * (job:progress stage: "AssemblyAI is listening…",
+       * "Perfecting each start and end…").
+       */
+      const label = deep ? `🧠 Finding the best shorts ${where}…` : `🤖 Finding the best moments ${where}…`;
       const args = {
         input: ve.video.path, minLen: p.minLen, maxLen: p.maxLen, idealLen: p.idealLen,
         autoLen: !!p.autoLen, deep, maxClips, jobId,
