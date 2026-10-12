@@ -668,6 +668,14 @@ body.mw-cloud #cloudPass:focus { border-color: #1f6fe0; box-shadow: 0 0 0 3px rg
   body.mw-cloud #view-video.ve-pro .ve-text-tools input[type=color]:disabled { opacity: .35; }
   body.mw-cloud #view-video.ve-pro .ve-text-tools #vtAnim { flex: 1 1 120px; font-size: 15px; text-overflow: ellipsis; }
   body.mw-cloud #view-video.ve-pro .ve-text-tools #vtDelete { margin-left: auto; }
+  /* B, AA, outline and panel are on/off switches: on is plain to see (white
+     with blue letters), off is the dark button — otherwise nobody can tell
+     whether ALL CAPS or bold is on without looking at the picture */
+  body.mw-cloud #view-video.ve-pro .ve-text-tools :is(#vtBold, #vtCaps, #vtOutline, #vtBg).on {
+    background: #fff; border-color: #fff; color: #1f6fe0;
+  }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools #vtOutline.on { color: #fff; -webkit-text-stroke: 2px #1f6fe0; }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools #vtCaps { font-weight: 900; letter-spacing: .02em; }
   body.mw-cloud #view-video.ve-pro .ve-text-tools #vtDone { background: #1a5fc4; border-color: #1f6fe0; color: #fff; font-weight: 800; min-width: 56px; }
   /* in full screen the panel sits over the full-screen player bar */
   body.ve-pfull.mw-cloud #view-video.ve-pro .ve-text-tools { z-index: 2050; }

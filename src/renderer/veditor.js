@@ -4243,7 +4243,11 @@
       // Wrapping stated the same way on both sides. It used to be `pre-wrap` in
       // the rasteriser and the browser's default on the preview, which is a
       // difference waiting to show up on a line with two spaces in it.
-      + 'white-space:pre-wrap;word-break:break-word;';
+      + 'white-space:pre-wrap;word-break:break-word;'
+      // ALL CAPS is a look, not an edit: the words stay as typed (turn it off
+      // and they come back), and the preview and the rasterised export both
+      // read it from here, so the file is in capitals exactly when the preview is.
+      + (o.caps ? 'text-transform:uppercase;' : '');
     if (o.outline) {
       /*
        * A CSS text stroke is CENTRED on the glyph's edge — half of it eats into
@@ -4371,7 +4375,11 @@
       selN.removeAllRanges(); selN.addRange(range);
     } catch (e) { /* selection is best-effort */ }
     const commit = () => {
+      // innerText reads back what is SHOWN — capitals, when ALL CAPS is on —
+      // so read it with the look switched off to keep the words as typed.
+      const tt = content.style.textTransform; content.style.textTransform = 'none';
       o.text = content.innerText.replace(/\n+$/, '') || 'Text';
+      content.style.textTransform = tt;
       content.removeEventListener('blur', commit);
       ve.textEditing = null;
       // More words = more lines = a taller box: re-fit it inside the export
@@ -5211,6 +5219,8 @@
     flag('#vtBold', !!o.bold);
     flag('#vtBg', !!o.bg);
     flag('#vtOutline', !!o.outline);
+    flag('#vtCaps', !!o.caps);
+    { const b = $('#vtCaps'); if (b) b.setAttribute('aria-pressed', o.caps ? 'true' : 'false'); }
     put('#vtBgColor', /^#[0-9a-f]{6}$/i.test(o.bgColor || '') ? o.bgColor : '#000000');
     const bgc = $('#vtBgColor'); if (bgc && bgc.disabled !== !o.bg) bgc.disabled = !o.bg;
     put('#vtAnim', TEXT_ANIM_IDS.includes(o.anim) ? o.anim : 'none');
@@ -5946,7 +5956,7 @@
     // (text is fixed to the screen, like CapCut).
     const SAFE = 0.03; // slim safe margin — text can sit high/low; the .ass glyph clamp prevents any cut-off
     return ovs.map((o) => ({
-      text: o.text,
+      text: o.caps ? String(o.text || '').toUpperCase() : o.text,
       x: clamp(o.x, SAFE, 1 - SAFE),
       y: clamp(o.y, SAFE, 1 - SAFE),
       start: Math.max(0, o.start - s.start),
@@ -15331,6 +15341,7 @@
     }
     const vtColor = $('#vtColor'); if (vtColor) vtColor.addEventListener('change', () => applyTextProp((o) => { o.color = vtColor.value; }));
     const vtBold = $('#vtBold'); if (vtBold) vtBold.addEventListener('click', () => applyTextProp((o) => { o.bold = !o.bold; }));
+    const vtCaps = $('#vtCaps'); if (vtCaps) vtCaps.addEventListener('click', () => applyTextProp((o) => { o.caps = !o.caps; }));
     const vtBg = $('#vtBg'); if (vtBg) vtBg.addEventListener('click', () => applyTextProp((o) => { o.bg = !o.bg; }));
     const vtBgColor = $('#vtBgColor');
     if (vtBgColor) vtBgColor.addEventListener('change', () => applyTextProp((o) => { o.bg = true; o.bgColor = vtBgColor.value; }));
@@ -17013,6 +17024,12 @@
       setCuts(id, cuts) { const s = ve.segments.find((x) => x.id === id); if (s) { s.cuts = cuts; renderSegments(); } },
       // real export of one clip (pauses joined out) — returns the written file
       exportClip(id) { const s = ve.segments.find((x) => x.id === id); return s ? exportOneClip(s) : null; },
+      // …and with its added text burned on, the way Export does it
+      async exportClipWithText(id) {
+        const s = ve.segments.find((x) => x.id === id); if (!s) return null;
+        const text = await textImagesFor(s);
+        return burnTextIntoShort(s, await exportOneClip(s, null, !!(text && text.length)), null, text);
+      },
       // the short's kept camera path, and where the preview's crop is right now
       camOf(id) { const s = ve.segments.find((x) => x.id === id); const kf = s ? camCached(s) : null; return kf ? { n: kf.length, kf, noSpeaker: !!kf.noSpeaker } : null; },
       cropNow() { const w = cropWindow(); return { ox: w.ox, oy: w.oy, cw: w.cw }; },
@@ -17027,7 +17044,7 @@
         return c ? parseFloat(getComputedStyle(c).fontSize) : null;
       },
       textToolsVisible() { const b = document.getElementById('veTextTools'); return !!b && !b.classList.contains('hidden'); },
-      textStyleOf(id) { const o = ve.textOverlays.find((x) => x.id === id); return o ? { font: o.font, sizePct: o.sizePct, color: o.color, bold: o.bold, bg: !!o.bg, bgColor: o.bgColor, outline: !!o.outline, outlineColor: o.outlineColor } : null; },
+      textStyleOf(id) { const o = ve.textOverlays.find((x) => x.id === id); return o ? { font: o.font, sizePct: o.sizePct, color: o.color, bold: o.bold, caps: !!o.caps, bg: !!o.bg, bgColor: o.bgColor, outline: !!o.outline, outlineColor: o.outlineColor } : null; },
       textOverlays() { return ve.textOverlays.map((o) => ({ id: o.id, text: o.text, x: o.x, y: o.y, w: o.w, start: o.start, end: o.end, sizePct: o.sizePct, font: o.font, color: o.color, bold: !!o.bold, bg: !!o.bg, outline: !!o.outline })); },
       /** The stroke the preview is ACTUALLY painting, straight off the element. */
       textOutlineCss() {
