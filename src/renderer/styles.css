@@ -283,7 +283,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
   font-size: 13.5px; font-weight: 500; line-height: 1.38; letter-spacing: .005em;
 }
 .toast-good { --toast-c: #34d399; --toast-bg: rgba(52,211,153,.16); }
-.toast-error { --toast-c: #fb7185; --toast-bg: rgba(251,113,133,.16); }
+.toast-error { --toast-c: #f87171; --toast-bg: rgba(248,113,113,.16); }
 .toast-warn { --toast-c: #fbbf24; --toast-bg: rgba(251,191,36,.16); }
 .toast-ic { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
   color: var(--toast-c); background: var(--toast-bg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--toast-c) 35%, transparent); }
@@ -502,14 +502,14 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .ve-crop-reset:hover { background: var(--primary); }
 
 /* draggable picture-in-picture position guide on the preview (for the selected overlay clip) */
-.ve-overlay-guide { position: absolute; z-index: 8; border: 2px solid #ff7ad9; border-radius: 4px; background: rgba(255,122,217,.14); cursor: move; box-shadow: 0 0 0 9999px rgba(0,0,0,.02); }
+.ve-overlay-guide { position: absolute; z-index: 8; border: 2px solid #fbbf24; border-radius: 4px; background: rgba(251,191,36,.14); cursor: move; box-shadow: 0 0 0 9999px rgba(0,0,0,.02); }
 .ve-overlay-guide.hidden { display: none; }
-.ve-ovg-label { position: absolute; top: -18px; left: 0; font-size: 10px; font-weight: 800; color: #ff7ad9; white-space: nowrap; text-shadow: 0 1px 2px #000; }
-.ve-ovg-resize { position: absolute; right: -7px; bottom: -7px; width: 15px; height: 15px; background: #ff7ad9; border: 2px solid #fff; border-radius: 50%; cursor: nwse-resize; }
+.ve-ovg-label { position: absolute; top: -18px; left: 0; font-size: 10px; font-weight: 800; color: #fbbf24; white-space: nowrap; text-shadow: 0 1px 2px #000; }
+.ve-ovg-resize { position: absolute; right: -7px; bottom: -7px; width: 15px; height: 15px; background: #fbbf24; border: 2px solid #fff; border-radius: 50%; cursor: nwse-resize; }
 
 /* Added media on the preview — the actual second video / picture inside the PiP
    box, so placing an overlay is WYSIWYG instead of positioning an empty frame.
-   Click-through: the pink guide above it is what you grab. */
+   Click-through: the amber guide above it is what you grab. */
 /* z-index 2 puts it above the picture but UNDER the black matte (z 4) and the
    gap mask (z 3) — so an overlay dragged outside the export frame is hidden by
    the matte, exactly as it will be missing from the exported short. */
@@ -538,8 +538,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .ve-text-box { position: absolute; cursor: move; padding: 0; white-space: normal; user-select: none;
   outline: 1.5px dashed transparent; outline-offset: 3px; box-sizing: border-box; pointer-events: auto; }
 .ve-text-content { white-space: pre-wrap; word-break: break-word; }
-.ve-text-box:hover, .ve-text-box.sel { outline-color: #ff7ad9; }
-.ve-text-box .ve-text-resize { position: absolute; right: -6px; bottom: -6px; width: 14px; height: 14px; background: #ff7ad9; border: 2px solid #fff; border-radius: 50%; cursor: nwse-resize; display: none; }
+.ve-text-box:hover, .ve-text-box.sel { outline-color: #fbbf24; }
+.ve-text-box .ve-text-resize { position: absolute; right: -6px; bottom: -6px; width: 14px; height: 14px; background: #fbbf24; border: 2px solid #fff; border-radius: 50%; cursor: nwse-resize; display: none; }
 .ve-text-box.sel .ve-text-resize { display: block; }
 .ve-text-box .ve-text-del { position: absolute; right: -6px; top: -6px; width: 16px; height: 16px; background: var(--danger); color: #fff; border: 2px solid #fff; border-radius: 50%; cursor: pointer; display: none; font-size: 10px; line-height: 12px; text-align: center; padding: 0; }
 .ve-text-box.sel .ve-text-del { display: block; }
@@ -549,20 +549,20 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 /* text-style toolbar — FLOATS over the top of the preview when a text overlay is
    selected (absolute, so it never resizes the preview / shifts the layout). */
 .ve-text-tools { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 9;
-  display: flex; align-items: center; gap: 10px; background: rgba(14,17,24,.92); border: 1px solid #ff7ad9; border-radius: 12px; padding: 7px 14px; box-shadow: 0 4px 18px rgba(0,0,0,.5); white-space: nowrap; }
-.ve-text-tools .vt-label { font-size: 12px; font-weight: 800; color: #ff7ad9; white-space: nowrap; }
+  display: flex; align-items: center; gap: 10px; background: rgba(14,17,24,.92); border: 1px solid #fbbf24; border-radius: 12px; padding: 7px 14px; box-shadow: 0 4px 18px rgba(0,0,0,.5); white-space: nowrap; }
+.ve-text-tools .vt-label { font-size: 12px; font-weight: 800; color: #fbbf24; white-space: nowrap; }
 .ve-text-tools select { width: auto; margin: 0; padding: 5px 8px; font-size: 12.5px; }
 .ve-text-tools .vt-size-wrap { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--muted); font-size: 12px; }
 .ve-text-tools input[type=number] { width: 64px; margin: 0; padding: 5px 6px; font-size: 12.5px; }
 .ve-text-tools input[type=color] { width: 34px; height: 30px; padding: 2px; margin: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-3); cursor: pointer; }
 .ve-text-tools button { background: var(--bg-3); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 5px 11px; font-size: 13px; font-weight: 800; cursor: pointer; }
-.ve-text-tools button:hover { border-color: #ff7ad9; }
-.ve-text-tools #vtBold.on, .ve-text-tools #vtBg.on, .ve-text-tools #vtOutline.on { border-color: #ff7ad9; background: rgba(255,122,217,.18); color: #fff; }
+.ve-text-tools button:hover { border-color: #fbbf24; }
+.ve-text-tools #vtBold.on, .ve-text-tools #vtBg.on, .ve-text-tools #vtOutline.on { border-color: #fbbf24; background: rgba(251,191,36,.18); color: #fff; }
 /* The outline button wears the thing it does: a white A with a black edge,
    which says more than any label would in the width available. */
 .ve-text-tools #vtOutline { color: #fff; -webkit-text-stroke: 2px #000; paint-order: stroke fill; font-size: 15px; font-weight: 900; padding: 4px 12px; }
 .ve-text-tools #vtOutline.on { color: #fff; }
-.ve-text-tools #vtSizeRange { width: 96px; margin: 0; accent-color: #ff7ad9; }
+.ve-text-tools #vtSizeRange { width: 96px; margin: 0; accent-color: #fbbf24; }
 .ve-text-tools .vt-unit { color: var(--muted); font-size: 12px; margin-left: -2px; }
 .ve-text-tools input[type=number]#vtSize { width: 58px; }
 
@@ -678,8 +678,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .ve-seg-label { position: absolute; top: 6px; left: 6px; max-width: calc(100% - 16px); font-size: 11px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; background: rgba(8,10,16,.55); padding: 2px 7px; border-radius: 6px; }
 /* subtle top sheen gives clips a little depth (CapCut-like) */
 .ve-seg::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,0) 42%); }
-/* overlay-lane clip (picture-in-picture) — pink accent so it reads as a 2nd lane */
-.ve-seg-ov { border-style: dashed !important; border-color: #ff7ad9 !important; box-shadow: 0 2px 10px rgba(255,122,217,.4); }
+/* overlay-lane clip (picture-in-picture) — amber accent so it reads as a 2nd lane */
+.ve-seg-ov { border-style: dashed !important; border-color: #fbbf24 !important; box-shadow: 0 2px 10px rgba(251,191,36,.4); }
 /* A pause removed with "Close gap": the clip is ONE short, and this is the slice
    that won't be in the export. Hatched + dark so it reads as "stitched out", and
    it sits ABOVE the clip's ::after sheen so the notch stays unmistakable. */
@@ -704,8 +704,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .ve-selbox { position: absolute; top: 0; height: 100%; background: rgba(79,124,235,.25); border: 1px solid var(--primary); display: none; pointer-events: none; }
 
 .ve-text-track { position: relative; height: 30px; margin-top: 6px; background: var(--bg); border-radius: 6px; overflow: visible; }
-.ve-text-clip { position: absolute; top: 2px; height: 26px; border: 2px solid #ff7ad9; background: rgba(255,122,217,.22); border-radius: 6px; cursor: move; box-sizing: border-box; display: flex; align-items: center; padding: 0 8px; font-size: 11px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; }
-.ve-text-clip:hover, .ve-text-clip.sel { box-shadow: 0 0 10px rgba(255,122,217,.6); }
+.ve-text-clip { position: absolute; top: 2px; height: 26px; border: 2px solid #fbbf24; background: rgba(251,191,36,.22); border-radius: 6px; cursor: move; box-sizing: border-box; display: flex; align-items: center; padding: 0 8px; font-size: 11px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; }
+.ve-text-clip:hover, .ve-text-clip.sel { box-shadow: 0 0 10px rgba(251,191,36,.6); }
 .ve-tc-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
 /* drag-to-extend handles on the text block (like the video clips' trim handles) */
 .ve-text-clip .ve-tc-h { position: absolute; top: 0; width: 9px; height: 100%; cursor: ew-resize; }
@@ -1310,7 +1310,7 @@ button.cap-model-pick .cap-model-name { align-items: flex-start; text-align: lef
 .fxq-looks { display: flex; gap: 12px; overflow-x: auto; padding: 6px 6px 6px; margin: -6px -6px 0; scrollbar-width: none; scroll-snap-type: x proximity; }
 .fxq-looks::-webkit-scrollbar { display: none; }
 .fxq-looks button { flex: none; display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 0; border: 0; background: none; color: var(--fq-mut); font-size: 12px; font-weight: 650; scroll-snap-align: start; }
-.fxq-looks i { position: relative; display: block; width: 66px; height: 66px; border-radius: 14px; background: linear-gradient(135deg, #f59e0b, #ec4899 45%, #6366f1) center / cover no-repeat;
+.fxq-looks i { position: relative; display: block; width: 66px; height: 66px; border-radius: 14px; background: linear-gradient(135deg, #22d3ee, #6366f1) center / cover no-repeat;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); transition: transform .15s ease; }
 .fxq-looks button:active i { transform: scale(.94); }
 .fxq-looks button.on { color: #fff; }

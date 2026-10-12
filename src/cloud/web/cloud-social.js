@@ -264,27 +264,32 @@
         </div>
       </header>
       <main class="ch-scroll">
-        <section class="ch-hello"><h1 id="chHello"></h1><span class="ch-ask" id="chAsk"></span></section>
+        <section class="ch-hello"><div class="ch-hello-t"><h1 id="chHello"></h1><p>What will you make today?</p></div><span class="ch-ask" id="chAsk"></span></section>
         <div id="chInvite"></div>
+        <!--
+          ►► ONE BIG DOOR, TWO SMALL ONES. ◄◄ "The UI is confusing… a lot is going
+          on." Three loud cards of the same size asked to be read one by one; now
+          the studio is the one big door (what most visits are for) and AI Montage
+          and Post online sit side by side under it — all three on one screen.
+          (No project list here: the Video Studio card says how many and opens them.)
+        -->
         <button type="button" class="ch-card ch-studio" data-go="projects">
           <span class="ch-glow"></span>
-          <span class="ch-art">${mi('film')}</span>
-          <span class="ch-copy"><b>Video Studio</b></span>
+          <span class="ch-copy"><b>Video Studio</b><small>Edit, make shorts, add captions</small></span>
+          <span class="ch-hero" aria-hidden="true"><span class="ch-hero-frame"><i class="ch-hero-play"></i><span class="ch-hero-cap"><i></i><i></i><i></i></span></span>
+            <span class="ch-hero-tl"><i></i><i></i><i></i><b></b></span></span>
           <span class="ch-foot"><span class="ch-foot-tx" id="chStudioFoot">Open a video to start</span><span class="ch-arrow">${mi('chev-right')}</span></span>
         </button>
-        <!-- (no project list here: the Video Studio card opens them all — "6 projects · open one or start new") -->
-        <button type="button" class="ch-card ch-montage" data-home="montage">
-          <span class="ch-glow"></span>
-          <span class="ch-art">${mi('sparkles')}</span>
-          <span class="ch-copy"><b>AI Montage</b></span>
-          <span class="ch-foot"><span class="ch-foot-tx">Start</span><span class="ch-arrow">${mi('chev-right')}</span></span>
-        </button>
-        <button type="button" class="ch-card ch-social" data-go="scheduler" id="chSocialCard">
-          <span class="ch-glow"></span>
-          <span class="ch-art">${mi('calendar')}</span>
-          <span class="ch-copy"><b>Post online</b></span>
-          <span class="ch-foot"><span class="ch-foot-tx" id="chSocialFoot">Plan your first post</span><span class="ch-marks" id="chMarks"></span><span class="ch-arrow">${mi('chev-right')}</span></span>
-        </button>
+        <div class="ch-duo">
+          <button type="button" class="ch-door ch-montage" data-home="montage">
+            <span class="ch-door-ic">${mi('sparkles')}</span><span class="ch-door-go">${mi('chev-right')}</span>
+            <b>AI Montage</b><small>Your clips, edited by AI</small>
+          </button>
+          <button type="button" class="ch-door ch-social" data-go="scheduler" id="chSocialCard">
+            <span class="ch-door-ic">${mi('calendar')}</span><span class="ch-door-go">${mi('chev-right')}</span>
+            <b>Post online</b><small id="chSocialFoot">Plan your first post</small><span class="ch-marks" id="chMarks"></span>
+          </button>
+        </div>
         <section class="ch-sec hidden" id="chJobs"><h2>Running now</h2><div class="ch-jobs"></div></section>
         <section class="ch-sec hidden" id="chReady">
           <h2>Ready to post <button type="button" class="ch-link" data-home="files">All files</button></h2>
