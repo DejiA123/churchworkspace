@@ -69,7 +69,19 @@
     },
   };
   const PLAT_ORDER = ['tiktok', 'youtube', 'instagram', 'facebook'];
-  const platMark = (p, cls) => `<span class="cs-mark${cls ? ' ' + cls : ''}" title="${escAttr((PLAT[p] || {}).name || p)}">${(PLAT[p] || {}).svg || ''}</span>`;
+  /*
+   * Each Instagram mark gets its OWN gradient id. They all used to point at one
+   * "mwIgG", and a gradient is found by id across the whole page: when the
+   * first copy sat in something hidden (a Home banner slide not showing), every
+   * Instagram mark lost its colours and drew white lines on white — invisible
+   * on the light pages.
+   */
+  let markN = 0;
+  const platMark = (p, cls) => {
+    let svg = (PLAT[p] || {}).svg || '';
+    if (svg.includes('mwIgG')) { const id = 'mwIgG' + (++markN); svg = svg.replace(/mwIgG/g, id); }
+    return `<span class="cs-mark${cls ? ' ' + cls : ''}" title="${escAttr((PLAT[p] || {}).name || p)}">${svg}</span>`;
+  };
 
   /* --------------------------------------------------------------- times */
 
@@ -1216,7 +1228,7 @@
       if (!st.files.length) {
         const err = st.sendErr ? `<p class="csb-send-err">${mi('alert')}<span>${esc(st.sendErr)}</span></p>` : '';
         return '<div class="csb-choose">'
-          + `<button type="button" class="csb-src" data-c="exports"><span class="csb-src-ic">${mi('film')}</span><b>Your exports</b><small>Shorts and videos the studio made</small></button>`
+          + `<button type="button" class="csb-src" data-c="exports"><span class="csb-src-ic">${mi('film')}</span><b>My videos</b><small>The shorts and videos you made</small></button>`
           + `<button type="button" class="csb-src" data-c="device"><span class="csb-src-ic">${mi('upload')}</span><b>From this ${phone() ? 'phone' : 'computer'}</b><small>Videos or flyers — pick one, or many at once</small></button>`
           + '</div>' + err;
       }
@@ -1787,7 +1799,7 @@
 
     async function pickExports() {
       await loadExports();
-      const sub = C.openPanel({ id: 'csPickExports', title: 'Your exports', cls: 'cp-pick' });
+      const sub = C.openPanel({ id: 'csPickExports', title: 'My videos', cls: 'cp-pick' });
       const files = S.exports;
       const chosen = new Set();
       const drawPick = () => {
@@ -2719,7 +2731,7 @@
 
   async function openMontage() {
     if (MT.busy && MT.panel && document.body.contains(MT.panel.el)) return;
-    const panel = C.openPanel({ id: 'cloudMontage', title: 'AI Montage', cls: 'cp-montage', onClose: () => { mtPreviewStop(); if (!MT.busy) mtRelease(); } });
+    const panel = C.openPanel({ id: 'cloudMontage', title: 'AI Montage', cls: 'cp-montage', full: true, onClose: () => { mtPreviewStop(); if (!MT.busy) mtRelease(); } });
     MT.panel = panel;
     let who = null, lib = null;
     try { who = await window.api.montage.status(); } catch (e) { who = null; }
@@ -2808,14 +2820,14 @@
     const videos = n
       ? `<div class="mt-grid${MT.order === 'mine' ? ' mt-ordered' : ''}">${tiles}
           <button type="button" class="mt-addt" data-mt="add"><span class="mt-addt-ic">${mi('plus')}</span><span>Phone</span></button>
-          <button type="button" class="mt-addt" data-mt="addsrv"><span class="mt-addt-ic">${mi('folder')}</span><span>My files</span></button></div>
+          <button type="button" class="mt-addt" data-mt="addsrv"><span class="mt-addt-ic">${mi('folder')}</span><span>My videos</span></button></div>
         ${!talk && n > 1 ? '<small class="mt-hint">Hold a tile and drag it to change the order.</small>' : ''}`
       : `<div class="mt-empty">
           <span class="mt-empty-top"><span class="mt-empty-ic">${mi(talk ? 'film' : 'image')}</span>
             <span class="mt-empty-t"><b>${talk ? 'Add a video of someone speaking' : 'Add your clips and photos'}</b>
             <small>${talk ? 'A sermon, a talk, a testimony — the AI finds the best lines' : 'Two or more — the AI cuts them to the music'}</small></span></span>
           <span class="mt-empty-btns"><button type="button" class="mt-btn mt-btn-hi" data-mt="add">${mi('phone')}<span>From phone</span></button>
-            <button type="button" class="mt-btn" data-mt="addsrv">${mi('folder')}<span>My files</span></button></span></div>`;
+            <button type="button" class="mt-btn" data-mt="addsrv">${mi('folder')}<span>My videos</span></button></span></div>`;
 
     // 3 — fine-tune: one list, each row its value, opened in place
     const keepRow = `<label class="mt-swline"${talk ? ' hidden' : ''}><span>Keep the clips’ own sound${MT.song || MT.songFile || MT.free ? ' under the music' : ''}</span>

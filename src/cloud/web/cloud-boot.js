@@ -1372,10 +1372,10 @@ let _hideTimer = null;
     const paint = () => {
       const people = (info.people || []).filter((u) => !me || u.uid !== me.uid);
       panel.body.innerHTML = `<div class="pf-me"><span class="pf-ava">${escHtml(((me && me.name) || '?').charAt(0).toUpperCase())}</span>`
-        + `<span class="pf-tx"><b>${escHtml((me && me.name) || 'This studio')}</b><small>${me ? (me.owner ? 'Owner · your space keeps the studio’s own files' : 'Your own space — only you see your work') : 'Signed in with the access code'}</small></span></div>`
+        + `<span class="pf-tx"><b>${escHtml((me && me.name) || 'This studio')}</b><small>${me ? (me.owner ? 'Owner · you look after this studio' : 'Only you see your videos and posts') : 'Signed in with the access code'}</small></span></div>`
         + (me ? `<div class="pf-sec"><b>Change your password</b>`
-          + '<input type="password" class="pf-in" id="pfCur" placeholder="current password" autocomplete="current-password" />'
-          + '<input type="password" class="pf-in" id="pfNew" placeholder="new password (6+ characters)" autocomplete="new-password" />'
+          + '<input type="password" class="pf-in" id="pfCur" placeholder="Current password" autocomplete="current-password" />'
+          + '<input type="password" class="pf-in" id="pfNew" placeholder="New password (6 or more letters)" autocomplete="new-password" />'
           + '<button type="button" class="pf-btn" data-pf="pass">Save new password</button></div>' : '')
         + (me && me.owner ? `<div class="pf-sec"><b>People with a space here</b>${people.length ? '' : '<small class="pf-empty">Nobody else yet. Share the studio’s address and access code, and they tap “New here”.</small>'}`
           + people.map((u) => `<div class="pf-person" data-uid="${escAttr(u.uid)}"><span class="pf-ava sm">${escHtml(u.name.charAt(0).toUpperCase())}</span>`
@@ -4779,7 +4779,8 @@ let _hideTimer = null;
     const scrim = document.createElement('div');
     scrim.className = 'cp-scrim';
     const el = document.createElement('section');
-    el.className = 'cp-panel' + (o.cls ? ' ' + o.cls : '');
+    // `full`: a page of its own (AI Montage) — the whole screen, not a sheet with a gap above it
+    el.className = 'cp-panel' + (o.full ? ' cp-full' : '') + (o.cls ? ' ' + o.cls : '');
     el.setAttribute('role', 'dialog');
     el.setAttribute('aria-modal', 'true');
     if (o.id) el.id = o.id;
@@ -4806,7 +4807,7 @@ let _hideTimer = null;
     let y0 = null, dy = 0;
     p.head.addEventListener('touchstart', (e) => {
       // (a sheet only on a phone — on a wide screen it is a card that stays put)
-      if (e.target.closest('button') || !window.matchMedia('(max-width: 900px)').matches) return;
+      if (e.target.closest('button') || el.classList.contains('cp-full') || !window.matchMedia('(max-width: 900px)').matches) return;
       y0 = e.touches[0].clientY; dy = 0; el.style.transition = 'none';
     }, { passive: true });
     p.head.addEventListener('touchmove', (e) => {
@@ -5117,15 +5118,17 @@ let _hideTimer = null;
       onClose: () => { clearInterval(jobs.timer); jobs.timer = null; jobs.sig = ''; },
     });
     p.body.addEventListener('click', onJobsClick);
-    p.foot.innerHTML = `<button type="button" class="cp-link" data-jobs="saved">${mi('download')}Everything finished this session</button>`
+    p.foot.innerHTML = `<button type="button" class="cp-link" data-jobs="saved">${mi('download')}Finished videos</button>`
       + '<small class="cj-server" id="cjServer"></small>';
     // What the exports are running on — the one number that explains their speed.
     call('machine:info').then((m) => {
       const el = $('#cjServer'); if (!el || !m) return;
       const cpu = m.quota ? (m.quota >= 1 ? `${Math.round(m.quota * 10) / 10} CPU` : `${Math.round(m.quota * 100) / 100} of a CPU`) : `${m.cpus} CPU${m.cpus > 1 ? 's' : ''}`;
       const slow = m.quota && m.quota < 1;
-      el.innerHTML = `Server: ${escHtml(cpu)} · ${escHtml(String(Math.round(m.memoryMB)))} MB`
-        + (slow ? '<br>A 90-second 1080p short takes several minutes on this — a bigger server plan makes every export faster.' : '');
+      // CPUs and megabytes mean nothing to most people: say something only
+      // when it explains a wait they will notice.
+      void cpu;
+      el.innerHTML = slow ? 'This server is small, so each short takes a few minutes. A bigger server plan makes them faster.' : '';
     }).catch(() => {});
     p.foot.addEventListener('click', (e) => {
       if (!e.target.closest('[data-jobs="saved"]')) return;

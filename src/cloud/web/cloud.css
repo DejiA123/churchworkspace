@@ -3559,3 +3559,87 @@ body.mw-cloud .cloud-sheet-modal .cloud-files-up, body.mw-cloud .cloud-files-bar
 .cloud-sheet-modal .cloud-files-empty { color: #5d6470; }
 .cloud-sheet-modal .cloud-files-empty b { color: #0f1115; }
 .cloud-sheet-modal .cf-empty-art { background: #f1f3f6; color: #0f1115; }
+
+/* A page of its own (AI Montage): the whole screen on a phone, like any of
+   CapCut's pages — no gap above it, no grab handle, a solid header that the
+   page scrolls under cleanly. */
+@media (max-width: 900px) {
+  .cp-panel.cp-full {
+    top: 0; bottom: var(--kb, 0px); max-height: none; height: auto;
+    border-radius: 0; box-shadow: none;
+    transform: translateX(100%);
+  }
+  .cp-panel.cp-full.on { transform: none; }
+  .cp-panel.cp-full .cp-grab { display: none; }
+  .cp-panel.cp-full .cp-head { padding: calc(env(safe-area-inset-top) + 12px) 12px 12px 20px; background: inherit; border-bottom: 1px solid rgba(15, 23, 42, .07); }
+  .cp-panel.cp-full .cp-title { font-size: 22px; }
+}
+
+/* ===================================================================== */
+/*  POST ONLINE AND EVERY POP-UP PANEL, IN THE SAME LIGHT LOOK            */
+/* ===================================================================== */
+/* The Posts page and its sheets were a dark, glowing purple page in an app
+   that is otherwise CapCut-light outside the editor. The page is built on
+   colour variables, so it takes the light palette here; the few places that
+   wrote white text straight in are put right below. Text that sits ON a
+   video thumbnail (tiles, the preview, its pills) stays white. */
+.cp-panel { background: #fff; color: #0f1115; box-shadow: 0 -12px 40px rgba(15, 23, 42, .16); }
+.cp-grab { background: #d5d8de; }
+.cp-title { color: #0f1115; }
+.cp-x { background: #f1f3f6; color: #3b4250; }
+.cp-link { color: #1f6fe0; }
+.csb, .csb-sheet, .csb-sheet.cp-panel {
+  --b-bg: #fff; --b-s1: #f6f7f9; --b-s2: #eef0f3; --b-s3: #fff;
+  --b-line: rgba(15, 23, 42, .08); --b-t1: #0f1115; --b-t2: #5d6470; --b-t3: #8b909b;
+  --b-acc: #1f6fe0; --b-grad: #0f1115;
+  color: #0f1115;
+}
+.csb { background: #fff !important; }
+.csb-sheet, .csb-sheet.cp-panel { background: #fff; }
+.csb-head h1, .csb-h2 h2, .csb-empty b, .csb-ai-head b { color: #0f1115; }
+.csb-round { background: #f1f3f6; color: #0f1115; }
+/* the one black button, flat — no glow */
+.csb-plus, .csb-cta, .csb-go { background: #0f1115; color: #fff; box-shadow: none; }
+.csb-go:disabled, .csb-cta:disabled { background: #e9ebef; color: #9aa1ad; }
+.csb-seg { background: #f1f3f6; }
+.csb-seg button.on { background: #fff; color: #0f1115; box-shadow: 0 1px 4px rgba(15, 23, 42, .12); }
+.csb-acc { background: #f6f7f9; color: #0f1115; border-color: transparent; }
+.csb-acc.add { background: #fff; border-color: #cfd4dc; }
+.csb-acc-plus { background: #eaf2ff; color: #1f6fe0; }
+.csb-acc-pic { background-color: #e7e9ee; }
+.csb-hero, .csb-src, .csb-when, .csb-act, .csb-more summary { color: #0f1115; }
+.csb-src { border-color: rgba(15, 23, 42, .08); background: #f6f7f9; }
+.csb-when { border-color: rgba(15, 23, 42, .1); background: #fff; }
+.csb-act { background: #f1f3f6; }
+.csb-facts span { background: #f1f3f6; color: #0f1115; }
+.csb-handtodo { background: #eaf2ff; border-color: rgba(31, 111, 224, .35); color: #0f1115; }
+.csb-ai { background: #f6f7f9; border-color: rgba(15, 23, 42, .08); }
+.csb-plan { background: #eaf2ff; color: #1e3a8a; }
+.csb-style { background: #f1f3f6; border-color: transparent; color: #0f1115; }
+.csb-names-btn { border-color: #cfd4dc; color: #5d6470; }
+.csb-note { color: #b45309; }
+.csb-sheet .cs-chip.on { background: #0f1115; color: #fff; border-color: #0f1115; }
+.csb-sheet .cs-chip { background: #f1f3f6; color: #0f1115; border-color: transparent; }
+.csb-strip-it { background-color: #e7e9ee; }
+.csb-prev { background-color: #e7e9ee; }
+/* the Posts page's top row stays put and solid: the title and New post used
+   to slide UNDER the back button when the page scrolled */
+.csb-top { position: relative; z-index: 3; background: #fff; padding-bottom: 8px; }
+/* Your space: grey boxes and the one black button, like sign in */
+.cp-panel .pf-in { background: #f1f3f6; color: #0f1115; border: 2px solid transparent; }
+.cp-panel .pf-in::placeholder { color: #9aa1ad; }
+.cp-panel .pf-in:focus { outline: none; background: #fff; border-color: #1f6fe0; }
+body.mw-cloud .cp-panel .primary-btn { background: #0f1115; color: #fff; border: 0; box-shadow: none; }
+.cp-panel .pf-sec, .cp-panel hr { border-color: rgba(15, 23, 42, .08); }
+/* How do I…? (the guide's help sheet): light on the phone, like every other sheet */
+body.mw-cloud .mwg-help { background: rgba(15, 17, 21, .35); }
+body.mw-cloud .mwg-sheet { background: #fff; color: #0f1115; box-shadow: 0 -10px 40px rgba(15, 23, 42, .18); }
+body.mw-cloud .mwg-sheet h2 .mwg-close { background: #f1f3f6; color: #3b4250; }
+body.mw-cloud .mwg-tile, body.mw-cloud .mwg-tile:nth-child(n) { background: #f6f7f9; color: #0f1115; box-shadow: none; }
+body.mw-cloud .mwg-reset { color: #1f6fe0; }
+.cj-server:empty { display: none; }
+.cp-panel .pf-btn { background: #0f1115; color: #fff; box-shadow: none; }
+.cp-panel .pf-sec { border-top-color: rgba(15, 23, 42, .08); }
+.cp-panel .pf-tx small, .cp-panel .pf-sec > b { color: #6b7280; }
+.cp-panel .pf-mini { background: #f1f3f6; color: #0f1115; border: 0; box-shadow: none; }
+.cp-panel .pf-mini.danger { background: #fff1f0; color: #d92d20; }

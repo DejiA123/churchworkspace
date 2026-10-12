@@ -52,19 +52,25 @@ const up = async () => { for (let k = 0; k < 80; k++) { try { await new Promise(
     // tap the lit name's line: it goes to that thing
     const hello = await page.evaluate(() => document.getElementById('chHello').textContent);
     check(/^Good (morning|afternoon|evening), Deji$/.test(hello), 'the greeting is in the banner', hello);
-    // How to → the help sheet
+    // Help → the help sheet
     await page.locator('#cloudHome [data-tool="help"]').tap(); await sleep(500);
-    check(await page.evaluate(() => !!document.querySelector('.mwg-help')), '"How to" opens the help');
+    check(await page.evaluate(() => !!document.querySelector('.mwg-help')), '"Help" opens the help');
     await page.evaluate(() => window.MWGuide.closeHelp()); await sleep(300);
     // Post online → the posts screen
     await page.locator('#chSocialCard').tap(); await sleep(800);
     check(await page.evaluate(() => document.body.classList.contains('mw-sched')), '"Post online" opens Posts');
     await page.evaluate(() => window.MWSocial.go('home')); await sleep(600);
-    // Saved → the saved sheet
-    await page.locator('#cloudHome [data-tool="saved"]').tap(); await sleep(800);
-    const saved = await page.evaluate(() => { const m = document.getElementById('cloudDownloadsModal'); return !!m && !m.classList.contains('hidden'); });
-    check(saved, '"Saved" opens what is saved (Finished in this session)');
-    await page.evaluate(() => document.getElementById('cloudDownloadsClose').click()); await sleep(500);
+    // Add a video → the phone's own picker (My videos opens behind it to show it arriving)
+    const [chooser] = await Promise.all([
+      page.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null),
+      page.locator('#cloudHome [data-tool="upload"]').tap(),
+    ]);
+    await sleep(600);
+    const filesOpen = await page.evaluate(() => { const m = document.getElementById('cloudFilesModal'); return !!m && !m.classList.contains('hidden'); });
+    check(!!chooser && filesOpen, '"Add a video" opens the phone\'s picker, with My videos behind it', { chooser: !!chooser, filesOpen });
+    // one place for videos: My videos, by that name
+    check(await page.evaluate(() => (document.querySelector('#cloudFilesModal .cloud-files-title') || {}).textContent === 'My videos'), 'the videos sheet is called My videos');
+    await page.evaluate(() => { const x = document.getElementById('cloudFilesClose'); if (x) x.click(); }); await sleep(500);
     await page.evaluate(() => window.MWSocial.go('home')); await sleep(600);
     // the two cards
     await page.locator('#cloudHome .ch-montage').tap(); await sleep(1200);
