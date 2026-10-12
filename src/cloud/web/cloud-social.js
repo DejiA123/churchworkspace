@@ -2595,11 +2595,12 @@
   }
   function mtAboutHtml() {
     const ideas = mtSpeakerGuesses().map((g) => [g, '🎤 ' + g]).concat(MT_OCCASIONS);
-    return `<section class="mt-sec"><h3>What’s it about? <small>optional</small></h3>
-        <textarea id="mtBrief" class="mt-brief" rows="2" maxlength="400" placeholder="e.g. Bishop David Richman at The Power House — faith over fear. Join us Sundays at 10am">${esc(MT.brief)}</textarea>
-        <div class="mt-ideas">${ideas.map(([v, l]) => `<button type="button" class="mt-chip${mtHas(MT.brief, v) ? ' on' : ''}" data-mt-idea="${escAttr(v)}">${esc(l)}</button>`).join('')}</div></section>`;
+    // (mi-off: every idea keeps its own emoji — none swapped for a line icon, so the row reads as one set)
+    return `<textarea id="mtBrief" class="mt-brief" rows="2" maxlength="400" placeholder="e.g. Bishop David Richman at The Power House — faith over fear. Join us Sundays at 10am">${esc(MT.brief)}</textarea>
+        <div class="mt-ideas mi-off">${ideas.map(([v, l]) => `<button type="button" class="mt-chip${mtHas(MT.brief, v) ? ' on' : ''}" data-mt-idea="${escAttr(v)}">${esc(l)}</button>`).join('')}</div>`;
   }
-  const MT = { items: [], song: null, songFile: null, style: 'hype', len: 30, custom: 120, aspect: '9:16', keep: true, brief: '', busy: false, order: 'ai', caps: true, mode: 'talk', free: null, freeMood: null, voice: '' };
+  const MT = { items: [], song: null, songFile: null, style: 'hype', len: 30, custom: 120, aspect: '9:16', keep: true, brief: '', busy: false, order: 'ai', caps: true, mode: 'talk', free: null, freeMood: null, voice: '',
+    acc: new Set() };   // the rows of "Fine-tune" that are open (kept across redraws)
   /* which free mood suits which style, for "✨ Pick for me" */
   const MT_MOOD_OF = { hype: 'hype', fun: 'hype', cinematic: 'epic', worship: 'uplift', emotional: 'calm' };
   /*
@@ -2610,11 +2611,16 @@
    * grade, B-roll from the photos and captions lit up word by word
    * (montage.js makeTalk).
    */
-  const MT_MODES = [['talk', '🔥 Viral Montage'], ['music', '🎵 AI Standard Montage']];   // the Viral Montage first (on the left)
+  // "Viral" beside "Music" read as two kinds of music: Viral is content made to be shared, Standard the classic montage
+  const MT_MODES = [['talk', 'Viral'], ['music', 'Standard']];   // Viral first (on the left)
+  const MT_KIND = {
+    talk: { sub: 'The best lines, hook first — made to go viral' },
+    music: { sub: 'Your clips and photos, cut to music' },
+  };
   const MT_TALK_LENS = [[15, '15s'], [30, '30s'], [45, '45s'], [60, '60s'], ['custom', 'Custom']];
-  const MT_ORDERS = [['ai', '✨ AI decides'], ['mine', '📌 My order']];
+  const MT_ORDERS = [['ai', 'AI decides'], ['mine', 'My order']];
   const MT_STYLES = [['hype', 'Hype'], ['worship', 'Worship'], ['emotional', 'Emotional'], ['cinematic', 'Cinematic'], ['fun', 'Fun']];
-  const MT_LENS = [['all', 'Use everything'], [15, '15s'], [30, '30s'], [45, '45s'], [60, '60s'], ['custom', 'Custom']];
+  const MT_LENS = [['all', 'All'], [15, '15s'], [30, '30s'], [45, '45s'], [60, '60s'], ['custom', 'Custom']];
   const MT_ASPECTS = [['9:16', 'Reels / TikTok'], ['1:1', 'Square'], ['4:5', 'Feed'], ['16:9', 'YouTube']];
 
   async function openMontage() {
@@ -2636,62 +2642,131 @@
     for (const it of MT.items) { try { URL.revokeObjectURL(it.url); } catch (e) {} }
   }
 
+  /*
+   * ►► THE AI MONTAGE, CALM AND CLEAR. ◄◄ The feedback: "confusing,
+   * overwhelming, too much going on" — and "Viral" beside "Music" read as two
+   * kinds of music. So the page asks two things, big: what are you making (two
+   * picture cards — Viral, made to be shared; Standard, clips and photos cut to
+   * music) and which videos. Every other choice is one tidy list, as a phone's
+   * own Settings is: each row says what it is set to now, and opens in place to
+   * change it. Nothing was taken away — every choice is a row.
+   */
+  function mtArt(v) {
+    return v === 'talk'
+      ? `<span class="mt-art mt-art-v" aria-hidden="true"><span class="mt-ph mt-ph-l"></span><span class="mt-ph mt-ph-r"></span>
+          <span class="mt-ph mt-ph-c">${mi('flame')}<span class="mt-cap"><i></i><i></i><i></i></span></span><span class="mt-likes"><i></i>24K</span></span>`
+      : `<span class="mt-art mt-art-s" aria-hidden="true"><span class="mt-film"><i></i><i></i><i></i><i></i></span>
+          <span class="mt-eq"><i></i><i></i><i></i><i></i><i></i></span><span class="mt-art-note">${mi('music')}</span></span>`;
+  }
+  // a shape's own outline, at most 40 × 34
+  const mtBox = (v) => { const [a, b] = String(v).split(':').map(Number); const k = Math.min(40 / a, 34 / b); return [Math.round(a * k), Math.round(b * k)]; };
+  // "🙏 Worship & uplifting" → "Worship"
+  const mtWord = (n) => String(n || '').replace(/\s*&.*$/, '').replace(/^\S+\s/, '');
+  /* what each row of the list is set to now, in a word or two (the music: what will really be used) */
+  function mtValues(who) {
+    const F = MT.freeList;
+    let music = 'No music';
+    if (MT.songFile) music = MT.songFile.name.replace(/\.[^.]+$/, '');
+    else if (MT.free && F && F.tracks) {
+      if (MT.free === 'auto') music = 'Pick for me · ' + mtWord((F.moods.find((m) => m.id === mtFreeMood()) || {}).name || mtFreeMood());
+      else music = (F.tracks.find((t) => t.id === MT.free) || {}).title || 'A free song';
+    } else if (MT.song) music = String(MT.song.name || 'Your song');
+    const voices = (who.voiceover && who.voiceover.voices) || [];
+    return {
+      music,
+      len: MT.len === 'all' ? 'All of it' : MT.len === 'custom' ? mtClock(MT.custom) : MT.len + ' sec',
+      shape: (MT_ASPECTS.find(([v]) => v === MT.aspect) || ['', MT.aspect])[1],
+      voice: !MT.voice ? 'None' : ((voices.find((x) => x.id === MT.voice) || {}).label || 'On'),
+      about: MT.brief ? MT.brief : 'Optional',
+      look: (MT_STYLES.find(([v]) => v === MT.style) || ['', 'Hype'])[1],
+      order: MT.order === 'mine' ? 'My order' : 'AI decides',
+    };
+  }
+  // the mood "✨ Pick for me" deals from: the one tapped, else the style's own
+  const mtFreeMood = () => MT.freeMood || MT_MOOD_OF[MT.style] || 'uplift';
+
   function mtPaint() {
     const p = MT.panel; if (!p) return;
     const esc = C.esc, attr = C.escAttr;
     const who = MT.who || {};
-    const chips = (list, cur, key) => list.map(([v, label]) => `<button type="button" class="mt-chip${String(cur) === String(v) ? ' on' : ''}" data-mt-${key}="${attr(v)}">${esc(label)}</button>`).join('');
     const openPath = window.VideoEditor && (window.VideoEditor.montagePath || window.VideoEditor.currentPath) ? (window.VideoEditor.montagePath || window.VideoEditor.currentPath)() : null;
     const openIsMontage = !!openPath && /(^|[\\/])montage-[^\\/]*\.mp4$/i.test(openPath);
     const talk = MT.mode === 'talk';
     if (talk && MT.len === 'all') MT.len = 30;
     const nVid = MT.items.filter((it) => it.kind === 'video').length;
     const ready = talk ? nVid >= 1 : MT.items.length >= 2;
-    /*
-     * ►► AS EASY AS 1-2-3. ◄◄ "The app works great but the screens are
-     * confusing — a lot is going on." So: three numbered steps — your videos,
-     * the kind of edit (two big cards), then music, length and shape — and
-     * every other choice (narrator, story, style, order, captions) folded
-     * under "More options", all still there. No long explanations.
-     */
-    const KIND = { talk: ['🔥', 'Viral', 'The best lines of someone speaking'], music: ['🎵', 'Music', 'Clips and photos cut to a song'] };
-    const step = (n, title, extra) => `<h3 class="mt-step"><i>${n}</i><span>${title}</span>${extra ? `<small>${extra}</small>` : ''}</h3>`;
-    p.body.innerHTML = `
-      ${openIsMontage ? `<button type="button" class="me-banner" data-mt-rearrange>✏️ <span><b>Rearrange the montage that’s open</b><small>Move clips and photos, then remake it</small></span></button>` : ''}
-      <section class="mt-sec">${step(1, talk ? 'Add your videos' : 'Add your clips and photos', MT.items.length ? MT.items.length + ' added' : talk ? '1 or more' : '2 or more')}
-        <div class="mt-grid${MT.order === 'mine' ? ' mt-ordered' : ''}">${MT.items.map((it, i) => `<div class="mt-tile" data-i="${i}">${it.kind === 'image'
-          ? `<img src="${attr(it.url)}" alt="" draggable="false" />` : (it.poster ? `<img src="${attr(it.poster)}" alt="" draggable="false" />` : '<span class="mt-load"></span>') + (talk
-            ? `<button type="button" class="mt-part${mtHasPart(it) ? ' on' : ''}" data-mt-part="${i}" aria-label="Choose the part to use">✂️ ${mtHasPart(it) ? mtClock(it.from || 0) + '–' + mtClock(it.to || it.secs) : 'Trim'}</button>`
-            : `<span class="mt-dur">▶${it.secs ? ' ' + Math.floor(it.secs / 60) + ':' + String(Math.round(it.secs % 60)).padStart(2, '0') : ''}</span>`)}
-          ${MT.order === 'mine' ? `<span class="mt-num">${i + 1}</span>` : ''}
-          <button type="button" class="mt-x" data-mt-del="${i}" aria-label="Remove">✕</button></div>`).join('')}
-          <button type="button" class="mt-add" data-mt="add">${mi('plus')}<span>From phone</span></button>
-          <button type="button" class="mt-add mt-add-files" data-mt="addsrv">${mi('folder')}<span>My files</span></button></div>
-      </section>
-      <section class="mt-sec">${step(2, 'Pick a kind')}
-        <div class="mt-kinds">${MT_MODES.map(([v]) => `<button type="button" class="mt-kind${MT.mode === v ? ' on' : ''}" data-mt-mode="${v}"><em>${KIND[v][0]}</em><b>${KIND[v][1]}</b><small>${KIND[v][2]}</small></button>`).join('')}</div></section>
-      <section class="mt-sec">${step(3, talk ? 'Background music' : 'Music', 'tap ▶ to listen')}
-        ${mtMusicHtml()}
-        <label class="mt-toggle"${talk ? ' hidden' : ''}><input type="checkbox" id="mtKeep" ${MT.keep ? 'checked' : ''}/> <span>Keep the clips’ own sound${MT.song || MT.songFile ? ' under the music' : ''}</span></label>
-      </section>
-      <section class="mt-sec"><h3>How long?</h3><div class="mt-row">${chips(talk ? MT_TALK_LENS : MT_LENS, MT.len, 'len')}</div>
+    const n = MT.items.length;
+    // a choice of a few: one segmented control, as the phone's own
+    const seg = (list, cur, key) => `<div class="mt-sc">${list.map(([v, label]) => `<button type="button" class="${String(cur) === String(v) ? 'on' : ''}" data-mt-${key}="${attr(v)}">${esc(label)}</button>`).join('')}</div>`;
+    const head = (k, title, meta) => `<h3 class="mt-h"><i>${k}</i><span>${title}</span>${meta ? `<small>${meta}</small>` : ''}</h3>`;
+    const row = (key, icon, label, value, body, hidden) => `<details class="mt-acc" data-acc="${key}"${MT.acc.has(key) ? ' open' : ''}${hidden ? ' hidden' : ''}>
+        <summary><span class="mt-ic mt-ic-${key}">${mi(icon)}</span><h3>${label}</h3><span class="mt-val">${esc(value)}</span><span class="mt-chev" aria-hidden="true"></span></summary>
+        <div class="mt-acc-in">${body}</div></details>`;
+    const V = mtValues(who);
+
+    // 2 — the videos: one inviting card when there are none, then their pictures
+    const tiles = MT.items.map((it, i) => `<div class="mt-tile" data-i="${i}">${it.kind === 'image'
+        ? `<img src="${attr(it.url)}" alt="" draggable="false" />` : (it.poster ? `<img src="${attr(it.poster)}" alt="" draggable="false" />` : '<span class="mt-load"></span>') + (talk
+          ? `<button type="button" class="mt-part${mtHasPart(it) ? ' on' : ''}" data-mt-part="${i}" aria-label="Choose the part to use">${mi('scissors')}<span>${mtHasPart(it) ? mtClock(it.from || 0) + '–' + mtClock(it.to || it.secs) : 'Trim'}</span></button>`
+          : `<span class="mt-dur">${mi('play')}${it.secs ? mtClock(it.secs) : ''}</span>`)}
+        ${MT.order === 'mine' ? `<span class="mt-num">${i + 1}</span>` : ''}
+        <button type="button" class="mt-x" data-mt-del="${i}" aria-label="Remove">${mi('x')}</button></div>`).join('');
+    const videos = n
+      ? `<div class="mt-grid${MT.order === 'mine' ? ' mt-ordered' : ''}">${tiles}
+          <button type="button" class="mt-addt" data-mt="add"><span class="mt-addt-ic">${mi('plus')}</span><span>Phone</span></button>
+          <button type="button" class="mt-addt" data-mt="addsrv"><span class="mt-addt-ic">${mi('folder')}</span><span>My files</span></button></div>
+        ${!talk && n > 1 ? '<small class="mt-hint">Hold a tile and drag it to change the order.</small>' : ''}`
+      : `<div class="mt-empty">
+          <span class="mt-empty-top"><span class="mt-empty-ic">${mi(talk ? 'film' : 'image')}</span>
+            <span class="mt-empty-t"><b>${talk ? 'Add a video of someone speaking' : 'Add your clips and photos'}</b>
+            <small>${talk ? 'A sermon, a talk, a testimony — the AI finds the best lines' : 'Two or more — the AI cuts them to the music'}</small></span></span>
+          <span class="mt-empty-btns"><button type="button" class="mt-btn mt-btn-hi" data-mt="add">${mi('phone')}<span>From phone</span></button>
+            <button type="button" class="mt-btn" data-mt="addsrv">${mi('folder')}<span>My files</span></button></span></div>`;
+
+    // 3 — fine-tune: one list, each row its value, opened in place
+    const keepRow = `<label class="mt-swline"${talk ? ' hidden' : ''}><span>Keep the clips’ own sound${MT.song || MT.songFile || MT.free ? ' under the music' : ''}</span>
+        <input type="checkbox" class="mt-sw" id="mtKeep" ${MT.keep ? 'checked' : ''}/></label>`;
+    const lenBody = `${seg(talk ? MT_TALK_LENS : MT_LENS, MT.len, 'len')}
         ${MT.len === 'custom' ? `<div class="mt-custom"><label><input type="number" id="mtMin" inputmode="numeric" min="0" max="10" value="${Math.floor(MT.custom / 60)}" /><span>min</span></label>
-          <label><input type="number" id="mtSec" inputmode="numeric" min="0" max="59" step="5" value="${MT.custom % 60}" /><span>sec</span></label></div>` : ''}</section>
-      <section class="mt-sec"><h3>Shape</h3><div class="mt-row">${chips(MT_ASPECTS.map(([v, l]) => [v, v + ' · ' + l]), MT.aspect, 'aspect')}</div></section>
-      <details class="mt-moreopts"${MT.more ? ' open' : ''}><summary>${mi('sliders')}<span>More options</span><small>${talk ? 'narrator, story, style' : 'order, style, captions, story'}</small></summary>
-      ${talk ? `<section class="mt-sec"><h3>Narrator <small>tap ▶ to hear</small></h3>
-        ${who.voiceover && who.voiceover.installed ? mtVoiceHtml(who.voiceover.voices || [])
-    : '<small class="mt-hint">The narrator voice is not installed on this server yet — update the server to add it.</small>'}</section>` : ''}
-      ${mtAboutHtml()}
-      <section class="mt-sec"><h3>Style</h3><div class="mt-row">${chips(MT_STYLES, MT.style, 'style')}</div></section>
-      <section class="mt-sec"${talk ? ' hidden' : ''}><h3>Order</h3><div class="mt-row">${chips(MT_ORDERS, MT.order, 'order')}</div>
-        <small class="mt-hint">${MT.order === 'mine' ? 'Hold a tile and drag it to move it.' : 'Hold and drag a tile to set your own order.'}</small></section>
-      ${talk ? '' : `<section class="mt-sec"><h3>Words on screen</h3><label class="mt-toggle"><input type="checkbox" id="mtCaps" ${MT.caps ? 'checked' : ''}/> <span>💬 Captions of what’s said</span></label></section>`}
-      </details>
+          <label><input type="number" id="mtSec" inputmode="numeric" min="0" max="59" step="5" value="${MT.custom % 60}" /><span>sec</span></label></div>` : ''}`;
+    const shapeBody = `<div class="mt-shapes">${MT_ASPECTS.map(([v, l]) => { const [w, h] = mtBox(v); return `<button type="button" class="mt-shape${MT.aspect === v ? ' on' : ''}" data-mt-aspect="${attr(v)}">
+        <span class="mt-shape-pic"><i style="width:${w}px;height:${h}px"></i></span><b>${esc(l)}</b><small>${esc(v)}</small></button>`; }).join('')}</div>`;
+    const voiceBody = who.voiceover && who.voiceover.installed ? mtVoiceHtml(who.voiceover.voices || [])
+      : '<small class="mt-hint">The narrator voice is not installed on this server yet — update the server to add it.</small>';
+    const lookBody = `<div class="mt-row mt-looks">${MT_STYLES.map(([v, l]) => `<button type="button" class="mt-chip${MT.style === v ? ' on' : ''}" data-mt-style="${attr(v)}"><i class="mt-dot mt-dot-${v}"></i>${esc(l)}</button>`).join('')}</div>`;
+    const orderBody = `${seg(MT_ORDERS, MT.order, 'order')}
+        <small class="mt-hint">${MT.order === 'mine' ? 'Hold a tile and drag it to move it.' : 'Hold and drag a tile to set your own order.'}</small>`;
+    const capsRow = talk ? '' : `<label class="mt-swrow"><span class="mt-ic mt-ic-caps">${mi('captions')}</span><span class="mt-lbl">Captions</span>
+        <input type="checkbox" class="mt-sw" id="mtCaps" ${MT.caps ? 'checked' : ''}/></label>`;
+
+    p.body.innerHTML = `
+      ${openIsMontage ? `<button type="button" class="me-banner" data-mt-rearrange><span class="me-banner-ic">${mi('pen')}</span><span class="me-banner-t"><b>Rearrange the montage that’s open</b><small>Move clips and photos, then remake it</small></span><span class="mt-chev" aria-hidden="true"></span></button>` : ''}
+      <section class="mt-sec">${head(1, 'What are you making?')}
+        <div class="mt-kinds">${MT_MODES.map(([v, name]) => `<button type="button" class="mt-kind${MT.mode === v ? ' on' : ''}" data-mt-mode="${v}" aria-pressed="${MT.mode === v}">
+          ${mtArt(v)}<span class="mt-kind-t"><b>${name}</b><small>${MT_KIND[v].sub}</small></span><span class="mt-tick">${mi('check')}</span></button>`).join('')}</div></section>
+      <section class="mt-sec">${head(2, talk ? 'Your videos' : 'Your clips & photos', n ? `${n} added` : talk ? '1 or more' : '2 or more')}
+        ${videos}</section>
+      <section class="mt-sec mt-tune">${head(3, 'Fine-tune', 'optional')}
+        <div class="mt-group">
+          ${row('music', 'music', 'Music', V.music, mtMusicHtml() + keepRow)}
+          ${row('len', 'hourglass', 'Length', V.len, lenBody)}
+          ${row('shape', 'crop', 'Shape', V.shape, shapeBody)}
+          ${talk ? row('voice', 'mic', 'Narrator', V.voice, voiceBody) : ''}
+          ${row('about', 'pen', 'What it’s about', V.about, mtAboutHtml())}
+          ${row('look', 'wand', 'Vibe', V.look, lookBody)}
+          ${row('order', 'shuffle', 'Order', V.order, orderBody, talk)}
+          ${capsRow}
+        </div></section>
       <input type="file" id="mtPick" accept="video/*,image/*" multiple hidden />
       <input type="file" id="mtSong" accept="audio/*,.mp3,.m4a,.wav,.aac" hidden />`;
-    { const d = p.body.querySelector('.mt-moreopts'); if (d) d.addEventListener('toggle', () => { MT.more = d.open; }); }
-    p.foot.innerHTML = `<button type="button" class="mt-go" data-mt="go"${ready ? '' : ' disabled'}>${mi('sparkles')} ${!ready ? (talk ? 'Add a video to start' : 'Add 2 clips or photos to start') : talk ? 'Make my Viral Montage' : 'Make my montage'}</button>`;
+    // a row opened or closed stays so through every redraw; one the operator opens eases in
+    $$('details.mt-acc', p.body).forEach((d) => d.addEventListener('toggle', () => {
+      const k = d.dataset.acc;
+      if (d.open && !MT.acc.has(k)) { MT.acc.add(k); d.classList.add('mt-opening'); }
+      else if (!d.open) MT.acc.delete(k);
+    }));
+    const go = !ready ? (talk ? 'Add a video to start' : 'Add 2 clips or photos to start') : talk ? 'Make my viral montage' : 'Make my montage';
+    p.foot.innerHTML = `<button type="button" class="mt-go" data-mt="go"${ready ? '' : ' disabled'}>${ready ? mi('sparkles') : ''}<span>${go}</span></button>`;
     if (!p._wired) { p._wired = true; mtWire(p); }
     if (MT.preview) mtPreviewPaint();   // a sample still loading or playing keeps its line after a redraw
   }
@@ -2712,37 +2787,36 @@
     const tab = mtMusTab();
     const tabs = `<div class="mt-seg" role="tablist">
         <button type="button" class="${tab === 'none' ? 'on' : ''}" data-mt-song="">No music</button>
-        ${hasFree ? `<button type="button" class="${tab === 'free' ? 'on' : ''}" data-mt-tab="free">✨ Free songs</button>` : ''}
-        <button type="button" class="${tab === 'mine' ? 'on' : ''}" data-mt-tab="mine">🎵 My songs</button></div>`;
+        ${hasFree ? `<button type="button" class="${tab === 'free' ? 'on' : ''}" data-mt-tab="free">Free songs</button>` : ''}
+        <button type="button" class="${tab === 'mine' ? 'on' : ''}" data-mt-tab="mine">My songs</button></div>`;
     const playing = MT.preview && MT.preview.key;
     const row = ({ key, sel, title, sub, pick, play }) => `<div class="mt-song${sel ? ' on' : ''}" ${pick}>
-        ${play ? `<button type="button" class="mt-play${playing === key ? ' on' : ''}" data-mt-play="${attr(key)}" aria-label="Listen to ${attr(title)}"></button>` : '<span class="mt-play mt-play-x">✨</span>'}
+        ${play ? `<button type="button" class="mt-play${playing === key ? ' on' : ''}" data-mt-play="${attr(key)}" aria-label="Listen to ${attr(title)}"></button>` : `<span class="mt-play mt-play-x">${mi('sparkles')}</span>`}
         <span class="mt-song-t"><b>${esc(title)}</b><small data-mt-sub="${attr(key)}" data-orig="${attr(sub)}">${esc(sub)}</small></span><span class="mt-radio"></span></div>`;
     if (tab === 'free' && hasFree) {
-      const mood = MT.freeMood || (F.tracks.find((t) => t.id === MT.free) || {}).mood || MT_MOOD_OF[MT.style] || 'uplift';
+      const mood = MT.freeMood || (F.tracks.find((t) => t.id === MT.free) || {}).mood || mtFreeMood();
       const mName = (F.moods.find((m) => m.id === mood) || {}).name || '';
       const songs = F.tracks.filter((t) => t.mood === mood);
       const selAt = songs.findIndex((t) => t.id === MT.free);
       const all = MT.showAll === mood || selAt >= MT_LIST_SHOW;
       const shown = all ? songs : songs.slice(0, MT_LIST_SHOW);
-      const short = (n) => String(n).replace(/\s*&.*$/, '');
       return `${tabs}
-        <div class="mt-row mt-moods">${F.moods.map((m) => `<button type="button" class="mt-chip${mood === m.id ? ' on' : ''}" data-mt-mood="${attr(m.id)}">${esc(short(m.name))}</button>`).join('')}</div>
+        <div class="mt-row mt-moods">${F.moods.map((m) => `<button type="button" class="mt-chip${mood === m.id ? ' on' : ''}" data-mt-mood="${attr(m.id)}">${esc(mtWord(m.name))}</button>`).join('')}</div>
         <div class="mt-list">
-          ${row({ key: 'auto', sel: MT.free === 'auto', title: 'Pick for me', sub: `a different ${short(mName).replace(/^\S+\s/, '')} song each time`, pick: 'data-mt-free="auto"' })}
+          ${row({ key: 'auto', sel: MT.free === 'auto', title: 'Pick for me', sub: `a different ${mtWord(mName)} song each time`, pick: 'data-mt-free="auto"' })}
           ${shown.map((t) => row({ key: 'free:' + t.id, sel: MT.free === t.id, title: t.title, sub: mName.replace(/^\S+\s/, ''), pick: `data-mt-free="${attr(t.id)}"`, play: true })).join('')}
-          ${!all && songs.length > MT_LIST_SHOW ? `<button type="button" class="mt-more" data-mt-all="${attr(mood)}">Show all ${songs.length} ${esc(short(mName).replace(/^\S+\s/, ''))} songs ▾</button>` : ''}
+          ${!all && songs.length > MT_LIST_SHOW ? `<button type="button" class="mt-more" data-mt-all="${attr(mood)}">Show all ${songs.length} ${esc(mtWord(mName))} songs</button>` : ''}
         </div>
-        <small class="mt-hint">🎁 Free and safe to post — no muting or copyright flags; the post credits the artist for you.</small>`;
+        <small class="mt-hint">Free and safe to post — no copyright flags. The post credits the artist.</small>`;
     }
     if (tab === 'mine') {
       return `${tabs}
         <div class="mt-list">
           ${MT.songFile ? row({ key: 'file', sel: true, title: MT.songFile.name.replace(/\.[^.]+$/, ''), sub: 'from this phone', pick: 'data-mt-tab="mine"', play: true }) : ''}
           ${MT.lib.slice(0, 30).map((m) => row({ key: 'lib:' + m.id, sel: !!(MT.song && MT.song.id === m.id), title: String(m.name || 'Song'), sub: m.durationSec ? mtClock(m.durationSec) : 'your song', pick: `data-mt-song="${attr(m.id)}"`, play: true })).join('')}
-          <button type="button" class="mt-more" data-mt="song">＋ Add a song from this phone</button>
+          <button type="button" class="mt-more" data-mt="song">${mi('plus')} Add a song from this phone</button>
         </div>
-        ${MT.lib.length || MT.songFile ? '' : '<small class="mt-hint">Your own songs: a worship track, an instrumental — add one from this phone and it stays here for next time.</small>'}`;
+        ${MT.lib.length || MT.songFile ? '' : '<small class="mt-hint">It stays here for next time.</small>'}`;
     }
     return `${tabs}<small class="mt-hint">${MT.mode === 'talk' ? 'No music — just the voices.' : 'No music — the clips’ own sound.'}</small>`;
   }
@@ -2759,10 +2833,10 @@
     const esc = C.esc, attr = C.escAttr;
     const playing = MT.preview && MT.preview.key;
     const row = (id, title, sub, play) => `<div class="mt-song${(MT.voice || '') === id ? ' on' : ''}" data-mt-voice="${attr(id)}">
-        ${play ? `<button type="button" class="mt-play${playing === 'voice:' + id ? ' on' : ''}" data-mt-play="voice:${attr(id)}" aria-label="Hear ${attr(title)}"></button>` : '<span class="mt-play mt-play-x mt-play-off">🔇</span>'}
+        ${play ? `<button type="button" class="mt-play${playing === 'voice:' + id ? ' on' : ''}" data-mt-play="voice:${attr(id)}" aria-label="Hear ${attr(title)}"></button>` : `<span class="mt-play mt-play-x mt-play-off">${mi('volume-x')}</span>`}
         <span class="mt-song-t"><b>${esc(title)}</b><small data-mt-sub="voice:${attr(id)}" data-orig="${attr(sub)}">${esc(sub)}</small></span><span class="mt-radio"></span></div>`;
     return `<div class="mt-list">${row('', 'No narrator', 'Straight in with the first line', false)}${voices.map((v) => row(v.id, v.label, MT_VOICE_FEEL[v.id] || 'An AI voice', true)).join('')}</div>
-      <small class="mt-hint">🎙 The narrator says a hook before the first line and a closing line to follow or share, over B-roll — words the AI writes for this edit.</small>`;
+      <small class="mt-hint">A hook at the start and a closing line at the end, written by the AI for this edit.</small>`;
   }
   const mtClock = (sec) => { const s = Math.max(0, Math.round(sec || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
@@ -2851,7 +2925,13 @@
       if (d.mtPart != null) return mtChoosePart(MT.items[+d.mtPart]);
       if (d.mtDel != null) { const it = MT.items.splice(+d.mtDel, 1)[0]; if (it) URL.revokeObjectURL(it.url); return mtPaint(); }
       if (d.mtSong != null) { MT.song = d.mtSong ? MT.lib.find((m) => m.id === d.mtSong) || null : null; MT.songFile = null; MT.free = null; MT.musTab = d.mtSong ? 'mine' : 'none'; if (!d.mtSong) mtPreviewStop(); return mtPaint(); }
-      if (d.mtFree) { MT.free = d.mtFree; MT.song = null; MT.songFile = null; MT.musTab = 'free'; return mtPaint(); }
+      if (d.mtFree) {
+        MT.free = d.mtFree; MT.song = null; MT.songFile = null; MT.musTab = 'free';
+        // a song picked: its mood is the one "Pick for me" deals from after it
+        const t = d.mtFree !== 'auto' && MT.freeList && MT.freeList.tracks.find((x) => x.id === d.mtFree);
+        if (t) MT.freeMood = t.mood;
+        return mtPaint();
+      }
       if (d.mtMood) { MT.freeMood = d.mtMood; MT.showAll = null; return mtPaint(); }
       if (d.mtVoice != null) { MT.voice = d.mtVoice; return mtPaint(); }
       if (d.mtIdea != null) {
@@ -3180,7 +3260,7 @@
       if (!MT.songFile && MT.free && MT.freeList) {
         mtProgress('Getting the music…', 30);
         try {
-          song = await freeFetch(MT.free, MT.freeList.tracks, MT_MOOD_OF[MT.style] || 'uplift', (title) => { if (title) mtProgress(`Getting the music — “${title}”…`, 30); });
+          song = await freeFetch(MT.free, MT.freeList.tracks, mtFreeMood(), (title) => { if (title) mtProgress(`Getting the music — “${title}”…`, 30); });
           credit = song.credit || '';
         } catch (er) {
           C.island({ kind: 'warn', title: 'That song could not be fetched', sub: (er && er.message) || '', ms: 5000 });

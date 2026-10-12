@@ -2208,7 +2208,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     if (info && info.width && info.height) infos.push({ file: f, info, image: isImage(f) || !(info.durationSec > 0.3) });
   }
   const vids = infos.filter((x) => !x.image);
-  if (!vids.length) throw new Error('Add at least one video with someone speaking — the Viral Montage is cut from what is said.');
+  if (!vids.length) throw new Error('Add at least one video with someone speaking — a Viral montage is cut from what is said.');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mw-talk-'));
   const history = loadHistory(output);
   try {
@@ -2260,7 +2260,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       if (top.length) opts.angle = String(top[Math.floor(Math.random() * top.length)]).slice(0, 140);
     }
     if (phrases.length < 2) {
-      const e = new Error('No one could be heard speaking in these videos. The Viral Montage is cut from what is said — choose “AI Standard Montage” for clips without speech.');
+      const e = new Error('No one could be heard speaking in these videos. A Viral montage is cut from what is said — choose “Standard” for clips without speech.');
       e.noSpeech = true;
       throw e;
     }

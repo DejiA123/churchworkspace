@@ -91,16 +91,22 @@ async function waitUp() {
       return page;
     };
     const page = await open({ ...devices['iPhone 13'] });
+    // the choices under "Fine-tune" are rows that open in place (each says what it is set to): open them all
+    const openRows = async () => {
+      await page.evaluate(() => document.querySelectorAll('#cloudMontage details.mt-acc:not([open])').forEach((d) => { d.open = true; }));
+      await sleep(250);
+    };
 
     await page.evaluate(() => window.MWSocial.openMontage());
     await page.waitForSelector('#cloudMontage [data-mt-mode="talk"]', { timeout: 15000 });
     check(await page.locator('#cloudMontage [data-mt-mode]').count() === 2, 'the montage page asks what kind of edit: music montage or viral talk edit');
     await page.locator('#cloudMontage [data-mt-mode="talk"]').tap();
     await sleep(300);
+    await openRows();
     const st = () => page.evaluate(() => {
       const go = document.querySelector('#cloudMontage .mt-go');
       return { go: go && go.textContent.trim(), disabled: !!(go && go.disabled),
-        order: !!document.querySelector('#cloudMontage [data-mt-order]') && document.querySelector('#cloudMontage [data-mt-order]').closest('section').hidden,
+        order: !!document.querySelector('#cloudMontage [data-mt-order]') && document.querySelector('#cloudMontage [data-mt-order]').closest('.mt-acc').hidden,
         lens: [...document.querySelectorAll('#cloudMontage [data-mt-len]')].map((b) => b.textContent), caps: !document.getElementById('mtCaps') };
     });
     const a = await st();
@@ -158,9 +164,8 @@ async function waitUp() {
     const nv = await page.evaluate(() => ({ rows: [...document.querySelectorAll('#cloudMontage [data-mt-voice]')].map((r) => r.dataset.mtVoice), plays: document.querySelectorAll('#cloudMontage [data-mt-play^="voice:"]').length,
       on: (document.querySelector('#cloudMontage [data-mt-voice].on') || {}).dataset }));
     check(nv.rows.join() === ',am_michael,af_heart,am_onyx' && nv.plays === 3 && nv.on && nv.on.mtVoice === '', 'the narrator is a list: "No narrator" (ticked) then each voice with ▶ to hear it', nv);
-    // the narrator is under "More options" (the screen keeps to 3 steps)
-    await page.evaluate(() => { const d = document.querySelector('#cloudMontage .mt-moreopts'); if (d && !d.open) d.querySelector('summary').click(); });
-    await sleep(200);
+    // the narrator is a row of "Fine-tune" (the screen keeps to 3 steps)
+    await openRows();
     await page.locator('#cloudMontage [data-mt-voice="am_onyx"] .mt-song-t').tap();
     await sleep(300);
     await page.locator('#cloudMontage [data-mt-play="voice:am_onyx"]').tap();
@@ -318,6 +323,7 @@ async function waitUp() {
     if (opened) {
       await page.setInputFiles('#mtPick', VID);
       await sleep(600);
+      await openRows();
       await page.locator('#cloudMontage [data-mt-song=""]').tap();
       await page.evaluate(() => { window.__asked = false; window.api.montage.create = () => { window.__asked = true; return new Promise(() => {}); }; });   // the server is "working"
       await page.locator('#cloudMontage .mt-go').tap();
