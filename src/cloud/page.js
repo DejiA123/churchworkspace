@@ -215,33 +215,44 @@ ${styles}
   </div>
 
   <div id="cloudGate" class="cloud-gate">
-    <form class="cloud-gate-box" id="cloudGateForm" autocomplete="off">
-      <div class="cloud-gate-logo">✝</div>
-      <h1>Church Work Space</h1>
-      <p class="cloud-gate-sub">Video Studio and Social Scheduler, anywhere.</p>
-      <!-- Everyone has a space of their own: sign in to yours, or make one. -->
-      <div class="cg-tabs" id="cloudGateTabs" role="tablist">
-        <button type="button" class="cg-tab on" data-gmode="signin" role="tab">Sign in</button>
-        <button type="button" class="cg-tab" data-gmode="create" role="tab">New here</button>
+    <form class="cloud-gate-box" id="cloudGateForm" autocomplete="off" novalidate>
+      <!-- the same blue banner as Home, so the app looks like one app from the first screen -->
+      <div class="cg-hero">
+        <div class="cloud-gate-logo">✝</div>
+        <h1>Church Work Space</h1>
+        <p class="cloud-gate-sub">Turn sermons into shorts, captions and posts.</p>
       </div>
-      <p class="cg-note hidden" id="cloudGateNote"></p>
-      <label for="cloudName" class="cloud-gate-label">Your name</label>
-      <input type="text" id="cloudName" autocomplete="username" autocapitalize="words" spellcheck="false"
-             placeholder="e.g. Deji" enterkeyhint="next" />
-      <label for="cloudPw" class="cloud-gate-label">Password</label>
-      <input type="password" id="cloudPw" autocomplete="current-password" placeholder="your password" enterkeyhint="go" />
-      <div class="cg-create">
-        <label for="cloudPass" class="cloud-gate-label">Church access code</label>
-        <input type="password" id="cloudPass" inputmode="text" autocomplete="off"
-               placeholder="ask whoever runs the studio" enterkeyhint="go" />
+      <div class="cg-card">
+        <!-- Everyone has a space of their own: sign in to yours, or make one. -->
+        <div class="cg-tabs" id="cloudGateTabs" role="tablist">
+          <button type="button" class="cg-tab on" data-gmode="signin" role="tab">Sign in</button>
+          <button type="button" class="cg-tab" data-gmode="create" role="tab">New here</button>
+        </div>
+        <p class="cg-note hidden" id="cloudGateNote"></p>
+        <label for="cloudName" class="cloud-gate-label">Your name</label>
+        <input type="text" id="cloudName" autocomplete="username" autocapitalize="words" spellcheck="false"
+               placeholder="e.g. Deji" enterkeyhint="next" />
+        <label for="cloudPw" class="cloud-gate-label">Password</label>
+        <div class="cg-pw"><input type="password" id="cloudPw" autocomplete="current-password" placeholder="Your password" enterkeyhint="go" />
+          <button type="button" class="cg-show" data-show="cloudPw" aria-label="Show password">Show</button></div>
+        <div class="cg-create">
+          <small class="cg-hint" id="cloudPwHint">At least 6 letters or numbers</small>
+          <label for="cloudPw2" class="cloud-gate-label">Confirm password</label>
+          <div class="cg-pw"><input type="password" id="cloudPw2" autocomplete="new-password" placeholder="Type it again" enterkeyhint="next" />
+            <button type="button" class="cg-show" data-show="cloudPw2" aria-label="Show password">Show</button></div>
+          <small class="cg-hint" id="cloudPwMatch" aria-live="polite"></small>
+          <label for="cloudPass" class="cloud-gate-label">Church access code</label>
+          <input type="text" id="cloudPass" inputmode="text" autocomplete="off" autocapitalize="none" spellcheck="false"
+                 placeholder="e.g. vine-hope-1234" enterkeyhint="go" />
+          <small class="cg-hint">Ask your church's media team for it.</small>
+        </div>
+        <label class="cloud-gate-remember" for="cloudRemember">
+          <span class="cgr-text"><b>Stay signed in</b><small>on this phone</small></span>
+          <input type="checkbox" id="cloudRemember" class="cgr-switch" role="switch" checked />
+        </label>
+        <button type="submit" id="cloudGateGo" class="primary-btn cloud-gate-go">Sign in</button>
+        <div id="cloudGateMsg" class="cloud-gate-msg" role="alert" aria-live="assertive"></div>
       </div>
-      <label class="cloud-gate-remember" for="cloudRemember">
-        <span class="cgr-text"><b>Stay signed in</b><small>on this device</small></span>
-        <input type="checkbox" id="cloudRemember" class="cgr-switch" role="switch" checked />
-      </label>
-      <button type="submit" id="cloudGateGo" class="primary-btn cloud-gate-go">Open</button>
-      <div id="cloudGateMsg" class="cloud-gate-msg"></div>
-      <div class="cloud-gate-foot">v${version}</div>
     </form>
   </div>
 

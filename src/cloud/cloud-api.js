@@ -973,8 +973,8 @@ function browse(exts) {
   const seen = new Set();
   const d = dirsFor();
   const groups = [
-    { key: 'output', label: 'Finished exports', dir: d.output },
-    { key: 'uploads', label: 'Sent from a phone', dir: d.uploads },
+    { key: 'output', label: 'Finished videos', dir: d.output },
+    { key: 'uploads', label: 'Added from your phone', dir: d.uploads },
     { key: 'videos', label: 'Videos folder', dir: d.videos },
   ];
   return groups.map((g) => {
@@ -1155,16 +1155,16 @@ async function handle(req, res) {
     };
     // Making a space: the church's code says they belong here.
     if (body.create) {
-      if (!codeMatches(given)) return wrong('That access code is not right — ask whoever runs the studio for it.');
+      if (!codeMatches(given)) return wrong('That access code isn’t right. Ask your church’s media team for it.');
       if (name.length < 2) return json(res, 400, { error: 'Type your name (at least 2 letters).' });
-      if (pw.length < 6) return json(res, 400, { error: 'Choose a password of at least 6 characters.' });
+      if (pw.length < 6) return json(res, 400, { error: 'Choose a password of at least 6 letters or numbers.' });
       if (userByName(name)) return json(res, 409, { error: 'There is already a space with that name — sign in, or choose another name.' });
       return issue(makeUser(name, pw));
     }
     // Signing in to a space.
     if (name || pw) {
       const u = userByName(name);
-      if (!u || !checkPass(u, pw)) return wrong('That name and password do not match.');
+      if (!u || !checkPass(u, pw)) return wrong('That name and password don’t match. Check them and try again.');
       return issue(u);
     }
     // The code alone: only while there are no spaces yet (an older installed app).
@@ -1191,7 +1191,7 @@ async function authedRoutes(req, res, url, p, me) {
     if (!me) return json(res, 400, { error: 'Make your space first.' });
     let body; try { body = JSON.parse((await readBody(req, 4096)).toString('utf-8') || '{}'); } catch (e) { return json(res, 400, { error: 'Bad request.' }); }
     if (!checkPass(me, body.current)) return json(res, 401, { error: 'Your current password is not right.' });
-    if (String(body.password || '').length < 6) return json(res, 400, { error: 'Choose a password of at least 6 characters.' });
+    if (String(body.password || '').length < 6) return json(res, 400, { error: 'Choose a password of at least 6 letters or numbers.' });
     setPass(me, body.password); saveUsers();
     return json(res, 200, { ok: true });
   }

@@ -1936,8 +1936,9 @@ body.mw-cloud.mw-home .cloud-home { background: #fff; color: #111318; }
 .ch-banner-tx small { display: block; font-size: 15px; font-weight: 500; color: rgba(255, 255, 255, .86); }
 .ch-banner-go { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; margin: 3px 0 0; padding: 0; border: 0; background: none; color: #fff; text-align: left; cursor: pointer; }
 .ch-banner-go b { font-size: 27px; font-weight: 750; letter-spacing: -.5px; line-height: 1.15; }
-.ch-banner-go span { flex: none; width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; background: rgba(255, 255, 255, .22); }
-.ch-banner-go span .mi { width: 15px; height: 15px; margin: 0; }
+/* the arrow is a real button: a white circle you cannot miss, not a faint square */
+.ch-banner-go span { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: #fff; color: #0a4fc4; box-shadow: 0 4px 14px rgba(5, 40, 110, .3); }
+.ch-banner-go span .mi { width: 18px; height: 18px; margin: 0; }
 /* the two big things: soft cards on the banner's edge, a black icon and a name */
 .ch-duo { position: relative; z-index: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: -44px; }
 .ch-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-width: 0; min-height: 126px; margin: 0; padding: 16px 10px;
@@ -3433,3 +3434,128 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .csb-plus { width: auto; padding: 0 18px 0 14px; border-radius: 24px; display: inline-flex; gap: 6px; align-items: center; font-weight: 750; font-size: 16px; }
 .csb-ask .mwg-ask { width: 44px; height: 44px; font-size: 20px; }
 
+
+/* ===================================================================== */
+/*  SIGN IN, THE WAY CAPCUT DOES IT                                      */
+/* ===================================================================== */
+/* The first screen anyone sees wears Home's look: the same blue banner,
+   then a white card with soft grey boxes, sentence-case labels and one
+   black button. Everything is in the card, nothing is small print. */
+body.mw-cloud #cloudGate, #cloudGate {
+  display: block; padding: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  background: #fff; color: #0f1115;
+}
+/* signed in: gone, whatever else styles it (the rule above outranks a plain .gone) */
+body.mw-cloud #cloudGate.gone, #cloudGate.gone { display: none !important; }
+#cloudGate .cloud-gate-box {
+  width: 100%; max-width: 460px; margin: 0 auto; padding: 0; min-height: 100%;
+  background: transparent; border: 0; border-radius: 0; box-shadow: none; text-align: left;
+}
+#cloudGate .cg-hero {
+  padding: calc(env(safe-area-inset-top) + 34px) 24px 64px; text-align: center; color: #fff;
+  background: linear-gradient(180deg, #0a4fc4 0%, #1f6fe0 45%, #4d95ef 75%, #a9cdf8 100%);
+}
+@media (min-width: 461px) { #cloudGate .cg-hero { border-radius: 0 0 28px 28px; } }
+#cloudGate .cloud-gate-logo {
+  width: 58px; height: 58px; margin: 0 auto 14px; border-radius: 17px; font-size: 28px;
+  background: #fff; color: #0a4fc4; box-shadow: 0 10px 28px rgba(5, 40, 110, .35);
+}
+#cloudGate h1 { margin: 0 0 6px; font-size: 26px; font-weight: 800; letter-spacing: -.4px; color: #fff; }
+#cloudGate .cloud-gate-sub { margin: 0; font-size: 15px; line-height: 1.4; color: rgba(255, 255, 255, .88); }
+#cloudGate .cg-card {
+  position: relative; margin: -34px 14px 24px; padding: 18px 18px 20px;
+  background: #fff; border-radius: 22px; box-shadow: 0 10px 34px rgba(15, 23, 42, .12);
+}
+#cloudGate .cg-tabs { margin: 0 0 16px; padding: 4px; background: #f1f3f6; border: 0; border-radius: 14px; }
+#cloudGate .cg-tab { height: 42px; border-radius: 11px; color: #5d6470; font-size: 16px; font-weight: 600; }
+#cloudGate .cg-tab.on { background: #fff; color: #0f1115; box-shadow: 0 1px 4px rgba(15, 23, 42, .12); }
+#cloudGate .cg-note { margin: -2px 0 14px; font-size: 14px; line-height: 1.45; color: #3b4250; text-align: left; }
+#cloudGate .cloud-gate-label {
+  display: block; margin: 14px 0 7px; font-size: 15px; font-weight: 600; letter-spacing: 0; text-transform: none; color: #0f1115;
+}
+#cloudGate .cg-tabs + .cloud-gate-label, #cloudGate .cg-note + .cloud-gate-label { margin-top: 0; }
+#cloudGate #cloudName, #cloudGate #cloudPw, #cloudGate #cloudPw2, #cloudGate #cloudPass {
+  width: 100%; height: 52px; margin: 0; padding: 0 16px; box-sizing: border-box;
+  font-size: 17px; color: #0f1115; background: #f1f3f6; border: 2px solid transparent; border-radius: 14px;
+  box-shadow: none;
+}
+#cloudGate #cloudName::placeholder, #cloudGate #cloudPw::placeholder, #cloudGate #cloudPw2::placeholder, #cloudGate #cloudPass::placeholder { color: #9aa1ad; }
+#cloudGate #cloudName:focus, #cloudGate #cloudPw:focus, #cloudGate #cloudPw2:focus, #cloudGate #cloudPass:focus {
+  outline: none; background: #fff; border-color: #1f6fe0; box-shadow: 0 0 0 4px rgba(31, 111, 224, .14);
+}
+#cloudGate .cg-bad, #cloudGate .cg-bad:focus { border-color: #e5484d !important; box-shadow: 0 0 0 4px rgba(229, 72, 77, .14) !important; }
+#cloudGate .cg-pw { position: relative; }
+#cloudGate .cg-pw input { padding-right: 76px !important; }
+#cloudGate .cg-show {
+  position: absolute; right: 6px; top: 6px; height: 40px; min-width: 62px; margin: 0; padding: 0 12px;
+  border: 0; border-radius: 10px; background: transparent; color: #1f6fe0; font-size: 15px; font-weight: 600; cursor: pointer;
+}
+#cloudGate .cg-show:active { background: rgba(31, 111, 224, .1); }
+#cloudGate .cg-hint { display: block; margin: 7px 2px 0; font-size: 13.5px; line-height: 1.35; color: #6b7280; }
+#cloudGate .cg-hint:empty { display: none; }
+#cloudGate .cg-hint.good { color: #15803d; font-weight: 600; }
+#cloudGate .cg-hint.bad { color: #c2410c; font-weight: 600; }
+#cloudGate .cloud-gate-remember {
+  margin: 18px 0 0; padding: 12px 14px; background: #f7f8fa; border: 0; border-radius: 14px;
+}
+#cloudGate .cgr-text b { font-size: 15px; color: #0f1115; }
+#cloudGate .cgr-text small { font-size: 13px; color: #6b7280; }
+#cloudGate .cloud-gate-remember input.cgr-switch { background: #d5d9e0; }
+#cloudGate .cloud-gate-remember input.cgr-switch:checked { background: #1f6fe0; }
+body.mw-cloud #cloudGate .cloud-gate-go, #cloudGate .cloud-gate-go {
+  width: 100%; height: 56px; margin: 20px 0 0; padding: 0; border: 0; border-radius: 16px;
+  background: #0f1115; color: #fff; font-size: 17px; font-weight: 700; box-shadow: none;
+}
+#cloudGate .cloud-gate-go:active { transform: scale(.985); }
+#cloudGate .cloud-gate-go:disabled { opacity: .6; }
+#cloudGate .cloud-gate-msg { min-height: 0; margin: 12px 2px 0; font-size: 15px; line-height: 1.4; color: #3b4250; text-align: center; }
+#cloudGate .cloud-gate-msg:empty { margin: 0; }
+#cloudGate .cloud-gate-msg.bad { color: #c62828; font-weight: 600; }
+
+/* ===================================================================== */
+/*  LIGHT PAGES: MY VIDEOS, FINISHED, HELP — CAPCUT'S LOOK OUTSIDE THE    */
+/*  EDITOR                                                               */
+/* ===================================================================== */
+/* CapCut is light everywhere you choose, look and post, and dark only where
+   you edit, so the picture is the brightest thing there. The same here: the
+   lists you open from Home are white sheets with grey rows and black buttons. */
+body.mw-cloud .cloud-sheet-modal .cloud-files-box,
+body.mw-cloud .cloud-sheet-modal .cloud-help-box {
+  background: #fff; color: #0f1115; border: 0; box-shadow: 0 -10px 40px rgba(15, 23, 42, .18);
+}
+body.mw-cloud .cloud-sheet-modal { background: rgba(15, 17, 21, .35); }
+.cloud-sheet-modal .cloud-files-title { color: #0f1115; }
+.cloud-sheet-modal .cloud-files-pill { background: #f1f3f6; color: #0f1115; }
+.cf-selecting .cloud-files-pill#cloudFilesSelect { background: #0f1115; color: #fff; }
+.cloud-sheet-modal .cloud-files-x { background: #f1f3f6; color: #3b4250; }
+body.mw-cloud .cloud-sheet-modal .cloud-files-up, body.mw-cloud .cloud-files-bar .primary-btn {
+  background: #0f1115; color: #fff; border: 0; box-shadow: none;
+}
+.cloud-sheet-modal .cloud-files-icon { background: #f1f3f6; color: #0f1115; }
+.cloud-sheet-modal .cloud-files-disk { color: #6b7280; }
+.cloud-sheet-modal .cloud-files-disk b { color: #b42318; }
+.cloud-sheet-modal .cf-disk-bar { background: #eef0f3; }
+.cloud-sheet-modal .cloud-files-head { color: #5d6470; letter-spacing: .3px; }
+.cloud-sheet-modal .cloud-files-head small { color: #9aa1ad; }
+.cloud-sheet-modal .cf-row { background: #f7f8fa; }
+.cloud-sheet-modal .cf-pic { background-color: #e7e9ee; box-shadow: none; }
+.cloud-sheet-modal .cf-tx b { color: #0f1115; }
+.cloud-sheet-modal .cf-tx small { color: #6b7280; }
+.cloud-sheet-modal .cf-btn { color: #0f1115; }
+.cloud-sheet-modal .cf-btn:active { background: #e9ecf1; }
+.cloud-sheet-modal .cf-bin { color: #d92d20; }
+.cloud-sheet-modal .cf-open { background: #0f1115; color: #fff; }
+.cloud-sheet-modal .cf-sure { background: #fff1f0; }
+.cloud-sheet-modal .cf-sure span { color: #b42318; }
+.cloud-sheet-modal .cf-no { background: #eef0f3; color: #0f1115; }
+.cloud-sheet-modal .cf-check { box-shadow: inset 0 0 0 2px #c4c9d2; }
+.cloud-sheet-modal .cf-selecting .cf-row.chosen, .cloud-sheet-modal .cf-picking-multi .cf-row.chosen { background: #eaf2ff; box-shadow: inset 0 0 0 1.5px #1f6fe0; }
+.cloud-sheet-modal .cf-selecting .cf-row.chosen .cf-check, .cloud-sheet-modal .cf-picking-multi .cf-row.chosen .cf-check { background: #1f6fe0; }
+.cloud-sheet-modal .cv-act.cv-save { background: #0f1115; color: #fff; border-color: transparent; box-shadow: none; }
+/* Delete all is a quiet grey button until it asks "for good?" — not a red
+   one sitting beside Save all, waiting for a slip of the thumb */
+.cloud-sheet-modal .cloud-files-group .cf-delall { background: #f1f3f6; border-color: transparent; color: #5d6470; box-shadow: none; }
+.cloud-sheet-modal .cloud-files-group .cf-delall.sure { background: #d92d20; color: #fff; box-shadow: 0 0 0 3px rgba(217, 45, 32, .2); }
+.cloud-sheet-modal .cloud-files-empty { color: #5d6470; }
+.cloud-sheet-modal .cloud-files-empty b { color: #0f1115; }
+.cloud-sheet-modal .cf-empty-art { background: #f1f3f6; color: #0f1115; }

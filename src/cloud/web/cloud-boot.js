@@ -1265,13 +1265,37 @@ let _hideTimer = null;
     const note = $('#cloudGateNote');
     if (note) {
       note.textContent = firstEver
-        ? 'You are the first here. Make your space: it is the owner’s, and keeps everything already on the studio.'
-        : gateMode === 'create' ? 'Your own space: your videos, exports, captions and posts, and nobody else’s.' : '';
+        ? 'You’re the first one here. Make your space to begin: you’ll look after this studio.'
+        : gateMode === 'create' ? 'Make your own space. Only you see your videos and posts.' : '';
       note.classList.toggle('hidden', !note.textContent);
     }
     const pw = $('#cloudPw'); if (pw) pw.setAttribute('autocomplete', gateMode === 'create' ? 'new-password' : 'current-password');
     const go = $('#cloudGateGo'); if (go) go.textContent = gateMode === 'create' ? 'Create my space' : 'Sign in';
+    if (pw) pw.placeholder = gateMode === 'create' ? 'Choose a password' : 'Your password';
     const msg = $('#cloudGateMsg'); if (msg) { msg.textContent = ''; msg.className = 'cloud-gate-msg'; }
+    syncPwMatch();
+  }
+  /* "Confirm password" says straight away whether the two agree, instead of
+     letting someone find out after pressing the button. */
+  function syncPwMatch() {
+    const out = $('#cloudPwMatch'); if (!out) return;
+    const a = ($('#cloudPw') || {}).value || '', b = ($('#cloudPw2') || {}).value || '';
+    if (gateMode !== 'create' || !b) { out.textContent = ''; out.className = 'cg-hint'; return; }
+    const same = a === b;
+    out.textContent = same ? '✓ Passwords match' : 'Passwords don’t match yet';
+    out.className = 'cg-hint ' + (same ? 'good' : 'bad');
+  }
+  /** What is missing, in plain words, before anything is sent — or '' when all is ready. */
+  function gateProblem() {
+    const name = (($('#cloudName') || {}).value || '').trim();
+    const pw = ($('#cloudPw') || {}).value || '';
+    if (!name) return { el: '#cloudName', why: 'Type your name.' };
+    if (gateMode !== 'create') return pw ? null : { el: '#cloudPw', why: 'Type your password.' };
+    if (name.length < 2) return { el: '#cloudName', why: 'Your name needs at least 2 letters.' };
+    if (pw.length < 6) return { el: '#cloudPw', why: 'Choose a password of at least 6 letters or numbers.' };
+    if (pw !== (($('#cloudPw2') || {}).value || '')) return { el: '#cloudPw2', why: 'The two passwords are different. Type the same one in both boxes.' };
+    if (!(($('#cloudPass') || {}).value || '').trim()) return { el: '#cloudPass', why: 'Type the church access code. Your church’s media team has it.' };
+    return null;
   }
 
   function signedOut(why) {
@@ -1291,7 +1315,13 @@ let _hideTimer = null;
     const name = ($('#cloudName') || {}).value || '';
     const password = ($('#cloudPw') || {}).value || '';
     const code = String(($('#cloudPass') || {}).value || '').trim().toLowerCase().replace(/\s+/g, '-');
-    if (btn) { btn.disabled = true; btn.textContent = gateMode === 'create' ? 'Making your space…' : 'Opening…'; }
+    const problem = gateProblem();
+    if (problem) {
+      if (msg) { msg.textContent = problem.why; msg.className = 'cloud-gate-msg bad'; }
+      const f = $(problem.el); if (f) { f.classList.add('cg-bad'); f.focus(); }
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = gateMode === 'create' ? 'Making your space…' : 'Signing in…'; }
     if (msg) { msg.textContent = ''; msg.className = 'cloud-gate-msg'; }
     try {
       const body = gateMode === 'create'
@@ -1505,7 +1535,7 @@ let _hideTimer = null;
     // (one short line: "Send a video or picture from this phone" ran off the button)
     if (up) up.textContent = `Send ${String(SEND_WHAT[kind]).length <= 10 ? SEND_WHAT[kind] + ' ' : ''}from ${window.matchMedia('(max-width: 900px)').matches ? 'this phone' : 'this computer'}`;
     const title = m.querySelector('.cloud-files-title');
-    if (title) title.textContent = opts.picking ? PICK_TITLE[kind] : 'Your files';
+    if (title) title.textContent = opts.picking ? PICK_TITLE[kind] : 'My videos';
     setSelecting(false);
     /*
      * PICKING SEVERAL (the AI Montage's "From your files"): a tap ticks a video
@@ -1567,7 +1597,7 @@ let _hideTimer = null;
       + (AUDIO_RE.test((/\.[^.]+$/.exec(String(f.name).toLowerCase()) || [''])[0])
         ? '<span class="cf-pic cf-pic-audio" aria-hidden="true">🎵</span>'   // a song has no picture to ask for
         : `<span class="cf-pic" data-thumb="${escAttr(f.path)}"></span>`)
-      + `<span class="cf-tx"><b>${escHtml(f.name)}</b><small>${fmtSize(f.size)} · ${escHtml(niceWhen(f.mtime))}</small></span>`
+      + `<span class="cf-tx"><b title="${escAttr(f.name)}">${escHtml(friendlyName(f.name))}</b><small>${fmtSize(f.size)} · ${escHtml(niceWhen(f.mtime))}</small></span>`
       + '</button>'
       + (picking
         ? '<button type="button" class="cf-open" data-act="open">Open</button>'
@@ -1630,11 +1660,14 @@ let _hideTimer = null;
     const d = filesCache && filesCache.disk;
     if (!d || !d.total) { el.classList.add('hidden'); return; }
     const used = Math.max(0, d.total - d.free);
-    el.classList.remove('hidden');
-    el.classList.toggle('low', d.free < d.total * 0.1);
-    const where = cloud.hello && cloud.hello.standalone ? 'the server' : 'the studio machine';
+    // Room left is only news when it is running out: a row of gigabytes on
+    // every visit was one more thing to read that meant nothing to most people.
+    const low = d.free < Math.min(d.total * 0.1, 15 * 1024 ** 3);
+    el.classList.toggle('hidden', !low);
+    el.classList.toggle('low', low);
+    if (!low) return;
     el.innerHTML = `<div class="cf-disk-bar"><i style="width:${Math.min(100, (used / d.total) * 100).toFixed(1)}%"></i></div>`
-      + `<span><b>${fmtSize(d.free)} free</b> of ${fmtSize(d.total)} on ${where}</span>`;
+      + `<span><b>Running out of room: ${fmtSize(d.free)} left.</b> Delete videos you have already saved or posted.</span>`;
   }
 
   /* ---- deleting ---- */
@@ -3196,6 +3229,24 @@ let _hideTimer = null;
     return null;
   }
 
+  /*
+   * A file's name the way a person would say it: "short-Faith_over_fear-
+   * 20261002-173243.mp4" is "Faith over fear", and a video sent from a phone
+   * ("20261012132409-Prayer Meeting.mov") is "Prayer Meeting". The real name
+   * stays on the row's tooltip.
+   */
+  function friendlyName(name) {
+    const raw = String(name || '').replace(/\.[a-z0-9]+$/i, '');
+    const n = raw.replace(/^\d{12,14}[-_ ]+/, '')
+      .replace(/[-_]?\d{8}[-_]\d{4,6}$/, '')
+      .replace(/^(short|edited|export|clip)[-_]+/i, '')
+      .replace(/(^|[-_])(edited|overlay|captioned|text|reframed|framed|plus)(?=$|[-_])/gi, '$1')
+      .replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!n) return /^short/i.test(raw) ? 'Short' : /^edited/i.test(raw) ? 'Edited video' : 'Video';
+    return n.charAt(0).toUpperCase() + n.slice(1);
+  }
+  cloud.friendlyName = friendlyName;
+
   function renderDownloads() {
     const list = $('#cloudDownloadsList');
     if (!list) return;
@@ -3208,7 +3259,7 @@ let _hideTimer = null;
     list.innerHTML = (vids.length > 1 ? `<button type="button" class="cv-act cv-save cv-ready sa-all" data-act="saveall">${mi('download')}<span>Save all ${vids.length} to Photos</span></button>` : '')
       + cloud.downloads.map((d) => `<div class="cf-row" data-path="${escAttr(d.path)}">`
       + `<button type="button" class="cf-main" data-act="view"><span class="cf-pic" data-thumb="${escAttr(d.path)}"></span>`
-      + `<span class="cf-tx"><b>${escHtml(d.name)}</b><small>Finished ${escHtml(niceWhen(d.at))}</small></span></button>`
+      + `<span class="cf-tx"><b title="${escAttr(d.name)}">${escHtml(friendlyName(d.name))}</b><small>Finished ${escHtml(niceWhen(d.at))}</small></span></button>`
       + `<button type="button" class="cf-btn" data-act="save" aria-label="Save to this phone" title="Save to this phone">${mi('download')}</button></div>`).join('');
     watchThumbs(list);
   }
@@ -5222,6 +5273,21 @@ let _hideTimer = null;
       signIn($('#cloudRemember').checked);
     });
     on('#cloudGateTabs', 'click', (e) => { const t = e.target.closest('[data-gmode]'); if (t) setGateMode(t.dataset.gmode); });
+    // Show / Hide on a password box, so nobody has to type blind on a phone
+    on('#cloudGateForm', 'click', (e) => {
+      const b = e.target.closest('[data-show]'); if (!b) return;
+      const f = $('#' + b.dataset.show); if (!f) return;
+      const show = f.type === 'password';
+      f.type = show ? 'text' : 'password';
+      b.textContent = show ? 'Hide' : 'Show';
+      b.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+    });
+    // typing again clears the red mark and the message about that box
+    on('#cloudGateForm', 'input', (e) => {
+      if (e.target.classList) e.target.classList.remove('cg-bad');
+      const msg = $('#cloudGateMsg'); if (msg && msg.classList.contains('bad')) { msg.textContent = ''; msg.className = 'cloud-gate-msg'; }
+      syncPwMatch();
+    });
     on('#cloudFiles', 'click', () => openFilesModal());
     on('#cloudFilesClose', 'click', closeFilesModal);
     on('#cloudFilesRefresh', 'click', () => refreshFiles());

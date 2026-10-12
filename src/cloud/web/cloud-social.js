@@ -284,7 +284,6 @@
           <header class="ch-top">
             <div class="ch-brand"><span class="ch-logo">✝</span><span class="ch-name">Church Work Space</span></div>
             <div class="ch-acts"><span class="ch-chip-slot"></span><span class="ch-ask" id="chAsk"></span>
-              <button type="button" class="ch-round" data-home="files" aria-label="Your files">${mi('folder')}</button>
               <button type="button" class="ch-round ch-me" data-home="me" aria-label="Your space"><b id="chMeInitial">${esc(((C.me && C.me.name) || '').charAt(0).toUpperCase()) || mi('user')}</b></button>
             </div>
           </header>
@@ -308,13 +307,13 @@
           <button type="button" class="ch-tool" data-tool="captions"><span class="ch-tool-ic">${mi('captions')}<i class="ch-spark">${mi('sparkles')}</i></span><span class="ch-tool-tx">Auto captions</span></button>
           <button type="button" class="ch-tool ch-social" data-go="scheduler" id="chSocialCard"><span class="ch-tool-ic">${mi('calendar')}<i class="ch-badge hidden" id="chSocialBadge"></i></span><span class="ch-tool-tx">Post online</span>
             <small id="chSocialFoot"></small><span class="ch-marks" id="chMarks"></span></button>
-          <button type="button" class="ch-tool" data-tool="saved"><span class="ch-tool-ic">${mi('download')}</span><span class="ch-tool-tx">Saved</span></button>
-          <button type="button" class="ch-tool" data-home="files"><span class="ch-tool-ic">${mi('folder')}</span><span class="ch-tool-tx">Your files</span></button>
-          <button type="button" class="ch-tool" data-tool="help"><span class="ch-tool-ic"><i class="ch-q">?</i></span><span class="ch-tool-tx">How to</span></button>
+          <button type="button" class="ch-tool" data-tool="upload"><span class="ch-tool-ic">${mi('upload')}</span><span class="ch-tool-tx">Add a video</span></button>
+          <button type="button" class="ch-tool" data-home="files"><span class="ch-tool-ic">${mi('folder')}</span><span class="ch-tool-tx">My videos</span></button>
+          <button type="button" class="ch-tool" data-tool="help"><span class="ch-tool-ic"><i class="ch-q">?</i></span><span class="ch-tool-tx">Help</span></button>
         </nav>
         <section class="ch-sec hidden" id="chJobs"><h2>Running now</h2><div class="ch-jobs"></div></section>
         <section class="ch-sec hidden" id="chReady">
-          <h2>Ready to post <button type="button" class="ch-link" data-home="files">All files</button></h2>
+          <h2>Ready to post <button type="button" class="ch-link" data-home="files">See all</button></h2>
           <div class="ch-reel" id="chReel"></div>
         </section>
         <p class="ch-foot-note" id="chWhere"></p>
@@ -328,6 +327,8 @@
       if (b.dataset.hero != null) return heroShow(+b.dataset.hero, true);
       if (b.dataset.tool === 'shorts' || b.dataset.tool === 'captions') return homeTool(b.dataset.tool);
       if (b.dataset.tool === 'saved') { const d = document.getElementById('cloudDownloads'); return d && d.click(); }
+      // "Add a video": straight to the phone's own picker — My videos opens behind it to show it arriving
+      if (b.dataset.tool === 'upload') { const f = document.getElementById('cloudFiles'); if (f) f.click(); const u = document.getElementById('cloudUpload'); return u && u.click(); }
       if (b.dataset.tool === 'help') return window.MWGuide && window.MWGuide.openHelp && window.MWGuide.openHelp();
       if (b.dataset.proj) return openProject(b.dataset.proj);
       if (b.dataset.home === 'projects') return openProjects();
@@ -410,7 +411,7 @@
         { target: '#cloudHome .ch-studio', emoji: '🎬', title: 'Make a video', body: 'Edit a video, make shorts, add captions.' },
         { target: '#cloudHome .ch-montage', emoji: '✨', title: 'AI Montage', body: 'Pick photos and videos. The AI makes the edit.' },
         { target: '#chSocialCard', emoji: '📅', title: 'Post online', body: 'Send your videos and flyers to social media.' },
-        { target: '#cloudHome [data-home="files"]', emoji: '📁', title: 'Your files', body: 'All your videos are kept here.' },
+        { target: '#cloudHome [data-home="files"]', emoji: '📁', title: 'My videos', body: 'All your videos are kept here: the ones you added, and the shorts you made.' },
         { target: '#chAsk .mwg-ask', emoji: '❓', title: 'Need help?', body: 'Tap ? any time to see these tips again.' },
       ],
     });
@@ -447,12 +448,13 @@
     }
     $('#chHello').textContent = greeting() + (C.me && C.me.name ? ', ' + C.me.name.split(' ')[0] : '');
     const where = (C.hello && C.hello.standalone) ? 'Working on the church’s cloud server' : 'Working on the church’s studio machine';
-    $('#chWhere').textContent = where + (C.hello && C.hello.version ? ` · v${C.hello.version}` : '');
+    void where;
+    $('#chWhere').textContent = '';
     // the studio's door says what is waiting behind it
     const ed = window.VideoEditor;
     let foot = 'Open a video to start';
     if (ed && ed.hasVideo && ed.hasVideo()) foot = 'Carry on editing';
-    if (S.projects && S.projects.length) foot = `${S.projects.length} project${S.projects.length > 1 ? 's' : ''} · open one or start new`;
+    if (S.projects && S.projects.length) foot = `${S.projects.length} project${S.projects.length > 1 ? 's' : ''}`;
     else if (S.resumeName) foot = `Pick up “${S.resumeName}”`;
     $('#chStudioFoot').textContent = foot;
     renderHomeProjects();
