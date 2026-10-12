@@ -1736,8 +1736,13 @@ async function planWholeSermon(opts, { totalDur, OFF, snap, minLen, maxLen, idea
  * meaning. Returns true when the start moved.
  */
 function trimLeadIn(c) {
-  const w = c && c.words;
+  let w = c && c.words;
   if (!Array.isArray(w) || w.length < 8) return false;
+  // the words begin with any that overlap the start — the last of the sentence before
+  // (measured: "understand?" then "But under normal circumstances…"): those are not the short's
+  let j = 0;
+  while (j < 3 && j < w.length && w[j].start < c.start - 0.15) j++;
+  if (j) { w = w.slice(j); c.words = w; }
   const raw = (x) => String((x && x.text) || '').trim();
   const bare = (x) => raw(x).toLowerCase().replace(/[^a-z']/g, '');
   const lead = (x) => /^(but|and)$/.test(bare(x)) || (/^(so|now|well|then|also)$/.test(bare(x)) && /,$/.test(raw(x)));

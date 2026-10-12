@@ -164,6 +164,9 @@ function server() {
   const mk = (t, s0) => t.split(' ').map((x, i) => ({ text: x, start: s0 + i * 0.4, end: s0 + i * 0.4 + 0.3 }));
   let c = { start: 100, end: 200, text: 'But under normal circumstances, whatever is born of God overcomes the world.', words: mk('But under normal circumstances, whatever is born of God overcomes the world.', 100) };
   check('[4] "But under normal circumstances…" starts on "Under…" — on the next word\'s own time', trimLeadIn(c) && c.text.startsWith('Under normal circumstances') && Math.abs(c.start - 100.34) < 0.01 && c.words[0].text === 'under', { start: c.start, text: c.text });
+  // the words of a short begin with the last word of the sentence before, overlapping its start (measured)
+  c = { start: 100.3, end: 200, text: 'But under normal circumstances, whatever is born of God overcomes the world.', words: [{ text: 'understand?', start: 99.7, end: 100.35 }].concat(mk('But under normal circumstances, whatever is born of God overcomes the world.', 100.4)) };
+  check('[4] …also when the words begin with the last one of the sentence before ("understand? But under…")', trimLeadIn(c) && c.text.startsWith('Under normal circumstances') && c.words[0].text === 'under' && c.start > 100.4, { start: c.start, w0: c.words[0] && c.words[0].text, text: c.text.slice(0, 30) });
   c = { start: 100, end: 200, text: 'But you see, the nature of God in us, there is a way we win.', words: mk('But you see, the nature of God in us, there is a way we win.', 100) };
   check('[4] "But you see, …" goes with it: "The nature of God in us…"', trimLeadIn(c) && c.text.startsWith('The nature of God'), c.text);
   for (const t of ['So many big churches are big for nothing at all today.', 'Because God is good, we will win every battle today.', 'Now the Lord said to Moses, go down to the river.']) {
