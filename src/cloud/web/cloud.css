@@ -3076,3 +3076,24 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .csb-head > div { flex: 1; }
 .csb-plus { width: auto; padding: 0 18px 0 14px; border-radius: 24px; display: inline-flex; gap: 6px; align-items: center; font-weight: 750; font-size: 16px; }
 .csb-ask .mwg-ask { width: 44px; height: 44px; font-size: 20px; }
+
+/* AI Montage, as easy as 1-2-3: numbered steps, two big cards, the rest under "More options" */
+.mt-sec h3.mt-step { justify-content: flex-start; gap: 10px; align-items: center; font-size: 15px; text-transform: none; letter-spacing: 0; color: #fff; }
+.mt-step i { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 14px; font-weight: 800;
+  background: linear-gradient(135deg, #8b5cf6, #ec4899); color: #fff; }
+.mt-step small { margin-left: auto; opacity: .65; font-size: 12px; }
+.mt-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.mt-kind { display: grid; justify-items: start; gap: 2px; padding: 14px; border-radius: 16px; border: 1.5px solid var(--ph-line, #2a2b32);
+  background: rgba(255,255,255,.04); color: #fff; text-align: left; }
+.mt-kind em { font-style: normal; font-size: 26px; line-height: 1.1; }
+.mt-kind b { font-size: 16px; }
+.mt-kind small { font-size: 12px; opacity: .7; line-height: 1.3; }
+.mt-kind.on { border-color: #a855f7; background: linear-gradient(135deg, rgba(139,92,246,.28), rgba(236,72,153,.16)); box-shadow: 0 0 0 3px rgba(168,85,247,.18); }
+.mt-moreopts { border-top: 1px solid var(--ph-line, #2a2b32); padding-top: 8px; }
+.mt-moreopts > summary { list-style: none; display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 14px;
+  background: rgba(255,255,255,.05); color: #fff; font-weight: 650; cursor: pointer; }
+.mt-moreopts > summary::-webkit-details-marker { display: none; }
+.mt-moreopts > summary .mi { width: 18px; height: 18px; color: #c084fc; }
+.mt-moreopts > summary small { margin-left: auto; opacity: .6; font-weight: 500; font-size: 12px; }
+.mt-moreopts[open] > summary { margin-bottom: 4px; }
+.mt-go:disabled { opacity: .55; }

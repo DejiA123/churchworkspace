@@ -104,7 +104,7 @@ async function waitUp() {
         lens: [...document.querySelectorAll('#cloudMontage [data-mt-len]')].map((b) => b.textContent), caps: !document.getElementById('mtCaps') };
     });
     const a = await st();
-    check(/Viral Montage/.test(a.go) && a.disabled, 'the button says "Make my Viral Montage", waiting for a video', a);
+    check(/Add a video to start/.test(a.go) && a.disabled, 'the button says "Add a video to start" until there is one', a);
     check(a.order && !a.lens.includes('Use everything') && a.caps, 'the talk edit hides Order and "Use everything", and its captions are always on', a);
     const extra = await page.evaluate(() => ({
       narrator: [...document.querySelectorAll('#cloudMontage .mt-sec h3')].some((h) => /Narrator/.test(h.textContent)),
@@ -158,6 +158,9 @@ async function waitUp() {
     const nv = await page.evaluate(() => ({ rows: [...document.querySelectorAll('#cloudMontage [data-mt-voice]')].map((r) => r.dataset.mtVoice), plays: document.querySelectorAll('#cloudMontage [data-mt-play^="voice:"]').length,
       on: (document.querySelector('#cloudMontage [data-mt-voice].on') || {}).dataset }));
     check(nv.rows.join() === ',am_michael,af_heart,am_onyx' && nv.plays === 3 && nv.on && nv.on.mtVoice === '', 'the narrator is a list: "No narrator" (ticked) then each voice with ▶ to hear it', nv);
+    // the narrator is under "More options" (the screen keeps to 3 steps)
+    await page.evaluate(() => { const d = document.querySelector('#cloudMontage .mt-moreopts'); if (d && !d.open) d.querySelector('summary').click(); });
+    await sleep(200);
     await page.locator('#cloudMontage [data-mt-voice="am_onyx"] .mt-song-t').tap();
     await sleep(300);
     await page.locator('#cloudMontage [data-mt-play="voice:am_onyx"]').tap();
@@ -203,7 +206,7 @@ async function waitUp() {
     await page.locator('#cloudMontage [data-mt-mode="music"]').tap();
     await sleep(300);
     const c = await st();
-    check(/montage/.test(c.go) && c.disabled, 'the music montage still asks for two or more clips', c);
+    check(/Add 2 clips or photos/.test(c.go) && c.disabled, 'the music montage still asks for two or more clips', c);
     // "WHAT'S IT ABOUT?": one box, one row of ideas to tap (the speaker read off the video's own name)
     await page.locator('#cloudMontage [data-mt-mode="talk"]').tap();
     await sleep(300);
@@ -244,7 +247,7 @@ async function waitUp() {
     await page.locator('#cloudMontagePart [data-mp="ok"]').tap();
     await sleep(300);
     const tileT = await page.evaluate(() => ({ t: document.querySelector('#cloudMontage [data-mt-part="0"]').textContent.trim(), on: document.querySelector('#cloudMontage [data-mt-part="0"]').classList.contains('on'), other: document.querySelector('#cloudMontage [data-mt-part="1"]').textContent.trim(), gone: !document.getElementById('cloudMontagePart') }));
-    check(tileT.gone && tileT.on && /0:10–0:25/.test(tileT.t) && /All/.test(tileT.other), 'the video\'s tile shows the part chosen (the other still says All)', tileT);
+    check(tileT.gone && tileT.on && /0:10–0:25/.test(tileT.t) && /Trim/.test(tileT.other), 'the video\'s tile shows the part chosen (the other still says Trim)', tileT);
     await page.locator('#mtBrief').fill('Bishop David Richman at The Power House — faith over fear. Sunday service');
     await page.locator('#cloudMontage [data-mt-song=""]').tap();
     await sleep(200);
@@ -275,7 +278,7 @@ async function waitUp() {
       return { music: !!sec, worship: !!document.querySelector('#csCompose [data-c="mus"][data-v="auto"]'),
         moods: document.querySelectorAll('#csCompose [data-c="musmood"]').length, hint: (document.querySelector('#csCompose .csb-more .cs-hint, #csCompose .cs-sec .cs-hint') || {}).textContent || '' };
     }, VID);
-    check(sched.music && sched.worship && sched.moods === 4, 'a new post offers Music: a worship song picked for you, or free songs by mood', sched);
+    check(sched.music && !sched.worship && sched.moods === 0 && /My music/.test(sched.hint), 'a new post offers Music: the church’s own recordings — never a free instrumental', sched);
     if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'schedule-music.png') });
     const songPath = path.join(MEDIA, 'my-song.wav');
     execFileSync(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'sine=f=523:d=6', songPath]);

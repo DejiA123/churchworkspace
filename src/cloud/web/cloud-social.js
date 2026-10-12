@@ -2640,9 +2640,6 @@
     const p = MT.panel; if (!p) return;
     const esc = C.esc, attr = C.escAttr;
     const who = MT.who || {};
-    const brain = who.director === 'claude' ? `Directed by <b>Claude</b> (${esc(who.model || 'Opus')}), looking at every shot`
-      : who.director === 'groq' ? 'Directed by Groq AI (free), looking at every shot. <small>A Claude key on the server gives the very best edits.</small>'
-        : 'Directed by the studio’s own editor. <small>Add a Claude key on the server for AI-directed edits.</small>';
     const chips = (list, cur, key) => list.map(([v, label]) => `<button type="button" class="mt-chip${String(cur) === String(v) ? ' on' : ''}" data-mt-${key}="${attr(v)}">${esc(label)}</button>`).join('');
     const openPath = window.VideoEditor && (window.VideoEditor.montagePath || window.VideoEditor.currentPath) ? (window.VideoEditor.montagePath || window.VideoEditor.currentPath)() : null;
     const openIsMontage = !!openPath && /(^|[\\/])montage-[^\\/]*\.mp4$/i.test(openPath);
@@ -2650,46 +2647,51 @@
     if (talk && MT.len === 'all') MT.len = 30;
     const nVid = MT.items.filter((it) => it.kind === 'video').length;
     const ready = talk ? nVid >= 1 : MT.items.length >= 2;
+    /*
+     * ►► AS EASY AS 1-2-3. ◄◄ "The app works great but the screens are
+     * confusing — a lot is going on." So: three numbered steps — your videos,
+     * the kind of edit (two big cards), then music, length and shape — and
+     * every other choice (narrator, story, style, order, captions) folded
+     * under "More options", all still there. No long explanations.
+     */
+    const KIND = { talk: ['🔥', 'Viral', 'The best lines of someone speaking'], music: ['🎵', 'Music', 'Clips and photos cut to a song'] };
+    const step = (n, title, extra) => `<h3 class="mt-step"><i>${n}</i><span>${title}</span>${extra ? `<small>${extra}</small>` : ''}</h3>`;
     p.body.innerHTML = `
-      <section class="mt-sec"><h3>What kind of edit?</h3><div class="mt-row">${chips(MT_MODES, MT.mode, 'mode')}</div>
-        <small class="mt-hint">${talk
-    ? 'Add one or more videos of someone speaking — tap ✂️ on a video to use only part of it. The AI listens to every word, picks the lines that stop the scroll — from any of the videos — puts the strongest first and builds the story, then cuts it with jump zooms, a cinematic look, flashes, B-roll from your photos and captions lit up word by word.'
-    : 'Clips and photos cut to music — the AI picks the best-looking moments and cuts them on the beat.'}</small></section>
       ${openIsMontage ? `<button type="button" class="me-banner" data-mt-rearrange>✏️ <span><b>Rearrange the montage that’s open</b><small>Move clips and photos, then remake it</small></span></button>` : ''}
-      <p class="mt-lead">${mi('sparkles')} ${brain}</p>
-      <section class="mt-sec"><h3>${talk ? 'Your videos' : 'Your clips &amp; photos'} <small>${MT.items.length ? MT.items.length + ' added' : talk ? 'add 1 or more videos (photos become B-roll)' : 'add 2 or more'}</small></h3>
+      <section class="mt-sec">${step(1, talk ? 'Add your videos' : 'Add your clips and photos', MT.items.length ? MT.items.length + ' added' : talk ? '1 or more' : '2 or more')}
         <div class="mt-grid${MT.order === 'mine' ? ' mt-ordered' : ''}">${MT.items.map((it, i) => `<div class="mt-tile" data-i="${i}">${it.kind === 'image'
           ? `<img src="${attr(it.url)}" alt="" draggable="false" />` : (it.poster ? `<img src="${attr(it.poster)}" alt="" draggable="false" />` : '<span class="mt-load"></span>') + (talk
-            ? `<button type="button" class="mt-part${mtHasPart(it) ? ' on' : ''}" data-mt-part="${i}" aria-label="Choose the part to use">✂️ ${mtHasPart(it) ? mtClock(it.from || 0) + '–' + mtClock(it.to || it.secs) : 'All' + (it.secs ? ' ' + mtClock(it.secs) : '')}</button>`
+            ? `<button type="button" class="mt-part${mtHasPart(it) ? ' on' : ''}" data-mt-part="${i}" aria-label="Choose the part to use">✂️ ${mtHasPart(it) ? mtClock(it.from || 0) + '–' + mtClock(it.to || it.secs) : 'Trim'}</button>`
             : `<span class="mt-dur">▶${it.secs ? ' ' + Math.floor(it.secs / 60) + ':' + String(Math.round(it.secs % 60)).padStart(2, '0') : ''}</span>`)}
           ${MT.order === 'mine' ? `<span class="mt-num">${i + 1}</span>` : ''}
           <button type="button" class="mt-x" data-mt-del="${i}" aria-label="Remove">✕</button></div>`).join('')}
-          <button type="button" class="mt-add" data-mt="add">${mi('plus')}<span>Add</span></button>
-          <button type="button" class="mt-add mt-add-files" data-mt="addsrv">${mi('folder')}<span>From your files</span></button></div>
+          <button type="button" class="mt-add" data-mt="add">${mi('plus')}<span>From phone</span></button>
+          <button type="button" class="mt-add mt-add-files" data-mt="addsrv">${mi('folder')}<span>My files</span></button></div>
       </section>
-      <section class="mt-sec"${talk ? ' hidden' : ''}><h3>Order</h3><div class="mt-row">${chips(MT_ORDERS, MT.order, 'order')}</div>
-        <small class="mt-hint">${MT.order === 'mine' ? 'The clips play in this order. Hold a tile and drag it to move it — a photo goes over the video before it.' : 'The AI puts the strongest moment first and orders the rest for the story. Hold and drag a tile to set your own order.'}</small></section>
-      ${talk ? `<section class="mt-sec"><h3>Narrator <small>optional · tap ▶ to hear</small></h3>
-        ${who.voiceover && who.voiceover.installed ? mtVoiceHtml(who.voiceover.voices || [])
-    : '<small class="mt-hint">The narrator voice is not installed on this server yet — update the server to add it.</small>'}</section>` : ''}
-      <section class="mt-sec"><h3>${talk ? 'Background music' : 'Music'} <small>tap ▶ to listen</small></h3>
+      <section class="mt-sec">${step(2, 'Pick a kind')}
+        <div class="mt-kinds">${MT_MODES.map(([v]) => `<button type="button" class="mt-kind${MT.mode === v ? ' on' : ''}" data-mt-mode="${v}"><em>${KIND[v][0]}</em><b>${KIND[v][1]}</b><small>${KIND[v][2]}</small></button>`).join('')}</div></section>
+      <section class="mt-sec">${step(3, talk ? 'Background music' : 'Music', 'tap ▶ to listen')}
         ${mtMusicHtml()}
         <label class="mt-toggle"${talk ? ' hidden' : ''}><input type="checkbox" id="mtKeep" ${MT.keep ? 'checked' : ''}/> <span>Keep the clips’ own sound${MT.song || MT.songFile ? ' under the music' : ''}</span></label>
       </section>
-      <section class="mt-sec"><h3>Style</h3><div class="mt-row">${chips(MT_STYLES, MT.style, 'style')}</div></section>
-      <section class="mt-sec"><h3>Length</h3><div class="mt-row">${chips(talk ? MT_TALK_LENS : MT_LENS, MT.len, 'len')}</div>
+      <section class="mt-sec"><h3>How long?</h3><div class="mt-row">${chips(talk ? MT_TALK_LENS : MT_LENS, MT.len, 'len')}</div>
         ${MT.len === 'custom' ? `<div class="mt-custom"><label><input type="number" id="mtMin" inputmode="numeric" min="0" max="10" value="${Math.floor(MT.custom / 60)}" /><span>min</span></label>
-          <label><input type="number" id="mtSec" inputmode="numeric" min="0" max="59" step="5" value="${MT.custom % 60}" /><span>sec</span></label></div>` : ''}
-        <small class="mt-hint">${talk ? 'About this much speech — the AI keeps every line whole, so it can land a little over or under.' : MT.len === 'custom' ? 'Any length from 8 seconds to 10 minutes — the AI builds a longer piece in sections, each rising and landing.' : MT.len === 'all' ? 'Nothing is cut out: every clip plays in full and every photo gets its moment — the AI orders them and blends them together with fades, flashes and cuts on the beat.' : 'The AI picks the best moments to fit this length.'}</small></section>
+          <label><input type="number" id="mtSec" inputmode="numeric" min="0" max="59" step="5" value="${MT.custom % 60}" /><span>sec</span></label></div>` : ''}</section>
       <section class="mt-sec"><h3>Shape</h3><div class="mt-row">${chips(MT_ASPECTS.map(([v, l]) => [v, v + ' · ' + l]), MT.aspect, 'aspect')}</div></section>
-      <section class="mt-sec"><h3>Words on screen</h3>
-        ${talk ? '<p class="mt-hint">💬 Captions of every word, lit up as it’s said, are always on — plus a headline hook at the top. You can restyle both in the studio.</p>'
-    : `<label class="mt-toggle"><input type="checkbox" id="mtCaps" ${MT.caps ? 'checked' : ''}/> <span>💬 Captions of what’s said, added automatically</span></label>
-        <small class="mt-hint">The AI also writes a hook, story lines and a closing line, styled to match — tell it the story below.</small>`}</section>
+      <details class="mt-moreopts"${MT.more ? ' open' : ''}><summary>${mi('sliders')}<span>More options</span><small>${talk ? 'narrator, story, style' : 'order, style, captions, story'}</small></summary>
+      ${talk ? `<section class="mt-sec"><h3>Narrator <small>tap ▶ to hear</small></h3>
+        ${who.voiceover && who.voiceover.installed ? mtVoiceHtml(who.voiceover.voices || [])
+    : '<small class="mt-hint">The narrator voice is not installed on this server yet — update the server to add it.</small>'}</section>` : ''}
       ${mtAboutHtml()}
+      <section class="mt-sec"><h3>Style</h3><div class="mt-row">${chips(MT_STYLES, MT.style, 'style')}</div></section>
+      <section class="mt-sec"${talk ? ' hidden' : ''}><h3>Order</h3><div class="mt-row">${chips(MT_ORDERS, MT.order, 'order')}</div>
+        <small class="mt-hint">${MT.order === 'mine' ? 'Hold a tile and drag it to move it.' : 'Hold and drag a tile to set your own order.'}</small></section>
+      ${talk ? '' : `<section class="mt-sec"><h3>Words on screen</h3><label class="mt-toggle"><input type="checkbox" id="mtCaps" ${MT.caps ? 'checked' : ''}/> <span>💬 Captions of what’s said</span></label></section>`}
+      </details>
       <input type="file" id="mtPick" accept="video/*,image/*" multiple hidden />
       <input type="file" id="mtSong" accept="audio/*,.mp3,.m4a,.wav,.aac" hidden />`;
-    p.foot.innerHTML = `<button type="button" class="mt-go" data-mt="go"${ready ? '' : ' disabled'}>${mi('sparkles')} ${talk ? 'Make my Viral Montage' : 'Make my montage'}</button>`;
+    { const d = p.body.querySelector('.mt-moreopts'); if (d) d.addEventListener('toggle', () => { MT.more = d.open; }); }
+    p.foot.innerHTML = `<button type="button" class="mt-go" data-mt="go"${ready ? '' : ' disabled'}>${mi('sparkles')} ${!ready ? (talk ? 'Add a video to start' : 'Add 2 clips or photos to start') : talk ? 'Make my Viral Montage' : 'Make my montage'}</button>`;
     if (!p._wired) { p._wired = true; mtWire(p); }
     if (MT.preview) mtPreviewPaint();   // a sample still loading or playing keeps its line after a redraw
   }
