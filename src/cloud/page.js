@@ -195,12 +195,12 @@ function build(opts = {}) {
        a light page's white: the CapCut look, without the bugs. iOS reads this
        when the app is added to the Home Screen; cloud-boot.js (vpFix) tells
        an older install with the short window to re-add it. -->
-  <meta name="apple-mobile-web-app-title" content="Church Work Space" />
+  <meta name="apple-mobile-web-app-title" content="Church Space" />
   <meta name="format-detection" content="telephone=no" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png?v=${key}" />
   <link rel="icon" href="/icons/icon-192.png" />
-  <title>Church Work Space</title>
+  <title>Church Space</title>
 ${styles}
   <link rel="stylesheet" href="/cloud.css?v=${key}" />
 </head>
@@ -208,17 +208,17 @@ ${styles}
   <!-- The launch screen: up from the first paint, so a phone that is already signed in
        never sees the sign-in page flash past while it asks the server. cloud-boot.js
        takes it away once it knows where to go (Home, or the sign-in page). -->
-  <div id="mwSplash" class="mw-splash" aria-label="Opening Church Work Space" role="status">
+  <div id="mwSplash" class="mw-splash" aria-label="Opening Church Space" role="status">
     <div class="mw-splash-mid">
       <img class="mw-splash-icon" src="/icons/icon-192.png" alt="" width="88" height="88" />
-      <div class="mw-splash-name">Church Work Space</div>
+      <div class="mw-splash-name">Church Space</div>
       <div class="mw-splash-bar"><i></i></div>
     </div>
   </div>
   <!-- The cloud bar replaces the desktop sidebar: who you are connected to,
        how the work is getting home, and the way back to your files. -->
   <div id="cloudBar" class="cloud-bar">
-    <div class="cloud-brand"><span class="cloud-logo">✝</span><span class="cloud-name">Church Work Space</span><span id="cloudWhere" class="cloud-where"></span></div>
+    <div class="cloud-brand"><span class="cloud-logo">✝</span><span class="cloud-name">Church Space</span><span id="cloudWhere" class="cloud-where"></span></div>
     <div class="cloud-bar-actions">
       <button id="cloudFiles" class="cloud-chip" title="Your recordings and finished exports on the studio machine">📁 Files</button>
       <button id="cloudDownloads" class="cloud-chip" title="Everything this session has finished — tap to save it to this phone">⬇ Saved <span id="cloudDlCount" class="cloud-badge hidden">0</span></button>
@@ -232,7 +232,7 @@ ${styles}
       <!-- the same blue banner as Home, so the app looks like one app from the first screen -->
       <div class="cg-hero">
         <div class="cloud-gate-logo">✝</div>
-        <h1>Church Work Space</h1>
+        <h1>Church Space</h1>
         <p class="cloud-gate-sub">Turn sermons into shorts, captions and posts.</p>
       </div>
       <div class="cg-card">

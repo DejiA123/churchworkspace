@@ -1,6 +1,6 @@
 'use strict';
 /*
- * Church Work Space — Video Studio (CapCut-style)
+ * Church Space — Video Studio (CapCut-style)
  * Video preview + scrubbable timeline (filmstrip, ruler, playhead), draggable /
  * trimmable clip segments, an AI "find sermon highlights" button that drops
  * clips onto the timeline, and one-tap 9:16 short export.
@@ -11182,7 +11182,7 @@
     await loadWordBook(true);
     const b = ve._wb || wbBlank();
     const data = {
-      app: 'Church Work Space', kind: 'word-book', version: 1, exported: new Date().toISOString(),
+      app: 'Church Space', kind: 'word-book', version: 1, exported: new Date().toISOString(),
       fixes: (b.fixes || []).filter((f) => f.on !== false).map((f) => ({ from: f.from, to: f.to })),
       terms: (b.terms || []).map((t) => t.text).filter(Boolean),
     };

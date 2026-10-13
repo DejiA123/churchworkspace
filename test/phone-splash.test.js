@@ -67,7 +67,7 @@ const WATCH = () => {
       return { up: !!sp && getComputedStyle(sp).opacity === '1', icon: !!img && img.complete && img.naturalWidth > 0, name: sp ? sp.innerText.trim() : '', running: !!bar && getComputedStyle(bar).animationName === 'mwSplashRun' };
     });
     if (SHOTS) await page.screenshot({ path: SHOTS + '/splash.png' });
-    check(mid.up && mid.icon && /Church Work Space/.test(mid.name) && mid.running, '[2] while it asks: the launch screen, with the app icon, its name and a running bar', mid);
+    check(mid.up && mid.icon && /Church Space/.test(mid.name) && mid.running, '[2] while it asks: the launch screen, with the app icon, its name and a running bar', mid);
     await page.waitForFunction(() => !document.getElementById('mwSplash'), null, { timeout: 15000 }).catch(() => {});
     await sleep(600);
     const seen = await page.evaluate(() => window.__seen);

@@ -80,7 +80,7 @@ const live = [];
     cleared: {}, blackout: false,
   });
   const info = await req('/api/info');
-  check('it identifies itself by name', info.json && /Church Work Space/.test(info.json.name || ''),
+  check('it identifies itself by name', info.json && /Church Space/.test(info.json.name || ''),
     info.json && info.json.name);
   const state = await req('/api/state?key=' + PASS);
   check('and hands over what is on the screen right now',

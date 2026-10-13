@@ -141,7 +141,7 @@ function start(m) {
       color_format: COLOR_UYVY_BGRA,
       bandwidth,
       allow_video_fields: false,
-      p_ndi_recv_name: 'Church Work Space',
+      p_ndi_recv_name: 'Church Space',
     });
     if (!recv) throw new Error('Could not open the NDI receiver.');
     vframe = ndi.koffi.alloc(ndi.T.video, 1);

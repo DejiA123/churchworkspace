@@ -1,6 +1,6 @@
 'use strict';
 /*
- * Church Work Space — Flyer Maker (Canva-style, free & offline).
+ * Church Space — Flyer Maker (Canva-style, free & offline).
  *
  * - Freeform design surface: drag / resize / rotate / inline-edit layers.
  * - Left rail: 🪄 Magic (type your event → AI builds flyers), 🗂️ Templates,

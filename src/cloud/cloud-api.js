@@ -1137,7 +1137,7 @@ async function handle(req, res) {
   if (p === '/api/hello') {
     return json(res, 200, {
       ok: true,
-      name: 'Church Work Space',
+      name: 'Church Space',
       version: cfg.appVersion || '',
       signedIn: authed(req, url),
       // spaces: whether this studio has accounts yet, and who is signed in

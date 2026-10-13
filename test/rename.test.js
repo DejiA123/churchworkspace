@@ -35,7 +35,8 @@ const ROOT = path.join(__dirname, '..');
 const { migrateUserData, MARKER } = require(path.join(ROOT, 'src/main/migrate-name'));
 const pkg = require(path.join(ROOT, 'package.json'));
 
-const NEW_NAME = 'Church Work Space';
+const NEW_NAME = 'Church Work Space';   // the installer's product name (and its data folder)
+const DISPLAY_NAME = 'Church Space';    // the name people see in the app
 const OLD_NAME = 'Church Media Workstation';
 
 let pass = 0, fail = 0;
@@ -58,11 +59,11 @@ check('the installer will be named after it', !/workstation/i.test(pkg.name + pk
   `"${pkg.productName} Setup ${pkg.version}.exe"`);
 
 const mainJs = read('src/main/main.js');
-check('the window title bar says it', mainJs.includes("title: '" + NEW_NAME + "'"));
+check('the window title bar says it', mainJs.includes("title: '" + DISPLAY_NAME + "'"));
 const indexHtml = read('src/renderer/index.html');
-check('the browser/page title says it', indexHtml.includes('<title>' + NEW_NAME + '</title>'));
+check('the browser/page title says it', indexHtml.includes('<title>' + DISPLAY_NAME + '</title>'));
 check('the sidebar falls back to it before a church sets its own name',
-  read('src/renderer/renderer.js').includes("|| '" + NEW_NAME + "'"));
+  read('src/renderer/renderer.js').includes("|| '" + DISPLAY_NAME + "'"));
 
 /* Nothing user-visible may still carry the old words. Identifiers are exempt
  * and checked separately below — they are deliberately unchanged. */

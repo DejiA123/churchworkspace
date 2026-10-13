@@ -320,7 +320,7 @@ async function winEnable(userData, everyMinutes, cmd) {
   // schtasks reads the definition as UTF-16 — hand it exactly that, BOM and all.
   const xml = taskXml({
     exe: cmd.exe, args: cmd.args, everyMinutes,
-    description: 'Publishes Church Work Space social posts at their scheduled time, even when the app is closed.',
+    description: 'Publishes Church Space social posts at their scheduled time, even when the app is closed.',
   });
   const file = path.join(os.tmpdir(), 'cws-autopost-' + Date.now() + '.xml');
   fs.writeFileSync(file, '\ufeff' + xml, 'utf16le');

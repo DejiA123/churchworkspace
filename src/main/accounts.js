@@ -303,7 +303,7 @@ function captureGoogleCode({ authBase, clientId, openUrl, timeoutMs = 5 * 60 * 1
       if (!u.searchParams.has('code') && !u.searchParams.has('error')) { res.statusCode = 404; return res.end(); }
       res.setHeader('content-type', 'text/html');
       res.end('<html><body style="font-family:sans-serif;background:#12151d;color:#eee;display:grid;place-items:center;height:96vh">' +
-        '<div style="text-align:center"><h2>✅ Connected</h2><p>You can close this tab and go back to the Church Work Space.</p></div></body></html>');
+        '<div style="text-align:center"><h2>✅ Connected</h2><p>You can close this tab and go back to the Church Space.</p></div></body></html>');
       const err = u.searchParams.get('error');
       const code = u.searchParams.get('code');
       const st = u.searchParams.get('state');

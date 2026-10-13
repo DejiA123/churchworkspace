@@ -378,7 +378,7 @@ function headers() {
   const h = { authorization: 'Bearer ' + key(), 'content-type': 'application/json' };
   if (cfg.provider === 'openrouter') {
     h['http-referer'] = 'https://church.work.space';
-    h['x-title'] = 'Church Work Space';
+    h['x-title'] = 'Church Space';
   }
   return h;
 }

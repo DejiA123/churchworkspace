@@ -296,7 +296,7 @@
       <main class="ch-scroll">
         <section class="ch-banner" id="chBanner">
           <header class="ch-top">
-            <div class="ch-brand"><span class="ch-logo">✝</span><span class="ch-name">Church Work Space</span></div>
+            <div class="ch-brand"><span class="ch-logo">✝</span><span class="ch-name">Church Space</span></div>
             <div class="ch-acts"><span class="ch-chip-slot"></span><span class="ch-ask" id="chAsk"></span>
               <button type="button" class="ch-round ch-me" data-home="me" aria-label="Your space"><b id="chMeInitial">${esc(((C.me && C.me.name) || '').charAt(0).toUpperCase()) || mi('user')}</b></button>
             </div>

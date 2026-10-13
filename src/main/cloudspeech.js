@@ -570,7 +570,7 @@ async function transcribe(pcm16, { partial = false, live = null, signal = null }
         method: 'POST',
         headers: Object.assign({ authorization: 'Bearer ' + cfg.key },
           cfg.provider === 'openrouter'
-            ? { 'http-referer': 'https://church.work.space', 'x-title': 'Church Work Space' }
+            ? { 'http-referer': 'https://church.work.space', 'x-title': 'Church Space' }
             : {}),
         body: form,
         signal: ac.signal,
@@ -880,7 +880,7 @@ async function postAudio(body, { timeoutMs, signal, prompt }) {
       method: 'POST',
       headers: Object.assign({ authorization: 'Bearer ' + fileKey() },
         cfg.provider === 'openrouter'
-          ? { 'http-referer': 'https://church.work.space', 'x-title': 'Church Work Space' }
+          ? { 'http-referer': 'https://church.work.space', 'x-title': 'Church Space' }
           : {}),
       body: form,
       signal: ac.signal,
@@ -1088,7 +1088,7 @@ async function postAudioWords(body, { timeoutMs = 180000, retry429 = true, model
         method: 'POST',
         headers: Object.assign({ authorization: 'Bearer ' + fileKey() },
           cfg.provider === 'openrouter'
-            ? { 'http-referer': 'https://church.work.space', 'x-title': 'Church Work Space' }
+            ? { 'http-referer': 'https://church.work.space', 'x-title': 'Church Space' }
             : {}),
         body: form,
         signal: ac.signal,

@@ -2114,8 +2114,8 @@ async function init() {
 
   // Brand
   const b = state.settings.brand || {};
-  $('#brandName').textContent = b.churchName || 'Church Work Space';
-  $('#brandName').title = b.churchName || 'Church Work Space';
+  $('#brandName').textContent = b.churchName || 'Church Space';
+  $('#brandName').title = b.churchName || 'Church Space';
   $('#setChurchName').value = b.churchName || '';
   $('#setPrimary').value = b.primaryColor || '#1f6feb';
   $('#setAccent').value = b.accentColor || '#f5a623';

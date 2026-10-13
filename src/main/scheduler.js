@@ -660,7 +660,7 @@ class Scheduler {
     // (the studio was just opened while a background run was in flight). One
     // of them publishes; the other is told to leave it alone.
     const release = this._lock('publish');
-    if (!release) return { pending: true, reason: 'Another copy of Church Work Space is publishing right now.' };
+    if (!release) return { pending: true, reason: 'Another copy of Church Space is publishing right now.' };
 
     this._busy.add(id);
     try {

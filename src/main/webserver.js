@@ -86,7 +86,7 @@ function handle(req, res) {
   }
 
   if (p === '/api/info') {
-    return json(res, 200, { ok: true, name: 'Church Work Space', control: cfg.allowControl, needsKey: !!cfg.passcode });
+    return json(res, 200, { ok: true, name: 'Church Space', control: cfg.allowControl, needsKey: !!cfg.passcode });
   }
 
   // live push: one long-lived response per phone

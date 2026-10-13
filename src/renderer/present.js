@@ -1,6 +1,6 @@
 'use strict';
 /*
- * Church Work Space — Presentation Studio (ProPresenter-style).
+ * Church Space — Presentation Studio (ProPresenter-style).
  *
  * The shape of the thing, and why:
  *

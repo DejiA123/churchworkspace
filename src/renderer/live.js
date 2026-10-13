@@ -3935,7 +3935,7 @@ window.LiveStudio = (() => {
       if (!cat.supported) {
         return `<div class="vmx-is-hint">${esc(cat.label)}</div>` +
           `<div class="vmx-is-empty"><div class="vmx-is-empty-ic">🚧</div>` +
-          `<p>${esc(cat.label)} isn't available in Church Work Space.</p>` +
+          `<p>${esc(cat.label)} isn't available in Church Space.</p>` +
           (cat.note ? `<p class="vmx-is-empty-note">${esc(cat.note)}</p>` : '') +
           `</div>`;
       }

@@ -126,7 +126,7 @@ shim.shim.shell.openExternal = async (url) => {
 
 /* ------------------------------------------------------------ the app itself */
 
-console.log(`Church Work Space — Cloud Studio v${version}`);
+console.log(`Church Space — Cloud Studio v${version}`);
 console.log('  data:   ' + DATA);
 console.log('  media:  ' + MEDIA);
 

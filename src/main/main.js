@@ -204,7 +204,7 @@ function createWindow() {
     minWidth: 980,
     minHeight: 640,
     backgroundColor: '#0f1117',
-    title: 'Church Work Space',
+    title: 'Church Space',
     icon: path.join(__dirname, '..', '..', 'build', 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

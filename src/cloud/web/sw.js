@@ -143,7 +143,7 @@ self.addEventListener('fetch', (e) => {
       } catch (er) {
         const hit = await caches.match('/');
         return hit || new Response(
-          '<!doctype html><meta charset="utf-8"><title>Church Work Space</title>'
+          '<!doctype html><meta charset="utf-8"><title>Church Space</title>'
           + '<body style="font:16px system-ui;background:#0b0d12;color:#eef1f7;display:grid;place-items:center;height:100vh;margin:0">'
           + '<div style="text-align:center;padding:24px"><div style="font-size:40px">✝</div>'
           + '<h1 style="font-size:18px">The studio is not reachable</h1>'

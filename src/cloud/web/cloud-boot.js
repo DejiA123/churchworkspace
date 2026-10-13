@@ -5025,7 +5025,7 @@ let _hideTimer = null;
         island({
           id: 'vpshort', kind: 'info', ms: 14000,
           title: 'Re-add the app for the full screen',
-          sub: 'Your iPhone is leaving a strip at the bottom. Remove Church Work Space from your Home Screen, then add it again from Safari (Share → Add to Home Screen) and the tools sit on the bottom edge.',
+          sub: 'Your iPhone is leaving a strip at the bottom. Remove Church Space from your Home Screen, then add it again from Safari (Share → Add to Home Screen) and the tools sit on the bottom edge.',
         });
       };
       setTimeout(tell, 2500);
