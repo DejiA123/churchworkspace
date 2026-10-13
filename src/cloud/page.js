@@ -173,29 +173,31 @@ function build(opts = {}) {
   const scripts = RENDERER_SCRIPTS.map((f) => `  <script src="/r/${f}?v=${key}"></script>`).join('\n');
 
   return `<!DOCTYPE html>
-<html lang="en"${opts.topFull ? ' class="mw-topfull"' : ''}>
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' blob: data:; worker-src 'self' blob:; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://player.vimeo.com;" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
-  <meta name="theme-color" content="#000000" media="(max-width: 900px)" />
-  <meta name="theme-color" content="#0d1117" />
+  <!-- The colour of the bar above the app (iPhone home-screen app, phone
+       browsers): the app's blue to start with, then whatever the screen has
+       at its top edge — cloud-boot.js (topTint) keeps it matched. -->
+  <meta name="theme-color" content="#0a4fc4" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <!-- Opaque black, not "black-translucent": on iOS 26 a home-screen app with
-       the see-through bar gets a window one status bar short of the screen,
-       and the strip under it can never be drawn in (WebKit bug 301108), so
-       the tool dock floated over a dead band or was cut off in it. Opaque, iOS
-       keeps the status bar's strip itself (black, like the studio's own top)
-       and the app reaches the bottom edge. iOS reads this when the app is
-       added to the home screen; cloud-boot.js (vpFix) tells an older install
-       to re-add it. (/?top=full asks for the see-through bar on one phone,
-       to try it: the app then runs up behind the clock — cloud-api.js.) -->
-  <meta name="apple-mobile-web-app-status-bar-style" content="${opts.topFull ? 'black-translucent' : 'black'}" />
+  <!-- NO apple-mobile-web-app-status-bar-style. "black-translucent" (the app
+       drawn under the clock) is broken on iOS 26 and later: a window one
+       status bar short of the screen with a dead strip at the bottom (WebKit
+       bug 301108), a blurred top, and from 26.1 on not see-through at all.
+       "black" painted the strip black whatever the screen. With none, iOS
+       gives the app the whole screen below an opaque status bar TINTED WITH
+       theme-color — so the bar is the Home screen's blue, the studio's black,
+       a light page's white: the CapCut look, without the bugs. iOS reads this
+       when the app is added to the Home Screen; cloud-boot.js (vpFix) tells
+       an older install with the short window to re-add it. -->
   <meta name="apple-mobile-web-app-title" content="Church Work Space" />
   <meta name="format-detection" content="telephone=no" />
-  <link rel="manifest" href="/manifest.webmanifest${opts.topFull ? '?top=full' : ''}" />
+  <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png?v=${key}" />
   <link rel="icon" href="/icons/icon-192.png" />
   <title>Church Work Space</title>

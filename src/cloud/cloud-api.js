@@ -1020,38 +1020,13 @@ async function handle(req, res) {
   /* --- the app shell (open: it is a sign-in page until you sign in) ------ */
 
   if (p === '/' || p === '/index.html') {
-    /*
-     * THE TOP OF THE SCREEN, ON AN iPHONE HOME-SCREEN APP. Opaque black by
-     * default (page.js says why: iOS 26's see-through bar left a dead strip
-     * at the bottom). /?top=full asks for the see-through bar on THIS phone
-     * — the app then runs up behind the clock, CapCut-style — and /?top=bar
-     * goes back. iOS takes the setting when the app is added to the Home
-     * Screen, so it is a cookie Safari hands to the app it adds.
-     */
-    const q = new URL(req.url, 'http://x').searchParams.get('top');
-    const had = /(?:^|;\s*)mw_top=full(?:;|$)/.test(String(req.headers.cookie || ''));
-    const full = q === 'full' || (q !== 'bar' && had);
-    const headers = {};
-    if (q === 'full') headers['Set-Cookie'] = 'mw_top=full; Path=/; Max-Age=31536000; SameSite=Lax; Secure';
-    if (q === 'bar') headers['Set-Cookie'] = 'mw_top=; Path=/; Max-Age=0; SameSite=Lax; Secure';
-    const html = page.build({ version: cfg.appVersion || '0', topFull: full });
-    return send(res, 200, 'text/html; charset=utf-8', html, headers);
+    const html = page.build({ version: cfg.appVersion || '0' });
+    return send(res, 200, 'text/html; charset=utf-8', html);
   }
   if (p === '/cloud-boot.js') return sendWeb(req, res, 'cloud-boot.js');
   if (p === '/cloud-social.js') return sendWeb(req, res, 'cloud-social.js');
   if (p === '/cloud.css') return sendWeb(req, res, 'cloud.css');
-  if (p === '/manifest.webmanifest') {
-    // added to the Home Screen from /?top=full: the app OPENS there too, so it asks for the
-    // see-through bar on every launch — whether or not iOS carried Safari's cookie into it
-    if (new URL(req.url, 'http://x').searchParams.get('top') === 'full') {
-      try {
-        const m = JSON.parse(fs.readFileSync(path.join(__dirname, 'web', 'manifest.webmanifest'), 'utf-8'));
-        m.start_url = '/?top=full';
-        return send(res, 200, 'application/manifest+json; charset=utf-8', JSON.stringify(m));
-      } catch (e) { /* the plain one, below */ }
-    }
-    return sendWeb(req, res, 'manifest.webmanifest');
-  }
+  if (p === '/manifest.webmanifest') return sendWeb(req, res, 'manifest.webmanifest');
   // A service worker may only control the scope it is served from, so this one
   // is served from the root even though it lives in web/.
   if (p === '/sw.js') return sendWeb(req, res, 'sw.js');

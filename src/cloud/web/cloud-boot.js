@@ -4866,8 +4866,9 @@ let _hideTimer = null;
    * icons (a church's own screenshot: 932 points of screen, nothing drawn
    * below 873).
    *
-   * The cure is in page.js: the status bar is now opaque black, which gives
-   * the app the whole screen down to the bottom edge. iOS reads that setting
+   * The cure is in page.js: the status bar is opaque (no see-through style,
+   * tinted with the screen's colour — topTint below), which gives the app the
+   * whole screen down to the bottom edge. iOS reads that setting
    * only when the app is ADDED to the home screen, though. So an install made
    * before it still has the short window, and that is all this does now: it
    * notices one (short by the status bar's height, on a home-screen iPhone),
@@ -4929,10 +4930,7 @@ let _hideTimer = null;
         island({
           id: 'vpshort', kind: 'info', ms: 14000,
           title: 'Re-add the app for the full screen',
-          // tried the see-through top (/?top=full) and this iPhone has the bug: the way back is the black bar
-          sub: document.documentElement.classList.contains('mw-topfull')
-            ? 'This iPhone cannot run the app up behind the clock without losing a strip at the bottom. In Safari, open ' + location.host + '/?top=bar, then remove Church Work Space from your Home Screen and add it again (Share → Add to Home Screen).'
-            : 'Your iPhone is leaving a strip at the bottom. Remove Church Work Space from your Home Screen, then add it again from Safari (Share → Add to Home Screen) and the tools sit on the bottom edge.',
+          sub: 'Your iPhone is leaving a strip at the bottom. Remove Church Work Space from your Home Screen, then add it again from Safari (Share → Add to Home Screen) and the tools sit on the bottom edge.',
         });
       };
       setTimeout(tell, 2500);
@@ -4945,6 +4943,75 @@ let _hideTimer = null;
     },
   };
   cloud.vpFix = vpFix;
+
+  /*
+   * ►► THE BAR ABOVE THE APP WEARS THE SCREEN'S COLOUR. ◄◄ "The black bar at
+   * the top where the time and wifi are — make it blue too, like CapCut." On
+   * an iPhone home-screen app the status bar is opaque (page.js says why) and
+   * iOS fills it with theme-color; it was black, so a blue Home screen sat
+   * under a black stripe. Now the colour is read off the screen itself — what
+   * is drawn at its very top edge, sheets and dimmed backdrops included — so
+   * Home's banner runs on into the bar in its own blue, the studio's top is
+   * black, a light page is white (iOS turns the clock dark on it), and any
+   * screen added later gets it right without being listed anywhere.
+   */
+  const topTint = {
+    meta: null,
+    last: '',
+    rgba(c) {
+      const m = /rgba?\(([^)]+)\)/.exec(String(c || ''));
+      if (!m) return null;
+      const p = m[1].split(/[\s,\/]+/).filter(Boolean).map((x) => (x.endsWith('%') ? parseFloat(x) / 100 : Number(x)));
+      if (p.length < 3 || p.slice(0, 3).some((x) => !Number.isFinite(x))) return null;
+      return { r: p[0], g: p[1], b: p[2], a: p.length > 3 && Number.isFinite(p[3]) ? p[3] : 1 };
+    },
+    /** The colour at the top-left of the screen: every layer there, laid over the next (a gradient by its first colour). */
+    sample() {
+      const els = document.elementsFromPoint(Math.min(8, window.innerWidth / 2), 1);
+      let r = 0, g = 0, b = 0, a = 0;
+      const over = (c, k) => {
+        if (!c || a >= 0.999) return;
+        const w = (1 - a) * Math.max(0, Math.min(1, c.a * k));
+        r += w * c.r; g += w * c.g; b += w * c.b; a += w;
+      };
+      for (const el of els) {
+        if (a >= 0.999) break;
+        const cs = getComputedStyle(el);
+        const k = parseFloat(cs.opacity);
+        if (!(k > 0)) continue;
+        const img = cs.backgroundImage;
+        if (img && img !== 'none') over(this.rgba((/rgba?\([^)]+\)/.exec(img) || [])[0]), k);
+        over(this.rgba(cs.backgroundColor), k);
+      }
+      over({ r: 255, g: 255, b: 255, a: 1 }, 1);   // nothing drawn: the page's white
+      return '#' + [r, g, b].map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
+    },
+    set(color) {
+      if (!color || color === this.last) return;
+      this.last = color;
+      if (!this.meta || !this.meta.isConnected) {
+        // one theme-color, kept by this (a second, media-bound one would win on a phone)
+        document.querySelectorAll('meta[name="theme-color"]').forEach((m, i) => { if (i) m.remove(); });
+        this.meta = document.querySelector('meta[name="theme-color"]');
+        if (!this.meta) { this.meta = document.createElement('meta'); this.meta.name = 'theme-color'; document.head.appendChild(this.meta); }
+      }
+      this.meta.setAttribute('content', color);
+    },
+    check() { try { this.set(this.sample()); } catch (e) { /* a colour is a nicety */ } },
+  };
+  cloud.topTint = topTint;
+  {
+    let queued = false;
+    const soon = () => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; topTint.check(); }); };
+    // scrolling (any scroller — caught on the way down), a screen or sheet changing, the window turning
+    window.addEventListener('scroll', soon, { capture: true, passive: true });
+    window.addEventListener('resize', soon);
+    const watch = () => new MutationObserver(soon).observe(document.body, { attributes: true, attributeFilter: ['class'], childList: true });
+    if (document.body) watch(); else document.addEventListener('DOMContentLoaded', watch);
+    // …and a look now and then for whatever none of those announce (a sign-in page going away)
+    setInterval(() => { if (!document.hidden) topTint.check(); }, 700);
+    setTimeout(soon, 0);
+  }
   {
     let t = null;
     const recheck = () => { clearTimeout(t); t = setTimeout(() => { try { vpFix.check(); } catch (e) {} }, 120); };
