@@ -763,7 +763,12 @@
     const im = imgOf(L.img);
     const W = S.w, H = S.h, pal = S.pal;
     if (im) {
-      const a = { bright: L.bright, contrast: L.contrast, sat: L.sat, gray: L.gray, blur: L.blur, duo: L.grade ? gradeStops(pal, L.grade) : null, keep: L.keep };
+      /* THE PHOTO STAYS A PHOTO. The grade mapped 85-90% of every pixel onto the
+         flyer's four colours, which posterised a real picture into something
+         drawn ("too cartoonish"). Now at least half of the photograph's own
+         colour stays, and a touch of depth of field puts it behind the speaker. */
+      const keep = Math.max(L.keep == null ? 0.16 : L.keep, L.keepFloor == null ? 0.55 : L.keepFloor);
+      const a = { bright: L.bright, contrast: L.contrast, sat: L.sat, gray: L.gray, blur: L.blur == null ? 1.5 : L.blur, duo: L.grade ? gradeStops(pal, L.grade) : null, keep };
       x.drawImage(adjusted(im, a, Math.round(W * Q), Math.round(H * Q)), 0, 0, W, H);
     } else {
       const g = x.createLinearGradient(0, 0, W * 0.3, H); g.addColorStop(0, pal.mid); g.addColorStop(1, pal.deep);
@@ -1003,6 +1008,34 @@
     QM.set(im, m);
     return m;
   }
+  /*
+   * A CLEAN EDGE. A cut-out made small and blown up to a poster stair-steps
+   * along every shoulder and keeps a pale fringe of the old background (the
+   * blocky white outline round a suit). The edge is smoothed — the alpha
+   * blurred and cut again a little inside — which rounds the steps into the
+   * real curve and takes the fringe off with them. It only ever takes away.
+   */
+  function smoothEdge(c) {
+    const W = c.width, H = c.height;
+    if (W < 8 || H < 8) return c;
+    const x = c.getContext('2d', { willReadFrequently: true });
+    const d = x.getImageData(0, 0, W, H), p = d.data, n = W * H;
+    const a = new Float32Array(n);
+    for (let i = 0; i < n; i++) a[i] = p[i * 4 + 3] / 255;
+    const r = Math.max(2, Math.round(Math.max(W, H) * 0.0035));
+    const b = Float32Array.from(a), tmp = new Float32Array(n);
+    for (let pass = 0; pass < 2; pass++) {   // two box passes ≈ a gaussian
+      for (let y = 0; y < H; y++) { let acc = 0; const row = y * W; for (let k = -r; k <= r; k++) acc += b[row + clamp(k, 0, W - 1)]; for (let xx = 0; xx < W; xx++) { tmp[row + xx] = acc / (2 * r + 1); acc += b[row + Math.min(W - 1, xx + r + 1)] - b[row + Math.max(0, xx - r)]; } }
+      for (let xx = 0; xx < W; xx++) { let acc = 0; for (let k = -r; k <= r; k++) acc += tmp[clamp(k, 0, H - 1) * W + xx]; for (let y = 0; y < H; y++) { b[y * W + xx] = acc / (2 * r + 1); acc += tmp[Math.min(H - 1, y + r + 1) * W + xx] - tmp[Math.max(0, y - r) * W + xx]; } }
+    }
+    for (let i = 0; i < n; i++) {
+      if (a[i] === 0) continue;
+      const t = clamp((b[i] - 0.5) / 0.4, 0, 1), sm = t * t * (3 - 2 * t);
+      p[i * 4 + 3] = Math.round(Math.min(a[i], sm) * 255);
+    }
+    x.putImageData(d, 0, 0);
+    return c;
+  }
   const PREP = new WeakMap();
   function preparePerson(im) {
     if (PREP.has(im)) return PREP.get(im);
@@ -1023,7 +1056,7 @@
         }
       }
       const t = tidyCanvas(c);
-      return { img: t.c, meta: metaOf(t.c, lm, t.x0, t.y0, W0, H0) };
+      return { img: smoothEdge(t.c), meta: metaOf(t.c, lm, t.x0, t.y0, W0, H0) };
     })().catch(() => ({ img: im, meta: null }));
     PREP.set(im, job);
     return job;
@@ -1165,11 +1198,13 @@
   const venueLines = (D, n) => { const p = venueParts(D); if (p.length <= n) return p.join(',\n'); return [p.slice(0, p.length - n + 1).join(', ')].concat(p.slice(p.length - n + 1)).join(',\n'); };
   const spsOf = (D) => D.sp.filter((s) => imgOf(s.img));
   const sp0 = (D) => spsOf(D)[0] || null;
-  const lit = (p) => ({ glow: rgba(p.accent, 0.5), rim: mix('#ffffff', p.accent, 0.3), rimW: 1.4, tint: { color: p.accent, a: 0.3, fall: 0.35 } });
+  // backlit in the flyer's colour, softly — a white line round a person reads as a sticker
+const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffffff', 0.35), 0.55), rimW: 1.1, tint: { color: p.accent, a: 0.28, fall: 0.35 } });
   /* titles that stand off the page: chrome or gold, bevelled, on a deep block with a dark edge */
-  const CHROME = { stops: ['#ffffff', '#f2f4f7', '#c9ced6', '#ffffff', '#9aa3ad'], angle: 90 };
+  const CHROME = { stops: ['#ffffff', '#ffffff', '#eceff3', '#d5dae1'], angle: 90 };
   const GOLD = { stops: ['#fff6c7', '#ffe066', '#f5b301', '#ffd84d', '#c97a00'], angle: 90 };
-  const solid3d = (p, o) => Object.assign({ extrude: 7, extrudeColor: [mix(p.deep, '#000000', 0.2), mix(p.deep, '#000000', 0.7)], edge: 1.6, edgeColor: mix(p.deep, '#000000', 0.6), bevel: 1, shadow: true }, o || {});
+  // refined, not WordArt: a shallow block in the flyer's own dark colour, a soft light on top, a real shadow
+  const solid3d = (p, o) => Object.assign({ extrude: 3, extrudeColor: [mix(p.deep, '#000000', 0.25), mix(p.deep, '#000000', 0.6)], bevel: 0.55, shadow: true }, o || {});
   function footerWords(f) {
     const k = String((f.kind || '') + ' ' + (f.title || '')).toLowerCase();
     if (/prayer|vigil|fast/.test(k)) return 'PRAYER   |   PRAISE   |   POWER';
@@ -1189,7 +1224,7 @@
     let nb;
     if (mode === 'full') nb = m.h;
     else if (mode === 'waist') nb = m.hy ? m.hy + u * 0.25 : m.sy + u * 2.4;
-    else if (mode === 'chest') nb = m.wy ? clamp(m.wy + u * 0.3, m.sy + u * 1.05, m.sy + u * 1.55) : m.sy + u * 1.4;
+    else if (mode === 'chest') nb = m.wy ? clamp(m.wy + u * 0.12, m.sy + u * 0.95, m.sy + u * 1.25) : m.sy + u * 1.2;
     else nb = m.sy + u * 0.9;
     return { t: Math.max(0, m.top - u * 0.06), nb, cx: m.cx };
   }
@@ -1201,11 +1236,15 @@
     const vb = Math.min(m.h, fr.nb);
     const h = (vb - fr.t) * k, w = m.w * k;
     const whole = mode === 'full' && vb >= m.h - 2;
+    // a wide photo (arms out, a second person's shoulder) is moved over rather than run into the words beside it
+    let X = o.cx + (m.w / 2 - fr.cx) * k;
+    if (o.maxR != null) X = Math.min(X, o.maxR - w / 2);
+    if (o.minL != null) X = Math.max(X, o.minL + w / 2);
     return IM(Object.assign({
       img: sp.img, name: sp.name || 'Speaker', speaker: sp.id || '', photo: sp.photo || '',
       src: { x: 0, y: fr.t / m.h, w: 1, h: (vb - fr.t) / m.h },
-      w, h, x: o.cx + (m.w / 2 - fr.cx) * k, y: o.t + h / 2,
-      fade: whole ? 0 : (o.fade == null ? 0.22 : o.fade), feather: 1.4,
+      w, h, x: X, y: o.t + h / 2,
+      fade: whole ? 0 : Math.max(o.fade == null ? 0.22 : o.fade, mode === 'chest' ? 0.34 : 0), feather: 1.4,
       frame: { mode, t: o.t, b: o.b, cx: o.cx },
     }, o.extra || {}));
   }
@@ -1292,7 +1331,7 @@
       const sc = splitConnector(f.title);
       const lines = sc ? [sc.a, sc.b] : twoLines(f.title || 'Glory to Glory').filter(Boolean);
       const ts = stackLines(lines, { t: H * 0.13, fit: 940, maxH: H * (lines.length === 1 ? 0.3 : sp ? 0.21 : 0.25), gap: sc ? 66 : 18,
-        style: solid3d(p, { font: 'Anton', upper: true, fill: CHROME, extrude: 6 }) });
+        style: solid3d(p, { font: 'Anton', upper: true, fill: CHROME, extrude: 3 }) });
       L.push(...ts);
       if (sc && ts.length === 2) {
         const g = pill([{ text: sc.conn.charAt(0).toUpperCase() + sc.conn.slice(1), font: 'Barlow Italic', size: 50 }], { fill: p.accent, ink: '#141414', radius: 0, padX: 16, padY: 9 });
@@ -1332,7 +1371,7 @@
       }
       const lines = stack(f.title || 'Push', 3), n = lines.length;
       const ts = stackLines(lines, { t: y, fit: 990, maxH: H * (n === 1 ? 0.26 : n === 2 ? 0.16 : 0.12), gap: 8,
-        style: solid3d(p, { font: 'Barlow Italic', upper: true, fill: CHROME, grain: true, extrude: 6, extrudeColor: [mix(p.mid, '#000000', 0.3), mix(p.deep, '#000000', 0.6)], glow: rgba(p.accent, 0.45) }) });
+        style: solid3d(p, { font: 'Barlow Italic', upper: true, fill: CHROME, grain: true, extrude: 3, extrudeColor: [mix(p.mid, '#000000', 0.3), mix(p.deep, '#000000', 0.6)], glow: rgba(p.accent, 0.45) }) });
       L.push(...ts);
       if (sp) { const lb = box(ts[ts.length - 1]); L.push(hero(sp, { cx: 540, t: Math.max(lb.t + lb.h * 0.1, y + (ts.bottom - y) * 0.4), b: H - 40, mode: 'chest', fade: 0.3, extra: lit(p) })); }
       if (d) L.push(...col([d.day3, d.ddth, d.month, d.year].map((s, i) => T({ name: 'Date ' + (i + 1), text: s, font: 'Barlow Italic', size: 56, line: 0.9, fill: p.accent, align: 'left', shadow: true })), { l: 62, t: H * 0.6, gap: -2 }));
@@ -1360,7 +1399,7 @@
       if (n === 2) L.push(hero(ps[1], { cx: 770, t: H * 0.23, b: pb, mode: 'chest', extra: lit(p) }), hero(ps[0], { cx: 320, t: H * 0.21, b: pb, mode: 'chest', extra: lit(p) }));
       if (n === 3) L.push(hero(ps[1], { cx: 220, t: H * 0.27, b: pb, mode: 'chest', extra: lit(p) }), hero(ps[2], { cx: 860, t: H * 0.27, b: pb, mode: 'chest', extra: lit(p) }), hero(ps[0], { cx: 540, t: H * 0.2, b: pb, mode: 'chest', extra: lit(p) }));
       const ts = stackLines(twoLines(f.title || 'Worship Encounter').filter(Boolean), { t: H * (n ? 0.57 : 0.36), fit: 880, maxH: H * (n ? 0.115 : 0.16), gap: 6,
-        style: solid3d(p, { font: 'Anton', fill: CHROME, extrude: 5, glow: rgba(p.accent, 0.4) }) });
+        style: solid3d(p, { font: 'Anton', fill: CHROME, extrude: 3, glow: rgba(p.accent, 0.4) }) });
       L.push(...ts);
       let y = ts.bottom + 18;
       if (f.theme) { const th = put(T({ name: 'Theme', text: 'Theme: ' + f.theme, font: 'DM Serif', size: 34, maxW: 920, shadow: true }), { cx: 540, t: y }); L.push(th); y = box(th).b + 12; }
@@ -1391,7 +1430,7 @@
       if (ps[0]) L.push(hero(ps[0], { cx: 540, t: H * 0.1, b: H * 0.76, mode: 'chest', fade: 0.3, extra: lit(p) }));
       const ws = String(f.title || 'Miracle Service').trim().split(/\s+/);
       const big = ws.length > 1 ? ws.slice(0, -1).join(' ') : ws[0], small = ws.length > 1 ? ws[ws.length - 1] : '';
-      const t1 = put(T(Object.assign({ name: 'Title', text: big, upper: true, font: 'Archivo Black', fit: 960, maxH: H * (ps.length ? 0.11 : 0.15) }, solid3d(p, { fill: CHROME, extrude: 6, glow: rgba(p.accent, 0.35) }))), { cx: 540, t: H * (ps.length ? 0.66 : 0.42) });
+      const t1 = put(T(Object.assign({ name: 'Title', text: big, upper: true, font: 'Archivo Black', fit: 960, maxH: H * (ps.length ? 0.11 : 0.15) }, solid3d(p, { fill: CHROME, extrude: 3, glow: rgba(p.accent, 0.35) }))), { cx: 540, t: H * (ps.length ? 0.66 : 0.42) });
       L.push(t1);
       let y = box(t1).b + 18;
       if (small) { const t2 = put(T({ name: 'Subtitle', text: small.toUpperCase().split('').join(' '), font: 'Montserrat', size: 40, letter: 0.3, fit: Math.min(880, box(t1).w * 0.9), maxH: 34, shadow: true }), { cx: 540, t: y }); L.push(t2); y = box(t2).b + 16; }
@@ -1412,7 +1451,7 @@
       const hd = header(D, { center: true, t: 32 }); L.push(...hd);
       const pr = put(T({ name: 'Presents', text: 'PRESENTS', font: 'Montserrat', size: 15, letter: 1.0, shadow: true }), { cx: 540, t: hd.bottom }); L.push(pr);
       const ts = stackLines(twoLines(f.title || 'Bible Study').filter(Boolean), { t: box(pr).b + 18, cx: 600, fit: 740, maxH: H * (sp ? 0.13 : 0.17), gap: 4,
-        style: solid3d(p, { font: 'Abril Fatface', fill: GOLD, extrude: 6, extrudeColor: ['#5a3300', '#1f1000'], edgeColor: '#1f1000', glow: rgba('#ffcf33', 0.3) }) });
+        style: solid3d(p, { font: 'Abril Fatface', fill: GOLD, extrude: 3, extrudeColor: ['#5a3300', '#1f1000'], edgeColor: '#1f1000', glow: rgba('#ffcf33', 0.3) }) });
       L.push(...ts);
       const tT = box(ts[0]).t, tB = ts.bottom, tl = Math.min(...ts.map((t) => box(t).l));
       L.push(SH({ name: 'Join tab', shape: 'rect', fill: '#d71920', x: tl - 52, y: (tT + tB) / 2, w: 62, h: tB - tT + 8, shadow: true }));
@@ -1450,14 +1489,14 @@
       let y = hd.bottom + 22;
       if (tag) { const g = pill([{ text: tag, upper: true, font: 'Anton', size: 40 }], { fill: { stops: ['#ff3b30', '#b3000c'], angle: 90 }, ink: '#ffffff', radius: 6, padX: 22, padY: 8, rot: -6, shadow: true }); L.push(...g.place(400, y + g.h / 2)); y += g.h - 4; }
       const ts = tilt(stackLines(stack(rest, 3), { t: y, fit: 960, maxH: H * 0.155, gap: 0,
-        style: { font: 'Anton', upper: true, fill: { stops: ['#fffbe0', '#ffe14a', '#ffb800', '#ff8a00'], angle: 90 }, extrude: 9, extrudeColor: ['#8a2a00', '#3a0a00'], edge: 2.2, edgeColor: '#3a0a00', bevel: 1, glow: rgba('#ffcf3a', 0.55), shadow: true } }), -4);
+        style: { font: 'Anton', upper: true, fill: { stops: ['#fff6c2', '#ffd94a', '#f7a800', '#e88600'], angle: 90 }, extrude: 4, extrudeColor: ['#7a2600', '#3a0a00'], bevel: 0.6, glow: rgba('#ffb300', 0.4), shadow: true } }), -4);
       L.push(...ts);
       const tb = ts.bottom;
       if (f.theme) L.push(put(T({ name: 'Theme', text: f.theme, upper: true, font: 'Montserrat', size: 23, align: 'right', maxW: 470, line: 1.12, shadow: true }), { r: 1000, t: tb + 26 }));
       const ps = spsOf(D).slice(0, 2), top = Math.max(tb + 30, H * 0.42);
-      const grade = { tint: { color: p.accent, a: 0.35, fall: 0.3 }, rim: mix('#ffffff', p.accent, 0.25), rimW: 1.6, glow: rgba(p.accent, 0.5) };
+      const grade = lit(p);
       if (ps[1]) L.push(hero(ps[1], { cx: 170, t: top + 70, b: H + 40, mode: 'chest', fade: 0.12, extra: grade }));
-      if (ps[0]) L.push(hero(ps[0], { cx: ps[1] ? 430 : 360, t: top, b: H + 40, mode: 'chest', fade: 0.12, extra: grade }));
+      if (ps[0]) L.push(hero(ps[0], { cx: ps[1] ? 430 : 360, t: top, b: H + 40, mode: 'chest', fade: 0.12, maxR: 700, extra: grade }));
       L.push(SH({ name: 'Floor shade', shape: 'rect', fill: { stops: [rgba(p.deep, 0), rgba(mix(p.deep, '#000000', 0.5), 0.9)], angle: 90 }, x: 540, y: H - 110, w: W, h: 220 }));
       const right = [];
 
@@ -1484,7 +1523,7 @@
       const ts = stackLines(lines, { t: top, fit: 1000, maxH: avail / n - 14, gap: 14,
         style: { font: 'League Gothic', upper: true, stretch: 1.45, fill: { stops: ['#ffffff', mix('#ffffff', p.accent, 0.3), mix(p.accent, p.hi, 0.25)], angle: 90 }, bevel: 0.6, glow: rgba(p.accent, 0.35), shadow: true } });
       L.push(...ts);
-      if (sp) { const m = META.get(sp.img); L.push(hero(sp, { cx: 540, t: top + (ts.bottom - top) * 0.2, b: H - 16, mode: m && m.full ? 'full' : 'waist', extra: lit(p) })); }
+      if (sp) L.push(hero(sp, { cx: 540, t: top + (ts.bottom - top) * 0.22, b: H + 30, mode: 'chest', extra: lit(p) }));
       L.push(...col([d && T({ name: 'Date', text: `${d.mon3}. ${d.ddth}`, font: 'Anton', size: 50, fill: p.accent, align: 'right', shadow: true }), f.time && T({ name: 'Time', text: f.time, font: 'Anton', size: 50, align: 'right', shadow: true })], { r: 1018, b: H - 50, gap: 4 }));
       L.push(...col([sp && sp.name && T({ name: 'Speaker', text: sp.name, upper: true, font: 'Montserrat', size: 18, align: 'left', shadow: true, maxW: 300 }),
         venueText(D) && T({ name: 'Venue', text: venueLines(D, 3), upper: true, font: 'Montserrat', size: 14, align: 'left', line: 1.22, maxW: 280, shadow: true })], { l: 62, b: H - 50, gap: 10 }));
@@ -1533,10 +1572,10 @@
       const pre = words.slice(0, si).join(' '), word = words[si], post = words.slice(si + 1).join(' ');
       let y = hd.bottom + 4;
       const jo = put(T({ name: 'Kicker', text: 'Join Our', font: 'Great Vibes', size: 62, shadow: true }), { cx: 540, t: y }); L.push(jo); y = box(jo).b + 6;
-      if (pre) { const t = put(T(Object.assign({ name: 'Title', text: pre, upper: true, font: 'Barlow Italic', fit: 700, maxH: H * 0.085 }, solid3d(p, { fill: CHROME, extrude: 5 }))), { cx: 540, t: y }); L.push(t); y = box(t).b - 6; }
+      if (pre) { const t = put(T(Object.assign({ name: 'Title', text: pre, upper: true, font: 'Barlow Italic', fit: 700, maxH: H * 0.085 }, solid3d(p, { fill: CHROME, extrude: 3 }))), { cx: 540, t: y }); L.push(t); y = box(t).b - 6; }
       const sw = put(T({ name: 'Script word', text: word, font: 'Alex Brush', fill: { stops: ['#fffdf2', '#fff0b8', '#ffd76a'], angle: 90 }, fit: 990, maxH: H * 0.2, extrude: 4, extrudeColor: [mix(p.deep, '#000000', 0.1), mix(p.deep, '#000000', 0.6)], glow: rgba('#ffffff', 0.25), shadow: true }), { cx: 540, t: y }); L.push(sw);
       y = box(sw).b - box(sw).h * 0.2;
-      if (post) { const t = put(T(Object.assign({ name: 'Title 2', text: post, upper: true, font: 'Barlow Italic', fit: 780, maxH: H * 0.11 }, solid3d(p, { fill: CHROME, extrude: 6 }))), { cx: 560, t: y }); L.push(t); y = box(t).b; }
+      if (post) { const t = put(T(Object.assign({ name: 'Title 2', text: post, upper: true, font: 'Barlow Italic', fit: 780, maxH: H * 0.11 }, solid3d(p, { fill: CHROME, extrude: 3 }))), { cx: 560, t: y }); L.push(t); y = box(t).b; }
       if (sp) L.push(hero(sp, { cx: 760, t: Math.max(y - 20, H * 0.42), b: H + 30, mode: 'chest', fade: 0.12, extra: lit(p) }));
       const lc = col([d && T({ name: 'Date', text: `${d.day3} ${d.ddth}.\n${d.mon3}, ${d.year}`, font: 'Anton', size: 50, line: 1.02, align: 'left', shadow: true })], { l: 62, t: Math.max(y + 34, H * 0.6), gap: 10 });
       L.push(...lc);
