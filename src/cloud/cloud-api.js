@@ -1040,7 +1040,18 @@ async function handle(req, res) {
   if (p === '/cloud-boot.js') return sendWeb(req, res, 'cloud-boot.js');
   if (p === '/cloud-social.js') return sendWeb(req, res, 'cloud-social.js');
   if (p === '/cloud.css') return sendWeb(req, res, 'cloud.css');
-  if (p === '/manifest.webmanifest') return sendWeb(req, res, 'manifest.webmanifest');
+  if (p === '/manifest.webmanifest') {
+    // added to the Home Screen from /?top=full: the app OPENS there too, so it asks for the
+    // see-through bar on every launch — whether or not iOS carried Safari's cookie into it
+    if (new URL(req.url, 'http://x').searchParams.get('top') === 'full') {
+      try {
+        const m = JSON.parse(fs.readFileSync(path.join(__dirname, 'web', 'manifest.webmanifest'), 'utf-8'));
+        m.start_url = '/?top=full';
+        return send(res, 200, 'application/manifest+json; charset=utf-8', JSON.stringify(m));
+      } catch (e) { /* the plain one, below */ }
+    }
+    return sendWeb(req, res, 'manifest.webmanifest');
+  }
   // A service worker may only control the scope it is served from, so this one
   // is served from the root even though it lives in web/.
   if (p === '/sw.js') return sendWeb(req, res, 'sw.js');

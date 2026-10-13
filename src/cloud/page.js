@@ -195,7 +195,7 @@ function build(opts = {}) {
   <meta name="apple-mobile-web-app-status-bar-style" content="${opts.topFull ? 'black-translucent' : 'black'}" />
   <meta name="apple-mobile-web-app-title" content="Church Work Space" />
   <meta name="format-detection" content="telephone=no" />
-  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="manifest" href="/manifest.webmanifest${opts.topFull ? '?top=full' : ''}" />
   <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png?v=${key}" />
   <link rel="icon" href="/icons/icon-192.png" />
   <title>Church Work Space</title>
