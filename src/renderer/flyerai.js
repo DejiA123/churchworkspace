@@ -12,19 +12,21 @@
  */
 (function () {
   let segmenter = null, initPromise = null, initFailed = false;
+  // the desktop's privileged scheme, or — in the Cloud Studio's browser — the server's /ai/ route (as facetrack.js)
+  const base = () => (typeof window !== 'undefined' && window.MW_AI_BASE) || 'mwasset://';
 
   async function init() {
     if (segmenter) return segmenter;
     if (initFailed) throw new Error('segmenter unavailable');
     if (!initPromise) initPromise = (async () => {
-      const mp = await import('mwasset://vision_bundle.mjs');
-      const vision = await mp.FilesetResolver.forVisionTasks('mwasset://wasm');
+      const mp = await import(base() + 'vision_bundle.mjs');
+      const vision = await mp.FilesetResolver.forVisionTasks(base() + 'wasm');
       // Multiclass model has much better hair/body edges; plain selfie model
       // is the lightweight fallback if the big model file is missing.
       for (const model of ['selfie_multiclass_256x256.tflite', 'selfie_segmenter.tflite']) {
         try {
           segmenter = await mp.ImageSegmenter.createFromOptions(vision, {
-            baseOptions: { modelAssetPath: 'mwasset://' + model },
+            baseOptions: { modelAssetPath: base() + model },
             runningMode: 'IMAGE',
             outputConfidenceMasks: true,
             outputCategoryMask: false,

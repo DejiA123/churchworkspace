@@ -276,11 +276,13 @@
     { k: 'shorts', name: 'Long video to shorts', title: 'Turn a sermon into shorts', act: () => homeTool('shorts') },
     { k: 'caps', name: 'Auto captions', title: 'Captions, word by word', act: () => homeTool('captions') },
     { k: 'montage', name: 'AI Montage', title: 'Your clips, edited by AI', act: () => openMontage() },
+    { k: 'flyer', name: 'AI Flyers', title: 'Flyers like the best on Pinterest', act: () => openFlyers() },
     { k: 'post', name: 'Post everywhere', title: 'Post to every app at once', act: () => go('scheduler') },
   ];
   function heroArt(k) {
     if (k === 'shorts') return '<span class="hs-wide"><i></i></span><span class="hs-tall"><i class="hs-play"></i><span class="hs-cap"><i></i><i></i><i></i></span></span>';
     if (k === 'caps') return '<span class="hs-words"><b>FAITH OVER</b><b><em>FEAR</em></b></span>';
+    if (k === 'flyer') return '<span class="hs-flyer"><b>JOIN US</b><em>Sunday</em><i></i></span>';
     if (k === 'montage') return `<span class="hs-film"><i></i><i></i><i></i></span><span class="hs-note">${mi('music')}</span>`;
     return `<span class="hs-plats">${['tiktok', 'youtube', 'instagram', 'facebook'].map((p) => `<i>${platMark(p, 'sm')}</i>`).join('')}</span>`;
   }
@@ -312,6 +314,12 @@
             <span class="ch-card-ic">${mi('sparkles')}</span><b>AI Montage</b><small>Your clips, edited by AI</small>
           </button>
         </div>
+        <!-- 🎨 the third big thing: flyers (cloud-flyer.js) -->
+        <button type="button" class="ch-flyer" data-home="flyers">
+          <span class="ch-flyer-art" aria-hidden="true"><i class="a"></i><i class="b"></i><i class="c"></i></span>
+          <span class="ch-flyer-tx"><b>Flyer Studio</b><small>AI flyers for Sunday, Bible Study, Easter…</small></span>
+          <span class="ch-flyer-go">Make</span>
+        </button>
         <div id="chInvite"></div>
         <nav class="ch-tools" aria-label="Tools">
           <button type="button" class="ch-tool" data-tool="shorts"><span class="ch-tool-ic">${mi('scissors')}<i class="ch-spark">${mi('sparkles')}</i></span><span class="ch-tool-tx">AI Shorts</span></button>
@@ -348,11 +356,18 @@
       if (b.dataset.home === 'files') return $('#cloudFiles') && $('#cloudFiles').click();
       if (b.dataset.home === 'me') return C.openProfile && C.openProfile();
       if (b.dataset.home === 'montage') return openMontage();
+      if (b.dataset.home === 'flyers') return openFlyers();
       if (b.dataset.post) return compose({ files: [b.dataset.post] });
       if (b.dataset.job) return C.openJobs();
     });
     heroStart();
     return el;
+  }
+
+  /* the Flyer Studio (cloud-flyer.js) */
+  function openFlyers() {
+    if (window.MWFlyerStudio) return window.MWFlyerStudio.open();
+    C.toast('The flyer studio is still loading — try again in a moment.');
   }
 
   /*
@@ -421,6 +436,7 @@
         { emoji: '👋', title: 'Welcome!', body: 'Here is a quick look around.' },
         { target: '#cloudHome .ch-studio', emoji: '🎬', title: 'Make a video', body: 'Edit a video, make shorts, add captions.' },
         { target: '#cloudHome .ch-montage', emoji: '✨', title: 'AI Montage', body: 'Pick photos and videos. The AI makes the edit.' },
+        { target: '#cloudHome .ch-flyer', emoji: '🎨', title: 'Flyers', body: 'Pick the service, tap Make. The AI paints the picture; your words stay exactly as typed.' },
         { target: '#chSocialCard', emoji: '📅', title: 'Post online', body: 'Send your videos and flyers to social media.' },
         { target: '#cloudHome [data-home="files"]', emoji: '📁', title: 'My videos', body: 'All your videos are kept here: the ones you added, and the shorts you made.' },
         { target: '#chAsk .mwg-ask', emoji: '❓', title: 'Need help?', body: 'Tap ? any time to see these tips again.' },

@@ -30,6 +30,9 @@ services:
       ASSEMBLYAI_API_KEY: "${ASSEMBLYAI_API_KEY:-}" # free credit: a second ear that is not Whisper
       MISTRAL_API_KEY: "${MISTRAL_API_KEY:-}"       # free: Mistral Large reads the whole sermon to choose the shorts
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"  # paid: Claude directs montages and proof-reads captions
+      CLOUDFLARE_ACCOUNT_ID: "${CLOUDFLARE_ACCOUNT_ID:-}"   # free: FLUX.2 paints the flyers' pictures (bash scripts/cloud-keys.sh cloudflare)
+      CLOUDFLARE_API_TOKEN: "${CLOUDFLARE_API_TOKEN:-}"
+      POLLINATIONS_API_KEY: "${POLLINATIONS_API_KEY:-}"     # free, optional: lifts the keyless painter's limits
       MW_CLOUD_SOCIAL: "${MW_CLOUD_SOCIAL:-on}"
     volumes:
       - studio-data:/data          # settings, projects, library, speech models

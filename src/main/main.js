@@ -341,6 +341,7 @@ app.whenReady().then(() => {
   sessions.init(userData); // saved editing sessions under <userData>/sessions
   mediaCache.init(path.join(app.getPath('temp'), 'cws-media-cache')); // timeline pictures + HEVC previews, per recording
   songbank.init(userData); // the songs the church sings, under <userData>/song-bank.json
+  require('./flyerart').init(userData); // the flyer kit (church, speakers, services) under <userData>/flyer-kit
   bible.init(userData);   // downloaded translations live under <userData>/bibles
   versefind.init(userData); // …and the quotation matcher reads them from its worker
   bgvideos.init(userData); // motion backgrounds fetched on demand, under <userData>/backgrounds
@@ -769,6 +770,18 @@ ipcMain.handle('machine:info', wrap(async () => {
   const m = require('./machine');
   return { cpus: m.cpus(), memoryMB: m.memoryMB(), quota: m.quota ? m.quota() : 0, small: m.small() };
 }));
+
+/* Flyers (Home → Flyers): the AI paints the picture, the phone sets the words — see flyerart.js. */
+const flyerart = require('./flyerart');
+ipcMain.handle('flyer:status', wrap(async () => flyerart.status()));
+ipcMain.handle('flyer:direct', wrap(async (e, a) => flyerart.direct((a && a.fields) || {})));
+ipcMain.handle('flyer:paint', wrap(async (e, a) => flyerart.paint(a || {})));
+ipcMain.handle('flyer:kitGet', wrap(async () => flyerart.kitGet()));
+ipcMain.handle('flyer:kitSave', wrap(async (e, a) => flyerart.kitSave((a && a.kit) || {})));
+ipcMain.handle('flyer:kitPic', wrap(async (e, a) => flyerart.kitPic(a && a.name)));
+ipcMain.handle('flyer:kitUsed', wrap(async (e, a) => flyerart.kitUsed(a || {})));
+ipcMain.handle('flyer:inspoAdd', wrap(async (e, a) => flyerart.inspoAdd(a || {})));
+ipcMain.handle('flyer:inspoRemove', wrap(async (e, a) => flyerart.inspoRemove(a || {})));
 
 /* AI montage: a pile of videos and pictures → one edit, directed by the best
    model available (see montage.js). Its stage names ride on the progress

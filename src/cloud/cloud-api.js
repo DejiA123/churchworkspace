@@ -220,6 +220,16 @@ const ALLOWED = {
   'montage:create': true,
   'montage:project': true,
   'montage:remake': true,
+  // 🎨 flyers: the AI paints a background, the kit keeps the church's details (flyerart.js)
+  'flyer:status': true,
+  'flyer:direct': true,
+  'flyer:paint': true,
+  'flyer:kitGet': true,
+  'flyer:kitSave': true,
+  'flyer:kitPic': true,
+  'flyer:kitUsed': true,
+  'flyer:inspoAdd': true,
+  'flyer:inspoRemove': true,
   'sermon:exportShort': true,
   'sermon:exportReframed': true,
   'sermon:exportFramed': true,
@@ -1033,6 +1043,7 @@ async function handle(req, res) {
   }
   if (p === '/cloud-boot.js') return sendWeb(req, res, 'cloud-boot.js');
   if (p === '/cloud-social.js') return sendWeb(req, res, 'cloud-social.js');
+  if (p === '/cloud-flyer.js') return sendWeb(req, res, 'cloud-flyer.js');
   if (p === '/cloud.css') return sendWeb(req, res, 'cloud.css');
   if (p === '/manifest.webmanifest') return sendWeb(req, res, 'manifest.webmanifest');
   // A service worker may only control the scope it is served from, so this one
@@ -1082,6 +1093,15 @@ async function handle(req, res) {
    * down again each time the home-screen app opened, and the Font picker sat
    * empty until the last had arrived.
    */
+  /* the flyer studio's own photographs (Unsplash licence) — named, from that folder only (flyerart.js) */
+  if (p.startsWith('/flyerphotos/')) {
+    let name = '';
+    try { name = decodeURIComponent(p.slice(13)); } catch (e) { name = ''; }
+    const full = require('../main/flyerart').stockPath(name);
+    if (!full) return send(res, 404, 'text/plain', 'not found');
+    return sendFile(req, res, full, { cache: 'public, max-age=604800' });
+  }
+
   if (p.startsWith('/fonts/')) {
     const base = cfg.dirs.fonts;
     let name = '';

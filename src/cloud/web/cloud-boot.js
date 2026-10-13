@@ -532,6 +532,17 @@ let _hideTimer = null;
       exportTo: (id, dest) => call('session:export', { id, dest }),
       importFrom: (src) => call('session:import', { src }),
     },
+    flyer: {
+      status: () => call('flyer:status'),
+      direct: (fields) => call('flyer:direct', { fields }),
+      paint: (a) => call('flyer:paint', a),
+      kitGet: () => call('flyer:kitGet'),
+      kitSave: (kit) => call('flyer:kitSave', { kit }),
+      kitPic: (name) => call('flyer:kitPic', { name }),
+      kitUsed: (speaker, photo) => call('flyer:kitUsed', { speaker, photo }),
+      inspoAdd: (a) => call('flyer:inspoAdd', a),
+      inspoRemove: (id) => call('flyer:inspoRemove', { id }),
+    },
     montage: {
       status: () => call('montage:status'),
       create: (a) => call('montage:create', a),

@@ -135,7 +135,7 @@ function assetKey(version) {
   if (_assetKey && _assetKey.version === version) return _assetKey.key;
   const h = crypto.createHash('sha1');
   const files = [INDEX, ...[...RENDERER_SCRIPTS, ...RENDERER_STYLES].map((f) => path.join(RENDERER_DIR, f)),
-    ...['cloud-boot.js', 'cloud-social.js', 'cloud.css', 'sw.js'].map((f) => path.join(__dirname, 'web', f))];
+    ...['cloud-boot.js', 'cloud-social.js', 'cloud-flyer.js', 'cloud.css', 'sw.js'].map((f) => path.join(__dirname, 'web', f))];
   for (const f of files) { try { h.update(fs.readFileSync(f)); } catch (e) {} }
   const key = version + '-' + h.digest('hex').slice(0, 10);
   _assetKey = { version, key };
@@ -335,6 +335,7 @@ ${body}
        DOMContentLoaded, by which time everything below has loaded. -->
   <script src="/cloud-boot.js?v=${key}"></script>
   <script src="/cloud-social.js?v=${key}"></script>
+  <script src="/cloud-flyer.js?v=${key}"></script>
 ${scripts}
 </body>
 </html>

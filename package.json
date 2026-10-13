@@ -17,6 +17,7 @@
     "test:features": "node test/features.test.js",
     "test:smoke": "electron test/smoke.js",
     "test:flyer": "electron test/flyer-maker.test.js",
+    "test:flyer-studio": "node test/flyer-studio.test.js",
     "test:autoframe": "node test/autoframe-smooth.test.js",
     "test:padcenter": "node test/pad-center.test.js",
     "test:reframe-export": "node test/reframe-export.test.js",

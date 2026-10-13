@@ -55,6 +55,13 @@ services:
       # set it in the dashboard, never in the repo.
       - key: ANTHROPIC_API_KEY
         sync: false
+      # Flyers (Home → Flyers): a free Cloudflare account paints the pictures
+      # with FLUX.2 — about 70 a day, no card. Without them a keyless free
+      # painter (Pollinations) is used, then the studio's own photographs.
+      - key: CLOUDFLARE_ACCOUNT_ID
+        sync: false
+      - key: CLOUDFLARE_API_TOKEN
+        sync: false
       # The phone's Social Scheduler is on by default (posts go out through
       # Zernio — see CLOUD.md). Add MW_CLOUD_SOCIAL=off in the dashboard to take
       # it off the phone and stop this server publishing anything.

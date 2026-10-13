@@ -7,6 +7,7 @@
 #   bash scripts/cloud-keys.sh groq       asks for the Groq key (again)
 #   bash scripts/cloud-keys.sh assemblyai asks for the AssemblyAI key (a second ear that is not Whisper)
 #   bash scripts/cloud-keys.sh mistral    asks for the Mistral key (free: Mistral Large chooses the shorts)
+#   bash scripts/cloud-keys.sh cloudflare asks for a free Cloudflare account ID + token (FLUX.2 paints the flyers)
 #
 # What you paste is never shown on the screen or kept in the shell's history.
 # It is checked with the service, saved in .env (readable only by you) and the
@@ -38,6 +39,7 @@ check_key() {
     GEMINI_API_KEY) code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "x-goog-api-key: $2" 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1' 2>/dev/null)" || true ;;
     ASSEMBLYAI_API_KEY) code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "authorization: $2" 'https://api.assemblyai.com/v2/transcript?limit=1' 2>/dev/null)" || true ;;
     MISTRAL_API_KEY) code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "Authorization: Bearer $2" 'https://api.mistral.ai/v1/models' 2>/dev/null)" || true ;;
+    CLOUDFLARE_API_TOKEN) code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "Authorization: Bearer $2" 'https://api.cloudflare.com/client/v4/user/tokens/verify' 2>/dev/null)" || true ;;
     GROQ_API_KEY)   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -H "Authorization: Bearer $2" 'https://api.groq.com/openai/v1/models' 2>/dev/null)" || true ;;
     *) code=200 ;;
   esac
@@ -70,6 +72,15 @@ fi
 if [ "$WANT" = "mistral" ]; then
   ask MISTRAL_API_KEY "A free Mistral key (console.mistral.ai → sign up, free Experiment plan → API Keys → Create new key)" "" && changed=1 || true
 fi
+if [ "$WANT" = "cloudflare" ]; then
+  # the account ID is not a secret and cannot be checked alone: it is saved as typed
+  printf '%s  ? Your Cloudflare Account ID (dash.cloudflare.com → Workers & Pages / AI → the "Account ID" on the right)%s\n    ' "$BLUE" "$OFF"
+  read -r cfid || cfid=""; cfid="$(printf '%s' "$cfid" | tr -d '[:space:]')"
+  if [ -n "$cfid" ]; then
+    envset CLOUDFLARE_ACCOUNT_ID "$cfid"; ok "CLOUDFLARE_ACCOUNT_ID saved"
+    ask CLOUDFLARE_API_TOKEN "A Cloudflare API token (My Profile → API Tokens → Create Token → \"Workers AI\" template)" "" && changed=1 || true
+  else warn "Nothing typed — Cloudflare not changed."; fi
+fi
 if [ "$WANT" = "groq" ]; then
   ask GROQ_API_KEY "A free Groq key (console.groq.com → API Keys)" "gsk_" && changed=1 || true
 fi
@@ -89,9 +100,9 @@ fi
 echo
 echo "  The studio has:"
 if ! $DOCKER compose exec -T studio sh -c '
-  for k in GROQ_API_KEY GEMINI_API_KEY ASSEMBLYAI_API_KEY MISTRAL_API_KEY ANTHROPIC_API_KEY; do
+  for k in GROQ_API_KEY GEMINI_API_KEY ASSEMBLYAI_API_KEY MISTRAL_API_KEY CLOUDFLARE_API_TOKEN ANTHROPIC_API_KEY; do
     eval v=\${$k:-}
-    case $k in GROQ_API_KEY) w="captions + scans (Whisper)";; GEMINI_API_KEY) w="the third ear that checks every caption";; ASSEMBLYAI_API_KEY) w="a second ear that is not Whisper (free credit)";; MISTRAL_API_KEY) w="Mistral Large chooses the shorts (free)";; *) w="Claude (paid, optional)";; esac
+    case $k in GROQ_API_KEY) w="captions + scans (Whisper)";; GEMINI_API_KEY) w="the third ear that checks every caption";; ASSEMBLYAI_API_KEY) w="a second ear that is not Whisper (free credit)";; MISTRAL_API_KEY) w="Mistral Large chooses the shorts (free)";; CLOUDFLARE_API_TOKEN) w="FLUX.2 paints the flyers (free)";; *) w="Claude (paid, optional)";; esac
     if [ -n "$v" ]; then echo "    ✓ $k — $w"; else echo "    ✗ $k — not set ($w)"; fi
   done' 2>/dev/null; then
   warn "the studio is not running — start it with: FORCE=1 bash scripts/cloud-update.sh"
