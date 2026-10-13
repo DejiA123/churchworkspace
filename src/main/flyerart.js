@@ -51,6 +51,8 @@ function status() {
   let writer = 'rules';
   if (process.env.ANTHROPIC_API_KEY) writer = 'claude';
   else { try { const cw = require('./cloudwrite'); if (cw.access && cw.access().key) writer = 'groq'; } catch (e) { /* none */ } }
+  // the same free Cloudflare account that paints the pictures also has a writer: the art director
+  if (writer === 'rules' && cf) writer = 'cloudflare';
   return {
     painter: cf ? 'cloudflare' : 'pollinations',
     painterName: cf ? 'FLUX.2 (Cloudflare, free)' : 'FLUX (Pollinations, free)',
@@ -211,7 +213,7 @@ const DIRECTION_SCHEMA = {
 
 const DIRECTOR_SYSTEM = `You are the art director of a top Nigerian church media team whose event flyers are the ones everyone saves on Pinterest: dramatic, glossy, colourful, cinematic.
 You are given the event. Decide:
-- scenes: THREE different backgrounds for an image model, each one sentence describing a REAL PHOTOGRAPH a church photographer could take: a worship stage with coloured spotlights and haze, a crowd with raised hands seen from behind and out of focus, sunlight breaking through real clouds, real fire and sparks, smoke lit in colour, a dim church auditorium with warm stage light, city lights bokeh at night, a real sunrise over hills. Light and atmosphere, never a single object in the middle (the speaker stands there): no glowing books, no candles in the centre, no symbols, no fantasy trees, nothing drawn. Match the event's mood and season (Easter: real sunrise over hills; Christmas: warm golden bokeh lights; prayer: deep blue haze and a single beam of light; Bible study: a dim auditorium with warm amber light, books out of focus at the sides). Never ask for text, letters, logos or faces close up.
+- scenes: SIX different backgrounds for an image model — six different ideas, never the same picture twice, the way a top designer would build six different flyers for this one event. Think in visual metaphors of the title and theme ("a lamp unto my feet": a lantern glowing on a dark path; "breakthrough": light bursting through cracked rock; "fire": real flames and embers; "word": an ancient scroll on a desk in a beam of light, or a lighthouse beam over a night sea; "harvest": a golden field at sunset), mixed with the stage, crowd and sky pictures church flyers love. Each one sentence describing a REAL PHOTOGRAPH a church photographer could take: a worship stage with coloured spotlights and haze, a crowd with raised hands seen from behind and out of focus, sunlight breaking through real clouds, real fire and sparks, smoke lit in colour, a dim church auditorium with warm stage light, city lights bokeh at night, a real sunrise over hills. Light and atmosphere, never a single object in the middle (the speaker stands there): no glowing books, no candles in the centre, no symbols, no fantasy trees, nothing drawn. Match the event's mood and season (Easter: real sunrise over hills; Christmas: warm golden bokeh lights; prayer: deep blue haze and a single beam of light; Bible study: a dim auditorium with warm amber light, books out of focus at the sides). Never ask for text, letters, logos or faces close up.
 - palette: four hex colours that will grade the picture and colour the type (deep, mid, accent, highlight). Bold and saturated: purple & gold, royal blue & white, crimson & gold, teal & lime, magenta & cyan.
 - scriptWord: one word for flowing script lettering across the speaker, usually the service day or the heart of the theme.
 - kicker: a short uppercase line above the title.
@@ -251,10 +253,39 @@ async function directWithClaude(f) {
   return JSON.parse(text);
 }
 
+/* Cloudflare Workers AI's free writers, best first (a model the account lacks is skipped) */
+const CF_WRITERS = ['@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/meta/llama-3.1-8b-instruct-fast', '@cf/meta/llama-3.1-8b-instruct'];
+function jsonIn(text) {
+  if (text && typeof text === 'object') return text;
+  const t = String(text || ''); const a = t.indexOf('{'), b = t.lastIndexOf('}');
+  if (a < 0 || b <= a) return null;
+  try { return JSON.parse(t.slice(a, b + 1)); } catch (e) { return null; }
+}
+async function directWithCloudflare(f) {
+  const system = DIRECTOR_SYSTEM + '\nAnswer with ONE JSON object only, no prose, with keys: scenes (array of 6 strings), palette (array of 4 hex strings like "#1a0638"), scriptWord (string), kicker (string), looks (array of layout names).';
+  const until = Date.now() + 30000;   // the whole art direction, never longer than this — then the pool
+  for (const id of CF_WRITERS) {
+    if (benchedNow(id)) continue;
+    const left = until - Date.now(); if (left < 4000) break;
+    try {
+      const res = await fetchTimed(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cfAccount())}/ai/run/${id}`, {
+        method: 'POST', headers: { authorization: `Bearer ${cfToken()}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ messages: [{ role: 'system', content: system }, { role: 'user', content: fieldsText(f) + '\n(Surprise me: this is request ' + Math.floor(Math.random() * 1e6) + ', so make the six scenes different from any you gave before.)' }], max_tokens: 1200, temperature: 1.0 }),
+      }, Math.min(25000, left));
+      if (res.status === 400 || res.status === 404) { benched.set(id, Date.now() + 6 * 3600e3); continue; }
+      if (!res.ok) continue;
+      const j = await res.json().catch(() => null);
+      const d = jsonIn(j && j.result && j.result.response);
+      if (d && Array.isArray(d.scenes) && d.scenes.length) return d;
+    } catch (e) { /* the next writer */ }
+  }
+  return null;
+}
+
 async function directWithGroq(f) {
   const cw = require('./cloudwrite');
   const text = await cw.chat({
-    system: DIRECTOR_SYSTEM + '\nJSON keys: scenes (array of 3 strings), palette (array of 4 hex strings), scriptWord, kicker, looks (array).',
+    system: DIRECTOR_SYSTEM + '\nJSON keys: scenes (array of 6 strings), palette (array of 4 hex strings), scriptWord, kicker, looks (array).',
     prompt: fieldsText(f), json: true, maxTokens: 900, temperature: 0.9, evenIfOff: true, timeoutMs: 25000,
   });
   return text ? cw.parseJson(text) : null;
@@ -273,23 +304,52 @@ const RULES = [
   { rx: /worship|praise|sunday|service|.*/i, scenes: ['sunlight breaking through dramatic purple and gold clouds, real sky photograph', 'a worship concert stage with blue spotlights and haze, crowd with raised hands far away out of focus', 'soft royal purple and gold bokeh lights with lens flare, shallow depth of field'], palette: ['#1a0638', '#5b21b6', '#f5c542', '#ffffff'], script: 'Sunday', kicker: 'WORSHIP WITH US THIS', looks: ['glory', 'sunday', 'encounter'] },
 ];
 
+/*
+ * WHEN NO AI CAN WRITE: never the same three pictures again. The event's own
+ * scenes, then a wide pool of what church flyers are built on — six picked at
+ * random every time, so "New pictures" really is new.
+ */
+const POOL = [
+  'real flames and glowing embers rising into a dark night sky, photograph',
+  'white light bursting through a crack in dark rock, dust in the beams, photograph',
+  'a lighthouse beam sweeping over a dark stormy sea at night, long exposure photograph',
+  'an ancient parchment scroll and a quill on a wooden desk in a single beam of window light, dark background, shallow depth of field',
+  'a lantern glowing on a misty forest path at night, warm light, photograph',
+  'sunlight streaming through stained glass windows into a dark cathedral, coloured light on the floor, photograph',
+  'white doves flying through golden rays of light against a blue sky, photograph',
+  'a huge crowd with hands raised at an outdoor night service, stage lights and haze, seen from behind, out of focus',
+  'thunderclouds lit from within by lightning over a dark plain, dramatic real sky photograph',
+  'golden light rays breaking through heavy clouds over the ocean at sunset, photograph',
+  'a misty mountain range at dawn with layers of blue ridges and a glowing sky, landscape photograph',
+  'city lights at night seen from a rooftop, deep blue hour, soft bokeh, photograph',
+  'light trails and lens flares of a concert stage, purple and gold, long exposure photograph',
+  'water drops and ripples catching golden light on a dark lake, macro photograph',
+  'a path of light leading up a hill to a glowing horizon at dawn, photograph',
+  'red velvet curtains and golden stage lights in an empty theatre, haze, photograph',
+  'smoke swirling in coloured stage light against a black background, photograph',
+  'warm golden sunrise over a quiet field with morning mist, photograph',
+  'an open bible on a pulpit under a soft spotlight in a dark auditorium, out of focus at the edges',
+  'the silhouette of a cross on a hill against a blazing orange sky, real photograph',
+];
+const pick = (arr, n) => { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a.slice(0, n); };
 function directByRules(f) {
   const hay = [f.season, f.kind, f.title, f.theme, f.notes].filter(Boolean).join(' ');
   const r = RULES.find((x) => x.rx.test(hay)) || RULES[RULES.length - 1];
   let script = r.script;
   if (r === RULES[RULES.length - 1] && f.dayName) script = f.dayName;
-  return { scenes: r.scenes.slice(), palette: r.palette.slice(), scriptWord: script, kicker: r.kicker, looks: r.looks.slice() };
+  const scenes = pick(r.scenes, 3).concat(pick(POOL.filter((p) => !r.scenes.includes(p)), 3));
+  return { scenes: pick(scenes, 6), palette: r.palette.slice(), scriptWord: script, kicker: r.kicker, looks: r.looks.slice() };
 }
 
 const HEX = /^#[0-9a-f]{6}$/i;
 function clean(d, f) {
   const base = directByRules(f);
   if (!d || typeof d !== 'object') return Object.assign(base, { by: 'rules', looks: Array.from(new Set(base.looks.concat(LOOKS))) });
-  const scenes = (Array.isArray(d.scenes) ? d.scenes : []).map((s) => String(s || '').trim()).filter((s) => s.length > 8).slice(0, 3);
+  const scenes = (Array.isArray(d.scenes) ? d.scenes : []).map((s) => String(s || '').trim().slice(0, 400)).filter((s) => s.length > 8).slice(0, 6);
   const palette = (Array.isArray(d.palette) ? d.palette : []).map((c) => String(c || '').trim()).filter((c) => HEX.test(c)).slice(0, 4);
   const looks = (Array.isArray(d.looks) ? d.looks : []).filter((l) => LOOKS.includes(l));
   return {
-    scenes: scenes.length ? scenes.concat(base.scenes).slice(0, 3) : base.scenes,
+    scenes: scenes.length ? Array.from(new Set(scenes.concat(base.scenes))).slice(0, 6) : base.scenes,
     palette: palette.length === 4 ? palette : base.palette,
     scriptWord: String(d.scriptWord || '').replace(/[^\p{L}' -]/gu, '').trim().slice(0, 14) || base.scriptWord,
     kicker: String(d.kicker || '').trim().slice(0, 32) || base.kicker,
@@ -372,6 +432,9 @@ async function direct(fields = {}) {
   } catch (e) { d = null; }
   if (!d && (st.writer === 'groq' || st.writer === 'claude')) {
     try { d = await directWithGroq(f); by = 'groq'; } catch (e) { d = null; }
+  }
+  if (!d && st.cloudflare) {
+    try { d = await directWithCloudflare(f); by = 'cloudflare'; } catch (e) { d = null; }
   }
   if (!d) by = 'rules';
   const out = clean(d, f);

@@ -2051,8 +2051,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     if (!F.bgs.length) { IMGS.set('proc:' + tryNo, proceduralBg(sz.w, sz.h, F.pal, tryNo * 13 + 5)); F.bgs = [{ key: 'proc:' + tryNo, by: 'painted here', proc: true }]; }
     rebuildDesigns();
     // then the AI's — three at once, each swapped in as it lands
-    const scenes = (F.dir.scenes || []).slice(0, 3);
-    while (scenes.length < 3 && scenes.length) scenes.push(scenes[scenes.length - 1]);
+    // six AI pictures, six ideas, six lights: every design on the board gets its own
+    const scenes = (F.dir.scenes || []).slice(0, 6);
+    for (let j = 0; scenes.length && scenes.length < 6; j++) scenes.push(scenes[j % scenes.length]);
     F.painting = scenes.length;
     drawPick();
     let failed = '';
@@ -2067,6 +2068,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         IMGS.set(key, im);
         // AI pictures lead; the photos stay on for variety until three AI ones are in
         const ai = F.bgs.filter((b) => !b.proc).concat({ key, by: out.by, scene, tone: tone.id });
+        // AI pictures in order of their light, the studio's photos only standing in until three are here
+        ai.sort((a, b) => TONES.findIndex((t) => t.id === a.tone) - TONES.findIndex((t) => t.id === b.tone));
         F.bgs = ai.concat(F.bgs.filter((b) => b.proc)).slice(0, Math.max(3, ai.length));
         rebuildDesigns();
       } catch (e) { failed = e.message || String(e); }
@@ -2084,11 +2087,17 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     { id: 'own', words: '' },
     { id: 'blue', words: 'the whole scene lit in deep royal blue and cool white light, blue haze' },
     { id: 'purple', words: 'the whole scene lit in rich purple and magenta light with warm orange highlights' },
+    { id: 'red', words: 'the whole scene lit in deep crimson red and warm orange light, glowing embers' },
+    { id: 'gold', words: 'the whole scene bathed in warm golden sunlight and amber haze, glowing highlights' },
+    { id: 'teal', words: 'the whole scene lit in deep teal and emerald light with soft white highlights' },
   ];
   const TONE_PAL = {
     own: 'own',
     blue: { deep: '#020b2e', mid: '#0b3d91', accent: '#ffd23f', hi: '#ffffff' },
     purple: { deep: '#14063a', mid: '#6d1fb0', accent: '#ff9a2e', hi: '#ffe6ff' },
+    red: { deep: '#240003', mid: '#a5111d', accent: '#ffc21a', hi: '#fff3e0' },
+    gold: { deep: '#2a1400', mid: '#b86f00', accent: '#ffd54a', hi: '#fffbe6' },
+    teal: { deep: '#012226', mid: '#0e6f7a', accent: '#ffd23f', hi: '#ffffff' },
   };
   function rebuildDesigns() {
     const sz = sizeOf();
