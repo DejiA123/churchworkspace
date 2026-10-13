@@ -220,6 +220,7 @@
 
   /* the pictures a scene refers to by key (a scene stays plain JSON, so undo is cheap) */
   const IMGS = new Map();
+  const META = new Map();   // picture key -> where the person is in it (preparePerson)
   const imgOf = (k) => IMGS.get(k) || null;
   function loadImg(src) {
     return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('That picture could not be opened.')); i.src = src; });
@@ -233,26 +234,51 @@
     ctx.drawImage(im, x + (w - dw) * fx, y + (h - dh) * fy, dw, dh);
   }
 
-  /* brightness / contrast / saturation / black-and-white, by hand (Safari's canvas has no ctx.filter) */
+  /*
+   * THE GRADE. Brightness / contrast / saturation by hand (Safari's canvas
+   * has no ctx.filter), and the GRADIENT MAP that gives a designer's flyer
+   * its colour: every brightness in the photo takes its colour from the
+   * flyer's own ramp — deep shadows, the main colour in the middle, the
+   * accent in the light — so any photo comes out orange-and-gold, or
+   * purple-and-pink, like the rest of the flyer.
+   */
   const adjCache = new Map();
+  function duoLut(stops) {
+    const lut = new Float32Array(256 * 3);
+    for (let v = 0; v < 256; v++) {
+      const t = v / 255;
+      let j = 0; while (j < stops.length - 2 && t > stops[j + 1][0]) j++;
+      const [t0, c0] = stops[j], [t1, c1] = stops[Math.min(stops.length - 1, j + 1)];
+      const u = t1 > t0 ? Math.max(0, Math.min(1, (t - t0) / (t1 - t0))) : 0;
+      const a = hexRgb(c0), b = hexRgb(c1);
+      for (let k = 0; k < 3; k++) lut[v * 3 + k] = a[k] + (b[k] - a[k]) * u;
+    }
+    return lut;
+  }
   function adjusted(im, a, w, h) {
-    const key = [IMGS_KEY(im), w, h, a.bright || 0, a.contrast || 0, a.sat || 0, a.gray ? 1 : 0, a.blur || 0].join('|');
+    const key = [IMGS_KEY(im), w, h, a.bright || 0, a.contrast || 0, a.sat || 0, a.gray ? 1 : 0, a.blur || 0, a.duo ? JSON.stringify(a.duo) : '', a.keep == null ? '' : a.keep].join('|');
     if (adjCache.has(key)) return adjCache.get(key);
-    let c = canvas(w, h); const x = c.getContext('2d', { willReadFrequently: true });
+    const c = canvas(w, h); const x = c.getContext('2d', { willReadFrequently: true });
+    x.imageSmoothingQuality = 'high';
     cover(x, im, 0, 0, w, h);
     if (a.blur) {   // a soft blur: down and back up
       const f = clamp(1 - a.blur / 30, 0.04, 1), s = canvas(w * f, h * f);
       s.getContext('2d').drawImage(c, 0, 0, s.width, s.height);
-      x.clearRect(0, 0, w, h); x.imageSmoothingQuality = 'high'; x.drawImage(s, 0, 0, w, h);
+      x.clearRect(0, 0, w, h); x.drawImage(s, 0, 0, w, h);
     }
-    if (a.bright || a.contrast || a.sat || a.gray) {
+    if (a.bright || a.contrast || a.sat || a.gray || a.duo) {
       const d = x.getImageData(0, 0, w, h), p = d.data;
       const br = (a.bright || 0) * 2.55, ct = 1 + (a.contrast || 0) / 100, st = a.gray ? 0 : 1 + (a.sat || 0) / 100;
+      const lut = a.duo ? duoLut(a.duo) : null, keep = a.keep == null ? 0.16 : a.keep;
       for (let i = 0; i < p.length; i += 4) {
         let r = p[i], g = p[i + 1], b = p[i + 2];
         const l = 0.299 * r + 0.587 * g + 0.114 * b;
         r = l + (r - l) * st; g = l + (g - l) * st; b = l + (b - l) * st;
         r = (r - 128) * ct + 128 + br; g = (g - 128) * ct + 128 + br; b = (b - 128) * ct + 128 + br;
+        if (lut) {
+          const L = Math.max(0, Math.min(255, Math.round(0.299 * r + 0.587 * g + 0.114 * b))) * 3;
+          r = lut[L] * (1 - keep) + r * keep; g = lut[L + 1] * (1 - keep) + g * keep; b = lut[L + 2] * (1 - keep) + b * keep;
+        }
         p[i] = r < 0 ? 0 : r > 255 ? 255 : r; p[i + 1] = g < 0 ? 0 : g > 255 ? 255 : g; p[i + 2] = b < 0 ? 0 : b > 255 ? 255 : b;
       }
       x.putImageData(d, 0, 0);
@@ -264,28 +290,24 @@
   const imKeys = new WeakMap(); let imN = 0;
   function IMGS_KEY(im) { if (!imKeys.has(im)) imKeys.set(im, 'i' + (++imN)); return imKeys.get(im); }
 
-  /* ------------------------------------------------ the painted-here background */
-
-  /* For when no AI could be reached (and while it paints): rays, glow and bokeh in the flyer's colours. */
+  /* For when no photo could be had: rays, glow and bokeh in the flyer's colours. */
   function proceduralBg(w, h, pal, seed, style) {
     const c = canvas(w, h), x = c.getContext('2d'), r = rng(seed || 7);
     const g = x.createLinearGradient(0, 0, w * 0.3, h);
     g.addColorStop(0, pal.mid); g.addColorStop(0.55, mix(pal.mid, pal.deep, 0.6)); g.addColorStop(1, pal.deep);
     x.fillStyle = g; x.fillRect(0, 0, w, h);
     const cx = w * (0.3 + r() * 0.4), cy = h * (0.12 + r() * 0.2);
-    // god rays
     x.save(); x.globalCompositeOperation = 'lighter';
     for (let i = 0; i < 16; i++) {
       const a = -Math.PI / 2 + (r() - 0.5) * 2.6, len = h * 1.6, wd = 0.03 + r() * 0.07;
       const rg = x.createLinearGradient(cx, cy, cx + Math.cos(a) * len, cy + Math.sin(a) * len);
       rg.addColorStop(0, rgba(pal.hi, 0.22)); rg.addColorStop(1, rgba(pal.hi, 0));
       x.fillStyle = rg; x.beginPath(); x.moveTo(cx, cy);
-      x.lineTo(cx + Math.cos(a - wd) * len, cy - Math.sin(-a + wd) * len); x.lineTo(cx + Math.cos(a + wd) * len, cy + Math.sin(a + wd) * len); x.closePath(); x.fill();
+      x.lineTo(cx + Math.cos(a - wd) * len, cy + Math.sin(a - wd) * len); x.lineTo(cx + Math.cos(a + wd) * len, cy + Math.sin(a + wd) * len); x.closePath(); x.fill();
     }
     const glow = x.createRadialGradient(cx, cy, 0, cx, cy, w * 0.75);
     glow.addColorStop(0, rgba(pal.accent, 0.55)); glow.addColorStop(0.35, rgba(pal.accent, 0.12)); glow.addColorStop(1, rgba(pal.accent, 0));
     x.fillStyle = glow; x.fillRect(0, 0, w, h);
-    // bokeh
     for (let i = 0; i < 46; i++) {
       const bx = r() * w, by = r() * h, br = 6 + r() * (style === 'big' ? 70 : 38);
       const bg = x.createRadialGradient(bx, by, 0, bx, by, br);
@@ -313,16 +335,18 @@
     const r = Math.min(R, W / 2, H / 2);
     x.beginPath(); x.moveTo(X + r, Y); x.arcTo(X + W, Y, X + W, Y + H, r); x.arcTo(X + W, Y + H, X, Y + H, r); x.arcTo(X, Y + H, X, Y, r); x.arcTo(X, Y, X + W, Y, r); x.closePath();
   }
-  function fillOf(x, f, w, h) {
+  /* a fill: a colour, or a gradient centred on (cx, cy) over w × h */
+  function gradAt(ctx, f, cx, cy, w, h) {
     if (f && typeof f === 'object' && f.stops) {
       const a = ((f.angle == null ? 90 : f.angle) * Math.PI) / 180;
       const dx = Math.cos(a) * w / 2, dy = Math.sin(a) * h / 2;
-      const g = x.createLinearGradient(-dx, -dy, dx, dy);
+      const g = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
       f.stops.forEach((c, i) => g.addColorStop(i / Math.max(1, f.stops.length - 1), c));
       return g;
     }
     return f || '#ffffff';
   }
+  const fillOf = (x, f, w, h) => gradAt(x, f, 0, 0, w, h);
 
   function drawShape(x, L) {
     const w = L.w, h = L.h;
@@ -330,7 +354,7 @@
     if (L.shadow) { x.shadowColor = 'rgba(0,0,0,.45)'; x.shadowBlur = 24 * Q; x.shadowOffsetY = 8 * Q; }
     switch (L.shape) {
       case 'pill': roundRect(x, -w / 2, -h / 2, w, h, h / 2); x.fill(); break;
-      case 'round': roundRect(x, -w / 2, -h / 2, w, h, L.radius || 18); x.fill(); break;
+      case 'round': roundRect(x, -w / 2, -h / 2, w, h, L.radius == null ? 18 : L.radius); x.fill(); break;
       case 'band': { const k = L.skew == null ? 40 : L.skew; x.beginPath(); x.moveTo(-w / 2 + k, -h / 2); x.lineTo(w / 2, -h / 2); x.lineTo(w / 2 - k, h / 2); x.lineTo(-w / 2, h / 2); x.closePath(); x.fill(); break; }
       case 'slant': { const k = L.skew == null ? 60 : L.skew; x.beginPath(); x.moveTo(-w / 2, -h / 2 + k); x.lineTo(w / 2, -h / 2); x.lineTo(w / 2, h / 2); x.lineTo(-w / 2, h / 2); x.closePath(); x.fill(); break; }
       case 'torn': tornPath(x, w, h, L.seed, { top: true, bottom: true }); x.fill(); break;
@@ -338,25 +362,18 @@
       case 'circle': x.beginPath(); x.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2); x.fill();
         if (L.ring) { x.shadowColor = 'transparent'; x.lineWidth = L.ring; x.strokeStyle = L.ringColor || '#fff'; x.beginPath(); x.ellipse(0, 0, w / 2 - L.ring * 1.6, h / 2 - L.ring * 1.6, 0, 0, Math.PI * 2); x.stroke(); }
         break;
-      case 'ring': {   // an outline: a circle when square, a pill when long
+      case 'ring': {
         const lw = L.line || 6; x.lineWidth = lw; x.strokeStyle = x.fillStyle;
         if (Math.abs(w - h) < 2) { x.beginPath(); x.ellipse(0, 0, w / 2 - lw, h / 2 - lw, 0, 0, Math.PI * 2); }
-        else roundRect(x, -w / 2 + lw / 2, -h / 2 + lw / 2, w - lw, h - lw, (h - lw) / 2);
+        else roundRect(x, -w / 2 + lw / 2, -h / 2 + lw / 2, w - lw, h - lw, L.radius == null ? (h - lw) / 2 : L.radius);
         x.stroke(); break;
       }
-      case 'brush': {   // a painted swoosh, tapered at both ends
-        const r = rng(L.seed || 9);
-        x.beginPath(); x.moveTo(-w / 2, h * 0.1);
-        x.bezierCurveTo(-w * 0.2, -h * 0.55, w * 0.2, -h * 0.5, w / 2, -h * 0.18);
-        x.bezierCurveTo(w * 0.22, h * 0.05 + r() * 6, -w * 0.15, h * 0.12, -w / 2, h * 0.1);
-        x.closePath(); x.fill();
-        break;
-      }
       case 'line': x.fillRect(-w / 2, -h / 2, w, h); break;
-      case 'glow': {   // a soft light behind the people
+      case 'cross': { const t = w * 0.2; x.fillRect(-t / 2, -h / 2, t, h); x.fillRect(-w / 2, -h / 2 + h * 0.24, w, t); break; }
+      case 'glow': {
         const col = typeof L.fill === 'string' ? L.fill : '#ffffff';
         const g = x.createRadialGradient(0, 0, 0, 0, 0, Math.max(w, h) / 2);
-        g.addColorStop(0, col); g.addColorStop(0.45, rgba(col.length === 7 ? col : '#ffffff', 0.35)); g.addColorStop(1, rgba(col.length === 7 ? col : '#ffffff', 0));
+        g.addColorStop(0, col); g.addColorStop(0.45, rgba(col, 0.35)); g.addColorStop(1, rgba(col, 0));
         x.globalCompositeOperation = 'screen'; x.fillStyle = g; x.beginPath(); x.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2); x.fill(); x.globalCompositeOperation = 'source-over';
         break;
       }
@@ -366,7 +383,7 @@
         x.globalCompositeOperation = 'destination-out'; x.beginPath(); x.arc(0, -s * 0.12, s * 0.13, 0, Math.PI * 2); x.fill(); x.globalCompositeOperation = 'source-over';
         break;
       }
-      case 'fade': {   // a gradient wash: transparent at the top to the colour at the bottom
+      case 'fade': {
         const g = x.createLinearGradient(0, -h / 2, 0, h / 2);
         const col = typeof L.fill === 'string' ? L.fill : '#000000';
         g.addColorStop(0, rgba(col, 0)); g.addColorStop(0.55, rgba(col, (L.strength || 0.85) * 0.75)); g.addColorStop(1, rgba(col, L.strength || 0.85));
@@ -377,99 +394,192 @@
     x.shadowColor = 'transparent';
   }
 
-  /* ------------------------------------------------------------------- text */
+  /* ------------------------------------------------------------------ light */
 
-  /* the face fills a flyer's lettering wears */
-  const METALS = {
-    gold: ['#7a4b0e', '#f8dc8b', '#b97d1c', '#fff2c4', '#8d5a12'],
-    rust: ['#3b1c0a', '#a8611f', '#5a2d0e', '#d58a3a', '#3b1c0a'],
-    silver: ['#5d6470', '#f2f5f8', '#8f97a3', '#ffffff', '#5d6470'],
-    fire: ['#ffef9a', '#ffb300', '#ff5a00', '#b31200'],
-    ice: ['#ffffff', '#d7f1ff', '#7cc8ff', '#2f7fd6'],
-  };
-  function textFill(x, L, w, h) {
-    const f = L.fill;
-    if (typeof f === 'string' && METALS[f]) return fillOf(x, { stops: METALS[f], angle: 90 }, w, h);
-    return fillOf(x, f, w, h);
+  /*
+   * LIGHT — what makes a designer's flyer glow: a halo behind the preacher,
+   * a streak of light through the title, rays from above, embers rising,
+   * soft out-of-focus lights. Each only ever adds light (screen / lighter),
+   * so it can sit on any picture.
+   */
+  function drawFx(x, S, L) {
+    const p = S.pal, c1 = L.color || p.accent, c2 = L.color2 || p.hi, r = rng(L.seed || 11);
+    x.save();
+    x.globalAlpha = L.opacity == null ? 1 : L.opacity;
+    x.globalCompositeOperation = 'screen';
+    const blob = (cx, cy, rx, ry, col, a, rot) => {
+      x.save(); x.translate(cx, cy); if (rot) x.rotate(rot); x.scale(Math.max(1, rx), Math.max(1, ry));
+      const g = x.createRadialGradient(0, 0, 0, 0, 0, 1);
+      g.addColorStop(0, rgba(col, a)); g.addColorStop(0.35, rgba(col, a * 0.5)); g.addColorStop(0.7, rgba(col, a * 0.12)); g.addColorStop(1, rgba(col, 0));
+      x.fillStyle = g; x.beginPath(); x.arc(0, 0, 1, 0, Math.PI * 2); x.fill(); x.restore();
+    };
+    switch (L.kind) {
+      case 'glow': blob(L.x, L.y, L.w / 2, L.h / 2, c1, 0.95); break;
+      case 'streak': {
+        const rot = (L.rot || 0) * Math.PI / 180;
+        const cols = L.colors || ['#ff2d55', '#ff9500', '#ffd60a', '#34c759', '#0a84ff', '#bf5af2'];
+        const n = cols.length;
+        cols.forEach((col, i) => {
+          const off = (i - (n - 1) / 2) * L.h / n;
+          blob(L.x - Math.sin(rot) * off, L.y + Math.cos(rot) * off, L.w / 2, L.h / n * 1.1, col, 0.5, rot);
+        });
+        blob(L.x, L.y, L.w / 2, Math.max(3, L.h * 0.05), '#ffffff', 0.8, rot);
+        break;
+      }
+      case 'rays': {
+        const n = L.n || 16;
+        for (let i = 0; i < n; i++) {
+          const a = Math.PI / 2 + (r() - 0.5) * (L.spread || 1.5), len = L.h, wd = 0.012 + r() * 0.04;
+          const g = x.createLinearGradient(L.x, L.y, L.x + Math.cos(a) * len, L.y + Math.sin(a) * len);
+          g.addColorStop(0, rgba(i % 3 ? c1 : c2, 0.2 + r() * 0.25)); g.addColorStop(1, rgba(c1, 0));
+          x.fillStyle = g; x.beginPath(); x.moveTo(L.x, L.y);
+          x.lineTo(L.x + Math.cos(a - wd) * len, L.y + Math.sin(a - wd) * len);
+          x.lineTo(L.x + Math.cos(a + wd) * len, L.y + Math.sin(a + wd) * len); x.closePath(); x.fill();
+        }
+        break;
+      }
+      case 'sparks': {
+        x.globalCompositeOperation = 'lighter';
+        const n = L.n || 80;
+        for (let i = 0; i < n; i++) {
+          const px = L.x - L.w / 2 + r() * L.w, py = L.y - L.h / 2 + r() * L.h, s = 0.8 + r() * r() * 4;
+          const col = r() > 0.35 ? c1 : c2, len = 1 + r() * 4;
+          x.save(); x.translate(px, py); x.rotate((r() - 0.5) * 0.9); x.scale(1, len);
+          const g = x.createRadialGradient(0, 0, 0, 0, 0, s * 2.2);
+          g.addColorStop(0, 'rgba(255,255,255,.95)'); g.addColorStop(0.3, rgba(col, 0.85)); g.addColorStop(1, rgba(col, 0));
+          x.fillStyle = g; x.beginPath(); x.arc(0, 0, s * 2.2, 0, Math.PI * 2); x.fill(); x.restore();
+        }
+        break;
+      }
+      case 'bokeh': {
+        const n = L.n || 30;
+        for (let i = 0; i < n; i++) {
+          const px = L.x - L.w / 2 + r() * L.w, py = L.y - L.h / 2 + r() * L.h, s = 8 + r() * (L.size || 42);
+          const col = r() > 0.5 ? c1 : c2, a = 0.1 + r() * 0.28;
+          const g = x.createRadialGradient(px, py, 0, px, py, s);
+          g.addColorStop(0, rgba(col, a)); g.addColorStop(0.8, rgba(col, a * 0.7)); g.addColorStop(1, rgba(col, 0));
+          x.fillStyle = g; x.beginPath(); x.arc(px, py, s, 0, Math.PI * 2); x.fill();
+        }
+        break;
+      }
+      case 'flare': {
+        blob(L.x, L.y, L.w * 0.12, L.w * 0.12, '#ffffff', 0.95);
+        blob(L.x, L.y, L.w * 0.4, L.w * 0.4, c1, 0.6);
+        blob(L.x, L.y, L.w / 2, Math.max(3, L.w * 0.012), '#ffffff', 0.85);
+        blob(L.x, L.y, L.w / 2, Math.max(6, L.w * 0.04), c2, 0.5);
+        break;
+      }
+      default:
+    }
+    x.restore();
   }
 
+  /* ------------------------------------------------------------------- text */
+
+  const METALS = {
+    gold: ['#fff4cc', '#f6d47e', '#d8a23e', '#fbe6a2', '#b47a1d', '#eec35a', '#8a5a12'],
+    rust: ['#8a4d1f', '#c27a35', '#6b3514', '#b0692b', '#4f260c'],
+    silver: ['#ffffff', '#e3e7ec', '#a3abb5', '#f4f6f8', '#78818c', '#d9dee4'],
+    fire: ['#fff6a0', '#ffd400', '#ff9d00', '#e14b00'],
+    ice: ['#ffffff', '#d7f1ff', '#7cc8ff', '#2f7fd6'],
+  };
+  const textFillAt = (ctx, L, cx, cy, w, h) => gradAt(ctx, typeof L.fill === 'string' && METALS[L.fill] ? { stops: METALS[L.fill], angle: 90 } : L.fill, cx, cy, w, h);
+
+  /* a worn, printed texture for distressed lettering */
+  let grungeC = null;
+  function grungeTile() {
+    if (grungeC) return grungeC;
+    grungeC = canvas(256, 256);
+    const x = grungeC.getContext('2d'), r = rng(23);
+    for (let i = 0; i < 900; i++) { x.fillStyle = r() > 0.5 ? 'rgba(0,0,0,.5)' : 'rgba(255,255,255,.4)'; x.beginPath(); x.arc(r() * 256, r() * 256, 0.4 + r() * r() * 3.2, 0, Math.PI * 2); x.fill(); }
+    for (let i = 0; i < 40; i++) { x.strokeStyle = 'rgba(0,0,0,.35)'; x.lineWidth = 0.5 + r(); x.beginPath(); const sx = r() * 256, sy = r() * 256; x.moveTo(sx, sy); x.lineTo(sx + (r() - 0.5) * 60, sy + (r() - 0.5) * 18); x.stroke(); }
+    return grungeC;
+  }
+
+  /*
+   * A TEXT LAYER, SET LIKE A DESIGNER SETS IT. The box of a text layer is its
+   * INK — the letters themselves, measured — not the font's line box, so a
+   * stack of words lines up edge to edge. `fit` sets a line exactly as wide
+   * as asked (the stacked titles every one of those flyers has), `maxH` caps
+   * how tall the capitals may be, `stretch` makes condensed letters taller.
+   * Drawn on its own canvas (cached) at the flyer's output sharpness.
+   */
   const txtCache = new Map();
-  /* A text layer drawn on its own canvas (cached): depth, glow, outline, gradient or picture inside the letters. */
+  let measC = null;
   function textCanvas(L) {
-    const key = JSON.stringify([Q, L.text, L.font, L.size, L.fill, L.stroke, L.strokeColor, L.extrude, L.extrudeColor, L.glow, L.shadow, L.letter, L.align, L.line, L.slant, L.upper, L.maxW, L.grain, L.imgFill, L.imgFill && IMGS.has(L.imgFill)]);
+    const key = JSON.stringify([Q, L.text, L.font, L.size, L.fit, L.maxH, L.maxW, L.stretch, L.fill, L.stroke, L.strokeColor, L.extrude, L.extrudeColor, L.glow, L.shadow, L.letter, L.align, L.line, L.slant, L.upper, L.grain, L.imgFill, L.imgFill && IMGS.has(L.imgFill)]);
     if (txtCache.has(key)) return txtCache.get(key);
-    const m = canvas(4, 4).getContext('2d');
+    const m = (measC || (measC = canvas(8, 8))).getContext('2d');
     const text = String(L.text == null ? '' : L.text);
     const lines = (L.upper ? text.toUpperCase() : text).split('\n');
+    const sy = L.stretch || 1;
     let size = L.size || 80;
     const fontOf = (s) => `${s}px ${fam(L.font || 'Anton')}, "Arial Black", Impact, sans-serif`;
     const lsp = (s) => (L.letter || 0) * s;
-    const widthOf = (ln, s) => { m.font = fontOf(s); return m.measureText(ln).width + Math.max(0, ln.length - 1) * lsp(s); };
-    let maxW = Math.max(1, ...lines.map((ln) => widthOf(ln, size)));
-    // a long line that would have to shrink below two-thirds of its size is broken in two instead (an address stays readable)
-    if (L.maxW && maxW > L.maxW / 0.66 && lines.length === 1 && /\s/.test(lines[0])) {
-      const ws = lines[0].split(/\s+/); let best = 1, diff = 1e9;
-      for (let i = 1; i < ws.length; i++) { const d = Math.abs(widthOf(ws.slice(0, i).join(' '), size) - widthOf(ws.slice(i).join(' '), size)); if (d < diff) { diff = d; best = i; } }
-      lines.splice(0, 1, ws.slice(0, best).join(' '), ws.slice(best).join(' '));
-      maxW = Math.max(1, ...lines.map((ln) => widthOf(ln, size)));
-    }
-    if (L.maxW && maxW > L.maxW) { size = Math.max(8, size * (L.maxW / maxW)); maxW = Math.max(1, ...lines.map((ln) => widthOf(ln, size))); }
-    const lh = size * (L.line || 1.0);
-    const depth = L.extrude ? Math.round(L.extrude * size / 100) : 0;
-    const pad = Math.ceil(size * 0.35 + depth + (L.glow ? size * 0.3 : 0) + (L.stroke || 0) * 2 + (L.shadow ? size * 0.12 : 0));
-    const slant = L.slant ? 0.2 : 0;
-    const W = maxW + pad * 2 + size * slant, H = lh * lines.length + pad * 2 + size * 0.25;
-    const c = canvas(W * Q, H * Q), x = c.getContext('2d');
-    x.scale(Q, Q);
-    x.font = fontOf(size); x.textBaseline = 'alphabetic'; x.lineJoin = 'round';
-    const asc = size * 0.82;
-    const put = (ctx, ln, i, ox, oy, how) => {
-      const lw = widthOf(ln, size);
-      let sx = L.align === 'left' ? pad : L.align === 'right' ? W - pad - lw - size * slant : (W - lw - size * slant) / 2;
-      const sy = pad + asc + i * lh + (lh - size) / 2;
-      sx += ox; const yy = sy + oy;
-      if (!L.letter) { ctx[how](ln, sx + (slant ? (H - yy) * slant * 0 : 0), yy); return; }
-      for (const ch of ln) { ctx[how](ch, sx, yy); sx += ctx.measureText(ch).width + lsp(size); }
+    const metr = (ln, s) => {
+      m.font = fontOf(s);
+      if (!L.letter || ln.length < 2) {
+        const t = m.measureText(ln || ' ');
+        return { l: t.actualBoundingBoxLeft || 0, r: t.actualBoundingBoxRight != null ? t.actualBoundingBoxRight : t.width, a: (t.actualBoundingBoxAscent != null ? t.actualBoundingBoxAscent : s * 0.72) * sy, d: (t.actualBoundingBoxDescent || 0) * sy };
+      }
+      let x = 0, l = 0, r = 0, a = 0, d = 0; const ch = Array.from(ln);
+      ch.forEach((c, i) => { const t = m.measureText(c); if (i === 0) l = t.actualBoundingBoxLeft || 0; r = x + (t.actualBoundingBoxRight != null ? t.actualBoundingBoxRight : t.width); a = Math.max(a, t.actualBoundingBoxAscent || 0); d = Math.max(d, t.actualBoundingBoxDescent || 0); x += t.width + lsp(s); });
+      return { l, r, a: a * sy, d: d * sy };
     };
-    if (slant) x.setTransform(Q, 0, -slant * Q, Q, slant * H * 0.5 * Q, 0);
-    const each = (fn) => lines.forEach((ln, i) => fn(ln, i));
-    // depth: the letters stepped back toward the bottom right in a darker colour
-    if (depth) {
-      x.fillStyle = L.extrudeColor || 'rgba(0,0,0,.55)';
-      for (let d = depth; d >= 1; d--) each((ln, i) => put(x, ln, i, d * 0.7, d, 'fillText'));
+    const inkW = (ln, s) => { const t = metr(ln, s); return Math.max(1, t.l + t.r); };
+    const widest = (s) => Math.max(1, ...lines.map((ln) => inkW(ln, s)));
+    // a long single line that would have to shrink below two-thirds of its size is broken in two instead (an address stays readable)
+    if (L.maxW && !L.fit && lines.length === 1 && /\s/.test(lines[0]) && widest(size) > L.maxW / 0.66) {
+      const ws = lines[0].split(/\s+/); let best = 1, diff = 1e9;
+      for (let i = 1; i < ws.length; i++) { const dd = Math.abs(inkW(ws.slice(0, i).join(' '), size) - inkW(ws.slice(i).join(' '), size)); if (dd < diff) { diff = dd; best = i; } }
+      lines.splice(0, 1, ws.slice(0, best).join(' '), ws.slice(best).join(' '));
     }
-    if (L.glow) {
-      x.save(); x.shadowColor = L.glow; x.shadowBlur = size * 0.35 * Q; x.fillStyle = L.glow;
-      each((ln, i) => put(x, ln, i, 0, 0, 'fillText')); x.restore();
-    }
-    if (L.shadow) { x.save(); x.shadowColor = 'rgba(0,0,0,.55)'; x.shadowBlur = size * 0.14 * Q; x.shadowOffsetY = size * 0.05 * Q; }
-    if (L.stroke) { x.lineWidth = L.stroke * 2; x.strokeStyle = L.strokeColor || '#000'; each((ln, i) => put(x, ln, i, 0, 0, 'strokeText')); }
-    if (L.shadow && !L.stroke) { x.fillStyle = 'rgba(0,0,0,.01)'; }
-    // the face: plain, gradient, metal, or a picture inside the letters
+    if (L.fit) size = size * L.fit / widest(size);
+    if (L.maxW && widest(size) > L.maxW) size = size * L.maxW / widest(size);
+    if (L.maxH) { const h0 = Math.max(1, ...lines.map((ln) => { const t = metr(ln, size); return t.a + t.d; })); if (h0 > L.maxH) size = size * L.maxH / h0; }
+    size = Math.max(6, size);
+    const lh = size * (L.line || 1.0) * sy;
+    const M = lines.map((ln) => metr(ln, size));
+    const blockW = Math.max(1, ...M.map((t) => t.l + t.r));
+    const xs = M.map((t) => { const w = t.l + t.r; return (L.align === 'left' ? 0 : L.align === 'right' ? blockW - w : (blockW - w) / 2) + t.l; });
+    const ys = M.map((t, i) => i * lh);
+    let y0 = Infinity, y1 = -Infinity;
+    M.forEach((t, i) => { y0 = Math.min(y0, ys[i] - t.a); y1 = Math.max(y1, ys[i] + t.d); });
+    if (!isFinite(y0)) { y0 = -size * 0.7; y1 = 0; }
+    const inkW_ = blockW, inkH_ = Math.max(1, y1 - y0);
+    const depth = L.extrude ? Math.round(L.extrude * size / 100) : 0;
+    const slant = L.slant ? 0.2 : 0;
+    const pad = Math.ceil(size * 0.1 + depth * 1.3 + (L.glow ? size * 0.5 : 0) + (L.stroke || 0) * 2 + (L.shadow ? size * 0.22 : 0) + slant * inkH_ / 2) + 4;
+    const W = inkW_ + pad * 2, H = inkH_ + pad * 2;
+    const ox = pad, oy = pad - y0, midY = pad + inkH_ / 2;
+    const c = canvas(W * Q, H * Q), x = c.getContext('2d');
+    const setT = (ctx) => { ctx.setTransform(Q, 0, 0, Q, 0, 0); if (slant) ctx.transform(1, 0, -slant, 1, slant * midY, 0); };
+    const draw = (ctx, dx, dy, how) => lines.forEach((ln, i) => {
+      let px = ox + xs[i] + dx; const py = oy + ys[i] + dy;
+      ctx.save(); ctx.translate(0, py); if (sy !== 1) ctx.scale(1, sy);
+      if (!L.letter || ln.length < 2) ctx[how](ln, px, 0);
+      else for (const ch of ln) { ctx[how](ch, px, 0); px += ctx.measureText(ch).width + lsp(size); }
+      ctx.restore();
+    });
+    setT(x); x.font = fontOf(size); x.textBaseline = 'alphabetic'; x.lineJoin = 'round';
+    if (depth) { x.fillStyle = L.extrudeColor || 'rgba(0,0,0,.55)'; for (let d = depth; d >= 1; d--) draw(x, d * 0.55, d, 'fillText'); }
+    if (L.glow) { x.save(); x.shadowColor = L.glow; x.shadowBlur = size * 0.45 * Q; x.fillStyle = L.glow; draw(x, 0, 0, 'fillText'); x.restore(); }
+    if (L.shadow && L.fill !== 'none') { x.save(); x.shadowColor = 'rgba(0,0,0,.55)'; x.shadowBlur = size * 0.18 * Q; x.shadowOffsetY = size * 0.05 * Q; x.fillStyle = 'rgba(0,0,0,.55)'; draw(x, 0, 0, 'fillText'); x.restore(); }
+    if (L.stroke) { x.save(); if (L.shadow && L.fill === 'none') { x.shadowColor = 'rgba(0,0,0,.6)'; x.shadowBlur = size * 0.12 * Q; } x.lineWidth = L.stroke * 2; x.strokeStyle = L.strokeColor || '#000'; draw(x, 0, 0, 'strokeText'); x.restore(); }
     if (L.fill !== 'none') {
       const face = canvas(W * Q, H * Q), fx = face.getContext('2d');
-      fx.scale(Q, Q);
-      fx.font = x.font; fx.lineJoin = 'round';
-      if (slant) fx.setTransform(Q, 0, -slant * Q, Q, slant * H * 0.5 * Q, 0);
-      fx.translate(W / 2, H / 2);
-      fx.fillStyle = textFill(fx, L, maxW, lh * lines.length);
-      fx.translate(-W / 2, -H / 2);
-      each((ln, i) => put(fx, ln, i, 0, 0, 'fillText'));
-      fx.setTransform(Q, 0, 0, Q, 0, 0);
+      setT(fx); fx.font = x.font; fx.lineJoin = 'round';
+      fx.fillStyle = textFillAt(fx, L, pad + inkW_ / 2, midY, inkW_, inkH_);
+      draw(fx, 0, 0, 'fillText');
+      fx.setTransform(1, 0, 0, 1, 0, 0);
       const im = L.imgFill && imgOf(L.imgFill);
-      if (im) { fx.globalCompositeOperation = 'source-atop'; fx.globalAlpha = 0.9; cover(fx, im, 0, 0, W, H); fx.globalAlpha = 1; }
-      if (L.grain) {   // a worn, printed texture
-        fx.globalCompositeOperation = 'source-atop';
-        const r = rng(7);
-        for (let i = 0; i < (W * H) / 90; i++) { fx.fillStyle = r() > 0.5 ? 'rgba(0,0,0,.18)' : 'rgba(255,255,255,.14)'; fx.fillRect(r() * W, r() * H, 1 + r() * 3, 1 + r() * 2); }
-      }
+      if (im) { fx.globalCompositeOperation = 'source-atop'; fx.globalAlpha = 0.9; cover(fx, im, 0, 0, face.width, face.height); fx.globalAlpha = 1; }
+      if (L.grain) { fx.globalCompositeOperation = 'source-atop'; fx.globalAlpha = 0.45; fx.fillStyle = fx.createPattern(grungeTile(), 'repeat'); fx.fillRect(0, 0, face.width, face.height); fx.globalAlpha = 1; }
       x.setTransform(1, 0, 0, 1, 0, 0);
       x.drawImage(face, 0, 0);
-      x.setTransform(Q, 0, 0, Q, 0, 0);
     }
-    if (L.shadow) x.restore();
-    const out = { c, w: W, h: H, pad, size };
-    if (txtCache.size > 120) txtCache.delete(txtCache.keys().next().value);
+    const out = { c, w: W, h: H, ink: { w: inkW_, h: inkH_ }, pad, size };
+    if (txtCache.size > 160) txtCache.delete(txtCache.keys().next().value);
     txtCache.set(key, out);
     return out;
   }
@@ -477,32 +587,58 @@
   /* ----------------------------------------------------------------- images */
 
   const picCache = new Map();
+  const srcOf = (L) => L.src || (L.crop && L.crop < 1 ? { x: 0, y: 0, w: 1, h: L.crop } : null);
+  /*
+   * A PICTURE LAYER — a person, mostly. `src` is the part of the photo shown
+   * (head to hips, say). The preacher is lit by the flyer: a halo of the
+   * accent colour behind (glow), a thin bright edge (rim) as if a light were
+   * behind them, and the bottom melts into the design (fade).
+   */
   function imageCanvas(L, im) {
-    const w = Math.round(L.w * Q), h = Math.round(L.h * Q);
-    const key = [IMGS_KEY(im), w, h, L.crop || 1, L.gray ? 1 : 0, L.fade || 0, L.glow || '', L.bright || 0, L.contrast || 0, L.sat || 0, L.radius || 0, L.outline || ''].join('|');
+    const w = Math.max(1, Math.round(L.w * Q)), h = Math.max(1, Math.round(L.h * Q));
+    const sr = srcOf(L);
+    const key = [IMGS_KEY(im), w, h, sr ? [sr.x, sr.y, sr.w, sr.h].map((v) => (+v).toFixed(4)).join(',') : '', L.gray ? 1 : 0, L.fade || 0, L.glow || '', L.rim || '', L.bright || 0, L.contrast || 0, L.sat || 0, L.radius || 0, L.round ? 1 : 0, L.outline || ''].join('|');
     if (picCache.has(key)) return picCache.get(key);
-    const pad = Math.round((L.glow ? 40 : L.outline ? 14 : 0) * Q);
+    const pad = Math.round((L.glow ? Math.max(40, L.h * 0.08) : L.outline ? 14 : 0) * Q);
     const c = canvas(w + pad * 2, h + pad * 2), x = c.getContext('2d');
-    // a person shown from the head down to `crop` of their height (waist-up, as flyers do)
     let pic = im;
-    if (L.crop && L.crop < 1) { pic = canvas(iw(im), Math.max(1, Math.round(ih(im) * L.crop))); pic.getContext('2d').drawImage(im, 0, 0); }
+    if (sr) {
+      const sx = sr.x * iw(im), sy = sr.y * ih(im), sw = Math.max(1, sr.w * iw(im)), sh = Math.max(1, sr.h * ih(im));
+      pic = canvas(sw, sh); pic.getContext('2d').drawImage(im, -sx, -sy);
+    }
     const body = (L.gray || L.bright || L.contrast || L.sat) ? adjusted(pic, { gray: L.gray, bright: L.bright, contrast: L.contrast, sat: L.sat }, w, h) : null;
     const layer = canvas(w, h), lx = layer.getContext('2d');
-    if (L.radius) { roundRect(lx, 0, 0, w, h, L.radius * Q); lx.clip(); }
-    if (body) lx.drawImage(body, 0, 0); else cover(lx, pic, 0, 0, w, h);
-    if (L.fade) {   // melt into the flyer at the bottom
+    lx.imageSmoothingQuality = 'high';
+    if (L.round) { lx.beginPath(); lx.ellipse(w / 2, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2); lx.clip(); }
+    else if (L.radius) { roundRect(lx, 0, 0, w, h, L.radius * Q); lx.clip(); }
+    if (body) lx.drawImage(body, 0, 0); else lx.drawImage(pic, 0, 0, w, h);
+    if (L.rim) {   // the edge lit from behind: the outline minus the outline pulled in
+      const r = Math.max(1.5, h * 0.004);
+      const e = canvas(w, h), ex = e.getContext('2d');
+      ex.drawImage(layer, 0, 0); ex.globalCompositeOperation = 'destination-in';
+      ex.drawImage(layer, r, 0); ex.drawImage(layer, -r, 0); ex.drawImage(layer, 0, r); ex.drawImage(layer, 0, -r);
+      const t = canvas(w, h), tx = t.getContext('2d');
+      tx.drawImage(layer, 0, 0); tx.globalCompositeOperation = 'source-in'; tx.fillStyle = L.rim; tx.fillRect(0, 0, w, h);
+      tx.globalCompositeOperation = 'destination-out'; tx.drawImage(e, 0, 0);
+      tx.globalCompositeOperation = 'destination-in';   // stronger at the top (head and shoulders), gone by the waist
+      const g = tx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(0.55, 'rgba(0,0,0,.5)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+      tx.fillStyle = g; tx.fillRect(0, 0, w, h);
+      lx.globalCompositeOperation = 'screen'; lx.globalAlpha = 0.9; lx.drawImage(t, 0, 0); lx.globalAlpha = 1; lx.globalCompositeOperation = 'source-over';
+    }
+    if (L.fade) {
       lx.globalCompositeOperation = 'destination-out';
       const g = lx.createLinearGradient(0, h * (1 - L.fade), 0, h);
       g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,1)');
       lx.fillStyle = g; lx.fillRect(0, 0, w, h);
+      lx.globalCompositeOperation = 'source-over';
     }
-    if (L.outline) {   // a sticker edge, the cut-out traced in a colour
+    if (L.outline) {
       const o = canvas(w + pad * 2, h + pad * 2), ox = o.getContext('2d');
       for (let a = 0; a < 16; a++) ox.drawImage(layer, pad + Math.cos(a / 8 * Math.PI) * 9 * Q, pad + Math.sin(a / 8 * Math.PI) * 9 * Q);
       ox.globalCompositeOperation = 'source-in'; ox.fillStyle = L.outline; ox.fillRect(0, 0, o.width, o.height);
       x.drawImage(o, 0, 0);
     }
-    if (L.glow) { x.save(); x.shadowColor = L.glow; x.shadowBlur = 38 * Q; x.drawImage(layer, pad, pad); x.restore(); }
+    if (L.glow) { x.save(); x.shadowColor = L.glow; x.shadowBlur = Math.max(30, L.h * 0.07) * Q; x.drawImage(layer, pad, pad); x.restore(); }
     x.drawImage(layer, pad, pad);
     const out = { c, pad };
     if (picCache.size > 30) picCache.delete(picCache.keys().next().value);
@@ -512,39 +648,42 @@
 
   /* ------------------------------------------------------------------ scene */
 
+  /* the colour ramp a background is mapped onto: near-black, deep, main, accent, light */
+  function gradeStops(p, kind) {
+    const dk = mix(p.deep, '#000000', 0.7), lt = mix(p.accent, '#ffffff', 0.6);
+    const at = kind === 'dark' ? [0.34, 0.66, 0.9] : kind === 'bright' ? [0.1, 0.36, 0.7] : [0.22, 0.5, 0.82];
+    return [[0, dk], [at[0], p.deep], [at[1], p.mid], [at[2], p.accent], [1, lt]];
+  }
   function drawBg(x, S, L) {
     const im = imgOf(L.img);
     const W = S.w, H = S.h, pal = S.pal;
     if (im) {
-      const a = { bright: L.bright, contrast: L.contrast, sat: L.sat, gray: L.gray, blur: L.blur };
+      const a = { bright: L.bright, contrast: L.contrast, sat: L.sat, gray: L.gray, blur: L.blur, duo: L.grade ? gradeStops(pal, L.grade) : null, keep: L.keep };
       x.drawImage(adjusted(im, a, Math.round(W * Q), Math.round(H * Q)), 0, 0, W, H);
-    } else { x.fillStyle = pal.deep; x.fillRect(0, 0, W, H); }
-    const t = L.tint == null ? 0.45 : L.tint;
-    if (t > 0) {   // the grade: the picture wears the flyer's two colours
-      x.save();
-      x.globalCompositeOperation = 'color'; x.globalAlpha = t * 0.85;
-      const g = x.createLinearGradient(0, 0, W * 0.4, H);
-      g.addColorStop(0, pal.mid); g.addColorStop(1, pal.deep);
+    } else {
+      const g = x.createLinearGradient(0, 0, W * 0.3, H); g.addColorStop(0, pal.mid); g.addColorStop(1, pal.deep);
       x.fillStyle = g; x.fillRect(0, 0, W, H);
-      x.globalCompositeOperation = 'soft-light'; x.globalAlpha = t * 0.7;
-      x.fillStyle = pal.mid; x.fillRect(0, 0, W, H);
+    }
+    if (L.tint > 0) {   // the older grade (colour + soft light), kept for designs made with it
+      x.save();
+      x.globalCompositeOperation = 'color'; x.globalAlpha = L.tint * 0.85;
+      const g = x.createLinearGradient(0, 0, W * 0.4, H); g.addColorStop(0, pal.mid); g.addColorStop(1, pal.deep);
+      x.fillStyle = g; x.fillRect(0, 0, W, H);
       x.restore();
     }
-    if (L.vignette !== 0) {
-      const v = x.createRadialGradient(W / 2, H * 0.42, Math.min(W, H) * 0.35, W / 2, H / 2, Math.max(W, H) * 0.8);
-      v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, rgba(pal.deep, L.vignette == null ? 0.75 : L.vignette));
+    if (L.wash) { x.fillStyle = L.wash; x.fillRect(0, 0, W, H); }
+    // shade where the words sit, in the flyer's own darkest colour
+    const dark = mix(pal.deep, '#000000', 0.45);
+    const shade = (yA, yB, a) => { const g = x.createLinearGradient(0, yA, 0, yB); g.addColorStop(0, rgba(dark, 0)); g.addColorStop(1, rgba(dark, a)); x.fillStyle = g; x.fillRect(0, Math.min(yA, yB), W, Math.abs(yB - yA)); };
+    if (L.topShade) shade(H * (L.topTo || 0.3), 0, L.topShade);
+    if (L.bottomShade) shade(H * (L.bottomFrom || 0.55), H, L.bottomShade);
+    if (L.vignette) {
+      const v = x.createRadialGradient(W / 2, H * 0.45, Math.min(W, H) * 0.32, W / 2, H / 2, Math.max(W, H) * 0.78);
+      v.addColorStop(0, rgba(dark, 0)); v.addColorStop(1, rgba(dark, L.vignette));
       x.fillStyle = v; x.fillRect(0, 0, W, H);
     }
-    if (L.wash) { x.fillStyle = L.wash; x.fillRect(0, 0, W, H); }
-    // the photographic finish: a light leak in the flyer's colour, and fine grain
-    if (L.leak !== 0) {
-      x.save(); x.globalCompositeOperation = 'screen';
-      const g = x.createRadialGradient(W * 0.85, H * 0.05, 0, W * 0.85, H * 0.05, W * 0.9);
-      g.addColorStop(0, rgba(pal.accent, 0.32 * (L.leak == null ? 1 : L.leak))); g.addColorStop(1, rgba(pal.accent, 0));
-      x.fillStyle = g; x.fillRect(0, 0, W, H); x.restore();
-    }
     if (L.grain !== 0) {
-      x.save(); x.globalCompositeOperation = 'overlay'; x.globalAlpha = 0.07 * (L.grain == null ? 1 : L.grain);
+      x.save(); x.globalCompositeOperation = 'overlay'; x.globalAlpha = 0.06 * (L.grain == null ? 1 : L.grain);
       x.fillStyle = x.createPattern(grainTile(), 'repeat'); x.fillRect(0, 0, W, H); x.restore();
     }
   }
@@ -558,15 +697,16 @@
     return grainC;
   }
 
-  /** Where a layer sits, for picking and the selection box: centre, size, turn. */
+  /** The size of a layer as it is seen: a text layer's letters, a picture's frame. */
   function boxOf(L) {
-    if (L.type === 'text') { const t = textCanvas(L); return { w: t.w - t.pad * 1.4, h: t.h - t.pad * 1.4 }; }
-    return { w: L.w, h: L.h };
+    if (L.type === 'text') { const t = textCanvas(L); return { w: t.ink.w, h: t.ink.h }; }
+    return { w: L.w || 0, h: L.h || 0 };
   }
 
   function drawLayer(x, S, L) {
     if (L.hidden) return;
     if (L.type === 'bg') return drawBg(x, S, L);
+    if (L.type === 'fx') return drawFx(x, S, L);
     x.save();
     x.globalAlpha = L.opacity == null ? 1 : L.opacity;
     x.translate(L.x, L.y);
@@ -594,500 +734,100 @@
     return cv;
   }
 
-  /* ================================================================ LAYOUTS */
+  /* ============================================================ THE PEOPLE */
 
   /*
-   * Six looks, each one a family of real flyers (the Pinterest board the
-   * operator showed): SCRIPT — a script word sweeping across the pastor;
-   * JOIN US — enormous stacked capitals, the speakers' heads over them, a
-   * slanted band of details; BREAKTHROUGH — a giant metal title on a light
-   * page; TORN — a black-and-white photo and a torn paper strip; SCENIC — an
-   * italic gradient title over a landscape; THEME BOX — the theme in serif
-   * lettering in a black ragged box. Each takes the event (D) and returns
-   * layers; the operator can then move every one.
+   * A SPEAKER'S PHOTO, MADE READY. The cut-out keeps whatever touched the
+   * person — the podium they stood at, a chair, a microphone stand ("what is
+   * that black thing in the corner?"). The pose model (on this phone) says
+   * where the body is; anything outside the outline it draws — head, neck,
+   * body, arms, hands, and the legs only when they can be seen — goes. Then
+   * only the person is kept and the picture is trimmed round them. The
+   * landmarks also say where the head, shoulders and hips are, so every
+   * flyer frames every photo the same way, the face the same size.
    */
-  const T = (o) => Object.assign({ id: uid(), type: 'text', x: 540, y: 200, rot: 0, s: 1, font: 'Anton', size: 100, fill: '#ffffff', align: 'center', line: 1 }, o);
-  const SH = (o) => Object.assign({ id: uid(), type: 'shape', x: 540, y: 200, rot: 0, s: 1, shape: 'rect', w: 200, h: 80, fill: '#ffffff' }, o);
-  const IM = (o) => Object.assign({ id: uid(), type: 'image', x: 540, y: 600, rot: 0, s: 1, w: 500, h: 700 }, o);
-  const BG = (o) => Object.assign({ id: 'bg', type: 'bg', name: 'Background', lock: true, tint: 0.45 }, o);
-
-  /* the people, sized to stand on a line: height h, feet at y */
-  /*
-   * A PERSON, AS FLYERS SHOW THEM: from the head to the hips, melting into the
-   * design. A full-length photo is cut at about 60% of its height (whatever
-   * stood in front of their legs — a podium, a chair — goes with it); a
-   * photo that is already head-and-shoulders is used whole.
-   */
-  function person(sp, cx, footY, h, extra) {
-    const im = imgOf(sp.img); if (!im) return null;
-    const tall = ih(im) / iw(im);
-    const crop = tall > 1.45 ? Math.max(0.5, Math.min(1, 1.15 / tall + 0.12)) : 1;
-    const w = h * iw(im) / (ih(im) * crop);
-    const ex = Object.assign({}, extra || {});
-    if (crop < 1) ex.fade = Math.max(ex.fade || 0, 0.22);
-    return IM(Object.assign({ img: sp.img, name: sp.name || 'Speaker', speaker: sp.id || '', photo: sp.photo || '', crop, x: cx, y: footY - h / 2, w, h }, ex));
+  function alphaStats(c) {
+    const k = Math.min(1, 120 / Math.max(c.width, c.height)), s = canvas(c.width * k, c.height * k), x = s.getContext('2d', { willReadFrequently: true });
+    x.drawImage(c, 0, 0, s.width, s.height);
+    const d = x.getImageData(0, 0, s.width, s.height).data; let clear = 0, mass = 0;
+    for (let i = 3; i < d.length; i += 4) { if (d[i] < 128) clear++; mass += d[i]; }
+    return { clear: clear / (d.length / 4), mass };
   }
-  function people(D, opts) {
-    const list = D.sp.filter((s) => imgOf(s.img)).slice(0, opts.max || 2);
-    if (!list.length) return [];
-    const n = list.length, out = [];
-    const h = opts.h * (n > 1 ? opts.shrink || 0.9 : 1);
-    list.forEach((s, i) => {
-      const cx = n === 1 ? opts.cx : opts.cx + (i - (n - 1) / 2) * opts.gap;
-      const L = person(s, cx, opts.foot + (i ? opts.lift || 0 : 0), i ? h * 0.94 : h, opts.extra);
-      if (L) out.push(L);
-    });
-    return n > 1 ? out.reverse() : out;   // the first-named stands in front
+  function onGray(c, max) {
+    const k = Math.min(1, (max || 640) / Math.max(c.width, c.height)), s = canvas(c.width * k, c.height * k), x = s.getContext('2d');
+    x.fillStyle = '#7f7f7f'; x.fillRect(0, 0, s.width, s.height); x.drawImage(c, 0, 0, s.width, s.height);
+    return s;
   }
-  /*
-   * THE CHURCH'S LOGO, AS IT IS. A logo is never cut out — the person model
-   * takes a dove for a person and tears it apart, and a logo's own white is
-   * often part of the design. One with a solid background (most logos sent
-   * as a JPEG) sits on a white rounded badge, the way the flyers the church
-   * likes carry theirs; one that is already see-through goes on as it is.
-   */
-  function logoLayers(D, cx, cy, h) {
-    const im = imgOf(D.logo); if (!im) return [];
-    const opaque = isOpaque(im);
-    const ih0 = opaque ? h - 16 : h;
-    const w = Math.min(h * 2.4, ih0 * iw(im) / ih(im));
-    const out = [];
-    if (opaque) out.push(SH({ name: 'Logo badge', shape: 'round', fill: '#ffffff', radius: 16, shadow: true, x: cx, y: cy, w: w + 20, h }));
-    out.push(IM({ img: D.logo, name: 'Logo', x: cx, y: cy, w, h: ih0 }));
-    return out;
-  }
-  const opaqueOf = new WeakMap();
-  function isOpaque(im) {
-    if (opaqueOf.has(im)) return opaqueOf.get(im);
-    let o = true;
-    try {
-      const c = canvas(24, 24), x = c.getContext('2d', { willReadFrequently: true });
-      x.drawImage(im, 0, 0, 24, 24);
-      const d = x.getImageData(0, 0, 24, 24).data;
-      // see-through if any corner or edge-middle is
-      for (const [px, py] of [[0, 0], [23, 0], [0, 23], [23, 23], [12, 0], [0, 12], [23, 12], [12, 23]]) if (d[(py * 24 + px) * 4 + 3] < 200) { o = false; break; }
-    } catch (e) { o = true; }
-    opaqueOf.set(im, o);
+  function softened(c, r) {
+    const k = clamp(2 / r, 0.04, 1), s = canvas(c.width * k, c.height * k);
+    s.getContext('2d').drawImage(c, 0, 0, s.width, s.height);
+    const o = canvas(c.width, c.height), x = o.getContext('2d'); x.imageSmoothingQuality = 'high'; x.drawImage(s, 0, 0, c.width, c.height);
     return o;
   }
-  function brand(D, opts = {}) {
-    const out = [];
-    const ink = opts.ink || '#ffffff';
-    let x = opts.x || 70; const y = opts.y || 78;
-    if (D.logo && imgOf(D.logo)) {
-      const ls = logoLayers(D, 0, y + 6, 104);
-      const w = Math.max(...ls.map((l) => l.w));
-      ls.forEach((l) => { l.x = x + w / 2; });
-      out.push(...ls);
-      x += w + 16;
-    }
-    if (D.f.church) {
-      const t = T({ name: 'Church', text: D.f.church, font: 'Montserrat', size: 26, upper: true, fill: ink, shadow: true, align: 'left', maxW: opts.maxW || 520, y, letter: 0.02 });
-      t.x = x + boxOf(t).w / 2;   // its left edge just after the logo, however long the name
-      out.push(t);
-    }
-    return out;
-  }
-  /* lay layers side by side, centred on cx, each as wide as it draws */
-  function row(items, cx, gap) {
-    const ws = items.map((L) => (L.type === 'text' ? boxOf(L).w : L.w));
-    let x = cx - (ws.reduce((a, b) => a + b, 0) + gap * (items.length - 1)) / 2;
-    items.forEach((L, i) => { L.x = x + ws[i] / 2; x += ws[i] + gap; });
-    return items;
-  }
-  /*
-   * THE DETAILS ROW every one of those flyers ends on: date | time | where,
-   * with hairlines between — each cell a big line and a small one.
-   */
-  function infoRow(D, y, cells, o = {}) {
-    const ink = o.ink || '#ffffff', acc = o.accent || D.pal.accent, out = [];
-    const items = cells.filter((c) => c && (c.big || c.small));
-    if (!items.length) return out;
-    const cols = items.map((c) => {
-      const big = c.big ? T({ name: c.name || 'Detail', text: c.big, font: c.font || 'Anton', size: c.size || 54, fill: c.accent ? acc : ink, align: 'left', line: 0.95, y: y - (c.small ? 14 : 0), maxW: c.maxW || 300, upper: true }) : null;
-      const small = c.small ? T({ name: (c.name || 'Detail') + ' note', text: c.small, font: 'Montserrat', size: c.smallSize || 18, fill: c.accent && !c.big ? acc : rgba(ink, 0.88), align: 'left', line: 1.15, y: y + (c.big ? 30 : 0), maxW: c.maxW || 300, upper: true }) : null;
-      const label = c.label ? T({ name: c.label, text: c.label + ':', font: 'Montserrat', size: 15, fill: o.labelInk || '#111111', align: 'left', y: y - (c.big ? 64 : 46), letter: 0.12 }) : null;
-      const w = Math.max(big ? boxOf(big).w : 0, small ? boxOf(small).w : 0, label ? boxOf(label).w + 20 : 0);
-      return { big, small, w, pin: c.pin, label };
+  function envelope(w, h, lm) {
+    const P = (i, v) => { const q = lm[i]; return q && (q.visibility == null || q.visibility >= v) ? { x: q.x * w, y: q.y * h } : null; };
+    const ls = P(11, 0.3), rs = P(12, 0.3);
+    if (!ls || !rs) return null;
+    const sw = Math.max(8, Math.hypot(ls.x - rs.x, ls.y - rs.y));
+    const sm = { x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 };
+    const nose = P(0, 0.3) || { x: sm.x, y: sm.y - sw * 0.75 };
+    const c = canvas(w, h), x = c.getContext('2d');
+    x.fillStyle = '#fff'; x.strokeStyle = '#fff'; x.lineCap = 'round'; x.lineJoin = 'round';
+    const line = (pts, r) => { const ps = pts.filter(Boolean); if (ps.length < 2) return; x.lineWidth = r * 2; x.beginPath(); x.moveTo(ps[0].x, ps[0].y); ps.slice(1).forEach((q) => x.lineTo(q.x, q.y)); x.stroke(); };
+    const dot = (q, r) => { if (!q) return; x.beginPath(); x.arc(q.x, q.y, r, 0, Math.PI * 2); x.fill(); };
+    // the head, generously (hair, a hat, a head-tie)
+    const hr = Math.max(sw * 0.42, Math.hypot(nose.x - sm.x, nose.y - sm.y) * 0.8);
+    x.beginPath(); x.ellipse(nose.x, nose.y - hr * 0.45, hr * 1.25, hr * 1.6, 0, 0, Math.PI * 2); x.fill();
+    line([nose, sm], sw * 0.32);
+    // the body to the hips
+    const lh = P(23, 0.2), rh = P(24, 0.2);
+    const hy = lh && rh ? (lh.y + rh.y) / 2 : sm.y + sw * 1.7;
+    const L2 = lh || { x: ls.x, y: hy }, R2 = rh || { x: rs.x, y: hy };
+    x.beginPath(); x.moveTo(ls.x, ls.y); x.lineTo(rs.x, rs.y); x.lineTo(R2.x, R2.y); x.lineTo(L2.x, L2.y); x.closePath(); x.fill();
+    x.lineWidth = sw * 0.6; x.stroke();
+    // arms and hands (a microphone in a hand stays)
+    [[11, 13, 15, 19, 21], [12, 14, 16, 20, 22]].forEach(([s, e, wr, ix, th]) => {
+      const S2 = P(s, 0.2), E = P(e, 0.35), Wr = P(wr, 0.35);
+      line([S2, E, Wr], sw * 0.21);
+      if (Wr) { dot(Wr, sw * 0.36); line([Wr, P(ix, 0.3)], sw * 0.16); line([Wr, P(th, 0.3)], sw * 0.16); }
+      else if (E) dot(E, sw * 0.24);
     });
-    const gap = o.gap || 34;
-    const total = cols.reduce((a, c) => a + c.w + (c.pin ? 40 : 0), 0) + gap * 2 * (cols.length - 1);
-    let x = (o.cx || 540) - total / 2;
-    cols.forEach((c, i) => {
-      if (c.pin) { out.push(SH({ name: 'Pin', shape: 'pin', fill: acc, x: x + 16, y, w: 34, h: 34 })); x += 40; }
-      if (c.label) {
-        const lw = boxOf(c.label).w + 20;
-        out.push(SH({ name: 'Label', shape: 'round', fill: acc, radius: 8, x: x + lw / 2, y: c.label.y, w: lw, h: 28 }));
-        c.label.x = x + lw / 2; out.push(c.label);
-      }
-      if (c.big) { c.big.x = x + boxOf(c.big).w / 2; out.push(c.big); }
-      if (c.small) { c.small.x = x + boxOf(c.small).w / 2; out.push(c.small); }
-      x += c.w;
-      if (i < cols.length - 1) { out.push(SH({ name: 'Divider', shape: 'line', fill: rgba(ink, 0.5), x: x + gap, y, w: 2, h: 76 })); x += gap * 2; }
+    // the legs only when they can be seen (a podium in front of them is not them)
+    [[23, 25, 27, 31, 29], [24, 26, 28, 32, 30]].forEach(([hp, kn, an, ft, hl]) => {
+      const K = P(kn, 0.6); if (!K) return;
+      line([P(hp, 0.2) || { x: (lh || ls).x, y: hy }, K, P(an, 0.6), P(ft, 0.6)], sw * 0.22);
+      dot(P(hl, 0.6), sw * 0.16);
     });
-    return out;
+    return softened(c, Math.max(2, sw * 0.05));
   }
-  /* up to three lines, the long words alone, so each line can be set as wide as the flyer */
-  function stack(title, max = 3) {
-    const w = String(title || '').trim().split(/\s+/).filter(Boolean);
-    if (w.length <= max) return w;
-    const lines = []; let cur = '';
-    const target = Math.ceil(w.join(' ').length / max);
-    for (const word of w) { if (cur && (cur + ' ' + word).length > target && lines.length < max - 1) { lines.push(cur); cur = word; } else cur = cur ? cur + ' ' + word : word; }
-    if (cur) lines.push(cur);
-    return lines;
-  }
-  const speakerLine = (D) => D.sp.map((s) => s.name).filter(Boolean).join(' & ');
-  /* the address as a flyer prints it: not the church's name again (it is at the top), three parts at most */
-  const venueText = (D) => {
-    let parts = String(D.f.venue || '').split(/\s*,\s*/).filter(Boolean);
-    const ch = String(D.f.church || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
-    if (parts.length > 1 && ch && parts[0].toLowerCase().replace(/[^a-z0-9]+/g, '') === ch) parts = parts.slice(1);
-    return parts.slice(0, 3).join(', ');
-  };
-  const W = 1080;
-
-  const LAYOUTS = {
-    /* ── a script word across the pastor (the purple "Sunday" flyer) ── */
-    script(D) {
-      const H = D.h, p = D.pal, f = D.f, L = [BG({ img: D.bg, tint: 0.55 })];
-      L.push(...people(D, { cx: 600, foot: H - 120, h: H * 0.76, gap: 330, max: 2, extra: { glow: rgba(p.accent, 0.55), fade: 0.18 } }));
-      L.push(SH({ name: 'Shade', shape: 'fade', fill: p.deep, x: 540, y: H - 260, w: W, h: 520, strength: 0.92 }));
-      L.push(...brand(D));
-      L.push(T({ name: 'Kicker', text: (D.dir.kicker || 'WORSHIP WITH US THIS').split(/\s+/).reduce((a, w, i, arr) => a + w + (i === Math.ceil(arr.length / 2) - 1 ? '\n' : ' '), '').trim(), font: 'Montserrat', size: 30, upper: true, fill: '#ffffff', shadow: true, align: 'right', line: 1.1, x: 200, y: H - 640 }));
-      L.push(T({ name: 'Script', text: D.script, font: 'Great Vibes', size: 330, fill: '#ffffff', glow: rgba(p.accent, 0.8), shadow: true, x: 540, y: H - 400, rot: -7, maxW: 980 }));
-      if (speakerLine(D)) L.push(T({ name: 'With', text: 'WITH\n' + speakerLine(D).replace(' & ', '\n& '), font: 'Montserrat', size: 24, upper: true, fill: '#ffffff', shadow: true, align: 'left', line: 1.2, x: 880, y: H - 610, maxW: 330 }));
-      // 16TH AUGUST (7AM)
-      const day = T({ name: 'Day', text: f.dd || '', font: 'Bebas Neue', size: 96, fill: '#ffffff', shadow: true, y: H - 205 });
-      const mon = T({ name: 'Month', text: f.month || '', font: 'Bebas Neue', size: 96, fill: p.accent, slant: true, shadow: true, y: H - 205 });
-      const tm = T({ name: 'Time', text: f.time || '', font: 'Bebas Neue', size: 70, fill: '#ffffff', y: H - 203, maxW: 220 });
-      const ring = SH({ name: 'Time ring', shape: 'pill', fill: 'rgba(255,255,255,.14)', y: H - 207, w: boxOf(tm).w + 44, h: 86 });
-      row([day, mon, ring], 540, 22);
-      tm.x = ring.x;
-      L.push(day, mon, ring, SH({ name: 'Time line', shape: 'ring', fill: '#ffffff', line: 3, x: ring.x, y: ring.y, w: ring.w, h: ring.h }), tm);
-      if (venueText(D)) {
-        const pin = SH({ name: 'Pin', shape: 'pin', fill: p.accent, y: H - 120, w: 40, h: 40 });
-        const v = T({ name: 'Venue', text: venueText(D), font: 'Montserrat', size: 24, upper: true, fill: '#ffffff', shadow: true, y: H - 118, maxW: 860 });
-        row([pin, v], 540, 10);
-        L.push(pin, v);
-      }
-      if (f.handles) L.push(T({ name: 'Handles', text: f.handles, font: 'Montserrat', size: 22, fill: rgba('#ffffff', 0.85), x: 540, y: H - 62, maxW: 900 }));
-      return L;
-    },
-
-    /* ── JOIN US THIS SUNDAY: huge stacked capitals, heads over them, a slanted band ── */
-    joinus(D) {
-      const H = D.h, p = D.pal, f = D.f, L = [BG({ img: D.bg, tint: 0.7, sat: 20 })];
-      L.push(...brand(D));
-      const top = D.titleTop, big = D.titleBig;
-      L.push(T({ name: 'Title 1', text: top, font: 'Anton', size: 250, upper: true, fill: '#ffffff', extrude: 6, extrudeColor: rgba(p.deep, 0.75), x: 540, y: 300, maxW: 960, line: 0.9 }));
-      L.push(T({ name: 'Title 2', text: big, font: 'Anton', size: 300, upper: true, fill: { stops: ['#ffffff', mix('#ffffff', p.hi, 0.4)], angle: 90 }, extrude: 6, extrudeColor: rgba(p.deep, 0.75), x: 540, y: 560, maxW: 980 }));
-      L.push(SH({ name: 'Chip', shape: 'band', fill: p.accent, x: 560, y: 420, w: 220, h: 78, rot: -8, skew: 18, shadow: true }));
-      L.push(T({ name: 'Chip text', text: D.chip || 'THIS', font: 'Anton', size: 62, fill: lum(p.accent) > 0.6 ? '#111111' : '#ffffff', x: 560, y: 422, rot: -8, maxW: 190 }));
-      L.push(...people(D, { cx: 640, foot: H - 230, h: H * 0.55, gap: 400, max: 2, lift: -10, extra: { glow: rgba(p.hi, 0.35) } }));
-      // the band
-      L.push(SH({ name: 'Band', shape: 'slant', fill: { stops: [p.deep, mix(p.deep, p.mid, 0.5)], angle: 0 }, x: 540, y: H - 145, w: W, h: 300, skew: 70 }));
-      L.push(SH({ name: 'Band edge', shape: 'slant', fill: p.accent, x: 540, y: H - 300, w: W, h: 16, skew: 70 }));
-      L.push(T({ name: 'Date', text: `${f.mon || ''} ${f.dd || ''}`.trim(), font: 'Anton', size: 104, fill: '#ffffff', align: 'left', x: 260, y: H - 205, maxW: 440 }));
-      L.push(T({ name: 'Time', text: [f.time, f.time2].filter(Boolean).join('   '), font: 'Anton', size: 46, fill: p.accent, align: 'left', x: 260, y: H - 130, maxW: 440 }));
-      if (venueText(D)) L.push(T({ name: 'Venue', text: venueText(D), font: 'Montserrat', size: 24, upper: true, fill: '#ffffff', align: 'left', x: 270, y: H - 72, maxW: 460, line: 1.1 }));
-      if (f.handles) L.push(T({ name: 'Handles', text: f.handles, font: 'Montserrat', size: 22, fill: p.accent, align: 'right', x: 820, y: H - 60, maxW: 400 }));
-      if (speakerLine(D)) L.push(T({ name: 'Speakers', text: speakerLine(D).replace(/ & /g, '\n& '), font: 'Anton', size: 46, upper: true, fill: '#ffffff', align: 'right', x: 820, y: H - 130, maxW: 400, line: 1.0 }));
-      return L;
-    },
-
-    /* ── BREAKTHROUGH: a giant metal title on a light page ── */
-    breakthrough(D) {
-      const H = D.h, p = D.pal, f = D.f, L = [BG({ img: D.bg, tint: 0.15, wash: 'rgba(250,247,241,.78)', vignette: 0, sat: 10 })];
-      L.push(SH({ name: 'Glow', shape: 'glow', fill: p.accent, x: 900, y: 140, w: 700, h: 700, opacity: 0.5 }));
-      L.push(...brand(D, { ink: '#1a1a1a' }));
-      if (f.extra) L.push(T({ name: 'Edition', text: f.extra, font: 'Playfair Display', size: 44, fill: '#2a2a2a', align: 'right', x: 880, y: 150, maxW: 360, line: 0.95 }));
-      const words = D.titleWords;
-      L.push(T({ name: 'Title 1', text: words[0], font: 'Anton', size: 330, upper: true, fill: 'gold', grain: true, extrude: 7, extrudeColor: '#3b2208', x: 520, y: 510, maxW: 1000, line: 0.86 }));
-      if (words[1]) L.push(T({ name: 'Title 2', text: words[1], font: 'Anton', size: 250, upper: true, fill: 'rust', grain: true, extrude: 7, extrudeColor: '#2a1405', x: 480, y: 750, maxW: 900 }));
-      L.push(T({ name: 'Kicker', text: D.dir.kicker || 'JOIN US', font: 'Barlow Italic', size: 80, upper: true, fill: '#c81e1e', shadow: true, x: 380, y: 250, rot: -4, maxW: 640 }));
-      if (f.theme) {
-        L.push(T({ name: 'Theme label', text: 'THEME:', font: 'Montserrat', size: 20, fill: '#555', x: 90, y: 880, align: 'left' }));
-        L.push(T({ name: 'Theme', text: twoLines(f.theme.toUpperCase()).filter(Boolean).join('\n'), font: 'Anton', size: 50, fill: '#1a1a1a', slant: true, align: 'left', x: 230, y: 950, line: 0.95, maxW: 360 }));
-      }
-      L.push(...people(D, { cx: 770, foot: H - 80, h: H * 0.52, gap: 300, max: 2, extra: {} }));
-      // the dates, as red chips
-      L.push(SH({ name: 'Date chip', shape: 'rect', fill: '#c81e1e', x: 190, y: H - 290, w: 250, h: 100 }));
-      L.push(T({ name: 'Date', text: `${f.dd || ''}\n${(f.month || '').slice(0, 3)}, ${f.year || ''}`, font: 'Anton', size: 42, fill: '#ffffff', x: 190, y: H - 290, line: 0.95, maxW: 220 }));
-      L.push(SH({ name: 'Time chip', shape: 'rect', fill: '#1a1a1a', x: 375, y: H - 290, w: 120, h: 100 }));
-      L.push(T({ name: 'Time', text: (f.time || '').replace(/\s*–\s*/, '–\n'), font: 'Anton', size: 34, fill: '#ffffff', x: 375, y: H - 290, line: 1, maxW: 110 }));
-      if (venueText(D)) {
-        L.push(SH({ name: 'Pin', shape: 'pin', fill: '#c81e1e', x: 90, y: H - 192, w: 34, h: 34 }));
-        L.push(T({ name: 'Venue', text: venueText(D).replace(/,\s*/g, ',\n'), font: 'Montserrat', size: 22, fill: '#222', align: 'left', slant: true, x: 270, y: H - 160, line: 1.15, maxW: 340 }));
-      }
-      L.push(SH({ name: 'Footer', shape: 'rect', fill: '#ffffff', x: 540, y: H - 40, w: W, h: 80 }));
-      L.push(T({ name: 'Contacts', text: [f.phone, f.handles].filter(Boolean).join('  |  ') || (f.church || ''), font: 'Montserrat', size: 24, fill: '#1a1a1a', x: 540, y: H - 40, maxW: 980 }));
-      return L;
-    },
-
-    /* ── TORN: black and white, a torn paper strip, two boxes ── */
-    torn(D) {
-      const H = D.h, p = D.pal, f = D.f, L = [BG({ img: D.bg, tint: 0, gray: true, contrast: 25, bright: -18 })];
-      L.push(...brand(D));
-      L.push(...people(D, { cx: 720, foot: H * 0.66, h: H * 0.6, gap: 280, max: 2, extra: { gray: true, contrast: 15 } }));
-      L.push(T({ name: 'Title', text: D.titleBig, font: 'Anton', size: 210, upper: true, fill: 'none', stroke: 3, strokeColor: rgba('#ffffff', 0.9), x: 540, y: H * 0.58, maxW: 1000 }));
-      L.push(SH({ name: 'Paper', shape: 'torn', fill: '#f7f7f5', x: 540, y: H * 0.78, w: 1180, h: H * 0.2, rot: -2, shadow: true, seed: 11 }));
-      if (speakerLine(D)) L.push(T({ name: 'Speakers', text: D.sp.map((s) => s.name).join('\n'), font: 'Montserrat', size: 26, fill: '#ffffff', align: 'left', x: 860, y: 260, line: 1.3, maxW: 360 }));
-      const by = H * 0.27;
-      L.push(SH({ name: 'Box 1', shape: 'rect', fill: p.accent, x: 210, y: by, w: 290, h: 110, shadow: true }));
-      L.push(T({ name: 'When', text: (D.whenWord || 'THIS SUNDAY').replace(' ', '\n'), font: 'Anton', size: 46, fill: lum(p.accent) > 0.6 ? '#0f172a' : '#ffffff', align: 'left', x: 210, y: by, line: 0.95, maxW: 240 }));
-      L.push(SH({ name: 'Box 2', shape: 'rect', fill: '#151515', x: 210, y: by + 108, w: 290, h: 100, shadow: true }));
-      L.push(T({ name: 'Time', text: f.time || '', font: 'Anton', size: 64, fill: '#ffffff', x: 210, y: by + 110, maxW: 250 }));
-      L.push(T({ name: 'Theme', text: f.theme || f.title || '', font: 'Anton', size: 92, upper: true, fill: '#151515', x: 540, y: H * 0.77, rot: -2, maxW: 960 }));
-      L.push(SH({ name: 'Footer', shape: 'round', fill: '#ffffff', x: 540, y: H - 50, w: 1000, h: 64, radius: 32 }));
-      L.push(T({ name: 'Venue', text: venueText(D) || f.church || '', font: 'Montserrat', size: 24, upper: true, fill: '#151515', x: 540, y: H - 50, letter: 0.04, maxW: 940 }));
-      return L;
-    },
-
-    /* ── SCENIC: an italic gradient title over a landscape (the "Mountain Experience") ── */
-    scenic(D) {
-      const H = D.h, p = D.pal, f = D.f, L = [BG({ img: D.bg, tint: 0.3, contrast: 10 })];
-      if (f.church) L.push(T({ name: 'Church', text: f.church, font: 'Montserrat', size: 22, upper: true, fill: rgba('#ffffff', 0.9), letter: 0.5, x: 540, y: 90, maxW: 960 }));
-      if (D.logo && imgOf(D.logo)) L.push(...logoLayers(D, 540, 165, 84));
-      const words = D.titleWords;
-      const grad = { stops: ['#ffffff', mix('#ffffff', p.accent, 0.35), p.accent], angle: 90 };
-      L.push(T({ name: 'Title 1', text: words[0], font: 'Barlow Italic', size: 260, upper: true, fill: grad, shadow: true, extrude: 4, extrudeColor: rgba(p.deep, 0.9), x: 540, y: 330, maxW: 900 }));
-      if (words[1]) L.push(T({ name: 'Title 2', text: words[1], font: 'Barlow Italic', size: 240, upper: true, fill: grad, shadow: true, extrude: 4, extrudeColor: rgba(p.deep, 0.9), x: 560, y: 540, maxW: 960 }));
-      L.push(SH({ name: 'Brush', shape: 'brush', fill: '#e11d2a', x: 260, y: words[1] ? 560 : 360, w: 260, h: 90, rot: -14, opacity: 0.92 }));
-      L.push(...people(D, { cx: 540, foot: H - 60, h: H * 0.55, gap: 340, max: 2, extra: { fade: 0.15 } }));
-      L.push(SH({ name: 'Shade', shape: 'fade', fill: p.deep, x: 540, y: H - 120, w: W, h: 240, strength: 0.8 }));
-      L.push(SH({ name: 'Time badge', shape: 'circle', fill: rgba(p.deep, 0.55), ring: 3, ringColor: '#ffffff', x: 190, y: H * 0.62, w: 190, h: 190 }));
-      L.push(T({ name: 'Time', text: f.time || '', font: 'Anton', size: 60, fill: '#ffffff', slant: true, x: 190, y: H * 0.62, maxW: 160 }));
-      L.push(T({ name: 'Day', text: f.dd || '', font: 'Anton', size: 120, fill: '#ffffff', slant: true, shadow: true, x: 880, y: H * 0.6, maxW: 300 }));
-      L.push(SH({ name: 'Month tag', shape: 'rect', fill: '#ffffff', x: 880, y: H * 0.6 + 82, w: 250, h: 52 }));
-      L.push(T({ name: 'Month', text: `${f.month || ''} ${f.year || ''}`, font: 'Anton', size: 40, fill: p.deep, x: 880, y: H * 0.6 + 84, maxW: 230 }));
-      if (venueText(D)) {
-        L.push(SH({ name: 'Address tag', shape: 'rect', fill: '#ffffff', x: 860, y: H * 0.6 + 200, w: 330, h: 130 }));
-        L.push(T({ name: 'Address', text: 'Address:', font: 'Montserrat', size: 20, fill: '#e11d2a', align: 'left', x: 760, y: H * 0.6 + 155 }));
-        L.push(T({ name: 'Venue', text: venueText(D).replace(/,\s*/g, ',\n'), font: 'Montserrat', size: 18, fill: '#111', align: 'left', x: 860, y: H * 0.6 + 212, line: 1.15, maxW: 300 }));
-      }
-      if (speakerLine(D)) L.push(T({ name: 'Speakers', text: 'With ' + speakerLine(D), font: 'Great Vibes', size: 54, fill: '#ffffff', glow: rgba(p.accent, 0.6), x: 540, y: H - 120, maxW: 860 }));
-      L.push(T({ name: 'Footer', text: (f.kind || 'PRAYERS | WORSHIP').toUpperCase(), font: 'Montserrat', size: 18, fill: rgba('#ffffff', 0.85), letter: 0.6, x: 540, y: H - 40, maxW: 960 }));
-      return L;
-    },
-
-    /* ── THEME BOX: the theme in serif lettering in a black ragged box ── */
-    themebox(D) {
-      const H = D.h, p = D.pal, f = D.f, L = [BG({ img: D.bg, tint: 0.35 })];
-      L.push(...brand(D));
-      L.push(T({ name: 'Kicker', text: (D.dir.kicker || f.title || '').toUpperCase().replace(/^(\S+\s\S+)\s/, '$1\n'), font: 'Anton', size: 52, fill: '#ffffff', slant: true, shadow: true, align: 'right', x: 860, y: 110, line: 0.95, maxW: 360 }));
-      L.push(SH({ name: 'Box', shape: 'ragged', fill: '#0b0b0d', x: 540, y: H * 0.36, w: 880, h: 440, rot: -1, shadow: true, seed: 5 }));
-      L.push(T({ name: 'Theme label', text: 'THEME', font: 'Montserrat', size: 22, fill: '#ffffff', letter: 0.9, x: 540, y: H * 0.36 - 165 }));
-      const tw = D.themeWords;
-      L.push(T({ name: 'Theme 1', text: tw[0], font: 'DM Serif', size: 150, upper: true, fill: '#ffffff', x: 540, y: H * 0.36 - 55, maxW: 760 }));
-      if (tw[1]) {
-        const t2 = T({ name: 'Theme 2', text: tw[1], font: 'DM Serif', size: 130, upper: true, fill: '#ffffff', y: H * 0.36 + 100, maxW: tw[2] ? 560 : 760 });
-        if (tw[2]) { const ac = T({ name: 'Accent', text: tw[2], font: 'Anton', size: 74, upper: true, fill: p.accent, slant: true, y: H * 0.36 + 106, rot: -4, maxW: 200 }); row([ac, t2], 540, 18); L.push(ac); } else t2.x = 540;
-        L.push(t2);
-      }
-      L.push(...people(D, { cx: 540, foot: H - 160, h: H * 0.42, gap: 320, max: 2, extra: { glow: rgba('#ffffff', 0.25) } }));
-      L.push(SH({ name: 'Info bar', shape: 'band', fill: '#0b0b0d', x: 560, y: H - 105, w: 940, h: 150, skew: 30, rot: -1, shadow: true }));
-      L.push(SH({ name: 'Pin', shape: 'pin', fill: '#e11d2a', x: 110, y: H - 108, w: 70, h: 70 }));
-      L.push(T({ name: 'Date', text: `${f.dd || ''}\n${f.month || ''}, ${f.year || ''}`, font: 'Anton', size: 46, fill: '#ffffff', align: 'left', x: 290, y: H - 108, line: 0.95, maxW: 260 }));
-      L.push(T({ name: 'Time', text: `${f.time || ''}\n${(f.day || '').toUpperCase()}`, font: 'Anton', size: 40, fill: p.accent, align: 'left', x: 545, y: H - 108, line: 1, maxW: 200 }));
-      if (venueText(D)) L.push(T({ name: 'Venue', text: venueText(D).replace(/,\s*/g, ',\n'), font: 'Montserrat', size: 18, fill: '#ffffff', align: 'left', x: 830, y: H - 108, line: 1.15, maxW: 250 }));
-      return L;
-    },
-  };
-  Object.assign(LAYOUTS, {
-    /* ── GIANT: PUSH / PROPHETIC PRAYER MEETING / 6 HOURS PRAYER WATCH — the title fills the flyer, the preacher in front ── */
-    giant(D) {
-      const H = D.h, p = D.pal, f = D.f, L = [BG({ img: D.bg, tint: 0.5, contrast: 12 })];
-      L.push(...brand(D));
-      if (f.theme && f.theme !== f.title) L.push(T({ name: 'Theme', text: 'THEME: ' + f.theme, font: 'Montserrat', size: 24, upper: true, fill: '#ffffff', shadow: true, x: 540, y: 165, maxW: 900, letter: 0.04 }));
-      const lines = stack(f.title || 'Prayer Meeting', 3);
-      const n = lines.length, top = n === 1 ? 420 : n === 2 ? 330 : 290, step = n === 3 ? 215 : 250;
-      const grad = { stops: ['#ffffff', mix('#ffffff', p.accent, 0.55), p.accent], angle: 90 };
-      lines.forEach((ln, i) => L.push(T({ name: 'Title ' + (i + 1), text: ln, font: 'Anton', size: n === 1 ? 380 : 300, upper: true, fill: i === n - 1 && n > 1 ? grad : '#ffffff', extrude: 5, extrudeColor: rgba(p.deep, 0.85), shadow: true, x: 540, y: top + i * step, maxW: 1010, line: 0.9 })));
-      const main = D.sp.filter((s) => imgOf(s.img));
-      if (main.length) {
-        const P1 = person(main[0], 800, H - 150, H * 0.56, { glow: rgba(p.accent, 0.45) });
-        if (P1) L.push(P1);
-        L.push(T({ name: 'With', text: 'with', font: 'Yellowtail', size: 66, fill: p.accent, x: 300, y: H - 330, rot: -8 }));
-        L.push(T({ name: 'Speaker', text: (main[0].name || '').replace(/^(\S+\.?)\s+/, '$1\n'), font: 'Anton', size: 54, upper: true, fill: '#ffffff', shadow: true, align: 'left', x: 300, y: H - 250, line: 0.95, maxW: 360 }));
-      }
-      L.push(SH({ name: 'Shade', shape: 'fade', fill: p.deep, x: 540, y: H - 90, w: W, h: 180, strength: 0.9 }));
-      L.push(...infoRow(D, H - 95, [
-        { name: 'Date', big: `${(f.day || '').slice(0, 3)}. ${f.dd || ''}`, small: `${f.month || ''} ${f.year || ''}`, accent: true, size: 50 },
-        { name: 'Time', big: f.time, small: f.time2 ? 'and ' + f.time2 : 'prompt', size: 64 },
-        { name: 'Venue', small: venueText(D).replace(/,\s*/g, ',\n'), pin: true, maxW: 330, smallSize: 17 },
-      ]));
-      return L;
-    },
-
-    /* ── LINE-UP: THE HARVEST / YADAH / OVERFLOW — everyone ministering, named, over a big title ── */
-    lineup(D) {
-      const H = D.h, p = D.pal, f = D.f, L = [BG({ img: D.bg, tint: 0.55 })];
-      L.push(...brand(D));
-      L.push(T({ name: 'Presents', text: 'PRESENTS', font: 'Montserrat', size: 18, fill: rgba('#ffffff', 0.85), letter: 0.8, x: 540, y: 150 }));
-      const list = D.sp.filter((s) => imgOf(s.img)).slice(0, 8);
-      L.push(SH({ name: 'Glow', shape: 'glow', fill: p.accent, x: 540, y: H * 0.42, w: 900, h: 900, opacity: list.length ? 0.55 : 0.3 }));
-      const n = list.length;
-      const back = n > 4 ? list.slice(0, Math.ceil(n / 2)) : [];
-      const front = n > 4 ? list.slice(Math.ceil(n / 2)) : list;
-      const place = (row, foot, h, spread) => row.forEach((sp, i) => {
-        const cx = row.length === 1 ? 540 : 540 + (i - (row.length - 1) / 2) * Math.min(spread, 900 / (row.length - 0.4));
-        const P1 = person(sp, cx, foot, h, { glow: rgba('#000000', 0.35) });
-        if (!P1) return;
-        L.push(P1);
-        L.push(T({ name: 'Name', text: (sp.name || '').toUpperCase().replace(/^(\S+\.?)\s+/, '$1\n'), font: 'Montserrat', size: 17, fill: '#ffffff', shadow: true, line: 1.1, x: cx + (i < row.length / 2 ? -1 : 1) * P1.w * 0.36, y: foot - h * 0.42, maxW: 170 }));
-      });
-      if (back.length) place(back, H * 0.5, H * 0.3, 260);
-      place(front, H * (back.length ? 0.66 : 0.64), H * (back.length ? 0.34 : n === 1 ? 0.5 : 0.42), n <= 2 ? 360 : 270);
-      L.push(SH({ name: 'Shade', shape: 'fade', fill: p.deep, x: 540, y: H * 0.74, w: W, h: H * 0.3, strength: 0.95 }));
-      L.push(SH({ name: 'Floor', shape: 'rect', fill: p.deep, x: 540, y: H * 0.94, w: W, h: H * 0.13 }));
-      if (f.extra || f.kicker) L.push(T({ name: 'Kicker', text: f.extra || f.kicker, font: 'Montserrat', size: 24, upper: true, fill: p.accent, letter: 0.3, x: 540, y: H * 0.665 }));
-      L.push(T({ name: 'Title', text: f.title || 'The Harvest', font: 'Cinzel', size: 150, upper: true, fill: 'gold', extrude: 4, extrudeColor: '#3b2208', shadow: true, x: 540, y: H * 0.735, maxW: 1000 }));
-      if (f.theme) L.push(T({ name: 'Theme', text: f.theme, font: 'Montserrat', size: 26, upper: true, fill: '#ffffff', letter: 0.12, x: 540, y: H * 0.8, maxW: 900 }));
-      L.push(T({ name: 'Date', text: `${f.day ? f.day.toUpperCase() + ', ' : ''}${f.dd || ''} OF ${f.month || ''}, ${f.year || ''}`, font: 'Montserrat', size: 26, fill: p.accent, x: 540, y: H * 0.845, maxW: 900 }));
-      L.push(...infoRow(D, H * 0.925, [
-        { name: 'Time', big: f.time + (f.time2 ? ' & ' + f.time2 : ''), size: 50 },
-        { name: 'Venue', small: venueText(D).replace(/,\s*/g, ',\n'), pin: true, maxW: 420, smallSize: 18 },
-      ]));
-      return L;
-    },
-
-    /* ── PRESENTS: MIRACLE SERVICE / INVOCATION — the minister in the middle, the title across him ── */
-    presents(D) {
-      const H = D.h, p = D.pal, f = D.f, L = [BG({ img: D.bg, tint: 0.5 })];
-      if (D.logo && imgOf(D.logo)) L.push(...logoLayers(D, 540, 80, 72));
-      if (f.church) L.push(T({ name: 'Church', text: f.church, font: 'Montserrat', size: 22, upper: true, fill: '#ffffff', letter: 0.12, x: 540, y: D.logo ? 140 : 90, maxW: 900 }));
-      L.push(T({ name: 'Presents', text: 'PRESENTS', font: 'Montserrat', size: 16, fill: rgba('#ffffff', 0.8), letter: 0.9, x: 540, y: D.logo ? 172 : 124 }));
-      L.push(...people(D, { cx: 540, foot: H * 0.8, h: H * 0.66, gap: 420, max: 3, extra: { glow: rgba(p.accent, 0.4), fade: 0.12 } }));
-      L.push(SH({ name: 'Shade', shape: 'fade', fill: p.deep, x: 540, y: H * 0.8, w: W, h: H * 0.42, strength: 0.96 }));
-      L.push(SH({ name: 'Floor', shape: 'rect', fill: p.deep, x: 540, y: H * 0.955, w: W, h: H * 0.1 }));
-      const words = twoLines(f.title || 'Miracle Service');
-      const word2 = words[1] || '';
-      L.push(T({ name: 'Title', text: words[0], font: 'Anton', size: 220, upper: true, fill: { stops: ['#ffffff', mix('#ffffff', p.accent, 0.5), p.accent], angle: 90 }, extrude: 5, extrudeColor: rgba('#000000', 0.6), shadow: true, x: 540, y: H * 0.71, maxW: 1000 }));
-      if (word2) L.push(T({ name: 'Subtitle', text: word2.toUpperCase().split('').join(' '), font: 'Montserrat', size: 38, fill: '#ffffff', letter: 0.3, x: 540, y: H * 0.79, maxW: 900 }));
-      if (f.theme) L.push(T({ name: 'Theme', text: '“' + f.theme + '”', font: 'Alex Brush', size: 66, fill: p.accent, x: 540, y: H * (word2 ? 0.84 : 0.8), maxW: 900 }));
-      L.push(...infoRow(D, H * 0.915, [
-        { name: 'Date', label: 'DATE', big: `${(f.day || '').slice(0, 3)}. ${f.dd || ''}`, small: `${f.month || ''}, ${f.year || ''}`, size: 44 },
-        { name: 'Time', label: 'TIME', big: f.time, small: f.time2 ? 'and ' + f.time2 : 'prompt', size: 56, accent: true },
-        { name: 'Venue', label: 'VENUE', small: venueText(D).replace(/,\s*/g, ',\n'), maxW: 330, smallSize: 17 },
-      ], { labelInk: lum(p.accent) > 0.55 ? '#111111' : '#ffffff' }));
-      L.push(T({ name: 'Footer', text: (f.footer || 'PRAYERS  |  WORSHIP  |  WORD').toUpperCase(), font: 'Montserrat', size: 16, fill: rgba('#ffffff', 0.75), letter: 0.5, x: 540, y: H - 32, maxW: 960 }));
-      return L;
-    },
-  });
-  /* ── SLAB: BIBLE STUDY / SPIRIT OF DAVID — a yellow slab-serif title, a red JOIN US tab, the pastor under a round badge ── */
-  LAYOUTS.slab = function slab(D) {
-    const H = D.h, p = D.pal, f = D.f, L = [BG({ img: D.bg, tint: 0.4, bright: -12 })];
-    L.push(...brand(D));
-    L.push(T({ name: 'Presents', text: 'PRESENTS', font: 'Montserrat', size: 16, fill: rgba('#ffffff', 0.85), letter: 0.8, x: 540, y: 150 }));
-    const words = twoLines(f.title || 'Bible Study');
-    const fillY = { stops: ['#fff6a8', '#ffd21f', '#f0a500'], angle: 90 };
-    L.push(T({ name: 'Title 1', text: words[0], font: 'Alfa Slab One', size: 190, fill: fillY, extrude: 5, extrudeColor: '#5a2a00', shadow: true, x: 580, y: 300, maxW: 820 }));
-    if (words[1]) L.push(T({ name: 'Title 2', text: words[1], font: 'Alfa Slab One', size: 190, fill: fillY, extrude: 5, extrudeColor: '#5a2a00', shadow: true, x: 580, y: 500, maxW: 860 }));
-    L.push(SH({ name: 'Join tab', shape: 'rect', fill: '#d71920', x: 110, y: words[1] ? 400 : 300, w: 64, h: 230, shadow: true }));
-    L.push(T({ name: 'Join us', text: 'JOIN US', font: 'Anton', size: 40, fill: '#ffffff', rot: -90, x: 110, y: words[1] ? 400 : 300 }));
-    L.push(...infoRow(D, words[1] ? 660 : 470, [
-      { name: 'Date', big: `${(f.day || '').slice(0, 3)}. ${f.dd ? f.dd.replace(/\D+$/, '') : ''}\n${f.month || ''}`, size: 46 },
-      { name: 'Time', big: [f.time, f.time2].filter(Boolean).join('\n'), size: 46, accent: true },
-    ], { gap: 26 }));
-    L.push(...people(D, { cx: 470, foot: H - 64, h: H * 0.42, gap: 330, max: 3, extra: { glow: rgba('#000000', 0.4), fade: 0.12 } }));
-    const sp = D.sp[0];
-    if (sp && sp.name) {
-      L.push(SH({ name: 'Badge', shape: 'circle', fill: '#ffd21f', x: 830, y: H - 330, w: 230, h: 230, shadow: true }));
-      L.push(T({ name: 'With', text: 'with', font: 'Great Vibes', size: 44, fill: '#111111', x: 830, y: H - 395 }));
-      L.push(T({ name: 'Speaker', text: sp.name.toUpperCase().replace(/^(\S+\.?)\s+/, '$1\n'), font: 'Anton', size: 40, fill: '#d71920', line: 0.95, x: 830, y: H - 315, maxW: 190 }));
-    }
-    L.push(SH({ name: 'Footer', shape: 'rect', fill: rgba('#000000', 0.75), x: 540, y: H - 32, w: W, h: 64 }));
-    L.push(T({ name: 'Venue', text: [venueText(D), f.phone].filter(Boolean).join('   •   '), font: 'Montserrat', size: 20, upper: true, fill: '#ffffff', x: 540, y: H - 32, maxW: 1000 }));
-    return L;
-  };
-  const LOOK_NAMES = { slab: 'Slab title', giant: 'Giant title', lineup: 'Line-up', presents: 'Presents', script: 'Script', joinus: 'Join us', breakthrough: 'Breakthrough', torn: 'Torn paper', scenic: 'Scenic', themebox: 'Theme box' };
-
-  /* split a title into two balanced lines */
-  function twoLines(s) {
-    const w = String(s || '').trim().split(/\s+/).filter(Boolean);
-    if (w.length <= 1) return [w[0] || '', ''];
-    let best = 1, diff = 1e9;
-    for (let i = 1; i < w.length; i++) { const d = Math.abs(w.slice(0, i).join(' ').length - w.slice(i).join(' ').length); if (d < diff) { diff = d; best = i; } }
-    return [w.slice(0, best).join(' '), w.slice(best).join(' ')];
-  }
-
-  /** The event, the art direction and the pictures → everything a layout reads. */
-  function dataFor(o) {
-    const f = Object.assign({}, o.fields || {});
-    const dp = dateParts(f.date);
-    if (dp) Object.assign(f, { dd: dp.dd, month: dp.month, mon: dp.mon, year: dp.year, day: dp.dayName });
-    f.time = niceTime(f.time);
-    f.time2 = niceTime(f.time2);
-    const dir = o.dir || {};
-    const pal = o.pal || { deep: '#1a0638', mid: '#5b21b6', accent: '#f5c542', hi: '#ffffff' };
-    const title = (f.title || 'Sunday Service').trim();
-    const isWeekly = /service|meeting|study|fellowship|prayer/i.test(title) && title.split(/\s+/).length <= 3;
-    const dayWord = (dp && dp.day) || 'SUNDAY';
-    const D = {
-      w: o.w || 1080, h: o.h || 1350, pal, dir, f,
-      bg: o.bg, logo: o.logo,
-      sp: (o.speakers || []).map((s) => ({ name: s.name, img: s.img, id: s.id, photo: s.photo })),
-      script: dir.scriptWord || (dp ? dp.dayName : 'Sunday'),
-      titleTop: isWeekly ? 'JOIN US' : (dir.kicker || 'JOIN US FOR').split(/\s+/).slice(0, 3).join(' '),
-      titleBig: isWeekly && /sunday/i.test(title) ? dayWord : title,
-      chip: isWeekly ? 'THIS' : (dp ? dp.day.slice(0, 3) : 'THIS'),
-      whenWord: dp ? 'THIS ' + dp.day : 'THIS SUNDAY',
-      titleWords: twoLines(f.theme && o.look === 'scenic' ? f.theme : title),
-      themeWords: (() => { const t = twoLines(f.theme || title); const w2 = t[1].split(/\s+/); return w2.length > 2 ? [t[0], w2.slice(1).join(' '), w2[0]] : t; })(),
-    };
-    return D;
-  }
-
-  /** A whole flyer: { w, h, pal, look, layers } */
-  function buildScene(o) {
-    const D = dataFor(o);
-    const look = LAYOUTS[o.look] ? o.look : 'script';
-    let layers = LAYOUTS[look](D).filter(Boolean);
-    if (D.h !== 1350) layers = layers;   // layouts are written against the height they are given
-    return { w: D.w, h: D.h, pal: D.pal, look, layers };
-  }
-
-  /*
-   * A CUT-OUT, TIDIED. The person model hands back the whole photo with the
-   * background see-through: a man on a big stage is a small figure in a large
-   * empty frame, so on a flyer (which sizes people by height) he came out
-   * tiny — and a chair or a coat it half-kept rode along. So: only the largest
-   * shape is kept (the person; anything under a tenth of his size goes), and
-   * the picture is trimmed tight around him, feet at the bottom edge.
-   */
-  async function tidyCut(src) {
-    const im = await loadImg(src);
-    const W = iw(im), H = ih(im);
+  /* the person's own outline: only the biggest shape, trimmed tight (feet at the bottom edge) */
+  function tidyCanvas(cv) {
+    const W = cv.width, H = cv.height;
     const k = Math.min(1, 360 / Math.max(W, H)), w = Math.max(1, Math.round(W * k)), h = Math.max(1, Math.round(H * k));
     const sm = canvas(w, h), sx = sm.getContext('2d', { willReadFrequently: true });
-    sx.drawImage(im, 0, 0, w, h);
+    sx.drawImage(cv, 0, 0, w, h);
     const a = sx.getImageData(0, 0, w, h).data;
-    const lab = new Int32Array(w * h).fill(-1), sizes = [], boxes = [];
-    const stack = [];
+    const lab = new Int32Array(w * h).fill(-1), sizes = [], boxes = [], st = [];
     for (let i = 0; i < w * h; i++) {
       if (lab[i] >= 0 || a[i * 4 + 3] < 60) continue;
       const id = sizes.length; let n = 0; const bx = [w, h, 0, 0];
-      lab[i] = id; stack.push(i);
-      while (stack.length) {
-        const j = stack.pop(), x = j % w, y = (j / w) | 0; n++;
+      lab[i] = id; st.push(i);
+      while (st.length) {
+        const j = st.pop(), x = j % w, y = (j / w) | 0; n++;
         if (x < bx[0]) bx[0] = x; if (y < bx[1]) bx[1] = y; if (x > bx[2]) bx[2] = x; if (y > bx[3]) bx[3] = y;
-        for (const q of [j - 1, j + 1, j - w, j + w]) {
-          if (q < 0 || q >= w * h || lab[q] >= 0 || a[q * 4 + 3] < 60) continue;
-          if ((q === j - 1 && x === 0) || (q === j + 1 && x === w - 1)) continue;
-          lab[q] = id; stack.push(q);
-        }
+        if (x > 0 && lab[j - 1] < 0 && a[(j - 1) * 4 + 3] >= 60) { lab[j - 1] = id; st.push(j - 1); }
+        if (x < w - 1 && lab[j + 1] < 0 && a[(j + 1) * 4 + 3] >= 60) { lab[j + 1] = id; st.push(j + 1); }
+        if (y > 0 && lab[j - w] < 0 && a[(j - w) * 4 + 3] >= 60) { lab[j - w] = id; st.push(j - w); }
+        if (y < h - 1 && lab[j + w] < 0 && a[(j + w) * 4 + 3] >= 60) { lab[j + w] = id; st.push(j + w); }
       }
       sizes.push(n); boxes.push(bx);
     }
-    if (!sizes.length) return src;
+    if (!sizes.length) return { c: cv, x0: 0, y0: 0 };
     const big = sizes.indexOf(Math.max(...sizes));
-    // a part of him the model split off (a hand past the microphone) is beside or inside his outline; a chair is off to the side
     const B = boxes[big], bw = B[2] - B[0], left = B[0] - bw * 0.08, right = B[2] + bw * 0.08;
     const keep = sizes.map((n, i) => i === big || (n >= sizes[big] * 0.1 && boxes[i][0] >= left && boxes[i][2] <= right));
-    // drop what is not kept, at full size, by the small map
     const full = canvas(W, H), fx = full.getContext('2d', { willReadFrequently: true });
-    fx.drawImage(im, 0, 0);
+    fx.drawImage(cv, 0, 0);
     const d = fx.getImageData(0, 0, W, H), p = d.data;
     let x0 = W, y0 = H, x1 = 0, y1 = 0;
     for (let y = 0; y < H; y++) {
@@ -1100,16 +840,663 @@
         if (p[i + 3] > 20) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
       }
     }
-    if (x1 <= x0 || y1 <= y0) return src;
+    if (x1 <= x0 || y1 <= y0) return { c: cv, x0: 0, y0: 0 };
     fx.putImageData(d, 0, 0);
     const pad = Math.round(Math.max(x1 - x0, y1 - y0) * 0.02);
     x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(W - 1, x1 + pad); y1 = Math.min(H - 1, y1 + 1);
     const out = canvas(x1 - x0 + 1, y1 - y0 + 1);
     out.getContext('2d').drawImage(full, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
-    return out.toDataURL('image/png');
+    return { c: out, x0, y0 };
+  }
+  /* where the head, shoulders and hips are in a (trimmed) cut-out */
+  function metaOf(c, lm, x0, y0, W0, H0) {
+    const w = c.width, h = c.height;
+    const k = Math.min(1, 220 / Math.max(w, h)), aw = Math.max(1, Math.round(w * k)), ah = Math.max(1, Math.round(h * k));
+    const s = canvas(aw, ah), sx = s.getContext('2d', { willReadFrequently: true }); sx.drawImage(c, 0, 0, aw, ah);
+    const a = sx.getImageData(0, 0, aw, ah).data;
+    const on = (X, Y) => a[(Y * aw + X) * 4 + 3] > 110;
+    const topIn = (xa, xb) => { const A = clamp(Math.floor(xa * k), 0, aw - 1), B = clamp(Math.ceil(xb * k), 0, aw - 1); for (let Y = 0; Y < ah; Y++) for (let X = A; X <= B; X++) if (on(X, Y)) return Y / k; return 0; };
+    let top = topIn(0, w);
+    if (lm) {
+      const P = (i, v) => { const q = lm[i]; return q && (q.visibility == null || q.visibility >= v) ? { x: q.x * W0 - x0, y: q.y * H0 - y0 } : null; };
+      const ls = P(11, 0.3), rs = P(12, 0.3);
+      if (ls && rs) {
+        const sw = Math.max(8, Math.hypot(ls.x - rs.x, ls.y - rs.y)), sy = (ls.y + rs.y) / 2, cx = (ls.x + rs.x) / 2;
+        const nose = P(0, 0.3), hx = nose ? nose.x : cx;
+        top = topIn(hx - sw * 0.6, hx + sw * 0.6);
+        const lh = P(23, 0.45), rh = P(24, 0.45);
+        const hy = lh && rh ? (lh.y + rh.y) / 2 : null;
+        return { w, h, top, cx, sy: Math.max(sy, top + 10), sw, hy: hy && hy > sy + 10 ? hy : null, full: !!(P(27, 0.6) || P(28, 0.6)) };
+      }
+    }
+    const tall = h / w;
+    let cxs = 0, n = 0; const ya = Math.round(top * k), yb = Math.min(ah - 1, Math.round((top + h * 0.15) * k));
+    for (let Y = ya; Y <= yb; Y++) for (let X = 0; X < aw; X++) if (on(X, Y)) { cxs += X; n++; }
+    return { w, h, top, cx: n ? cxs / n / k : w / 2, sy: top + (tall > 1.7 ? h * 0.17 : h * 0.33), sw: w * 0.45, hy: null, full: tall > 2.3, guess: true };
+  }
+  const QM = new WeakMap();
+  function quickMeta(im) {
+    if (QM.has(im)) return QM.get(im);
+    const k = Math.min(1, 400 / Math.max(iw(im), ih(im)));
+    const c = canvas(iw(im) * k, ih(im) * k); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+    const m0 = metaOf(c, null, 0, 0, c.width, c.height), f = 1 / k;
+    const m = Object.assign({}, m0, { w: iw(im), h: ih(im), top: m0.top * f, cx: m0.cx * f, sy: m0.sy * f, sw: m0.sw * f });
+    QM.set(im, m);
+    return m;
+  }
+  const PREP = new WeakMap();
+  function preparePerson(im) {
+    if (PREP.has(im)) return PREP.get(im);
+    const job = (async () => {
+      const W0 = iw(im), H0 = ih(im);
+      let c = canvas(W0, H0); c.getContext('2d').drawImage(im, 0, 0);
+      const st0 = alphaStats(c);
+      if (st0.clear < 0.04) return { img: c, meta: null };   // a plain photo, nothing cut out: leave it
+      let lm = null;
+      try { if (root.FlyerAI && root.FlyerAI.poseOf) lm = await root.FlyerAI.poseOf(onGray(c)); } catch (e) { lm = null; }
+      if (lm) {
+        const env = envelope(W0, H0, lm);
+        if (env) {
+          const o = canvas(W0, H0), ox = o.getContext('2d');
+          ox.drawImage(c, 0, 0); ox.globalCompositeOperation = 'destination-in'; ox.drawImage(env, 0, 0);
+          // a wrong pose would take half the person: then it is not trusted
+          if (alphaStats(o).mass >= st0.mass * 0.55) c = o;
+        }
+      }
+      const t = tidyCanvas(c);
+      return { img: t.c, meta: metaOf(t.c, lm, t.x0, t.y0, W0, H0) };
+    })().catch(() => ({ img: im, meta: null }));
+    PREP.set(im, job);
+    return job;
   }
 
-  root.MWFlyer = { tidyCut, HD, render, buildScene, loadFonts, IMGS, loadImg, proceduralBg, LAYOUTS, LOOK_NAMES, FONTS, textCanvas, boxOf, Dates };
+  /* ================================================================ LAYOUTS */
+
+  const T = (o) => Object.assign({ id: uid(), type: 'text', x: 540, y: 200, rot: 0, s: 1, font: 'Anton', size: 100, fill: '#ffffff', align: 'center', line: 1 }, o);
+  const SH = (o) => Object.assign({ id: uid(), type: 'shape', x: 540, y: 200, rot: 0, s: 1, shape: 'rect', w: 200, h: 80, fill: '#ffffff' }, o);
+  const IM = (o) => Object.assign({ id: uid(), type: 'image', x: 540, y: 600, rot: 0, s: 1, w: 500, h: 700 }, o);
+  const BG = (o) => Object.assign({ id: 'bg', type: 'bg', name: 'Background', lock: true }, o);
+  const FX = (o) => Object.assign({ id: uid(), type: 'fx', name: 'Light', lock: true, x: 540, y: 400, w: 800, h: 800 }, o);
+  const W = 1080;
+
+  function box(L) { const b = boxOf(L), s = L.s || 1, w = b.w * s, h = b.h * s; return { w, h, l: L.x - w / 2, r: L.x + w / 2, t: L.y - h / 2, b: L.y + h / 2 }; }
+  function put(L, o) {
+    const b = box(L);
+    if (o.l != null) L.x = o.l + b.w / 2; if (o.r != null) L.x = o.r - b.w / 2; if (o.cx != null) L.x = o.cx;
+    if (o.t != null) L.y = o.t + b.h / 2; if (o.b != null) L.y = o.b - b.h / 2; if (o.cy != null) L.y = o.cy;
+    return L;
+  }
+  /* things one under another, lined up on one side, from a top, a bottom or a middle */
+  function col(items, o) {
+    const list = items.filter(Boolean);
+    const gap = o.gap == null ? 6 : o.gap;
+    const total = list.reduce((a, L) => a + box(L).h, 0) + gap * Math.max(0, list.length - 1);
+    let y = o.t != null ? o.t : o.b != null ? o.b - total : (o.cy || 0) - total / 2;
+    list.forEach((L) => { const q = { t: y }; if (o.l != null) q.l = o.l; else if (o.r != null) q.r = o.r; else q.cx = o.cx; put(L, q); y = box(L).b + gap; });
+    list.top = list.length ? box(list[0]).t : y; list.bottom = y - gap;
+    return list;
+  }
+  /* the lines of a title, each set exactly as wide as the block — the stacked look */
+  function stackLines(lines, o) {
+    return col(lines.filter(Boolean).map((ln, i, a) => T(Object.assign({ name: (o.name || 'Title') + (a.length > 1 ? ' ' + (i + 1) : ''), text: ln, fit: o.fit, maxH: o.maxH }, o.style || {}))),
+      { t: o.t, b: o.b, cx: o.cx == null ? 540 : o.cx, gap: o.gap == null ? 12 : o.gap });
+  }
+  /* a tilted block keeps its lines on the tilt */
+  function tilt(list, deg) {
+    if (!list.length) return list;
+    const yc = (box(list[0]).t + box(list[list.length - 1]).b) / 2, k = Math.tan((-deg * Math.PI) / 180);
+    list.forEach((L) => { L.rot = deg; L.x += (L.y - yc) * k; });
+    return list;
+  }
+  /* a rounded label with text in it; place(cx, cy) puts it */
+  function pill(lines, o) {
+    const ts = lines.filter((l) => l && l.text).map((l) => T(Object.assign({ name: (o.name || 'Label') + ' text', fill: o.ink || '#141414', line: 1 }, l)));
+    const padX = o.padX == null ? 22 : o.padX, padY = o.padY == null ? 14 : o.padY, gap = o.gap == null ? 4 : o.gap;
+    let w = Math.max(o.minW || 0, ...ts.map((t) => box(t).w)) + padX * 2;
+    let h = ts.reduce((a, t) => a + box(t).h, 0) + gap * Math.max(0, ts.length - 1) + padY * 2;
+    if (o.circle) w = h = Math.max(w, h);
+    const bg = SH({ name: o.name || 'Label', shape: o.circle ? 'circle' : o.shape || 'round', radius: o.radius == null ? 14 : o.radius, fill: o.fill, w, h, shadow: !!o.shadow, rot: o.rot || 0 });
+    const g = [bg, ...ts];
+    g.w = w; g.h = h;
+    g.place = (cx, cy) => {
+      bg.x = cx; bg.y = cy; col(ts, { cx, cy, gap });
+      if (o.rot) { const a = (o.rot * Math.PI) / 180; ts.forEach((t) => { const dx = t.x - cx, dy = t.y - cy; t.x = cx + dx * Math.cos(a) - dy * Math.sin(a); t.y = cy + dx * Math.sin(a) + dy * Math.cos(a); t.rot = o.rot; }); }
+      return g;
+    };
+    return g;
+  }
+  /* things side by side, centred */
+  function hrow(gs, cx, cy, gap) {
+    const list = gs.filter(Boolean).map((g) => (g.place ? g : Object.assign([g], { w: box(g).w, h: box(g).h, place: (x, y) => { put(g, { cx: x, cy: y }); return [g]; } })));
+    const total = list.reduce((a, g) => a + g.w, 0) + gap * Math.max(0, list.length - 1);
+    let x = cx - total / 2; const out = [];
+    list.forEach((g) => { g.place(x + g.w / 2, cy); out.push(...g); x += g.w + gap; });
+    return out;
+  }
+  function venueGroup(text, color, maxW, o) {
+    o = o || {};
+    const pin = SH({ name: 'Pin', shape: 'pin', fill: color, w: 32, h: 32 });
+    const t = T({ name: 'Venue', text, upper: true, font: 'Montserrat', size: o.size || 16, align: 'left', line: 1.2, maxW, fill: o.ink || '#ffffff', shadow: o.shadow !== false });
+    const tb = box(t), g = [pin, t];
+    g.w = 40 + tb.w; g.h = Math.max(32, tb.h);
+    g.place = (cx, cy) => { const l = cx - g.w / 2; pin.x = l + 15; pin.y = cy; put(t, { l: l + 40, cy }); return g; };
+    return g;
+  }
+  /* the details row: date | time | where, with hairlines between */
+  function infoRow(D, cy, cells, o) {
+    o = o || {};
+    const ink = o.ink || '#ffffff', acc = o.accent || D.pal.accent, out = [];
+    const cols = cells.filter((c) => c && (c.big || c.small)).map((c) => {
+      const items = [];
+      if (c.big) items.push(T({ name: c.name || 'Detail', text: c.big, font: c.font || 'Anton', size: c.size || 50, fill: c.accent ? acc : ink, align: 'left', line: 0.95, upper: true, maxW: c.maxW || 340, shadow: true }));
+      if (c.small) items.push(T({ name: (c.name || 'Detail') + ' note', text: c.small, font: 'Montserrat', size: c.smallSize || 16, fill: ink, align: 'left', line: 1.22, upper: true, maxW: c.maxW || 320, letter: 0.02, shadow: true }));
+      return { c, items, w: Math.max(...items.map((L) => box(L).w)) + (c.pin ? 42 : 0) };
+    });
+    if (!cols.length) return out;
+    const gap = o.gap || 28;
+    const total = cols.reduce((a, k) => a + k.w, 0) + gap * 2 * (cols.length - 1);
+    let x = (o.cx || 540) - total / 2;
+    cols.forEach((k, i) => {
+      let lx = x;
+      if (k.c.pin) { out.push(SH({ name: 'Pin', shape: 'pin', fill: acc, x: lx + 15, y: cy, w: 32, h: 32 })); lx += 42; }
+      out.push(...col(k.items, { l: lx, cy, gap: 6 }));
+      x += k.w;
+      if (i < cols.length - 1) { out.push(SH({ name: 'Divider', shape: 'line', fill: rgba(ink, 0.6), x: x + gap, y: cy, w: 2, h: o.lineH || 70 })); x += gap * 2; }
+    });
+    return out;
+  }
+  /* up to `max` lines, the long words alone */
+  function stack(title, max = 3) {
+    const w = String(title || '').trim().split(/\s+/).filter(Boolean);
+    if (w.length <= max) return w;
+    const lines = []; let cur = '';
+    const target = Math.ceil(w.join(' ').length / max);
+    for (const word of w) { if (cur && (cur + ' ' + word).length > target && lines.length < max - 1) { lines.push(cur); cur = word; } else cur = cur ? cur + ' ' + word : word; }
+    if (cur) lines.push(cur);
+    return lines;
+  }
+  /* a title in two balanced lines */
+  function twoLines(s) {
+    const w = String(s || '').trim().split(/\s+/).filter(Boolean);
+    if (w.length <= 1) return [w[0] || '', ''];
+    let best = 1, diff = 1e9;
+    for (let i = 1; i < w.length; i++) { const d = Math.abs(w.slice(0, i).join(' ').length - w.slice(i).join(' ').length); if (d < diff) { diff = d; best = i; } }
+    return [w.slice(0, best).join(' '), w.slice(best).join(' ')];
+  }
+  /* "Glory to Glory" → GLORY [to] GLORY: the little word between two big ones */
+  const CONN = /^(to|of|the|for|and|&|in|on|at|by|with|from|into|unto|is)$/i;
+  function splitConnector(title) {
+    const w = String(title || '').trim().split(/\s+/);
+    if (w.length < 3) return null;
+    let best = -1, bd = 1e9;
+    for (let i = 1; i < w.length - 1; i++) if (CONN.test(w[i])) { const d = Math.abs(w.slice(0, i).join(' ').length - w.slice(i + 1).join(' ').length); if (d < bd) { bd = d; best = i; } }
+    return best < 0 ? null : { a: w.slice(0, best).join(' '), conn: w[best], b: w.slice(best + 1).join(' ') };
+  }
+  /* "Bishop David Richman" → Bishop + David Richman */
+  const HON = /^((?:rt\.?\s+)?(?:rev(?:erend|d)?\.?\s+)?(?:dr\.?\s+)?(?:arch\s*bishop|bishop|apostle|prophet(?:ess)?|pastor|pst\.?|rev(?:erend|d)?\.?|evang(?:elist)?\.?|dr\.?|min(?:ister)?\.?|elder|deacon(?:ess)?|bro(?:ther)?\.?|sis(?:ter)?\.?|mrs?\.?|ms\.?|prof\.?))\s+/i;
+  function nameParts(n) { const s = String(n || '').trim(); const m = HON.exec(s); return m && s.length > m[0].length ? { title: m[1], name: s.slice(m[0].length) } : { title: '', name: s }; }
+  /* the address as a flyer prints it: not the church's name again, three parts at most */
+  function venueParts(D) {
+    let parts = String(D.f.venue || '').split(/\s*,\s*/).filter(Boolean);
+    const ch = String(D.f.church || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+    if (parts.length > 1 && ch && parts[0].toLowerCase().replace(/[^a-z0-9]+/g, '') === ch) parts = parts.slice(1);
+    return parts.slice(0, 3);
+  }
+  const venueText = (D) => venueParts(D).join(', ');
+  const venueLines = (D, n) => { const p = venueParts(D); if (p.length <= n) return p.join(',\n'); return [p.slice(0, p.length - n + 1).join(', ')].concat(p.slice(p.length - n + 1)).join(',\n'); };
+  const spsOf = (D) => D.sp.filter((s) => imgOf(s.img));
+  const sp0 = (D) => spsOf(D)[0] || null;
+  const lit = (p) => ({ glow: rgba(p.accent, 0.55), rim: mix('#ffffff', p.accent, 0.35) });
+  function footerWords(f) {
+    const k = String((f.kind || '') + ' ' + (f.title || '')).toLowerCase();
+    if (/prayer|vigil|fast/.test(k)) return 'PRAYER   |   PRAISE   |   POWER';
+    if (/bible|word|study|teach/.test(k)) return 'STUDY   |   GROW   |   GO';
+    if (/miracle|healing|crusade|revival/.test(k)) return 'MIRACLES   |   SIGNS   |   WONDERS';
+    return 'PRAISE   |   WORSHIP   |   WORD';
+  }
+
+  /*
+   * THE PERSON, FRAMED. `mode` says how much of them: bust (head and
+   * shoulders), chest, waist, or full. The frame is worked out from where the
+   * head and shoulders are in THIS photo, so a full-length stage photo and a
+   * studio portrait both come out with the face the same size.
+   */
+  function frameOf(m, mode) {
+    const u = Math.max(12, m.sy - m.top);
+    let nb;
+    if (mode === 'full') nb = m.h;
+    else if (mode === 'waist') nb = m.hy ? m.hy + u * 0.25 : m.sy + u * 2.4;
+    else if (mode === 'chest') nb = m.sy + u * 1.55;
+    else nb = m.sy + u * 0.9;
+    return { t: Math.max(0, m.top - u * 0.06), nb, cx: m.cx };
+  }
+  function hero(sp, o) {
+    const im = imgOf(sp.img); if (!im) return null;
+    const m = META.get(sp.img) || quickMeta(im);
+    const mode = o.mode || 'waist', fr = frameOf(m, mode);
+    const k = (o.b - o.t) / Math.max(1, fr.nb - fr.t);
+    const vb = Math.min(m.h, fr.nb);
+    const h = (vb - fr.t) * k, w = m.w * k;
+    const whole = mode === 'full' && vb >= m.h - 2;
+    return IM(Object.assign({
+      img: sp.img, name: sp.name || 'Speaker', speaker: sp.id || '', photo: sp.photo || '',
+      src: { x: 0, y: fr.t / m.h, w: 1, h: (vb - fr.t) / m.h },
+      w, h, x: o.cx + (m.w / 2 - fr.cx) * k, y: o.t + h / 2,
+      fade: whole ? 0 : (o.fade == null ? 0.22 : o.fade),
+      frame: { mode, t: o.t, b: o.b, cx: o.cx },
+    }, o.extra || {}));
+  }
+  /* a person on a rounded card (head and shoulders), for a small portrait */
+  function card(sp, o, p) {
+    const im = imgOf(sp.img); if (!im) return [];
+    const m = META.get(sp.img) || quickMeta(im);
+    const fr = frameOf(m, 'chest'), vb = Math.min(m.h, fr.nb);
+    const k = (o.h * 0.92) / Math.max(1, vb - fr.t);
+    const sw = o.w / k, sh = o.h / k, sx = fr.cx - sw / 2, sy = vb - sh;
+    return [
+      SH({ name: 'Card', shape: 'round', radius: 18, fill: { stops: [mix(p.mid, '#ffffff', 0.2), p.deep], angle: 90 }, shadow: true, x: o.l + o.w / 2, y: o.t + o.h / 2, w: o.w, h: o.h }),
+      IM({ img: sp.img, name: sp.name || 'Speaker', speaker: sp.id || '', photo: sp.photo || '', src: { x: sx / m.w, y: sy / m.h, w: sw / m.w, h: sh / m.h }, radius: 18, x: o.l + o.w / 2, y: o.t + o.h / 2, w: o.w, h: o.h }),
+    ];
+  }
+  /*
+   * THE CHURCH'S LOGO, AS IT IS — never cut out. A logo with a background of
+   * its own sits in a white disc, the way a church's emblem sits on the flyers
+   * it likes; one that is already see-through goes on as it is.
+   */
+  const opaqueOf = new WeakMap();
+  function isOpaque(im) {
+    if (opaqueOf.has(im)) return opaqueOf.get(im);
+    let o = true;
+    try {
+      const c = canvas(24, 24), x = c.getContext('2d', { willReadFrequently: true });
+      x.drawImage(im, 0, 0, 24, 24);
+      const d = x.getImageData(0, 0, 24, 24).data;
+      for (const [px, py] of [[0, 0], [23, 0], [0, 23], [23, 23], [12, 0], [0, 12], [23, 12], [12, 23]]) if (d[(py * 24 + px) * 4 + 3] < 200) { o = false; break; }
+    } catch (e) { o = true; }
+    opaqueOf.set(im, o);
+    return o;
+  }
+  function logoLayers(D, cx, cy, size) {
+    const im = imgOf(D.logo); if (!im) return [];
+    if (!isOpaque(im)) { const h = size, w = Math.min(size * 2.6, h * iw(im) / ih(im)); return [IM({ img: D.logo, name: 'Logo', x: cx, y: cy, w, h })]; }
+    const d = size, f = Math.min(d * 0.7 / iw(im), d * 0.7 / ih(im));
+    return [SH({ name: 'Logo disc', shape: 'circle', fill: '#ffffff', shadow: true, x: cx, y: cy, w: d, h: d }), IM({ img: D.logo, name: 'Logo', x: cx, y: cy, w: iw(im) * f, h: ih(im) * f })];
+  }
+  /* logo and church name: top left, or centred */
+  function header(D, o) {
+    o = o || {};
+    const out = [];
+    if (o.center) {
+      let y = o.t || 40;
+      if (D.logo && imgOf(D.logo)) { out.push(...logoLayers(D, 540, y + 38, 76)); y += 86; }
+      if (D.f.church) { const t = put(T({ name: 'Church', text: D.f.church, upper: true, font: 'Montserrat', size: 21, letter: 0.06, shadow: true, maxW: 760 }), { cx: 540, t: y }); out.push(t); y = box(t).b + 12; }
+      out.bottom = y;
+      return out;
+    }
+    let x = 60; const cy = o.cy || 78;
+    if (D.logo && imgOf(D.logo)) { const ls = logoLayers(D, 0, cy, 76); const w = Math.max(...ls.map((l) => l.w)); ls.forEach((l) => { l.x = x + w / 2; }); out.push(...ls); x += w + 14; }
+    if (D.f.church) {
+      const name = D.f.church.length > 20 ? twoLines(D.f.church).filter(Boolean).join('\n') : D.f.church;
+      out.push(put(T({ name: 'Church', text: name, upper: true, font: 'Montserrat', size: 21, align: 'left', line: 1.12, letter: 0.03, shadow: true, maxW: o.maxW || 420 }), { l: x, cy }));
+    }
+    out.bottom = cy + 40;
+    return out;
+  }
+
+  const LAYOUTS = {
+    /* ── GLORY: two enormous lines, a little tag between, the preacher in front of them ── */
+    glory(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D);
+      L.push(BG({ img: D.bg, grade: 'dark', bright: -10, contrast: 18, keep: 0.12, topShade: 0.65, bottomShade: 0.92, bottomFrom: 0.55, vignette: 0.55 }));
+      L.push(FX({ kind: 'streak', x: 540, y: H * 0.3, w: 2000, h: 190, rot: -13, opacity: 0.7 }));
+      L.push(FX({ kind: 'glow', x: 560, y: H * 0.55, w: 900, h: 800, opacity: 0.45 }));
+      L.push(...header(D));
+      const sc = splitConnector(f.title);
+      const lines = sc ? [sc.a, sc.b] : twoLines(f.title || 'Glory to Glory').filter(Boolean);
+      const ts = stackLines(lines, { t: H * 0.13, fit: 940, maxH: H * (lines.length === 1 ? 0.3 : sp ? 0.21 : 0.25), gap: sc ? 66 : 18,
+        style: { font: 'Anton', upper: true, fill: { stops: ['#ffffff', '#f4f4f4', '#c4c4c4'], angle: 90 }, shadow: true } });
+      L.push(...ts);
+      if (sc && ts.length === 2) {
+        const g = pill([{ text: sc.conn.charAt(0).toUpperCase() + sc.conn.slice(1), font: 'Barlow Italic', size: 50 }], { fill: p.accent, ink: '#141414', radius: 0, padX: 16, padY: 9 });
+        L.push(...g.place(540, (box(ts[0]).b + box(ts[1]).t) / 2));
+      }
+      if (sp) { const lb = box(ts[ts.length - 1]); L.push(hero(sp, { cx: 560, t: Math.max(lb.t + lb.h * 0.3, H * 0.34), b: H - 96, mode: 'waist', extra: lit(p) })); }
+      L.push(...col([f.time && T({ name: 'Time', text: f.time, font: 'Barlow Italic', size: 72, align: 'left', shadow: true }),
+        d && T({ name: 'Date', text: `${d.day3}, ${d.mon3} ${d.ddn}`, font: 'Barlow Italic', size: 40, align: 'left', shadow: true }),
+        d && T({ name: 'Year', text: d.year, font: 'Barlow Italic', size: 40, align: 'left', shadow: true })], { l: 70, b: H - 122, gap: 4 }));
+      if (sp && sp.name) {
+        const np = nameParts(sp.name);
+        L.push(...col([np.title && T({ name: 'Speaker title', text: np.title, font: 'Great Vibes', size: 64, align: 'right', shadow: true }),
+          T({ name: 'Speaker', text: twoLines(np.name).filter(Boolean).join('\n'), upper: true, font: 'Barlow Italic', size: 44, line: 0.95, align: 'right', shadow: true, maxW: 320 })], { r: 1010, b: H - 122, gap: -6 }));
+      }
+      if (f.theme && f.theme.length <= 28) { const v = T({ name: 'Theme', text: f.theme, font: 'Great Vibes', size: 54, fill: rgba('#ffffff', 0.85), rot: -90, maxW: H * 0.42 }); v.x = 50; v.y = H * 0.48; L.push(v); }
+      const vt = venueText(D);
+      if (vt) {
+        L.push(SH({ name: 'Address bar', shape: 'rect', fill: p.accent, x: 540, y: H - 58, w: 960, h: 62 }));
+        L.push(put(T({ name: 'Venue', text: vt, upper: true, font: 'Barlow Italic', size: 27, fill: '#141414', maxW: 910 }), { cx: 540, cy: H - 58 }));
+      }
+      return L;
+    },
+
+    /* ── FIRE: PUSH / 6 HOURS PRAYER WATCH — a burning italic title, the preacher in front ── */
+    fire(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D);
+      L.push(BG({ img: D.bg, grade: 'normal', contrast: 22, keep: 0.15, topShade: 0.65, bottomShade: 0.94, bottomFrom: 0.6, vignette: 0.5 }));
+      L.push(FX({ kind: 'glow', x: 540, y: H * 0.52, w: 1100, h: 900, opacity: 0.55 }));
+      L.push(FX({ kind: 'sparks', x: 540, y: H * 0.55, w: 1080, h: H * 0.9, n: 110, seed: 5, opacity: 0.9 }));
+      L.push(...header(D));
+      let y = H * 0.155;
+      if (f.theme) {
+        const k = put(T({ name: 'Theme label', text: 'THEME:', font: 'Montserrat', size: 16, letter: 0.14 }), { cx: 540, t: y });
+        const th = put(T({ name: 'Theme', text: f.theme, upper: true, font: 'Anton', size: 46, shadow: true, maxW: 960, letter: 0.03 }), { cx: 540, t: box(k).b + 8 });
+        L.push(k, th); y = box(th).b + 20;
+      }
+      const lines = stack(f.title || 'Push', 3), n = lines.length;
+      const ts = stackLines(lines, { t: y, fit: 990, maxH: H * (n === 1 ? 0.26 : n === 2 ? 0.16 : 0.12), gap: 8,
+        style: { font: 'Barlow Italic', upper: true, fill: { stops: ['#ffffff', '#f6f6f6', '#cfcfcf'], angle: 90 }, grain: true, extrude: 3, extrudeColor: rgba('#000000', 0.5), shadow: true } });
+      L.push(...ts);
+      if (sp) { const lb = box(ts[ts.length - 1]); L.push(hero(sp, { cx: 540, t: Math.max(lb.t + lb.h * 0.2, y + (ts.bottom - y) * 0.45), b: H - 150, mode: 'waist', extra: lit(p) })); }
+      if (d) L.push(...col([d.day3, d.ddth, d.month, d.year].map((s, i) => T({ name: 'Date ' + (i + 1), text: s, font: 'Barlow Italic', size: 56, line: 0.9, fill: p.accent, align: 'left', shadow: true })), { l: 62, t: H * 0.6, gap: -2 }));
+      L.push(...col([f.time && T({ name: 'Time', text: f.time, font: 'Anton', size: 66, align: 'right', shadow: true }), f.time2 && T({ name: 'Time 2', text: f.time2, font: 'Anton', size: 42, align: 'right', shadow: true })], { r: 1016, t: H * 0.6, gap: 6 }));
+      if (sp && sp.name) {
+        const np = nameParts(sp.name);
+        L.push(...col([T({ name: 'Ministering', text: 'MINISTERING', font: 'Montserrat', size: 15, letter: 0.18, align: 'right', shadow: true }),
+          T({ name: 'Speaker', text: (np.title ? np.title + '\n' : '') + np.name, upper: true, font: 'Anton', size: 34, line: 1.0, align: 'right', shadow: true, maxW: 300 })], { r: 1016, b: H - 168, gap: 6 }));
+      }
+      const vt = venueText(D);
+      if (vt) L.push(put(T({ name: 'Venue', text: vt, upper: true, font: 'Anton', size: 34, shadow: true, maxW: 980, line: 1.05 }), { cx: 540, b: H - 44 }));
+      return L;
+    },
+
+    /* ── ENCOUNTER: the ministers in the light, the title across them, the details on labels ── */
+    encounter(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [];
+      L.push(BG({ img: D.bg, grade: 'bright', contrast: 8, keep: 0.2, topShade: 0.45, bottomShade: 0.95, bottomFrom: 0.48, vignette: 0.35 }));
+      L.push(FX({ kind: 'glow', x: 540, y: H * 0.3, w: 1300, h: 1000, opacity: 0.6 }));
+      L.push(FX({ kind: 'bokeh', x: 540, y: H * 0.35, w: 1080, h: H * 0.6, n: 26, seed: 3, opacity: 0.7 }));
+      L.push(...header(D));
+      L.push(put(T({ name: 'Presents', text: 'PRESENTS', font: 'Montserrat', size: 19, letter: 0.9, shadow: true }), { cx: 540, t: H * 0.14 }));
+      const ps = spsOf(D).slice(0, 3), n = ps.length, pb = H * 0.8;
+      if (n === 1) L.push(hero(ps[0], { cx: 540, t: H * 0.185, b: pb, mode: 'waist', extra: lit(p) }));
+      if (n === 2) L.push(hero(ps[1], { cx: 770, t: H * 0.23, b: pb, mode: 'chest', extra: lit(p) }), hero(ps[0], { cx: 320, t: H * 0.21, b: pb, mode: 'chest', extra: lit(p) }));
+      if (n === 3) L.push(hero(ps[1], { cx: 220, t: H * 0.27, b: pb, mode: 'chest', extra: lit(p) }), hero(ps[2], { cx: 860, t: H * 0.27, b: pb, mode: 'chest', extra: lit(p) }), hero(ps[0], { cx: 540, t: H * 0.2, b: pb, mode: 'chest', extra: lit(p) }));
+      const ts = stackLines(twoLines(f.title || 'Worship Encounter').filter(Boolean), { t: H * (n ? 0.57 : 0.36), fit: 880, maxH: H * (n ? 0.115 : 0.16), gap: 6,
+        style: { font: 'Anton', fill: '#ffffff', shadow: true, extrude: 2, extrudeColor: rgba(p.deep, 0.6) } });
+      L.push(...ts);
+      let y = ts.bottom + 18;
+      if (f.theme) { const th = put(T({ name: 'Theme', text: 'Theme: ' + f.theme, font: 'DM Serif', size: 34, maxW: 920, shadow: true }), { cx: 540, t: y }); L.push(th); y = box(th).b + 12; }
+      if (f.extra) {
+        const ex = put(T({ name: 'Scripture', text: f.extra, font: 'Montserrat', size: 20, maxW: 560, letter: 0.04, shadow: true }), { cx: 540, t: y }); const b = box(ex);
+        L.push(SH({ name: 'Line', shape: 'line', fill: rgba('#ffffff', 0.7), x: b.l - 74, y: b.t + b.h / 2, w: 110, h: 2 }), SH({ name: 'Line', shape: 'line', fill: rgba('#ffffff', 0.7), x: b.r + 74, y: b.t + b.h / 2, w: 110, h: 2 }), ex);
+      }
+      const items = [];
+      if (d) items.push(pill([{ text: `${d.day3}, ${d.ddth}`, font: 'Anton', size: 32 }, { text: `${d.month} ${d.year}`, font: 'Montserrat', size: 15 }], { fill: p.accent, ink: '#161616', radius: 12, padX: 20, padY: 12 }));
+      if (f.time) items.push(pill([{ text: f.time, font: 'Anton', size: 38 }, { text: f.time2 ? 'AND ' + f.time2 : 'PROMPT', font: 'Montserrat', size: 13 }], { fill: p.accent, ink: '#161616', radius: 12, padX: 20, padY: 12 }));
+      if (venueText(D)) items.push(venueGroup(venueLines(D, 3), p.accent, 320));
+      L.push(...hrow(items, 540, H - 86, 20));
+      return L;
+    },
+
+    /* ── SPOTLIGHT (Miracle Service): the minister lit from behind, a wide title below ── */
+    miracle(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [];
+      L.push(BG({ img: D.bg, grade: 'dark', contrast: 15, keep: 0.12, topShade: 0.45, bottomShade: 0.96, bottomFrom: 0.5, vignette: 0.6 }));
+      L.push(FX({ kind: 'glow', x: 540, y: H * 0.32, w: 1050, h: 950, opacity: 0.65 }));
+      L.push(FX({ kind: 'sparks', x: 540, y: H * 0.45, w: 1080, h: H * 0.8, n: 60, seed: 9, opacity: 0.75 }));
+      L.push(...header(D));
+      if (f.handles) L.push(put(T({ name: 'Handles', text: f.handles, font: 'Montserrat', size: 16, align: 'right', maxW: 360, shadow: true }), { r: 1016, cy: 78 }));
+      const ps = spsOf(D);
+      if (ps[1]) L.push(hero(ps[1], { cx: 200, t: H * 0.25, b: H * 0.7, mode: 'chest', extra: lit(p) }));
+      if (ps[2]) L.push(hero(ps[2], { cx: 880, t: H * 0.25, b: H * 0.7, mode: 'chest', extra: lit(p) }));
+      if (ps[0]) L.push(hero(ps[0], { cx: 540, t: H * 0.12, b: H * 0.74, mode: 'waist', extra: lit(p) }));
+      const ws = String(f.title || 'Miracle Service').trim().split(/\s+/);
+      const big = ws.length > 1 ? ws.slice(0, -1).join(' ') : ws[0], small = ws.length > 1 ? ws[ws.length - 1] : '';
+      const t1 = put(T({ name: 'Title', text: big, upper: true, font: 'Archivo Black', fill: { stops: ['#ffffff', '#f0f0f0', '#b4b4b4'], angle: 90 }, fit: 930, maxH: H * (ps.length ? 0.095 : 0.14), shadow: true, extrude: 2, extrudeColor: rgba('#000000', 0.5) }), { cx: 540, t: H * (ps.length ? 0.69 : 0.42) });
+      L.push(t1);
+      let y = box(t1).b + 18;
+      if (small) { const t2 = put(T({ name: 'Subtitle', text: small.toUpperCase().split('').join(' '), font: 'Montserrat', size: 40, letter: 0.3, fit: Math.min(880, box(t1).w * 0.9), maxH: 34, shadow: true }), { cx: 540, t: y }); L.push(t2); y = box(t2).b + 16; }
+      if (f.theme) { const th = put(T({ name: 'Theme', text: f.theme, font: 'Alex Brush', size: 58, fill: p.accent, maxW: 900, shadow: true }), { cx: 540, t: y }); L.push(th); y = box(th).b + 10; }
+      L.push(...infoRow(D, Math.min(H - 92, Math.max(y + 56, H * 0.88)), [
+        d && { name: 'Date', big: `${d.day3}. ${d.ddth}`, small: `${d.month}, ${d.year}`, size: 40 },
+        f.time && { name: 'Time', big: f.time, small: f.time2 ? 'AND ' + f.time2 : 'PROMPT', size: 54, accent: true },
+        venueText(D) && { name: 'Venue', small: venueLines(D, 3), maxW: 300, smallSize: 15 }]));
+      L.push(put(T({ name: 'Footer', text: footerWords(f), font: 'Montserrat', size: 13, letter: 0.4, fill: rgba('#ffffff', 0.75), maxW: 980 }), { cx: 540, b: H - 22 }));
+      return L;
+    },
+
+    /* ── BIBLE STUDY: a gold serif title with a red JOIN US tab, the teacher below ── */
+    bible(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D);
+      L.push(BG({ img: D.bg, grade: 'dark', bright: -4, contrast: 14, keep: 0.25, topShade: 0.5, bottomShade: 0.95, bottomFrom: 0.5, vignette: 0.6 }));
+      L.push(FX({ kind: 'glow', x: 260, y: H * 0.2, w: 900, h: 760, opacity: 0.4 }));
+      const hd = header(D, { center: true, t: 32 }); L.push(...hd);
+      const pr = put(T({ name: 'Presents', text: 'PRESENTS', font: 'Montserrat', size: 15, letter: 1.0, shadow: true }), { cx: 540, t: hd.bottom }); L.push(pr);
+      const ts = stackLines(twoLines(f.title || 'Bible Study').filter(Boolean), { t: box(pr).b + 18, cx: 600, fit: 740, maxH: H * (sp ? 0.13 : 0.17), gap: 4,
+        style: { font: 'Abril Fatface', fill: { stops: ['#fff7b8', '#ffd52a', '#f2a600'], angle: 90 }, extrude: 4, extrudeColor: '#3a2000', shadow: true } });
+      L.push(...ts);
+      const tT = box(ts[0]).t, tB = ts.bottom, tl = Math.min(...ts.map((t) => box(t).l));
+      L.push(SH({ name: 'Join tab', shape: 'rect', fill: '#d71920', x: tl - 52, y: (tT + tB) / 2, w: 62, h: tB - tT + 8, shadow: true }));
+      const jt = T({ name: 'Join us', text: 'JOIN US', font: 'Anton', size: 40, rot: -90, maxW: tB - tT - 16 }); jt.x = tl - 52; jt.y = (tT + tB) / 2; L.push(jt);
+      const y = tB + 28; let cb = y;
+      if (d || f.time) {
+        const dc = col([d && T({ name: 'Day', text: `${d.day3}. ${d.ddn}`, font: 'Anton', size: 46, align: 'right', shadow: true }), d && T({ name: 'Month', text: d.month, font: 'Anton', size: 46, align: 'right', shadow: true })], { r: 574, t: y, gap: 4 });
+        const tc = col([f.time && T({ name: 'Time', text: f.time, font: 'Anton', size: 46, fill: p.accent, align: 'left', shadow: true }), f.time2 && T({ name: 'Time 2', text: f.time2, font: 'Anton', size: 46, fill: p.accent, align: 'left', shadow: true }), !f.time2 && T({ name: 'Prompt', text: 'PROMPT', font: 'Montserrat', size: 18, letter: 0.2, align: 'left', shadow: true })], { l: 626, t: y, gap: 6 });
+        cb = Math.max(dc.bottom, tc.bottom);
+        L.push(...dc, ...tc, SH({ name: 'Divider', shape: 'line', fill: rgba('#ffffff', 0.75), x: 600, y: (y + cb) / 2, w: 3, h: cb - y }));
+      }
+      if (sp) L.push(hero(sp, { cx: 520, t: Math.max(cb + 26, H * 0.45), b: H - 64, mode: 'chest', extra: lit(p) }));
+      if (sp && sp.name) {
+        const np = nameParts(sp.name);
+        const g = pill([{ text: 'with', font: 'Great Vibes', size: 40 }, { text: (np.title ? np.title + '\n' : '') + np.name, upper: true, font: 'Anton', size: 34, line: 0.98, fill: '#c81e1e', maxW: 230 }], { fill: '#ffd21f', ink: '#141414', radius: 18, rot: -4, shadow: true, padX: 22, padY: 14, gap: 2 });
+        L.push(...g.place(860, H - 290));
+      }
+      const vt = venueText(D);
+      if (vt) L.push(put(T({ name: 'Venue', text: vt, upper: true, font: 'Montserrat', size: 18, letter: 0.03, shadow: true, maxW: 980 }), { cx: 540, b: H - 26 }));
+      return L;
+    },
+
+    /* ── GOLD (Night of Prophetic Prayers): a red ribbon, a blazing gold title, the details down the right ── */
+    prophetic(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [];
+      L.push(BG({ img: D.bg, grade: 'bright', contrast: 12, keep: 0.18, topShade: 0.35, bottomShade: 0.85, bottomFrom: 0.6, vignette: 0.35 }));
+      L.push(FX({ kind: 'rays', x: 540, y: -60, h: H * 0.95, n: 18, seed: 4, color: p.hi, opacity: 0.55 }));
+      L.push(FX({ kind: 'glow', x: 540, y: H * 0.28, w: 1200, h: 900, opacity: 0.5 }));
+      const hd = header(D, { center: true, t: 32 }); L.push(...hd);
+      const m = /^((?:a\s+)?(?:night|day|days|hour|hours|evening|morning|season|week|weekend)\s+of)\s+(.+)$/i.exec(String(f.title || '').trim());
+      const tag = m ? m[1] : (D.dir.kicker && D.dir.kicker.length <= 20 ? D.dir.kicker : '');
+      const rest = m ? m[2] : (f.title || 'Prophetic Prayers');
+      let y = hd.bottom + 16;
+      if (tag) { const g = pill([{ text: tag, upper: true, font: 'Anton', size: 38 }], { fill: '#d71920', ink: '#ffffff', radius: 0, padX: 20, padY: 8, rot: -5, shadow: true }); L.push(...g.place(420, y + g.h / 2)); y += g.h + 6; }
+      const ts = tilt(stackLines(stack(rest, 3), { t: y, fit: 920, maxH: H * 0.15, gap: 4,
+        style: { font: 'Anton', upper: true, fill: 'fire', extrude: 6, extrudeColor: '#6e1600', shadow: true } }), -3);
+      L.push(...ts);
+      const tb = ts.bottom;
+      if (f.theme) L.push(put(T({ name: 'Theme', text: f.theme, upper: true, font: 'Montserrat', size: 21, align: 'right', maxW: 440, line: 1.15, shadow: true }), { r: 1000, t: tb + 22 }));
+      const ps = spsOf(D).slice(0, 2);
+      if (ps[1]) L.push(hero(ps[1], { cx: 170, t: Math.max(tb + 80, H * 0.58), b: H, mode: 'chest', extra: lit(p) }));
+      if (ps[0]) L.push(hero(ps[0], { cx: ps[1] ? 420 : 370, t: Math.max(tb + 40, H * 0.5), b: H, mode: 'waist', extra: lit(p) }));
+      L.push(...col([d && T({ name: 'Day', text: `${d.day}, ${d.year}`, font: 'Montserrat', size: 18, letter: 0.3, align: 'right', shadow: true }),
+        d && T({ name: 'Date', text: `${d.ddth} ${d.month}`, font: 'Anton', size: 70, align: 'right', shadow: true, maxW: 420 }),
+        f.time && T({ name: 'Time', text: f.time, font: 'Anton', size: 70, align: 'right', shadow: true }),
+        venueText(D) && T({ name: 'Venue', text: venueLines(D, 3), upper: true, font: 'Montserrat', size: 16, align: 'right', line: 1.22, maxW: 380, shadow: true })], { r: 1010, b: H - 60, gap: 8 }));
+      if (ps[0] && ps[0].name) {
+        const np = nameParts(ps[0].name);
+        L.push(...col([T({ name: 'Ministering', text: 'MINISTERING', font: 'Montserrat', size: 13, letter: 0.2, align: 'left', shadow: true }),
+          T({ name: 'Speaker', text: (np.title ? np.title + ' ' : '') + np.name, upper: true, font: 'Montserrat', size: 24, align: 'left', shadow: true, maxW: 440 })], { l: 56, b: H - 32, gap: 4 }));
+      }
+      return L;
+    },
+
+    /* ── GIANT WORDS (Sunday Service): the title as tall as the flyer, the preacher walking out of it ── */
+    sunday(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D);
+      L.push(BG({ img: D.bg, grade: 'normal', contrast: 10, keep: 0.22, topShade: 0.45, bottomShade: 0.8, bottomFrom: 0.68, vignette: 0.35 }));
+      L.push(FX({ kind: 'glow', x: 540, y: H * 0.45, w: 1100, h: 1100, opacity: 0.5 }));
+      const kw = String(D.dir.kicker || 'Worship with us at our').toUpperCase().split(/\s+/);
+      const ka = kw.slice(0, Math.ceil(kw.length / 2)).join(' '), kb = kw.slice(Math.ceil(kw.length / 2)).join(' ');
+      const k1 = put(T({ name: 'Kicker', text: ka, font: 'League Gothic', size: 36, align: 'left', letter: 0.04, shadow: true }), { l: 62, cy: 62 });
+      L.push(k1);
+      if (kb) { const k2 = put(T({ name: 'Kicker 2', text: kb, font: 'League Gothic', size: 36, align: 'right', letter: 0.04, shadow: true }), { r: 1018, cy: 62 }); L.push(k2, SH({ name: 'Line', shape: 'line', fill: rgba('#ffffff', 0.8), x: (box(k1).r + box(k2).l) / 2, y: 64, w: Math.max(20, box(k2).l - box(k1).r - 30), h: 2 })); }
+      const lines = stack(f.title || 'Sunday Service', 2), n = lines.length, top = 108, avail = H - top - (sp ? 60 : 150);
+      const ts = stackLines(lines, { t: top, fit: 1000, maxH: avail / n - 14, gap: 14,
+        style: { font: 'League Gothic', upper: true, stretch: 1.45, fill: { stops: ['#ffffff', mix('#ffffff', p.accent, 0.3), mix(p.accent, p.hi, 0.25)], angle: 90 }, shadow: true } });
+      L.push(...ts);
+      if (sp) { const m = META.get(sp.img); L.push(hero(sp, { cx: 540, t: top + (ts.bottom - top) * 0.2, b: H - 16, mode: m && m.full ? 'full' : 'waist', extra: lit(p) })); }
+      L.push(...col([d && T({ name: 'Date', text: `${d.mon3}. ${d.ddth}`, font: 'Anton', size: 50, fill: p.accent, align: 'right', shadow: true }), f.time && T({ name: 'Time', text: f.time, font: 'Anton', size: 50, align: 'right', shadow: true })], { r: 1018, b: H - 50, gap: 4 }));
+      L.push(...col([sp && sp.name && T({ name: 'Speaker', text: sp.name, upper: true, font: 'Montserrat', size: 18, align: 'left', shadow: true, maxW: 300 }),
+        venueText(D) && T({ name: 'Venue', text: venueLines(D, 3), upper: true, font: 'Montserrat', size: 14, align: 'left', line: 1.22, maxW: 280, shadow: true })], { l: 62, b: H - 50, gap: 10 }));
+      return L;
+    },
+
+    /* ── LINE-UP: everyone ministering, each named, under a bold title ── */
+    lineup(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [];
+      L.push(BG({ img: D.bg, grade: 'normal', contrast: 14, keep: 0.15, topShade: 0.5, bottomShade: 0.96, bottomFrom: 0.6, vignette: 0.45 }));
+      L.push(FX({ kind: 'glow', x: 540, y: H * 0.55, w: 1300, h: 800, opacity: 0.55 }));
+      const hd = header(D, { center: true, t: 30 }); L.push(...hd);
+      const pr = put(T({ name: 'Presents', text: 'PRESENTS', font: 'Montserrat', size: 15, letter: 1.0, shadow: true }), { cx: 540, t: hd.bottom }); L.push(pr);
+      const ps = spsOf(D).slice(0, 7), n = ps.length;
+      const ts = stackLines(stack(f.title || 'The Power of Praise', 3), { t: box(pr).b + 14, fit: 880, maxH: H * (n ? 0.085 : 0.14), gap: 6,
+        style: { font: 'Barlow Italic', upper: true, fill: { stops: [mix(p.accent, '#ffffff', 0.4), p.accent, mix(p.accent, p.mid, 0.35)], angle: 90 }, extrude: 4, extrudeColor: rgba(p.deep, 0.85), shadow: true } });
+      L.push(...ts);
+      let y = ts.bottom + 12;
+      if (f.theme) { const th = put(T({ name: 'Theme', text: f.theme, upper: true, font: 'Montserrat', size: 20, letter: 0.08, maxW: 900, shadow: true }), { cx: 540, t: y }); L.push(th); y = box(th).b; }
+      if (n) {
+        const mid = Math.floor((n - 1) / 2), pos = ps.map((s, i) => ({ s, j: mid + (i === 0 ? 0 : (i % 2 ? Math.ceil(i / 2) : -Math.ceil(i / 2))) }));
+        const minJ = Math.min(...pos.map((q) => q.j)); pos.forEach((q) => { q.j -= minJ; });
+        const cMid = (n - 1) / 2, stepX = Math.min(330, 1000 / n), baseT = Math.max(y + 90, H * 0.4), names = [];
+        pos.sort((a, b) => Math.abs(b.j - cMid) - Math.abs(a.j - cMid)).forEach((q) => {
+          const dist = Math.abs(q.j - cMid), cx = 540 + (q.j - cMid) * stepX, t = baseT + dist * 30;
+          const P = hero(q.s, { cx, t, b: H - 80, mode: 'chest', extra: lit(p) }); if (P) L.push(P);
+          if (q.s.name) { const np = nameParts(q.s.name); names.push(...col([np.title && T({ name: 'Title', text: np.title, upper: true, font: 'Montserrat', size: 12, letter: 0.1, maxW: stepX - 14, shadow: true }), T({ name: 'Name', text: np.name, upper: true, font: 'Montserrat', size: 16, maxW: stepX - 14, line: 1.05, shadow: true })], { cx, b: t - 10, gap: 3 })); }
+        });
+        L.push(...names);
+      }
+      L.push(...infoRow(D, H - 60, [d && { name: 'Date', big: `${d.ddth} ${d.month}, ${d.year}`, size: 30 }, venueText(D) && { name: 'Venue', small: venueLines(D, 2), pin: true, maxW: 400, smallSize: 14 }, f.time && { name: 'Time', big: f.time, size: 40, accent: true }], { lineH: 50 }));
+      return L;
+    },
+
+    /* ── SCRIPT (Special Sunday Service): one word in flowing script, capitals around it ── */
+    script(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D);
+      L.push(BG({ img: D.bg, grade: 'normal', contrast: 15, sat: 10, keep: 0.12, topShade: 0.5, bottomShade: 0.88, bottomFrom: 0.6, vignette: 0.45 }));
+      L.push(FX({ kind: 'streak', x: 540, y: H * 0.42, w: 1900, h: 260, rot: 22, opacity: 0.55 }));
+      L.push(FX({ kind: 'glow', x: 780, y: H * 0.64, w: 900, h: 900, opacity: 0.5 }));
+      const hd = header(D, { center: true, t: 30 }); L.push(...hd);
+      const words = String(f.title || 'Sunday Service').trim().split(/\s+/);
+      const want = String(D.script || '').toLowerCase();
+      let si = words.findIndex((w) => w.toLowerCase() === want); if (si < 0) si = words.findIndex((w) => /day$/i.test(w)); if (si < 0) si = 0;
+      const pre = words.slice(0, si).join(' '), word = words[si], post = words.slice(si + 1).join(' ');
+      let y = hd.bottom + 4;
+      const jo = put(T({ name: 'Kicker', text: 'Join Our', font: 'Great Vibes', size: 62, shadow: true }), { cx: 540, t: y }); L.push(jo); y = box(jo).b + 6;
+      if (pre) { const t = put(T({ name: 'Title', text: pre, upper: true, font: 'Barlow Italic', fit: 700, maxH: H * 0.085, shadow: true }), { cx: 540, t: y }); L.push(t); y = box(t).b - 6; }
+      const sw = put(T({ name: 'Script word', text: word, font: 'Alex Brush', fill: { stops: ['#fffbe6', '#ffe9a0', mix('#ffd76a', p.accent, 0.3)], angle: 90 }, fit: 980, maxH: H * 0.19, shadow: true }), { cx: 540, t: y }); L.push(sw);
+      y = box(sw).b - box(sw).h * 0.2;
+      if (post) { const t = put(T({ name: 'Title 2', text: post, upper: true, font: 'Barlow Italic', fit: 760, maxH: H * 0.1, shadow: true, extrude: 2, extrudeColor: rgba(p.deep, 0.7) }), { cx: 560, t: y }); L.push(t); y = box(t).b; }
+      if (sp) L.push(hero(sp, { cx: 770, t: Math.max(y + 10, H * 0.47), b: H - 36, mode: 'chest', extra: lit(p) }));
+      const lc = col([d && T({ name: 'Date', text: `${d.day3} ${d.ddth}.\n${d.mon3}, ${d.year}`, font: 'Anton', size: 50, line: 1.02, align: 'left', shadow: true })], { l: 62, t: Math.max(y + 34, H * 0.6), gap: 10 });
+      L.push(...lc);
+      let yy = lc.length ? lc.bottom + 22 : Math.max(y + 34, H * 0.6);
+      if (f.time) { const g = pill([{ text: f.time.replace(/(AM|PM)$/, '\n$1'), font: 'Anton', size: 30, line: 0.95 }], { fill: p.accent, ink: '#ffffff', circle: true, padX: 16, padY: 16, shadow: true }); L.push(...g.place(62 + g.w / 2, yy + g.h / 2)); yy += g.h + 20; }
+      if (venueText(D)) { const g = venueGroup(venueLines(D, 3), p.accent, 300, { size: 15 }); L.push(...g.place(62 + g.w / 2, yy + g.h / 2)); yy += g.h + 18; }
+      if (sp && sp.name) { const np = nameParts(sp.name); L.push(...col([T({ name: 'With', text: 'with ' + (np.title || ''), font: 'Montserrat', size: 15, align: 'left', shadow: true }), T({ name: 'Speaker', text: np.name, upper: true, font: 'Montserrat', size: 26, align: 'left', shadow: true, maxW: 360 })], { l: 62, t: yy, gap: 4 })); }
+      return L;
+    },
+
+    /* ── SCENIC (Doctrines of Faith): a landscape, one huge word, the preacher on a card ── */
+    scenic(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D);
+      L.push(BG({ img: D.bg, grade: 'normal', contrast: 12, keep: 0.38, topShade: 0.4, bottomShade: 0.92, bottomFrom: 0.6, vignette: 0.4 }));
+      L.push(FX({ kind: 'glow', x: 540, y: H * 0.25, w: 1200, h: 800, color: p.hi, opacity: 0.35 }));
+      const hd = header(D, { center: true, t: 30 }); L.push(...hd);
+      const ws = String(f.title || 'Faith').trim().split(/\s+/);
+      const big = ws.length > 1 ? ws[ws.length - 1] : ws[0], kick = ws.length > 1 ? ws.slice(0, -1).join(' ') : '';
+      let y = H * 0.5;
+      if (kick) { const k = put(T({ name: 'Kicker', text: kick, upper: true, font: 'Montserrat', size: 28, letter: 0.55, shadow: true, maxW: 1000 }), { cx: 540, t: y }); L.push(k); y = box(k).b + 14; }
+      const t = put(T({ name: 'Title', text: big, upper: true, font: 'Anton', fit: 1000, maxH: H * 0.2, fill: { stops: ['#ffffff', mix(p.hi, p.accent, 0.4), p.accent], angle: 90 }, grain: true, shadow: true, extrude: 3, extrudeColor: rgba(p.deep, 0.8) }), { cx: 540, t: y });
+      L.push(t); y = box(t).b + 26;
+      const cardT = Math.max(y, H - 320), cardB = H - 60, cardW = Math.min(250, (cardB - cardT) * 0.8);
+      if (sp) L.push(...card(sp, { l: 66, t: cardT, w: cardW, h: cardB - cardT }, p));
+      const ix = sp ? 66 + cardW + 34 : 66;
+      L.push(...col([sp && sp.name && T({ name: 'With', text: 'With ' + sp.name, font: 'Great Vibes', size: 44, align: 'left', shadow: true, maxW: 1010 - ix }),
+        d && T({ name: 'Date', text: `${d.day3}. ${d.ddth} ${d.month}`, font: 'Montserrat', size: 24, align: 'left', shadow: true, maxW: 1010 - ix }),
+        f.time && T({ name: 'Time', text: f.time + (f.time2 ? ' & ' + f.time2 : ' Prompt'), font: 'Anton', size: 52, align: 'left', shadow: true }),
+        venueText(D) && T({ name: 'Venue', text: venueLines(D, 3), font: 'Montserrat', size: 16, align: 'left', line: 1.25, maxW: 1010 - ix, shadow: true })], { l: ix, cy: (cardT + cardB) / 2, gap: 10 }));
+      return L;
+    },
+
+    /* ── LIGHT (Workers' Meeting / Single Men Hangout): a bright page, a bold dark title, a script word in colour ── */
+    light(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D);
+      const red = lum(p.mid) < 0.5 ? p.mid : '#c8102e', ink = '#1c1c1f';
+      L.push(BG({ img: D.bg, sat: -75, bright: 26, contrast: -12, wash: 'rgba(255,251,245,.6)', grain: 0.6 }));
+      L.push(FX({ kind: 'glow', x: 540, y: H * 0.62, w: 1100, h: 700, color: '#ffffff', opacity: 0.8 }));
+      const hd = header(D, { center: true, t: 30 });
+      hd.forEach((l) => { if (l.type === 'text') { l.fill = ink; l.shadow = false; } });
+      L.push(...hd);
+      const ws = String(f.title || 'Workers Meeting').trim().split(/\s+/);
+      const scriptW = ws.length > 1 ? ws[ws.length - 1] : '', main = ws.length > 1 ? ws.slice(0, -1).join(' ') : ws[0];
+      let y = hd.bottom + 18;
+      if (f.extra) { const k = put(T({ name: 'Kicker', text: f.extra, upper: true, font: 'Barlow Italic', size: 34, fill: red }), { cx: 540, t: y }); L.push(k); y = box(k).b + 10; }
+      const ts = stackLines(stack(main, 2), { t: y, fit: 800, maxH: H * 0.13, gap: 6, style: { font: 'Anton', upper: true, fill: ink } });
+      L.push(...ts); y = ts.bottom;
+      if (scriptW) { const s = put(T({ name: 'Script word', text: scriptW.toLowerCase(), font: 'Yellowtail', fill: red, fit: 640, maxH: H * 0.11 }), { cx: 600, t: y - H * 0.03 }); s.rot = -6; L.push(s); y = box(s).b; }
+      if (f.theme) { const th = put(T({ name: 'Theme', text: 'Theme: ' + f.theme, upper: true, font: 'Barlow Italic', size: 34, fill: ink, maxW: 820 }), { cx: 540, t: y + 14 }); L.push(th); y = box(th).b; }
+      if (sp) L.push(hero(sp, { cx: 540, t: Math.max(y + 30, H * 0.42), b: H - 120, mode: 'waist', extra: { rim: '#ffffff' } }));
+      L.push(SH({ name: 'Info bar', shape: 'round', radius: 0, fill: { stops: [rgba('#ffffff', 0), rgba('#ffffff', 0.92)], angle: 90 }, x: 540, y: H - 90, w: W, h: 180 }));
+      L.push(...infoRow(D, H - 74, [d && { name: 'Date', big: `${d.ddth} ${d.mon3}. ${d.year}`, size: 40 }, f.time && { name: 'Time', big: f.time, size: 40, accent: true }, venueText(D) && { name: 'Venue', small: venueLines(D, 3), maxW: 320, smallSize: 14 }], { ink, accent: red, lineH: 56 }));
+      return L;
+    },
+  };
+  const LOOK_NAMES = { glory: 'Glory', fire: 'Fire', encounter: 'Encounter', miracle: 'Spotlight', bible: 'Bible Study', prophetic: 'Gold', sunday: 'Giant words', lineup: 'Line-up', script: 'Script', scenic: 'Scenic', light: 'Light' };
+  /* each look's own colours (the AI's colours go on the first few designs; these on the rest, for variety) */
+  const SIGNATURE = {
+    glory: { deep: '#0b0b10', mid: '#2a2140', accent: '#f6c915', hi: '#ffffff' },
+    fire: { deep: '#1a0300', mid: '#c2410c', accent: '#ffb300', hi: '#fff3c4' },
+    encounter: { deep: '#3a1200', mid: '#d4560b', accent: '#ffc233', hi: '#fff4d6' },
+    miracle: { deep: '#1a0630', mid: '#6d1fb0', accent: '#ff8a1e', hi: '#ffe6ff' },
+    bible: { deep: '#0d0804', mid: '#4a2e12', accent: '#ffcf33', hi: '#fff6dd' },
+    prophetic: { deep: '#3a1800', mid: '#c77400', accent: '#ffd23f', hi: '#fff8dc' },
+    sunday: { deep: '#2b1600', mid: '#b86f00', accent: '#ffd54a', hi: '#fffbe6' },
+    lineup: { deep: '#2a0400', mid: '#c2260c', accent: '#ffc21a', hi: '#ffffff' },
+    script: { deep: '#14063a', mid: '#5b21b6', accent: '#ff3d8b', hi: '#ffe4f2' },
+    scenic: { deep: '#012a30', mid: '#0e6f7a', accent: '#7ee0d6', hi: '#ffffff' },
+    light: { deep: '#3a2a1a', mid: '#c8102e', accent: '#c8102e', hi: '#ffffff' },
+  };
+
+  /** The event, the art direction and the pictures → everything a layout reads. */
+  function dataFor(o) {
+    const f = Object.assign({}, o.fields || {});
+    const dp = dateParts(f.date);
+    if (dp) Object.assign(f, { dd: dp.dd, month: dp.month, mon: dp.mon, year: dp.year, day: dp.dayName });
+    f.time = niceTime(f.time);
+    f.time2 = niceTime(f.time2);
+    const dir = o.dir || {};
+    const pal = o.pal || { deep: '#1a0638', mid: '#5b21b6', accent: '#f5c542', hi: '#ffffff' };
+    return {
+      w: o.w || 1080, h: o.h || 1350, pal, dir, f, bg: o.bg, logo: o.logo,
+      sp: (o.speakers || []).map((s) => ({ name: s.name, img: s.img, id: s.id, photo: s.photo })),
+      script: dir.scriptWord || (dp ? dp.dayName : 'Sunday'),
+      d: dp ? { day3: dp.day.slice(0, 3), day: dp.day, dayName: dp.dayName, ddn: dp.dd.replace(/\D+$/, ''), ddth: dp.dd, month: dp.month, mon3: dp.month.slice(0, 3), year: dp.year } : null,
+    };
+  }
+
+  /** A whole flyer: { w, h, pal, look, layers } */
+  function buildScene(o) {
+    const D = dataFor(o);
+    const look = LAYOUTS[o.look] ? o.look : 'glory';
+    return { w: D.w, h: D.h, pal: D.pal, look, layers: LAYOUTS[look](D).filter(Boolean) };
+  }
+
+  /* A cut-out, tidied — the upload path keeps a data URL (see tidyCanvas). */
+  async function tidyCut(src) {
+    const im = await loadImg(src);
+    const c = canvas(iw(im), ih(im)); c.getContext('2d').drawImage(im, 0, 0);
+    const t = tidyCanvas(c);
+    return t.c === c && !t.x0 && !t.y0 ? src : t.c.toDataURL('image/png');
+  }
+
+  root.MWFlyer = { tidyCut, preparePerson, hero, META, HD, render, buildScene, loadFonts, IMGS, loadImg, proceduralBg, LAYOUTS, LOOK_NAMES, SIGNATURE, FONTS, textCanvas, boxOf, Dates };
 
   /* ================================================================== THE UI */
 
@@ -1218,9 +1605,12 @@
       PICLOAD.set(p, (async () => {
         const url = /^data:/.test(p) ? p : await window.api.flyer.kitPic(p);
         PICURL.set(p, url);
-        const im = await loadImg(url);
-        IMGS.set(picKey(p), im);
-        return im;
+        const raw = await loadImg(url);
+        // the person made ready: what is not them taken away, where their head and shoulders are noted
+        const pr = await root.MWFlyer.preparePerson(raw);
+        IMGS.set(picKey(p), pr.img);
+        if (pr.meta) META.set(picKey(p), pr.meta); else META.delete(picKey(p));
+        return pr.img;
       })().catch(() => { PICLOAD.delete(p); return null; }));
     }
     return PICLOAD.get(p);
@@ -1438,7 +1828,9 @@
     const all = Array.from(new Set(looks.concat(Object.keys(LAYOUTS))));
     F.designs = all.map((look, i) => {
       const bg = F.bgs[i % F.bgs.length];
-      return buildScene({ look, w: sz.w, h: sz.h, pal: F.pal, dir: F.dir, fields: F.fields, speakers: speakersFor(i), logo: IMGS.has('logo') ? 'logo' : null, bg: bg && bg.key });
+      // the AI's colours on the first designs, each look's own on the rest — a board of different flyers, not one flyer ten times
+      const pal = i < 3 || !SIGNATURE[look] ? F.pal : SIGNATURE[look];
+      return buildScene({ look, w: sz.w, h: sz.h, pal, dir: F.dir, fields: F.fields, speakers: speakersFor(i), logo: IMGS.has('logo') ? 'logo' : null, bg: bg && bg.key });
     });
     if (F.step === 'pick') paintThumbs();
   }
@@ -1465,10 +1857,10 @@
     if (!F.panel) return;
     $$('.fs-card', F.panel.body).forEach((c) => {
       const S = F.designs[+c.dataset.i]; if (!S) return;
-      const big = render(S, canvas(1, 1), 0.5);
       const cv = c.querySelector('canvas');
-      cv.width = 360; cv.height = Math.round(360 * S.h / S.w);
-      const x = cv.getContext('2d'); x.imageSmoothingQuality = 'high'; x.drawImage(big, 0, 0, cv.width, cv.height);
+      // as sharp as this screen shows it (a phone has three pixels to each point)
+      const px = Math.max(240, Math.round((cv.clientWidth || 170) * (window.devicePixelRatio || 1)));
+      render(S, cv, px / S.w);
     });
   }
 
@@ -1536,8 +1928,8 @@
     requestAnimationFrame(() => {
       paintQueued = false;
       const cv = $('#fsCanvas'); if (!cv || !F.scene) return;
-      render(F.scene, cv);
       const k = stageScale();
+      render(F.scene, cv, clamp(k * (window.devicePixelRatio || 1), 1, 2));
       cv.style.width = Math.round(F.scene.w * k) + 'px'; cv.style.height = Math.round(F.scene.h * k) + 'px';
       selBox();
     });
@@ -1571,8 +1963,9 @@
           if (im) {
             try {
               const t = canvas(1, 1), tx = t.getContext('2d');
-              const u = (rx / s + L.w / 2) / L.w, v = (ry / s + L.h / 2) / L.h;
-              tx.drawImage(im, (L.flip ? 1 - u : u) * iw(im), v * ih(im), 1, 1, 0, 0, 1, 1);
+              const sr = L.src || { x: 0, y: 0, w: 1, h: L.crop || 1 };
+              const u0 = (rx / s + L.w / 2) / L.w, v = (ry / s + L.h / 2) / L.h, u = L.flip ? 1 - u0 : u0;
+              tx.drawImage(im, (sr.x + u * sr.w) * iw(im), (sr.y + v * sr.h) * ih(im), 1, 1, 0, 0, 1, 1);
               if (tx.getImageData(0, 0, 1, 1).data[3] < 30) continue;
             } catch (e) { /* tainted: count it */ }
           }
@@ -1705,7 +2098,7 @@
       case 'effects': return sheetEffects(L);
       case 'spacing': return sliders([['Letters', 'letter', -0.05, 0.8, 0.01], ['Lines', 'line', 0.7, 1.6, 0.02], ['Size', 's', 0.2, 3, 0.02], ['Turn', 'rot', -180, 180, 1]], L);
       case 'opacity': return sliders([['Opacity', 'opacity', 0.05, 1, 0.01]], L);
-      case 'imglook': return sliders([['Length', 'crop', 0.35, 1, 0.01], ['Brightness', 'bright', -60, 60], ['Contrast', 'contrast', -50, 80], ['Colour', 'sat', -100, 100], ['Round corners', 'radius', 0, 300]], L);
+      case 'imglook': return sliders([['Length', 'len', 0.4, 1.6, 0.01], ['Brightness', 'bright', -60, 60], ['Contrast', 'contrast', -50, 80], ['Colour', 'sat', -100, 100], ['Round corners', 'radius', 0, 300]], L);
       case 'dup': { const N = Object.assign(clone(L), { id: uid(), x: L.x + 30, y: L.y + 30 }); change(() => { ls.splice(ls.indexOf(L) + 1, 0, N); F.sel = N.id; }); return; }
       case 'front': { const i = ls.indexOf(L); if (i < ls.length - 1) change(() => { ls.splice(i, 1); ls.splice(i + 1, 0, L); }); return; }
       case 'back': { const i = ls.indexOf(L); if (i > 1) change(() => { ls.splice(i, 1); ls.splice(i - 1, 0, L); }); return; }
@@ -1719,7 +2112,7 @@
       case 'bank': return sheetBank(L);
       case 'replace': return pickImage(async (url) => {
         const im = await loadImg(url); const key = 'user:' + uid(); IMGS.set(key, im);
-        change(() => { L.img = key; L.w = L.h * iw(im) / ih(im); });
+        change(() => { refit(L, { img: key }); });
       });
       default:
     }
@@ -1739,12 +2132,19 @@
   function sliders(list, L) {
     if (!L) return;
     snapshot();
+    // "Length": how much of the person is shown, the head staying where it is
+    if (L.type === 'image' && L.len == null) { L.len = 1; L._src0 = L.src ? Object.assign({}, L.src) : { x: 0, y: 0, w: 1, h: L.crop || 1 }; L._h0 = L.h; L._top0 = L.y - L.h / 2; }
     openSheet(list.map(([label, k, min, max, step]) => {
       const v = L[k] == null ? (k === 'opacity' || k === 's' || k === 'crop' ? 1 : k === 'line' ? 1 : k === 'tint' ? 0.45 : k === 'vignette' ? 0.75 : 0) : L[k];
       return `<label class="fs-slider"><span>${esc(label)}</span><input type="range" data-k="${k}" min="${min}" max="${max}" step="${step || 1}" value="${v}"><output>${Math.round(v * (step && step < 1 ? 100 : 1))}</output></label>`;
     }).join(''), (sh) => {
       $$('input[type=range]', sh).forEach((r) => r.addEventListener('input', () => {
         L[r.dataset.k] = +r.value;
+        if (r.dataset.k === 'len' && L._src0) {
+          const im = imgOf(L.img), maxH = im ? 1 - L._src0.y : 1;
+          L.src = Object.assign({}, L._src0, { h: Math.min(maxH, L._src0.h * L.len) });
+          L.h = L._h0 * L.src.h / L._src0.h; L.y = L._top0 + L.h / 2; delete L.crop;
+        }
         r.nextElementSibling.textContent = Math.round(+r.value * (+r.step < 1 ? 100 : 1));
         paint();
       }));
@@ -1883,6 +2283,16 @@
     });
   }
 
+  /* a person's layer given another photo: framed the same way (head where it was, same size) */
+  function refit(L, o) {
+    if (L.frame) {
+      const N = root.MWFlyer.hero({ img: o.img, name: L.name, id: L.speaker, photo: o.photo || L.photo }, L.frame);
+      if (N) { ['img', 'photo', 'src', 'w', 'h', 'x', 'y', 'fade'].forEach((k) => { L[k] = N[k]; }); delete L.crop; delete L.len; return; }
+    }
+    const im = imgOf(o.img); L.img = o.img; if (o.photo) L.photo = o.photo; delete L.src; delete L.crop;
+    if (im) L.w = L.h * iw(im) / ih(im);
+  }
+
   /* swap a speaker's picture for another from their bank */
   function sheetBank(L) {
     const s = ((F.kit && F.kit.speakers) || []).find((x) => x.id === L.speaker); if (!s) return;
@@ -1891,7 +2301,7 @@
       sh.addEventListener('click', async (e) => {
         const b = e.target.closest('[data-photo]'); if (!b) return;
         const p = b.dataset.photo, im = await bankPic(p); if (!im) return;
-        change(() => { L.photo = p; L.img = picKey(p); L.w = L.h * iw(im) / ih(im); });
+        change(() => { refit(L, { img: picKey(p), photo: p }); });
         F.pinned[s.id] = p;
         $$('.fs-bank-pic', sh).forEach((x) => x.classList.toggle('on', x === b));
       });
@@ -2008,8 +2418,9 @@
     const c = canvas(iw(im), ih(im)); c.getContext('2d').drawImage(im, 0, 0);
     cutOutUrl(c.toDataURL('image/png'), async (png) => {
       png = await tidyCut(png).catch(() => png);
-      const cut = await loadImg(png); const key = 'cut:' + uid(); IMGS.set(key, cut);
-      change(() => { L.img = key; L.w = L.h * iw(cut) / ih(cut); });
+      const pr = await preparePerson(await loadImg(png)); const key = 'cut:' + uid(); IMGS.set(key, pr.img);
+      if (pr.meta) META.set(key, pr.meta);
+      change(() => { refit(L, { img: key }); });
       toast('Background removed.', 'good');
     });
   }

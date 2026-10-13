@@ -132,10 +132,10 @@ async function t(name, fn) {
   const saved = process.env.ANTHROPIC_API_KEY; delete process.env.ANTHROPIC_API_KEY;
   await t('each kind of event gets its look, its colours and matching photographs', async () => {
     const bible = await fa.direct({ title: 'Bible Study', kind: 'Bible study' });
-    assert.strictEqual(bible.looks[0], 'slab'); assert.strictEqual(bible.palette.length, 4);
+    assert.strictEqual(bible.looks[0], 'bible'); assert.strictEqual(bible.palette.length, 4);
     assert.ok(bible.photos.includes('bible-open.jpg'), bible.photos.join());
     const prayer = await fa.direct({ title: 'Prayer Meeting' });
-    assert.strictEqual(prayer.looks[0], 'giant');
+    assert.strictEqual(prayer.looks[0], 'prophetic');
     assert.ok(prayer.photos.includes('praying-hands.jpg'), prayer.photos.join());
     const easter = await fa.direct({ title: 'Easter Sunday', season: 'Easter Sunday' });
     assert.strictEqual(easter.scriptWord, 'Easter');

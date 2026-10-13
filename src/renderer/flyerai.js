@@ -366,5 +366,34 @@
     try { await init(); return true; } catch (e) { return false; }
   }
 
-  window.FlyerAI = { removeBackground, removePerson, removeByEdges, aiAvailable, maskFor, composite };
+  /*
+   * WHERE THE BODY IS. MediaPipe's pose model (on this phone, like the cut-out)
+   * gives the head, shoulders, elbows, hands, hips and knees: the flyer studio
+   * uses them to throw away whatever the cut-out kept that is not the person
+   * (a podium, a chair, a microphone stand) and to frame every photo the same
+   * way, the face the same size.
+   */
+  let poser = null, poserP = null, poseFailed = false;
+  async function initPose() {
+    if (poser) return poser;
+    if (poseFailed) throw new Error('pose unavailable');
+    if (!poserP) poserP = (async () => {
+      const mp = await import(base() + 'vision_bundle.mjs');
+      const vision = await mp.FilesetResolver.forVisionTasks(base() + 'wasm');
+      poser = await mp.PoseLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: base() + 'pose_landmarker_lite.task' },
+        runningMode: 'IMAGE', numPoses: 1, minPoseDetectionConfidence: 0.3, minPosePresenceConfidence: 0.3,
+      });
+      return poser;
+    })().catch((e) => { poseFailed = true; poserP = null; throw e; });
+    return poserP;
+  }
+  /** The 33 body landmarks (0..1, with visibility) of the main person in a picture, or null. */
+  async function poseOf(src) {
+    const p = await initPose();
+    const r = p.detect(src);
+    return r && r.landmarks && r.landmarks[0] ? r.landmarks[0] : null;
+  }
+
+  window.FlyerAI = { removeBackground, removePerson, removeByEdges, aiAvailable, maskFor, composite, poseOf };
 })();
