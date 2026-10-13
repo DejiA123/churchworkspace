@@ -167,6 +167,10 @@ S[330].text = 'There is no prosperity gospel, there is only one gospel.';
     check('the limit is the cut\'s, not 8% over it (150 s band: 154 s, not 162 s)', P.ceilFor(150) === 154 && Math.abs(P.ceilFor(45) - 48.6) < 1e-9, [P.ceilFor(150), P.ceilFor(45)]);
     T[60].text = "You understand what I'm saying?"; T[61].text = "You understand what I'm saying?";
     const ck = P.vet({ from: 45, to: 61, strength: 7 }, T, sec2, band2);
+    T[62].text = "There's no— you understand what I'm saying?";
+    const ck2 = P.vet({ from: 45, to: 62, strength: 7 }, T, sec2, band2);
+    check('…nor on it tacked onto a broken-off phrase ("There\'s no— you understand what I\'m saying?")', ck2 && ck2.to === 59, ck2 && [ck2.from, ck2.to]);
+    check('…while a real sentence that ends with it is kept', !P._rx.ASIDE_RX.test('God will heal every one of you tonight, you understand what I\'m saying?'));
     check('a short does not end on the preacher checking on the room ("You understand what I\'m saying?")', ck && ck.to === 59, ck && [ck.from, ck.to]);
     // a line that is the consequence of what came before never opens a short
     T[80].text = 'God never leaves the righteous alone.'; T[81].text = "So that's the reason why we keep praying.";
