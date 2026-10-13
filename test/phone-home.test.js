@@ -45,14 +45,20 @@ const up = async () => { for (let k = 0; k < 80; k++) { try { await new Promise(
     await page.waitForFunction(() => window.MWSocial && window.MWSocial.openMontage && document.getElementById('cloudHome'), null, { timeout: 30000 });
     await sleep(1200);
     if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'home.png') });
-    const t1 = await page.evaluate(() => (document.querySelector('#cloudHome .ch-wheel li.on') || {}).textContent);
-    check(await page.evaluate(() => !document.querySelector('#cloudHome .ch-banner-go, #chHeroTitle')), 'no line of words under the greeting');
-    await sleep(2900);
-    const t2 = await page.evaluate(() => ({ t: (document.querySelector('#cloudHome .ch-wheel li.on') || {}).textContent, on: (document.querySelector('#cloudHome .ch-wheel li.on') || {}).textContent, shots: document.querySelectorAll('#cloudHome .ch-shot.on').length }));
-    check(t1 !== t2.t && t2.shots === 1 && !!t2.on, 'the banner rolls on by itself: a new title, its name lit, one picture in front', { t1, t2 });
+    // Church Space's own home (design D): the New project card, the six app icons, this week's services, a bottom bar
+    const lay = await page.evaluate(() => ({
+      name: (document.querySelector('#cloudHome .ch-name') || {}).textContent,
+      newCard: !!document.querySelector('#cloudHome .ch-new'),
+      icons: document.querySelectorAll('#cloudHome .ch-tools .ch-ti').length,
+      week: !!document.querySelector('#cloudHome #chWeekRow .ch-day'),
+      bar: document.querySelectorAll('#cloudHome .ch-bar button').length,
+      wheel: !!document.querySelector('#cloudHome .ch-wheel'),
+    }));
+    check(lay.name === 'Church Space' && lay.newCard && lay.icons === 6 && lay.week && lay.bar === 4 && !lay.wheel,
+      'the home is Church Space\'s own: New project, six app icons, This week, the bottom bar (no rolling banner)', lay);
     // tap the lit name's line: it goes to that thing
     const hello = await page.evaluate(() => document.getElementById('chHello').textContent);
-    check(/^Good (morning|afternoon|evening), Deji$/.test(hello), 'the greeting is in the banner', hello);
+    check(/^Good (morning|afternoon|evening), Deji$/.test(hello), 'the greeting is under the name', hello);
     // Help → the help sheet
     await page.locator('#cloudHome [data-tool="help"]').tap(); await sleep(500);
     check(await page.evaluate(() => !!document.querySelector('.mwg-help')), '"Help" opens the help');

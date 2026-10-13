@@ -3794,22 +3794,7 @@ html, body.mw-cloud, body.mw-cloud .cloud-home .ch-scroll, body.mw-cloud #cloudG
 /*  page and the pick in the app's light look, the editor dark like       */
 /*  CapCut's so the flyer is the brightest thing on the screen.           */
 /* ===================================================================== */
-.ch-flyer { position: relative; display: flex; align-items: center; gap: 14px; width: 100%; margin: 10px 0 0; padding: 12px 14px 12px 12px; border: 0; border-radius: 18px;
-  color: #fff; text-align: left; overflow: hidden; cursor: pointer;
-  background: linear-gradient(115deg, #2a0b5a 0%, #6d28d9 48%, #c026d3 100%);
-  box-shadow: 0 10px 24px rgba(109, 40, 217, .25); transition: transform .15s ease; }
-.ch-flyer:active { transform: scale(.98); }
-/* three real flyers from the Flyer Studio, fanned like prints on a table */
-.ch-flyer-art { position: relative; flex: none; width: 74px; height: 76px; }
-.ch-flyer-art img { position: absolute; width: 44px; height: 55px; object-fit: cover; border-radius: 5px; background: #1a1030;
-  box-shadow: 0 6px 14px rgba(0, 0, 0, .4), 0 0 0 1px rgba(255, 255, 255, .14); }
-.ch-flyer-art .a { left: 0; top: 14px; transform: rotate(-12deg); }
-.ch-flyer-art .b { left: 30px; top: 12px; transform: rotate(10deg); }
-.ch-flyer-art .c { left: 15px; top: 4px; z-index: 1; }
-.ch-flyer-tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.ch-flyer-tx b { font-size: 17px; font-weight: 700; letter-spacing: -.2px; }
-.ch-flyer-tx small { font-size: 12.5px; color: rgba(255, 255, 255, .82); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ch-flyer-go { flex: none; padding: 8px 14px; border-radius: 999px; font-size: 13.5px; font-weight: 700; color: #4c1d95; background: #fff; }
+/* (the old Flyer Studio card's styles went with it: Flyers is an app icon on Home now) */
 .ch-shot-flyer { display: grid; place-items: center; background: linear-gradient(170deg, #6d28d9, #1a0638); }
 .hs-flyer { position: relative; display: flex; flex-direction: column; align-items: center; transform: rotate(-4deg); }
 .hs-flyer b { font: 900 30px/0.9 Impact, "Arial Black", sans-serif; letter-spacing: -.5px; color: #fff; text-shadow: 2px 3px 0 rgba(0, 0, 0, .35); }
@@ -3980,3 +3965,79 @@ html, body.mw-cloud, body.mw-cloud .cloud-home .ch-scroll, body.mw-cloud #cloudG
 .fs-bulk span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .fs-bulk b { font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fs-bulk small { font-size: 12px; color: #6d28d9; }
+
+/* ===================================================================== */
+/*  HOME — CHURCH SPACE'S OWN (design D, "app icons")                     */
+/* ===================================================================== */
+/* Soft lilac page, a violet-to-gold New project card, the tools as glossy
+   app icons each in its own colour, this week's services, a bottom bar.
+   Inspired by the calm of CapCut's front page, in nobody's colours but ours. */
+body.mw-cloud.mw-home .cloud-home { background: #f4f1fb; color: #1b1630; }
+.cloud-home .ch-scroll { padding: 0 20px calc(100px + env(safe-area-inset-bottom)); }
+.cloud-home .ch-top { margin: 0; padding: calc(10px + env(safe-area-inset-top)) 0 0; min-height: 56px; }
+.cloud-home .ch-brand { padding: 0; gap: 10px; background: none; border-radius: 0; }
+.cloud-home .ch-logo { width: 36px; height: 36px; border-radius: 12px; font-size: 18px; color: #fff;
+  background: linear-gradient(140deg, #7c3aed, #f59e0b); box-shadow: 0 6px 16px rgba(124, 58, 237, .28); }
+.cloud-home .ch-name { font-size: 21px; font-weight: 800; letter-spacing: -.4px; color: #1b1630; }
+.cloud-home .ch-round, .cloud-home .ch-ask .mwg-ask { width: 36px; height: 36px; border: 0; border-radius: 50%;
+  color: #1b1630; background: #fff; box-shadow: 0 1px 3px rgba(27, 22, 48, .1); font-size: 16px; }
+.cloud-home .ch-round.ch-me { color: #6d28d9; background: #fff; font-weight: 800; }
+.cloud-home .ch-help .ch-q { width: 20px; height: 20px; border-width: 1.8px; font-size: 12px; }
+.cloud-home .ch-hello { margin: 14px 2px 0; font-size: 15px; font-weight: 600; color: #6b6585; }
+
+.ch-new { position: relative; width: 100%; min-height: 138px; margin: 12px 0 0; padding: 22px 92px 22px 22px; border: 0; border-radius: 28px;
+  overflow: hidden; display: flex; align-items: center; text-align: left; color: #fff;
+  background: linear-gradient(120deg, #6d28d9, #a21caf 58%, #f59e0b); box-shadow: 0 14px 30px rgba(109, 40, 217, .28); }
+.ch-new::before { content: ''; position: absolute; right: -50px; top: -70px; width: 240px; height: 240px; border-radius: 50%; background: rgba(255, 255, 255, .12); }
+.ch-new:active { transform: scale(.985); }
+.ch-new-tx { position: relative; display: flex; flex-direction: column; gap: 5px; }
+.ch-new-tx b { font-size: 26px; font-weight: 800; letter-spacing: -.5px; }
+.ch-new-tx span { font-size: 14px; line-height: 1.35; color: rgba(255, 255, 255, .88); }
+.ch-new-tx small { align-self: flex-start; margin-top: 4px; padding: 4px 10px; border-radius: 99px; font-size: 12px; font-weight: 700; background: rgba(255, 255, 255, .2); }
+.ch-new-tx small:empty { display: none; }
+.ch-new-plus { position: absolute; right: 20px; top: 50%; width: 58px; height: 58px; margin-top: -29px; border-radius: 19px;
+  display: grid; place-items: center; font-size: 38px; font-weight: 300; line-height: 1; color: #6d28d9; background: #fff;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .22); }
+
+.cloud-home .ch-tools { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 8px; margin: 22px -4px 0; }
+.cloud-home .ch-tool { gap: 8px; padding: 6px 2px; background: none; color: #1b1630; }
+.cloud-home .ch-tool:active { background: none; transform: scale(.94); }
+.ch-ti { position: relative; width: 64px; height: 64px; border-radius: 21px; display: grid; place-items: center; color: #fff;
+  box-shadow: 0 8px 18px rgba(27, 22, 48, .14), inset 0 1px 0 rgba(255, 255, 255, .35); }
+.ch-ti > .mi { width: 28px; height: 28px; margin: 0; }
+.ch-ti.t-shorts { background: linear-gradient(140deg, #fb923c, #ef4444); }
+.ch-ti.t-caps { background: linear-gradient(140deg, #22d3ee, #3b82f6); }
+.ch-ti.t-flyer { background: linear-gradient(140deg, #fbbf24, #d97706); }
+.ch-ti.t-montage { background: linear-gradient(140deg, #c084fc, #7c3aed); }
+.ch-ti.t-post { background: linear-gradient(140deg, #f472b6, #be185d); }
+.ch-ti.t-up { background: linear-gradient(140deg, #4ade80, #15803d); }
+.ch-ti .ch-badge { top: -5px; right: -5px; }
+.cloud-home .ch-tool-tx { font-size: 13.5px; font-weight: 650; }
+
+.ch-week { margin-top: 26px; }
+.ch-week h2, .cloud-home .ch-sec h2 { display: flex; justify-content: space-between; align-items: baseline; margin: 0 2px 12px; font-size: 20px; font-weight: 800; letter-spacing: -.3px; color: #1b1630; }
+.cloud-home .ch-link { color: #7c3aed; font-size: 14px; font-weight: 700; }
+.ch-week-row { display: flex; gap: 10px; overflow-x: auto; margin: 0 -20px; padding: 2px 20px 8px; scrollbar-width: none; }
+.ch-week-row::-webkit-scrollbar { display: none; }
+.ch-day { flex: none; width: 146px; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 14px; border: 0; border-radius: 20px;
+  text-align: left; color: #1b1630; background: #fff; box-shadow: 0 1px 3px rgba(27, 22, 48, .07); }
+.ch-day small { font-size: 11.5px; font-weight: 800; letter-spacing: .05em; color: #a21caf; }
+.ch-day b { width: 100%; min-height: 2.5em; font-size: 15.5px; font-weight: 750; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ch-day span { margin-top: 8px; padding: 6px 11px; border-radius: 99px; font-size: 12px; font-weight: 700; color: #fff; background: #1b1630; }
+.ch-day.season { background: linear-gradient(140deg, #fff7e0, #ffeef8); }
+.ch-day-set { width: 100%; }
+.ch-day-set span { background: #7c3aed; }
+
+.cloud-home .ch-sec { margin-top: 26px; }
+.cloud-home .ch-foot-note { color: #8a84a0; }
+
+.ch-bar { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; display: flex; justify-content: space-around;
+  padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); background: rgba(255, 255, 255, .94);
+  -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); box-shadow: 0 -1px 0 #ebe6f5; }
+.ch-bar button { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px 0; border: 0; background: none;
+  font-size: 11px; font-weight: 600; color: #9a93ad; }
+.ch-bar button .mi { width: 23px; height: 23px; margin: 0; }
+.ch-bar button.on { color: #6d28d9; font-weight: 800; }
+@media (min-width: 900px) { .ch-bar { display: none; } .cloud-home .ch-scroll { padding-bottom: 40px; } }
+/* one help button on Home (the guide's own "?" sits on the other screens) */
+.cloud-home .ch-ask { display: none; }

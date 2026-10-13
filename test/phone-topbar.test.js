@@ -77,6 +77,7 @@ const dist = (a, b) => { const p = (h) => [1, 3, 5].map((i) => parseInt(String(h
       return m;
     };
     const BLUE = '#0a4fc4';
+    const HOME = '#f4f1fb';   // Church Space's own Home (design D): a soft lilac page
 
     console.log('\n[1] the page');
     await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'load' });
@@ -99,7 +100,7 @@ const dist = (a, b) => { const p = (h) => [1, 3, 5].map((i) => parseInt(String(h
     await page.reload({ waitUntil: 'load' });
     await page.waitForFunction(() => document.getElementById('cloudHome') && document.body.classList.contains('mw-home'), null, { timeout: 30000 });
     const home = await settle();
-    check(dist(home, BLUE) < 12, 'Home: the banner\'s blue runs on into the bar', home);
+    check(dist(home, HOME) < 12, 'Home: the page\'s lilac runs on into the bar', home);
     // pulled down from the top it showed the white page behind the banner (and the bar went white): it does not stretch
     const stretch = await page.evaluate(() => ({
       home: getComputedStyle(document.querySelector('#cloudHome .ch-scroll')).overscrollBehaviorY,
@@ -117,32 +118,27 @@ const dist = (a, b) => { const p = (h) => [1, 3, 5].map((i) => parseInt(String(h
       try { T.check(); } finally { document.elementsFromPoint = real; }
       return document.querySelector('meta[name="theme-color"]').content;
     });
-    check(dist(kept, BLUE) < 12, 'nothing at the top for a moment (the app stretched): the bar stays blue, not white', kept);
+    check(dist(kept, HOME) < 12, 'nothing at the top for a moment (the app stretched): the bar keeps Home\'s colour, not white', kept);
     console.log('\n[3] Home scrolled');
     const fadeOp = () => page.evaluate(() => { const f = document.querySelector('.mw-edge-fade'); return f ? +getComputedStyle(f).opacity : null; });
     check(await fadeOp() === 0, 'at rest, no fade over the top of Home', await fadeOp());
-    // (a new space has little on Home: made as long as a busy church's, so the banner can leave the top)
+    // (a new space has little on Home: made as long as a busy church's, so it can scroll)
     await page.evaluate(() => {
       const sc = document.querySelector('#cloudHome .ch-scroll');
       const pad = document.createElement('div'); pad.id = 'tallPad'; pad.style.height = '1600px'; sc.appendChild(pad);
-      // half way up the banner first
-      const h = document.getElementById('chBanner').getBoundingClientRect().height;
-      for (const el of [sc, document.getElementById('cloudHome')]) el.scrollTop = 0;
-      sc.scrollTop = Math.round(h * 0.55);
-      if (sc.scrollTop === 0) document.getElementById('cloudHome').scrollTop = Math.round(h * 0.55);
+      sc.scrollTop = 160;
     });
     const mid = await settle();
-    const lum = (h) => { const p = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)); return 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]; };
-    check(lum(mid) > lum(BLUE) + 25 && dist(mid, '#ffffff') > 40, 'half way up the banner, the bar is the lighter blue that is there now (not the deep blue it starts with)', mid);
+    check(dist(mid, HOME) < 12, 'scrolled a little: the bar stays Home\'s own colour', mid);
     check(await fadeOp() === 1, 'scrolled: the soft edge is on, so what slides under the bar fades into it', await fadeOp());
     const fadeBg = await page.evaluate(() => getComputedStyle(document.querySelector('.mw-edge-fade')).backgroundImage);
     const fadeTop = '#' + (fadeBg.match(/\d+/g) || []).slice(0, 3).map((x) => (+x).toString(16).padStart(2, '0')).join('');
     check(dist(fadeTop, mid) < 4, 'the edge fades from the bar\'s own colour', { fadeTop, mid });
     await page.evaluate(() => { for (const el of [document.querySelector('#cloudHome .ch-scroll'), document.getElementById('cloudHome')]) el.scrollTop = 900; });
     const scrolled = await settle();
-    check(dist(scrolled, '#ffffff') < 12, 'scrolled past the banner: white (the clock turns dark)', scrolled);
+    check(dist(scrolled, HOME) < 12, 'scrolled further: still Home\'s colour (the clock stays dark on it)', scrolled);
     await page.evaluate(() => { for (const el of [document.querySelector('#cloudHome .ch-scroll'), document.getElementById('cloudHome')]) el.scrollTop = 0; });
-    check(dist(await settle(), BLUE) < 12, 'back at the top: blue again', await tint());
+    check(dist(await settle(), HOME) < 12, 'back at the top: the same colour', await tint());
     check(await fadeOp() === 0, 'and the fade is gone', await fadeOp());
 
     console.log('\n[4] the studio, Posts, Projects');
@@ -173,7 +169,7 @@ const dist = (a, b) => { const p = (h) => [1, 3, 5].map((i) => parseInt(String(h
     await page.evaluate(() => window.MWSocial.go('home'));
     await page.evaluate(() => { const m = document.getElementById('vePresetModal'); if (m) m.classList.add('hidden'); });
     const back = await settle();
-    check(dist(back, BLUE) < 12, 'back on Home: blue', back);
+    check(dist(back, HOME) < 12, 'back on Home: its own colour', back);
 
     console.log('\n[5b] a page\'s title bar');
     const softHead = (sel) => page.evaluate((sel) => {

@@ -1885,14 +1885,18 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
 
   /* -------------------------------------------------------- the entry door */
 
-  async function open() {
+  async function open(opts) {
+    opts = opts || {};
     F.panel = C.openPanel({ id: 'cloudFlyer', title: 'Flyers', cls: 'cp-flyer', full: true, onClose: () => { F.panel = null; } });
     F.panel.body.innerHTML = '<div class="fs-loading">Opening the flyer studio…</div>';
     loadFonts();
     const [st] = await Promise.all([window.api.flyer.status().catch(() => null), loadKit()]);
     F.status = st;
     F.step = 'make';
-    if (!F.occasion) pickOccasion((upcoming(F.kit)[0]) || null);
+    // from Home's "This week": that service, ready to make
+    const want = opts.occasion && upcoming(F.kit).find((o) => o.id === opts.occasion);
+    if (want) pickOccasion(want);
+    else if (!F.occasion) pickOccasion((upcoming(F.kit)[0]) || null);
     draw();
   }
 
@@ -2802,7 +2806,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
 
   /* ============================================================ MY CHURCH */
 
-  function openKit() {
+  function openKit(onSaved) {
     const P = C.openPanel({ id: 'cloudFlyerKit', title: 'My church', cls: 'cp-flyer-kit' });
     const k = JSON.parse(JSON.stringify(F.kit));   // a copy: closing without Save keeps the kit as it was
     const drawKit = () => {
@@ -2880,6 +2884,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
           await loadKit();
           P.close();
           if (F.panel && F.step === 'make') { if (F.occasion) pickOccasion(upcoming(F.kit).find((o) => o.id === F.occasion.id) || F.occasion); drawMake(); }
+          if (typeof onSaved === 'function') { try { onSaved(); } catch (e) {} }
           return;
         }
         default:
@@ -2943,5 +2948,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     });
   }
 
-  root.MWFlyerStudio = { open, _state: F };
+  /* "My church" straight from Home (This week → Edit) */
+  async function openKitAlone(onSaved) { await loadKit(); openKit(onSaved); }
+  root.MWFlyerStudio = { open, openKit: openKitAlone, _state: F };
 })();

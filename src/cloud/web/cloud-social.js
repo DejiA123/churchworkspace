@@ -264,86 +264,68 @@
   }
 
   /*
-   * ►► HOME, THE WAY CAPCUT DOES IT. ◄◄ "The buttons look like every other
-   * AI-made app": glowing pills, glass cards, gradients everywhere. CapCut's
-   * front page is calm instead — a banner whose titles roll by, two soft cards
-   * for the two big things, then the tools as plain line icons in a grid, on
-   * white. So is this one. Every door it had is still here: the Video Studio
-   * (and its projects), AI Montage, Post online, your files — and AI Shorts
-   * and Captions straight from the front page.
+   * ►► HOME: CHURCH SPACE'S OWN. ◄◄ "It looks like CapCut." The calm and the
+   * one-tap reach stay — a big New project card, the tools as app icons — but
+   * in Church Space's own colours (violet to gold), and with what no video
+   * app has: this week's services, each a tap from its flyer. Every door the
+   * page had is still here (Studio and projects, Montage, Post, My videos,
+   * Help, your space).
    */
-  const HOME_HERO = [
-    { k: 'shorts', name: 'Long video to shorts', title: 'Turn a sermon into shorts', act: () => homeTool('shorts') },
-    { k: 'caps', name: 'Auto captions', title: 'Captions, word by word', act: () => homeTool('captions') },
-    { k: 'montage', name: 'AI Montage', title: 'Your clips, edited by AI', act: () => openMontage() },
-    { k: 'flyer', name: 'AI Flyers', title: 'Flyers like the best on Pinterest', act: () => openFlyers() },
-    { k: 'post', name: 'Post everywhere', title: 'Post to every app at once', act: () => go('scheduler') },
-  ];
-  function heroArt(k) {
-    if (k === 'shorts') return '<span class="hs-wide"><i></i></span><span class="hs-tall"><i class="hs-play"></i><span class="hs-cap"><i></i><i></i><i></i></span></span>';
-    if (k === 'caps') return '<span class="hs-words"><b>FAITH OVER</b><b><em>FEAR</em></b></span>';
-    if (k === 'flyer') return '<span class="hs-flyer"><b>JOIN US</b><em>Sunday</em><i></i></span>';
-    if (k === 'montage') return `<span class="hs-film"><i></i><i></i><i></i></span><span class="hs-note">${mi('music')}</span>`;
-    return `<span class="hs-plats">${['tiktok', 'youtube', 'instagram', 'facebook'].map((p) => `<i>${platMark(p, 'sm')}</i>`).join('')}</span>`;
-  }
-
   function buildHome() {
     const el = document.createElement('div');
     el.id = 'cloudHome';
     el.className = 'cloud-home';
-    const n = HOME_HERO.length;
+    const TI = (cls, extra) => `<span class="ch-ti ${cls}">${extra}</span>`;
     el.innerHTML = `
       <main class="ch-scroll">
-        <section class="ch-banner" id="chBanner">
-          <header class="ch-top">
-            <div class="ch-brand"><span class="ch-logo">✝</span><span class="ch-name">Church Space</span></div>
-            <div class="ch-acts"><span class="ch-chip-slot"></span><span class="ch-ask" id="chAsk"></span>
-              <button type="button" class="ch-round ch-me" data-home="me" aria-label="Your space"><b id="chMeInitial">${esc(((C.me && C.me.name) || '').charAt(0).toUpperCase()) || mi('user')}</b></button>
-            </div>
-          </header>
-          <div class="ch-wheel" aria-hidden="true"><ul>${[0, 1, 2].map(() => HOME_HERO.map((h, i) => `<li data-hero="${i}">${esc(h.name)}</li>`).join('')).join('')}</ul></div>
-          <div class="ch-shots" aria-hidden="true" data-hero-go>${HOME_HERO.map((h, i) => `<span class="ch-shot ch-shot-${h.k}" data-i="${i}">${heroArt(h.k)}</span>`).join('')}</div>
-          <div class="ch-banner-tx"><small id="chHello"></small></div>
-        </section>
-        <!-- the two big things, as two soft cards (no project list here: the Video Studio card says how many and opens them) -->
-        <div class="ch-duo">
-          <button type="button" class="ch-card ch-studio" data-go="projects">
-            <span class="ch-card-ic">${mi('film')}</span><b>Video Studio</b><small id="chStudioFoot">Open a video to start</small>
-          </button>
-          <button type="button" class="ch-card ch-montage" data-home="montage">
-            <span class="ch-card-ic">${mi('sparkles')}</span><b>AI Montage</b><small>Your clips, edited by AI</small>
-          </button>
-        </div>
-        <!-- 🎨 the third big thing: flyers (cloud-flyer.js) -->
-        <button type="button" class="ch-flyer" data-home="flyers">
-          <span class="ch-flyer-art" aria-hidden="true"><img class="a" src="/icons/flyer-a.jpg" alt="" width="216" height="270" decoding="async" /><img class="b" src="/icons/flyer-b.jpg" alt="" width="216" height="270" decoding="async" /><img class="c" src="/icons/flyer-c.jpg" alt="" width="216" height="270" decoding="async" /></span>
-          <span class="ch-flyer-tx"><b>Flyer Studio</b><small>AI flyers for Sunday, Bible Study, Easter…</small></span>
-          <span class="ch-flyer-go">Make</span>
+        <header class="ch-top">
+          <div class="ch-brand"><span class="ch-logo">✝</span><span class="ch-name">Church Space</span></div>
+          <div class="ch-acts"><span class="ch-chip-slot"></span><span class="ch-ask" id="chAsk"></span>
+            <button type="button" class="ch-round ch-help" data-tool="help" aria-label="Help"><i class="ch-q">?</i></button>
+            <button type="button" class="ch-round ch-me" data-home="me" aria-label="Your space"><b id="chMeInitial">${esc(((C.me && C.me.name) || '').charAt(0).toUpperCase()) || mi('user')}</b></button>
+          </div>
+        </header>
+        <p class="ch-hello" id="chHello"></p>
+        <!-- the one big thing: start something (the Video Studio and its projects) -->
+        <button type="button" class="ch-new ch-studio" data-go="projects">
+          <span class="ch-new-tx"><b>New project</b><span>Drop in Sunday’s sermon — we’ll do the rest</span><small id="chStudioFoot"></small></span>
+          <span class="ch-new-plus" aria-hidden="true">+</span>
         </button>
         <div id="chInvite"></div>
+        <!-- the tools, as app icons -->
         <nav class="ch-tools" aria-label="Tools">
-          <button type="button" class="ch-tool" data-tool="shorts"><span class="ch-tool-ic">${mi('scissors')}<i class="ch-spark">${mi('sparkles')}</i></span><span class="ch-tool-tx">AI Shorts</span></button>
-          <button type="button" class="ch-tool" data-tool="captions"><span class="ch-tool-ic">${mi('captions')}<i class="ch-spark">${mi('sparkles')}</i></span><span class="ch-tool-tx">Auto captions</span></button>
-          <button type="button" class="ch-tool ch-social" data-go="scheduler" id="chSocialCard"><span class="ch-tool-ic">${mi('calendar')}<i class="ch-badge hidden" id="chSocialBadge"></i></span><span class="ch-tool-tx">Post online</span>
+          <button type="button" class="ch-tool" data-tool="shorts">${TI('t-shorts', mi('scissors'))}<span class="ch-tool-tx">AI Shorts</span></button>
+          <button type="button" class="ch-tool" data-tool="captions">${TI('t-caps', mi('captions'))}<span class="ch-tool-tx">Captions</span></button>
+          <button type="button" class="ch-tool ch-flyer" data-home="flyers">${TI('t-flyer', mi('image'))}<span class="ch-tool-tx">Flyers</span></button>
+          <button type="button" class="ch-tool ch-montage" data-home="montage">${TI('t-montage', mi('sparkles'))}<span class="ch-tool-tx">AI Montage</span></button>
+          <button type="button" class="ch-tool ch-social" data-go="scheduler" id="chSocialCard">${TI('t-post', mi('send') + '<i class="ch-badge hidden" id="chSocialBadge"></i>')}<span class="ch-tool-tx">Post</span>
             <small id="chSocialFoot"></small><span class="ch-marks" id="chMarks"></span></button>
-          <button type="button" class="ch-tool" data-tool="upload"><span class="ch-tool-ic">${mi('upload')}</span><span class="ch-tool-tx">Add a video</span></button>
-          <button type="button" class="ch-tool" data-home="files"><span class="ch-tool-ic">${mi('folder')}</span><span class="ch-tool-tx">My videos</span></button>
-          <button type="button" class="ch-tool" data-tool="help"><span class="ch-tool-ic"><i class="ch-q">?</i></span><span class="ch-tool-tx">Help</span></button>
+          <button type="button" class="ch-tool" data-tool="upload">${TI('t-up', mi('upload'))}<span class="ch-tool-tx">Upload</span></button>
         </nav>
+        <!-- this week's services, each a tap from its flyer (the church's own service days) -->
+        <section class="ch-week" id="chWeek">
+          <h2>This week <button type="button" class="ch-link" data-home="kit">Edit</button></h2>
+          <div class="ch-week-row" id="chWeekRow"></div>
+        </section>
         <section class="ch-sec hidden" id="chJobs"><h2>Running now</h2><div class="ch-jobs"></div></section>
         <section class="ch-sec hidden" id="chReady">
           <h2>Ready to post <button type="button" class="ch-link" data-home="files">See all</button></h2>
           <div class="ch-reel" id="chReel"></div>
         </section>
         <p class="ch-foot-note" id="chWhere"></p>
-      </main>`;
+      </main>
+      <nav class="ch-bar" aria-label="Sections">
+        <button type="button" class="on" data-bar="home">${mi('home')}<span>Home</span></button>
+        <button type="button" data-go="projects">${mi('film')}<span>Projects</span></button>
+        <button type="button" data-home="flyers">${mi('image')}<span>Flyers</span></button>
+        <button type="button" data-home="files">${mi('folder')}<span>My videos</span></button>
+      </nav>`;
     document.body.appendChild(el);
     el.querySelector('.ch-chip-slot').appendChild(C.jobChip());
     el.addEventListener('click', (e) => {
-      const b = e.target.closest('[data-go],[data-home],[data-post],[data-job],[data-view],[data-proj],[data-tool],[data-hero],[data-hero-go]');
+      const b = e.target.closest('[data-go],[data-home],[data-post],[data-job],[data-view],[data-proj],[data-tool],[data-bar]');
       if (!b) return;
-      if (b.dataset.heroGo != null) return HOME_HERO[heroAt() % n].act();
-      if (b.dataset.hero != null) return heroShow(+b.dataset.hero, true);
+      if (b.dataset.bar === 'home') { const sc = el.querySelector('.ch-scroll'); if (sc) sc.scrollTo({ top: 0, behavior: 'smooth' }); return; }
       if (b.dataset.tool === 'shorts' || b.dataset.tool === 'captions') return homeTool(b.dataset.tool);
       if (b.dataset.tool === 'saved') { const d = document.getElementById('cloudDownloads'); return d && d.click(); }
       // "Add a video": straight to the phone's own picker — My videos opens behind it to show it arriving
@@ -356,58 +338,44 @@
       if (b.dataset.home === 'files') return $('#cloudFiles') && $('#cloudFiles').click();
       if (b.dataset.home === 'me') return C.openProfile && C.openProfile();
       if (b.dataset.home === 'montage') return openMontage();
-      if (b.dataset.home === 'flyers') return openFlyers();
+      if (b.dataset.home === 'flyers') return openFlyers(b.dataset.occ ? { occasion: b.dataset.occ } : undefined);
+      if (b.dataset.home === 'kit') return window.MWFlyerStudio && window.MWFlyerStudio.openKit ? window.MWFlyerStudio.openKit(() => renderWeek()) : openFlyers();
       if (b.dataset.post) return compose({ files: [b.dataset.post] });
       if (b.dataset.job) return C.openJobs();
     });
-    heroStart();
+    renderWeek();
     return el;
   }
 
+  /*
+   * THIS WEEK: the church's own services (Tuesday Bible Study, Friday prayer,
+   * Sunday service — set once in the Flyer Studio), the next few, each a tap
+   * from its flyer. Nothing a video app has: this is what makes it theirs.
+   */
+  async function renderWeek() {
+    const row = document.getElementById('chWeekRow'); if (!row) return;
+    let kit = null;
+    try { kit = await window.api.flyer.kitGet(); } catch (e) { kit = null; }
+    const D = window.MWFlyer && window.MWFlyer.Dates;
+    const occ = kit && D ? D.upcoming(kit).slice(0, 6) : [];
+    if (!occ.length) {
+      row.innerHTML = '<button type="button" class="ch-day ch-day-set" data-home="kit"><small>SET UP ONCE</small><b>Your service days</b><span>Add them</span></button>';
+      return;
+    }
+    row.innerHTML = occ.map((o) => {
+      const d = D.dateParts(o.date);
+      const when = d ? d.dayName.slice(0, 3).toUpperCase() : '';
+      const t = o.time || (o.service && o.service.time) || '';
+      return `<button type="button" class="ch-day${o.seasonal ? ' season' : ''}" data-home="flyers" data-occ="${esc(o.id)}"><small>${esc(when)}${t ? ' ' + esc(D.niceTime(t)) : ''}</small><b>${esc(o.name)}</b><span>Make flyer</span></button>`;
+    }).join('');
+  }
+
   /* the Flyer Studio (cloud-flyer.js) */
-  function openFlyers() {
-    if (window.MWFlyerStudio) return window.MWFlyerStudio.open();
+  function openFlyers(opts) {
+    if (window.MWFlyerStudio) return window.MWFlyerStudio.open(opts);
     C.toast('The flyer studio is still loading — try again in a moment.');
   }
 
-  /*
-   * THE BANNER'S TITLES ROLL BY (CapCut's front page): the names of what the
-   * studio does go past one by one, the one in the middle lit, its picture
-   * beside it — tap the picture to go straight there. (The line of words that
-   * stood under the greeting is gone: the names already say it.)
-   * It only moves while the home screen is on show.
-   */
-  const HERO = { pos: HOME_HERO.length, timer: 0 };
-  const heroAt = () => HERO.pos;
-  function heroShow(i, fromTap) {
-    const n = HOME_HERO.length;
-    const home = $('#cloudHome'); if (!home) return;
-    if (i != null) HERO.pos = n + (((i % n) + n) % n);
-    const ul = $('.ch-wheel ul', home);
-    const k = HERO.pos % n;
-    ul.style.transform = `translateY(${-(HERO.pos - 1) * 38}px)`;
-    $$('.ch-wheel li', home).forEach((li, j) => li.classList.toggle('on', j === HERO.pos));
-    $$('.ch-shot', home).forEach((s) => {
-      const d = ((+s.dataset.i - k) % n + n) % n;
-      s.classList.toggle('on', d === 0);
-      s.classList.toggle('next', d === 1);
-      s.classList.toggle('prev', d === n - 1);
-    });
-    if (fromTap) { clearInterval(HERO.timer); HERO.timer = 0; heroStart(); }
-  }
-  function heroStart() {
-    heroShow();
-    if (HERO.timer) return;
-    HERO.timer = setInterval(() => {
-      if (document.hidden || !document.body.classList.contains('mw-home')) return;
-      const n = HOME_HERO.length;
-      const ul = $('#cloudHome .ch-wheel ul'); if (!ul) return;
-      HERO.pos++;
-      heroShow();
-      // past the middle copy of the names: back to it, unseen (the same names stand there)
-      if (HERO.pos >= 2 * n) setTimeout(() => { ul.style.transition = 'none'; HERO.pos -= n; heroShow(); void ul.offsetHeight; ul.style.transition = ''; }, 700);
-    }, 2600);
-  }
   /* AI Shorts or Captions from the front page: straight to the tool — a video first when none is open */
   function homeTool(kind) {
     const ed = window.VideoEditor;
