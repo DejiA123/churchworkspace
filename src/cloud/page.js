@@ -232,7 +232,7 @@ ${styles}
         <p class="cg-note hidden" id="cloudGateNote"></p>
         <label for="cloudName" class="cloud-gate-label">Your name</label>
         <input type="text" id="cloudName" autocomplete="username" autocapitalize="words" spellcheck="false"
-               placeholder="e.g. Deji" enterkeyhint="next" />
+               placeholder="Your name" enterkeyhint="next" />
         <label for="cloudPw" class="cloud-gate-label">Password</label>
         <div class="cg-pw"><input type="password" id="cloudPw" autocomplete="current-password" placeholder="Your password" enterkeyhint="go" />
           <button type="button" class="cg-show" data-show="cloudPw" aria-label="Show password">Show</button></div>
