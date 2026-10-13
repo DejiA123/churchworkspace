@@ -228,6 +228,7 @@ const ALLOWED = {
   'flyer:kitSave': true,
   'flyer:kitPic': true,
   'flyer:kitUsed': true,
+  'flyer:kitAddPhoto': true,
   'flyer:inspoAdd': true,
   'flyer:inspoRemove': true,
   'sermon:exportShort': true,

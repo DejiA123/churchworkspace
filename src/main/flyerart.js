@@ -550,6 +550,27 @@ function inspoRemove({ id } = {}) {
 }
 function writeKit(k) { fs.mkdirSync(KIT_DIR, { recursive: true }); fs.writeFileSync(kitFile(), JSON.stringify(k, null, 1)); }
 
+/*
+ * ONE PICTURE INTO A SPEAKER'S BANK. A bulk add sends each photo as it is cut
+ * out — thirty cut-outs in a single save would be a request of 60 MB, and one
+ * that fails would lose them all.
+ */
+function kitAddPhoto({ speaker, dataUrl, name } = {}) {
+  const k = readKit();
+  let s = (k.speakers || []).find((x) => x.id === speaker);
+  if (!s) {
+    if (!speaker || !name) throw new Error('That speaker is not in the kit.');
+    s = { id: str(speaker, 40), name: str(name, 80), role: '', photos: [] };
+    k.speakers = (k.speakers || []).concat(s);
+  }
+  const file = picOut(dataUrl, 'speaker');
+  if (!file) throw new Error('That is not a picture.');
+  s.photos = photosOf(s).concat(file).slice(-40);
+  delete s.photo;
+  writeKit(k);
+  return file;
+}
+
 /* Which of a speaker's pictures a flyer used last — the next flyer starts from the one after it. */
 function kitUsed({ speaker, photo } = {}) {
   const k = readKit();
@@ -561,4 +582,4 @@ function kitUsed({ speaker, photo } = {}) {
   return true;
 }
 
-module.exports = { inspoAdd, inspoRemove, stockPhotos, stockPath, PHOTO_TAGS, status, paint, direct, init, kitGet, kitSave, kitPic, kitUsed, paintPrompt, sizeFor, directByRules, imageFrom, LOOKS };
+module.exports = { kitAddPhoto, inspoAdd, inspoRemove, stockPhotos, stockPath, PHOTO_TAGS, status, paint, direct, init, kitGet, kitSave, kitPic, kitUsed, paintPrompt, sizeFor, directByRules, imageFrom, LOOKS };

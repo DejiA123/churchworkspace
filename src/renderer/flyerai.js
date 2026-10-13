@@ -105,37 +105,103 @@
     return a;
   }
 
-  /** AI person cut-out. Returns { src, coverage } or throws. */
-  async function removePerson(src) {
-    const seg = await init();
-    const img = await loadImage(src);
-    const { cv, cx, w, h } = drawToCanvas(img, 1600);
-    const result = seg.segment(cv);
-    const mask = personMask(result, w, h);
-    if (!mask) throw new Error('no mask');
 
-    // Resample mask to image size if the model returned its own resolution.
-    const { data, mw, mh } = mask;
-    const alpha = new Float32Array(w * h);
-    let covered = 0;
-    for (let y = 0; y < h; y++) {
-      const sy = mh === h ? y : Math.min(mh - 1, Math.round((y / h) * mh));
-      for (let x = 0; x < w; x++) {
-        const sx = mw === w ? x : Math.min(mw - 1, Math.round((x / w) * mw));
-        const v = data[sy * mw + sx];
-        alpha[y * w + x] = v;
-        if (v > 0.5) covered++;
-      }
+  /*
+   * ►► A FINE MASK, NOT A BLOWN-UP ONE. ◄◄ The person model sees every picture
+   * squashed to 256 × 256. A preacher on a wide stage photo is then a figure
+   * eighty pixels tall, and stretching that mask back over a 12-megapixel
+   * photo gave stair-stepped, wobbly edges ("shocking"). Three things make it
+   * clean, all here on the phone, in a second or two:
+   *
+   *   1. A SECOND LOOK, CLOSE UP. The first pass only finds where the person
+   *      is; the picture is then cropped round them and looked at again, in
+   *      overlapping square tiles down a tall figure — several times the
+   *      detail on the person themselves.
+   *   2. SMOOTH, not nearest-pixel, scaling of that mask.
+   *   3. A GUIDED FILTER (He, Sun & Tang): the edge is pulled onto the real
+   *      edge in the photo — the line of a shoulder, a sleeve, the hair —
+   *      instead of where the small mask happened to put it. It may only move
+   *      the edge so far, so a white jacket against a pale wall cannot leak.
+   */
+  function sampleBilinear(data, mw, mh, fx, fy) {
+    const x = Math.max(0, Math.min(mw - 1, fx * mw - 0.5)), y = Math.max(0, Math.min(mh - 1, fy * mh - 0.5));
+    const x0 = Math.floor(x), y0 = Math.floor(y), x1 = Math.min(mw - 1, x0 + 1), y1 = Math.min(mh - 1, y0 + 1), ax = x - x0, ay = y - y0;
+    const a = data[y0 * mw + x0], b = data[y0 * mw + x1], c = data[y1 * mw + x0], d = data[y1 * mw + x1];
+    return (a * (1 - ax) + b * ax) * (1 - ay) + (c * (1 - ax) + d * ax) * ay;
+  }
+  function segmentRegion(seg, src, sx, sy, sw, sh) {
+    const S = 512, k = Math.min(1, S / Math.max(sw, sh));
+    const c = document.createElement('canvas'); c.width = Math.max(8, Math.round(sw * k)); c.height = Math.max(8, Math.round(sh * k));
+    c.getContext('2d').drawImage(src, sx, sy, sw, sh, 0, 0, c.width, c.height);
+    return personMask(seg.segment(c), c.width, c.height);
+  }
+  function boxMean(a, w, h, r) { const o = Float32Array.from(a); return blurAlpha(o, w, h, r); }
+  function guided(I, p, w, h, r, eps) {
+    const n = w * h, Ip = new Float32Array(n), II = new Float32Array(n);
+    for (let i = 0; i < n; i++) { Ip[i] = I[i] * p[i]; II[i] = I[i] * I[i]; }
+    const mI = boxMean(I, w, h, r), mp = boxMean(p, w, h, r), mIp = boxMean(Ip, w, h, r), mII = boxMean(II, w, h, r);
+    const A = new Float32Array(n), B = new Float32Array(n);
+    for (let i = 0; i < n; i++) { const v = mII[i] - mI[i] * mI[i], cv = mIp[i] - mI[i] * mp[i]; A[i] = cv / (v + eps); B[i] = mp[i] - A[i] * mI[i]; }
+    const mA = boxMean(A, w, h, r), mB = boxMean(B, w, h, r);
+    const q = new Float32Array(n);
+    for (let i = 0; i < n; i++) q[i] = mA[i] * I[i] + mB[i];
+    return q;
+  }
+  /** Person confidence 0..1 for every pixel of a w × h canvas. */
+  async function fineMask(cv, cx, w, h) {
+    const seg = await init();
+    const m1 = personMask(seg.segment(cv), w, h);
+    if (!m1) throw new Error('no mask');
+    const coarse = new Float32Array(w * h);
+    let x0 = w, y0 = h, x1 = -1, y1 = -1, covered = 0;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const v = sampleBilinear(m1.data, m1.mw, m1.mh, (x + 0.5) / w, (y + 0.5) / h);
+      coarse[y * w + x] = v;
+      if (v > 0.5) { covered++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
     }
     const coverage = covered / (w * h);
     if (coverage < 0.015) { const e = new Error('no person found'); e.noPerson = true; throw e; }
+    // the close look: the person's box, a margin round it, in square tiles along its long side
+    const mx = (x1 - x0) * 0.15, my = (y1 - y0) * 0.08;
+    const bx = Math.max(0, Math.floor(x0 - mx)), by = Math.max(0, Math.floor(y0 - my));
+    const bw = Math.min(w, Math.ceil(x1 + mx)) - bx, bh = Math.min(h, Math.ceil(y1 + my)) - by;
+    const fine = coarse.slice(), wsum = new Float32Array(w * h), acc = new Float32Array(w * h);
+    const tall = bh >= bw, long = tall ? bh : bw, short = tall ? bw : bh;
+    const n = Math.max(1, Math.ceil(long / short * 1.15 - 0.15));
+    const tile = n === 1 ? long : Math.min(long, Math.ceil(long / n * 1.3));
+    for (let t = 0; t < n; t++) {
+      const off = n === 1 ? 0 : Math.round(t * (long - tile) / (n - 1));
+      const sx = tall ? bx : bx + off, sy = tall ? by + off : by, sw = tall ? bw : tile, sh = tall ? tile : bh;
+      const m = segmentRegion(seg, cv, sx, sy, sw, sh);
+      if (!m) continue;
+      for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
+        // feathered weight: tiles blend into each other, not seam
+        const ex = Math.min(x, sw - 1 - x) / (sw * 0.15), ey = Math.min(y, sh - 1 - y) / (sh * 0.15);
+        const wt = Math.max(0.02, Math.min(1, tall ? ey : ex)) * Math.max(0.02, Math.min(1, tall ? ex : ey) + 0.5);
+        const i = (sy + y) * w + sx + x;
+        acc[i] += wt * sampleBilinear(m.data, m.mw, m.mh, (x + 0.5) / sw, (y + 0.5) / sh); wsum[i] += wt;
+      }
+    }
+    for (let i = 0; i < fine.length; i++) if (wsum[i] > 0) fine[i] = acc[i] / wsum[i];
+    // the edge onto the photo's own edges
+    const px = cx.getImageData(0, 0, w, h).data, I = new Float32Array(w * h);
+    for (let i = 0, p = 0; i < I.length; i++, p += 4) I[i] = (0.299 * px[p] + 0.587 * px[p + 1] + 0.114 * px[p + 2]) / 255;
+    const r = Math.max(3, Math.round(Math.max(w, h) / 320));
+    const q = guided(I, fine, w, h, r, 2e-3);
+    for (let i = 0; i < q.length; i++) { const lo = fine[i] - 0.3, hi = fine[i] + 0.3; q[i] = q[i] < lo ? lo : q[i] > hi ? hi : q[i]; q[i] = q[i] < 0 ? 0 : q[i] > 1 ? 1 : q[i]; }
+    return { alpha: q, coverage };
+  }
 
-    // Feather: soften the confidence step, then a light blur for hair edges.
+  /** AI person cut-out. Returns { src, coverage } or throws. */
+  async function removePerson(src) {
+    const img = await loadImage(src);
+    const { cv, cx, w, h } = drawToCanvas(img, 1600);
+    const { alpha, coverage } = await fineMask(cv, cx, w, h);
+    // a firm edge: the confident middle solid, the last pixel or two soft
     for (let i = 0; i < alpha.length; i++) {
-      const v = (alpha[i] - 0.35) / (0.75 - 0.35); // smooth ramp between lo..hi
+      const v = (alpha[i] - 0.3) / (0.7 - 0.3);
       alpha[i] = v <= 0 ? 0 : v >= 1 ? 1 : v * v * (3 - 2 * v);
     }
-    blurAlpha(alpha, w, h, Math.max(1, Math.round(Math.max(w, h) / 500)));
 
     const id = cx.getImageData(0, 0, w, h), d = id.data;
     for (let i = 0, p = 0; i < alpha.length; i++, p += 4) d[p + 3] = Math.round(d[p + 3] * alpha[i]);
@@ -198,24 +264,7 @@
   /** Person alpha (0..255) from the segmenter. `strength` 0..1 biases how much
    *  of the uncertain edge counts as background — higher removes more. */
   async function personAlpha(cx, w, h, cv, strength) {
-    const seg = await init();
-    const result = seg.segment(cv);
-    const mask = personMask(result, w, h);
-    if (!mask) throw new Error('no mask');
-    const { data, mw, mh } = mask;
-    const alpha = new Float32Array(w * h);
-    let covered = 0;
-    for (let y = 0; y < h; y++) {
-      const sy = mh === h ? y : Math.min(mh - 1, Math.round((y / h) * mh));
-      for (let x = 0; x < w; x++) {
-        const sx = mw === w ? x : Math.min(mw - 1, Math.round((x / w) * mw));
-        const v = data[sy * mw + sx];
-        alpha[y * w + x] = v;
-        if (v > 0.5) covered++;
-      }
-    }
-    const coverage = covered / (w * h);
-    if (coverage < 0.015) { const e = new Error('no person found'); e.noPerson = true; throw e; }
+    const { alpha, coverage } = await fineMask(cv, cx, w, h);
     // The ramp is what "how much is removed" moves. Sliding it up demands more
     // confidence before a pixel is kept, so more of the fringe goes; sliding it
     // down keeps more of the halo. Same smoothstep as the one-press path at 0.5.
@@ -226,7 +275,6 @@
       const v = (alpha[i] - lo) / (hi - lo);
       alpha[i] = v <= 0 ? 0 : v >= 1 ? 1 : v * v * (3 - 2 * v);
     }
-    blurAlpha(alpha, w, h, Math.max(1, Math.round(Math.max(w, h) / 500)));
     const out = new Uint8ClampedArray(w * h);
     for (let i = 0; i < alpha.length; i++) out[i] = Math.round(alpha[i] * 255);
     return { alpha: out, coverage };

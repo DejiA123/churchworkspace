@@ -540,6 +540,7 @@ let _hideTimer = null;
       kitSave: (kit) => call('flyer:kitSave', { kit }),
       kitPic: (name) => call('flyer:kitPic', { name }),
       kitUsed: (speaker, photo) => call('flyer:kitUsed', { speaker, photo }),
+      kitAddPhoto: (speaker, dataUrl, name) => call('flyer:kitAddPhoto', { speaker, dataUrl, name }),
       inspoAdd: (a) => call('flyer:inspoAdd', a),
       inspoRemove: (id) => call('flyer:inspoRemove', { id }),
     },

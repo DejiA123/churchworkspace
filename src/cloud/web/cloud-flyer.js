@@ -406,6 +406,13 @@
     const lsp = (s) => (L.letter || 0) * s;
     const widthOf = (ln, s) => { m.font = fontOf(s); return m.measureText(ln).width + Math.max(0, ln.length - 1) * lsp(s); };
     let maxW = Math.max(1, ...lines.map((ln) => widthOf(ln, size)));
+    // a long line that would have to shrink below two-thirds of its size is broken in two instead (an address stays readable)
+    if (L.maxW && maxW > L.maxW / 0.66 && lines.length === 1 && /\s/.test(lines[0])) {
+      const ws = lines[0].split(/\s+/); let best = 1, diff = 1e9;
+      for (let i = 1; i < ws.length; i++) { const d = Math.abs(widthOf(ws.slice(0, i).join(' '), size) - widthOf(ws.slice(i).join(' '), size)); if (d < diff) { diff = d; best = i; } }
+      lines.splice(0, 1, ws.slice(0, best).join(' '), ws.slice(best).join(' '));
+      maxW = Math.max(1, ...lines.map((ln) => widthOf(ln, size)));
+    }
     if (L.maxW && maxW > L.maxW) { size = Math.max(8, size * (L.maxW / maxW)); maxW = Math.max(1, ...lines.map((ln) => widthOf(ln, size))); }
     const lh = size * (L.line || 1.0);
     const depth = L.extrude ? Math.round(L.extrude * size / 100) : 0;
@@ -472,14 +479,17 @@
   const picCache = new Map();
   function imageCanvas(L, im) {
     const w = Math.round(L.w * Q), h = Math.round(L.h * Q);
-    const key = [IMGS_KEY(im), w, h, L.gray ? 1 : 0, L.fade || 0, L.glow || '', L.bright || 0, L.contrast || 0, L.sat || 0, L.radius || 0, L.outline || ''].join('|');
+    const key = [IMGS_KEY(im), w, h, L.crop || 1, L.gray ? 1 : 0, L.fade || 0, L.glow || '', L.bright || 0, L.contrast || 0, L.sat || 0, L.radius || 0, L.outline || ''].join('|');
     if (picCache.has(key)) return picCache.get(key);
     const pad = Math.round((L.glow ? 40 : L.outline ? 14 : 0) * Q);
     const c = canvas(w + pad * 2, h + pad * 2), x = c.getContext('2d');
-    const body = (L.gray || L.bright || L.contrast || L.sat) ? adjusted(im, { gray: L.gray, bright: L.bright, contrast: L.contrast, sat: L.sat }, w, h) : null;
+    // a person shown from the head down to `crop` of their height (waist-up, as flyers do)
+    let pic = im;
+    if (L.crop && L.crop < 1) { pic = canvas(iw(im), Math.max(1, Math.round(ih(im) * L.crop))); pic.getContext('2d').drawImage(im, 0, 0); }
+    const body = (L.gray || L.bright || L.contrast || L.sat) ? adjusted(pic, { gray: L.gray, bright: L.bright, contrast: L.contrast, sat: L.sat }, w, h) : null;
     const layer = canvas(w, h), lx = layer.getContext('2d');
     if (L.radius) { roundRect(lx, 0, 0, w, h, L.radius * Q); lx.clip(); }
-    if (body) lx.drawImage(body, 0, 0); else cover(lx, im, 0, 0, w, h);
+    if (body) lx.drawImage(body, 0, 0); else cover(lx, pic, 0, 0, w, h);
     if (L.fade) {   // melt into the flyer at the bottom
       lx.globalCompositeOperation = 'destination-out';
       const g = lx.createLinearGradient(0, h * (1 - L.fade), 0, h);
@@ -602,10 +612,20 @@
   const BG = (o) => Object.assign({ id: 'bg', type: 'bg', name: 'Background', lock: true, tint: 0.45 }, o);
 
   /* the people, sized to stand on a line: height h, feet at y */
+  /*
+   * A PERSON, AS FLYERS SHOW THEM: from the head to the hips, melting into the
+   * design. A full-length photo is cut at about 60% of its height (whatever
+   * stood in front of their legs — a podium, a chair — goes with it); a
+   * photo that is already head-and-shoulders is used whole.
+   */
   function person(sp, cx, footY, h, extra) {
     const im = imgOf(sp.img); if (!im) return null;
-    const w = h * iw(im) / ih(im);
-    return IM(Object.assign({ img: sp.img, name: sp.name || 'Speaker', speaker: sp.id || '', photo: sp.photo || '', x: cx, y: footY - h / 2, w, h }, extra || {}));
+    const tall = ih(im) / iw(im);
+    const crop = tall > 1.45 ? Math.max(0.5, Math.min(1, 1.15 / tall + 0.12)) : 1;
+    const w = h * iw(im) / (ih(im) * crop);
+    const ex = Object.assign({}, extra || {});
+    if (crop < 1) ex.fade = Math.max(ex.fade || 0, 0.22);
+    return IM(Object.assign({ img: sp.img, name: sp.name || 'Speaker', speaker: sp.id || '', photo: sp.photo || '', crop, x: cx, y: footY - h / 2, w, h }, ex));
   }
   function people(D, opts) {
     const list = D.sp.filter((s) => imgOf(s.img)).slice(0, opts.max || 2);
@@ -619,16 +639,53 @@
     });
     return n > 1 ? out.reverse() : out;   // the first-named stands in front
   }
+  /*
+   * THE CHURCH'S LOGO, AS IT IS. A logo is never cut out — the person model
+   * takes a dove for a person and tears it apart, and a logo's own white is
+   * often part of the design. One with a solid background (most logos sent
+   * as a JPEG) sits on a white rounded badge, the way the flyers the church
+   * likes carry theirs; one that is already see-through goes on as it is.
+   */
+  function logoLayers(D, cx, cy, h) {
+    const im = imgOf(D.logo); if (!im) return [];
+    const opaque = isOpaque(im);
+    const ih0 = opaque ? h - 16 : h;
+    const w = Math.min(h * 2.4, ih0 * iw(im) / ih(im));
+    const out = [];
+    if (opaque) out.push(SH({ name: 'Logo badge', shape: 'round', fill: '#ffffff', radius: 16, shadow: true, x: cx, y: cy, w: w + 20, h }));
+    out.push(IM({ img: D.logo, name: 'Logo', x: cx, y: cy, w, h: ih0 }));
+    return out;
+  }
+  const opaqueOf = new WeakMap();
+  function isOpaque(im) {
+    if (opaqueOf.has(im)) return opaqueOf.get(im);
+    let o = true;
+    try {
+      const c = canvas(24, 24), x = c.getContext('2d', { willReadFrequently: true });
+      x.drawImage(im, 0, 0, 24, 24);
+      const d = x.getImageData(0, 0, 24, 24).data;
+      // see-through if any corner or edge-middle is
+      for (const [px, py] of [[0, 0], [23, 0], [0, 23], [23, 23], [12, 0], [0, 12], [23, 12], [12, 23]]) if (d[(py * 24 + px) * 4 + 3] < 200) { o = false; break; }
+    } catch (e) { o = true; }
+    opaqueOf.set(im, o);
+    return o;
+  }
   function brand(D, opts = {}) {
     const out = [];
     const ink = opts.ink || '#ffffff';
     let x = opts.x || 70; const y = opts.y || 78;
     if (D.logo && imgOf(D.logo)) {
-      const im = imgOf(D.logo), h = 74, w = Math.min(160, h * iw(im) / ih(im));
-      out.push(IM({ img: D.logo, name: 'Logo', x: x + w / 2, y, w, h }));
-      x += w + 18;
+      const ls = logoLayers(D, 0, y + 6, 104);
+      const w = Math.max(...ls.map((l) => l.w));
+      ls.forEach((l) => { l.x = x + w / 2; });
+      out.push(...ls);
+      x += w + 16;
     }
-    if (D.f.church) out.push(T({ name: 'Church', text: D.f.church, font: 'Montserrat', size: 26, upper: true, fill: ink, align: 'left', maxW: opts.maxW || 520, x: x + Math.min(520, D.f.church.length * 15) / 2, y, letter: 0.02 }));
+    if (D.f.church) {
+      const t = T({ name: 'Church', text: D.f.church, font: 'Montserrat', size: 26, upper: true, fill: ink, shadow: true, align: 'left', maxW: opts.maxW || 520, y, letter: 0.02 });
+      t.x = x + boxOf(t).w / 2;   // its left edge just after the logo, however long the name
+      out.push(t);
+    }
     return out;
   }
   /* lay layers side by side, centred on cx, each as wide as it draws */
@@ -681,7 +738,13 @@
     return lines;
   }
   const speakerLine = (D) => D.sp.map((s) => s.name).filter(Boolean).join(' & ');
-  const venueText = (D) => D.f.venue || '';
+  /* the address as a flyer prints it: not the church's name again (it is at the top), three parts at most */
+  const venueText = (D) => {
+    let parts = String(D.f.venue || '').split(/\s*,\s*/).filter(Boolean);
+    const ch = String(D.f.church || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+    if (parts.length > 1 && ch && parts[0].toLowerCase().replace(/[^a-z0-9]+/g, '') === ch) parts = parts.slice(1);
+    return parts.slice(0, 3).join(', ');
+  };
   const W = 1080;
 
   const LAYOUTS = {
@@ -703,8 +766,10 @@
       tm.x = ring.x;
       L.push(day, mon, ring, SH({ name: 'Time line', shape: 'ring', fill: '#ffffff', line: 3, x: ring.x, y: ring.y, w: ring.w, h: ring.h }), tm);
       if (venueText(D)) {
-        L.push(SH({ name: 'Pin', shape: 'pin', fill: p.accent, x: 120, y: H - 120, w: 40, h: 40 }));
-        L.push(T({ name: 'Venue', text: venueText(D), font: 'Montserrat', size: 24, upper: true, fill: '#ffffff', align: 'left', x: 560, y: H - 118, maxW: 860 }));
+        const pin = SH({ name: 'Pin', shape: 'pin', fill: p.accent, y: H - 120, w: 40, h: 40 });
+        const v = T({ name: 'Venue', text: venueText(D), font: 'Montserrat', size: 24, upper: true, fill: '#ffffff', shadow: true, y: H - 118, maxW: 860 });
+        row([pin, v], 540, 10);
+        L.push(pin, v);
       }
       if (f.handles) L.push(T({ name: 'Handles', text: f.handles, font: 'Montserrat', size: 22, fill: rgba('#ffffff', 0.85), x: 540, y: H - 62, maxW: 900 }));
       return L;
@@ -740,7 +805,7 @@
       const words = D.titleWords;
       L.push(T({ name: 'Title 1', text: words[0], font: 'Anton', size: 330, upper: true, fill: 'gold', grain: true, extrude: 7, extrudeColor: '#3b2208', x: 520, y: 510, maxW: 1000, line: 0.86 }));
       if (words[1]) L.push(T({ name: 'Title 2', text: words[1], font: 'Anton', size: 250, upper: true, fill: 'rust', grain: true, extrude: 7, extrudeColor: '#2a1405', x: 480, y: 750, maxW: 900 }));
-      L.push(T({ name: 'Kicker', text: D.dir.kicker || 'JOIN US', font: 'Barlow Italic', size: 92, upper: true, fill: '#c81e1e', shadow: true, x: 300, y: 285, rot: -5, maxW: 480 }));
+      L.push(T({ name: 'Kicker', text: D.dir.kicker || 'JOIN US', font: 'Barlow Italic', size: 80, upper: true, fill: '#c81e1e', shadow: true, x: 380, y: 250, rot: -4, maxW: 640 }));
       if (f.theme) {
         L.push(T({ name: 'Theme label', text: 'THEME:', font: 'Montserrat', size: 20, fill: '#555', x: 90, y: 880, align: 'left' }));
         L.push(T({ name: 'Theme', text: twoLines(f.theme.toUpperCase()).filter(Boolean).join('\n'), font: 'Anton', size: 50, fill: '#1a1a1a', slant: true, align: 'left', x: 230, y: 950, line: 0.95, maxW: 360 }));
@@ -783,7 +848,7 @@
     scenic(D) {
       const H = D.h, p = D.pal, f = D.f, L = [BG({ img: D.bg, tint: 0.3, contrast: 10 })];
       if (f.church) L.push(T({ name: 'Church', text: f.church, font: 'Montserrat', size: 22, upper: true, fill: rgba('#ffffff', 0.9), letter: 0.5, x: 540, y: 90, maxW: 960 }));
-      if (D.logo && imgOf(D.logo)) L.push(...brand(D).filter((l) => l.name === 'Logo').map((l) => Object.assign(l, { x: 540, y: 160 })));
+      if (D.logo && imgOf(D.logo)) L.push(...logoLayers(D, 540, 165, 84));
       const words = D.titleWords;
       const grad = { stops: ['#ffffff', mix('#ffffff', p.accent, 0.35), p.accent], angle: 90 };
       L.push(T({ name: 'Title 1', text: words[0], font: 'Barlow Italic', size: 260, upper: true, fill: grad, shadow: true, extrude: 4, extrudeColor: rgba(p.deep, 0.9), x: 540, y: 330, maxW: 900 }));
@@ -820,7 +885,7 @@
         if (tw[2]) { const ac = T({ name: 'Accent', text: tw[2], font: 'Anton', size: 74, upper: true, fill: p.accent, slant: true, y: H * 0.36 + 106, rot: -4, maxW: 200 }); row([ac, t2], 540, 18); L.push(ac); } else t2.x = 540;
         L.push(t2);
       }
-      L.push(...people(D, { cx: 540, foot: H - 140, h: H * 0.38, gap: 320, max: 2, extra: { glow: rgba('#ffffff', 0.25) } }));
+      L.push(...people(D, { cx: 540, foot: H - 160, h: H * 0.42, gap: 320, max: 2, extra: { glow: rgba('#ffffff', 0.25) } }));
       L.push(SH({ name: 'Info bar', shape: 'band', fill: '#0b0b0d', x: 560, y: H - 105, w: 940, h: 150, skew: 30, rot: -1, shadow: true }));
       L.push(SH({ name: 'Pin', shape: 'pin', fill: '#e11d2a', x: 110, y: H - 108, w: 70, h: 70 }));
       L.push(T({ name: 'Date', text: `${f.dd || ''}\n${f.month || ''}, ${f.year || ''}`, font: 'Anton', size: 46, fill: '#ffffff', align: 'left', x: 290, y: H - 108, line: 0.95, maxW: 260 }));
@@ -841,7 +906,7 @@
       lines.forEach((ln, i) => L.push(T({ name: 'Title ' + (i + 1), text: ln, font: 'Anton', size: n === 1 ? 380 : 300, upper: true, fill: i === n - 1 && n > 1 ? grad : '#ffffff', extrude: 5, extrudeColor: rgba(p.deep, 0.85), shadow: true, x: 540, y: top + i * step, maxW: 1010, line: 0.9 })));
       const main = D.sp.filter((s) => imgOf(s.img));
       if (main.length) {
-        const P1 = person(main[0], 760, H - 150, H * 0.6, { glow: rgba(p.accent, 0.45) });
+        const P1 = person(main[0], 800, H - 150, H * 0.56, { glow: rgba(p.accent, 0.45) });
         if (P1) L.push(P1);
         L.push(T({ name: 'With', text: 'with', font: 'Yellowtail', size: 66, fill: p.accent, x: 300, y: H - 330, rot: -8 }));
         L.push(T({ name: 'Speaker', text: (main[0].name || '').replace(/^(\S+\.?)\s+/, '$1\n'), font: 'Anton', size: 54, upper: true, fill: '#ffffff', shadow: true, align: 'left', x: 300, y: H - 250, line: 0.95, maxW: 360 }));
@@ -890,7 +955,7 @@
     /* ── PRESENTS: MIRACLE SERVICE / INVOCATION — the minister in the middle, the title across him ── */
     presents(D) {
       const H = D.h, p = D.pal, f = D.f, L = [BG({ img: D.bg, tint: 0.5 })];
-      if (D.logo && imgOf(D.logo)) L.push(...brand(D).filter((l) => l.name === 'Logo').map((l) => Object.assign(l, { x: 540, y: 80, h: 64, w: l.w * 64 / l.h })));
+      if (D.logo && imgOf(D.logo)) L.push(...logoLayers(D, 540, 80, 72));
       if (f.church) L.push(T({ name: 'Church', text: f.church, font: 'Montserrat', size: 22, upper: true, fill: '#ffffff', letter: 0.12, x: 540, y: D.logo ? 140 : 90, maxW: 900 }));
       L.push(T({ name: 'Presents', text: 'PRESENTS', font: 'Montserrat', size: 16, fill: rgba('#ffffff', 0.8), letter: 0.9, x: 540, y: D.logo ? 172 : 124 }));
       L.push(...people(D, { cx: 540, foot: H * 0.8, h: H * 0.66, gap: 420, max: 3, extra: { glow: rgba(p.accent, 0.4), fade: 0.12 } }));
@@ -925,7 +990,7 @@
       { name: 'Date', big: `${(f.day || '').slice(0, 3)}. ${f.dd ? f.dd.replace(/\D+$/, '') : ''}\n${f.month || ''}`, size: 46 },
       { name: 'Time', big: [f.time, f.time2].filter(Boolean).join('\n'), size: 46, accent: true },
     ], { gap: 26 }));
-    L.push(...people(D, { cx: 540, foot: H - 70, h: H * 0.5, gap: 330, max: 3, extra: { glow: rgba('#000000', 0.4) } }));
+    L.push(...people(D, { cx: 470, foot: H - 64, h: H * 0.42, gap: 330, max: 3, extra: { glow: rgba('#000000', 0.4), fade: 0.12 } }));
     const sp = D.sp[0];
     if (sp && sp.name) {
       L.push(SH({ name: 'Badge', shape: 'circle', fill: '#ffd21f', x: 830, y: H - 330, w: 230, h: 230, shadow: true }));
@@ -983,7 +1048,68 @@
     return { w: D.w, h: D.h, pal: D.pal, look, layers };
   }
 
-  root.MWFlyer = { HD, render, buildScene, loadFonts, IMGS, loadImg, proceduralBg, LAYOUTS, LOOK_NAMES, FONTS, textCanvas, boxOf, Dates };
+  /*
+   * A CUT-OUT, TIDIED. The person model hands back the whole photo with the
+   * background see-through: a man on a big stage is a small figure in a large
+   * empty frame, so on a flyer (which sizes people by height) he came out
+   * tiny — and a chair or a coat it half-kept rode along. So: only the largest
+   * shape is kept (the person; anything under a tenth of his size goes), and
+   * the picture is trimmed tight around him, feet at the bottom edge.
+   */
+  async function tidyCut(src) {
+    const im = await loadImg(src);
+    const W = iw(im), H = ih(im);
+    const k = Math.min(1, 360 / Math.max(W, H)), w = Math.max(1, Math.round(W * k)), h = Math.max(1, Math.round(H * k));
+    const sm = canvas(w, h), sx = sm.getContext('2d', { willReadFrequently: true });
+    sx.drawImage(im, 0, 0, w, h);
+    const a = sx.getImageData(0, 0, w, h).data;
+    const lab = new Int32Array(w * h).fill(-1), sizes = [], boxes = [];
+    const stack = [];
+    for (let i = 0; i < w * h; i++) {
+      if (lab[i] >= 0 || a[i * 4 + 3] < 60) continue;
+      const id = sizes.length; let n = 0; const bx = [w, h, 0, 0];
+      lab[i] = id; stack.push(i);
+      while (stack.length) {
+        const j = stack.pop(), x = j % w, y = (j / w) | 0; n++;
+        if (x < bx[0]) bx[0] = x; if (y < bx[1]) bx[1] = y; if (x > bx[2]) bx[2] = x; if (y > bx[3]) bx[3] = y;
+        for (const q of [j - 1, j + 1, j - w, j + w]) {
+          if (q < 0 || q >= w * h || lab[q] >= 0 || a[q * 4 + 3] < 60) continue;
+          if ((q === j - 1 && x === 0) || (q === j + 1 && x === w - 1)) continue;
+          lab[q] = id; stack.push(q);
+        }
+      }
+      sizes.push(n); boxes.push(bx);
+    }
+    if (!sizes.length) return src;
+    const big = sizes.indexOf(Math.max(...sizes));
+    // a part of him the model split off (a hand past the microphone) is beside or inside his outline; a chair is off to the side
+    const B = boxes[big], bw = B[2] - B[0], left = B[0] - bw * 0.08, right = B[2] + bw * 0.08;
+    const keep = sizes.map((n, i) => i === big || (n >= sizes[big] * 0.1 && boxes[i][0] >= left && boxes[i][2] <= right));
+    // drop what is not kept, at full size, by the small map
+    const full = canvas(W, H), fx = full.getContext('2d', { willReadFrequently: true });
+    fx.drawImage(im, 0, 0);
+    const d = fx.getImageData(0, 0, W, H), p = d.data;
+    let x0 = W, y0 = H, x1 = 0, y1 = 0;
+    for (let y = 0; y < H; y++) {
+      const my = Math.min(h - 1, (y * k) | 0);
+      for (let x = 0; x < W; x++) {
+        const i = (y * W + x) * 4;
+        if (p[i + 3] === 0) continue;
+        const l = lab[my * w + Math.min(w - 1, (x * k) | 0)];
+        if (l < 0 || !keep[l]) { p[i + 3] = 0; continue; }
+        if (p[i + 3] > 20) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+      }
+    }
+    if (x1 <= x0 || y1 <= y0) return src;
+    fx.putImageData(d, 0, 0);
+    const pad = Math.round(Math.max(x1 - x0, y1 - y0) * 0.02);
+    x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(W - 1, x1 + pad); y1 = Math.min(H - 1, y1 + 1);
+    const out = canvas(x1 - x0 + 1, y1 - y0 + 1);
+    out.getContext('2d').drawImage(full, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+    return out.toDataURL('image/png');
+  }
+
+  root.MWFlyer = { tidyCut, HD, render, buildScene, loadFonts, IMGS, loadImg, proceduralBg, LAYOUTS, LOOK_NAMES, FONTS, textCanvas, boxOf, Dates };
 
   /* ================================================================== THE UI */
 
@@ -1199,6 +1325,7 @@
         <section class="fs-sec">
           <h3>Who is preaching? <small>tap to put them on · tap again for their pictures</small></h3>
           <div class="fs-sps">${sp}</div>
+          ${chosenSpeakers().map((s) => `<button type="button" class="fs-bulk" data-act="bulk" data-id="${escAttr(s.id)}">${ic('photo')}<span><b>Add photos of ${esc(s.name || 'this speaker')}</b><small>pick many at once — each is cut out for you · ${(s.photos || []).length} in the bank</small></span>${ic('plus')}</button>`).join('')}
         </section>
         <section class="fs-sec fs-form">
           <label class="fs-f fs-wide"><span>Title</span><input data-f="title" value="${escAttr(f.title)}" placeholder="Sunday Service"></label>
@@ -1244,6 +1371,10 @@
       if (b.dataset.size) { F.size = b.dataset.size; return drawMake(); }
       if (b.dataset.act === 'kit') return openKit();
       if (b.dataset.act === 'addsp') return addSpeaker(true);
+      if (b.dataset.act === 'bulk') {
+        const s = ((F.kit && F.kit.speakers) || []).find((x) => x.id === b.dataset.id);
+        if (s) return addPhotos(s, async () => { await saveKit(true); drawMake(); });
+      }
     };
     P.foot.onclick = (e) => { if (e.target.closest('[data-act="make"]')) makeFlyers(); };
   }
@@ -1574,7 +1705,7 @@
       case 'effects': return sheetEffects(L);
       case 'spacing': return sliders([['Letters', 'letter', -0.05, 0.8, 0.01], ['Lines', 'line', 0.7, 1.6, 0.02], ['Size', 's', 0.2, 3, 0.02], ['Turn', 'rot', -180, 180, 1]], L);
       case 'opacity': return sliders([['Opacity', 'opacity', 0.05, 1, 0.01]], L);
-      case 'imglook': return sliders([['Brightness', 'bright', -60, 60], ['Contrast', 'contrast', -50, 80], ['Colour', 'sat', -100, 100], ['Round corners', 'radius', 0, 300]], L);
+      case 'imglook': return sliders([['Length', 'crop', 0.35, 1, 0.01], ['Brightness', 'bright', -60, 60], ['Contrast', 'contrast', -50, 80], ['Colour', 'sat', -100, 100], ['Round corners', 'radius', 0, 300]], L);
       case 'dup': { const N = Object.assign(clone(L), { id: uid(), x: L.x + 30, y: L.y + 30 }); change(() => { ls.splice(ls.indexOf(L) + 1, 0, N); F.sel = N.id; }); return; }
       case 'front': { const i = ls.indexOf(L); if (i < ls.length - 1) change(() => { ls.splice(i, 1); ls.splice(i + 1, 0, L); }); return; }
       case 'back': { const i = ls.indexOf(L); if (i > 1) change(() => { ls.splice(i, 1); ls.splice(i - 1, 0, L); }); return; }
@@ -1609,7 +1740,7 @@
     if (!L) return;
     snapshot();
     openSheet(list.map(([label, k, min, max, step]) => {
-      const v = L[k] == null ? (k === 'opacity' || k === 's' ? 1 : k === 'line' ? 1 : k === 'tint' ? 0.45 : k === 'vignette' ? 0.75 : 0) : L[k];
+      const v = L[k] == null ? (k === 'opacity' || k === 's' || k === 'crop' ? 1 : k === 'line' ? 1 : k === 'tint' ? 0.45 : k === 'vignette' ? 0.75 : 0) : L[k];
       return `<label class="fs-slider"><span>${esc(label)}</span><input type="range" data-k="${k}" min="${min}" max="${max}" step="${step || 1}" value="${v}"><output>${Math.round(v * (step && step < 1 ? 100 : 1))}</output></label>`;
     }).join(''), (sh) => {
       $$('input[type=range]', sh).forEach((r) => r.addEventListener('input', () => {
@@ -1775,7 +1906,7 @@
       P.body.innerHTML = `<div class="fs-kit"><p class="fs-note">${(s.photos || []).length ? 'Pick the picture for this flyer, or let the AI pick — it goes round all of them, a different one each time.' : 'No pictures yet. Add some — they are cut out and kept for every flyer.'}</p>
         <div class="fs-bank"><button type="button" class="fs-bank-pic fs-bank-ai${F.pinned[id] ? '' : ' on'}" data-b="ai">${ic('spark')}<small>AI picks</small></button>
         ${(s.photos || []).map((p) => `<button type="button" class="fs-bank-pic${F.pinned[id] === p ? ' on' : ''}" data-b="pin" data-photo="${escAttr(p)}">${picTag(p)}</button>`).join('')}
-        <button type="button" class="fs-bank-pic fs-bank-add" data-b="add">${ic('plus')}<small>Add</small></button></div></div>`;
+        <button type="button" class="fs-bank-pic fs-bank-add" data-b="add">${ic('plus')}<small>Add photos<br>(many at once)</small></button></div></div>`;
       P.foot.innerHTML = `<button type="button" class="fs-ghost" data-b="off"><span>Take ${esc((s.name || 'them').split(' ').slice(-1)[0])} off this flyer</span></button><button type="button" class="fs-go" data-b="done"><span>Done</span></button>`;
       fillPics(P.body);
     };
@@ -1800,20 +1931,30 @@
     const inp = document.createElement('input');
     inp.type = 'file'; inp.accept = 'image/*'; inp.multiple = true;
     inp.onchange = async () => {
-      const files = Array.from(inp.files || []).slice(0, 20); if (!files.length) return;
+      const files = Array.from(inp.files || []).slice(0, 30); if (!files.length) return;
       if (files.length === 1) {
         const url = await shrinkToDataUrl(files[0], 1800);
-        return cutOutUrl(url, async (png) => { s.photos = (s.photos || []).concat(png); await then(); });
+        return cutOutUrl(url, async (png) => {
+          png = await tidyCut(png).catch(() => png);
+          let kept = png;
+          try { kept = await window.api.flyer.kitAddPhoto(s.id, png, s.name); PICURL.set(kept, png); } catch (e) { /* the next Save sends it */ }
+          s.photos = (s.photos || []).concat(kept); await then();
+        });
       }
-      toast(`Cutting out ${files.length} pictures…`, '', 5000);
+      let n = 0;
       for (const f of files) {
+        toast(`Cutting out ${++n} of ${files.length}…`, '', 4000);
         try {
           const url = await shrinkToDataUrl(f, 1800);
           let png = url;
-          try { png = (await window.FlyerAI.removePerson(url)).src; } catch (e) { /* kept as it is */ }
-          s.photos = (s.photos || []).concat(png);
+          try { png = await tidyCut((await window.FlyerAI.removePerson(url)).src); } catch (e) { /* kept as it is */ }
+          // each one kept on the server as soon as it is cut out (a speaker not yet saved is made as it goes)
+          let kept = png;
+          try { kept = await window.api.flyer.kitAddPhoto(s.id, png, s.name); PICURL.set(kept, png); } catch (e) { /* the next Save sends it */ }
+          s.photos = (s.photos || []).concat(kept);
         } catch (e) { /* skip that one */ }
       }
+      toast(`${files.length} photos added to ${s.name || 'the bank'}. Tap one in My church to fix its cut-out.`, 'good', 6000);
       await then();
     };
     inp.click();
@@ -1832,23 +1973,23 @@
 
   /* ------------------------------------------------- pictures, and cut-outs */
 
-  function pickImage(then) {
+  function pickImage(then, o = {}) {
     const inp = document.createElement('input');
     inp.type = 'file'; inp.accept = 'image/*';
     inp.onchange = async () => {
       const file = inp.files && inp.files[0]; if (!file) return;
-      try { then(await shrinkToDataUrl(file, 1800)); } catch (e) { toast(e.message || 'That picture could not be opened.', 'error'); }
+      try { then(await shrinkToDataUrl(file, o.max || 1800, o.png)); } catch (e) { toast(e.message || 'That picture could not be opened.', 'error'); }
     };
     inp.click();
   }
   /* a phone photo is 12 megapixels; a flyer needs a fraction of that */
-  async function shrinkToDataUrl(file, max) {
+  async function shrinkToDataUrl(file, max, png) {
     const url = URL.createObjectURL(file);
     try {
       const im = await loadImg(url);
       const k = Math.min(1, max / Math.max(iw(im), ih(im)));
       const c = canvas(iw(im) * k, ih(im) * k); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
-      return c.toDataURL('image/jpeg', 0.92);
+      return png ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.92);
     } finally { URL.revokeObjectURL(url); }
   }
 
@@ -1866,6 +2007,7 @@
     const im = imgOf(L.img); if (!im) return;
     const c = canvas(iw(im), ih(im)); c.getContext('2d').drawImage(im, 0, 0);
     cutOutUrl(c.toDataURL('image/png'), async (png) => {
+      png = await tidyCut(png).catch(() => png);
       const cut = await loadImg(png); const key = 'cut:' + uid(); IMGS.set(key, cut);
       change(() => { L.img = key; L.w = L.h * iw(cut) / ih(cut); });
       toast('Background removed.', 'good');
@@ -1973,7 +2115,8 @@
       const b = e.target.closest('[data-k]'); if (!b) return;
       const i = +b.dataset.i;
       switch (b.dataset.k) {
-        case 'logo': return pickImage((url) => cutOutUrl(url, async (png) => { k.logoUrl = png; IMGS.set('logo', await loadImg(png)); drawKit(); }));
+        // the logo exactly as it is — never cut out (see logoLayers); a PNG keeps its see-through parts
+        case 'logo': return pickImage(async (url) => { k.logoUrl = url; IMGS.set('logo', await loadImg(url)); drawKit(); }, { png: true, max: 900 });
         case 'spadd-pic': return addPhotos(k.speakers[i], async () => drawKit());
         case 'inspoadd': return addInspiration(() => drawKit());
         case 'inspo': {
@@ -1986,7 +2129,7 @@
           const fix = window.confirm('Fix this picture’s cut-out?\n\n(Cancel to choose whether to remove it.)');
           if (fix) {
             await bankPic(p);
-            return cutOutUrl(PICURL.get(p) || p, (png) => { sp.photos[j] = png; drawKit(); });
+            return cutOutUrl(PICURL.get(p) || p, async (png) => { sp.photos[j] = await tidyCut(png).catch(() => png); drawKit(); });
           }
           if (window.confirm('Remove this picture from ' + (sp.name || 'the speaker') + '’s bank?')) { sp.photos.splice(j, 1); drawKit(); }
           return;

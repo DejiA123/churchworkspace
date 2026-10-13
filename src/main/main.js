@@ -780,6 +780,7 @@ ipcMain.handle('flyer:kitGet', wrap(async () => flyerart.kitGet()));
 ipcMain.handle('flyer:kitSave', wrap(async (e, a) => flyerart.kitSave((a && a.kit) || {})));
 ipcMain.handle('flyer:kitPic', wrap(async (e, a) => flyerart.kitPic(a && a.name)));
 ipcMain.handle('flyer:kitUsed', wrap(async (e, a) => flyerart.kitUsed(a || {})));
+ipcMain.handle('flyer:kitAddPhoto', wrap(async (e, a) => flyerart.kitAddPhoto(a || {})));
 ipcMain.handle('flyer:inspoAdd', wrap(async (e, a) => flyerart.inspoAdd(a || {})));
 ipcMain.handle('flyer:inspoRemove', wrap(async (e, a) => flyerart.inspoRemove(a || {})));
 

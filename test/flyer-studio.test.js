@@ -92,6 +92,14 @@ async function t(name, fn) {
     const files = fs.readdirSync(path.join(dir, 'flyer-kit')).filter((n) => n !== 'kit.json');
     assert.strictEqual(files.length, 3, 'the removed picture is gone from the disk');
   });
+  await t('a bulk add stores each photo as it comes, even for a speaker not saved yet', () => {
+    const a = fa.kitAddPhoto({ speaker: 'new1', name: 'Pst. Grace', dataUrl: png(7) });
+    const b = fa.kitAddPhoto({ speaker: 'new1', dataUrl: png(8) });
+    const sp = fa.kitGet().speakers.find((x) => x.id === 'new1');
+    assert.deepStrictEqual(sp.photos, [a, b]); assert.strictEqual(sp.name, 'Pst. Grace');
+    assert.throws(() => fa.kitAddPhoto({ speaker: 'nobody', dataUrl: png(1) }));
+    k = fa.kitGet();
+  });
   await t('a picture comes back by its name, and nothing outside the kit does', () => {
     assert.ok(fa.kitPic(k.speakers[0].photos[0]).startsWith('data:image/png;base64,'));
     assert.throws(() => fa.kitPic('../kit.json'));
@@ -153,7 +161,7 @@ async function t(name, fn) {
     const api = fs.readFileSync(path.join(__dirname, '..', 'src/cloud/cloud-api.js'), 'utf8');
     const main = fs.readFileSync(path.join(__dirname, '..', 'src/main/main.js'), 'utf8');
     const boot = fs.readFileSync(path.join(__dirname, '..', 'src/cloud/web/cloud-boot.js'), 'utf8');
-    for (const ch of ['status', 'direct', 'paint', 'kitGet', 'kitSave', 'kitPic', 'kitUsed', 'inspoAdd', 'inspoRemove']) {
+    for (const ch of ['status', 'direct', 'paint', 'kitGet', 'kitSave', 'kitPic', 'kitUsed', 'kitAddPhoto', 'inspoAdd', 'inspoRemove']) {
       assert.ok(api.includes(`'flyer:${ch}': true`), ch + ' allowed');
       assert.ok(main.includes(`ipcMain.handle('flyer:${ch}'`), ch + ' handled');
       assert.ok(boot.includes(`'flyer:${ch}'`), ch + ' in window.api');
