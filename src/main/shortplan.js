@@ -49,7 +49,7 @@ const NEW_STORY_RX = /\b(i went to|one day|(?:a|some|many|two|three|few) (?:days
 
 const words = (t) => String(t || '').split(/\s+/).filter(Boolean).length;
 // opens by pointing back at something said before it
-const LEANS_RX = /^(?:(?:so|and|but|now),?\s+)?(that'?s?|this|these|those|it|he|she|they|him|her|them|which|so that|and that|but that)\b(?! is why| is how| is what)/i;
+const LEANS_RX = /^(?:so,?\s+)?(that'?s?|this|these|those|it|he|she|they|him|her|them|which|so that|and that|but that)\b(?! is why| is how| is what)/i;
 /*
  * A line that is the CONSEQUENCE of what came before — "So that's the reason
  * why you see…", "That's why…", "This is how…". Heard on a live sermon's short:
@@ -77,7 +77,25 @@ const STOPS_RX = /[.!?…]["')\]]?\s*$/;
  * prayer section were chopped mid-sentence. A line OPENS a thought only when
  * the line before it finished one (or a new paragraph begins there).
  */
-const opens = (S, k) => k <= 0 || !!S[k].para || STOPS_RX.test(String(S[k - 1].text || '').trim());
+// (a sentence the preacher broke off — AssemblyAI ends it with a dash — ends a thought too: what follows is a new one)
+const BROKEN_RX = /[—–]\s*$|--\s*$/;
+// …when what follows it begins as a sentence does (a capital): "we are— that is the most important…" is one sentence, corrected
+const opens = (S, k) => k <= 0 || !!S[k].para || STOPS_RX.test(String(S[k - 1].text || '').trim())
+  || (BROKEN_RX.test(String(S[k - 1].text || '').trim()) && /^["'“‘(]?[A-Z0-9]/.test(String(S[k].text || '').trim()));
+/*
+ * WEAK OPENINGS, heard on a live sermon's shorts — whole sentences, but not
+ * where an editor starts:
+ *   • a phrase said twice: "It's not, it's not." (the real line comes next)
+ *   • a sentence the preacher broke off: "How somebody can be at peace with
+ *     Jesus inside for—" (the new thought after it is the start)
+ *   • "He…", "They…" when the line it points back to could not come too (the
+ *     short was already as long as it may be): "He was in all ways tempted…"
+ */
+const saidTwice = (t) => {
+  const w = String(t || '').toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').split(/\s+/).filter(Boolean);
+  return w.length >= 2 && w.length <= 10 && w.length % 2 === 0 && w.slice(0, w.length / 2).join(' ') === w.slice(w.length / 2).join(' ');
+};
+const PERSON_RX = /^(?:(?:so|and|but|now),?\s+)?(he|she|they|him|her|them)\b/i;
 const lands = (S, k) => STOPS_RX.test(String(S[k].text || '').trim());
 /*
  * The longest a planned short may be. It was 8% over the length asked for —
@@ -245,11 +263,19 @@ function finishWhole(sents, from, to, ceil) {
       if (k < to) from = k;
     }
   }
+  // a weak opening: on to the next sentence that stands alone (a few at most — never far into the moment)
+  const weak = (k) => { const t = String(sents[k].text || '').trim(); return saidTwice(t) || BROKEN_RX.test(t) || PERSON_RX.test(t); };
+  // (only ever to the very next sentence, and only when that one starts a thought cleanly: further on is the moment itself)
+  if (opens(sents, from) && weak(from) && from + 1 < to) {
+    const k = from + 1, t = String(sents[k].text || '').trim();
+    if (opens(sents, k) && !weak(k) && !BACKREF_RX.test(t) && !ASIDE_RX.test(sents[k].text) && !FILLER_OPEN_RX.test(t) && !LEANS_RX.test(t)) from = k;
+  }
   if (!opens(sents, from)) {
     let k = from;
     while (k > 0 && from - k < 4 && !opens(sents, k) && sents[to].end - sents[k - 1].start <= ceil && !PROFANE_RX.test(sents[k - 1].text)) k--;
     if (opens(sents, k)) from = k;
-    else { k = from; while (k < to && !opens(sents, k)) k++; from = k; }
+    // (forward: to a sentence that starts a thought — not a lone word or a filler on the way: "Being" in "…being fearful. Being unbelieving.")
+    else { k = from; while (k < to && (!opens(sents, k) || words(sents[k].text) <= 1 || FILLER_OPEN_RX.test(sents[k].text.trim()) || ASIDE_RX.test(sents[k].text))) k++; from = k; }
   }
   if (!lands(sents, to)) {
     let k = to;

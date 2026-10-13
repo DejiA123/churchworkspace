@@ -150,7 +150,7 @@ S[330].text = 'There is no prosperity gospel, there is only one gospel.';
   {
     // a pause at a comma breaks a "sentence" in two (highlights.buildSentences): the halves of a live sermon's lines
     const T = [];
-    for (let k = 0; k < 120; k++) T.push({ start: k * 6, end: k * 6 + 5.6, text: `Line ${k} is a whole sentence about prayer and faith.` });
+    for (let k = 0; k < 240; k++) T.push({ start: k * 6, end: k * 6 + 5.6, text: `Line ${k} is a whole sentence about prayer and faith.` });
     T[40].text = 'Especially when the children of God gather, individual issues will be solved,';
     T[41].text = 'whether they be sicknesses or difficulty in marriage.';
     T[20].text = 'I am coming to the feet of Jesus, the feet of the cross,';
@@ -175,6 +175,21 @@ S[330].text = 'There is no prosperity gospel, there is only one gospel.';
     T[100].text = "You understand what I'm saying?"; T[101].text = "So that's why you see, your destiny is not going to be okay.";
     const fwd = P.vet({ from: 101, to: 115, strength: 7 }, T, sec2, band2);
     check('…and when the line before is only an aside, the short starts on the next sentence that stands alone', fwd && fwd.from === 102, fwd && [fwd.from, fwd.to]);
+    // weak openings: a phrase said twice; a sentence broken off; "He…" whose line could not come too
+    T[120].text = "It's not, it's not."; T[121].text = "We don't use the weapons of this world.";
+    const tw = P.finishWhole(T, 120, 134, 154);
+    check('a phrase said twice ("It\'s not, it\'s not.") does not open a short: the line after it does', tw && tw.from === 121, tw);
+    T[140].text = 'How somebody can be at peace with Jesus inside for—'; T[141].text = 'One of my children in the faith told me something.';
+    const br = P.finishWhole(T, 140, 154, 154);
+    check('a sentence broken off ("…inside for—") does not open a short: the new thought after it does', br && br.from === 141, br);
+    T[160].text = 'You know, we are—'; T[161].text = 'that is the most important thing in this life.';
+    check('…but a sentence put right mid-way ("we are— that is…") is still one sentence', P.finishWhole(T, 161, 175, 154) && P.finishWhole(T, 161, 175, 154).from === 160, P.finishWhole(T, 161, 175, 154));
+    T[180].text = 'He was in all ways tempted like we are, yet without sin.'; T[181].text = 'And the Bible says we can come boldly to the throne of grace.';
+    const he = P.finishWhole(T, 180, 194, 154);
+    check('"He was…" with no room for the line it points to: the short starts on the next clean sentence', he && he.from === 181, he);
+    T[200].text = 'He was faithful.'; T[201].text = 'They said nothing.';
+    const he2 = P.finishWhole(T, 200, 214, 154);
+    check('…and stays when the next one leans back as well (it never runs on into the moment)', he2 && he2.from === 200, he2);
     const fw = P.finishWhole(T, 21, 41, 154);
     check('finishWhole: both edges whole', fw && fw.from === 20 && fw.to === 41, fw);
   }

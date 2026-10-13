@@ -103,6 +103,17 @@ const oneMin = h.refineToSentences(0, 60, minSents, 40, 80, 60, {});
 check('"1 minute" mode lands close to 60s (not a 40s stub)', oneMin && Math.abs((oneMin.end - oneMin.start) - 60, 0) <= 12, oneMin && `${(oneMin.end - oneMin.start).toFixed(1)}s`);
 check('"1 minute" clip still starts/ends on sentence edges', oneMin && minSents.some((s) => s.start === oneMin.start) && minSents.some((s) => s.end === oneMin.end));
 
+// A FALSE START BEFORE THE REAL WORDS (trimLeadIn): "It's not— we don't use the weapons…" starts on "We don't…";
+// "We are— that is the most important…" is one sentence put right, and keeps its start.
+{
+  const mk = (txt, t0) => txt.split(' ').map((x, i) => ({ text: x, start: t0 + i * 0.4, end: t0 + i * 0.4 + 0.35 }));
+  const fsC = { start: 100, end: 180, words: mk("It's not— we don't use the weapons of our warfare, they are not carnal", 100), text: "It's not— we don't use the weapons of our warfare" };
+  const ok1 = h.trimLeadIn(fsC);
+  check('a false start ("It\'s not—") is left off the short', ok1 && /^We don't use/.test(fsC.text) && fsC.start > 100, fsC.text);
+  const scC = { start: 100, end: 180, words: mk('We are— that is the most important in this life, to talk to God', 100), text: 'We are— that is the most important' };
+  check('…but a sentence put right ("We are— that is…") keeps its start', !h.trimLeadIn(scC) && scC.start === 100, scC.text);
+}
+
 // THE PAUSE NEVER CROSSES INTO ANOTHER SENTENCE (planWholeSermon). Measured on a live
 // sermon: with no breath near the end, the snap rode up to 3 s on — "…you understand what
 // I'm saying? | So that's" — into the next sentence. The words' times now bound it.

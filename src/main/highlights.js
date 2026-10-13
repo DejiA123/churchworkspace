@@ -1784,6 +1784,15 @@ function trimLeadIn(c) {
   const lead = (x) => /^(but|and)$/.test(bare(x)) || (/^(so|now|well|then|also)$/.test(bare(x)) && /,$/.test(raw(x)));
   let k = 0;
   while (k < 2 && lead(w[k])) k++;
+  // a false start before the real words — "It's not— we don't use the weapons of our warfare…": from the word after the dash
+  // (not when the words after it lean on it: "We are— that is the most important…" is one sentence, put right)
+  if (!k) {
+    for (let j = 0; j < 3 && j < w.length; j++) {
+      if (!/[—–]$|--$/.test(raw(w[j]))) continue;
+      if (w[j + 1] && !/^(that|this|which|it|is|was|are|were|to|of|for|and|or|but)$/.test(bare(w[j + 1]))) k = j + 1;
+      break;
+    }
+  }
   if (!k) return false;
   if (bare(w[k]) === 'you' && /^(see|know)$/.test(bare(w[k + 1])) && /,$/.test(raw(w[k + 1]))) k += 2;
   const first = w[k];
@@ -1804,6 +1813,7 @@ function trimLeadIn(c) {
   c.quote = drop(c.quote);
   if (typeof c.durationSec === 'number') c.durationSec = Math.round((c.end - c.start) * 10) / 10;
   c.leadTrimmed = w.slice(0, k).map((x) => raw(x)).join(' ');
+  // (the words after a dash begin the short: "we don't use…" → "We don't use…")
   return true;
 }
 
