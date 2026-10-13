@@ -1052,7 +1052,7 @@ async function handle(req, res) {
   if (p === '/sw.js') return sendWeb(req, res, 'sw.js');
   if (p.startsWith('/icons/')) {
     const name = path.basename(p);
-    if (!/^[\w.-]+\.(png|svg|ico)$/i.test(name)) return send(res, 404, 'text/plain', 'not found');
+    if (!/^[\w.-]+\.(png|svg|ico|jpg)$/i.test(name)) return send(res, 404, 'text/plain', 'not found');
     return sendWeb(req, res, path.join('icons', name), 'public, max-age=604800');
   }
 

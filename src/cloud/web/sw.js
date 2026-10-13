@@ -55,6 +55,9 @@ const SHELL = [
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
+  '/icons/flyer-glory.jpg',
+  '/icons/flyer-push.jpg',
+  '/icons/flyer-miracle.jpg',
 ];
 
 self.addEventListener('install', (e) => {

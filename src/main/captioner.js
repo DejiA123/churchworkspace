@@ -892,6 +892,7 @@ function cleanCaptionText(t) {
     .replace(/["“”„‟«»‹›″＂‘]/g, '')
     .replace(/[?？¿]/g, '')                 // question marks
     .replace(/[…⋯]/g, ' ')                 // ellipsis reads as a pause, not a character
+    .replace(/\s*[\u2012\u2013\u2014\u2015]+\s*/g, ' ')   // dashes (— –): a pause, never drawn (ARE— → ARE)
     .replace(/[.,。．，、]/g, (m, i, s) =>  // full stops / commas: keep only between digits
       (/\d/.test(s[i - 1] || '') && /\d/.test(s[i + 1] || '') ? m : ''))
     .replace(/\s+/g, ' ')

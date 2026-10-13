@@ -66,7 +66,7 @@
     music: null,       // { id, name, file, durationSec, volume, fadeIn, fadeOut, duck, bed, tlStart, len }
     outro: null,       // a library clip appended to every short
     outroAll: true,
-    capStyleId: 'outline', // which visual caption look is selected (DEFAULT_CAP_STYLE)
+    capStyleId: 'boxword', // which visual caption look is selected — Box word, yellow, following the voice, from the start
     /*
      * Where the captions sit, as fractions of the EXPORT FRAME (not the preview
      * window, which is a different shape and size on every screen). null means
@@ -1218,14 +1218,25 @@
     const capFp = caps.length + ':' + (caps.length ? caps[0].start + '-' + caps[caps.length - 1].end : '');
     const sig = capFp + '|' + JSON.stringify(shorts.map((s) => [
       s.id, s.label, s.start, s.end, s.thumb ? 1 : 0, s.color, s.virality, s.score,
-      s.reasons, cutsOf(s).length, removedDur(s).toFixed(2), s.id === ve.sel, s.subject ? 1 : 0,
+      s.reasons, cutsOf(s).length, removedDur(s).toFixed(2), s.subject ? 1 : 0,
       s.thumbPick ? (s.thumbPick.file || s.thumbPick.at) : 0,
     ]));
+    /*
+     * Picking a short (its ▶, or a tap on the card) only moves the highlight.
+     * It used to be part of the description, so ▶ rebuilt every card — and the
+     * new thumbnails have no height until they load, so the list shrank for a
+     * moment and the panel jumped back to its first short.
+     */
     if (el.__clipSig === sig && (shorts.length === 0) === !el.querySelector('.ve-clip')) {
+      $$('.ve-clip', el).forEach((c) => c.classList.toggle('sel', c.dataset.id === ve.sel));
       updateClipPlayButtons();          // the ▶/⏸ still tracks the playhead
       return;
     }
     el.__clipSig = sig;
+    // and when the cards are rebuilt, the panel stays where it was scrolled to
+    const scrollers = [];
+    for (let n = el; n && n !== document.documentElement; n = n.parentElement) if (n.scrollTop) scrollers.push([n, n.scrollTop]);
+    const keepScroll = () => scrollers.forEach(([n, y]) => { if (n.scrollTop !== y) n.scrollTop = y; });
     if (!shorts.length) {
       el.innerHTML = `<p class="muted small">No shorts yet. Tap <b>✨ Make Shorts</b>.</p>`;
       return;
@@ -1271,7 +1282,7 @@
     $$('.ve-clip-name', el).forEach((inp) => inp.addEventListener('change', () => {
       const s = ve.segments.find((x) => x.id === inp.dataset.id); if (s) { s.label = inp.value; renderSegments(); }
     }));
-    $$('[data-play]', el).forEach((b) => b.addEventListener('click', () => previewSegment(b.dataset.play)));
+    $$('[data-play]', el).forEach((b) => b.addEventListener('click', () => holdClipListScroll(el, () => previewSegment(b.dataset.play))));
     $$('[data-cap]', el).forEach((b) => b.addEventListener('click', () => captionShort(b.dataset.cap)));
     $$('[data-thumb]', el).forEach((b) => b.addEventListener('click', () => openThumbPicker(b.dataset.thumb)));
     $$('[data-who]', el).forEach((b) => b.addEventListener('click', () => openFollowPicker(b.dataset.who, true)));
@@ -1283,6 +1294,8 @@
     }));
     shorts.forEach((s) => loadClipThumb(s));
     updateClipPlayButtons();
+    keepScroll();
+    if (scrollers.length) $$('img', el).forEach((im) => { if (!im.complete) im.addEventListener('load', keepScroll, { once: true }); });
   }
 
   // The scroller (#veTlScroll) has horizontal padding; the ruler/tracks are
@@ -5884,6 +5897,12 @@
         renderCapTrack(); if (capModalOpen()) renderCapList(); updateCapOverlay(ve.refs.player.currentTime || 0);
         return;
       }
+      if (ve.capEvents[i] && ve.capEvents[i].text !== orig) {
+        // the line was changed live as it was typed; the undo step is the line as it was before
+        const now = ve.capEvents[i].text; ve.capEvents[i].text = orig;
+        pushHistory({ captions: true }); ve._capEditAt = Date.now();
+        ve.capEvents[i].text = now;
+      }
       if (ve.capEvents[i]) { if (ve.capEvents[i].text !== txt || ve.capEvents[i].doubt) settleDoubt(ve.capEvents[i]); ve.capEvents[i].text = txt; }
       if (label.textContent !== txt) label.textContent = txt;
       label.removeAttribute('contenteditable');
@@ -6704,6 +6723,28 @@
     const pr = p.play(); if (pr && pr.catch) pr.catch(() => {});
     ve.refs.play.textContent = '⏸';
     updateClipPlayButtons();
+  }
+  /*
+   * ▶ on a short plays it where the list is — the panel does not move. On an
+   * iPhone it jumped back to the first short. Whatever moves it (a rebuild, the
+   * player starting, Safari's own focus handling), the panel is put back for a
+   * moment after the tap — unless a finger is scrolling it.
+   */
+  function holdClipListScroll(el, fn) {
+    const held = [];
+    for (let n = el.parentElement; n && n !== document.documentElement; n = n.parentElement) {
+      if (n.scrollHeight > n.clientHeight + 1) held.push([n, n.scrollTop]);
+    }
+    fn();
+    if (!held.length) return;
+    let touched = false;
+    const stop = () => { touched = true; };
+    held.forEach(([n]) => { n.addEventListener('touchstart', stop, { once: true, passive: true }); n.addEventListener('wheel', stop, { once: true, passive: true }); });
+    const put = () => { if (!touched) held.forEach(([n, y]) => { if (Math.abs(n.scrollTop - y) > 1) n.scrollTop = y; }); };
+    put();
+    requestAnimationFrame(put);
+    [120, 350, 800].forEach((ms) => setTimeout(put, ms));
+    setTimeout(() => held.forEach(([n]) => { n.removeEventListener('touchstart', stop); n.removeEventListener('wheel', stop); }), 900);
   }
   function updateClipPlayButtons() {
     const p = ve.refs.player;
@@ -9062,7 +9103,7 @@
     const prior = (document.getElementById('capFixNote') || {}).textContent || '';
     const book = res.fixed ? ' · ' + prior : '';
     if (res.engine === 'cloud') {
-      setCapFixNote(`☁️ Heard by ${res.engineName || 'Groq — Whisper Large v3 Turbo'} in ${((res.cloudMs || 0) / 1000).toFixed(1)} s${book}`, true);
+      setCapFixNote(`Heard by ${res.engineName || 'Groq — Whisper Large v3 Turbo'} in ${((res.cloudMs || 0) / 1000).toFixed(1)} s${book}`, true);
     } else if (res.engine === 'mixed') {
       window.__toast && window.__toast(`☁️ Groq heard the first ${fmt(res.cloudSec)} — then ${res.cloudWhy || 'it stopped'}, so this PC heard the last ${fmt(res.pcSec)}.`, 'error', 10000);
     } else if (res.cloudWhy) {
@@ -10339,6 +10380,8 @@
         handoverSet(hand);
       }
     }
+    // the box this phone shows is the whole export's: it counts the server's shorts too (cloud-boot.js)
+    if (sbatch && sbatch.id && window.__followServerBatch) window.__followServerBatch(sbatch.id, { handing: true });
     const expectFor = (s) => {
       const p = (ve.presets && ve.presets[ve.aspect]) || { w: 1080, h: 1920 };
       const q = String(qualityCfg() || '1080p');
@@ -10364,7 +10407,7 @@
         // hand over — said so, so it cannot be mistaken for the server's own count
         // (the jobs sheet), which is further behind and is the export itself.
         const at = Math.min(total, before + done + 1);
-        if (window.__setJobBatch) window.__setJobBatch(at, total, sbatch ? 'Preparing short' : null, sbatch ? 'for the server' : null);
+        if (window.__setJobBatch) window.__setJobBatch(at, total, sbatch ? 'Getting short' : null, sbatch ? 'ready for the server' : null);
         if (window.__setTaskBatch) window.__setTaskBatch(task, at, total);
         try {
           /*
@@ -10428,6 +10471,14 @@
             catch (e) { SB.end(); if (!e || !e.recordUnsupported) throw e; steps = null; }
           }
           if (steps && steps.length) {
+            // the box stays up while this short is handed over and the phone
+            // takes its breath — it blinked out for a second between shorts
+            const inBg = (window.__tasksList ? window.__tasksList() : []).some((t) => t.id === task);
+            if (!inBg && window.__showOverlay) {
+              window.__showOverlay(`Sending “${s.label}” to the server…`);
+              if (window.__setJobBatch) window.__setJobBatch(at, total, 'Getting short', 'ready for the server');
+              if (window.__setProgress) window.__setProgress(100);
+            }
             await SB.add(sbatch.id, s.label, steps);
             steps = null;
             if (hand) { hand.sent = (hand.sent || []).concat(s.id); hand.at = Date.now(); handoverSet(hand); }
@@ -10435,7 +10486,10 @@
             // short's pictures before the next one starts drawing
             await new Promise((r) => setTimeout(r, 1200));
             sent++; sentHere++;
-            if (window.__taskSay) window.__taskSay(task, `Handed ${sent} of ${total} to the server — it is exporting them`);
+            // said in the same box, without starting its bar again at 0
+            const said = `Handed ${sent} of ${total} to the server — it is exporting them`;
+            if (inBg) { if (window.__taskSay) window.__taskSay(task, said); }
+            else { const m = document.getElementById('overlayMsg'); if (m) m.textContent = said; }
           } else {
             const out = await chain();
             if (window.__taskAddFile) window.__taskAddFile(task, out);
@@ -10462,15 +10516,25 @@
     if (window.__setJobBatch) window.__setJobBatch(null);
     if (sbatch) { try { await SB.seal(sbatch.id); } catch (e) {} handoverSet(null); }
     const extras = [ve.music ? 'music' : null, (ve.outro && ve.outroAll !== false) ? 'your outro' : null].filter(Boolean).join(' + ');
+    if (!sent && window.__followServerBatch) window.__followServerBatch(null);
     if (sent) {
       // the server has them: this phone's part is over
       const note = `✅ ${sent} short${sent > 1 ? 's are' : ' is'} exporting on the server${done > sentHere ? ` (${done - sentHere} made here)` : ''} — you can close the app; they will be in Files.`
         + (skipped.length ? ` ${skipped.length} could not be prepared: ${skipped.join('; ')}.` : '')
         + (stopped ? ` The rest ${stopped.cancelled ? 'were stopped' : 'did not finish'}.` : '');
-      if (window.__endTask) window.__endTask(task, { ok: true, note });
-      // the progress box this phone showed while handing over is finished with
-      window.__hideOverlay && window.__hideOverlay();
-      window.__toast && window.__toast(note, 'good', 9000);
+      const inBg = window.__endTask ? window.__endTask(task, { ok: true, note }) : false;
+      // one progress, start to end: the same box goes on with the server's
+      // count until the shorts are ready to save (cloud-boot.js)
+      const followed = !inBg && !stopped && !!window.__followServerBatch && window.__followServerBatch(sbatch.id, {
+        title: `Exporting ${total} short${total > 1 ? 's' : ''}`,
+        note: 'All handed over — you can close the app, the server carries on.'
+          + (skipped.length ? ` ${skipped.length} could not be prepared.` : ''),
+      });
+      if (!followed) {
+        if (window.__followServerBatch) window.__followServerBatch(null);
+        window.__hideOverlay && window.__hideOverlay();
+        window.__toast && window.__toast(note, 'good', 9000);
+      }
     } else if (done) {
       const note = `✅ Exported ${done} short${done > 1 ? 's' : ''}${capped ? (capped >= done ? ' with captions' : ` (${capped} with captions)`) : ''}${extras ? ' + ' + extras : ''} to your output folder.`
         + (skipped.length ? ` ${skipped.length} could not be made: ${skipped.join('; ')}.` : '')
@@ -10690,6 +10754,7 @@
       .replace(/["“”„‟«»‹›″＂‘]/g, '')       // quotes of every shape
       .replace(/[?？¿]/g, '')                // question marks
       .replace(/[…⋯]/g, ' ')                 // ellipsis reads as a pause
+      .replace(/\s*[\u2012\u2013\u2014\u2015]+\s*/g, ' ')   // dashes (— –): a pause, never drawn (ARE— → ARE)
       .replace(/[.,。．，、]/g, (m, i, s) =>  // full stops / commas: keep only between digits
         (/\d/.test(s[i - 1] || '') && /\d/.test(s[i + 1] || '') ? m : ''))
       .replace(/\s+/g, ' ')
@@ -10834,7 +10899,9 @@
     const r = W.applyAcrossLines(evs, m);
     const rw = (ve.capWords || []).length ? W.applyToWords(ve.capWords, m) : { count: 0, words: null };
     if (!r.count && !rw.count) return { count: 0, lines: 0, changes: [] };
-    pushHistory({ captions: true });        // one Ctrl+Z puts the whole sweep back
+    // one Ctrl+Z puts the whole sweep back — together with the line whose retyping started it
+    if (!(ve._capEditAt && Date.now() - ve._capEditAt < 4000)) pushHistory({ captions: true });
+    ve._capEditAt = 0;
     // An imported line keeps the words it ARRIVED with in `origText`, and the
     // Case dropdown rebuilds from those. A corrected line that kept its old
     // origText would put the wrong word straight back the moment somebody
@@ -11230,7 +11297,7 @@
      * `wordColor` is the colour that does the picking — the block behind the word
      * for Box word — and `wordInk` the letters on that block. */
     { id: 'boxword', name: 'Box word', style: 'outline', color: '#ffffff', outline: '#000000',
-      wordHighlight: true, wordMode: 'box', wordColor: '#8b5cf6', wordInk: '#ffffff', wordGap: 0.12 },
+      wordHighlight: true, wordMode: 'box', wordColor: '#ffe14d', wordInk: '#000000', wordGap: 0.12 },
     { id: 'limebox', name: 'Lime box', style: 'outline', color: '#ffffff', outline: '#000000',
       wordHighlight: true, wordMode: 'box', wordColor: '#3ddc84', wordInk: '#000000', wordGap: 0.12 },
     { id: 'karaoke', name: 'Karaoke', style: 'outline', color: '#ffffff', outline: '#000000',
@@ -11251,7 +11318,7 @@
    * read on a phone, and it survives being posted over any background (the
    * church asked for Montserrat and XS as the starting point; Size is #capSize). Case lives on #capCase and
    * the font on #capFont (both set in the markup / font list); this is the look. */
-  const DEFAULT_CAP_STYLE = 'outline';
+  const DEFAULT_CAP_STYLE = 'boxword';   // Box word, yellow, following the voice
   const DEFAULT_CAP_FONT = 'Montserrat';
   const DEFAULT_CAP_TRANS = 'pop';
   /*
@@ -11514,11 +11581,13 @@
     } catch (e) {}
   }
   function restoreCapLook() {
-    let raw = null;
+    let raw = null, old = false;
     try { raw = localStorage.getItem(LIB_KEYS.capLook); } catch (e) {}
+    if (!raw) { try { raw = localStorage.getItem('mw-cap-look-v1'); old = !!raw; } catch (e) {} }
     if (!raw) return;
     try {
       const v = JSON.parse(raw) || {};
+      if (old) { delete v.wordHl; delete v.wordColor; }   // the place and width only (see LIB_KEYS)
       if (v.pos && Number.isFinite(v.pos.x) && Number.isFinite(v.pos.y)) ve.capPos = { x: v.pos.x, y: v.pos.y };
       if (Number.isFinite(v.width)) ve.capWidth = clamp(v.width, window.CapLayout.MIN_WIDTH, window.CapLayout.MAX_WIDTH);
       const hl = document.getElementById('capWordHl');
@@ -11906,6 +11975,8 @@
       if (e && inp.value && inp.value !== inChosenCase(inp.value)) inp.value = inChosenCase(inp.value);
       if (!e || e.text === inp.value) return;
       const before = e.text;
+      // a retyped line is an edit like any other: ↶ puts it back (it never could — nothing was recorded)
+      pushHistory({ captions: true }); ve._capEditAt = Date.now();
       e.text = inp.value;
       if (e.doubt) { settleDoubt(e); setTimeout(renderCapList, 0); }   // looked at and put right
       if (e._was != null && e._was === e.text) { delete e._was; renderCapList(); }
@@ -13348,7 +13419,7 @@
     let res = scope && cloud ? cachedCloudWords(scope) : null;
     if (!res) try {
       // named for the ear that really listens: AssemblyAI when it is set up (Groq is then never asked)
-      res = await window.__runJob(cloud ? `☁️ ${cloudEarName() === 'AssemblyAI' ? 'AssemblyAI' : 'Groq’s free cloud Whisper'} is listening… (word-by-word timing)` : '🎧 Transcribing speech on your PC… (word-by-word timing)', jobId,
+      res = await window.__runJob(cloud ? 'Listening to every word…' : 'Listening to every word on this computer…', jobId,
         () => window.api.captions.transcribe(Object.assign(
           { input: ve.video.path, model: capModelCfg(), jobId },
           scope ? { startSec: scope.start, endSec: scope.end } : {})));
@@ -13433,7 +13504,7 @@
     // Heard already while its pauses were found? Then that IS the transcript.
     let res = capHearsInCloud() ? cachedCloudWords(s) : null;
     if (!res) try {
-      res = await window.__runJob(`${capHearsInCloud() ? '☁️' : '🎧'} Captioning "${s.label}" (${Math.round(s.end - s.start)}s clip only — never the whole video)…`, jid,
+      res = await window.__runJob(`Captioning "${s.label}"…`, jid,
         () => window.api.captions.transcribe({ input: ve.video.path, startSec: s.start, endSec: s.end, model: capModelCfg(), jobId: jid }));
     } catch (e) {
       if (e && e.cancelled) return 'cancelled';
@@ -13738,18 +13809,19 @@
   const fxPayload = (s) => cleanFx(s && s.fx) || undefined;
   /** The clips a look can go on, in timeline order: the main track, then the clips after it. */
   const fxClips = () => mainClips().concat(tailClips());
-  /** The CSS that shows a look on the preview (close to ffmpeg's eq, not pixel-identical). */
+  /** The CSS that shows a look on the preview. The export runs these exact
+      formulas, in this order (fxVideo in video.js), so the colours match. */
   /* Safari (every iPhone) cannot run an SVG filter on a playing video: with
      url(#fxSharpen) in the filter it drops the WHOLE filter, so brightness,
-     contrast and the rest showed nothing either. There sharpening is previewed
-     as the crisper contrast it gives; the export sharpens for real. */
+     contrast and the rest showed nothing either. There the preview leaves the
+     sharpening out (it used to fake it as extra contrast, which made the
+     preview's colours differ from the export's); the export sharpens for real. */
   const NO_SVG_VIDEO_FILTER = typeof navigator !== 'undefined' && /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|Edg|Electron/.test(navigator.userAgent);
   function fxCss(f) {
     f = Object.assign({}, FX_DEFAULT, f || {});
     const parts = [];
     if (Math.abs(f.bri) > 0.001) parts.push(`brightness(${(1 + f.bri).toFixed(3)})`);
-    const con = f.con * (NO_SVG_VIDEO_FILTER && f.sharp > 0.001 ? 1 + 0.08 * f.sharp : 1);
-    if (Math.abs(con - 1) > 0.001) parts.push(`contrast(${+con.toFixed(3)})`);
+    if (Math.abs(f.con - 1) > 0.001) parts.push(`contrast(${+f.con.toFixed(3)})`);
     if (Math.abs(f.sat - 1) > 0.001) parts.push(`saturate(${f.sat})`);
     if (FX_LOOK_CSS[f.look]) parts.push(FX_LOOK_CSS[f.look]);
     if (f.sharp > 0.001 && !NO_SVG_VIDEO_FILTER) parts.push('url(#fxSharpen)');
@@ -14118,7 +14190,10 @@
   // capStyle is on a -v2 key: the shipped default moved from Clean to Outline, and
   // a value stored under the old key would quietly keep overriding it. Bumping the
   // key hands everyone the new default once; anything picked from now on sticks.
-  const LIB_KEYS = { music: 'mw-ve-music', outro: 'mw-ve-outro', capStyle: 'mw-cap-style-v2', capLook: 'mw-cap-look-v1' };
+  const LIB_KEYS = { music: 'mw-ve-music', outro: 'mw-ve-outro', capStyle: 'mw-cap-style-v3', capLook: 'mw-cap-look-v2' };
+  // v3/v2: Box word in yellow, following the voice, became the default — a look
+  // stored under the old keys was the old default, not a choice; where the words
+  // sit and how wide they wrap (dragged by hand) are carried over below
   const outNameFor = (p) => String(p).split(/[\\/]/).pop().replace(/\.[^.]+$/, '').replace(/-\d{8}-\d{6}$/, '').slice(0, 50) || 'clip';
   const fmtDur = (s) => { s = Math.max(0, Math.round(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
@@ -15421,7 +15496,7 @@
       if (useCloud) {
         const jid = window.__newJobId();
         try {
-          res = await window.__runJob(`☁️ Listening for pauses in "${s.label}" (by the words)…`, jid,
+          res = await window.__runJob(`Listening for pauses in "${s.label}"…`, jid,
             () => window.api.video.speechPauses({
               input: ve.video.path, startSec: s.start, endSec: s.end, minSilenceSec: 0.7, padSec: 0.12, jobId: jid,
               words: scanWordsFor(s),

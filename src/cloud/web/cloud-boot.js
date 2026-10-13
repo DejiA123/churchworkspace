@@ -277,8 +277,62 @@ let _hideTimer = null;
    * Stop stops it on the server.
    */
   const serverTasks = new Map(); // batchId -> taskId
+  /*
+   * ONE PROGRESS, START TO END. An Export all that the server makes had two:
+   * the phone's own box ("Preparing short 5 of 10 for the server"), which
+   * finished first and closed, and the server's job, which carried on in the
+   * jobs sheet until the shorts were ready — two numbers for one export. Now
+   * the box this phone opened stays the export's: while the phone gets each
+   * short ready it also says how many the server has made, and once all are
+   * handed over it goes straight on with the server's own count (and bringing
+   * them down to the phone) until they are ready to save.
+   */
+  const follow = { id: null, handing: false, made: 0, failed: 0 };
+  function overlayShown() { const o = $('#overlay'); return !!o && !o.classList.contains('hidden'); }
+  window.__followServerBatch = (id, o) => {
+    o = o || {};
+    if (!id) { follow.id = null; return; }
+    if (follow.id !== id) { follow.made = 0; follow.failed = 0; }
+    follow.id = id;
+    follow.handing = !!o.handing;
+    if (follow.handing) { setJobBatchExtra(); return true; }
+    // the server finished before the phone had closed its part: nothing to follow
+    const was = follow.lastBatch;
+    if (was && was.id === id && was.state !== 'running') { follow.id = null; return false; }
+    // the phone's part is over: the box carries on with the server's count
+    follow.mine = true;
+    try { showOverlay(o.title || 'Exporting on the server'); } finally { follow.mine = false; }
+    setStage(o.note || 'All handed over — you can close the app, the server carries on.');
+    const bg = $('#overlayBackground');
+    if (bg) { bg.classList.remove('hidden'); bg.onclick = () => { follow.id = null; hideOverlay(); }; }
+    showCancel(null);
+    if (was && was.id === id) followPaint(was);
+    return true;
+  };
+  function followPaint(b) {
+    follow.lastBatch = b;
+    follow.made = b.done || 0; follow.failed = b.failed || 0;
+    if (follow.id !== b.id) return;
+    if (follow.handing) { setJobBatchExtra(); return; }
+    if (!overlayShown()) { follow.id = null; return; }   // sent to the background
+    if (b.state === 'running') {
+      const cur = b.current;
+      const finished = (b.done || 0) + (b.failed || 0);
+      setJobBatch(Math.min(b.total, finished + 1), b.total, 'Exporting short', 'on the server');
+      if (cur && cur.label) setStage(`“${cur.label}” — you can close the app, the server carries on.`);
+      const share = canSaveHere() && ownBatches().includes(b.id) ? 100 - SAVE_SHARE : 100;
+      setProgress(((finished + (cur ? (cur.pct || 0) / 100 : 0)) / Math.max(1, b.total)) * share);
+    }
+  }
+  function setJobBatchExtra() {
+    const extra = follow.id && follow.handing && (follow.made || follow.failed)
+      ? `· ${follow.made} made on the server` : '';
+    jobBatchState.extra = extra;
+    if (jobBatchState.args) setJobBatch(...jobBatchState.args);
+  }
   function showServerBatch(b) {
     if (!b || !b.id || !window.__newTask) return;
+    if (follow.id === b.id) followPaint(b);
     let tid = serverTasks.get(b.id);
     if (!tid) {
       // a batch THIS phone started that never got all its shorts (the app was
@@ -309,6 +363,7 @@ let _hideTimer = null;
       bringBatchDown(b, tid, outs0);
       return;
     }
+    if (follow.id === b.id) { follow.id = null; if (overlayShown()) hideOverlay(); }
     batchSaving.delete(tid);
     // the phone was closed before it handed every short over: say so, and what to do
     const stalled = b.stalled && b.stalled.planned > b.stalled.sent;
@@ -343,9 +398,21 @@ let _hideTimer = null;
     let stop = false;
     batchStops.set(tid, () => { stop = true; });
     let res = { got: 0, space: null };
+    // the export's own box, when it is still up, finishes here too (its last SAVE_SHARE)
+    const inBox = () => follow.id === b.id && overlayShown();
+    if (inBox()) {
+      setJobBatch(null);
+      const m = $('#overlayMsg'); if (m) m.textContent = 'Getting the shorts onto your phone';
+      setStage(`${b.done} made — bringing them down so you can save them.`);
+      setProgress(100 - SAVE_SHARE);
+    }
     try {
-      res = await prefetchShorts(outs, { stopped: () => stop, progress: (n, line) => { pct(n); if (line) say(line); } });
+      res = await prefetchShorts(outs, { stopped: () => stop, progress: (n, line) => {
+        pct(n); if (line) say(line);
+        if (inBox()) setProgress(100 - SAVE_SHARE + (n * SAVE_SHARE) / 100);
+      } });
     } catch (e) { /* the shorts are made; the Save all panel fetches whatever did not come down */ }
+    if (follow.id === b.id) { follow.id = null; if (overlayShown()) hideOverlay(); }
     batchStops.delete(tid);
     batchSaving.delete(tid);
     const made = `${b.done} short${b.done === 1 ? '' : 's'}`;
@@ -871,6 +938,8 @@ let _hideTimer = null;
 
   function showOverlay(msg) {
     clearTimeout(_hideTimer); _hideTimer = null;
+    // another job takes the box: the server export carries on in the jobs sheet
+    if (follow.id && !follow.handing && !follow.mine) follow.id = null;
     clearOverlaySave();   // the last export's "Save to Photos" card never greets the next job
     const m = $('#overlayMsg'); if (m) m.textContent = msg || 'Working…';
     setStage('');
@@ -960,11 +1029,18 @@ let _hideTimer = null;
     const bg = $('#overlayBackground');
     if (bg) { bg.classList.add('hidden'); bg.onclick = null; }
   }
+  const jobBatchState = { args: null, extra: '' };
   function setJobBatch(i, n, what, tail) {
     const el = $('#overlayBatch');
+    jobBatchState.args = i && n ? [i, n, what, tail] : null;
+    if (!follow.handing) jobBatchState.extra = '';
     if (!el) return;
     if (!i || !n) { el.classList.add('hidden'); el.textContent = ''; }
-    else { el.classList.remove('hidden'); el.textContent = `${what || 'Short'} ${Math.min(i, n)} of ${n}${tail ? ' ' + tail : ''}`; }
+    else {
+      el.classList.remove('hidden');
+      const extra = jobBatchState.extra;
+      el.textContent = `${what || 'Short'} ${Math.min(i, n)} of ${n}${tail ? ' ' + tail : ''}${extra ? ' ' + extra : ''}`;
+    }
   }
 
   let _cancelJobId = null;
@@ -5470,7 +5546,9 @@ let _hideTimer = null;
       card.querySelector('.cj-bar i').style.width = Math.max(2, pc) + '%';
       const b = batchOf(t);
       const step = toastText(t.step) || 'Starting…';
-      card.querySelector('.cj-step').textContent = b && b.n > 1 ? `Short ${b.i} of ${b.n} · ${t.percent}% · ${step}` : step;
+      // one number per export: the ring has the whole export's; this short's own
+      // percentage beside it ("24%" and "42%" on one card) only confused
+      card.querySelector('.cj-step').textContent = b && b.n > 1 ? `Short ${b.i} of ${b.n} · ${step.replace(/^On the server · /, 'on the server: ')}` : step;
       card.querySelector('.cj-time').textContent = 'Running ' + clockOf(Date.now() - t.at);
       card.querySelector('.cj-eta').textContent = etaOf(t);
     }

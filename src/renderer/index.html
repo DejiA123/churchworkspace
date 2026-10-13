@@ -1759,9 +1759,10 @@
   </div>
 
   <!-- SVG sharpen filter used for the LIVE Video-quality preview (CSS has no
-       sharpen; the export uses ffmpeg's unsharp). kernelMatrix is updated live. -->
+       sharpen). The export runs the same kernel in ffmpeg (fxVideo in video.js),
+       in sRGB like this, so the two match. kernelMatrix is updated live. -->
   <svg id="fxSvgDefs" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
-    <filter id="fxSharpen" x="0" y="0" width="100%" height="100%">
+    <filter id="fxSharpen" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
       <feConvolveMatrix id="fxSharpKernel" order="3" preserveAlpha="true" kernelMatrix="0 0 0 0 1 0 0 0 0" />
     </filter>
   </svg>

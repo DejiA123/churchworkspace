@@ -57,7 +57,26 @@ const dur = (f) => +execFileSync(ffprobe, ['-v', 'error', '-show_entries', 'form
   check('a changed value is kept, the rest dropped', JSON.stringify(video.clipFx({ look: 'warm', bri: 0, con: 1.2, sat: 1, vol: 1 })) === '{"look":"warm","con":1.2}');
   check('out-of-range numbers are held in range', video.clipFx({ bri: 5, vol: 9 }).bri === 0.3 && video.clipFx({ vol: 9 }).vol === 2);
   check('an unknown filter is ignored', video.clipFx({ look: 'rm -rf' }) === null);
-  check('the picture recipe', video.fxVideo({ look: 'bw', sat: 1.3, sharp: 1 }) === 'hue=s=0,eq=saturation=1.3,unsharp=5:5:1.00:5:5:0', video.fxVideo({ look: 'bw', sat: 1.3, sharp: 1 }));
+  const recipe = video.fxVideo({ look: 'bw', sat: 1.3, sharp: 1 });
+  check('the picture recipe: the preview\'s steps, in its order, then its sharpen kernel',
+    /^colorchannelmixer=.*,colorchannelmixer=.*,format=gbrp,convolution=0m='0 -40 0 -40 260 -40 0 -40 0'.*,format=yuv420p$/.test(recipe), recipe);
+  // the export colours a pixel exactly as the browser's CSS filters do on the preview
+  {
+    const cssPx = (rgb, steps) => steps.reduce((p, [n, v]) => {
+      const m = (k) => [k[0] * p[0] + k[1] * p[1] + k[2] * p[2], k[3] * p[0] + k[4] * p[1] + k[5] * p[2], k[6] * p[0] + k[7] * p[1] + k[8] * p[2]];
+      p = p.map((c) => Math.max(0, Math.min(255, c))); // the browser clamps after every step
+      if (n === 'brightness') return p.map((c) => c * v);
+      if (n === 'contrast') return p.map((c) => (c - 127.5) * v + 127.5);
+      if (n === 'saturate') return m([0.213 + 0.787 * v, 0.715 - 0.715 * v, 0.072 - 0.072 * v, 0.213 - 0.213 * v, 0.715 + 0.285 * v, 0.072 - 0.072 * v, 0.213 - 0.213 * v, 0.715 - 0.715 * v, 0.072 + 0.928 * v]);
+      return p;
+    }, rgb).map((c) => c);
+    const IN = [90, 140, 200];
+    const out = execFileSync(ffmpeg, ['-hide_banner', '-v', 'error', '-f', 'lavfi', '-i', `color=c=0x${IN.map((c) => c.toString(16).padStart(2, '0')).join('')}:size=16x16:duration=0.1`,
+      '-vf', `format=gbrp,${video.fxVideo({ bri: 0.2, con: 1.2, sat: 1.3 })},format=rgb24`, '-frames:v', '1', '-f', 'rawvideo', 'pipe:1']);
+    const got = [out[0], out[1], out[2]];
+    const want = cssPx(IN, [['brightness', 1.2], ['contrast', 1.2], ['saturate', 1.3]]).map((c) => Math.round(Math.max(0, Math.min(255, c))));
+    check('brightness, contrast and saturation export as the preview shows them', got.every((c, i) => Math.abs(c - want[i]) <= 6), `export ${got} vs preview ${want}`);
+  }
   check('the sound recipe', video.fxAudio({ vol: 0.5 }) === 'volume=0.5' && video.fxAudio({ look: 'bw' }) === '');
 
   head('[2] Two halves of a split clip with different looks stay two pieces');
@@ -80,7 +99,7 @@ const dur = (f) => +execFileSync(ffprobe, ['-v', 'error', '-show_entries', 'form
 
   head('[4] One clip, no cut, with a look');
   const plan = video.cutPlan([{ start: 1, end: 5, fx: { sat: 0 } }], { durationSec: 8, hasAudio: true });
-  check('a single graded piece still gets a filter chain', plan && plan.chain && /eq=saturation=0/.test(plan.chain), plan && plan.chain);
+  check('a single graded piece still gets a filter chain', plan && plan.chain && /colorchannelmixer=rr=0.213:rg=0.715/.test(plan.chain), plan && plan.chain);
   const OUT1 = path.join(dir, 'one.mp4');
   await video.exportShort(ctx, { input: SRC, startSec: 1, endSec: 5, preset: 'source', pieces: [{ start: 1, end: 5, fx: { sat: 0 } }], output: OUT1 });
   check('…and the export is grey', sat(OUT1, 2) < 2, `saturation ${sat(OUT1, 2)}`);

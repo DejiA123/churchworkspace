@@ -1291,18 +1291,61 @@ function clipFx(fx) {
   const vol = numIn(fx.vol, 0, 2, 1); if (Math.abs(vol - 1) > 0.001) o.vol = +vol.toFixed(3);
   return Object.keys(o).length ? o : null;
 }
+/*
+ * THE EXPORT DOES WHAT THE PREVIEW SHOWS. The preview colours the playing
+ * video with the browser's own filters (brightness, contrast, saturate, sepia,
+ * hue-rotate, grayscale), and ffmpeg's `eq` is not the same arithmetic: its
+ * brightness ADDS light where the browser's MULTIPLIES it, and its contrast
+ * and saturation work on luma and chroma rather than on red, green and blue.
+ * So a brighter clip came out a different colour from the one on screen.
+ * These are the browser's formulas (the Filter Effects spec), step by step and
+ * in the same order — the preview's filter list (fxCss in veditor.js) — so
+ * what you see is what is exported.
+ */
+const LOOK_STEPS = {
+  vivid: [['saturate', 1.6], ['contrast', 1.15]],
+  warm: [['sepia', 0.25], ['saturate', 1.2], ['hue', -8]],
+  cool: [['saturate', 1.1], ['hue', 12]],
+  bw: [['grayscale', 1]],
+  vintage: [['sepia', 0.35], ['contrast', 0.92], ['saturate', 0.85], ['brightness', 1.03]],
+};
+const r4 = (v) => +v.toFixed(4);
+function mixer(m) {
+  const k = ['rr', 'rg', 'rb', 'gr', 'gg', 'gb', 'br', 'bg', 'bb'];
+  return 'colorchannelmixer=' + m.map((v, i) => `${k[i]}=${r4(v)}`).join(':');
+}
+function cssStep([name, v]) {
+  if (name === 'brightness') return mixer([v, 0, 0, 0, v, 0, 0, 0, v]);
+  if (name === 'contrast') { const e = `clip((val-127.5)*${r4(v)}+127.5\,0\,255)`; return `lutrgb=r='${e}':g='${e}':b='${e}'`; }
+  if (name === 'saturate') return mixer([0.213 + 0.787 * v, 0.715 - 0.715 * v, 0.072 - 0.072 * v, 0.213 - 0.213 * v, 0.715 + 0.285 * v, 0.072 - 0.072 * v, 0.213 - 0.213 * v, 0.715 - 0.715 * v, 0.072 + 0.928 * v]);
+  if (name === 'grayscale') { const a = 1 - v; return mixer([0.2126 + 0.7874 * a, 0.7152 - 0.7152 * a, 0.0722 - 0.0722 * a, 0.2126 - 0.2126 * a, 0.7152 + 0.2848 * a, 0.0722 - 0.0722 * a, 0.2126 - 0.2126 * a, 0.7152 - 0.7152 * a, 0.0722 + 0.9278 * a]); }
+  if (name === 'sepia') { const a = 1 - v; return mixer([0.393 + 0.607 * a, 0.769 - 0.769 * a, 0.189 - 0.189 * a, 0.349 - 0.349 * a, 0.686 + 0.314 * a, 0.168 - 0.168 * a, 0.272 - 0.272 * a, 0.534 - 0.534 * a, 0.131 + 0.869 * a]); }
+  if (name === 'hue') {
+    const t = (v * Math.PI) / 180, c = Math.cos(t), s = Math.sin(t);
+    return mixer([0.213 + c * 0.787 - s * 0.213, 0.715 - c * 0.715 - s * 0.715, 0.072 - c * 0.072 + s * 0.928,
+      0.213 - c * 0.213 + s * 0.143, 0.715 + c * 0.285 + s * 0.140, 0.072 - c * 0.072 - s * 0.283,
+      0.213 - c * 0.213 - s * 0.787, 0.715 - c * 0.715 + s * 0.715, 0.072 + c * 0.928 + s * 0.072]);
+  }
+  return '';
+}
 /** The picture side of a look, as filter steps ('' for none). */
 function fxVideo(fx) {
   const f = clipFx(fx); if (!f) return '';
-  const vf = [];
-  if (f.look) vf.push(LOOKS[f.look]);
-  const eq = [];
-  if (f.bri != null) eq.push('brightness=' + f.bri);
-  if (f.con != null) eq.push('contrast=' + f.con);
-  if (f.sat != null) eq.push('saturation=' + f.sat);
-  if (eq.length) vf.push('eq=' + eq.join(':'));
-  // after the grade, so it crisps the graded picture; luma only (no colour ringing)
-  if (f.sharp != null) vf.push(`unsharp=5:5:${f.sharp.toFixed(2)}:5:5:0`);
+  const steps = [];
+  // the preview's order: brightness, contrast, saturation, then the look
+  if (f.bri != null) steps.push(['brightness', 1 + f.bri]);
+  if (f.con != null) steps.push(['contrast', f.con]);
+  if (f.sat != null) steps.push(['saturate', f.sat]);
+  if (f.look) steps.push(...LOOK_STEPS[f.look]);
+  const vf = steps.map(cssStep).filter(Boolean);
+  // after the grade, so it crisps the graded picture: the preview's own 3x3
+  // kernel (the #fxSharpen SVG filter, a = 0.4 × sharp) on red, green and blue
+  if (f.sharp != null) {
+    const a = Math.round(Math.min(2, f.sharp) * 40), c = 100 + 4 * a;
+    const m = `0 -${a} 0 -${a} ${c} -${a} 0 -${a} 0`;
+    vf.push('format=gbrp', `convolution=0m='${m}':1m='${m}':2m='${m}':0rdiv=0.01:1rdiv=0.01:2rdiv=0.01`);
+  }
+  if (vf.length) vf.push('format=yuv420p');
   return vf.join(',');
 }
 /** The sound side ('' for none). */
@@ -2941,16 +2984,9 @@ async function applyEdits(ctx, { input, output, edits = {}, onProgress }) {
   if (rot === 90) vf.push('transpose=1'); else if (rot === 270) vf.push('transpose=2'); else if (rot === 180) vf.push('transpose=1,transpose=1');
   if (edits.flipH) vf.push('hflip');
   if (edits.flipV) vf.push('vflip');
-  if (edits.look && LOOKS[edits.look]) vf.push(LOOKS[edits.look]);
-  const eq = [];
-  if (edits.brightness) eq.push('brightness=' + Number(edits.brightness));
-  if (edits.contrast != null && Number(edits.contrast) !== 1) eq.push('contrast=' + Number(edits.contrast));
-  if (edits.saturation != null && Number(edits.saturation) !== 1) eq.push('saturation=' + Number(edits.saturation));
-  if (eq.length) vf.push('eq=' + eq.join(':'));
-  // Sharpness: ffmpeg unsharp (luma), amount 0..2 → luma_amount. Applied after the
-  // colour grade so it crisps the graded picture; chroma amount 0 (avoids colour ringing).
-  const sharpen = Math.min(2, Math.max(0, Number(edits.sharpen) || 0));
-  if (sharpen > 0) vf.push(`unsharp=5:5:${sharpen.toFixed(2)}:5:5:0`);
+  // the clip look, by the same formulas the preview shows it with (fxVideo)
+  const grade = fxVideo({ look: edits.look, bri: edits.brightness, con: edits.contrast, sat: edits.saturation, sharp: edits.sharpen });
+  if (grade) vf.push(grade);
   if (speed !== 1) vf.push(`setpts=${(1 / speed).toFixed(5)}*PTS`);
   if (edits.fadeIn) vf.push(`fade=t=in:st=0:d=${Number(edits.fadeIn)}`);
   if (edits.fadeOut) vf.push(`fade=t=out:st=${Math.max(0, outDur - Number(edits.fadeOut)).toFixed(2)}:d=${Number(edits.fadeOut)}`);
@@ -3477,7 +3513,7 @@ async function appendClips(ctx, { input, output, clips = [], position = 'end', f
 // shape is never handed back (see media-cache.json and the video:info handler).
 const INFO_SHAPE = require('crypto').createHash('sha1').update(probeInfo.toString()).digest('hex').slice(0, 8);
 
-module.exports = {
+module.exports = { cssStep, LOOK_STEPS,
   putTrackFrames, dropTrackFrames,
   PRESETS, QUALITY, DEFAULT_QUALITY, VOICE_SHARE, qualityDef, presetSize, sourceSize, upscaleFactor, outputFps,
   setExportPrefs, getExportPrefs, allExportPrefs, loadExportPrefs, RATE_CRF, FPS_CHOICES, TRANSITIONS, transitionOf,

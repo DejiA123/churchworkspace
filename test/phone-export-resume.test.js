@@ -149,8 +149,8 @@ async function until(fn, ms = 120000, every = 200) {
     const nums = seen.map((t) => { const m = /(\d+) of (\d+)/.exec(t); return m ? [+m[1], +m[2]] : null; }).filter(Boolean);
     check(nums.length >= 2 && nums.every(([i, n]) => n === 3 && i >= 2 && i <= 3) && nums.some(([i]) => i === 3),
       'the progress screen counts on from where it was cut off — never past the total', seen);
-    check(seen.length > 0 && seen.every((t) => /^Preparing short \d+ of 3 for the server$/.test(t)),
-      'and says it is getting them ready for the server (the jobs sheet has the export itself)', seen);
+    check(seen.length > 0 && seen.every((t) => /^(Getting short \d+ of 3 ready for the server( · \d+ made on the server)?|Exporting short \d+ of 3 on the server)$/.test(t)),
+      'and says it is getting them ready for the server, then counts the server\'s own export in the same box', seen);
     const others = await page.evaluate(async (id) => ((await window.__mwBatch.list()) || []).filter((x) => x.id !== id).length, bid);
     check(others === 0, 'no second export was started for the rest', others);
 
