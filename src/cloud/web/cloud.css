@@ -3538,7 +3538,9 @@ body.mw-cloud .cloud-sheet-modal .cloud-files-up, body.mw-cloud .cloud-files-bar
 }
 .cloud-sheet-modal .cloud-files-icon { background: #f1f3f6; color: #0f1115; }
 .cloud-sheet-modal .cloud-files-disk { color: #6b7280; }
-.cloud-sheet-modal .cloud-files-disk b { color: #b42318; }
+.cloud-sheet-modal .cloud-files-disk b { color: #0f1115; }
+.cloud-sheet-modal .cloud-files-disk.low b { color: #b42318; }
+.cloud-sheet-modal .cloud-files-disk small { color: #9aa1ad; font-size: 12px; }
 .cloud-sheet-modal .cf-disk-bar { background: #eef0f3; }
 .cloud-sheet-modal .cloud-files-head { color: #5d6470; letter-spacing: .3px; }
 .cloud-sheet-modal .cloud-files-head small { color: #9aa1ad; }

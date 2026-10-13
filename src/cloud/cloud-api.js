@@ -576,6 +576,14 @@ function userOf(req, url) {
   return rec && rec.uid ? userById(rec.uid) : null;
 }
 
+/*
+ * THE STUDIO'S OWNER — the first space made on it — looks after the server:
+ * how full its disk is is theirs to see, nobody else's ("let only me, the
+ * admin, see how much storage is left"). A studio with no accounts yet has
+ * nobody else in it.
+ */
+const isOwner = (me) => (me ? !!me.owner : !users.length);
+
 /** Constant-time compare that does not leak the length either. */
 function codeMatches(given) {
   const want = String(cfg.code || '');
@@ -877,7 +885,7 @@ function diskOf(dir) {
  * no longer exists.
  */
 const COMPANIONS = ['.jpg', '.srt', '.vtt'];
-async function deleteFiles(req, res) {
+async function deleteFiles(req, res, me) {
   let body;
   try { body = JSON.parse((await readBody(req, 256 * 1024)).toString('utf-8') || '{}'); }
   catch (e) { return json(res, 400, { error: 'Bad request.' }); }
@@ -939,7 +947,7 @@ async function deleteFiles(req, res) {
       }
     } catch (e) { /* the autosave is a convenience */ }
   }
-  return json(res, 200, { ok: true, deleted, refused, freed, autosaveCleared, disk: diskOf(mine.output || os.tmpdir()) });
+  return json(res, 200, { ok: true, deleted, refused, freed, autosaveCleared, disk: isOwner(me) ? diskOf(mine.output || os.tmpdir()) : undefined });
 }
 
 /*
@@ -1355,15 +1363,16 @@ async function authedRoutes(req, res, url, p, me) {
   }
 
   if (p === '/api/videos') {
-    return json(res, 200, { ok: true, groups: browse(url.searchParams.get('all') === '1' ? PICKABLE_EXT : null), disk: diskOf(dirsFor().output || os.tmpdir()), canDelete: !!cfg.allowUpload });
+    // the server's free space: for its owner only (isOwner)
+    return json(res, 200, { ok: true, groups: browse(url.searchParams.get('all') === '1' ? PICKABLE_EXT : null), disk: isOwner(me) ? diskOf(dirsFor().output || os.tmpdir()) : undefined, canDelete: !!cfg.allowUpload });
   }
 
   if (p === '/api/delete' && req.method === 'POST') {
     if (!cfg.allowUpload) return json(res, 403, { error: 'Changing files on this studio from a phone is switched off.' });
-    return deleteFiles(req, res);
+    return deleteFiles(req, res, me);
   }
 
-  if (p === '/api/status') return json(res, 200, status());
+  if (p === '/api/status') return json(res, 200, status({ me }));
 
   if (p === '/api/upload' && (req.method === 'POST' || req.method === 'PUT')) {
     if (!cfg.allowUpload) return json(res, 403, { error: 'Sending files to this studio is switched off.' });
@@ -1476,13 +1485,16 @@ function receiveUpload(req, res, url) {
 
 /* ---------------------------------------------------------------- control */
 
-function status() {
+/** `asker`: who asked over the web ({ me }); the studio machine itself (no asker) sees everything. */
+function status(asker) {
   const free = (dir) => {
     try {
       const s = fs.statfsSync ? fs.statfsSync(dir) : null;
       return s ? s.bavail * s.bsize : null;
     } catch (e) { return null; }
   };
+  // the server's disk, folders, devices and everyone's uploads are the owner's business
+  if (asker && !isOwner(asker.me)) return { ok: true, running: !!server, version: cfg.appVersion || '', standalone: !!cfg.standalone };
   return {
     ok: true,
     running: !!server,

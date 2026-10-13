@@ -106,8 +106,9 @@ async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise
     // wait for the lot
     for (let k = 0; k < 120; k++) { if (!(await rows()).length) break; await sleep(500); }
     check(most >= 3, '[1] they really went up at the same time (pieces in flight together: ' + most + ')');
-    const names = await page.evaluate(() => [...document.querySelectorAll('#cloudFilesList .cf-row')].map((r) => r.textContent));
-    const has = (n) => names.some((t) => t.includes(n));
+    // (each row shows a friendly name — "One" — and carries its file: matched on the file)
+    const names = await page.evaluate(() => [...document.querySelectorAll('#cloudFilesList .cf-row')].map((r) => (r.dataset.path || '').split(/[\\/]/).pop() + ' ' + r.textContent));
+    const has = (n) => names.some((t) => t.toLowerCase().includes('-' + n) || t.toLowerCase().startsWith(n));
     check(has('one.mp4') && has('three.mp4') && has('four.mp4') && has('five.mp4') && !has('two.mp4'), '[4] all but the stopped one arrived, and the list shows them', names.map((t) => t.slice(0, 40)));
     const isl = await page.evaluate(() => [...document.querySelectorAll('.cloud-island')].map((x) => x.textContent).join(' | '));
     void isl;

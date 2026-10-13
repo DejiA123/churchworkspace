@@ -1671,17 +1671,24 @@ let _hideTimer = null;
   function renderDisk() {
     const el = $('#cloudFilesDisk');
     if (!el) return;
+    /*
+     * The server's room left is for the studio's OWNER to see — the person who
+     * looks after it ("let only me, the admin, see how much storage is left").
+     * The server sends it to nobody else (cloud-api.js isOwner), so for them
+     * there is nothing here to show; for the owner it is always shown, and
+     * says so when it is running out.
+     */
     const d = filesCache && filesCache.disk;
     if (!d || !d.total) { el.classList.add('hidden'); return; }
     const used = Math.max(0, d.total - d.free);
-    // Room left is only news when it is running out: a row of gigabytes on
-    // every visit was one more thing to read that meant nothing to most people.
     const low = d.free < Math.min(d.total * 0.1, 15 * 1024 ** 3);
-    el.classList.toggle('hidden', !low);
+    el.classList.remove('hidden');
     el.classList.toggle('low', low);
-    if (!low) return;
+    const where = cloud.hello && cloud.hello.standalone ? 'the server' : 'the studio machine';
     el.innerHTML = `<div class="cf-disk-bar"><i style="width:${Math.min(100, (used / d.total) * 100).toFixed(1)}%"></i></div>`
-      + `<span><b>Running out of room: ${fmtSize(d.free)} left.</b> Delete videos you have already saved or posted.</span>`;
+      + (low
+        ? `<span><b>Running out of room: ${fmtSize(d.free)} left</b> of ${fmtSize(d.total)} on ${where}. Delete videos you have already saved or posted.</span>`
+        : `<span><b>${fmtSize(d.free)} free</b> of ${fmtSize(d.total)} on ${where} <small>· only you can see this</small></span>`);
   }
 
   /* ---- deleting ---- */
