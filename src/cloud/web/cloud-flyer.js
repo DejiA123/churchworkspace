@@ -731,6 +731,13 @@
       lx.globalCompositeOperation = 'screen'; lx.globalAlpha = 0.9; lx.filter = `blur(${Math.max(0.6, r * 0.45)}px)`; lx.drawImage(t, 0, 0); lx.filter = 'none'; lx.globalAlpha = 1; lx.globalCompositeOperation = 'source-over';
     }
     if (L.fade) {
+      /* the bottom of a person melts into SHADOW, as a designer does it — it
+         used to just go see-through, and a white suit fading over the picture
+         behind looked like a ghost */
+      lx.globalCompositeOperation = 'source-atop';
+      const sg = lx.createLinearGradient(0, h * (1 - L.fade * 1.6), 0, h);
+      sg.addColorStop(0, 'rgba(0,0,0,0)'); sg.addColorStop(0.55, 'rgba(0,0,0,.45)'); sg.addColorStop(1, 'rgba(0,0,0,.85)');
+      lx.fillStyle = sg; lx.fillRect(0, 0, w, h);
       lx.globalCompositeOperation = 'destination-out';
       const g = lx.createLinearGradient(0, h * (1 - L.fade), 0, h);
       g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,1)');
@@ -1527,7 +1534,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const ts = stackLines(lines, { t: top, fit: 1000, maxH: avail / n - 14, gap: 14,
         style: { font: 'League Gothic', upper: true, stretch: 1.45, fill: { stops: ['#ffffff', mix('#ffffff', p.accent, 0.3), mix(p.accent, p.hi, 0.25)], angle: 90 }, bevel: 0.6, glow: rgba(p.accent, 0.35), shadow: true } });
       L.push(...ts);
-      if (sp) L.push(hero(sp, { cx: 540, t: top + (ts.bottom - top) * 0.22, b: H + 30, mode: 'chest', extra: lit(p) }));
+      if (sp) L.push(hero(sp, { cx: 540, t: top + (ts.bottom - top) * 0.4, b: H + 30, mode: 'chest', extra: lit(p) }));
       L.push(...col([d && T({ name: 'Date', text: `${d.mon3}. ${d.ddth}`, font: 'Anton', size: 50, fill: p.accent, align: 'right', shadow: true }), f.time && T({ name: 'Time', text: f.time, font: 'Anton', size: 50, align: 'right', shadow: true })], { r: 1018, b: H - 50, gap: 4 }));
       L.push(...col([sp && sp.name && T({ name: 'Speaker', text: sp.name, upper: true, font: 'Montserrat', size: 18, align: 'left', shadow: true, maxW: 300 }),
         venueText(D) && T({ name: 'Venue', text: venueLines(D, 3), upper: true, font: 'Montserrat', size: 14, align: 'left', line: 1.22, maxW: 280, shadow: true })], { l: 62, b: H - 50, gap: 10 }));
@@ -1594,13 +1601,13 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     /* ── SCENIC (Doctrines of Faith): a landscape, one huge word, the preacher on a card ── */
     scenic(D) {
       const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D);
-      L.push(BG({ img: D.bg, grade: 'normal', contrast: 12, keep: 0.38, topShade: 0.4, bottomShade: 0.92, bottomFrom: 0.6, vignette: 0.4 }));
+      L.push(BG({ img: D.bg, grade: 'normal', contrast: 12, keep: 0.38, topShade: 0.4, bottomShade: 0.92, bottomFrom: 0.42, vignette: 0.4 }));
       L.push(FX({ kind: 'glow', x: 540, y: H * 0.25, w: 1200, h: 800, color: p.hi, opacity: 0.35 }));
       const hd = header(D, { center: true, t: 30 }); L.push(...hd);
       const ws = String(f.title || 'Faith').trim().split(/\s+/);
       const big = ws.length > 1 ? ws[ws.length - 1] : ws[0], kick = ws.length > 1 ? ws.slice(0, -1).join(' ') : '';
       let y = H * 0.5;
-      if (kick) { const k = put(T({ name: 'Kicker', text: kick, upper: true, font: 'Montserrat', size: 28, letter: 0.55, shadow: true, maxW: 1000 }), { cx: 540, t: y }); L.push(k); y = box(k).b + 14; }
+      if (kick) { const k = put(T({ name: 'Kicker', text: kick, upper: true, font: 'Montserrat', size: kick.length <= 8 ? 46 : 32, letter: kick.length <= 8 ? 0.6 : 0.4, shadow: true, glow: rgba('#000000', 0.55), maxW: 1000 }), { cx: 540, t: y }); L.push(k); y = box(k).b + 14; }
       const t = put(T({ name: 'Title', text: big, upper: true, font: 'Anton', fit: 1000, maxH: H * 0.2, fill: { stops: ['#ffffff', mix(p.hi, p.accent, 0.4), p.accent], angle: 90 }, grain: true, shadow: true, extrude: 3, extrudeColor: rgba(p.deep, 0.8) }), { cx: 540, t: y });
       L.push(t); y = box(t).b + 26;
       const cardT = Math.max(y, H - 320), cardB = H - 60, cardW = Math.min(250, (cardB - cardT) * 0.8);
