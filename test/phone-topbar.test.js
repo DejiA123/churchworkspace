@@ -16,6 +16,8 @@
  *       (CapCut's soft edge) — none of that at rest
  *   [4] the studio: black · Posts and Projects: white
  *   [5] a sheet's dimmed backdrop dims the bar too; closed, it comes back
+ *   [5b] a page's pinned title bar (AI Montage, Posts): no hairline under it,
+ *       and what scrolls up fades into it once the page is scrolled
  *   [6] iOS 26 reads the colour off a solid fixed strip on the top edge, not
  *       theme-color: the strip is there in every one of those colours, full
  *       width, put in afresh when the colour changes, and the page's own
@@ -172,6 +174,38 @@ const dist = (a, b) => { const p = (h) => [1, 3, 5].map((i) => parseInt(String(h
     await page.evaluate(() => { const m = document.getElementById('vePresetModal'); if (m) m.classList.add('hidden'); });
     const back = await settle();
     check(dist(back, BLUE) < 12, 'back on Home: blue', back);
+
+    console.log('\n[5b] a page\'s title bar');
+    const softHead = (sel) => page.evaluate((sel) => {
+      const h = document.querySelector(sel); if (!h) return null;
+      const a = getComputedStyle(h, '::after'), cs = getComputedStyle(h);
+      return { on: h.classList.contains('on'), soft: h.classList.contains('mw-softedge'), fade: +a.opacity, top: a.backgroundImage.slice(0, 40),
+        line: cs.borderBottomStyle !== 'none' && parseFloat(cs.borderBottomWidth) > 0, bg: cs.backgroundColor, rgb: h.style.getPropertyValue('--soft-rgb') };
+    }, sel);
+    await page.evaluate(() => window.MWSocial.openMontage());
+    await page.waitForSelector('#cloudMontage .cp-body');
+    await sleep(700);
+    const mt0 = await softHead('#cloudMontage .cp-head');
+    check(mt0 && !mt0.line, 'AI Montage: no line under its title bar', mt0);
+    await page.evaluate(() => { const b = document.querySelector('#cloudMontage .cp-body'); const p = document.createElement('div'); p.style.height = '1400px'; b.appendChild(p); b.scrollTop = 200; });
+    await sleep(600);
+    const mt1 = await softHead('#cloudMontage .cp-head');
+    check(mt1 && mt1.on && mt1.fade === 1, 'scrolled: what goes up under it fades into it', mt1);
+    check(mt1 && /246, 247, 249/.test(mt1.rgb) && /rgb\(246, 247, 249\)/.test(mt1.top), 'in the title bar\'s own colour', mt1 && { rgb: mt1.rgb, top: mt1.top });
+    await page.evaluate(() => { document.querySelector('#cloudMontage .cp-body').scrollTop = 0; });
+    await sleep(600);
+    const mt2 = await softHead('#cloudMontage .cp-head');
+    check(mt2 && !mt2.on && mt2.fade === 0, 'back at the top: no fade', mt2);
+    await page.evaluate(() => { const x = document.querySelector('#cloudMontage .cp-x'); if (x) x.click(); });
+    await sleep(700);
+    await page.evaluate(() => window.MWSocial.go('scheduler'));
+    await sleep(900);
+    await page.evaluate(() => { const sc = document.querySelector('.cloud-sched .csb-scroll'); sc.scrollTop = 40; sc.scrollTop = 300; });
+    await sleep(600);
+    const ps = await softHead('.cloud-sched .csb-top');
+    check(ps && ps.on && ps.fade === 1 && /255, 255, 255/.test(ps.rgb), 'Posts scrolled: the same soft edge under its bar, in white', ps);
+    await page.evaluate(() => window.MWSocial.go('home'));
+    await sleep(700);
 
     console.log('\n[6] what iOS 26 reads: a solid strip on the top edge');
     check(seen.every((x) => x.n === 1), 'there is always exactly one strip', seen.map((x) => x.n));

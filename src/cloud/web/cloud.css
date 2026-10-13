@@ -3566,8 +3566,8 @@ body.mw-cloud .cloud-sheet-modal .cloud-files-up, body.mw-cloud .cloud-files-bar
 .cloud-sheet-modal .cf-empty-art { background: #f1f3f6; color: #0f1115; }
 
 /* A page of its own (AI Montage): the whole screen on a phone, like any of
-   CapCut's pages — no gap above it, no grab handle, a solid header that the
-   page scrolls under cleanly. */
+   CapCut's pages — no gap above it, no grab handle, a solid header with no
+   line under it: what scrolls up fades into it (.mw-softedge). */
 @media (max-width: 900px) {
   .cp-panel.cp-full {
     top: 0; bottom: var(--kb, 0px); max-height: none; height: auto;
@@ -3576,7 +3576,7 @@ body.mw-cloud .cloud-sheet-modal .cloud-files-up, body.mw-cloud .cloud-files-bar
   }
   .cp-panel.cp-full.on { transform: none; }
   .cp-panel.cp-full .cp-grab { display: none; }
-  .cp-panel.cp-full .cp-head { padding: calc(env(safe-area-inset-top) + 12px) 12px 12px 20px; background: inherit; border-bottom: 1px solid rgba(15, 23, 42, .07); }
+  .cp-panel.cp-full .cp-head { padding: calc(env(safe-area-inset-top) + 12px) 12px 12px 20px; background: inherit; }
   .cp-panel.cp-full .cp-title { font-size: 22px; }
 }
 
@@ -3698,3 +3698,13 @@ body.mw-cloud #vePresetModal .ve-pre-intro, body.mw-cloud #vePresetModal .ve-pre
 html, body.mw-cloud, body.mw-cloud .cloud-home .ch-scroll, body.mw-cloud #cloudGate { overscroll-behavior-y: none; }
 /* …and under it, while the page is scrolled, the soft edge it fades into (never read, never in the way) */
 .mw-edge-fade { position: fixed; top: 0; left: 0; right: 0; height: 56px; z-index: 2147483645; pointer-events: none; opacity: 0; }
+
+/* A page's title bar, once what is under it is scrolled: no line, no hard edge — the content
+   fades into the bar's own colour (cloud-boot.js sets --soft-rgb and .on). */
+.mw-softedge { position: relative; z-index: 20; }
+.mw-softedge::after {
+  content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 28px; pointer-events: none;
+  background: linear-gradient(to bottom, rgb(var(--soft-rgb, 255, 255, 255)) 0%, rgba(var(--soft-rgb, 255, 255, 255), .85) 30%, rgba(var(--soft-rgb, 255, 255, 255), 0) 100%);
+  opacity: 0; transition: opacity .18s ease;
+}
+.mw-softedge.on::after { opacity: 1; }

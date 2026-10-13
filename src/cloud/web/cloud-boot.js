@@ -5134,6 +5134,36 @@ let _hideTimer = null;
     check() { try { this.set(this.sample()); } catch (e) { /* a colour is a nicety */ } },
   };
   cloud.topTint = topTint;
+
+  /*
+   * ►► A PAGE'S TITLE BAR: WHAT SCROLLS UNDER IT FADES INTO IT. ◄◄ "Let the
+   * AI Montage page blend when scrolling — there is a grey horizontal line."
+   * A page with a pinned title bar (AI Montage and every panel, Posts, the
+   * projects page) cut its content off at a hard edge, with a hairline under
+   * it on AI Montage. Now, once the page is scrolled, a soft fade in the bar's
+   * own colour hangs under it, the same edge as under the clock (topTint).
+   * Found by its scroll, so any such page added later blends without being
+   * listed: the scroller's title bar is the element just before it.
+   */
+  const SOFT_HEADS = '.cp-head, .csb-top, .cs-top';
+  const opaqueBg = (el) => {
+    for (let e = el; e && e !== document.documentElement; e = e.parentElement) {
+      const c = topTint.rgba(getComputedStyle(e).backgroundColor);
+      if (c && c.a > 0.95) return `${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)}`;
+    }
+    return '255, 255, 255';
+  };
+  window.addEventListener('scroll', (e) => {
+    const sc = e.target;
+    if (!(sc instanceof Element)) return;
+    const head = sc.previousElementSibling;
+    if (!head || !head.matches(SOFT_HEADS)) return;
+    if (!head.classList.contains('mw-softedge')) {
+      head.classList.add('mw-softedge');
+      head.style.setProperty('--soft-rgb', opaqueBg(head));
+    }
+    head.classList.toggle('on', sc.scrollTop > 2);
+  }, { capture: true, passive: true });
   {
     let queued = false;
     const soon = () => { if (queued) return; queued = true; requestAnimationFrame(() => { queued = false; topTint.check(); }); };
