@@ -1047,6 +1047,30 @@
     x.putImageData(d, 0, 0);
     return c;
   }
+  /*
+   * WHERE THE PERSON STOPS BEING CLEAN. A glass lectern in front of a
+   * preacher comes out of the cut-out HALF see-through — a pane of nothing
+   * with the old background ghosting in it, a sliver at the hand ("the remove
+   * from background is terrible"). A person's own edge is only a pixel or two
+   * of half-transparency per side; glass is a wide band of it. The first row
+   * below the shoulders where that band starts is where the flyer frames them
+   * down to, and no lower.
+   */
+  function cleanBottom(c, top, sy) {
+    const W = c.width, H = c.height, k = Math.min(1, 240 / Math.max(W, H));
+    const w = Math.max(1, Math.round(W * k)), h = Math.max(1, Math.round(H * k));
+    const s2 = canvas(w, h), x = s2.getContext('2d', { willReadFrequently: true });
+    x.drawImage(c, 0, 0, w, h);
+    const d = x.getImageData(0, 0, w, h).data;
+    const u = Math.max(4, (sy - top) * k), from = Math.round(sy * k + u * 0.35);
+    let run = 0;
+    for (let y = Math.max(0, from); y < h; y++) {
+      let part = 0, solid = 0;
+      for (let xx = 0; xx < w; xx++) { const a = d[(y * w + xx) * 4 + 3]; if (a >= 215) solid++; else if (a > 25) part++; }
+      if (part >= Math.max(8, solid * 0.14)) { if (++run >= 3) return (y - 2) / k; } else run = 0;
+    }
+    return null;
+  }
   const PREP = new WeakMap();
   function preparePerson(im) {
     if (PREP.has(im)) return PREP.get(im);
@@ -1067,7 +1091,9 @@
         }
       }
       const t = tidyCanvas(c);
-      return { img: smoothEdge(t.c), meta: metaOf(t.c, lm, t.x0, t.y0, W0, H0) };
+      const meta = metaOf(t.c, lm, t.x0, t.y0, W0, H0);
+      if (meta) { const cb = cleanBottom(t.c, meta.top, meta.sy); if (cb) meta.clean = cb; }
+      return { img: smoothEdge(t.c), meta };
     })().catch(() => ({ img: im, meta: null }));
     PREP.set(im, job);
     return job;
@@ -1237,6 +1263,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     else if (mode === 'waist') nb = m.hy ? m.hy + u * 0.25 : m.sy + u * 2.4;
     else if (mode === 'chest') nb = m.wy ? clamp(m.wy + u * 0.12, m.sy + u * 0.95, m.sy + u * 1.25) : m.sy + u * 1.2;
     else nb = m.sy + u * 0.9;
+    // never down into a lectern's glass (cleanBottom): framed tighter, the cut melting into shadow
+    if (m.clean && mode !== 'full') nb = Math.min(nb, Math.max(m.sy + u * 0.45, m.clean));
     return { t: Math.max(0, m.top - u * 0.06), nb, cx: m.cx };
   }
   function hero(sp, o) {
@@ -1529,7 +1557,17 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const ka = kw.slice(0, Math.ceil(kw.length / 2)).join(' '), kb = kw.slice(Math.ceil(kw.length / 2)).join(' ');
       const k1 = put(T({ name: 'Kicker', text: ka, font: 'League Gothic', size: 36, align: 'left', letter: 0.04, shadow: true }), { l: 62, cy: 62 });
       L.push(k1);
-      if (kb) { const k2 = put(T({ name: 'Kicker 2', text: kb, font: 'League Gothic', size: 36, align: 'right', letter: 0.04, shadow: true }), { r: 1018, cy: 62 }); L.push(k2, SH({ name: 'Line', shape: 'line', fill: rgba('#ffffff', 0.8), x: (box(k1).r + box(k2).l) / 2, y: 64, w: Math.max(20, box(k2).l - box(k1).r - 30), h: 2 })); }
+      // the church's logo always, in the middle of the line between the two kicker words
+      const logo = D.logo && imgOf(D.logo) ? logoLayers(D, 540, 62, 64) : [];
+      L.push(...logo);
+      if (kb) {
+        const k2 = put(T({ name: 'Kicker 2', text: kb, font: 'League Gothic', size: 36, align: 'right', letter: 0.04, shadow: true }), { r: 1018, cy: 62 }); L.push(k2);
+        const l0 = box(k1).r + 15, l1 = box(k2).l - 15, gap = logo.length ? 52 : 0;
+        if (gap) {
+          L.push(SH({ name: 'Line', shape: 'line', fill: rgba('#ffffff', 0.8), x: (l0 + 540 - gap) / 2, y: 64, w: Math.max(10, 540 - gap - l0), h: 2 }));
+          L.push(SH({ name: 'Line', shape: 'line', fill: rgba('#ffffff', 0.8), x: (540 + gap + l1) / 2, y: 64, w: Math.max(10, l1 - 540 - gap), h: 2 }));
+        } else L.push(SH({ name: 'Line', shape: 'line', fill: rgba('#ffffff', 0.8), x: (l0 + l1) / 2, y: 64, w: Math.max(20, l1 - l0), h: 2 }));
+      }
       const lines = stack(f.title || 'Sunday Service', 2), n = lines.length, top = 108, avail = H - top - (sp ? 60 : 150);
       const ts = stackLines(lines, { t: top, fit: 1000, maxH: avail / n - 14, gap: 14,
         style: { font: 'League Gothic', upper: true, stretch: 1.45, fill: { stops: ['#ffffff', mix('#ffffff', p.accent, 0.3), mix(p.accent, p.hi, 0.25)], angle: 90 }, bevel: 0.6, glow: rgba(p.accent, 0.35), shadow: true } });
