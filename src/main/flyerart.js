@@ -485,6 +485,22 @@ function kitSave(next = {}) {
     if (!(day >= 0 && day <= 6) || !s.name) continue;
     k.services.push({ id: str(s.id, 40) || 'sv' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), day, name: str(s.name, 60), time: str(s.time, 40), kind: str(s.kind, 60), speaker: str(s.speaker, 40), venue: str(s.venue, 200) });
   }
+  /*
+   * PRESETS — the details a church types again and again (WORD STUDY, 7PM, the
+   * hall's address, who preaches), saved under a name and put back with one
+   * tap; and what was last typed for each service, filled in by itself.
+   */
+  const fieldsOf = (f) => {
+    const o = {};
+    for (const key of ['title', 'theme', 'time', 'time2', 'venue', 'extra', 'phone', 'handles', 'notes']) if (f && f[key] != null) o[key] = str(f[key], key === 'notes' ? 400 : 200);
+    return o;
+  };
+  const presetOf = (p) => ({ fields: fieldsOf(p.fields), speakers: (Array.isArray(p.speakers) ? p.speakers : []).map((x) => str(x, 40)).slice(0, 8), size: str(p.size, 20) });
+  k.presets = (Array.isArray(next.presets) ? next.presets : old.presets || []).slice(0, 40)
+    .filter((p) => p && p.name).map((p) => Object.assign({ id: str(p.id, 40) || 'pr' + Date.now().toString(36), name: str(p.name, 60) }, presetOf(p)));
+  const lastIn = next.lastFor && typeof next.lastFor === 'object' ? next.lastFor : old.lastFor || {};
+  k.lastFor = {};
+  for (const key of Object.keys(lastIn).slice(-30)) if (/^[\w:.-]{1,60}$/.test(key) && lastIn[key]) k.lastFor[key] = presetOf(lastIn[key]);
   // tidy: pictures no longer in the kit go
   const keep = new Set([k.logo].concat(...k.speakers.map((s) => s.photos), k.inspo.map((i) => i.thumb)).filter(Boolean));
   try { for (const n of fs.readdirSync(KIT_DIR)) if (n !== 'kit.json' && !keep.has(n)) fs.unlinkSync(path.join(KIT_DIR, n)); } catch (e) { /* none yet */ }

@@ -547,7 +547,11 @@
     const key = JSON.stringify([Q, L.text, L.font, L.size, L.fit, L.maxH, L.maxW, L.stretch, L.fill, L.stroke, L.strokeColor, L.extrude, L.extrudeColor, L.bevel, L.edge, L.edgeColor, L.glow, L.shadow, L.letter, L.align, L.line, L.slant, L.upper, L.grain, L.imgFill, L.imgFill && IMGS.has(L.imgFill)]);
     if (txtCache.has(key)) return txtCache.get(key);
     const m = (measC || (measC = canvas(8, 8))).getContext('2d');
-    const text = String(L.text == null ? '' : L.text);
+    let text = String(L.text == null ? '' : L.text);
+    // script lettering in capitals is a jumble of swashes ("WORD" in Alex Brush): a word typed in capitals is set Like This
+    if (!L.upper && /[A-Z]{2}/.test(text) && text === text.toUpperCase() && (FONTS.find((q) => q.id === L.font) || {}).kind === 'script') {
+      text = text.toLowerCase().replace(/(^|[\s\n-])([a-z])/g, (m, a, c) => a + c.toUpperCase());
+    }
     const lines = (L.upper ? text.toUpperCase() : text).split('\n');
     const sy = L.stretch || 1;
     let size = L.size || 80;
@@ -1374,7 +1378,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         style: solid3d(p, { font: 'Barlow Italic', upper: true, fill: CHROME, grain: true, extrude: 3, extrudeColor: [mix(p.mid, '#000000', 0.3), mix(p.deep, '#000000', 0.6)], glow: rgba(p.accent, 0.45) }) });
       L.push(...ts);
       if (sp) { const lb = box(ts[ts.length - 1]); L.push(hero(sp, { cx: 540, t: Math.max(lb.t + lb.h * 0.1, y + (ts.bottom - y) * 0.4), b: H - 40, mode: 'chest', fade: 0.3, extra: lit(p) })); }
-      if (d) L.push(...col([d.day3, d.ddth, d.month, d.year].map((s, i) => T({ name: 'Date ' + (i + 1), text: s, font: 'Barlow Italic', size: 56, line: 0.9, fill: p.accent, align: 'left', shadow: true })), { l: 62, t: H * 0.6, gap: -2 }));
+      if (d) L.push(...col([d.day3, d.ddth, d.month, d.year].map((s, i) => T({ name: 'Date ' + (i + 1), text: s, font: 'Barlow Italic', size: 56, line: 0.9, fill: p.accent, align: 'left', shadow: true, edge: 2.4, edgeColor: mix(p.deep, '#000000', 0.55) })), { l: 62, t: H * 0.6, gap: -2 }));
       L.push(...col([f.time && T({ name: 'Time', text: f.time, font: 'Anton', size: 66, align: 'right', shadow: true }), f.time2 && T({ name: 'Time 2', text: f.time2, font: 'Anton', size: 42, align: 'right', shadow: true })], { r: 1016, t: H * 0.6, gap: 6 }));
       if (sp && sp.name) {
         const np = nameParts(sp.name);
@@ -1459,7 +1463,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const y = tB + 28; let cb = y;
       if (d || f.time) {
         const dc = col([d && T({ name: 'Day', text: `${d.day3}. ${d.ddn}`, font: 'Anton', size: 46, align: 'right', shadow: true }), d && T({ name: 'Month', text: d.month, font: 'Anton', size: 46, align: 'right', shadow: true })], { r: 574, t: y, gap: 4 });
-        const tc = col([f.time && T({ name: 'Time', text: f.time, font: 'Anton', size: 46, fill: p.accent, align: 'left', shadow: true }), f.time2 && T({ name: 'Time 2', text: f.time2, font: 'Anton', size: 46, fill: p.accent, align: 'left', shadow: true }), !f.time2 && T({ name: 'Prompt', text: 'PROMPT', font: 'Montserrat', size: 18, letter: 0.2, align: 'left', shadow: true })], { l: 626, t: y, gap: 6 });
+        const tc = col([f.time && T({ name: 'Time', text: f.time, font: 'Anton', size: 46, fill: p.accent, align: 'left', shadow: true, edge: 2.2, edgeColor: mix(p.deep, '#000000', 0.55) }), f.time2 && T({ name: 'Time 2', text: f.time2, font: 'Anton', size: 46, fill: p.accent, align: 'left', shadow: true, edge: 2.2, edgeColor: mix(p.deep, '#000000', 0.55) }), !f.time2 && T({ name: 'Prompt', text: 'PROMPT', font: 'Montserrat', size: 18, letter: 0.2, align: 'left', shadow: true })], { l: 626, t: y, gap: 6 });
         cb = Math.max(dc.bottom, tc.bottom);
         L.push(...dc, ...tc, SH({ name: 'Divider', shape: 'line', fill: rgba('#ffffff', 0.75), x: 600, y: (y + cb) / 2, w: 3, h: cb - y }));
       }
@@ -1548,7 +1552,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         const minJ = Math.min(...pos.map((q) => q.j)); pos.forEach((q) => { q.j -= minJ; });
         const cMid = (n - 1) / 2, stepX = Math.min(330, 1000 / n), baseT = Math.max(y + 90, H * 0.4), names = [];
         pos.sort((a, b) => Math.abs(b.j - cMid) - Math.abs(a.j - cMid)).forEach((q) => {
-          const dist = Math.abs(q.j - cMid), cx = 540 + (q.j - cMid) * stepX, t = n === 1 ? y + 60 : baseT + dist * 30;
+          const dist = Math.abs(q.j - cMid), cx = 540 + (q.j - cMid) * stepX, t = n === 1 ? y + 130 : baseT + dist * 30;
           // one minister alone fills the space a line of them would (not a small figure in an empty stage)
           const P = hero(q.s, { cx, t, b: n === 1 ? H + 30 : H - 80, mode: 'chest', extra: lit(p) }); if (P) L.push(P);
           if (q.s.name) { const np = nameParts(q.s.name); names.push(...col([np.title && T({ name: 'Title', text: np.title, upper: true, font: 'Montserrat', size: n === 1 ? 20 : 12, letter: 0.12, maxW: n === 1 ? 600 : stepX - 14, shadow: true }), T({ name: 'Name', text: np.name, upper: true, font: n === 1 ? 'Anton' : 'Montserrat', size: n === 1 ? 44 : 16, maxW: n === 1 ? 700 : stepX - 14, line: 1.05, shadow: true })], { cx, b: t - 10, gap: 3 })); }
@@ -1863,6 +1867,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const sv = o.service && o.service.speaker;
     if (sv && (k.speakers || []).some((s) => s.id === sv)) F.speakers = [sv];
     else if ((k.speakers || []).length) F.speakers = [k.speakers[0].id];
+    // what was typed for this service last time comes back by itself
+    const last = k.lastFor && k.lastFor[occKey(o)];
+    if (last) applyPreset(last);
   }
 
   function draw() {
@@ -1874,7 +1881,27 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
 
   /* ------------------------------------------------------ step 1: what for */
 
+  /* a typed box that behaves: capitals where a flyer has them, no autocorrect fighting names and addresses, Next on the keyboard */
+  const TXT = (cap) => `autocapitalize="${cap}" autocorrect="off" spellcheck="false" autocomplete="off" enterkeyhint="next"`;
+  /* "7:00PM" → "19:00" for the time wheel, and back */
+  const hhmm = (t) => { const m = timeMinutes(t); return m == null ? '' : `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
+  /* the form is never redrawn under a finger that is typing: it waits till the box is let go */
+  const typingIn = (el) => { const a = document.activeElement; return !!(a && el && el.contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)); };
+  function applyPreset(pr) {
+    if (!pr) return;
+    Object.assign(F.fields, pr.fields || {});
+    const have = new Set(((F.kit && F.kit.speakers) || []).map((x) => x.id));
+    const sps = (pr.speakers || []).filter((id) => have.has(id));
+    if (sps.length) { F.speakers = sps; F.pinned = {}; }
+    if (pr.size && SIZES.some((z) => z.id === pr.size)) F.size = pr.size;
+  }
+  const presetNow = () => ({ fields: Object.fromEntries(['title', 'theme', 'time', 'time2', 'venue', 'extra', 'phone', 'handles', 'notes'].map((key) => [key, F.fields[key] || ''])), speakers: F.speakers.slice(), size: F.size });
+  const occKey = (o) => (o && o.id ? String(o.id).replace(/^(season:[a-z-]+)\d{4}$/, '$1') : '');
   function drawMake() {
+    if (F.panel && typingIn(F.panel.body)) {
+      if (!F._redraw) { F._redraw = true; F.panel.body.addEventListener('focusout', () => setTimeout(() => { F._redraw = false; if (F.step === 'make' && !typingIn(F.panel && F.panel.body)) drawMake(); }, 60), { once: true }); }
+      return;
+    }
     const P = F.panel, k = F.kit || {};
     P.setTitle('Flyers');
     P.el.classList.remove('fs-editing');
@@ -1899,21 +1926,25 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
           <div class="fs-occs">${chips}</div>
         </section>
         <section class="fs-sec">
+          <h3>My presets <small>tap one to fill everything in</small></h3>
+          <div class="fs-occs fs-presets">${(k.presets || []).map((pr) => `<span class="fs-occ fs-preset" data-preset="${escAttr(pr.id)}"><b>${esc(pr.name)}</b><small>${esc([pr.fields && niceTime(pr.fields.time), pr.fields && pr.fields.venue].filter(Boolean).join(' · ') || 'saved details')}</small><button type="button" class="fs-preset-x" data-unpreset="${escAttr(pr.id)}" aria-label="Delete ${escAttr(pr.name)}">×</button></span>`).join('')}<button type="button" class="fs-occ fs-preset-add" data-act="savepreset"><b>＋ Save these</b><small>as a preset</small></button></div>
+        </section>
+        <section class="fs-sec">
           <h3>Who is preaching? <small>tap to put them on · tap again for their pictures</small></h3>
           <div class="fs-sps">${sp}</div>
           ${chosenSpeakers().map((s) => `<button type="button" class="fs-bulk" data-act="bulk" data-id="${escAttr(s.id)}">${ic('photo')}<span><b>Add photos of ${esc(s.name || 'this speaker')}</b><small>pick many at once — each is cut out for you · ${(s.photos || []).length} in the bank</small></span>${ic('plus')}</button>`).join('')}
         </section>
         <section class="fs-sec fs-form">
-          <label class="fs-f fs-wide"><span>Title</span><input data-f="title" value="${escAttr(f.title)}" placeholder="Sunday Service"></label>
-          <label class="fs-f fs-wide"><span>Theme <i>(optional)</i></span><input data-f="theme" value="${escAttr(f.theme)}" placeholder="e.g. Loose Him and Let Him Go"></label>
+          <label class="fs-f fs-wide"><span>Title</span><input data-f="title" value="${escAttr(f.title)}" placeholder="Sunday Service" ${TXT('words')}></label>
+          <label class="fs-f fs-wide"><span>Theme <i>(optional)</i></span><input data-f="theme" value="${escAttr(f.theme)}" placeholder="e.g. Loose Him and Let Him Go" ${TXT('sentences')}></label>
           <label class="fs-f"><span>Date</span><input type="date" data-f="date" value="${escAttr(f.date)}"></label>
-          <label class="fs-f"><span>Time</span><input data-f="time" value="${escAttr(f.time)}" placeholder="9:00AM"></label>
-          <label class="fs-f fs-wide"><span>Where</span><input data-f="venue" value="${escAttr(f.venue)}" placeholder="12 Airport Road, Benin City"></label>
+          <label class="fs-f"><span>Time</span><input type="time" data-f="time" data-time value="${escAttr(hhmm(f.time))}"></label>
+          <label class="fs-f fs-wide"><span>Where</span><input data-f="venue" value="${escAttr(f.venue)}" placeholder="12 Airport Road, Benin City" ${TXT('words')}></label>
           <details class="fs-more"${f.extra || f.time2 || f.notes ? ' open' : ''}><summary>More</summary>
-            <label class="fs-f"><span>Second service</span><input data-f="time2" value="${escAttr(f.time2)}" placeholder="11:00AM"></label>
-            <label class="fs-f"><span>Extra line</span><input data-f="extra" value="${escAttr(f.extra)}" placeholder="10th Edition"></label>
-            <label class="fs-f fs-wide"><span>Phone / email</span><input data-f="phone" value="${escAttr(f.phone)}"></label>
-            <label class="fs-f fs-wide"><span>Social handles</span><input data-f="handles" value="${escAttr(f.handles)}" placeholder="@yourchurch"></label>
+            <label class="fs-f"><span>Second service</span><input type="time" data-f="time2" data-time value="${escAttr(hhmm(f.time2))}"></label>
+            <label class="fs-f"><span>Extra line</span><input data-f="extra" value="${escAttr(f.extra)}" placeholder="10th Edition" ${TXT('words')}></label>
+            <label class="fs-f fs-wide"><span>Phone / email</span><input data-f="phone" value="${escAttr(f.phone)}" inputmode="email" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="next"></label>
+            <label class="fs-f fs-wide"><span>Social handles</span><input data-f="handles" value="${escAttr(f.handles)}" placeholder="@yourchurch" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="done"></label>
             <label class="fs-f fs-wide"><span>Tell the AI the mood <i>(optional)</i></span><textarea data-f="notes" rows="2" placeholder="fire, revival, purple and gold, mountains…">${esc(f.notes)}</textarea></label>
           </details>
         </section>
@@ -1931,9 +1962,44 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
 
   function wireMake() {
     const P = F.panel;
-    $$('[data-f]', P.body).forEach((el) => el.addEventListener('input', () => { F.fields[el.dataset.f] = el.value; }));
-    P.body.onclick = (e) => {
+    const boxes = $$('[data-f]', P.body);
+    boxes.forEach((el, i) => {
+      const keep = () => { F.fields[el.dataset.f] = el.hasAttribute('data-time') ? niceTime(el.value) : el.value; };
+      el.addEventListener('input', keep); el.addEventListener('change', keep);
+      // Next goes to the next box, the last one puts the keyboard away
+      el.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' || el.tagName === 'TEXTAREA') return;
+        e.preventDefault();
+        const nx = boxes.slice(i + 1).find((b) => b.offsetParent && b.type !== 'date' && b.type !== 'time');
+        if (nx) nx.focus(); else el.blur();
+      });
+      // the box being typed in stays in sight above the keyboard
+      el.addEventListener('focus', () => setTimeout(() => {
+        const r = el.getBoundingClientRect(), body = P.body.getBoundingClientRect();
+        const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+        const bottom = Math.min(body.bottom, vh) - 24;
+        if (r.bottom > bottom || r.top < body.top + 8) P.body.scrollTop += r.top - (body.top + Math.max(60, (bottom - body.top) * 0.3));
+      }, 320));
+    });
+    P.body.onclick = async (e) => {
+      const x = e.target.closest('[data-unpreset]');
+      if (x) {
+        const pr = (F.kit.presets || []).find((q) => q.id === x.dataset.unpreset);
+        if (pr && window.confirm(`Delete the preset “${pr.name}”?`)) { F.kit.presets = F.kit.presets.filter((q) => q !== pr); await saveKit(true); drawMake(); }
+        return;
+      }
+      const pb = e.target.closest('[data-preset]');
+      if (pb) { applyPreset((F.kit.presets || []).find((q) => q.id === pb.dataset.preset)); toast('Filled in from your preset.', 'good', 2500); return drawMake(); }
       const b = e.target.closest('[data-occ],[data-sp],[data-size],[data-act]'); if (!b) return;
+      if (b.dataset.act === 'savepreset') {
+        const name = (window.prompt('Name this preset (e.g. Tuesday Word Study):', F.fields.title || '') || '').trim();
+        if (!name) return;
+        const list = (F.kit.presets || []).filter((q) => q.name.toLowerCase() !== name.toLowerCase());
+        F.kit.presets = [Object.assign({ id: 'pr' + Date.now().toString(36), name }, presetNow())].concat(list).slice(0, 40);
+        await saveKit(true);
+        toast(`Saved “${name}”. Tap it any time to fill everything in.`, 'good');
+        return drawMake();
+      }
       if (b.dataset.occ) {
         if (b.dataset.occ === 'other') { F.occasion = { id: 'other' }; Object.assign(F.fields, { title: '', theme: '', kind: '' }); }
         else pickOccasion(upcoming(F.kit).find((o) => o.id === b.dataset.occ));
@@ -1959,6 +2025,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
 
   async function makeFlyers() {
     if (!F.fields.title.trim()) { toast('Give it a title first.', 'error'); return; }
+    // remember these details for this service (Tuesday's Word Study comes back as typed)
+    const ok = occKey(F.occasion);
+    if (ok && ok !== 'other' && F.kit) { F.kit.lastFor = Object.assign({}, F.kit.lastFor, { [ok]: presetNow() }); saveKit(true); }
     F.step = 'pick'; F.bgs = []; F.designs = []; F.dir = null; F.tries++;
     const tryNo = F.tries;
     drawPick();

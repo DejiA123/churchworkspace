@@ -5291,12 +5291,28 @@ let _hideTimer = null;
    */
   if (window.visualViewport) {
     const vv = window.visualViewport;
-    const onKb = () => {
-      const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
-      document.documentElement.style.setProperty('--kb', (kb > 90 ? kb : 0) + 'px');
+    /*
+     * SETTLED, NOT TWITCHING. Every scroll of the visual viewport re-set the
+     * sheet's bottom, and moving the sheet makes iOS pan again — so while
+     * someone typed, the sheet and the box they were in jumped about ("typing
+     * in the boxes is a bit buggy"). The keyboard's height is taken once it
+     * has stopped moving, and small wobbles are ignored.
+     */
+    let kbNow = 0, kbTimer = null;
+    const apply = (kb) => {
+      kbNow = kb;
+      document.documentElement.style.setProperty('--kb', kb + 'px');
       // …and whether it is up at all, for layouts that make room while it is
       // (the captions window gives its lines the space)
-      document.documentElement.classList.toggle('mw-kb', kb > 90);
+      document.documentElement.classList.toggle('mw-kb', kb > 0);
+    };
+    const onKb = () => {
+      const raw = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+      const kb = raw > 90 ? raw : 0;
+      clearTimeout(kbTimer);
+      if (!kb) { apply(0); return; }                                   // going away: at once
+      if (kbNow && Math.abs(kb - kbNow) < 40) return;                 // a wobble while typing
+      kbTimer = setTimeout(() => apply(kb), kbNow ? 160 : 60);        // coming up / changing: once it has settled
     };
     vv.addEventListener('resize', onKb);
     vv.addEventListener('scroll', onKb);
