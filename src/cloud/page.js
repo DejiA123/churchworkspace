@@ -205,6 +205,16 @@ ${styles}
   <link rel="stylesheet" href="/cloud.css?v=${key}" />
 </head>
 <body class="mw-cloud">
+  <!-- The launch screen: up from the first paint, so a phone that is already signed in
+       never sees the sign-in page flash past while it asks the server. cloud-boot.js
+       takes it away once it knows where to go (Home, or the sign-in page). -->
+  <div id="mwSplash" class="mw-splash" aria-label="Opening Church Work Space" role="status">
+    <div class="mw-splash-mid">
+      <img class="mw-splash-icon" src="/icons/icon-192.png" alt="" width="88" height="88" />
+      <div class="mw-splash-name">Church Work Space</div>
+      <div class="mw-splash-bar"><i></i></div>
+    </div>
+  </div>
   <!-- The cloud bar replaces the desktop sidebar: who you are connected to,
        how the work is getting home, and the way back to your files. -->
   <div id="cloudBar" class="cloud-bar">

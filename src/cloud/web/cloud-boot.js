@@ -5653,6 +5653,7 @@ let _hideTimer = null;
     // The home screen comes up at once, before the studio behind it has
     // finished waking — nobody should see the editor flash past on the way.
     if (window.MWSocial) { try { window.MWSocial.start(cloud.hello); } catch (e) { console.error(e); } }
+    hideSplash();
 
     connectEvents();
     setTimeout(wireServerBatches, 1200);
@@ -5788,6 +5789,20 @@ let _hideTimer = null;
     catch (e) { return ''; }
   })();
 
+  /* The launch screen (page.js) stays up until we know where to go, so a phone
+   * that is signed in goes straight from it to Home. It is up at least a beat,
+   * so it reads as the app opening rather than a flicker. */
+  function hideSplash() {
+    const sp = document.getElementById('mwSplash');
+    if (!sp || sp.classList.contains('gone')) return;
+    const wait = Math.max(0, 450 - (performance.now ? performance.now() : 450));
+    setTimeout(() => requestAnimationFrame(() => requestAnimationFrame(() => {
+      sp.classList.add('gone');
+      setTimeout(() => { sp.remove(); try { topTint.check(); } catch (e) {} }, 360);
+      try { topTint.check(); } catch (e) {}
+    })), wait);
+  }
+
   window.__cloudStart = async function (version) {
     cloud.version = version || '';
     wireCloudUi();
@@ -5815,7 +5830,9 @@ let _hideTimer = null;
     if (hello && hello.signedIn) {
       $('#cloudGate').classList.add('gone');
       await startStudio();
+      hideSplash();
     } else {
+      hideSplash();
       // no spaces yet: the first one is made here, and it is the owner's
       setGateMode(hello && hello.accounts === 0 ? 'create' : 'signin', !!hello && hello.accounts === 0);
       try { const n = localStorage.getItem(NAME_KEY); if (n && $('#cloudName')) $('#cloudName').value = n; } catch (e) {}
