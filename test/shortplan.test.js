@@ -168,6 +168,13 @@ S[330].text = 'There is no prosperity gospel, there is only one gospel.';
     T[60].text = "You understand what I'm saying?"; T[61].text = "You understand what I'm saying?";
     const ck = P.vet({ from: 45, to: 61, strength: 7 }, T, sec2, band2);
     check('a short does not end on the preacher checking on the room ("You understand what I\'m saying?")', ck && ck.to === 59, ck && [ck.from, ck.to]);
+    // a line that is the consequence of what came before never opens a short
+    T[80].text = 'God never leaves the righteous alone.'; T[81].text = "So that's the reason why we keep praying.";
+    const bk = P.vet({ from: 81, to: 95, strength: 7 }, T, sec2, band2);
+    check('"So that\'s the reason why…" brings its setup with it', bk && bk.from === 80, bk && [bk.from, bk.to]);
+    T[100].text = "You understand what I'm saying?"; T[101].text = "So that's why you see, your destiny is not going to be okay.";
+    const fwd = P.vet({ from: 101, to: 115, strength: 7 }, T, sec2, band2);
+    check('…and when the line before is only an aside, the short starts on the next sentence that stands alone', fwd && fwd.from === 102, fwd && [fwd.from, fwd.to]);
     const fw = P.finishWhole(T, 21, 41, 154);
     check('finishWhole: both edges whole', fw && fw.from === 20 && fw.to === 41, fw);
   }

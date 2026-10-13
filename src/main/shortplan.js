@@ -49,7 +49,17 @@ const NEW_STORY_RX = /\b(i went to|one day|(?:a|some|many|two|three|few) (?:days
 
 const words = (t) => String(t || '').split(/\s+/).filter(Boolean).length;
 // opens by pointing back at something said before it
-const LEANS_RX = /^(that'?s?|this|these|those|it|he|she|they|him|her|them|which|so that|and that|but that)\b(?! is why| is how| is what)/i;
+const LEANS_RX = /^(?:(?:so|and|but|now),?\s+)?(that'?s?|this|these|those|it|he|she|they|him|her|them|which|so that|and that|but that)\b(?! is why| is how| is what)/i;
+/*
+ * A line that is the CONSEQUENCE of what came before — "So that's the reason
+ * why you see…", "That's why…", "This is how…". Heard on a live sermon's short:
+ * it opened on "So that's the reason why you see, whether I'm in a
+ * relationship with you…", the reason itself left in the short before. Such a
+ * line never opens a short: its setup comes too, when it fits and is not an
+ * aside ("You understand what I'm saying?"), or the short starts on the next
+ * sentence that stands on its own.
+ */
+const BACKREF_RX = /^(?:(?:so|and|but|now),?\s+)?(?:that'?s|that is|this is|which is)\s+(?:(?:the|a)\s+reason\b|why\b|how\b|what\b)/i;
 /*
  * A word no church short may carry. In a sermon it is a mishearing (measured:
  * AssemblyAI wrote "…then f— it" for a line the preacher did not swear in) —
@@ -224,6 +234,17 @@ function vet(m, sents, [a, b], { minLen, maxLen, idealLen, noGrow = false }) {
  * comes back to the last full stop. Null when no whole sentence is left.
  */
 function finishWhole(sents, from, to, ceil) {
+  if (BACKREF_RX.test(String(sents[from].text || '').trim())) {
+    const setup = (k) => k >= 0 && !ASIDE_RX.test(sents[k].text) && !FILLER_OPEN_RX.test(sents[k].text.trim()) && !PROFANE_RX.test(sents[k].text) && words(sents[k].text) > 1;
+    let k = from;
+    while (k > 0 && from - k < 2 && setup(k - 1) && sents[to].end - sents[k - 1].start <= ceil && (k === from || !opens(sents, k))) k--;
+    if (k < from && opens(sents, k) && !BACKREF_RX.test(sents[k].text.trim())) from = k;
+    else {
+      k = from + 1;
+      while (k < to && (!opens(sents, k) || BACKREF_RX.test(sents[k].text.trim()) || ASIDE_RX.test(sents[k].text))) k++;
+      if (k < to) from = k;
+    }
+  }
   if (!opens(sents, from)) {
     let k = from;
     while (k > 0 && from - k < 4 && !opens(sents, k) && sents[to].end - sents[k - 1].start <= ceil && !PROFANE_RX.test(sents[k - 1].text)) k--;
