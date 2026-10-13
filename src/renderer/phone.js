@@ -568,8 +568,8 @@
     const maxClips = clamp(Math.min(20, fit), 3, 20);
     const deep = !!S.settings.deep;
     const label = deep
-      ? '🧠 Reading the sermon for its key points… (first run is the slow one — the transcript is cached)'
-      : '🤖 Finding the best moments…';
+      ? 'Reading the sermon for its key points… (first run is the slow one — the transcript is cached)'
+      : 'Finding the best moments…';
 
     let res;
     try {

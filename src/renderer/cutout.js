@@ -203,7 +203,7 @@
       const m = $('cutMethod');
       if (m) {
         m.textContent = r.method === 'ai'
-          ? '🧠 Found a person — cutting around them'
+          ? 'Found a person — cutting around them'
           : '🎨 No person found, so it is matching the backdrop colour';
       }
       redraw();

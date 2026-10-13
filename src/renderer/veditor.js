@@ -7093,7 +7093,7 @@
        * (job:progress stage: "AssemblyAI is listening…",
        * "Perfecting each start and end…").
        */
-      const label = deep ? `🧠 Finding the best shorts ${where}…` : `🤖 Finding the best moments ${where}…`;
+      const label = deep ? `Finding the best shorts ${where}…` : `Finding the best moments ${where}…`;
       const args = {
         input: ve.video.path, minLen: p.minLen, maxLen: p.maxLen, idealLen: p.idealLen,
         autoLen: !!p.autoLen, deep, maxClips, jobId,
