@@ -12,6 +12,10 @@
  *   [3] Home scrolled past the banner: white
  *   [4] the studio: black · Posts and Projects: white
  *   [5] a sheet's dimmed backdrop dims the bar too; closed, it comes back
+ *   [6] iOS 26 reads the colour off a solid fixed strip on the top edge, not
+ *       theme-color: the strip is there in every one of those colours, full
+ *       width, put in afresh when the colour changes, and the page's own
+ *       background follows; taps just under it still reach the top buttons
  *
  *   node test/phone-topbar.test.js
  */
@@ -50,7 +54,22 @@ const dist = (a, b) => { const p = (h) => [1, 3, 5].map((i) => parseInt(String(h
     const page = await ctx.newPage();
     page.on('pageerror', (e) => check(false, 'no page errors', e.message));
     const tint = () => page.evaluate(() => [...document.querySelectorAll('meta[name="theme-color"]')].map((m) => m.content));
-    const settle = async () => { await sleep(900); return (await tint())[0]; };
+    // what iOS 26 reads: the strip on the top edge (and the page's background)
+    const edge = () => page.evaluate(() => {
+      const all = document.querySelectorAll('.mw-edge-tint'), s = all[0];
+      if (!s) return { n: 0 };
+      const r = s.getBoundingClientRect(), cs = getComputedStyle(s);
+      const hex = (c) => '#' + (c.match(/\d+/g) || []).slice(0, 3).map((x) => (+x).toString(16).padStart(2, '0')).join('');
+      return { n: all.length, top: r.top, h: r.height, w: r.width, full: Math.abs(r.width - innerWidth) < 1, pos: cs.position, color: hex(cs.backgroundColor),
+        opaque: !/rgba\(.*,\s*0?\.\d+\)$/.test(cs.backgroundColor), page: hex(getComputedStyle(document.documentElement).backgroundColor), id: s.dataset.k || (s.dataset.k = String(Math.random())) };
+    });
+    const seen = [];
+    const settle = async () => {
+      await sleep(900);
+      const m = (await tint())[0], e = await edge();
+      seen.push(Object.assign({ meta: m }, e));
+      return m;
+    };
     const BLUE = '#0a4fc4';
 
     console.log('\n[1] the page');
@@ -109,6 +128,20 @@ const dist = (a, b) => { const p = (h) => [1, 3, 5].map((i) => parseInt(String(h
     await page.evaluate(() => { const m = document.getElementById('vePresetModal'); if (m) m.classList.add('hidden'); });
     const back = await settle();
     check(dist(back, BLUE) < 12, 'back on Home: blue', back);
+
+    console.log('\n[6] what iOS 26 reads: a solid strip on the top edge');
+    check(seen.every((x) => x.n === 1), 'there is always exactly one strip', seen.map((x) => x.n));
+    check(seen.every((x) => x.top === 0 && x.h >= 6 && x.full && x.pos === 'fixed' && x.opaque), 'fixed, on the top edge, full width, at least 6 px tall, solid', seen.map((x) => [x.top, x.h, x.full, x.pos, x.opaque]));
+    check(seen.every((x) => x.color === x.meta && x.page === x.meta), 'in each screen\'s colour — the same as theme-color, and the page\'s background with it', seen.map((x) => [x.meta, x.color, x.page]));
+    const ids = seen.map((x) => x.id), cols = seen.map((x) => x.meta);
+    const remade = cols.every((c, i) => !i || c === cols[i - 1] || ids[i] !== ids[i - 1]);
+    check(remade, 'when the colour changes, the strip is a new one (iOS reads it when it appears)', seen.map((x) => [x.meta, x.id.slice(2, 6)]));
+    // the top buttons still answer a tap just under the strip
+    await page.evaluate(() => { for (const el of [document.querySelector('#cloudHome .ch-scroll'), document.getElementById('cloudHome')]) el.scrollTop = 0; });
+    await sleep(500);
+    const me = await page.locator('#cloudHome .ch-me').boundingBox();
+    const hit = await page.evaluate(({ x, y }) => { const e = document.elementFromPoint(x, y); return !!(e && e.closest('.ch-me')); }, { x: me.x + me.width / 2, y: Math.max(me.y + 2, 7) });
+    check(me.y >= 6 && hit, 'the strip lies above the top buttons, not over them (the avatar still takes a tap)', { top: me.y, hit });
   } catch (e) {
     check(false, 'ran to the end', e.message);
   } finally {

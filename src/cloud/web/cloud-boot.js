@@ -4954,9 +4954,21 @@ let _hideTimer = null;
    * Home's banner runs on into the bar in its own blue, the studio's top is
    * black, a light page is white (iOS turns the clock dark on it), and any
    * screen added later gets it right without being listed anywhere.
+   *
+   * HOW iOS IS TOLD. iOS 26's Safari (home-screen apps included) no longer
+   * reads theme-color for that bar: it takes the solid background of a
+   * position:fixed element touching the top edge, or else the page's own
+   * background — the app's was black (the studio's top bar, the black page),
+   * so the bar was black on every screen. And it reads it when such an
+   * element APPEARS, not when one changes colour. So a strip 6 px tall sits
+   * on the top edge in the colour of the screen under it (it cannot be told
+   * apart from it), and is put in afresh whenever that colour changes; the
+   * page's background follows too, and theme-color stays for every other
+   * browser.
    */
   const topTint = {
     meta: null,
+    strip: null,
     last: '',
     rgba(c) {
       const m = /rgba?\(([^)]+)\)/.exec(String(c || ''));
@@ -4976,6 +4988,8 @@ let _hideTimer = null;
       };
       for (const el of els) {
         if (a >= 0.999) break;
+        // (not the strip this paints, nor the page background it sets — only what the screen draws)
+        if (el === this.strip || el === document.documentElement) continue;
         const cs = getComputedStyle(el);
         const k = parseFloat(cs.opacity);
         if (!(k > 0)) continue;
@@ -4996,6 +5010,17 @@ let _hideTimer = null;
         if (!this.meta) { this.meta = document.createElement('meta'); this.meta.name = 'theme-color'; document.head.appendChild(this.meta); }
       }
       this.meta.setAttribute('content', color);
+      // the phone layout: the strip on the top edge, put in anew so iOS reads it; the page's background behind it
+      if (window.matchMedia('(max-width: 900px)').matches && document.body) {
+        const s = document.createElement('div');
+        s.className = 'mw-edge-tint';
+        s.setAttribute('aria-hidden', 'true');
+        s.style.backgroundColor = color;
+        document.body.appendChild(s);
+        if (this.strip) this.strip.remove();
+        this.strip = s;
+        document.documentElement.style.backgroundColor = color;
+      }
     },
     check() { try { this.set(this.sample()); } catch (e) { /* a colour is a nicety */ } },
   };

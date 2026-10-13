@@ -3688,3 +3688,7 @@ body.mw-cloud #vePresetModal .ve-pre-save input { background: #1c1d23; color: #f
 body.mw-cloud #vePresetModal .ve-pre-card, body.mw-cloud #vePresetModal .ve-pre-save { background: #1c1d23; border-color: rgba(255,255,255,.08); }
 body.mw-cloud #vePresetModal .ve-pre-intro, body.mw-cloud #vePresetModal .ve-pre-line, body.mw-cloud #vePresetModal .ve-pre-empty, body.mw-cloud #vePresetModal .ve-pre-label { color: #a1a6b4; }
 
+
+/* The colour iOS 26 gives the bar above the app (cloud-boot.js topTint): a strip on the
+   top edge, solid, full width, above everything, painted the colour of what is under it. */
+.mw-edge-tint { position: fixed; top: 0; left: 0; right: 0; height: 6px; z-index: 2147483646; }
