@@ -3692,3 +3692,5 @@ body.mw-cloud #vePresetModal .ve-pre-intro, body.mw-cloud #vePresetModal .ve-pre
 /* The colour iOS 26 gives the bar above the app (cloud-boot.js topTint): a strip on the
    top edge, solid, full width, above everything, painted the colour of what is under it. */
 .mw-edge-tint { position: fixed; top: 0; left: 0; right: 0; height: 6px; z-index: 2147483646; }
+/* …and under it, while the page is scrolled, the soft edge it fades into (never read, never in the way) */
+.mw-edge-fade { position: fixed; top: 0; left: 0; right: 0; height: 56px; z-index: 2147483645; pointer-events: none; opacity: 0; }

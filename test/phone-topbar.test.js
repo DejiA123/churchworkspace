@@ -9,7 +9,9 @@
  *   [1] the page asks for iOS's default bar (no see-through style: broken on
  *       iOS 26+) and has ONE theme-color
  *   [2] sign-in and Home: the banner's blue
- *   [3] Home scrolled past the banner: white
+ *   [3] Home scrolled: the bar follows the banner's fade (a lighter blue half
+ *       way up it, white past it), and what slides under it fades into it
+ *       (CapCut's soft edge) — none of that at rest
  *   [4] the studio: black · Posts and Projects: white
  *   [5] a sheet's dimmed backdrop dims the bar too; closed, it comes back
  *   [6] iOS 26 reads the colour off a solid fixed strip on the top edge, not
@@ -96,21 +98,44 @@ const dist = (a, b) => { const p = (h) => [1, 3, 5].map((i) => parseInt(String(h
     check(dist(home, BLUE) < 12, 'Home: the banner\'s blue runs on into the bar', home);
 
     console.log('\n[3] Home scrolled');
+    const fadeOp = () => page.evaluate(() => { const f = document.querySelector('.mw-edge-fade'); return f ? +getComputedStyle(f).opacity : null; });
+    check(await fadeOp() === 0, 'at rest, no fade over the top of Home', await fadeOp());
     // (a new space has little on Home: made as long as a busy church's, so the banner can leave the top)
     await page.evaluate(() => {
       const sc = document.querySelector('#cloudHome .ch-scroll');
       const pad = document.createElement('div'); pad.id = 'tallPad'; pad.style.height = '1600px'; sc.appendChild(pad);
-      for (const el of [sc, document.getElementById('cloudHome')]) el.scrollTop = 900;
+      // half way up the banner first
+      const h = document.getElementById('chBanner').getBoundingClientRect().height;
+      for (const el of [sc, document.getElementById('cloudHome')]) el.scrollTop = 0;
+      sc.scrollTop = Math.round(h * 0.55);
+      if (sc.scrollTop === 0) document.getElementById('cloudHome').scrollTop = Math.round(h * 0.55);
     });
+    const mid = await settle();
+    const lum = (h) => { const p = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)); return 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]; };
+    check(lum(mid) > lum(BLUE) + 25 && dist(mid, '#ffffff') > 40, 'half way up the banner, the bar is the lighter blue that is there now (not the deep blue it starts with)', mid);
+    check(await fadeOp() === 1, 'scrolled: the soft edge is on, so what slides under the bar fades into it', await fadeOp());
+    const fadeBg = await page.evaluate(() => getComputedStyle(document.querySelector('.mw-edge-fade')).backgroundImage);
+    const fadeTop = '#' + (fadeBg.match(/\d+/g) || []).slice(0, 3).map((x) => (+x).toString(16).padStart(2, '0')).join('');
+    check(dist(fadeTop, mid) < 4, 'the edge fades from the bar\'s own colour', { fadeTop, mid });
+    await page.evaluate(() => { for (const el of [document.querySelector('#cloudHome .ch-scroll'), document.getElementById('cloudHome')]) el.scrollTop = 900; });
     const scrolled = await settle();
     check(dist(scrolled, '#ffffff') < 12, 'scrolled past the banner: white (the clock turns dark)', scrolled);
     await page.evaluate(() => { for (const el of [document.querySelector('#cloudHome .ch-scroll'), document.getElementById('cloudHome')]) el.scrollTop = 0; });
     check(dist(await settle(), BLUE) < 12, 'back at the top: blue again', await tint());
+    check(await fadeOp() === 0, 'and the fade is gone', await fadeOp());
 
     console.log('\n[4] the studio, Posts, Projects');
     await page.evaluate(() => window.MWSocial.go('scheduler'));
     const posts = await settle();
     check(dist(posts, '#ffffff') < 12, 'Posts: white', posts);
+    // its back button sits in a pinned bar: what scrolls goes under THAT, so no fade over it
+    await page.evaluate(() => {
+      const sc = document.querySelector('.cloud-sched .csb-scroll') || document.querySelector('.csb-scroll');
+      if (!sc) return;
+      const pad = document.createElement('div'); pad.style.height = '1500px'; sc.appendChild(pad); sc.scrollTop = 300;
+    });
+    const postsScrolled = await settle();
+    check(dist(postsScrolled, '#ffffff') < 12 && await fadeOp() === 0, 'Posts scrolled: its pinned top bar stays sharp (no fade over it), the bar white', { postsScrolled, fade: await fadeOp() });
     await page.evaluate(() => window.MWSocial.go('projects'));
     const proj = await settle();
     check(dist(proj, '#ffffff') < 12, 'Projects: white', proj);

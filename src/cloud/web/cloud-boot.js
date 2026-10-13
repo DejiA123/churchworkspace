@@ -4965,11 +4965,18 @@ let _hideTimer = null;
    * apart from it), and is put in afresh whenever that colour changes; the
    * page's background follows too, and theme-color stays for every other
    * browser.
+   *
+   * SCROLLING, LIKE CAPCUT. The colour is read where the screen's top edge
+   * crosses the page — a gradient at that very height — so as Home's banner
+   * slides away the bar goes from its deep blue through the paler blues to
+   * white with it, and while a page is scrolled what slides up under the bar
+   * fades into it (.mw-edge-fade) instead of being cut off at a hard line.
    */
   const topTint = {
     meta: null,
     strip: null,
-    last: '',
+    fade: null,
+    last: null,
     rgba(c) {
       const m = /rgba?\(([^)]+)\)/.exec(String(c || ''));
       if (!m) return null;
@@ -4977,10 +4984,67 @@ let _hideTimer = null;
       if (p.length < 3 || p.slice(0, 3).some((x) => !Number.isFinite(x))) return null;
       return { r: p[0], g: p[1], b: p[2], a: p.length > 3 && Number.isFinite(p[3]) ? p[3] : 1 };
     },
-    /** The colour at the top-left of the screen: every layer there, laid over the next (a gradient by its first colour). */
+    /*
+     * A gradient's colour where the top edge of the screen crosses it. Home's
+     * banner runs from deep blue to white; scrolled half away, what touches the
+     * top is its pale middle, not the blue it starts with — and the bar has to
+     * be THAT colour, or it sits on the page as a hard dark band. A top-to-
+     * bottom linear gradient is read at that height; any other kind by its
+     * first colour.
+     */
+    gradientAt(img, f) {
+      const at = img.indexOf('linear-gradient(');
+      if (at < 0) return this.rgba((/rgba?\([^)]+\)/.exec(img) || [])[0]);
+      // its arguments, split on the commas that are not inside rgb(…)
+      const args = [];
+      let depth = 0, cur = '';
+      for (let i = at + 'linear-gradient('.length; i < img.length; i++) {
+        const ch = img[i];
+        if (ch === '(') depth++;
+        if (ch === ')') { if (!depth) break; depth--; }
+        if (ch === ',' && !depth) { args.push(cur.trim()); cur = ''; } else cur += ch;
+      }
+      args.push(cur.trim());
+      let dir = 'down';
+      if (args.length && !/rgba?\(|#|transparent/i.test(args[0])) {
+        const d = args.shift().toLowerCase();
+        if (d === 'to top' || /^(0|360)deg$/.test(d)) dir = 'up';
+        else if (!(d === 'to bottom' || d === '180deg')) dir = 'other';
+      }
+      const stops = args.map((a) => ({ c: this.rgba((/rgba?\([^)]+\)/.exec(a) || [])[0]) || (/^transparent/i.test(a) ? { r: 0, g: 0, b: 0, a: 0 } : null),
+        p: ((a.replace(/rgba?\([^)]+\)/, '').match(/-?[\d.]+%/) || [])[0]) })).filter((x) => x.c);
+      if (!stops.length) return null;
+      if (dir === 'other' || stops.length === 1) return stops[0].c;
+      // positions: as given, the first 0 and the last 1 when not, the rest spread evenly between
+      stops.forEach((x) => { x.p = x.p != null ? parseFloat(x.p) / 100 : null; });
+      if (stops[0].p == null) stops[0].p = 0;
+      if (stops[stops.length - 1].p == null) stops[stops.length - 1].p = 1;
+      for (let i = 1; i < stops.length; i++) {
+        if (stops[i].p != null) { stops[i].p = Math.max(stops[i].p, stops[i - 1].p); continue; }
+        let j = i; while (stops[j].p == null) j++;
+        for (let k = i; k < j; k++) stops[k].p = stops[i - 1].p + (stops[j].p - stops[i - 1].p) * (k - i + 1) / (j - i + 1);
+        i = j - 1;
+      }
+      const t = dir === 'up' ? 1 - f : f;
+      if (t <= stops[0].p) return stops[0].c;
+      for (let i = 1; i < stops.length; i++) {
+        const A = stops[i - 1], B = stops[i];
+        if (t <= B.p) {
+          const u = B.p > A.p ? (t - A.p) / (B.p - A.p) : 1;
+          const mix = (k) => A.c[k] + (B.c[k] - A.c[k]) * u;
+          return { r: mix('r'), g: mix('g'), b: mix('b'), a: mix('a') };
+        }
+      }
+      return stops[stops.length - 1].c;
+    },
+    /**
+     * What the screen shows at its top edge (left end): every layer there, laid
+     * over the next — and how far the page under it has been scrolled.
+     */
     sample() {
-      const els = document.elementsFromPoint(Math.min(8, window.innerWidth / 2), 1);
-      let r = 0, g = 0, b = 0, a = 0;
+      const X = Math.min(8, window.innerWidth / 2), Y = 1;
+      const els = document.elementsFromPoint(X, Y);
+      let r = 0, g = 0, b = 0, a = 0, scrolled = 0, first = null;
       const over = (c, k) => {
         if (!c || a >= 0.999) return;
         const w = (1 - a) * Math.max(0, Math.min(1, c.a * k));
@@ -4988,21 +5052,63 @@ let _hideTimer = null;
       };
       for (const el of els) {
         if (a >= 0.999) break;
-        // (not the strip this paints, nor the page background it sets — only what the screen draws)
-        if (el === this.strip || el === document.documentElement) continue;
+        // (not what this paints, nor the page background it sets — only what the screen draws)
+        if (el === this.strip || el === this.fade || el === document.documentElement) continue;
+        if (!first) first = el;
         const cs = getComputedStyle(el);
         const k = parseFloat(cs.opacity);
         if (!(k > 0)) continue;
         const img = cs.backgroundImage;
-        if (img && img !== 'none') over(this.rgba((/rgba?\([^)]+\)/.exec(img) || [])[0]), k);
+        if (img && img !== 'none' && /gradient\(/.test(img)) {
+          const box = el.getBoundingClientRect();
+          over(this.gradientAt(img, box.height > 0 ? Math.max(0, Math.min(1, (Y - box.top) / box.height)) : 0), k);
+        }
         over(this.rgba(cs.backgroundColor), k);
       }
       over({ r: 255, g: 255, b: 255, a: 1 }, 1);   // nothing drawn: the page's white
-      return '#' + [r, g, b].map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
+      // scrolled: what is at the top sits in something that scrolls, and it has been — and is not
+      // pinned there (a sticky tab row, a fixed top bar: those stay sharp, nothing slides under them)
+      let pinned = false;
+      for (let el = first; el && el !== document.documentElement; el = el.parentElement) {
+        if (!scrolled && !pinned && /^(sticky|fixed)$/.test(getComputedStyle(el).position)) {
+          // (a fixed SCREEN — Home, a full page — is not a pinned bar: the scrolling happens inside it)
+          const box = el.getBoundingClientRect();
+          if (box.height < window.innerHeight * 0.5) pinned = true;
+        }
+        if (el.scrollTop > 0 && el.scrollHeight > el.clientHeight + 1) scrolled = Math.max(scrolled, el.scrollTop);
+      }
+      if (document.scrollingElement) scrolled = Math.max(scrolled, document.scrollingElement.scrollTop || 0);
+      if (pinned) scrolled = 0;
+      const q = (v) => Math.round(Math.max(0, Math.min(255, v)));
+      return { r: q(r), g: q(g), b: q(b), scrolled };
     },
-    set(color) {
-      if (!color || color === this.last) return;
-      this.last = color;
+    hex(c) { return '#' + [c.r, c.g, c.b].map((v) => v.toString(16).padStart(2, '0')).join(''); },
+    set(c) {
+      if (!c) return;
+      const phone = window.matchMedia('(max-width: 900px)').matches && document.body;
+      /*
+       * THE SOFT EDGE (CapCut's): while the page has been scrolled, what slides
+       * up under the bar fades into the bar's own colour instead of meeting it
+       * at a hard line. It is only seen, never read: iOS reads the strip.
+       */
+      if (phone) {
+        if (!this.fade || !this.fade.isConnected) {
+          this.fade = document.createElement('div');
+          this.fade.className = 'mw-edge-fade';
+          this.fade.setAttribute('aria-hidden', 'true');
+          document.body.appendChild(this.fade);
+        }
+        const rgb = `${c.r}, ${c.g}, ${c.b}`;
+        const bg = `linear-gradient(to bottom, rgb(${rgb}) 0%, rgba(${rgb}, .82) 30%, rgba(${rgb}, 0) 100%)`;
+        if (this.fade.style.backgroundImage !== bg) this.fade.style.backgroundImage = bg;
+        const op = String(Math.round(Math.min(1, c.scrolled / 40) * 100) / 100);
+        if (this.fade.style.opacity !== op) this.fade.style.opacity = op;
+      }
+      // a change too small to see is not worth telling iOS about (it is told by a new strip)
+      const L = this.last;
+      if (L && Math.hypot(L.r - c.r, L.g - c.g, L.b - c.b) < 3) return;
+      this.last = c;
+      const color = this.hex(c);
       if (!this.meta || !this.meta.isConnected) {
         // one theme-color, kept by this (a second, media-bound one would win on a phone)
         document.querySelectorAll('meta[name="theme-color"]').forEach((m, i) => { if (i) m.remove(); });
@@ -5011,7 +5117,7 @@ let _hideTimer = null;
       }
       this.meta.setAttribute('content', color);
       // the phone layout: the strip on the top edge, put in anew so iOS reads it; the page's background behind it
-      if (window.matchMedia('(max-width: 900px)').matches && document.body) {
+      if (phone) {
         const s = document.createElement('div');
         s.className = 'mw-edge-tint';
         s.setAttribute('aria-hidden', 'true');
