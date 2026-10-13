@@ -1548,9 +1548,10 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         const minJ = Math.min(...pos.map((q) => q.j)); pos.forEach((q) => { q.j -= minJ; });
         const cMid = (n - 1) / 2, stepX = Math.min(330, 1000 / n), baseT = Math.max(y + 90, H * 0.4), names = [];
         pos.sort((a, b) => Math.abs(b.j - cMid) - Math.abs(a.j - cMid)).forEach((q) => {
-          const dist = Math.abs(q.j - cMid), cx = 540 + (q.j - cMid) * stepX, t = baseT + dist * 30;
-          const P = hero(q.s, { cx, t, b: H - 80, mode: 'chest', extra: lit(p) }); if (P) L.push(P);
-          if (q.s.name) { const np = nameParts(q.s.name); names.push(...col([np.title && T({ name: 'Title', text: np.title, upper: true, font: 'Montserrat', size: 12, letter: 0.1, maxW: stepX - 14, shadow: true }), T({ name: 'Name', text: np.name, upper: true, font: 'Montserrat', size: 16, maxW: stepX - 14, line: 1.05, shadow: true })], { cx, b: t - 10, gap: 3 })); }
+          const dist = Math.abs(q.j - cMid), cx = 540 + (q.j - cMid) * stepX, t = n === 1 ? y + 60 : baseT + dist * 30;
+          // one minister alone fills the space a line of them would (not a small figure in an empty stage)
+          const P = hero(q.s, { cx, t, b: n === 1 ? H + 30 : H - 80, mode: 'chest', extra: lit(p) }); if (P) L.push(P);
+          if (q.s.name) { const np = nameParts(q.s.name); names.push(...col([np.title && T({ name: 'Title', text: np.title, upper: true, font: 'Montserrat', size: n === 1 ? 20 : 12, letter: 0.12, maxW: n === 1 ? 600 : stepX - 14, shadow: true }), T({ name: 'Name', text: np.name, upper: true, font: n === 1 ? 'Anton' : 'Montserrat', size: n === 1 ? 44 : 16, maxW: n === 1 ? 700 : stepX - 14, line: 1.05, shadow: true })], { cx, b: t - 10, gap: 3 })); }
         });
         L.push(...names);
       }
@@ -1982,18 +1983,21 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     rebuildDesigns();
     // then the AI's — three at once, each swapped in as it lands
     const scenes = (F.dir.scenes || []).slice(0, 3);
+    while (scenes.length < 3 && scenes.length) scenes.push(scenes[scenes.length - 1]);
     F.painting = scenes.length;
     drawPick();
     let failed = '';
     await Promise.all(scenes.map(async (scene, i) => {
       try {
-        const out = await window.api.flyer.paint({ scene, w: sz.w, h: sz.h, seed: Math.floor(Math.random() * 1e9), people: chosenSpeakers().some((s) => (s.photos || []).length) });
+        // each picture in its own light — the AI's colours, royal blue, purple — so the board is as varied as a Pinterest page
+        const tone = TONES[i % TONES.length];
+        const out = await window.api.flyer.paint({ scene: tone.words ? scene + ', ' + tone.words : scene, w: sz.w, h: sz.h, seed: Math.floor(Math.random() * 1e9), people: chosenSpeakers().some((s) => (s.photos || []).length) });
         if (tryNo !== F.tries) return;
         const im = await loadImg(out.dataUrl);
         const key = 'ai:' + tryNo + ':' + i;
         IMGS.set(key, im);
         // AI pictures lead; the photos stay on for variety until three AI ones are in
-        const ai = F.bgs.filter((b) => !b.proc).concat({ key, by: out.by, scene });
+        const ai = F.bgs.filter((b) => !b.proc).concat({ key, by: out.by, scene, tone: tone.id });
         F.bgs = ai.concat(F.bgs.filter((b) => b.proc)).slice(0, Math.max(3, ai.length));
         rebuildDesigns();
       } catch (e) { failed = e.message || String(e); }
@@ -2007,6 +2011,16 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     return F.speakers.map((id) => all.find((s) => s.id === id)).filter(Boolean);
   }
 
+  const TONES = [
+    { id: 'own', words: '' },
+    { id: 'blue', words: 'the whole scene lit in deep royal blue and cool white light, blue haze' },
+    { id: 'purple', words: 'the whole scene lit in rich purple and magenta light with warm orange highlights' },
+  ];
+  const TONE_PAL = {
+    own: 'own',
+    blue: { deep: '#020b2e', mid: '#0b3d91', accent: '#ffd23f', hi: '#ffffff' },
+    purple: { deep: '#14063a', mid: '#6d1fb0', accent: '#ff9a2e', hi: '#ffe6ff' },
+  };
   function rebuildDesigns() {
     const sz = sizeOf();
     const looks = (F.dir && F.dir.looks && F.dir.looks.length ? F.dir.looks : Object.keys(LAYOUTS)).filter((l) => LAYOUTS[l]);
@@ -2014,7 +2028,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     F.designs = all.map((look, i) => {
       const bg = F.bgs[i % F.bgs.length];
       // the AI's colours on the first designs, each look's own on the rest — a board of different flyers, not one flyer ten times
-      const pal = i < 3 || !SIGNATURE[look] ? F.pal : SIGNATURE[look];
+      // a picture painted in its own light takes colours that match it; the AI's own on the rest
+      const tp = bg && bg.tone && TONE_PAL[bg.tone];
+      const pal = tp ? (tp === 'own' ? F.pal : tp) : (i < 3 || !SIGNATURE[look] ? F.pal : SIGNATURE[look]);
       return buildScene({ look, w: sz.w, h: sz.h, pal, dir: F.dir, fields: F.fields, speakers: speakersFor(i), logo: IMGS.has('logo') ? 'logo' : null, bg: bg && bg.key });
     });
     if (F.step === 'pick') paintThumbs();
