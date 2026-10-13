@@ -306,20 +306,29 @@ body.mw-cloud .cloud-sheet-modal .cloud-files-box {
 #cloudFilesSelUse.cloud-files-use { background: #1f6fe0; color: #fff; box-shadow: none; }
 #cloudFilesSelUse.cloud-files-use:disabled { opacity: .45; }
 .cloud-files-selbar {
-  flex: none; display: flex; align-items: center; gap: 10px;
+  flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px;
   padding: 10px 16px 12px; border-top: 1px solid #23242b; background: #141519;
 }
 .cloud-files-selbar.hidden { display: none; }
-.cloud-files-selinfo { flex: 1; min-width: 0; font-size: 14px; font-weight: 700; color: #d8d9df; }
+/* the count gets its own line, the buttons share the row under it, so neither gets squashed */
+.cloud-files-selinfo {
+  flex: 1 0 100%; min-width: 0; font-size: 14px; font-weight: 700; color: #d8d9df;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .cloud-files-del {
-  flex: none; height: 44px; padding: 0 18px; border: 0; border-radius: 14px;
-  display: inline-flex; align-items: center; gap: 7px;
+  flex: 1 1 0; min-width: 0; height: 46px; padding: 0 14px; border: 0; border-radius: 14px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px; white-space: nowrap;
   background: #ff453a; color: #fff; font-size: 15px; font-weight: 800;
 }
 .cloud-files-del .mi { width: 18px; height: 18px; margin: 0; }
 .cloud-files-del:disabled { opacity: .35; cursor: default; }
-.cloud-files-save { background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); padding: 0 14px; }
-.cloud-files-del.sure { background: #d70015; box-shadow: 0 0 0 3px rgba(255,69,58,.3); }
+.cloud-files-save { background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); }
+.cloud-files-del > span { overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 380px) {
+  .cloud-files-del { padding: 0 10px; font-size: 14px; gap: 6px; }
+  .cloud-files-del.sure .mi { display: none; }   /* the words matter more than the bin on a small phone */
+}
+.cloud-files-del.sure { flex-grow: 1.9; background: #d70015; box-shadow: 0 0 0 3px rgba(255,69,58,.3); }
 .cloud-files-empty { padding: 34px 16px; text-align: center; color: #9b9ea8; }
 .cloud-files-empty b { display: block; margin-bottom: 6px; font-size: 17px; color: #f5f6f8; }
 .cloud-files-empty p { max-width: 300px; margin: 0 auto; font-size: 13.5px; line-height: 1.45; }

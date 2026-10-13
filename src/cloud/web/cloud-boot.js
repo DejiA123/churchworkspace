@@ -1737,7 +1737,7 @@ let _hideTimer = null;
     del.disabled = !n;
     del.classList.toggle('sure', !!(filesUi.sure && n));
     const tx = del.querySelector('span');
-    if (tx) tx.textContent = filesUi.sure && n ? `Delete ${n === 1 ? 'it' : 'all ' + n} for good?` : n > 1 ? `Delete ${n}` : 'Delete';
+    if (tx) tx.textContent = filesUi.sure && n ? `Delete ${n === 1 ? 'it' : n} for good?` : n > 1 ? `Delete ${n}` : 'Delete';
   }
   function onFilesClick(e) {
     const sa0 = e.target.closest('[data-selall]');

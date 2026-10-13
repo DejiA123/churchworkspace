@@ -90,6 +90,25 @@ async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise
     st = await page.evaluate(() => ({ n: document.querySelectorAll('#cloudFilesList .cf-row.chosen').length, info: document.getElementById('cloudFilesSelInfo').textContent, selAll: document.querySelector('[data-selall]').textContent }));
     check(st.n === 6 && /^6 selected/.test(st.info) && /Clear selection/.test(st.selAll), '[2] Select all ticks all six', st);
     if (process.env.MW_SHOTS) await page.screenshot({ path: process.env.MW_SHOTS + '/selall.png' });
+    // [6] the bar is not squashed: "24 selected · 663 MB" on one line, "Delete 24 for good?" in full beside Save
+    await page.click('#cloudFilesSelDelete'); await sleep(200);
+    for (const w of [390, 375, 320]) {
+      await page.setViewportSize({ width: w, height: 760 }); await sleep(150);
+      st = await page.evaluate(() => {
+        document.getElementById('cloudFilesSelInfo').textContent = '24 selected · 663 MB';
+        document.querySelector('#cloudFilesSelSave span').textContent = 'Save 24';
+        document.querySelector('#cloudFilesSelDelete span').textContent = 'Delete 24 for good?';
+        const r = (id) => document.getElementById(id).getBoundingClientRect();
+        const info = r('cloudFilesSelInfo'), sv = r('cloudFilesSelSave'), del = r('cloudFilesSelDelete');
+        const fits = (id) => { const s = document.querySelector('#' + id + ' span'); return s.scrollWidth <= s.clientWidth + 1; };
+        return { infoH: Math.round(info.height), infoAbove: info.bottom <= sv.top && info.bottom <= del.top, sameRow: Math.abs(sv.top - del.top) < 2,
+          inside: del.right <= window.innerWidth, saveFits: fits('cloudFilesSelSave'), delFits: fits('cloudFilesSelDelete'), saveW: Math.round(sv.width), delW: Math.round(del.width) };
+      });
+      check(st.infoH <= 22 && st.infoAbove && st.sameRow && st.inside && st.saveFits && st.delFits,
+        `[6] at ${w}px wide the count sits on one line above, and "Save 24" / "Delete 24 for good?" show in full`, st);
+      if (process.env.MW_SHOTS) await page.screenshot({ path: process.env.MW_SHOTS + `/selbar-${w}.png` });
+    }
+    await page.setViewportSize({ width: 390, height: 664 });
     await page.click('[data-selall]'); await sleep(300);
     st = await page.evaluate(() => document.querySelectorAll('#cloudFilesList .cf-row.chosen').length);
     check(st === 0, '[2] and Clear selection unticks them', st);
