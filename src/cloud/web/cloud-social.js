@@ -316,7 +316,7 @@
         </div>
         <!-- 🎨 the third big thing: flyers (cloud-flyer.js) -->
         <button type="button" class="ch-flyer" data-home="flyers">
-          <span class="ch-flyer-art" aria-hidden="true"><img class="a" src="/icons/flyer-push.jpg" alt="" width="216" height="270" decoding="async" /><img class="b" src="/icons/flyer-miracle.jpg" alt="" width="216" height="270" decoding="async" /><img class="c" src="/icons/flyer-glory.jpg" alt="" width="216" height="270" decoding="async" /></span>
+          <span class="ch-flyer-art" aria-hidden="true"><img class="a" src="/icons/flyer-a.jpg" alt="" width="216" height="270" decoding="async" /><img class="b" src="/icons/flyer-b.jpg" alt="" width="216" height="270" decoding="async" /><img class="c" src="/icons/flyer-c.jpg" alt="" width="216" height="270" decoding="async" /></span>
           <span class="ch-flyer-tx"><b>Flyer Studio</b><small>AI flyers for Sunday, Bible Study, Easter…</small></span>
           <span class="ch-flyer-go">Make</span>
         </button>

@@ -462,6 +462,43 @@
         }
         break;
       }
+      case 'beams': {
+        // stage lights: long soft beams from points above, crossing
+        const srcs = L.from || [[0.1, -0.05], [0.9, -0.05], [0.5, -0.08]];
+        srcs.forEach(([fx0, fy0], si) => {
+          const ox = fx0 * S.w, oy = fy0 * S.h, n = L.n || 4;
+          for (let i = 0; i < n; i++) {
+            const tx = L.x - L.w / 2 + r() * L.w, ty = L.y + L.h / 2;
+            const ang = Math.atan2(ty - oy, tx - ox), len = Math.hypot(tx - ox, ty - oy) * 1.15, wd = 0.02 + r() * 0.035;
+            const g = x.createLinearGradient(ox, oy, ox + Math.cos(ang) * len, oy + Math.sin(ang) * len);
+            const col = (si + i) % 2 ? c1 : c2;
+            g.addColorStop(0, rgba('#ffffff', 0.55)); g.addColorStop(0.15, rgba(col, 0.35)); g.addColorStop(1, rgba(col, 0));
+            x.fillStyle = g; x.beginPath(); x.moveTo(ox, oy);
+            x.lineTo(ox + Math.cos(ang - wd) * len, oy + Math.sin(ang - wd) * len); x.lineTo(ox + Math.cos(ang + wd) * len, oy + Math.sin(ang + wd) * len); x.closePath(); x.fill();
+          }
+          blob(ox, oy + 10, 90, 60, '#ffffff', 0.7);
+        });
+        break;
+      }
+      case 'ring': {
+        // the halo behind a head: a glowing ring of light
+        x.lineWidth = L.thick || Math.max(4, L.w * 0.012);
+        for (let k = 3; k >= 0; k--) {
+          x.strokeStyle = rgba(k ? c1 : c2, k ? 0.18 : 0.95); x.lineWidth = (L.thick || Math.max(4, L.w * 0.012)) * (1 + k * 2.2);
+          x.beginPath(); x.ellipse(L.x, L.y, L.w / 2, L.h / 2, 0, 0, Math.PI * 2); x.stroke();
+        }
+        break;
+      }
+      case 'confetti': {
+        x.globalCompositeOperation = 'source-over';
+        const cols = L.colors || [c1, c2, '#ffffff'];
+        for (let i = 0; i < (L.n || 70); i++) {
+          const px = L.x - L.w / 2 + r() * L.w, py = L.y - L.h / 2 + r() * L.h, sz = 6 + r() * 16;
+          x.save(); x.translate(px, py); x.rotate(r() * Math.PI); x.fillStyle = cols[i % cols.length]; x.globalAlpha = 0.65 + r() * 0.35;
+          x.fillRect(-sz / 2, -sz * 0.18, sz, sz * 0.36); x.restore();
+        }
+        break;
+      }
       case 'flare': {
         blob(L.x, L.y, L.w * 0.12, L.w * 0.12, '#ffffff', 0.95);
         blob(L.x, L.y, L.w * 0.4, L.w * 0.4, c1, 0.6);
@@ -507,7 +544,7 @@
   const txtCache = new Map();
   let measC = null;
   function textCanvas(L) {
-    const key = JSON.stringify([Q, L.text, L.font, L.size, L.fit, L.maxH, L.maxW, L.stretch, L.fill, L.stroke, L.strokeColor, L.extrude, L.extrudeColor, L.glow, L.shadow, L.letter, L.align, L.line, L.slant, L.upper, L.grain, L.imgFill, L.imgFill && IMGS.has(L.imgFill)]);
+    const key = JSON.stringify([Q, L.text, L.font, L.size, L.fit, L.maxH, L.maxW, L.stretch, L.fill, L.stroke, L.strokeColor, L.extrude, L.extrudeColor, L.bevel, L.edge, L.edgeColor, L.glow, L.shadow, L.letter, L.align, L.line, L.slant, L.upper, L.grain, L.imgFill, L.imgFill && IMGS.has(L.imgFill)]);
     if (txtCache.has(key)) return txtCache.get(key);
     const m = (measC || (measC = canvas(8, 8))).getContext('2d');
     const text = String(L.text == null ? '' : L.text);
@@ -549,7 +586,8 @@
     const inkW_ = blockW, inkH_ = Math.max(1, y1 - y0);
     const depth = L.extrude ? Math.round(L.extrude * size / 100) : 0;
     const slant = L.slant ? 0.2 : 0;
-    const pad = Math.ceil(size * 0.1 + depth * 1.3 + (L.glow ? size * 0.5 : 0) + (L.stroke || 0) * 2 + (L.shadow ? size * 0.22 : 0) + slant * inkH_ / 2) + 4;
+    const edge = L.edge ? Math.max(1.5, L.edge * size / 100) : 0;
+    const pad = Math.ceil(size * 0.1 + depth * 1.3 + edge * 2 + (L.glow ? size * 0.5 : 0) + (L.stroke || 0) * 2 + (L.shadow ? size * 0.22 : 0) + slant * inkH_ / 2) + 4;
     const W = inkW_ + pad * 2, H = inkH_ + pad * 2;
     const ox = pad, oy = pad - y0, midY = pad + inkH_ / 2;
     const c = canvas(W * Q, H * Q), x = c.getContext('2d');
@@ -562,19 +600,58 @@
       ctx.restore();
     });
     setT(x); x.font = fontOf(size); x.textBaseline = 'alphabetic'; x.lineJoin = 'round';
-    if (depth) { x.fillStyle = L.extrudeColor || 'rgba(0,0,0,.55)'; for (let d = depth; d >= 1; d--) draw(x, d * 0.55, d, 'fillText'); }
-    if (L.glow) { x.save(); x.shadowColor = L.glow; x.shadowBlur = size * 0.45 * Q; x.fillStyle = L.glow; draw(x, 0, 0, 'fillText'); x.restore(); }
-    if (L.shadow && L.fill !== 'none') { x.save(); x.shadowColor = 'rgba(0,0,0,.55)'; x.shadowBlur = size * 0.18 * Q; x.shadowOffsetY = size * 0.05 * Q; x.fillStyle = 'rgba(0,0,0,.55)'; draw(x, 0, 0, 'fillText'); x.restore(); }
+    if (L.glow) { x.save(); x.shadowColor = L.glow; x.shadowBlur = size * 0.45 * Q; x.fillStyle = L.glow; draw(x, 0, 0, 'fillText'); if (depth) draw(x, depth * 0.55, depth, 'fillText'); x.restore(); }
+    if (L.shadow && L.fill !== 'none') { x.save(); x.shadowColor = 'rgba(0,0,0,.6)'; x.shadowBlur = size * 0.2 * Q; x.shadowOffsetY = size * 0.06 * Q; x.fillStyle = 'rgba(0,0,0,.6)'; draw(x, depth * 0.55, depth, 'fillText'); x.restore(); }
+    /*
+     * 3D, AS THE FLYERS DO IT: the letters stand on a solid block of
+     * themselves (extrude) that darkens as it goes back — two colours, near and
+     * far — with a hard dark edge round the whole thing (edge), so a title
+     * reads from across a room.
+     */
+    if (edge) {
+      x.save(); x.lineWidth = edge * 2; x.strokeStyle = L.edgeColor || '#000000'; x.fillStyle = L.edgeColor || '#000000';
+      if (depth) draw(x, depth * 0.55, depth, 'strokeText');
+      draw(x, 0, 0, 'strokeText'); x.restore();
+    }
+    if (depth) {
+      const ec = Array.isArray(L.extrudeColor) ? L.extrudeColor : [L.extrudeColor || 'rgba(0,0,0,.55)', L.extrudeColor || 'rgba(0,0,0,.55)'];
+      const solid = ec.every((c) => /^#[0-9a-f]{6}$/i.test(c));
+      for (let d = depth; d >= 1; d--) { x.fillStyle = solid ? mix(ec[0], ec[1], (d - 1) / Math.max(1, depth - 1)) : ec[0]; draw(x, d * 0.55, d, 'fillText'); }
+    }
     if (L.stroke) { x.save(); if (L.shadow && L.fill === 'none') { x.shadowColor = 'rgba(0,0,0,.6)'; x.shadowBlur = size * 0.12 * Q; } x.lineWidth = L.stroke * 2; x.strokeStyle = L.strokeColor || '#000'; draw(x, 0, 0, 'strokeText'); x.restore(); }
     if (L.fill !== 'none') {
       const face = canvas(W * Q, H * Q), fx = face.getContext('2d');
       setT(fx); fx.font = x.font; fx.lineJoin = 'round';
+      // the letters first, then the fill laid into them: a gradient set while
+      // each line is moved into place moved with it, so every gold, fire and
+      // chrome title came out as its first colour only (flat cream)
+      fx.fillStyle = '#000'; draw(fx, 0, 0, 'fillText');
+      fx.globalCompositeOperation = 'source-in';
       fx.fillStyle = textFillAt(fx, L, pad + inkW_ / 2, midY, inkW_, inkH_);
-      draw(fx, 0, 0, 'fillText');
+      fx.fillRect(-W, -H, W * 3, H * 3);
+      fx.globalCompositeOperation = 'source-over';
       fx.setTransform(1, 0, 0, 1, 0, 0);
       const im = L.imgFill && imgOf(L.imgFill);
       if (im) { fx.globalCompositeOperation = 'source-atop'; fx.globalAlpha = 0.9; cover(fx, im, 0, 0, face.width, face.height); fx.globalAlpha = 1; }
       if (L.grain) { fx.globalCompositeOperation = 'source-atop'; fx.globalAlpha = 0.45; fx.fillStyle = fx.createPattern(grungeTile(), 'repeat'); fx.fillRect(0, 0, face.width, face.height); fx.globalAlpha = 1; }
+      if (L.bevel) {
+        // a bevel: light catching the top edge of every letter, shade under the bottom one
+        const k = Math.max(1.2, size * 0.035 * L.bevel);
+        const band = (dy, col, a) => {
+          const bc = canvas(face.width, face.height), bx = bc.getContext('2d');
+          setT(bx); bx.font = x.font; bx.fillStyle = '#000'; draw(bx, 0, 0, 'fillText');
+          bx.globalCompositeOperation = 'destination-out'; draw(bx, 0, dy, 'fillText');
+          bx.setTransform(1, 0, 0, 1, 0, 0); bx.globalCompositeOperation = 'source-in'; bx.fillStyle = col; bx.fillRect(0, 0, bc.width, bc.height);
+          fx.save(); fx.setTransform(1, 0, 0, 1, 0, 0); fx.globalCompositeOperation = 'source-atop'; fx.globalAlpha = a; fx.filter = `blur(${Math.max(0.5, k * Q * 0.25)}px)`; fx.drawImage(bc, 0, 0); fx.restore();
+        };
+        band(k, '#ffffff', 0.75);
+        band(-k, '#000000', 0.32);
+        // and a gloss across the upper half
+        fx.save(); fx.setTransform(1, 0, 0, 1, 0, 0); fx.globalCompositeOperation = 'source-atop';
+        const gg = fx.createLinearGradient(0, (pad - 0) * Q, 0, (pad + inkH_) * Q);
+        gg.addColorStop(0, 'rgba(255,255,255,.28)'); gg.addColorStop(0.48, 'rgba(255,255,255,.06)'); gg.addColorStop(0.5, 'rgba(0,0,0,0)'); gg.addColorStop(1, 'rgba(0,0,0,.12)');
+        fx.fillStyle = gg; fx.fillRect(0, 0, face.width, face.height); fx.restore();
+      }
       x.setTransform(1, 0, 0, 1, 0, 0);
       x.drawImage(face, 0, 0);
     }
@@ -597,9 +674,9 @@
   function imageCanvas(L, im) {
     const w = Math.max(1, Math.round(L.w * Q)), h = Math.max(1, Math.round(L.h * Q));
     const sr = srcOf(L);
-    const key = [IMGS_KEY(im), w, h, sr ? [sr.x, sr.y, sr.w, sr.h].map((v) => (+v).toFixed(4)).join(',') : '', L.gray ? 1 : 0, L.fade || 0, L.glow || '', L.rim || '', L.bright || 0, L.contrast || 0, L.sat || 0, L.radius || 0, L.round ? 1 : 0, L.outline || ''].join('|');
+    const key = [IMGS_KEY(im), w, h, sr ? [sr.x, sr.y, sr.w, sr.h].map((v) => (+v).toFixed(4)).join(',') : '', L.gray ? 1 : 0, L.fade || 0, L.glow || '', L.rim || '', L.bright || 0, L.contrast || 0, L.sat || 0, L.radius || 0, L.round ? 1 : 0, L.outline || '', L.tint ? JSON.stringify(L.tint) : '', L.rimW || 0, L.shade || '', L.feather || 0].join('|');
     if (picCache.has(key)) return picCache.get(key);
-    const pad = Math.round((L.glow ? Math.max(40, L.h * 0.08) : L.outline ? 14 : 0) * Q);
+    const pad = Math.round((L.glow || L.shade ? Math.max(40, L.h * 0.08) : L.outline ? 14 : 0) * Q);
     const c = canvas(w + pad * 2, h + pad * 2), x = c.getContext('2d');
     let pic = im;
     if (sr) {
@@ -612,8 +689,32 @@
     if (L.round) { lx.beginPath(); lx.ellipse(w / 2, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2); lx.clip(); }
     else if (L.radius) { roundRect(lx, 0, 0, w, h, L.radius * Q); lx.clip(); }
     if (body) lx.drawImage(body, 0, 0); else lx.drawImage(pic, 0, 0, w, h);
+    if (L.feather) {
+      /* a cut-out's edge, softened by a pixel or two: a mask made at the photo's
+         own size and blown up to a poster stair-steps along every shoulder */
+      const fr = Math.max(0.8, L.feather * h / 1000);
+      const mk = canvas(w, h), mx = mk.getContext('2d');
+      mx.filter = `blur(${fr}px)`; mx.drawImage(layer, 0, 0); mx.filter = 'none';
+      const keep = canvas(w, h), kx = keep.getContext('2d');
+      kx.drawImage(layer, 0, 0); kx.globalCompositeOperation = 'destination-in'; kx.drawImage(mk, 0, 0); kx.drawImage(mk, 0, 0);
+      lx.clearRect(0, 0, w, h); lx.drawImage(keep, 0, 0);
+    }
+    if (L.tint) {
+      /* GRADED INTO THE FLYER: the scene's own colour laid over the person
+         (soft light), stronger towards the edge it comes from, so a blue suit
+         in front of a fire is lit by the fire, not pasted on it */
+      const t = canvas(w, h), tx = t.getContext('2d');
+      tx.drawImage(layer, 0, 0);
+      tx.globalCompositeOperation = L.tint.mode || 'soft-light';
+      const g = tx.createLinearGradient(0, 0, 0, h);
+      g.addColorStop(0, rgba(L.tint.top || L.tint.color, L.tint.a == null ? 0.5 : L.tint.a));
+      g.addColorStop(1, rgba(L.tint.bottom || L.tint.color, (L.tint.a == null ? 0.5 : L.tint.a) * (L.tint.fall == null ? 0.6 : L.tint.fall)));
+      tx.fillStyle = g; tx.fillRect(0, 0, w, h);
+      tx.globalCompositeOperation = 'destination-in'; tx.drawImage(layer, 0, 0);
+      lx.clearRect(0, 0, w, h); lx.drawImage(t, 0, 0);
+    }
     if (L.rim) {   // the edge lit from behind: the outline minus the outline pulled in
-      const r = Math.max(1.5, h * 0.004);
+      const r = Math.max(1.5, h * 0.004 * (L.rimW || 1));
       const e = canvas(w, h), ex = e.getContext('2d');
       ex.drawImage(layer, 0, 0); ex.globalCompositeOperation = 'destination-in';
       ex.drawImage(layer, r, 0); ex.drawImage(layer, -r, 0); ex.drawImage(layer, 0, r); ex.drawImage(layer, 0, -r);
@@ -623,7 +724,7 @@
       tx.globalCompositeOperation = 'destination-in';   // stronger at the top (head and shoulders), gone by the waist
       const g = tx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(0.55, 'rgba(0,0,0,.5)'); g.addColorStop(1, 'rgba(0,0,0,0)');
       tx.fillStyle = g; tx.fillRect(0, 0, w, h);
-      lx.globalCompositeOperation = 'screen'; lx.globalAlpha = 0.9; lx.drawImage(t, 0, 0); lx.globalAlpha = 1; lx.globalCompositeOperation = 'source-over';
+      lx.globalCompositeOperation = 'screen'; lx.globalAlpha = 0.9; lx.filter = `blur(${Math.max(0.6, r * 0.45)}px)`; lx.drawImage(t, 0, 0); lx.filter = 'none'; lx.globalAlpha = 1; lx.globalCompositeOperation = 'source-over';
     }
     if (L.fade) {
       lx.globalCompositeOperation = 'destination-out';
@@ -638,6 +739,7 @@
       ox.globalCompositeOperation = 'source-in'; ox.fillStyle = L.outline; ox.fillRect(0, 0, o.width, o.height);
       x.drawImage(o, 0, 0);
     }
+    if (L.shade) { x.save(); x.shadowColor = L.shade; x.shadowBlur = Math.max(24, L.h * 0.05) * Q; x.drawImage(layer, pad, pad); x.restore(); }
     if (L.glow) { x.save(); x.shadowColor = L.glow; x.shadowBlur = Math.max(30, L.h * 0.07) * Q; x.drawImage(layer, pad, pad); x.restore(); }
     x.drawImage(layer, pad, pad);
     const out = { c, pad };
@@ -651,6 +753,9 @@
   /* the colour ramp a background is mapped onto: near-black, deep, main, accent, light */
   function gradeStops(p, kind) {
     const dk = mix(p.deep, '#000000', 0.7), lt = mix(p.accent, '#ffffff', 0.6);
+    // vivid: the loud, saturated look of the flyers people stop scrolling for —
+    // the shadows keep their colour (no black), the lights go to the accent
+    if (kind === 'vivid') return [[0, mix(p.deep, '#000000', 0.35)], [0.28, p.deep], [0.55, p.mid], [0.8, p.accent], [1, mix(p.accent, '#ffffff', 0.7)]];
     const at = kind === 'dark' ? [0.34, 0.66, 0.9] : kind === 'bright' ? [0.1, 0.36, 0.7] : [0.22, 0.5, 0.82];
     return [[0, dk], [at[0], p.deep], [at[1], p.mid], [at[2], p.accent], [1, lt]];
   }
@@ -672,6 +777,16 @@
       x.restore();
     }
     if (L.wash) { x.fillStyle = L.wash; x.fillRect(0, 0, W, H); }
+    // colour laid over the picture in a blend (overlay / color / screen…): the magenta-to-orange sweep
+    for (const cw of [].concat(L.colorWash || [])) {
+      x.save(); x.globalCompositeOperation = cw.mode || 'overlay'; x.globalAlpha = cw.a == null ? 0.6 : cw.a;
+      if (cw.radial) {
+        const g = x.createRadialGradient(cw.x * W, cw.y * H, 0, cw.x * W, cw.y * H, (cw.r || 0.7) * Math.max(W, H));
+        cw.stops.forEach((c, i) => g.addColorStop(i / Math.max(1, cw.stops.length - 1), c));
+        x.fillStyle = g;
+      } else x.fillStyle = gradAt(x, { stops: cw.stops, angle: cw.angle }, W / 2, H / 2, W, H);
+      x.fillRect(0, 0, W, H); x.restore();
+    }
     // shade where the words sit, in the flyer's own darkest colour
     const dark = mix(pal.deep, '#000000', 0.45);
     const shade = (yA, yB, a) => { const g = x.createLinearGradient(0, yA, 0, yB); g.addColorStop(0, rgba(dark, 0)); g.addColorStop(1, rgba(dark, a)); x.fillStyle = g; x.fillRect(0, Math.min(yA, yB), W, Math.abs(yB - yA)); };
@@ -866,7 +981,11 @@
         top = topIn(hx - sw * 0.6, hx + sw * 0.6);
         const lh = P(23, 0.45), rh = P(24, 0.45);
         const hy = lh && rh ? (lh.y + rh.y) / 2 : null;
-        return { w, h, top, cx, sy: Math.max(sy, top + 10), sw, hy: hy && hy > sy + 10 ? hy : null, full: !!(P(27, 0.6) || P(28, 0.6)) };
+        // the lowest hand: a chest-up flyer ends just under it — below the hands
+        // is where a podium, a lectern's glass or a front-row head gets in
+        const ws = [P(15, 0.35), P(16, 0.35)].filter(Boolean).map((q) => q.y);
+        const wy = ws.length ? Math.max(...ws) : null;
+        return { w, h, top, cx, sy: Math.max(sy, top + 10), sw, hy: hy && hy > sy + 10 ? hy : null, wy: wy && wy > sy ? wy : null, full: !!(P(27, 0.6) || P(28, 0.6)) };
       }
     }
     const tall = h / w;
@@ -1046,7 +1165,11 @@
   const venueLines = (D, n) => { const p = venueParts(D); if (p.length <= n) return p.join(',\n'); return [p.slice(0, p.length - n + 1).join(', ')].concat(p.slice(p.length - n + 1)).join(',\n'); };
   const spsOf = (D) => D.sp.filter((s) => imgOf(s.img));
   const sp0 = (D) => spsOf(D)[0] || null;
-  const lit = (p) => ({ glow: rgba(p.accent, 0.55), rim: mix('#ffffff', p.accent, 0.35) });
+  const lit = (p) => ({ glow: rgba(p.accent, 0.5), rim: mix('#ffffff', p.accent, 0.3), rimW: 1.4, tint: { color: p.accent, a: 0.3, fall: 0.35 } });
+  /* titles that stand off the page: chrome or gold, bevelled, on a deep block with a dark edge */
+  const CHROME = { stops: ['#ffffff', '#f2f4f7', '#c9ced6', '#ffffff', '#9aa3ad'], angle: 90 };
+  const GOLD = { stops: ['#fff6c7', '#ffe066', '#f5b301', '#ffd84d', '#c97a00'], angle: 90 };
+  const solid3d = (p, o) => Object.assign({ extrude: 7, extrudeColor: [mix(p.deep, '#000000', 0.2), mix(p.deep, '#000000', 0.7)], edge: 1.6, edgeColor: mix(p.deep, '#000000', 0.6), bevel: 1, shadow: true }, o || {});
   function footerWords(f) {
     const k = String((f.kind || '') + ' ' + (f.title || '')).toLowerCase();
     if (/prayer|vigil|fast/.test(k)) return 'PRAYER   |   PRAISE   |   POWER';
@@ -1066,7 +1189,7 @@
     let nb;
     if (mode === 'full') nb = m.h;
     else if (mode === 'waist') nb = m.hy ? m.hy + u * 0.25 : m.sy + u * 2.4;
-    else if (mode === 'chest') nb = m.sy + u * 1.55;
+    else if (mode === 'chest') nb = m.wy ? clamp(m.wy + u * 0.3, m.sy + u * 1.05, m.sy + u * 1.55) : m.sy + u * 1.4;
     else nb = m.sy + u * 0.9;
     return { t: Math.max(0, m.top - u * 0.06), nb, cx: m.cx };
   }
@@ -1082,7 +1205,7 @@
       img: sp.img, name: sp.name || 'Speaker', speaker: sp.id || '', photo: sp.photo || '',
       src: { x: 0, y: fr.t / m.h, w: 1, h: (vb - fr.t) / m.h },
       w, h, x: o.cx + (m.w / 2 - fr.cx) * k, y: o.t + h / 2,
-      fade: whole ? 0 : (o.fade == null ? 0.22 : o.fade),
+      fade: whole ? 0 : (o.fade == null ? 0.22 : o.fade), feather: 1.4,
       frame: { mode, t: o.t, b: o.b, cx: o.cx },
     }, o.extra || {}));
   }
@@ -1143,24 +1266,39 @@
     return out;
   }
 
+  /* "Ministering" in script over the name in bold capitals, the title above it small */
+  function nameTag(sp, o) {
+    const np = nameParts(sp.name || ''), al = o.align || 'left', p = o.p;
+    const items = [
+      o.script && T({ name: 'Ministering', text: o.script, font: 'Great Vibes', size: o.scriptSize || 46, fill: o.scriptFill || p.accent, align: al, shadow: true }),
+      np.title && T({ name: 'Speaker title', text: np.title, upper: true, font: 'Montserrat', size: o.titleSize || 18, letter: 0.18, align: al, shadow: true, fill: o.ink || '#ffffff' }),
+      T({ name: 'Speaker', text: np.name, upper: true, font: o.font || 'Anton', size: o.size || 46, align: al, line: 0.95, shadow: true, maxW: o.maxW || 420, fill: o.ink || '#ffffff' }),
+    ];
+    const pos = { gap: o.gap == null ? 2 : o.gap }; if (o.t != null) pos.t = o.t; else pos.b = o.b;
+    if (al === 'left') pos.l = o.l; else if (al === 'right') pos.r = o.r; else pos.cx = o.cx;
+    return col(items, pos);
+  }
+
   const LAYOUTS = {
     /* ── GLORY: two enormous lines, a little tag between, the preacher in front of them ── */
     glory(D) {
       const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D);
-      L.push(BG({ img: D.bg, grade: 'dark', bright: -10, contrast: 18, keep: 0.12, topShade: 0.65, bottomShade: 0.92, bottomFrom: 0.55, vignette: 0.55 }));
+      L.push(BG({ img: D.bg, grade: 'vivid', contrast: 18, sat: 10, keep: 0.1, topShade: 0.5, bottomShade: 0.92, bottomFrom: 0.6, vignette: 0.45,
+        colorWash: [{ radial: true, x: 0.5, y: 0.45, r: 0.6, stops: [rgba(p.mid, 0.9), rgba(p.deep, 0)], mode: 'screen', a: 0.5 }] }));
+      L.push(FX({ kind: 'beams', x: 540, y: H * 0.45, w: 1000, h: H * 0.5, n: 3, seed: 6, color: p.accent, opacity: 0.55 }));
       L.push(FX({ kind: 'streak', x: 540, y: H * 0.3, w: 2000, h: 190, rot: -13, opacity: 0.7 }));
       L.push(FX({ kind: 'glow', x: 560, y: H * 0.55, w: 900, h: 800, opacity: 0.45 }));
       L.push(...header(D));
       const sc = splitConnector(f.title);
       const lines = sc ? [sc.a, sc.b] : twoLines(f.title || 'Glory to Glory').filter(Boolean);
       const ts = stackLines(lines, { t: H * 0.13, fit: 940, maxH: H * (lines.length === 1 ? 0.3 : sp ? 0.21 : 0.25), gap: sc ? 66 : 18,
-        style: { font: 'Anton', upper: true, fill: { stops: ['#ffffff', '#f4f4f4', '#c4c4c4'], angle: 90 }, shadow: true } });
+        style: solid3d(p, { font: 'Anton', upper: true, fill: CHROME, extrude: 6 }) });
       L.push(...ts);
       if (sc && ts.length === 2) {
         const g = pill([{ text: sc.conn.charAt(0).toUpperCase() + sc.conn.slice(1), font: 'Barlow Italic', size: 50 }], { fill: p.accent, ink: '#141414', radius: 0, padX: 16, padY: 9 });
         L.push(...g.place(540, (box(ts[0]).b + box(ts[1]).t) / 2));
       }
-      if (sp) { const lb = box(ts[ts.length - 1]); L.push(hero(sp, { cx: 560, t: Math.max(lb.t + lb.h * 0.3, H * 0.34), b: H - 96, mode: 'waist', extra: lit(p) })); }
+      if (sp) { const lb = box(ts[ts.length - 1]); L.push(hero(sp, { cx: 560, t: Math.max(lb.t + lb.h * 0.15, H * 0.3), b: H + 30, mode: 'chest', fade: 0.3, extra: lit(p) })); }
       L.push(...col([f.time && T({ name: 'Time', text: f.time, font: 'Barlow Italic', size: 72, align: 'left', shadow: true }),
         d && T({ name: 'Date', text: `${d.day3}, ${d.mon3} ${d.ddn}`, font: 'Barlow Italic', size: 40, align: 'left', shadow: true }),
         d && T({ name: 'Year', text: d.year, font: 'Barlow Italic', size: 40, align: 'left', shadow: true })], { l: 70, b: H - 122, gap: 4 }));
@@ -1181,8 +1319,9 @@
     /* ── FIRE: PUSH / 6 HOURS PRAYER WATCH — a burning italic title, the preacher in front ── */
     fire(D) {
       const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D);
-      L.push(BG({ img: D.bg, grade: 'normal', contrast: 22, keep: 0.15, topShade: 0.65, bottomShade: 0.94, bottomFrom: 0.6, vignette: 0.5 }));
-      L.push(FX({ kind: 'glow', x: 540, y: H * 0.52, w: 1100, h: 900, opacity: 0.55 }));
+      L.push(BG({ img: D.bg, grade: 'vivid', contrast: 22, sat: 20, keep: 0.12, topShade: 0.45, bottomShade: 0.9, bottomFrom: 0.62, vignette: 0.4,
+        colorWash: [{ stops: [p.mid, p.accent], angle: 90, mode: 'overlay', a: 0.5 }] }));
+      L.push(FX({ kind: 'glow', x: 540, y: H * 0.52, w: 1100, h: 900, opacity: 0.6 }));
       L.push(FX({ kind: 'sparks', x: 540, y: H * 0.55, w: 1080, h: H * 0.9, n: 110, seed: 5, opacity: 0.9 }));
       L.push(...header(D));
       let y = H * 0.155;
@@ -1193,9 +1332,9 @@
       }
       const lines = stack(f.title || 'Push', 3), n = lines.length;
       const ts = stackLines(lines, { t: y, fit: 990, maxH: H * (n === 1 ? 0.26 : n === 2 ? 0.16 : 0.12), gap: 8,
-        style: { font: 'Barlow Italic', upper: true, fill: { stops: ['#ffffff', '#f6f6f6', '#cfcfcf'], angle: 90 }, grain: true, extrude: 3, extrudeColor: rgba('#000000', 0.5), shadow: true } });
+        style: solid3d(p, { font: 'Barlow Italic', upper: true, fill: CHROME, grain: true, extrude: 6, extrudeColor: [mix(p.mid, '#000000', 0.3), mix(p.deep, '#000000', 0.6)], glow: rgba(p.accent, 0.45) }) });
       L.push(...ts);
-      if (sp) { const lb = box(ts[ts.length - 1]); L.push(hero(sp, { cx: 540, t: Math.max(lb.t + lb.h * 0.2, y + (ts.bottom - y) * 0.45), b: H - 150, mode: 'waist', extra: lit(p) })); }
+      if (sp) { const lb = box(ts[ts.length - 1]); L.push(hero(sp, { cx: 540, t: Math.max(lb.t + lb.h * 0.1, y + (ts.bottom - y) * 0.4), b: H - 40, mode: 'chest', fade: 0.3, extra: lit(p) })); }
       if (d) L.push(...col([d.day3, d.ddth, d.month, d.year].map((s, i) => T({ name: 'Date ' + (i + 1), text: s, font: 'Barlow Italic', size: 56, line: 0.9, fill: p.accent, align: 'left', shadow: true })), { l: 62, t: H * 0.6, gap: -2 }));
       L.push(...col([f.time && T({ name: 'Time', text: f.time, font: 'Anton', size: 66, align: 'right', shadow: true }), f.time2 && T({ name: 'Time 2', text: f.time2, font: 'Anton', size: 42, align: 'right', shadow: true })], { r: 1016, t: H * 0.6, gap: 6 }));
       if (sp && sp.name) {
@@ -1217,11 +1356,11 @@
       L.push(...header(D));
       L.push(put(T({ name: 'Presents', text: 'PRESENTS', font: 'Montserrat', size: 19, letter: 0.9, shadow: true }), { cx: 540, t: H * 0.14 }));
       const ps = spsOf(D).slice(0, 3), n = ps.length, pb = H * 0.8;
-      if (n === 1) L.push(hero(ps[0], { cx: 540, t: H * 0.185, b: pb, mode: 'waist', extra: lit(p) }));
+      if (n === 1) L.push(hero(ps[0], { cx: 540, t: H * 0.17, b: H * 0.86, mode: 'chest', fade: 0.3, extra: lit(p) }));
       if (n === 2) L.push(hero(ps[1], { cx: 770, t: H * 0.23, b: pb, mode: 'chest', extra: lit(p) }), hero(ps[0], { cx: 320, t: H * 0.21, b: pb, mode: 'chest', extra: lit(p) }));
       if (n === 3) L.push(hero(ps[1], { cx: 220, t: H * 0.27, b: pb, mode: 'chest', extra: lit(p) }), hero(ps[2], { cx: 860, t: H * 0.27, b: pb, mode: 'chest', extra: lit(p) }), hero(ps[0], { cx: 540, t: H * 0.2, b: pb, mode: 'chest', extra: lit(p) }));
       const ts = stackLines(twoLines(f.title || 'Worship Encounter').filter(Boolean), { t: H * (n ? 0.57 : 0.36), fit: 880, maxH: H * (n ? 0.115 : 0.16), gap: 6,
-        style: { font: 'Anton', fill: '#ffffff', shadow: true, extrude: 2, extrudeColor: rgba(p.deep, 0.6) } });
+        style: solid3d(p, { font: 'Anton', fill: CHROME, extrude: 5, glow: rgba(p.accent, 0.4) }) });
       L.push(...ts);
       let y = ts.bottom + 18;
       if (f.theme) { const th = put(T({ name: 'Theme', text: 'Theme: ' + f.theme, font: 'DM Serif', size: 34, maxW: 920, shadow: true }), { cx: 540, t: y }); L.push(th); y = box(th).b + 12; }
@@ -1240,18 +1379,19 @@
     /* ── SPOTLIGHT (Miracle Service): the minister lit from behind, a wide title below ── */
     miracle(D) {
       const H = D.h, p = D.pal, f = D.f, d = D.d, L = [];
-      L.push(BG({ img: D.bg, grade: 'dark', contrast: 15, keep: 0.12, topShade: 0.45, bottomShade: 0.96, bottomFrom: 0.5, vignette: 0.6 }));
+      L.push(BG({ img: D.bg, grade: 'vivid', contrast: 15, sat: 15, keep: 0.12, topShade: 0.35, bottomShade: 0.96, bottomFrom: 0.55, vignette: 0.45 }));
       L.push(FX({ kind: 'glow', x: 540, y: H * 0.32, w: 1050, h: 950, opacity: 0.65 }));
+      L.push(FX({ kind: 'ring', x: 540, y: H * 0.26, w: 560, h: 560, color: p.accent, opacity: 0.55 }));
       L.push(FX({ kind: 'sparks', x: 540, y: H * 0.45, w: 1080, h: H * 0.8, n: 60, seed: 9, opacity: 0.75 }));
       L.push(...header(D));
       if (f.handles) L.push(put(T({ name: 'Handles', text: f.handles, font: 'Montserrat', size: 16, align: 'right', maxW: 360, shadow: true }), { r: 1016, cy: 78 }));
       const ps = spsOf(D);
       if (ps[1]) L.push(hero(ps[1], { cx: 200, t: H * 0.25, b: H * 0.7, mode: 'chest', extra: lit(p) }));
       if (ps[2]) L.push(hero(ps[2], { cx: 880, t: H * 0.25, b: H * 0.7, mode: 'chest', extra: lit(p) }));
-      if (ps[0]) L.push(hero(ps[0], { cx: 540, t: H * 0.12, b: H * 0.74, mode: 'waist', extra: lit(p) }));
+      if (ps[0]) L.push(hero(ps[0], { cx: 540, t: H * 0.1, b: H * 0.76, mode: 'chest', fade: 0.3, extra: lit(p) }));
       const ws = String(f.title || 'Miracle Service').trim().split(/\s+/);
       const big = ws.length > 1 ? ws.slice(0, -1).join(' ') : ws[0], small = ws.length > 1 ? ws[ws.length - 1] : '';
-      const t1 = put(T({ name: 'Title', text: big, upper: true, font: 'Archivo Black', fill: { stops: ['#ffffff', '#f0f0f0', '#b4b4b4'], angle: 90 }, fit: 930, maxH: H * (ps.length ? 0.095 : 0.14), shadow: true, extrude: 2, extrudeColor: rgba('#000000', 0.5) }), { cx: 540, t: H * (ps.length ? 0.69 : 0.42) });
+      const t1 = put(T(Object.assign({ name: 'Title', text: big, upper: true, font: 'Archivo Black', fit: 960, maxH: H * (ps.length ? 0.11 : 0.15) }, solid3d(p, { fill: CHROME, extrude: 6, glow: rgba(p.accent, 0.35) }))), { cx: 540, t: H * (ps.length ? 0.66 : 0.42) });
       L.push(t1);
       let y = box(t1).b + 18;
       if (small) { const t2 = put(T({ name: 'Subtitle', text: small.toUpperCase().split('').join(' '), font: 'Montserrat', size: 40, letter: 0.3, fit: Math.min(880, box(t1).w * 0.9), maxH: 34, shadow: true }), { cx: 540, t: y }); L.push(t2); y = box(t2).b + 16; }
@@ -1272,7 +1412,7 @@
       const hd = header(D, { center: true, t: 32 }); L.push(...hd);
       const pr = put(T({ name: 'Presents', text: 'PRESENTS', font: 'Montserrat', size: 15, letter: 1.0, shadow: true }), { cx: 540, t: hd.bottom }); L.push(pr);
       const ts = stackLines(twoLines(f.title || 'Bible Study').filter(Boolean), { t: box(pr).b + 18, cx: 600, fit: 740, maxH: H * (sp ? 0.13 : 0.17), gap: 4,
-        style: { font: 'Abril Fatface', fill: { stops: ['#fff7b8', '#ffd52a', '#f2a600'], angle: 90 }, extrude: 4, extrudeColor: '#3a2000', shadow: true } });
+        style: solid3d(p, { font: 'Abril Fatface', fill: GOLD, extrude: 6, extrudeColor: ['#5a3300', '#1f1000'], edgeColor: '#1f1000', glow: rgba('#ffcf33', 0.3) }) });
       L.push(...ts);
       const tT = box(ts[0]).t, tB = ts.bottom, tl = Math.min(...ts.map((t) => box(t).l));
       L.push(SH({ name: 'Join tab', shape: 'rect', fill: '#d71920', x: tl - 52, y: (tT + tB) / 2, w: 62, h: tB - tT + 8, shadow: true }));
@@ -1284,7 +1424,7 @@
         cb = Math.max(dc.bottom, tc.bottom);
         L.push(...dc, ...tc, SH({ name: 'Divider', shape: 'line', fill: rgba('#ffffff', 0.75), x: 600, y: (y + cb) / 2, w: 3, h: cb - y }));
       }
-      if (sp) L.push(hero(sp, { cx: 520, t: Math.max(cb + 26, H * 0.45), b: H - 64, mode: 'chest', extra: lit(p) }));
+      if (sp) L.push(hero(sp, { cx: 500, t: Math.max(cb + 20, H * 0.4), b: H - 40, mode: 'chest', fade: 0.25, extra: lit(p) }));
       if (sp && sp.name) {
         const np = nameParts(sp.name);
         const g = pill([{ text: 'with', font: 'Great Vibes', size: 40 }, { text: (np.title ? np.title + '\n' : '') + np.name, upper: true, font: 'Anton', size: 34, line: 0.98, fill: '#c81e1e', maxW: 230 }], { fill: '#ffd21f', ink: '#141414', radius: 18, rot: -4, shadow: true, padX: 22, padY: 14, gap: 2 });
@@ -1298,32 +1438,35 @@
     /* ── GOLD (Night of Prophetic Prayers): a red ribbon, a blazing gold title, the details down the right ── */
     prophetic(D) {
       const H = D.h, p = D.pal, f = D.f, d = D.d, L = [];
-      L.push(BG({ img: D.bg, grade: 'bright', contrast: 12, keep: 0.18, topShade: 0.35, bottomShade: 0.85, bottomFrom: 0.6, vignette: 0.35 }));
-      L.push(FX({ kind: 'rays', x: 540, y: -60, h: H * 0.95, n: 18, seed: 4, color: p.hi, opacity: 0.55 }));
-      L.push(FX({ kind: 'glow', x: 540, y: H * 0.28, w: 1200, h: 900, opacity: 0.5 }));
-      const hd = header(D, { center: true, t: 32 }); L.push(...hd);
+      L.push(BG({ img: D.bg, grade: 'vivid', contrast: 14, sat: 18, keep: 0.12, topShade: 0.3, bottomShade: 0.7, bottomFrom: 0.62, vignette: 0.3,
+        colorWash: [{ stops: [p.accent, p.mid], angle: 90, mode: 'overlay', a: 0.45 }] }));
+      L.push(FX({ kind: 'rays', x: 540, y: -60, h: H * 1.05, n: 22, seed: 4, color: p.hi, opacity: 0.7 }));
+      L.push(FX({ kind: 'glow', x: 540, y: H * 0.3, w: 1300, h: 900, opacity: 0.6 }));
+      L.push(FX({ kind: 'sparks', x: 540, y: H * 0.6, w: 1080, h: H * 0.7, n: 70, seed: 8, opacity: 0.8 }));
+      const hd = header(D, { center: true, t: 28 }); L.push(...hd);
       const m = /^((?:a\s+)?(?:night|day|days|hour|hours|evening|morning|season|week|weekend)\s+of)\s+(.+)$/i.exec(String(f.title || '').trim());
       const tag = m ? m[1] : (D.dir.kicker && D.dir.kicker.length <= 20 ? D.dir.kicker : '');
       const rest = m ? m[2] : (f.title || 'Prophetic Prayers');
-      let y = hd.bottom + 16;
-      if (tag) { const g = pill([{ text: tag, upper: true, font: 'Anton', size: 38 }], { fill: '#d71920', ink: '#ffffff', radius: 0, padX: 20, padY: 8, rot: -5, shadow: true }); L.push(...g.place(420, y + g.h / 2)); y += g.h + 6; }
-      const ts = tilt(stackLines(stack(rest, 3), { t: y, fit: 920, maxH: H * 0.15, gap: 4,
-        style: { font: 'Anton', upper: true, fill: 'fire', extrude: 6, extrudeColor: '#6e1600', shadow: true } }), -3);
+      let y = hd.bottom + 22;
+      if (tag) { const g = pill([{ text: tag, upper: true, font: 'Anton', size: 40 }], { fill: { stops: ['#ff3b30', '#b3000c'], angle: 90 }, ink: '#ffffff', radius: 6, padX: 22, padY: 8, rot: -6, shadow: true }); L.push(...g.place(400, y + g.h / 2)); y += g.h - 4; }
+      const ts = tilt(stackLines(stack(rest, 3), { t: y, fit: 960, maxH: H * 0.155, gap: 0,
+        style: { font: 'Anton', upper: true, fill: { stops: ['#fffbe0', '#ffe14a', '#ffb800', '#ff8a00'], angle: 90 }, extrude: 9, extrudeColor: ['#8a2a00', '#3a0a00'], edge: 2.2, edgeColor: '#3a0a00', bevel: 1, glow: rgba('#ffcf3a', 0.55), shadow: true } }), -4);
       L.push(...ts);
       const tb = ts.bottom;
-      if (f.theme) L.push(put(T({ name: 'Theme', text: f.theme, upper: true, font: 'Montserrat', size: 21, align: 'right', maxW: 440, line: 1.15, shadow: true }), { r: 1000, t: tb + 22 }));
-      const ps = spsOf(D).slice(0, 2);
-      if (ps[1]) L.push(hero(ps[1], { cx: 170, t: Math.max(tb + 80, H * 0.58), b: H, mode: 'chest', extra: lit(p) }));
-      if (ps[0]) L.push(hero(ps[0], { cx: ps[1] ? 420 : 370, t: Math.max(tb + 40, H * 0.5), b: H, mode: 'waist', extra: lit(p) }));
-      L.push(...col([d && T({ name: 'Day', text: `${d.day}, ${d.year}`, font: 'Montserrat', size: 18, letter: 0.3, align: 'right', shadow: true }),
-        d && T({ name: 'Date', text: `${d.ddth} ${d.month}`, font: 'Anton', size: 70, align: 'right', shadow: true, maxW: 420 }),
-        f.time && T({ name: 'Time', text: f.time, font: 'Anton', size: 70, align: 'right', shadow: true }),
-        venueText(D) && T({ name: 'Venue', text: venueLines(D, 3), upper: true, font: 'Montserrat', size: 16, align: 'right', line: 1.22, maxW: 380, shadow: true })], { r: 1010, b: H - 60, gap: 8 }));
-      if (ps[0] && ps[0].name) {
-        const np = nameParts(ps[0].name);
-        L.push(...col([T({ name: 'Ministering', text: 'MINISTERING', font: 'Montserrat', size: 13, letter: 0.2, align: 'left', shadow: true }),
-          T({ name: 'Speaker', text: (np.title ? np.title + ' ' : '') + np.name, upper: true, font: 'Montserrat', size: 24, align: 'left', shadow: true, maxW: 440 })], { l: 56, b: H - 32, gap: 4 }));
-      }
+      if (f.theme) L.push(put(T({ name: 'Theme', text: f.theme, upper: true, font: 'Montserrat', size: 23, align: 'right', maxW: 470, line: 1.12, shadow: true }), { r: 1000, t: tb + 26 }));
+      const ps = spsOf(D).slice(0, 2), top = Math.max(tb + 30, H * 0.42);
+      const grade = { tint: { color: p.accent, a: 0.35, fall: 0.3 }, rim: mix('#ffffff', p.accent, 0.25), rimW: 1.6, glow: rgba(p.accent, 0.5) };
+      if (ps[1]) L.push(hero(ps[1], { cx: 170, t: top + 70, b: H + 40, mode: 'chest', fade: 0.12, extra: grade }));
+      if (ps[0]) L.push(hero(ps[0], { cx: ps[1] ? 430 : 360, t: top, b: H + 40, mode: 'chest', fade: 0.12, extra: grade }));
+      L.push(SH({ name: 'Floor shade', shape: 'rect', fill: { stops: [rgba(p.deep, 0), rgba(mix(p.deep, '#000000', 0.5), 0.9)], angle: 90 }, x: 540, y: H - 110, w: W, h: 220 }));
+      const right = [];
+
+      if (d) right.push(T({ name: 'Day', text: `${d.day}, ${d.year}`, upper: true, font: 'Montserrat', size: 19, letter: 0.32, align: 'right', shadow: true }),
+        T({ name: 'Date', text: `${d.ddth} ${d.month}`, upper: true, font: 'Anton', size: 84, align: 'right', shadow: true, maxW: 430, fill: { stops: ['#ffffff', '#ffffff', '#ffe9a8'], angle: 90 } }));
+      if (f.time) right.push(T({ name: 'Time', text: f.time, font: 'Anton', size: 84, align: 'right', shadow: true, fill: { stops: ['#ffffff', '#ffffff', '#ffe9a8'], angle: 90 } }));
+      const rc = col(right, { r: 1010, b: H - 150, gap: 6 }); L.push(...rc);
+      if (venueText(D)) L.push(put(T({ name: 'Venue', text: venueLines(D, 3), upper: true, font: 'Montserrat', size: 16, align: 'right', line: 1.25, maxW: 380, shadow: true }), { r: 1010, t: rc.bottom + 16 }));
+      if (ps[0] && ps[0].name) L.push(...nameTag(ps[0], { l: 60, b: H - 40, align: 'left', script: 'Ministering', p }));
       return L;
     },
 
@@ -1339,7 +1482,7 @@
       if (kb) { const k2 = put(T({ name: 'Kicker 2', text: kb, font: 'League Gothic', size: 36, align: 'right', letter: 0.04, shadow: true }), { r: 1018, cy: 62 }); L.push(k2, SH({ name: 'Line', shape: 'line', fill: rgba('#ffffff', 0.8), x: (box(k1).r + box(k2).l) / 2, y: 64, w: Math.max(20, box(k2).l - box(k1).r - 30), h: 2 })); }
       const lines = stack(f.title || 'Sunday Service', 2), n = lines.length, top = 108, avail = H - top - (sp ? 60 : 150);
       const ts = stackLines(lines, { t: top, fit: 1000, maxH: avail / n - 14, gap: 14,
-        style: { font: 'League Gothic', upper: true, stretch: 1.45, fill: { stops: ['#ffffff', mix('#ffffff', p.accent, 0.3), mix(p.accent, p.hi, 0.25)], angle: 90 }, shadow: true } });
+        style: { font: 'League Gothic', upper: true, stretch: 1.45, fill: { stops: ['#ffffff', mix('#ffffff', p.accent, 0.3), mix(p.accent, p.hi, 0.25)], angle: 90 }, bevel: 0.6, glow: rgba(p.accent, 0.35), shadow: true } });
       L.push(...ts);
       if (sp) { const m = META.get(sp.img); L.push(hero(sp, { cx: 540, t: top + (ts.bottom - top) * 0.2, b: H - 16, mode: m && m.full ? 'full' : 'waist', extra: lit(p) })); }
       L.push(...col([d && T({ name: 'Date', text: `${d.mon3}. ${d.ddth}`, font: 'Anton', size: 50, fill: p.accent, align: 'right', shadow: true }), f.time && T({ name: 'Time', text: f.time, font: 'Anton', size: 50, align: 'right', shadow: true })], { r: 1018, b: H - 50, gap: 4 }));
@@ -1379,7 +1522,8 @@
     /* ── SCRIPT (Special Sunday Service): one word in flowing script, capitals around it ── */
     script(D) {
       const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D);
-      L.push(BG({ img: D.bg, grade: 'normal', contrast: 15, sat: 10, keep: 0.12, topShade: 0.5, bottomShade: 0.88, bottomFrom: 0.6, vignette: 0.45 }));
+      L.push(BG({ img: D.bg, grade: 'vivid', contrast: 15, sat: 20, keep: 0.12, topShade: 0.35, bottomShade: 0.85, bottomFrom: 0.65, vignette: 0.35,
+        colorWash: [{ stops: [p.mid, p.accent, '#ff7a00'], angle: 35, mode: 'overlay', a: 0.55 }] }));
       L.push(FX({ kind: 'streak', x: 540, y: H * 0.42, w: 1900, h: 260, rot: 22, opacity: 0.55 }));
       L.push(FX({ kind: 'glow', x: 780, y: H * 0.64, w: 900, h: 900, opacity: 0.5 }));
       const hd = header(D, { center: true, t: 30 }); L.push(...hd);
@@ -1389,11 +1533,11 @@
       const pre = words.slice(0, si).join(' '), word = words[si], post = words.slice(si + 1).join(' ');
       let y = hd.bottom + 4;
       const jo = put(T({ name: 'Kicker', text: 'Join Our', font: 'Great Vibes', size: 62, shadow: true }), { cx: 540, t: y }); L.push(jo); y = box(jo).b + 6;
-      if (pre) { const t = put(T({ name: 'Title', text: pre, upper: true, font: 'Barlow Italic', fit: 700, maxH: H * 0.085, shadow: true }), { cx: 540, t: y }); L.push(t); y = box(t).b - 6; }
-      const sw = put(T({ name: 'Script word', text: word, font: 'Alex Brush', fill: { stops: ['#fffbe6', '#ffe9a0', mix('#ffd76a', p.accent, 0.3)], angle: 90 }, fit: 980, maxH: H * 0.19, shadow: true }), { cx: 540, t: y }); L.push(sw);
+      if (pre) { const t = put(T(Object.assign({ name: 'Title', text: pre, upper: true, font: 'Barlow Italic', fit: 700, maxH: H * 0.085 }, solid3d(p, { fill: CHROME, extrude: 5 }))), { cx: 540, t: y }); L.push(t); y = box(t).b - 6; }
+      const sw = put(T({ name: 'Script word', text: word, font: 'Alex Brush', fill: { stops: ['#fffdf2', '#fff0b8', '#ffd76a'], angle: 90 }, fit: 990, maxH: H * 0.2, extrude: 4, extrudeColor: [mix(p.deep, '#000000', 0.1), mix(p.deep, '#000000', 0.6)], glow: rgba('#ffffff', 0.25), shadow: true }), { cx: 540, t: y }); L.push(sw);
       y = box(sw).b - box(sw).h * 0.2;
-      if (post) { const t = put(T({ name: 'Title 2', text: post, upper: true, font: 'Barlow Italic', fit: 760, maxH: H * 0.1, shadow: true, extrude: 2, extrudeColor: rgba(p.deep, 0.7) }), { cx: 560, t: y }); L.push(t); y = box(t).b; }
-      if (sp) L.push(hero(sp, { cx: 770, t: Math.max(y + 10, H * 0.47), b: H - 36, mode: 'chest', extra: lit(p) }));
+      if (post) { const t = put(T(Object.assign({ name: 'Title 2', text: post, upper: true, font: 'Barlow Italic', fit: 780, maxH: H * 0.11 }, solid3d(p, { fill: CHROME, extrude: 6 }))), { cx: 560, t: y }); L.push(t); y = box(t).b; }
+      if (sp) L.push(hero(sp, { cx: 760, t: Math.max(y - 20, H * 0.42), b: H + 30, mode: 'chest', fade: 0.12, extra: lit(p) }));
       const lc = col([d && T({ name: 'Date', text: `${d.day3} ${d.ddth}.\n${d.mon3}, ${d.year}`, font: 'Anton', size: 50, line: 1.02, align: 'left', shadow: true })], { l: 62, t: Math.max(y + 34, H * 0.6), gap: 10 });
       L.push(...lc);
       let yy = lc.length ? lc.bottom + 22 : Math.max(y + 34, H * 0.6);
@@ -1429,8 +1573,10 @@
     light(D) {
       const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D);
       const red = lum(p.mid) < 0.5 ? p.mid : '#c8102e', ink = '#1c1c1f';
-      L.push(BG({ img: D.bg, sat: -75, bright: 26, contrast: -12, wash: 'rgba(255,251,245,.6)', grain: 0.6 }));
-      L.push(FX({ kind: 'glow', x: 540, y: H * 0.62, w: 1100, h: 700, color: '#ffffff', opacity: 0.8 }));
+      L.push(BG({ img: D.bg, sat: -35, bright: 34, contrast: -10, wash: 'rgba(255,250,244,.55)', grain: 0.4,
+        colorWash: [{ stops: ['#ffffff', '#fff1e0', '#ffb36b', '#e8641e'], angle: 90, mode: 'soft-light', a: 0.85 },
+          { radial: true, x: 0.5, y: 0.3, r: 0.6, stops: ['rgba(255,255,255,.9)', 'rgba(255,255,255,0)'], mode: 'screen', a: 0.7 }] }));
+      L.push(FX({ kind: 'glow', x: 540, y: H * 0.35, w: 1300, h: 800, color: '#fff3dd', opacity: 0.85 }));
       const hd = header(D, { center: true, t: 30 });
       hd.forEach((l) => { if (l.type === 'text') { l.fill = ink; l.shadow = false; } });
       L.push(...hd);
@@ -1438,11 +1584,11 @@
       const scriptW = ws.length > 1 ? ws[ws.length - 1] : '', main = ws.length > 1 ? ws.slice(0, -1).join(' ') : ws[0];
       let y = hd.bottom + 18;
       if (f.extra) { const k = put(T({ name: 'Kicker', text: f.extra, upper: true, font: 'Barlow Italic', size: 34, fill: red }), { cx: 540, t: y }); L.push(k); y = box(k).b + 10; }
-      const ts = stackLines(stack(main, 2), { t: y, fit: 800, maxH: H * 0.13, gap: 6, style: { font: 'Anton', upper: true, fill: ink } });
+      const ts = stackLines(stack(main, 2), { t: y, fit: 820, maxH: H * 0.14, gap: 6, style: { font: 'Anton', upper: true, fill: { stops: ['#3a3a40', ink], angle: 90 }, shadow: false, extrude: 3, extrudeColor: rgba('#000000', 0.18) } });
       L.push(...ts); y = ts.bottom;
       if (scriptW) { const s = put(T({ name: 'Script word', text: scriptW.toLowerCase(), font: 'Yellowtail', fill: red, fit: 640, maxH: H * 0.11 }), { cx: 600, t: y - H * 0.03 }); s.rot = -6; L.push(s); y = box(s).b; }
       if (f.theme) { const th = put(T({ name: 'Theme', text: 'Theme: ' + f.theme, upper: true, font: 'Barlow Italic', size: 34, fill: ink, maxW: 820 }), { cx: 540, t: y + 14 }); L.push(th); y = box(th).b; }
-      if (sp) L.push(hero(sp, { cx: 540, t: Math.max(y + 30, H * 0.42), b: H - 120, mode: 'waist', extra: { rim: '#ffffff' } }));
+      if (sp) L.push(hero(sp, { cx: 540, t: Math.max(y + 10, H * 0.38), b: H - 60, mode: 'chest', fade: 0.35, extra: { shade: 'rgba(60,30,10,.35)', tint: { color: '#ffb36b', a: 0.25, fall: 0.4 } } }));
       L.push(SH({ name: 'Info bar', shape: 'round', radius: 0, fill: { stops: [rgba('#ffffff', 0), rgba('#ffffff', 0.92)], angle: 90 }, x: 540, y: H - 90, w: W, h: 180 }));
       L.push(...infoRow(D, H - 74, [d && { name: 'Date', big: `${d.ddth} ${d.mon3}. ${d.year}`, size: 40 }, f.time && { name: 'Time', big: f.time, size: 40, accent: true }, venueText(D) && { name: 'Venue', small: venueLines(D, 3), maxW: 320, smallSize: 14 }], { ink, accent: red, lineH: 56 }));
       return L;
