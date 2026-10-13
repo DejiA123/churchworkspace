@@ -5065,6 +5065,9 @@ let _hideTimer = null;
         }
         over(this.rgba(cs.backgroundColor), k);
       }
+      // nothing at all at the top: the app pulled away from it for a moment (iOS stretching it) —
+      // the bar keeps the colour it has, and so does the page's background shown in the gap
+      if (!first) return null;
       over({ r: 255, g: 255, b: 255, a: 1 }, 1);   // nothing drawn: the page's white
       // scrolled: what is at the top sits in something that scrolls, and it has been — and is not
       // pinned there (a sticky tab row, a fixed top bar: those stay sharp, nothing slides under them)

@@ -9,6 +9,8 @@
  *   [1] the page asks for iOS's default bar (no see-through style: broken on
  *       iOS 26+) and has ONE theme-color
  *   [2] sign-in and Home: the banner's blue
+ *   [2b] Home and sign-in cannot be pulled down past the top: iOS stretched
+ *       them and showed the white behind the banner (the bar went white too)
  *   [3] Home scrolled: the bar follows the banner's fade (a lighter blue half
  *       way up it, white past it), and what slides under it fades into it
  *       (CapCut's soft edge) — none of that at rest
@@ -96,7 +98,24 @@ const dist = (a, b) => { const p = (h) => [1, 3, 5].map((i) => parseInt(String(h
     await page.waitForFunction(() => document.getElementById('cloudHome') && document.body.classList.contains('mw-home'), null, { timeout: 30000 });
     const home = await settle();
     check(dist(home, BLUE) < 12, 'Home: the banner\'s blue runs on into the bar', home);
+    // pulled down from the top it showed the white page behind the banner (and the bar went white): it does not stretch
+    const stretch = await page.evaluate(() => ({
+      home: getComputedStyle(document.querySelector('#cloudHome .ch-scroll')).overscrollBehaviorY,
+      gate: getComputedStyle(document.getElementById('cloudGate')).overscrollBehaviorY,
+      app: getComputedStyle(document.documentElement).overscrollBehaviorY,
+    }));
+    check(stretch.home === 'none' && stretch.gate === 'none' && stretch.app === 'none', 'Home and the sign-in page cannot be pulled down past the top (no white above the banner)', stretch);
 
+    // pulled away for a moment, nothing at the top: the bar keeps its colour (it went white)
+    const kept = await page.evaluate(() => {
+      const T = window.MWCloud && window.MWCloud.topTint;
+      if (!T) return 'no handle';
+      const real = document.elementsFromPoint.bind(document);
+      document.elementsFromPoint = () => [document.documentElement];
+      try { T.check(); } finally { document.elementsFromPoint = real; }
+      return document.querySelector('meta[name="theme-color"]').content;
+    });
+    check(dist(kept, BLUE) < 12, 'nothing at the top for a moment (the app stretched): the bar stays blue, not white', kept);
     console.log('\n[3] Home scrolled');
     const fadeOp = () => page.evaluate(() => { const f = document.querySelector('.mw-edge-fade'); return f ? +getComputedStyle(f).opacity : null; });
     check(await fadeOp() === 0, 'at rest, no fade over the top of Home', await fadeOp());
