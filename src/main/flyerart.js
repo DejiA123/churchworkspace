@@ -55,8 +55,47 @@ const CF_BIG = [
   { id: '@cf/black-forest-labs/flux-2-dev', name: 'FLUX.2 [dev]', form: true, refs: true },
   { id: '@cf/leonardo/lucid-origin', name: 'Lucid Origin', form: false, json: (prompt, size, seed) => ({ prompt: prompt.slice(0, 2000), width: size.w, height: size.h, seed, guidance: 4.5, num_steps: 30 }) },
 ];
+/*
+ * ►► THE BEST OF THE FREE ALLOWANCE, WHERE IT SHOWS. ◄◄ FLUX.2 klein 9B paints
+ * far better than the 4B for about 1,450 neurons a flyer picture (it takes the
+ * preacher's photo as a reference too), and Leonardo's Phoenix 1.0 writes
+ * lettering into a picture coherently (about 2,100 at 832x1024). The day's
+ * allowance is kept (ledger below): the board's top designs get klein 9B,
+ * one AI-lettered title a board gets Phoenix, while there is allowance for
+ * them — then the 4B and schnell paint the rest, and the day never runs dry
+ * before the cheap ones are used.
+ */
+const CF_KLEIN9 = { id: '@cf/black-forest-labs/flux-2-klein-9b', name: 'FLUX.2 klein 9B', form: true, refs: true };
+const CF_PHOENIX = { id: '@cf/leonardo/phoenix-1.0', name: 'Phoenix 1.0', form: false, json: (prompt, size, seed) => ({ prompt: prompt.slice(0, 2000), width: size.w, height: size.h, seed, guidance: 3.5, num_steps: 28, negative_prompt: 'misspelled text, extra words, gibberish letters, watermark, signature, logo, blurry text' }) };
+const DAY_NEURONS = () => Math.max(1000, Number(process.env.CLOUDFLARE_DAILY_NEURONS) || 10000);
+/** What a picture costs of the allowance (Cloudflare's price list, in neurons). */
+function neuronsFor(m, size, refs) {
+  const mp = (size.w * size.h) / (1024 * 1024), tiles = Math.ceil(size.w / 512) * Math.ceil(size.h / 512);
+  const refMp = (refs || []).length * 0.4;
+  if (m.id.includes('klein-9b')) return 1364 + Math.max(0, mp - 1) * 182 + refMp * 182;
+  if (m.id.includes('klein-4b')) return 160 + refMp * 40;
+  if (m.id.includes('schnell')) return 460;
+  if (m.id.includes('phoenix')) return tiles * 530;
+  if (m.id.includes('lucid')) return tiles * 636;
+  return 5000;
+}
+/* the day's spend, kept on disk (a restart does not forget it); the day is Cloudflare's: UTC */
+const ledgerFile = () => path.join(KIT_DIR, 'cf-allowance.json');
+function ledger() {
+  const day = new Date().toISOString().slice(0, 10);
+  let l = null; try { l = JSON.parse(fs.readFileSync(ledgerFile(), 'utf8')); } catch (e) { l = null; }
+  return l && l.day === day ? l : { day, spent: 0 };
+}
+function spend(n) { const l = ledger(); l.spent = Math.round(l.spent + n); try { fs.mkdirSync(KIT_DIR, { recursive: true }); fs.writeFileSync(ledgerFile(), JSON.stringify(l)); } catch (e) {} }
+const allowanceLeft = () => Math.max(0, DAY_NEURONS() - ledger().spent);
+const RESERVE = 900;   // always left for the cheap painters: a flyer can always be made
 const cfPaid = () => /^(1|true|yes)$/i.test(String(process.env.CLOUDFLARE_PAID || ''));
-const cfModels = () => (cfPaid() ? CF_BIG.concat(CF_CHEAP) : CF_CHEAP);
+/** The models to try for a picture, best first: the premium one only while the day can afford it. */
+function cfModels(tier, size, refs) {
+  if (cfPaid()) return [CF_KLEIN9].concat(CF_BIG, CF_CHEAP);
+  if (tier === 'premium' && size && allowanceLeft() - neuronsFor(CF_KLEIN9, size, refs) >= RESERVE) return [CF_KLEIN9].concat(CF_CHEAP);
+  return CF_CHEAP;
+}
 // a model that refused (not on this account, a changed name) is skipped for a while, not asked every time
 const benched = new Map();
 const benchedNow = (id) => (benched.get(id) || 0) > Date.now();
@@ -68,7 +107,11 @@ function status() {
   else { try { const cw = require('./cloudwrite'); if (cw.access && cw.access().key) writer = 'groq'; } catch (e) { /* none */ } }
   // the same free Cloudflare account that paints the pictures also has a writer: the art director
   if (writer === 'rules' && cf) writer = 'cloudflare';
+  const left = cf ? (cfPaid() ? 1e9 : allowanceLeft()) : 0;
   return {
+    allowanceLeft: cf && !cfPaid() ? left : null,
+    premium: cf && (cfPaid() || left - 1450 >= RESERVE),
+    lettering: cf && (cfPaid() || left - 2120 >= RESERVE),
     painter: cf ? 'cloudflare' : 'pollinations',
     painterName: cf ? 'FLUX.2 (Cloudflare, free)' : 'FLUX (Pollinations, free)',
     cloudflare: cf,
@@ -143,9 +186,9 @@ async function imageFrom(res) {
   return { buf, mime };
 }
 
-async function paintCloudflare(prompt, size, seed, refs) {
+async function paintCloudflare(prompt, size, seed, refs, tier, only) {
   const errs = [];
-  for (const m of cfModels()) {
+  for (const m of (only || cfModels(tier, size, refs))) {
     if (benchedNow(m.id + (refs ? '+refs' : ''))) continue;
     if (refs && !m.refs) continue;   // a picture with the preacher in it needs a model that takes reference photos
     const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cfAccount())}/ai/run/${m.id}`;
@@ -170,7 +213,7 @@ async function paintCloudflare(prompt, size, seed, refs) {
       if (res.status === 429) {
         const t = await res.text().catch(() => '');
         // the day's free neurons are shared by every model: no point asking the next one
-        if (/daily free allocation|neurons/i.test(t)) throw Object.assign(new Error('today’s free Cloudflare allowance (10,000 neurons) is used up — it comes back at midnight UTC (1am in Ireland)'), { fatal: true });
+        if (/daily free allocation|neurons/i.test(t)) { spend(DAY_NEURONS()); throw Object.assign(new Error('today’s free Cloudflare allowance (10,000 neurons) is used up — it comes back at midnight UTC (1am in Ireland)'), { fatal: true }); }
         benched.set(m.id + (refs ? '+refs' : ''), Date.now() + 20 * 60e3);
         throw new Error(m.name + ': Cloudflare is busy');
       }
@@ -180,6 +223,7 @@ async function paintCloudflare(prompt, size, seed, refs) {
         throw new Error(`${m.name}: ${res.status} ${t.slice(0, 160)}`);
       }
       const out = await imageFrom(res);
+      if (!cfPaid()) spend(neuronsFor(m, size, refs));
       return Object.assign(out, { by: m.name + ' · Cloudflare' });
     } catch (e) {
       errs.push(e.message);
@@ -214,14 +258,14 @@ async function paintPollinations(prompt, size, seed) {
  * Paint one background. → { dataUrl, by, prompt } — or throws with a plain
  * sentence the phone can show (the phone then paints its own).
  */
-async function paint({ scene, w = 1080, h = 1350, seed, people = true, theme = false } = {}) {
+async function paint({ scene, w = 1080, h = 1350, seed, people = true, theme = false, tier = 'normal' } = {}) {
   const prompt = paintPrompt(scene, { people, theme: !!theme });
   const size = sizeFor(w, h);
   const s = Number.isFinite(+seed) ? Math.abs(Math.round(+seed)) % 2147483647 : Math.floor(Math.random() * 1e9);
   let out = null;
   const errs = [];
   if (cfAccount() && cfToken()) {
-    try { out = await paintCloudflare(prompt, size, s); } catch (e) { errs.push(e.message); }
+    try { out = await paintCloudflare(prompt, size, s, null, tier); } catch (e) { errs.push(e.message); }
   }
   const cfWhy = errs.slice();   // why Cloudflare did not paint (said on the phone, never silently)
   if (!out) {
@@ -265,8 +309,58 @@ async function paintWith({ scene, w = 1080, h = 1350, seed, refs = [], who } = {
   const prompt = paintWithPrompt(scene, who);
   const size = sizeFor(w, h);
   const s = Number.isFinite(+seed) ? Math.abs(Math.round(+seed)) % 2147483647 : Math.floor(Math.random() * 1e9);
-  const out = await paintCloudflare(prompt, size, s, rs);
+  const out = await paintCloudflare(prompt, size, s, rs, 'premium');
   return { dataUrl: `data:${out.mime};base64,${out.buf.toString('base64')}`, by: out.by, prompt, seed: s };
+}
+
+/*
+ * ►► THE TITLE LETTERED BY AI, INTO THE PICTURE. ◄◄ What the flyers people
+ * save have and a template cannot: the title is part of the art — carved in
+ * the rock, burning, in gold standing in the light. Phoenix 1.0 (free on
+ * Cloudflare, about two a day) paints the scene with the title lettered into
+ * it; the studio adds the minister and the details. An AI can misspell, so the
+ * picture is READ back (cloudsee.readFlyer, the free vision model) and kept
+ * only when every word of the title is there, spelt right — one more try if
+ * not. With no vision model to check, it comes back marked unchecked.
+ */
+const LETTERING = ['huge glossy 3D gold metallic lettering with bevelled edges and light glinting off it', 'massive carved stone lettering with cracks and dust, lit from above',
+  'giant burning letters made of fire and embers', 'bold brushed silver chrome 3D lettering with a strong glow behind it', 'tall elegant gold serif lettering with a soft glow'];
+function titlePrompt(scene, title, look) {
+  return [
+    `Church event poster key art with the title "${title}" written across the upper middle in ${look}, every letter spelled exactly ${title.split('').join(' ').toUpperCase().replace(/ {3}/g, ' / ')}`,
+    'the title is the ONLY text in the image: no other words, letters, numbers, logos or signatures',
+    'the scene: ' + String(scene || 'heavenly golden light breaking through dramatic clouds').slice(0, 400),
+    'epic cinematic movie-poster composition, dramatic volumetric light, rich saturated colour, hyper-detailed, the lower third darker and simpler, a thin empty strip along the very top',
+  ].join(', ');
+}
+const wordsOf = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9 ]+/g, ' ').split(/\s+/).filter((w) => w.length > 1);
+async function paintTitle({ scene, title, seed, look } = {}) {
+  if (!(cfAccount() && cfToken())) throw new Error('AI lettering needs the free Cloudflare account on the server.');
+  title = String(title || '').trim().replace(/\s+/g, ' ').slice(0, 32);
+  if (!title || title.split(' ').length > 4) throw new Error('AI lettering is for a short title (four words at most).');
+  const size = { w: 832, h: 1024 };   // 4 tiles: about 2,100 neurons, two a day on the free allowance
+  if (!cfPaid() && allowanceLeft() - neuronsFor(CF_PHOENIX, size) < RESERVE) throw new Error('today’s free allowance for AI lettering is used — it comes back at midnight UTC');
+  const want = wordsOf(title);
+  let cs = null; try { cs = require('./cloudsee'); } catch (e) { cs = null; }
+  const style = look || LETTERING[Math.floor(Math.random() * LETTERING.length)];
+  let last = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt && !cfPaid() && allowanceLeft() - neuronsFor(CF_PHOENIX, size) < RESERVE) break;
+    const s = Number.isFinite(+seed) && !attempt ? Math.abs(Math.round(+seed)) % 2147483647 : Math.floor(Math.random() * 1e9);
+    const prompt = titlePrompt(scene, title, style);
+    const out = await paintCloudflare(prompt, size, s, null, 'premium', [CF_PHOENIX]);
+    const dataUrl = `data:${out.mime};base64,${out.buf.toString('base64')}`;
+    last = { dataUrl, by: out.by, prompt, seed: s, checked: false, spelt: null };
+    if (!cs || !cs.ready || !cs.ready()) return last;
+    const r = await cs.readFlyer({ image: dataUrl, maxWaitMs: 20000 }).catch(() => ({ ok: false }));
+    if (!r || !r.ok) return last;
+    const seen = new Set(wordsOf([r.text, r.event].join(' ')));
+    const ok = want.every((w) => seen.has(w));
+    last = Object.assign(last, { checked: true, spelt: ok, read: (r.event || r.text || '').slice(0, 80) });
+    if (ok) return last;
+  }
+  if (last && last.checked && !last.spelt) throw new Error('the AI misspelt the title twice (it read “' + (last.read || '') + '”) — the designs without it stand');
+  return last;
 }
 
 /*
@@ -797,4 +891,4 @@ function kitUsed({ speaker, photo } = {}) {
   return true;
 }
 
-module.exports = { cfDiagnose, paintWith, paintWithPrompt, kitAddPhoto, inspoAdd, inspoRemove, stockPhotos, stockPath, PHOTO_TAGS, status, paint, direct, init, kitGet, kitSave, kitPic, kitUsed, paintPrompt, sizeFor, directByRules, imageFrom, LOOKS };
+module.exports = { paintTitle, titlePrompt, neuronsFor, cfDiagnose, paintWith, paintWithPrompt, kitAddPhoto, inspoAdd, inspoRemove, stockPhotos, stockPath, PHOTO_TAGS, status, paint, direct, init, kitGet, kitSave, kitPic, kitUsed, paintPrompt, sizeFor, directByRules, imageFrom, LOOKS };

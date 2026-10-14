@@ -1805,6 +1805,19 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   }
 
   const LAYOUTS = {
+    /* ── AI LETTERING: the picture already has the title in it (paintLettering); the minister at the foot, the details round him ── */
+    ailetter(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D);
+      L.push(BG({ img: D.bg, grade: 'normal', contrast: 6, keep: 0.6, topShade: 0.25, topTo: 0.08, bottomShade: 0.9, bottomFrom: 0.62, vignette: 0.25 }));
+      if (D.f.church) L.push(put(T({ name: 'Church', text: D.f.church, upper: true, font: 'Montserrat', size: 18, letter: 0.08, shadow: true, maxW: 900 }), { cx: 540, t: 18 }));
+      if (sp) L.push(hero(sp, { cx: 560, t: H * 0.5, b: H + 10, mode: 'chest', fade: 0.3, extra: lit(p) }));
+      L.push(...col([f.time && T({ name: 'Time', text: f.time + (f.time2 ? ' & ' + f.time2 : ''), font: 'Anton', size: 62, fill: p.accent, align: 'left', shadow: true }),
+        d && T({ name: 'Date', text: `${d.day3}, ${d.ddth}\n${d.month} ${d.year}`, upper: true, font: 'Barlow Black Italic', size: 40, line: 0.95, align: 'left', shadow: true })].filter(Boolean), { l: 52, b: H - 120, gap: 8 }));
+      if (sp && sp.name) { const np = nameParts(sp.name); L.push(...col([np.title && T({ name: 'Speaker title', text: np.title, font: 'Great Vibes', size: 52, align: 'right', shadow: true, fill: p.accent }), T({ name: 'Speaker', text: np.name, upper: true, font: 'Barlow Black Italic', size: 36, align: 'right', shadow: true, maxW: 320 })].filter(Boolean), { r: 1030, b: H - 120, gap: -4 })); }
+      const vt = venueText(D);
+      if (vt) { L.push(SH({ name: 'Address bar', shape: 'rect', fill: rgba(p.deep, 0.82), x: 540, y: H - 46, w: W, h: 70 })); L.push(put(T({ name: 'Venue', text: vt, upper: true, font: 'Montserrat', size: 20, letter: 0.05, maxW: 980 }), { cx: 540, cy: H - 46 })); }
+      return L;
+    },
     /* ════════ BRIGHT PAGES — a third of the flyers people save are white, cream or gold, not dark ════════ */
 
     /* ── JERICHO HOUR: a light page, a two-tone heavy title on the left, the minister big on the right, a ribbon with his name ── */
@@ -2544,7 +2557,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     },
   };
   const LOOK_NAMES = { glory: 'Glory', fire: 'Fire', encounter: 'Encounter', miracle: 'Spotlight', bible: 'Golden classic', prophetic: 'Gold', sunday: 'Giant words', lineup: 'Line-up', script: 'Script', scenic: 'Scenic', light: 'Light', joinus: 'Join us', didone: 'Elegant', upper: 'Upper Room', theme: 'Theme picture', mountain: 'Sky letters', breaking: 'Breaking', spirit: 'Gold line-up',
-    jericho: 'Bright hour', unique: 'Bright duo', thanks: 'Bright sky', mantle: 'Cream & gold', urgency: 'Line-up stage', harvest: 'Rows' };
+    ailetter: 'AI lettering', jericho: 'Bright hour', unique: 'Bright duo', thanks: 'Bright sky', mantle: 'Cream & gold', urgency: 'Line-up stage', harvest: 'Rows' };
   /* each look's own colours (the AI's colours go on the first few designs; these on the rest, for variety) */
   const SIGNATURE = {
     glory: { deep: '#0b0b10', mid: '#2a2140', accent: '#f6c915', hi: '#ffffff' },
@@ -2976,11 +2989,13 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     // remember these details for this service (Tuesday's Word Study comes back as typed)
     const ok = occKey(F.occasion);
     if (ok && ok !== 'other' && F.kit) { F.kit.lastFor = Object.assign({}, F.kit.lastFor, { [ok]: presetNow() }); saveKit(true); }
-    F.step = 'pick'; F.bgs = []; F.designs = []; F.dir = null; F.tries++; F.paintedIn = [];
+    F.step = 'pick'; F.bgs = []; F.designs = []; F.dir = null; F.tries++; F.paintedIn = []; F.lettered = null;
     const tryNo = F.tries;
     drawPick();
     await loadFonts();
     const dp = dateParts(F.fields.date);
+    // the day's free allowance, as it stands now (what is left decides the better painters and the AI lettering)
+    try { const st = await window.api.flyer.status(); if (st) F.status = st; } catch (e) { /* the last one known stands */ }
     await Promise.all(Object.keys(LAYOUTS).map((l, i) => speakersFor(i)).flat().map((s) => bankPic(s.photo)));
     const fields = Object.assign({}, F.fields, { dateText: dp ? dp.long : '', dayName: dp ? dp.dayName : '', season: F.occasion && F.occasion.seasonal ? F.occasion.name : '', speakers: chosenSpeakers().map((s) => ({ name: s.name })) });
     let dir = null;
@@ -3001,19 +3016,22 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     rebuildDesigns();
     // then the AI's — three at once, each swapped in as it lands
     // six AI pictures, six ideas, six lights: every design on the board gets its own
-    // one picture for each of the board's five; the first are the title's own idea painted as key art
+    // one picture for each of the board's three; the first are the title's own idea painted as key art
     const scenes = (F.dir.scenes || []).slice(0, BOARD_N);
     for (let j = 0; scenes.length && scenes.length < BOARD_N; j++) scenes.push(scenes[j % scenes.length]);
     const nTheme = Math.min(F.dir.themeScenes == null ? 0 : F.dir.themeScenes, 3);
     F.painting = scenes.length;
     drawPick();
     const paintingIn = paintPreacherIn(tryNo, sz);   // alongside the six, not after them
+    const lettering = paintLettering(tryNo);
     await Promise.all(scenes.map(async (scene, i) => {
       try {
         // each picture in its own light — the AI's colours, royal blue, purple — so the board is as varied as a Pinterest page
         const tone = F.board.tones[i % F.board.tones.length];
         const theme = i < nTheme;
-        const out = await window.api.flyer.paint({ scene: tone.words ? scene + ', ' + tone.words : scene, theme, w: sz.w, h: sz.h, seed: Math.floor(Math.random() * 1e9), people: chosenSpeakers().some((s) => (s.photos || []).length) });
+        // the board's top two get the better free painter (FLUX.2 klein 9B) while the day's allowance lasts
+        const tier = i < 2 && F.status && F.status.premium ? 'premium' : 'normal';
+        const out = await window.api.flyer.paint({ scene: tone.words ? scene + ', ' + tone.words : scene, theme, tier, w: sz.w, h: sz.h, seed: Math.floor(Math.random() * 1e9), people: chosenSpeakers().some((s) => (s.photos || []).length) });
         if (tryNo !== F.tries) return;
         let im = await loadImg(out.dataUrl);
         // the backup painter signs its pictures in the bottom corner: that strip is cut off
@@ -3030,6 +3048,31 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       finally { if (tryNo === F.tries) { F.painting--; if (F.step === 'pick') drawPick(); } }
     }));
     await paintingIn;
+    await lettering;
+  }
+
+  /*
+   * ►► THE TITLE LETTERED INTO THE PICTURE BY AI (free: Phoenix 1.0 on
+   * Cloudflare, about two a day). ◄◄ The art the flyers people save have —
+   * the title carved, burning, in gold — painted as part of the scene; the
+   * studio adds the minister and the details. The server reads it back and
+   * keeps it only when the title is spelt right (flyerart.paintTitle).
+   */
+  async function paintLettering(tryNo) {
+    F.lettered = null;
+    const title = String(F.fields.title || '').trim();
+    if (!(F.status && F.status.lettering) || !title || title.split(/\s+/).length > 4 || !window.api.flyer.paintTitle) return;
+    F.painting++; if (F.step === 'pick') drawPick();
+    try {
+      const scene = (F.dir.scenes || [])[0];
+      const out = await window.api.flyer.paintTitle({ scene, title, seed: Math.floor(Math.random() * 1e9) });
+      if (tryNo !== F.tries || !out || !out.dataUrl) return;
+      const key = 'ail:' + tryNo;
+      IMGS.set(key, await loadImg(out.dataUrl));
+      F.lettered = { key, checked: !!out.checked, by: out.by };
+      rebuildDesigns();
+    } catch (e) { /* the day's allowance, a misspelling twice: the other designs stand */ }
+    finally { if (tryNo === F.tries) { F.painting--; if (F.step === 'pick') drawPick(); } }
   }
 
   /*
@@ -3039,7 +3082,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
    * the scene, lit by it. They become their own designs, marked so that the
    * face is checked before posting: the model can change a face a little.
    */
-  const PAINT_IN_LOOKS = ['glory'];   // one: the board is five
+  const PAINT_IN_LOOKS = ['glory'];   // one, and only on a board without the AI lettering (the board is three)
   function refPhoto(sp) {
     const im = sp && imgOf(sp.img); if (!im) return null;
     const k = Math.min(1, 512 / Math.max(iw(im), ih(im)));
@@ -3051,6 +3094,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   async function paintPreacherIn(tryNo, sz) {
     F.paintedIn = [];
     if (!(F.status && F.status.cloudflare)) return;
+    // a board of three: the AI-lettered title takes a place when the day allows it; then this one does not
+    if (F.status.lettering && String(F.fields.title || '').trim().split(/\s+/).length <= 4) return;
     const sp = speakersFor(0)[0]; const ref = refPhoto(sp);
     if (!ref) return;
     const scenes = (F.dir.scenes || []).slice(0, PAINT_IN_LOOKS.length);
@@ -3105,16 +3150,16 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     crimson: { deep: '#26020c', mid: '#8c0f2e', accent: '#f2c46b', hi: '#fff4e6' },
   };
   /*
-   * ►► FIVE, THE BEST FIRST. ◄◄ Eighteen at once was too many to choose
-   * from. A board is five designs, ranked: how strong the layout is on its
+   * ►► THREE, THE BEST FIRST. ◄◄ Eighteen at once was too many to choose
+   * from (and five still too many). A board is three designs, ranked: how strong the layout is on its
    * own, whether it suits this event (the AI's own picks, a line-up only when
    * there are several ministers), what this phone has opened and saved
    * before, and a little freshness so the five are not the same five every
-   * time. "More designs" brings the next five. Each design is built with a
+   * time. "More designs" brings the next three. Each design is built with a
    * variant of its own (makeVariant); its picture is painted in one of
    * eleven lights picked afresh.
    */
-  const BOARD_N = 5;
+  const BOARD_N = 3;   // "3 flyers, not 5": three, the best first
   // how well each layout stands up on its own (from setting them beside the Pinterest flyers)
   const STRENGTH = { glory: 9, fire: 9, joinus: 9, spirit: 8, prophetic: 8, sunday: 8, upper: 8, miracle: 8, script: 7, encounter: 7, breaking: 7, didone: 7,
     lineup: 7, mountain: 6, bible: 6, scenic: 6, light: 6, theme: 6,
@@ -3147,7 +3192,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       if (['lineup', 'urgency', 'harvest', 'unique'].includes(l) && many) v += 3;
       return v + Math.random() * 2.2;                                            // freshness
     };
-    const scored = Object.keys(LAYOUTS).map((l) => [l, score(l)]).sort((a, b) => b[1] - a[1]);
+    const scored = Object.keys(LAYOUTS).filter((l) => l !== 'ailetter').map((l) => [l, score(l)]).sort((a, b) => b[1] - a[1]);
     return scored.map((x) => x[0]);
   }
   function newBoard() {
@@ -3166,7 +3211,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   function rebuildDesigns() {
     const sz = sizeOf();
     if (!F.board) newBoard();
-    const all = F.board.order.slice(0, Math.max(0, F.board.shown - (F.paintedIn || []).length));
+    const all = F.board.order.slice(0, Math.max(0, F.board.shown - (F.paintedIn || []).length - (F.lettered ? 1 : 0)));
     const used = new Map(), n = (b) => used.get(b.key) || 0;
     F.designs = all.map((look, i) => {
       // the title's own idea (key art) on the best-ranked designs first; then this look's own light; then the least used
@@ -3183,7 +3228,10 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     });
     // the preacher painted into the scene (paintPreacherIn): first on the board, labelled so the face is checked
     const pin = (F.paintedIn || []).map((b) => Object.assign(buildScene({ look: b.look, painted: true, w: sz.w, h: sz.h, pal: F.pal, dir: F.dir, fields: F.fields, speakers: speakersFor(0), logo: IMGS.has('logo') ? 'logo' : null, bg: b.key, variant: F.board.variants[b.look] }), { label: 'AI scene · check the face' }));
-    F.designs = pin.concat(F.designs);
+    // the AI-lettered title first of all: the one most like the flyers people save
+    const lt = F.lettered ? [Object.assign(buildScene({ look: 'ailetter', w: sz.w, h: sz.h, pal: F.pal, dir: F.dir, fields: F.fields, speakers: speakersFor(0), logo: IMGS.has('logo') ? 'logo' : null, bg: F.lettered.key }),
+      { label: F.lettered.checked ? 'AI lettering' : 'AI lettering · check the spelling' })] : [];
+    F.designs = lt.concat(pin, F.designs);
     if (F.step === 'pick') paintThumbs();
   }
 

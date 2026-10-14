@@ -225,6 +225,7 @@ const ALLOWED = {
   'flyer:direct': true,
   'flyer:paint': true,
   'flyer:paintWith': true,
+  'flyer:paintTitle': true,
   'flyer:kitGet': true,
   'flyer:kitSave': true,
   'flyer:kitPic': true,

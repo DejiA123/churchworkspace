@@ -605,6 +605,7 @@ let _hideTimer = null;
       direct: (fields) => call('flyer:direct', { fields }),
       paint: (a) => call('flyer:paint', a),
       paintWith: (a) => call('flyer:paintWith', a),
+      paintTitle: (a) => call('flyer:paintTitle', a),
       kitGet: () => call('flyer:kitGet'),
       kitSave: (kit) => call('flyer:kitSave', { kit }),
       kitPic: (name) => call('flyer:kitPic', { name }),
