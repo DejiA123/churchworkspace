@@ -1546,7 +1546,7 @@
           + [['now', 'Now'], ['best', '✦ Best time'], ['hour', 'In an hour'], ['tonight', 'Tonight 7 pm'], ['tomorrow', 'Tomorrow 9 am'], ['pick', 'Pick…']].map(([k, l]) =>
             `<button type="button" class="cs-chip${st.quick === k ? ' on' : ''}" data-c="quick" data-k="${k}">${l}</button>`).join('')
           + '</div>'
-          + (st.quick === 'pick' ? `<input type="datetime-local" class="cs-input cs-dt" data-c="dt" value="${localInput(chosenWhen())}" min="${localInput(new Date())}">` : '')
+          + (st.quick === 'pick' ? `<label class="cs-dt-wrap">${mi('calendar')}<input type="datetime-local" class="cs-dt" data-c="dt" value="${localInput(chosenWhen())}" min="${localInput(new Date())}" aria-label="Date and time"></label>` : '')
           + '<small class="csb-lbl">Then one every</small><div class="cs-chips">'
           + gaps.map(([h, l]) => `<button type="button" class="cs-chip${st.spacing === h ? ' on' : ''}" data-c="spacing" data-h="${h}">${l}</button>`).join('')
           + `<button type="button" class="cs-chip${custom ? ' on' : ''}" data-c="spacing-other">${custom ? `${st.spacing} h` : 'Other…'}</button></div>`
@@ -1559,7 +1559,7 @@
         + [['now', 'Now'], ['best', '✦ Best time'], ['hour', 'In an hour'], ['tonight', 'Tonight 7 pm'], ['tomorrow', 'Tomorrow 9 am'], ['pick', 'Pick…']].map(([k, l]) =>
           `<button type="button" class="cs-chip${st.quick === k ? ' on' : ''}" data-c="quick" data-k="${k}">${l}</button>`).join('')
         + '</div>'
-        + (st.quick === 'pick' ? `<input type="datetime-local" class="cs-input cs-dt" data-c="dt" value="${localInput(w)}" min="${localInput(new Date())}">` : '');
+        + (st.quick === 'pick' ? `<label class="cs-dt-wrap">${mi('calendar')}<input type="datetime-local" class="cs-dt" data-c="dt" value="${localInput(w)}" min="${localInput(new Date())}" aria-label="Date and time"></label>` : '');
     }
     // what the AI is doing, in words
     function aiStatus() {

@@ -2332,7 +2332,17 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.07);
 }
 .cs-chip.on { background: #f5f6f8; color: #000; box-shadow: none; }
-.cs-dt { margin-top: 10px; }
+/* Pick…: the date and time, in a field the width of the sheet. An iPhone's date box has
+   a width of its own and spilled off the screen at width: 100% plus padding; inside this
+   field it can only shrink (min-width: 0), and it reads as the light sheet's other fields */
+.cs-dt-wrap { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 100%; box-sizing: border-box; height: 52px; margin-top: 10px; padding: 0 14px;
+  border-radius: 14px; border: 1.5px solid #1f6fe0; background: #f6f9ff; overflow: hidden; cursor: pointer; }
+.cs-dt-wrap > .mi { flex: none; width: 20px; height: 20px; margin: 0; color: #1f6fe0; }
+.cs-dt { flex: 1 1 auto; display: block; min-width: 0; width: 100%; max-width: 100%; height: 100%; margin: 0; padding: 0; border: 0; outline: none;
+  background: transparent; color: #0f1115; font: inherit; font-size: 16px; font-weight: 650; text-align: left;
+  -webkit-appearance: none; appearance: none; }
+.cs-dt::-webkit-date-and-time-value { text-align: left; margin: 0; }
+.cs-dt::-webkit-calendar-picker-indicator { opacity: .55; cursor: pointer; }
 .cs-when-is {
   display: flex; align-items: center; gap: 9px; margin-top: 12px; padding: 12px 14px; border-radius: 15px;
   background: rgba(31,111,224,.13); color: #e0e6ff; font-size: 14px; font-weight: 700;
@@ -3680,6 +3690,11 @@ body.mw-cloud .cloud-sheet-modal .cloud-files-up, body.mw-cloud .cloud-files-bar
 .cp-panel .cs-d-when { color: #0f1115; }
 .cp-panel .cs-d-cap { color: #3b4250; }
 .cp-panel .cs-d-err { background: #fdecea; color: #b42318; }
+/* the sheets' text boxes: the dark sheet's #1c1d23 fields with white text, on white */
+.cp-panel .cs-input { background: #f6f7f9; border-color: #d5d9e0; color: #0f1115; }
+.cp-panel .cs-input::placeholder { color: #8b909b; }
+.cp-panel .cs-label { color: #3b4250; }
+.cp-panel .cs-label small { color: #5d6470; }
 /* the accounts a post goes to, on the light sheet: a chosen one kept the dark sheet's
    white name on its pale blue (unreadable) — dark names, the chosen ones in a clear blue
    chip with a blue tick, the others plain with a grey ring */
