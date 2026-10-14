@@ -3224,17 +3224,23 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const tp = bg && bg.tone && TONE_PAL[bg.tone];
       const v = F.board.variants[look];
       const pal = tp ? (tp === 'own' ? F.pal : tp) : (i === 0 ? F.pal : v.pal || SIGNATURE[look] || F.pal);
-      return buildScene({ look, w: sz.w, h: sz.h, pal, dir: F.dir, fields: F.fields, speakers: speakersFor(i), logo: IMGS.has('logo') ? 'logo' : null, bg: bg && bg.key, variant: v });
+      return Object.assign(buildScene({ look, w: sz.w, h: sz.h, pal, dir: F.dir, fields: F.fields, speakers: speakersFor(i), logo: IMGS.has('logo') ? 'logo' : null, bg: bg && bg.key, variant: v }), { madeBy: (bg && bg.by) || '' });
     });
     // the preacher painted into the scene (paintPreacherIn): first on the board, labelled so the face is checked
-    const pin = (F.paintedIn || []).map((b) => Object.assign(buildScene({ look: b.look, painted: true, w: sz.w, h: sz.h, pal: F.pal, dir: F.dir, fields: F.fields, speakers: speakersFor(0), logo: IMGS.has('logo') ? 'logo' : null, bg: b.key, variant: F.board.variants[b.look] }), { label: 'AI scene · check the face' }));
+    const pin = (F.paintedIn || []).map((b) => Object.assign(buildScene({ look: b.look, painted: true, w: sz.w, h: sz.h, pal: F.pal, dir: F.dir, fields: F.fields, speakers: speakersFor(0), logo: IMGS.has('logo') ? 'logo' : null, bg: b.key, variant: F.board.variants[b.look] }), { label: 'AI scene · check the face', madeBy: b.by || '' }));
     // the AI-lettered title first of all: the one most like the flyers people save
     const lt = F.lettered ? [Object.assign(buildScene({ look: 'ailetter', w: sz.w, h: sz.h, pal: F.pal, dir: F.dir, fields: F.fields, speakers: speakersFor(0), logo: IMGS.has('logo') ? 'logo' : null, bg: F.lettered.key }),
-      { label: F.lettered.checked ? 'AI lettering' : 'AI lettering · check the spelling' })] : [];
+      { label: F.lettered.checked ? 'AI lettering' : 'AI lettering · check the spelling', madeBy: F.lettered.by || '' })] : [];
     F.designs = lt.concat(pin, F.designs);
     if (F.step === 'pick') paintThumbs();
   }
 
+  /* "Made by Cloudflare" under a design whose picture Cloudflare's free AI painted (FLUX.2, Phoenix), the model named */
+  function madeByTag(by) {
+    if (!/cloudflare/i.test(by || '')) return '';
+    const model = String(by).replace(/\s*·\s*Cloudflare.*$/i, '').trim();
+    return `<em class="fs-by" title="${escAttr('Painted by ' + by)}"><b>☁</b> Made by Cloudflare AI${model ? `<i>${esc(model)}</i>` : ''}</em>`;
+  }
   function drawPick() {
     const P = F.panel; if (!P) return;
     P.setTitle('Pick one');
@@ -3242,7 +3248,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const busy = !F.designs.length;
     P.body.innerHTML = `<div class="fs-pick">
       <p class="fs-status">${busy ? 'The AI is reading your event…' : F.painting > 0 ? `<i class="fs-spin"></i> Painting ${F.painting} picture${F.painting > 1 ? 's' : ''} with AI — they appear as they’re ready` : 'Tap one to edit every part of it'}</p>
-      <div class="fs-grid">${busy ? '<div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div>' : F.designs.map((d, i) => `<button type="button" class="fs-card" data-i="${i}"><canvas></canvas><small>${esc(d.label || LOOK_NAMES[d.look] || d.look)}</small></button>`).join('')}</div>
+      <div class="fs-grid">${busy ? '<div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div>' : F.designs.map((d, i) => `<button type="button" class="fs-card" data-i="${i}"><canvas></canvas><small>${esc(d.label || LOOK_NAMES[d.look] || d.look)}</small>${madeByTag(d.madeBy)}</button>`).join('')}</div>
       ${!busy && F.board && F.board.shown < F.board.order.length ? `<button type="button" class="fs-ghost fs-more" data-act="more">${ic('layout')}<span>${BOARD_N} more designs</span></button>` : ''}
     </div>`;
     P.foot.innerHTML = `<button type="button" class="fs-ghost" data-act="back">${ic('back')}<span>Details</span></button><button type="button" class="fs-ghost" data-act="again">${ic('refresh')}<span>New pictures</span></button>`;
