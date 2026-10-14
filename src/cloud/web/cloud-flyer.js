@@ -2091,7 +2091,6 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   /* ------------------------------------------------------ step 2: make + pick */
 
   async function makeFlyers() {
-    F.cfTold = false; F.inTold = false;
     if (!F.fields.title.trim()) { toast('Give it a title first.', 'error'); return; }
     // remember these details for this service (Tuesday's Word Study comes back as typed)
     const ok = occKey(F.occasion);
@@ -2125,7 +2124,6 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     F.painting = scenes.length;
     drawPick();
     const paintingIn = paintPreacherIn(tryNo, sz);   // alongside the six, not after them
-    let failed = '';
     await Promise.all(scenes.map(async (scene, i) => {
       try {
         // each picture in its own light — the AI's colours, royal blue, purple — so the board is as varied as a Pinterest page
@@ -2135,7 +2133,6 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         let im = await loadImg(out.dataUrl);
         // the backup painter signs its pictures in the bottom corner: that strip is cut off
         if (/pollinations/i.test(out.by || '')) im = cropBottom(im, 0.06);
-        if (out.cfFailed && !F.cfTold) { F.cfTold = true; toast('Cloudflare did not paint (' + out.cfFailed.slice(0, 140) + ') — the backup painter made these. The best designs need Cloudflare working.', 'error', 12000); }
         const key = 'ai:' + tryNo + ':' + i;
         IMGS.set(key, im);
         // AI pictures lead; the photos stay on for variety until three AI ones are in
@@ -2144,11 +2141,10 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         ai.sort((a, b) => TONES.findIndex((t) => t.id === a.tone) - TONES.findIndex((t) => t.id === b.tone));
         F.bgs = ai.concat(F.bgs.filter((b) => b.proc)).slice(0, Math.max(3, ai.length));
         rebuildDesigns();
-      } catch (e) { failed = e.message || String(e); }
+      } catch (e) { /* the studio's own photographs stand in */ }
       finally { if (tryNo === F.tries) { F.painting--; if (F.step === 'pick') drawPick(); } }
     }));
     await paintingIn;
-    if (tryNo === F.tries && F.bgs.every((b) => b.proc) && failed) toast('The AI could not paint just now (' + failed.slice(0, 120) + '). These use the studio’s own photographs — tap “New pictures” to try again.', 'error', 9000);
   }
 
   /*
@@ -2182,7 +2178,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         IMGS.set(key, await loadImg(out.dataUrl));
         F.paintedIn = F.paintedIn.concat({ key, by: out.by, scene, look: PAINT_IN_LOOKS[i % PAINT_IN_LOOKS.length] });
         rebuildDesigns();
-      } catch (e) { if (!F.inTold) { F.inTold = true; toast('The AI could not paint the preacher into a scene: ' + String(e.message || e).slice(0, 160), 'error', 10000); } }
+      } catch (e) { /* the ordinary designs stand; this is an extra */ }
       finally { if (tryNo === F.tries) { F.painting--; if (F.step === 'pick') drawPick(); } }
     }));
   }
