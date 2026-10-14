@@ -177,7 +177,8 @@ function build(opts = {}) {
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' blob: data:; worker-src 'self' blob:; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://player.vimeo.com;" />
+        content="default-src 'self'; img-src 'self' data: blob: https://*.puter.com https://*.puter.site; media-src 'self' blob: data:; style-src 'self' 'unsafe-inline' https://*.puter.com; font-src 'self' data: https://*.puter.com; script-src 'self' 'wasm-unsafe-eval' https://js.puter.com; connect-src 'self' blob: data: https://*.puter.com wss://*.puter.com https://*.puter.site; worker-src 'self' blob:; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://player.vimeo.com https://puter.com https://*.puter.com;" />
+  <!-- (the puter.com entries: the Flyer Studio's optional Premium AI, loaded only when it is tapped — cloud-flyer.js) -->
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
   <!-- The colour of the bar above the app (iPhone home-screen app, phone
        browsers): the app's blue to start with, then whatever the screen has

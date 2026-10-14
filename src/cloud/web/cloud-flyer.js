@@ -2091,7 +2091,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   /* ------------------------------------------------------ step 2: make + pick */
 
   async function makeFlyers() {
-    F.cfTold = false; F.inTold = false;
+    F.cfTold = false; F.inTold = false; F.premium = [];
     if (!F.fields.title.trim()) { toast('Give it a title first.', 'error'); return; }
     // remember these details for this service (Tuesday's Word Study comes back as typed)
     const ok = occKey(F.occasion);
@@ -2125,6 +2125,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     F.painting = scenes.length;
     drawPick();
     const paintingIn = paintPreacherIn(tryNo, sz);   // alongside the six, not after them
+    autoPremium(tryNo);   // and the premium ones, when Puter is on (its own account, its own pace)
     let failed = '';
     await Promise.all(scenes.map(async (scene, i) => {
       try {
@@ -2187,6 +2188,178 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     }));
   }
 
+  /*
+   * ►► PREMIUM AI (Puter.js, "user pays"). ◄◄ The top image models — Google's
+   * Nano Banana, OpenAI's GPT Image, ByteDance's Seedream — called from the
+   * phone itself through Puter, paid from the operator's own free Puter
+   * account (a monthly allowance; more can be bought there), never from the
+   * church's. Loaded only when Premium is tapped. Two pictures a round: the
+   * preacher painted into the scene from his photo, and a background. Model
+   * names differ between Puter's pages, so each choice tries a few.
+   */
+  const PUTER_MODELS = [
+    { id: 'nano', name: 'Nano Banana', by: 'Google', ids: ['google/gemini-2.5-flash-image', 'gemini-2.5-flash-image', 'gemini-2.5-flash-image-preview'] },
+    { id: 'gpt', name: 'GPT Image', by: 'OpenAI', ids: ['gpt-image-1', 'openai/gpt-image-1'] },
+    { id: 'seedream', name: 'Seedream', by: 'ByteDance', ids: ['byteplus/dola-seedream-5-0-pro-260628', 'bytedance/seedream-4', 'seedream-4'] },
+    { id: 'pro', name: 'Nano Banana Pro', by: 'Google · best, uses more of the allowance', ids: ['google/gemini-3-pro-image', 'gemini-3-pro-image'] },
+  ];
+  let puterP = null;
+  function loadPuter() {
+    if (window.puter && window.puter.ai) return Promise.resolve(window.puter);
+    if (!puterP) {
+      puterP = new Promise((res, rej) => {
+        const sc = document.createElement('script');
+        sc.src = 'https://js.puter.com/v2/';
+        sc.onload = () => (window.puter && window.puter.ai ? res(window.puter) : rej(new Error('Puter did not start')));
+        sc.onerror = () => { puterP = null; rej(new Error('Could not reach Puter — check the connection')); };
+        document.head.appendChild(sc);
+      });
+    }
+    return puterP;
+  }
+  const puterMsg = (e) => String((e && (e.error && (e.error.message || e.error)) ) || (e && e.message) || e || 'unknown');
+  const outOfAllowance = (e) => /insufficient|funds|credit|balance|quota|allowance|402|usage limit|payment/i.test(puterMsg(e));
+  /* Puter answers with an <img>; drawn on a canvas it must be ours (a picture from another site cannot be), so it is fetched as a blob first */
+  async function asOwnImage(el) {
+    let src = el && (el.src || (typeof el === 'string' ? el : ''));
+    if (!src) throw new Error('Puter sent no picture');
+    if (!/^(data:|blob:)/.test(src)) {
+      const r = await fetch(src); if (!r.ok) throw new Error('could not fetch the picture (' + r.status + ')');
+      src = URL.createObjectURL(await r.blob());
+    }
+    return loadImg(src);
+  }
+  async function puterImage(prompt, model, refs) {
+    const P = await loadPuter();
+    const rs = [].concat(refs || []).filter(Boolean);
+    let last = null;
+    for (const id of model.ids) {
+      try {
+        const opt = { model: id };
+        if (rs.length === 1) opt.input_image = rs[0];
+        else if (rs.length > 1) opt.input_images = rs;
+        const el = await P.ai.txt2img(prompt, opt);
+        return { im: await asOwnImage(el), model: id };
+      } catch (e) { last = e; if (outOfAllowance(e)) throw e; }
+    }
+    throw last || new Error('no model answered');
+  }
+  /* the flyer's words, exactly as typed, for a design the AI letters itself */
+  function flyerWords() {
+    const f = F.fields || {}, dp = dateParts(f.date), sp = chosenSpeakers()[0];
+    const q = (t) => '"' + String(t || '').replace(/"/g, "'").trim() + '"';
+    const lines = [];
+    if (f.church || (F.kit && F.kit.church)) lines.push('the church name, small at the top: ' + q((f.church || F.kit.church).toUpperCase()));
+    lines.push('the title, huge and bold: ' + q((f.title || 'Sunday Service').toUpperCase()));
+    if (f.theme) lines.push('the theme: ' + q(f.theme));
+    if (dp) lines.push('the date: ' + q(`${dp.dayName.toUpperCase()} ${dp.dd} ${dp.month.toUpperCase()} ${dp.year}`));
+    if (f.time) lines.push('the time: ' + q(niceTime(f.time)));
+    if (sp && sp.name) lines.push('the minister: ' + q('Ministering: ' + sp.name));
+    if (f.venue) lines.push('the venue, small: ' + q(f.venue));
+    return lines;
+  }
+  function fullPrompt(scene, hasPerson, hasLogo) {
+    return [
+      'Design a complete, finished church event flyer, vertical 4:5, in the style of the best church flyers on Pinterest: a cinematic photographic background (' + scene + '), bold glossy 3D lettering in gold or chrome with depth and glow, dramatic light, a polished professional layout with clear hierarchy.',
+      hasPerson ? 'The minister is the man in the FIRST reference photo — keep him exactly the same person (same face, skin tone, hairline, beard, clothes), large, from the chest up, lit by the scene with a rim light.' : '',
+      hasLogo ? 'Place the church logo from the ' + (hasPerson ? 'SECOND' : 'FIRST') + ' reference image small at the top centre, unchanged.' : '',
+      'Use exactly this text and no other words, spelled exactly as given: ' + flyerWords().join('; ') + '.',
+      'No watermark, no extra text, no misspellings.',
+    ].filter(Boolean).join(' ');
+  }
+  function premiumPrompts(scene, withPerson) {
+    const look = 'vertical 4:5 portrait photograph for a premium church event flyer, photorealistic, cinematic colour grade, volumetric stage light and haze, shallow depth of field, sharp detail, the upper third darker and open for a headline. Absolutely no text, no letters, no words, no logos, no watermark.';
+    return withPerson
+      ? `Use the man in the reference photo — keep him exactly the same person: the same face, skin tone, hairline, beard and clothes. Show him from the chest up in the lower half of the frame, a little off-centre, preaching with passion, standing IN this scene: ${scene}. He is lit by the scene itself — a strong rim light behind him in the scene's colour, soft warm light on his face, haze around him. ${look}`
+      : `${scene}. No person in the middle of the frame. ${look}`;
+  }
+  function openPremium() {
+    const P = C.openPanel({ id: 'cloudFlyerPremium', title: 'Premium AI', cls: 'cp-flyer-kit' });
+    let model = PUTER_MODELS.find((m) => m.id === (localStorage.getItem('mw.flyer.premium') || 'nano')) || PUTER_MODELS[0];
+    let state = 'loading', who = '';
+    const draw = () => {
+      P.body.innerHTML = `<div class="fs-kit">
+        <p class="fs-note">The best image AIs, from your own <b>free Puter account</b> — it has a free monthly allowance (shown on puter.com), and more can be bought there for pennies if you ever want. The church pays nothing. Three designs: <b>a whole flyer designed by the AI</b> (your words, your logo, ${esc(chosenSpeakers()[0] ? chosenSpeakers()[0].name : 'the preacher')}), <b>him painted into a scene</b>, and a background.</p>
+        <div class="fs-occs fs-premium-models">${PUTER_MODELS.map((m) => `<button type="button" class="fs-occ${m.id === model.id ? ' on' : ''}" data-pm="${m.id}"><b>${esc(m.name)}</b><small>${esc(m.by)}</small></button>`).join('')}</div>
+        <label class="fs-premium-auto"><input type="checkbox" data-pauto${premiumAuto() ? ' checked' : ''}> Add premium designs every time I make flyers</label>
+        <p class="fs-status">${state === 'loading' ? '<i class="fs-spin"></i> Opening Puter…' : state === 'out' ? 'Signed out of Puter.' : state === 'in' ? 'Signed in to Puter' + (who ? ' as <b>' + esc(who) + '</b>' : '') + '.' : state === 'busy' ? '<i class="fs-spin"></i> Painting with ' + esc(model.name) + '… (up to a minute)' : esc(state)}</p>
+      </div>`;
+      P.foot.innerHTML = state === 'out'
+        ? '<button type="button" class="fs-go" data-pa="signin"><span>Sign in to Puter (free)</span></button>'
+        : `<button type="button" class="fs-go" data-pa="make"${state === 'in' ? '' : ' disabled'}><span>✦ Make premium designs</span></button>`;
+    };
+    draw();
+    loadPuter().then(async (pu) => {
+      state = pu.auth.isSignedIn() ? 'in' : 'out';
+      if (state === 'in') { try { who = (await pu.auth.getUser()).username || ''; } catch (e) {} }
+      draw();
+    }, (e) => { state = e.message; draw(); });
+    P.body.addEventListener('change', (e) => { if (e.target.matches('[data-pauto]')) { try { localStorage.setItem('mw.flyer.premiumAuto', e.target.checked ? '1' : '0'); } catch (er) {} } });
+    const click = async (e) => {
+      const m = e.target.closest('[data-pm]');
+      if (m) { model = PUTER_MODELS.find((x) => x.id === m.dataset.pm) || model; try { localStorage.setItem('mw.flyer.premium', model.id); } catch (er) {} return draw(); }
+      const a = e.target.closest('[data-pa]'); if (!a) return;
+      if (a.dataset.pa === 'signin') {
+        // straight from the tap: a sign-in window may only be opened by one
+        try { await window.puter.auth.signIn(); state = 'in'; try { localStorage.setItem('mw.flyer.premiumAuto', '1'); } catch (er) {} try { who = (await window.puter.auth.getUser()).username || ''; } catch (er) {} }
+        catch (er) { toast('Puter sign-in did not finish: ' + puterMsg(er).slice(0, 140), 'error', 9000); }
+        return draw();
+      }
+      if (a.dataset.pa === 'make') {
+        state = 'busy'; draw();
+        const ok = await makePremium(model);
+        if (ok) { P.close(); return; }
+        state = 'in'; draw();
+      }
+    };
+    P.body.addEventListener('click', click);
+    P.foot.addEventListener('click', click);
+  }
+  function logoRef() {
+    const im = IMGS.get('logo'); if (!im) return null;
+    const k = Math.min(1, 384 / Math.max(iw(im), ih(im)));
+    const c = canvas(iw(im) * k, ih(im) * k); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+    return c.toDataURL('image/png');
+  }
+  /* kinds: 'full' (the AI designs the whole flyer, words and all), 'in' (the preacher painted into a scene), 'bg' (a background) */
+  async function makePremium(model, kinds, quiet) {
+    const tryNo = F.tries;
+    const scenes = (F.dir && F.dir.scenes) || ['a worship stage with golden spotlights and haze, a crowd with raised hands far behind, out of focus'];
+    const sp = speakersFor(0)[0], ref = refPhoto(sp), logo = logoRef();
+    kinds = kinds || ['full', 'in', 'bg'];
+    const jobs = kinds.map((k, i) => (k === 'in' && !ref ? null : { kind: k, scene: scenes[i % scenes.length], refs: k === 'full' ? [ref, logo] : k === 'in' ? [ref] : [] })).filter(Boolean);
+    let made = 0, err = null;
+    for (const j of jobs) {   // one at a time: a free account may run only a few at once
+      try {
+        const prompt = j.kind === 'full' ? fullPrompt(j.scene, !!ref, !!logo) : premiumPrompts(j.scene, j.kind === 'in');
+        const out = await puterImage(prompt, model, j.refs.filter(Boolean));
+        if (tryNo !== F.tries) return false;
+        const key = 'prem:' + tryNo + ':' + j.kind + ':' + made;
+        IMGS.set(key, out.im);
+        F.premium = (F.premium || []).concat({ key, kind: j.kind, name: model.name });
+        made++;
+        rebuildDesigns();
+        if (F.step === 'pick') { drawPick(); if (F.panel) F.panel.body.scrollTop = 0; }   // new cards, at the top, in sight
+      } catch (e) { err = e; if (outOfAllowance(e)) break; }
+    }
+    if (err) toast(outOfAllowance(err) ? 'Your free Puter allowance is used up for this month — more can be bought on puter.com, or carry on with the free designs.' : 'Premium AI: ' + puterMsg(err).slice(0, 160), 'error', 11000);
+    if (made && !quiet) toast(`${made} premium design${made > 1 ? 's' : ''} by ${model.name} — at the top of the board.`, 'good', 5000);
+    return made > 0;
+  }
+  /* SEAMLESS: once signed in to Puter, every "Make my flyers" brings premium designs by itself (no tap needed) */
+  const premiumAuto = () => { try { return localStorage.getItem('mw.flyer.premiumAuto') === '1'; } catch (e) { return false; } };
+  const premiumModel = () => { let id = 'nano'; try { id = localStorage.getItem('mw.flyer.premium') || 'nano'; } catch (e) {} return PUTER_MODELS.find((m) => m.id === id) || PUTER_MODELS[0]; };
+  async function autoPremium(tryNo) {
+    if (!premiumAuto()) return;
+    try {
+      const pu = await loadPuter();
+      if (tryNo !== F.tries || !pu.auth.isSignedIn()) return;
+      F.premiumBusy = true; if (F.step === 'pick') drawPick();
+      await makePremium(premiumModel(), ['full', 'in'], true);
+    } catch (e) { /* the free designs stand */ }
+    finally { F.premiumBusy = false; if (tryNo === F.tries && F.step === 'pick') drawPick(); }
+  }
+
   function cropBottom(im, f) {
     const c = canvas(iw(im), Math.round(ih(im) * (1 - f)));
     c.getContext('2d').drawImage(im, 0, 0);
@@ -2227,7 +2400,20 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     });
     // the preacher painted into the scene (paintPreacherIn): first on the board, labelled so the face is checked
     const pin = (F.paintedIn || []).map((b) => Object.assign(buildScene({ look: b.look, painted: true, w: sz.w, h: sz.h, pal: F.pal, dir: F.dir, fields: F.fields, speakers: speakersFor(0), logo: IMGS.has('logo') ? 'logo' : null, bg: b.key }), { label: 'AI scene · check the face' }));
-    F.designs = pin.concat(F.designs);
+    // Premium AI (Puter): the preacher painted in → two painted designs; a background → two designs on it
+    const prem = [];
+    (F.premium || []).forEach((b) => {
+      if (b.kind === 'full') {
+        // the AI's own finished flyer: shown as it made it (no grade, no words over it); text can still be added in the editor
+        prem.push({ w: sz.w, h: sz.h, pal: F.pal, look: 'glory', painted: true, aiFull: true, label: `✦ ${b.name} · full design · check the spelling`,
+          layers: [BG({ img: b.key, keepFloor: 1, blur: 0, grain: 0 })] });
+        return;
+      }
+      const looks = b.kind === 'in' ? ['glory', 'miracle'] : ['sunday', 'fire'];
+      looks.forEach((look) => prem.push(Object.assign(buildScene({ look, painted: b.kind === 'in', w: sz.w, h: sz.h, pal: F.pal, dir: F.dir, fields: F.fields, speakers: speakersFor(0), logo: IMGS.has('logo') ? 'logo' : null, bg: b.key }),
+        { label: `✦ ${b.name}${b.kind === 'in' ? ' · check the face' : ''}` })));
+    });
+    F.designs = prem.concat(pin, F.designs);
     if (F.step === 'pick') paintThumbs();
   }
 
@@ -2237,16 +2423,17 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     P.el.classList.remove('fs-editing');
     const busy = !F.designs.length;
     P.body.innerHTML = `<div class="fs-pick">
-      <p class="fs-status">${busy ? 'The AI is reading your event…' : F.painting > 0 ? `<i class="fs-spin"></i> Painting ${F.painting} picture${F.painting > 1 ? 's' : ''} with AI — they appear as they’re ready` : 'Tap one to edit every part of it'}</p>
+      <p class="fs-status">${busy ? 'The AI is reading your event…' : F.premiumBusy ? '<i class="fs-spin"></i> Making premium designs with ' + esc(premiumModel().name) + '…' : F.painting > 0 ? `<i class="fs-spin"></i> Painting ${F.painting} picture${F.painting > 1 ? 's' : ''} with AI — they appear as they’re ready` : 'Tap one to edit every part of it'}</p>
       <div class="fs-grid">${busy ? '<div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div>' : F.designs.map((d, i) => `<button type="button" class="fs-card" data-i="${i}"><canvas></canvas><small>${esc(d.label || LOOK_NAMES[d.look] || d.look)}</small></button>`).join('')}</div>
     </div>`;
-    P.foot.innerHTML = `<button type="button" class="fs-ghost" data-act="back">${ic('back')}<span>Details</span></button><button type="button" class="fs-ghost" data-act="again">${ic('refresh')}<span>New pictures</span></button>`;
+    P.foot.innerHTML = `<button type="button" class="fs-ghost" data-act="back">${ic('back')}<span>Details</span></button><button type="button" class="fs-ghost" data-act="again">${ic('refresh')}<span>New pictures</span></button><button type="button" class="fs-go fs-premium" data-act="premium">${ic('spark')}<span>Premium</span></button>`;
     paintThumbs();
     P.body.onclick = (e) => { const c = e.target.closest('.fs-card'); if (c) openEditor(F.designs[+c.dataset.i]); };
     P.foot.onclick = (e) => {
       const b = e.target.closest('[data-act]'); if (!b) return;
       if (b.dataset.act === 'back') { F.step = 'make'; F.tries++; drawMake(); }
       if (b.dataset.act === 'again') makeFlyers();
+      if (b.dataset.act === 'premium') openPremium();
     };
   }
   function paintThumbs() {
