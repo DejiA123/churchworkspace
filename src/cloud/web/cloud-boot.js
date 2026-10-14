@@ -4934,6 +4934,8 @@ let _hideTimer = null;
   const panels = [];
   function openPanel(o = {}) {
     if (o.id) closePanel(o.id, true);
+    // never a keyboard's height left over from a box typed in before (see typing())
+    if (window.__kbCheck) window.__kbCheck();
     const scrim = document.createElement('div');
     scrim.className = 'cp-scrim';
     const el = document.createElement('section');
@@ -5352,8 +5354,22 @@ let _hideTimer = null;
       // (the captions window gives its lines the space)
       document.documentElement.classList.toggle('mw-kb', kb > 0);
     };
+    /*
+     * ONLY A KEYBOARD WHILE SOMETHING IS BEING TYPED. The viewport also comes
+     * up short with no keyboard at all — a moment after the app is brought
+     * back, after a pinch, and when the keyboard is put away by leaving the
+     * screen (iOS does not always say so) — and the sheets stood a keyboard's
+     * height off the bottom ("Running now" floating mid-screen). No box to type
+     * in, no keyboard.
+     */
+    const typing = () => {
+      const a = document.activeElement;
+      if (!a || a === document.body) return false;
+      if (a.isContentEditable) return true;
+      return a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && !/^(button|checkbox|radio|range|file|submit|reset|color|image|hidden)$/i.test(a.type || ''));
+    };
     const onKb = () => {
-      const raw = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+      const raw = typing() ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
       const kb = raw > 90 ? raw : 0;
       clearTimeout(kbTimer);
       if (!kb) { apply(0); return; }                                   // going away: at once
@@ -5362,6 +5378,11 @@ let _hideTimer = null;
     };
     vv.addEventListener('resize', onKb);
     vv.addEventListener('scroll', onKb);
+    // a box let go of (or taken): looked at again once the keyboard has moved
+    document.addEventListener('focusout', () => setTimeout(onKb, 60));
+    document.addEventListener('focusin', () => setTimeout(onKb, 320));
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(onKb, 80); });
+    window.__kbCheck = onKb;
   }
 
   /* ----------------------------------------------------- background jobs */
