@@ -2208,11 +2208,15 @@ body.mw-cloud .cloud-home .mwg-invite .mwg-x { color: #6b7280; opacity: 1; }
 .cs-post-cap { font-size: 13px; color: #9b9ea8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cs-post-foot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 4px; }
 .cs-state { flex: none; padding: 4px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 800; letter-spacing: .2px; }
-.cs-state.booked, .cs-state.posted { background: rgba(48,209,88,.16); color: #4ade80; }
-.cs-state.planned { background: rgba(31,111,224,.2); color: #b4bfff; }
-.cs-state.posting { background: rgba(10,132,255,.2); color: #6cb8ff; }
-.cs-state.failed { background: rgba(255,69,58,.17); color: #ff7166; }
-.cs-state.retry { background: rgba(255,179,64,.17); color: #ffbe55; }
+/* solid, with white text: they sit on white cards AND over video pictures, and a see-through
+   tint read on neither (a faint mint "Booked" on a pale green wash) */
+.cs-state { display: inline-flex; align-items: center; gap: 5px; color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.18); }
+.cs-state::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .9; }
+.cs-state.booked, .cs-state.posted { background: #16a34a; color: #fff; }
+.cs-state.planned { background: #1f6fe0; color: #fff; }
+.cs-state.posting { background: #0a84ff; color: #fff; }
+.cs-state.failed { background: #dc2626; color: #fff; }
+.cs-state.retry { background: #d97706; color: #fff; }
 .cs-empty { padding: 34px 16px; text-align: center; color: #9b9ea8; }
 .cs-empty-art { display: inline-flex; gap: 8px; margin-bottom: 16px; }
 .cs-empty-art .cs-mark { width: 46px; height: 46px; filter: drop-shadow(0 8px 16px rgba(0,0,0,.5)); }
@@ -3650,6 +3654,32 @@ body.mw-cloud .cloud-sheet-modal .cloud-files-up, body.mw-cloud .cloud-files-bar
 .csb-plan { background: #eaf2ff; color: #1e3a8a; }
 .csb-style { background: #f1f3f6; border-color: transparent; color: #0f1115; }
 .csb-names-btn { border-color: #cfd4dc; color: #5d6470; }
+/* ACCOUNTS and a post's details, on the white sheet: their rows were the dark sheet's
+   #1c1d23 cards with the platform's name in near-black, the linked name in mint, and a
+   pale-green-on-pale-green "Everything is connected" */
+.cp-panel .cs-plat, .cp-panel .cs-key, .cp-panel .cs-d-accts li { background: #f6f7f9; color: #0f1115; border: 1px solid rgba(15, 23, 42, .06); }
+.cp-panel .cs-plat-tx b, .cp-panel .cs-key-tx b, .cp-panel .cs-d-accts b, .cp-panel .cs-step-tx > b, .cp-panel .cs-d-title { color: #0f1115; }
+.cp-panel .cs-plat-tx small, .cp-panel .cs-key-tx small, .cp-panel .cs-d-accts small, .cp-panel .cs-step-tx small, .cp-panel .cs-setup-sub { color: #5d6470; }
+.cp-panel .cs-step-tx small b { color: #0f1115; }
+.cp-panel .cs-plat.linked .cs-plat-tx small, .cp-panel .cs-key.set .cs-key-tx small, .cp-panel .cs-d-accts li.ok small { color: #15803d; font-weight: 600; }
+.cp-panel .cs-d-accts li.bad small { color: #b42318; }
+.cp-panel .cs-d-accts li.warn small { color: #b45309; }
+.cp-panel .cs-mini { background: #fff; color: #0f1115; box-shadow: inset 0 0 0 1px #d5d9e0; }
+.cp-panel .cs-mini.accent { background: #1f6fe0; color: #fff; box-shadow: none; }
+.cp-panel .cs-note { background: #eaf2ff; color: #1e3a8a; }
+.cp-panel .cs-note.good { background: #dcfce7; color: #14532d; }
+.cp-panel .cs-note.bad { background: #fdecea; color: #b42318; }
+.cp-panel .cs-note.warn { background: #fff4e0; color: #8a4b08; }
+.cp-panel .cs-steps { color: #3b4250; }
+.cp-panel .cs-steps a, .cp-panel .cs-note a { color: #1f6fe0; }
+.cp-panel .cs-step-n { background: #eaf2ff; color: #1f6fe0; }
+.cp-panel .cs-pick { border-color: #d5d9e0; color: #5d6470; }
+.cp-panel .cs-pick.on { color: #0f1115; background: #eaf2ff; }
+.cp-panel .cs-more { color: #1f6fe0; }
+.cp-panel .cs-spin { border-color: rgba(31, 111, 224, .2); border-top-color: #1f6fe0; }
+.cp-panel .cs-d-when { color: #0f1115; }
+.cp-panel .cs-d-cap { color: #3b4250; }
+.cp-panel .cs-d-err { background: #fdecea; color: #b42318; }
 /* the accounts a post goes to, on the light sheet: a chosen one kept the dark sheet's
    white name on its pale blue (unreadable) — dark names, the chosen ones in a clear blue
    chip with a blue tick, the others plain with a grey ring */
