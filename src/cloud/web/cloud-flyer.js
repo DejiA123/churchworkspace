@@ -1748,7 +1748,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const fam = FACE_FAMILIES.findIndex((f) => f.includes(o.font));
     if (fam >= 0 && VAR.faces && VAR.faces[fam]) o.font = VAR.faces[fam];
     const metal = o.fill === CHROME || o.fill === GOLD || (o.fill && o.fill.stops);
-    if (VAR.tex && metal && !o.imgFill) {
+    if (VAR.tex && metal && !o.imgFill && !o.noTex) {
       // a title set in a material: gold leaf, stone, fire, steel — bevelled, on its block
       Object.assign(o, { fill: '#ffffff', imgFill: 'tex:' + VAR.tex, imgFillA: 1, bevel: Math.max(o.bevel || 0, 0.9), grain: VAR.tex === 'stone', speck: 0, erode: VAR.tex === 'stone' ? 0.25 : o.erode });
       if (!o.extrude) Object.assign(o, { extrude: 3, extrudeColor: VAR.tex === 'fire' ? ['#5a0d02', '#1a0300'] : VAR.tex === 'stone' ? ['#3a3430', '#0e0c0b'] : ['#6b3a04', '#1e0f01'] });
@@ -1819,7 +1819,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       L.push(put(micro('PRESENTS', { size: 14, letter: 0.9, fill: rgba(ink, 0.75), shadow: false }), { l: 72, t: y })); y += 34;
       const lines = stack(f.title || 'Jericho Hour', 2);
       const ts = stackLines(lines, { t: y, cx: 72 + 290, fit: 580, maxH: H * 0.12, gap: 6,
-        style: { font: 'Archivo Black', upper: true, fill: { stops: ['#3c3c44', ink], angle: 90 }, extrude: 2, extrudeColor: rgba('#000000', 0.16), shadow: false } });
+        style: { font: 'Archivo Black', upper: true, fill: { stops: ['#3c3c44', ink], angle: 90 }, extrude: 2, extrudeColor: rgba('#000000', 0.16), shadow: false, noTex: true } });
       if (ts[1]) { ts[1].fill = { stops: [mix(deepInk, '#ffffff', 0.15), deepInk], angle: 90 }; ts[1].inkSet = true; }
       L.push(...ts); y = ts.bottom + 16;
       const tagText = f.theme || D.dir.kicker || '';
@@ -1846,9 +1846,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const hd = header(D, { center: true, t: 30 }); hd.forEach((l) => { if (l.type === 'text') { l.fill = ink; l.shadow = false; } }); L.push(...hd);
       const [a, b] = twoLines(f.title || 'Unique Experience');
       let y = hd.bottom + 14;
-      const t1 = stackLines([a || b], { t: y, fit: 900, maxH: H * 0.12, style: { font: 'Anton', upper: true, stretch: 1.15, fill: { stops: [mix(red, '#ffffff', 0.1), red], angle: 90 }, extrude: 2, extrudeColor: rgba('#000000', 0.2), shadow: false } });
+      const t1 = stackLines([a || b], { t: y, fit: 900, maxH: H * 0.12, style: { font: 'Anton', upper: true, stretch: 1.15, fill: { stops: [mix(red, '#ffffff', 0.1), red], angle: 90 }, extrude: 2, extrudeColor: rgba('#000000', 0.2), shadow: false, noTex: true } });
       t1.forEach((l) => { l.inkSet = true; }); L.push(...t1); y = t1.bottom + 4;
-      if (a && b) { const t2 = stackLines([b], { t: y, fit: 900, maxH: H * 0.1, style: { font: 'Anton', upper: true, stretch: 1.15, fill: { stops: ['#3a3634', ink], angle: 90 }, shadow: false } }); L.push(...t2); y = t2.bottom; }
+      if (a && b) { const t2 = stackLines([b], { t: y, fit: 900, maxH: H * 0.1, style: { font: 'Anton', upper: true, stretch: 1.15, fill: { stops: ['#3a3634', ink], angle: 90 }, shadow: false, noTex: true } }); L.push(...t2); y = t2.bottom; }
       if (f.extra || f.theme) { const s = put(micro(f.extra || f.theme, { size: 18, letter: 0.7, fill: ink, shadow: false, maxW: 900 }), { cx: 540, t: y + 14 }); L.push(s); y = box(s).b; }
       const top = Math.max(y + 20, H * 0.36), bot = H - 150;
       if (ps.length === 2) {
@@ -1907,7 +1907,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       if (D.dir.kicker) { const k = put(T({ name: 'Kicker', text: '- ' + D.dir.kicker + ' -', upper: true, font: 'Montserrat', size: 18, letter: 0.3, fill: ink }), { cx: 540, t: y }); L.push(k); y = box(k).b + 12; }
       const lines = stack(f.title || 'Prophetic Mantle Service', 3), n = lines.length;
       const ts = stackLines(lines, { t: y, fit: 900, maxH: H * (n === 1 ? 0.2 : n === 2 ? 0.14 : 0.105), gap: 0,
-        style: { font: 'Bodoni Light', upper: true, stretch: 1.5, letter: -0.01, fill: { stops: ['#a8740e', '#e3b53c', '#7a4f05'], angle: 90 }, shadow: false } });
+        style: { font: 'Bodoni Light', upper: true, stretch: 1.5, letter: -0.01, fill: { stops: ['#a8740e', '#e3b53c', '#7a4f05'], angle: 90 }, shadow: false, noTex: true } });
       ts.forEach((l) => { l.inkSet = true; }); L.push(...ts);
       if (sp) L.push(hero(sp, { cx: 540, t: Math.max(ts.bottom - 20, H * 0.5), b: H - 90, mode: 'chest', fade: 0.3, extra: { fadeLight: true, shade: 'rgba(80,50,10,.2)', tint: { color: '#f6c445', a: 0.18, fall: 0.4 } } }));
       if (f.time) L.push(...col([T({ name: 'Time', text: f.time, font: 'Bodoni', size: 52, fill: ink, align: 'left' }), f.time2 && T({ name: 'Time 2', text: f.time2, font: 'Bodoni', size: 52, fill: ink, align: 'left' })].filter(Boolean), { l: 64, cy: H * 0.68, gap: 0 }));
