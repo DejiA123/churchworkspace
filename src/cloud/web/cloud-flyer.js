@@ -1267,7 +1267,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     if (m.clean && mode !== 'full') nb = Math.min(nb, Math.max(m.sy + u * 0.45, m.clean));
     return { t: Math.max(0, m.top - u * 0.06), nb, cx: m.cx };
   }
+  let PAINTED = false;   // buildScene: the preacher is painted into the picture itself — no cut-out on top
   function hero(sp, o) {
+    if (PAINTED) return null;
     const im = imgOf(sp.img); if (!im) return null;
     const m = META.get(sp.img) || quickMeta(im);
     const mode = o.mode || 'waist', fr = frameOf(m, mode);
@@ -1289,6 +1291,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   }
   /* a person on a rounded card (head and shoulders), for a small portrait */
   function card(sp, o, p) {
+    if (PAINTED) return [];
     const im = imgOf(sp.img); if (!im) return [];
     const m = META.get(sp.img) || quickMeta(im);
     const fr = frameOf(m, 'chest'), vb = Math.min(m.h, fr.nb);
@@ -1726,7 +1729,16 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   function buildScene(o) {
     const D = dataFor(o);
     const look = LAYOUTS[o.look] ? o.look : 'glory';
-    return { w: D.w, h: D.h, pal: D.pal, look, layers: LAYOUTS[look](D).filter(Boolean) };
+    PAINTED = !!o.painted;
+    let layers;
+    try { layers = LAYOUTS[look](D).filter(Boolean); } finally { PAINTED = false; }
+    // a painted-in preacher stands in the picture: the light effects go behind the words only, not over a face
+    if (o.painted) {
+      layers = layers.filter((l) => !(l.type === 'fx' && /glow|ring|sparks/.test(l.kind)));
+      // the picture has a face in it: its own colours kept (skin is not regraded), and no blur
+      layers.forEach((l) => { if (l.type === 'bg') { l.keepFloor = 0.88; l.blur = 0; } });
+    }
+    return { w: D.w, h: D.h, pal: D.pal, look, painted: !!o.painted, layers };
   }
 
   /* A cut-out, tidied — the upload path keeps a data URL (see tidyCanvas). */
@@ -2111,6 +2123,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     for (let j = 0; scenes.length && scenes.length < 6; j++) scenes.push(scenes[j % scenes.length]);
     F.painting = scenes.length;
     drawPick();
+    const paintingIn = paintPreacherIn(tryNo, sz);   // alongside the six, not after them
     let failed = '';
     await Promise.all(scenes.map(async (scene, i) => {
       try {
@@ -2130,7 +2143,44 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       } catch (e) { failed = e.message || String(e); }
       finally { if (tryNo === F.tries) { F.painting--; if (F.step === 'pick') drawPick(); } }
     }));
+    await paintingIn;
     if (tryNo === F.tries && F.bgs.every((b) => b.proc) && failed) toast('The AI could not paint just now (' + failed.slice(0, 120) + '). These use the studio’s own photographs — tap “New pictures” to try again.', 'error', 9000);
+  }
+
+  /*
+   * ►► THE PREACHER PAINTED IN (option 1). ◄◄ Their photo — the cut-out, on a
+   * plain grey, so a lectern or a crowd behind them is not copied — goes to
+   * FLUX.2 as a reference, and two pictures come back with them standing in
+   * the scene, lit by it. They become their own designs, marked so that the
+   * face is checked before posting: the model can change a face a little.
+   */
+  const PAINT_IN_LOOKS = ['glory', 'miracle'];
+  function refPhoto(sp) {
+    const im = sp && imgOf(sp.img); if (!im) return null;
+    const k = Math.min(1, 512 / Math.max(iw(im), ih(im)));
+    const c = canvas(iw(im) * k, ih(im) * k), x = c.getContext('2d');
+    x.fillStyle = '#7a7a7a'; x.fillRect(0, 0, c.width, c.height);
+    x.drawImage(im, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.9);
+  }
+  async function paintPreacherIn(tryNo, sz) {
+    F.paintedIn = [];
+    if (!(F.status && F.status.cloudflare)) return;
+    const sp = speakersFor(0)[0]; const ref = refPhoto(sp);
+    if (!ref) return;
+    const scenes = (F.dir.scenes || []).slice(0, PAINT_IN_LOOKS.length);
+    F.painting += scenes.length; if (F.step === 'pick') drawPick();
+    await Promise.all(scenes.map(async (scene, i) => {
+      try {
+        const out = await window.api.flyer.paintWith({ scene, w: sz.w, h: sz.h, seed: Math.floor(Math.random() * 1e9), refs: [ref] });
+        if (tryNo !== F.tries) return;
+        const key = 'aiin:' + tryNo + ':' + i;
+        IMGS.set(key, await loadImg(out.dataUrl));
+        F.paintedIn = F.paintedIn.concat({ key, by: out.by, scene, look: PAINT_IN_LOOKS[i % PAINT_IN_LOOKS.length] });
+        rebuildDesigns();
+      } catch (e) { /* the ordinary designs stand; this is an extra */ }
+      finally { if (tryNo === F.tries) { F.painting--; if (F.step === 'pick') drawPick(); } }
+    }));
   }
 
   function chosenSpeakers() {
@@ -2166,6 +2216,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const pal = tp ? (tp === 'own' ? F.pal : tp) : (i < 3 || !SIGNATURE[look] ? F.pal : SIGNATURE[look]);
       return buildScene({ look, w: sz.w, h: sz.h, pal, dir: F.dir, fields: F.fields, speakers: speakersFor(i), logo: IMGS.has('logo') ? 'logo' : null, bg: bg && bg.key });
     });
+    // the preacher painted into the scene (paintPreacherIn): first on the board, labelled so the face is checked
+    const pin = (F.paintedIn || []).map((b) => Object.assign(buildScene({ look: b.look, painted: true, w: sz.w, h: sz.h, pal: F.pal, dir: F.dir, fields: F.fields, speakers: speakersFor(0), logo: IMGS.has('logo') ? 'logo' : null, bg: b.key }), { label: 'AI scene · check the face' }));
+    F.designs = pin.concat(F.designs);
     if (F.step === 'pick') paintThumbs();
   }
 
@@ -2176,7 +2229,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const busy = !F.designs.length;
     P.body.innerHTML = `<div class="fs-pick">
       <p class="fs-status">${busy ? 'The AI is reading your event…' : F.painting > 0 ? `<i class="fs-spin"></i> Painting ${F.painting} picture${F.painting > 1 ? 's' : ''} with AI — they appear as they’re ready` : 'Tap one to edit every part of it'}</p>
-      <div class="fs-grid">${busy ? '<div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div>' : F.designs.map((d, i) => `<button type="button" class="fs-card" data-i="${i}"><canvas></canvas><small>${esc(LOOK_NAMES[d.look] || d.look)}</small></button>`).join('')}</div>
+      <div class="fs-grid">${busy ? '<div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div>' : F.designs.map((d, i) => `<button type="button" class="fs-card" data-i="${i}"><canvas></canvas><small>${esc(d.label || LOOK_NAMES[d.look] || d.look)}</small></button>`).join('')}</div>
     </div>`;
     P.foot.innerHTML = `<button type="button" class="fs-ghost" data-act="back">${ic('back')}<span>Details</span></button><button type="button" class="fs-ghost" data-act="again">${ic('refresh')}<span>New pictures</span></button>`;
     paintThumbs();

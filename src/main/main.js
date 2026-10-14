@@ -776,6 +776,7 @@ const flyerart = require('./flyerart');
 ipcMain.handle('flyer:status', wrap(async () => flyerart.status()));
 ipcMain.handle('flyer:direct', wrap(async (e, a) => flyerart.direct((a && a.fields) || {})));
 ipcMain.handle('flyer:paint', wrap(async (e, a) => flyerart.paint(a || {})));
+ipcMain.handle('flyer:paintWith', wrap(async (e, a) => flyerart.paintWith(a || {})));
 ipcMain.handle('flyer:kitGet', wrap(async () => flyerart.kitGet()));
 ipcMain.handle('flyer:kitSave', wrap(async (e, a) => flyerart.kitSave((a && a.kit) || {})));
 ipcMain.handle('flyer:kitPic', wrap(async (e, a) => flyerart.kitPic(a && a.name)));

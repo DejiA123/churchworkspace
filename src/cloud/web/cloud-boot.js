@@ -603,6 +603,7 @@ let _hideTimer = null;
       status: () => call('flyer:status'),
       direct: (fields) => call('flyer:direct', { fields }),
       paint: (a) => call('flyer:paint', a),
+      paintWith: (a) => call('flyer:paintWith', a),
       kitGet: () => call('flyer:kitGet'),
       kitSave: (kit) => call('flyer:kitSave', { kit }),
       kitPic: (name) => call('flyer:kitPic', { name }),

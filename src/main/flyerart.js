@@ -46,9 +46,9 @@ const polKey = () => env('POLLINATIONS_API_KEY', 'POLLINATIONS_TOKEN');
  * daily allowance: the bigger models use more of it per picture.
  */
 const CF_MODELS = [
-  { id: '@cf/black-forest-labs/flux-2-dev', name: 'FLUX.2 [dev]', form: true },
+  { id: '@cf/black-forest-labs/flux-2-dev', name: 'FLUX.2 [dev]', form: true, refs: true },
   { id: '@cf/leonardo/lucid-origin', name: 'Lucid Origin', form: false, json: (prompt, size, seed) => ({ prompt: prompt.slice(0, 2000), width: size.w, height: size.h, seed, guidance: 4.5, num_steps: 30 }) },
-  { id: '@cf/black-forest-labs/flux-2-klein-4b', name: 'FLUX.2 klein', form: true },
+  { id: '@cf/black-forest-labs/flux-2-klein-4b', name: 'FLUX.2 klein', form: true, refs: true },
   { id: '@cf/black-forest-labs/flux-1-schnell', name: 'FLUX.1', form: false },
 ];
 // a model that refused (not on this account, a changed name) is skipped for a while, not asked every time
@@ -126,10 +126,11 @@ async function imageFrom(res) {
   return { buf, mime };
 }
 
-async function paintCloudflare(prompt, size, seed) {
+async function paintCloudflare(prompt, size, seed, refs) {
   const errs = [];
   for (const m of CF_MODELS) {
-    if (benchedNow(m.id)) continue;
+    if (benchedNow(m.id + (refs ? '+refs' : ''))) continue;
+    if (refs && !m.refs) continue;   // a picture with the preacher in it needs a model that takes reference photos
     const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cfAccount())}/ai/run/${m.id}`;
     const headers = { authorization: `Bearer ${cfToken()}` };
     let body;
@@ -139,6 +140,8 @@ async function paintCloudflare(prompt, size, seed) {
       body.append('width', String(size.w));
       body.append('height', String(size.h));
       if (seed != null) body.append('seed', String(seed));
+      // FLUX.2 takes reference photos as input_image_0, input_image_1… (multipart)
+      (refs || []).slice(0, 4).forEach((r, i) => body.append('input_image_' + i, new Blob([r.buf], { type: r.mime }), 'ref' + i + (r.mime === 'image/png' ? '.png' : '.jpg')));
     } else {
       headers['content-type'] = 'application/json';
       body = JSON.stringify(m.json ? m.json(prompt, size, seed) : { prompt: prompt.slice(0, 2000), steps: 8, seed });
@@ -149,7 +152,7 @@ async function paintCloudflare(prompt, size, seed) {
       if (res.status === 429) throw Object.assign(new Error('today’s free Cloudflare allowance is used up (it comes back at 01:00)'), { fatal: true });
       if (!res.ok) {
         const t = await res.text().catch(() => '');
-        if (res.status === 400 || res.status === 404) benched.set(m.id, Date.now() + 6 * 3600e3);
+        if (res.status === 400 || res.status === 404) benched.set(m.id + (refs ? '+refs' : ''), Date.now() + 6 * 3600e3);
         throw new Error(`${m.name}: ${res.status} ${t.slice(0, 160)}`);
       }
       const out = await imageFrom(res);
@@ -200,6 +203,44 @@ async function paint({ scene, w = 1080, h = 1350, seed, people = true } = {}) {
     try { out = await paintPollinations(prompt, size, s); } catch (e) { errs.push(e.message); }
   }
   if (!out) throw new Error(errs.join(' · ') || 'no painter could be reached');
+  return { dataUrl: `data:${out.mime};base64,${out.buf.toString('base64')}`, by: out.by, prompt, seed: s };
+}
+
+/*
+ * ►► THE PREACHER PAINTED INTO THE SCENE. ◄◄ Not a cut-out laid on a picture:
+ * their photo goes to FLUX.2 as a reference, and the model paints them into
+ * the scene itself — lit by its stage lights, haze round them, the colour of
+ * the place on their suit — the way the designers' flyers look. The model may
+ * change a face a little, so these are offered as their own designs and the
+ * operator looks before posting. Cloudflare only (Pollinations takes no
+ * reference photos). → { dataUrl, by, prompt, seed }
+ */
+function paintWithPrompt(scene, who) {
+  return [
+    'Photograph for a church event flyer: the man in the reference image, exactly the same person — the same face, skin tone, hairline, beard and clothes — ' + (who || 'preaching with passion') + ', seen from the chest up, in the lower half of the frame and a little off-centre',
+    'he stands in this scene: ' + String(scene || 'a worship stage with golden stage lights and haze').slice(0, 400),
+    'lit by the scene itself: a strong rim light behind him in the scene\'s colour, soft warm light on his face, atmospheric haze around him, shallow depth of field, the background softly out of focus',
+    'the upper third of the frame open and darker for a headline',
+    'professional event photography, photorealistic, sharp detail on the face, cinematic colour grade',
+    'not an illustration, not a cartoon, not 3D render',
+    NO_TEXT,
+  ].join(', ');
+}
+function refOf(dataUrl) {
+  const m = /^data:(image\/(?:png|jpeg|webp));base64,(.+)$/i.exec(String(dataUrl || ''));
+  if (!m) return null;
+  const buf = Buffer.from(m[2], 'base64');
+  if (buf.length > 3 * 1024 * 1024) throw new Error('That reference photo is too big.');
+  return { buf, mime: m[1].toLowerCase() };
+}
+async function paintWith({ scene, w = 1080, h = 1350, seed, refs = [], who } = {}) {
+  if (!(cfAccount() && cfToken())) throw new Error('Painting the preacher into the picture needs the free Cloudflare account on the server (see CLOUD.md).');
+  const rs = (Array.isArray(refs) ? refs : []).map(refOf).filter(Boolean).slice(0, 2);
+  if (!rs.length) throw new Error('No photo of the preacher was sent.');
+  const prompt = paintWithPrompt(scene, who);
+  const size = sizeFor(w, h);
+  const s = Number.isFinite(+seed) ? Math.abs(Math.round(+seed)) % 2147483647 : Math.floor(Math.random() * 1e9);
+  const out = await paintCloudflare(prompt, size, s, rs);
   return { dataUrl: `data:${out.mime};base64,${out.buf.toString('base64')}`, by: out.by, prompt, seed: s };
 }
 
@@ -679,4 +720,4 @@ function kitUsed({ speaker, photo } = {}) {
   return true;
 }
 
-module.exports = { kitAddPhoto, inspoAdd, inspoRemove, stockPhotos, stockPath, PHOTO_TAGS, status, paint, direct, init, kitGet, kitSave, kitPic, kitUsed, paintPrompt, sizeFor, directByRules, imageFrom, LOOKS };
+module.exports = { paintWith, paintWithPrompt, kitAddPhoto, inspoAdd, inspoRemove, stockPhotos, stockPath, PHOTO_TAGS, status, paint, direct, init, kitGet, kitSave, kitPic, kitUsed, paintPrompt, sizeFor, directByRules, imageFrom, LOOKS };
