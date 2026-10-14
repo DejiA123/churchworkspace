@@ -1562,8 +1562,11 @@
   /* the address as a flyer prints it: not the church's name again, three parts at most */
   function venueParts(D) {
     let parts = String(D.f.venue || '').split(/\s*,\s*/).filter(Boolean);
-    const ch = String(D.f.church || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
-    if (parts.length > 1 && ch && parts[0].toLowerCase().replace(/[^a-z0-9]+/g, '') === ch) parts = parts.slice(1);
+    // "The Power House Int'l, Galway" under "The Power House International": the name is not printed twice
+    const words = (t) => String(t || '').toLowerCase().replace(/\bint'?l\b|\bintl\b/g, 'international').replace(/\bmin\b\.?/g, 'ministries')
+      .replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter((w) => w && w !== 'the').join(' ');
+    const ch = words(D.f.church), v0 = words(parts[0]);
+    if (parts.length > 1 && ch && v0 && (v0 === ch || (v0.split(' ').length >= 2 && (ch.startsWith(v0 + ' ') || v0.startsWith(ch + ' '))))) parts = parts.slice(1);
     return parts.slice(0, 3);
   }
   const venueText = (D) => venueParts(D).join(', ');
