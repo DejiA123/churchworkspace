@@ -117,7 +117,7 @@ app.whenReady().then(async () => {
   log(rf.reframeOn === true, 'the exporter sees auto-reframe as ON');
 
   /* ---------- [3][4][5] caption defaults ---------------------------------- */
-  console.log('\n[2] Caption defaults: ALL CAPS · Montserrat · XS · Box word');
+  console.log('\n[2] Caption defaults: ALL CAPS · Montserrat · XS · Outline');
   const caps = await js(win, `
     const T = window.VideoEditor.__test;
     // a fresh install has nothing saved — that is what "by default" means
@@ -129,8 +129,8 @@ app.whenReady().then(async () => {
   log(caps.case === 'upper', 'Case is ALL CAPS', caps.case);
   log(caps.font === 'Montserrat', 'Font is Montserrat', caps.font);
   log(caps.size === 'xs', 'Size is XS', caps.size);
-  log(caps.style === 'boxword' && caps.fresh === 'boxword', 'Style is Box word (yellow, following the voice)', caps.style);
-  log(caps.key === 'mw-cap-style-v3',
+  log(caps.style === 'outline' && caps.fresh === 'outline', 'Style is Outline', caps.style);
+  log(caps.key === 'mw-cap-style-v4',
     'the saved-style key was bumped, so an old stored look cannot override the new default', caps.key);
 
   const sticky = await js(win, `

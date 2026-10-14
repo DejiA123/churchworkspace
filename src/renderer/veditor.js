@@ -66,7 +66,7 @@
     music: null,       // { id, name, file, durationSec, volume, fadeIn, fadeOut, duck, bed, tlStart, len }
     outro: null,       // a library clip appended to every short
     outroAll: true,
-    capStyleId: 'boxword', // which visual caption look is selected — Box word, yellow, following the voice, from the start
+    capStyleId: 'outline', // which visual caption look is selected — Outline (white, black edge) from the start
     /*
      * Where the captions sit, as fractions of the EXPORT FRAME (not the preview
      * window, which is a different shape and size on every screen). null means
@@ -11318,7 +11318,7 @@
    * read on a phone, and it survives being posted over any background (the
    * church asked for Montserrat and XS as the starting point; Size is #capSize). Case lives on #capCase and
    * the font on #capFont (both set in the markup / font list); this is the look. */
-  const DEFAULT_CAP_STYLE = 'boxword';   // Box word, yellow, following the voice
+  const DEFAULT_CAP_STYLE = 'outline';   // Outline: white letters, a black edge (the church asked for it over Box word)
   const DEFAULT_CAP_FONT = 'Montserrat';
   const DEFAULT_CAP_TRANS = 'pop';
   /*
@@ -14190,10 +14190,11 @@
   // capStyle is on a -v2 key: the shipped default moved from Clean to Outline, and
   // a value stored under the old key would quietly keep overriding it. Bumping the
   // key hands everyone the new default once; anything picked from now on sticks.
-  const LIB_KEYS = { music: 'mw-ve-music', outro: 'mw-ve-outro', capStyle: 'mw-cap-style-v3', capLook: 'mw-cap-look-v2' };
+  const LIB_KEYS = { music: 'mw-ve-music', outro: 'mw-ve-outro', capStyle: 'mw-cap-style-v4', capLook: 'mw-cap-look-v2' };
   // v3/v2: Box word in yellow, following the voice, became the default — a look
   // stored under the old keys was the old default, not a choice; where the words
-  // sit and how wide they wrap (dragged by hand) are carried over below
+  // sit and how wide they wrap (dragged by hand) are carried over below.
+  // v4: Outline is the default now; a Box word stored under v3 was that old default.
   const outNameFor = (p) => String(p).split(/[\\/]/).pop().replace(/\.[^.]+$/, '').replace(/-\d{8}-\d{6}$/, '').slice(0, 50) || 'clip';
   const fmtDur = (s) => { s = Math.max(0, Math.round(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 
