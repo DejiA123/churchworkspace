@@ -4041,9 +4041,3 @@ body.mw-cloud.mw-home .cloud-home { background: #f4f1fb; color: #1b1630; }
 @media (min-width: 900px) { .ch-bar { display: none; } .cloud-home .ch-scroll { padding-bottom: 40px; } }
 /* one help button on Home (the guide's own "?" sits on the other screens) */
 .cloud-home .ch-ask { display: none; }
-/* Premium AI (Puter) on the Pick screen: a gold-to-violet button beside New pictures */
-.fs-go.fs-premium { flex: 0 0 auto; padding: 0 16px; min-height: 48px; background: linear-gradient(120deg, #f59e0b, #a21caf 60%, #6d28d9); color: #fff; }
-.fs-premium-models { flex-wrap: wrap; overflow: visible; margin: 10px 0 0; padding: 0; }
-.fs-premium-models .fs-occ { min-width: 0; flex: 1 1 45%; }
-.fs-premium-auto { display: flex; align-items: center; gap: 10px; margin: 14px 2px 0; font-size: 14px; font-weight: 600; color: #1b1630; }
-.fs-premium-auto input { width: 20px; height: 20px; accent-color: #7c3aed; }
