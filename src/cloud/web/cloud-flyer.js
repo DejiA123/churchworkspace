@@ -1560,14 +1560,23 @@
   const HON = /^((?:rt\.?\s+)?(?:rev(?:erend|d)?\.?\s+)?(?:dr\.?\s+)?(?:arch\s*bishop|bishop|apostle|prophet(?:ess)?|pastor|pst\.?|rev(?:erend|d)?\.?|evang(?:elist)?\.?|dr\.?|min(?:ister)?\.?|elder|deacon(?:ess)?|bro(?:ther)?\.?|sis(?:ter)?\.?|mrs?\.?|ms\.?|prof\.?))\s+/i;
   function nameParts(n) { const s = String(n || '').trim(); const m = HON.exec(s); return m && s.length > m[0].length ? { title: m[1], name: s.slice(m[0].length) } : { title: '', name: s }; }
   /* the address as a flyer prints it: not the church's name again, three parts at most */
+  // "The Power House Int'l Galway (H91 958A)" under "The Power House International": the name is not printed twice
+  const nameWords = (t) => String(t || '').toLowerCase().replace(/\bint'?l\b|\bintl\b/g, 'international').replace(/\bmin\b\.?/g, 'ministries')
+    .replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter((w) => w && w !== 'the').join(' ');
+  function withoutChurch(venue, church) {
+    const ch = nameWords(church), v = String(venue || '').trim();
+    if (!ch || !v) return v;
+    // the shortest start of the address that reads as the church's name (with or without a comma after it)
+    const re = /[\s,;:\-–—]+/g; let m;
+    while ((m = re.exec(v))) {
+      const head = v.slice(0, m.index), rest = v.slice(m.index + m[0].length).trim();
+      if (!rest) break;
+      if (nameWords(head) === ch) return rest;
+    }
+    return v;
+  }
   function venueParts(D) {
-    let parts = String(D.f.venue || '').split(/\s*,\s*/).filter(Boolean);
-    // "The Power House Int'l, Galway" under "The Power House International": the name is not printed twice
-    const words = (t) => String(t || '').toLowerCase().replace(/\bint'?l\b|\bintl\b/g, 'international').replace(/\bmin\b\.?/g, 'ministries')
-      .replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter((w) => w && w !== 'the').join(' ');
-    const ch = words(D.f.church), v0 = words(parts[0]);
-    if (parts.length > 1 && ch && v0 && (v0 === ch || (v0.split(' ').length >= 2 && (ch.startsWith(v0 + ' ') || v0.startsWith(ch + ' '))))) parts = parts.slice(1);
-    return parts.slice(0, 3);
+    return withoutChurch(D.f.venue, D.f.church).split(/\s*,\s*/).filter(Boolean).slice(0, 3);
   }
   const venueText = (D) => venueParts(D).join(', ');
   const venueLines = (D, n) => { const p = venueParts(D); if (p.length <= n) return p.join(',\n'); return [p.slice(0, p.length - n + 1).join(', ')].concat(p.slice(p.length - n + 1)).join(',\n'); };
