@@ -39,18 +39,24 @@ const polKey = () => env('POLLINATIONS_API_KEY', 'POLLINATIONS_TOKEN');
 
 /* Cloudflare's models, best first. `form`: the FLUX.2 family takes multipart form fields, even for a prompt alone. */
 /*
- * Best first. FLUX.2 [dev] is the full model (klein, the 4B one, is its small,
- * fast cousin); Lucid Origin is Leonardo's photoreal model. A model this
- * account does not have answers 400/404 and is skipped for six hours (benched),
- * so the list costs nothing where a model is missing. All draw on the same free
- * daily allowance: the bigger models use more of it per picture.
+ * WHAT A PICTURE COSTS OF THE FREE 10,000 NEURONS A DAY (Cloudflare's price
+ * list, a 1088x1360 flyer picture): FLUX.2 klein about 150, FLUX.1 schnell
+ * about 460, Lucid Origin about 3,900, FLUX.2 [dev] about 5,000. The big two
+ * spend the whole day in two pictures (that is what happened), so on the free
+ * plan the studio paints with klein — which also takes the preacher's photo as
+ * a reference — and schnell as its spare. With a paid Workers plan
+ * (CLOUDFLARE_PAID=1 on the server) the big ones go first.
  */
-const CF_MODELS = [
-  { id: '@cf/black-forest-labs/flux-2-dev', name: 'FLUX.2 [dev]', form: true, refs: true },
-  { id: '@cf/leonardo/lucid-origin', name: 'Lucid Origin', form: false, json: (prompt, size, seed) => ({ prompt: prompt.slice(0, 2000), width: size.w, height: size.h, seed, guidance: 4.5, num_steps: 30 }) },
+const CF_CHEAP = [
   { id: '@cf/black-forest-labs/flux-2-klein-4b', name: 'FLUX.2 klein', form: true, refs: true },
   { id: '@cf/black-forest-labs/flux-1-schnell', name: 'FLUX.1', form: false },
 ];
+const CF_BIG = [
+  { id: '@cf/black-forest-labs/flux-2-dev', name: 'FLUX.2 [dev]', form: true, refs: true },
+  { id: '@cf/leonardo/lucid-origin', name: 'Lucid Origin', form: false, json: (prompt, size, seed) => ({ prompt: prompt.slice(0, 2000), width: size.w, height: size.h, seed, guidance: 4.5, num_steps: 30 }) },
+];
+const cfPaid = () => /^(1|true|yes)$/i.test(String(process.env.CLOUDFLARE_PAID || ''));
+const cfModels = () => (cfPaid() ? CF_BIG.concat(CF_CHEAP) : CF_CHEAP);
 // a model that refused (not on this account, a changed name) is skipped for a while, not asked every time
 const benched = new Map();
 const benchedNow = (id) => (benched.get(id) || 0) > Date.now();
@@ -128,7 +134,7 @@ async function imageFrom(res) {
 
 async function paintCloudflare(prompt, size, seed, refs) {
   const errs = [];
-  for (const m of CF_MODELS) {
+  for (const m of cfModels()) {
     if (benchedNow(m.id + (refs ? '+refs' : ''))) continue;
     if (refs && !m.refs) continue;   // a picture with the preacher in it needs a model that takes reference photos
     const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cfAccount())}/ai/run/${m.id}`;
@@ -150,7 +156,13 @@ async function paintCloudflare(prompt, size, seed, refs) {
       const res = await fetchTimed(url, { method: 'POST', headers, body }, 120000);
       if (res.status === 401 || res.status === 403) throw Object.assign(new Error('the Cloudflare token was refused — it needs “Workers AI: Read”'), { fatal: true });
       // busy or over a limit: this model (a big one costs more of the allowance) — the next, smaller one may still paint
-      if (res.status === 429) { benched.set(m.id + (refs ? '+refs' : ''), Date.now() + 20 * 60e3); throw new Error(m.name + ': today’s free Cloudflare allowance is used up, or it is busy'); }
+      if (res.status === 429) {
+        const t = await res.text().catch(() => '');
+        // the day's free neurons are shared by every model: no point asking the next one
+        if (/daily free allocation|neurons/i.test(t)) throw Object.assign(new Error('today’s free Cloudflare allowance (10,000 neurons) is used up — it comes back at midnight UTC (1am in Ireland)'), { fatal: true });
+        benched.set(m.id + (refs ? '+refs' : ''), Date.now() + 20 * 60e3);
+        throw new Error(m.name + ': Cloudflare is busy');
+      }
       if (!res.ok) {
         const t = await res.text().catch(() => '');
         if (res.status === 400 || res.status === 404) benched.set(m.id + (refs ? '+refs' : ''), Date.now() + 6 * 3600e3);
@@ -253,7 +265,7 @@ async function paintWith({ scene, w = 1080, h = 1350, seed, refs = [], who } = {
 async function cfDiagnose() {
   if (!(cfAccount() && cfToken())) return [{ model: 'Cloudflare', ok: false, said: 'no account id / token on the server' }];
   const out = [];
-  for (const m of CF_MODELS) {
+  for (const m of cfModels()) {
     const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cfAccount())}/ai/run/${m.id}`;
     const headers = { authorization: `Bearer ${cfToken()}` };
     let body;
