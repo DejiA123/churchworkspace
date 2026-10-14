@@ -182,6 +182,26 @@
     { id: 'Luckiest Guy', file: 'LuckiestGuy-Regular.ttf', kind: 'display' },
     { id: 'Bangers', file: 'Bangers-Regular.ttf', kind: 'display' },
     { id: 'Sigmar One', file: 'SigmarOne-Regular.ttf', kind: 'display' },
+    // the faces those Pinterest flyers are actually set in: heavy italics (TONGUES SERVICE, PRAYER WALK),
+    // ultra-condensed (SUNDAY), Didone serifs (GLORY OF GOD, PROPHETIC MANTLE), blackletter (By His Spirit, Praise Altar),
+    // and the signature scripts written over names ("with", "Pst")
+    { id: 'Kanit Black', file: 'Kanit-Black.ttf', kind: 'display' },
+    { id: 'Kanit Italic', file: 'Kanit-BlackItalic.ttf', kind: 'display' },
+    { id: 'Montserrat Black', file: 'Montserrat-Black.ttf', kind: 'display' },
+    { id: 'Montserrat Italic', file: 'Montserrat-BlackItalic.ttf', kind: 'display' },
+    { id: 'Barlow Black', file: 'BarlowCondensed-Black.ttf', kind: 'display' },
+    { id: 'Barlow Black Italic', file: 'BarlowCondensed-BlackItalic.ttf', kind: 'display' },
+    { id: 'Six Caps', file: 'SixCaps.ttf', kind: 'display' },
+    { id: 'Bodoni', file: 'BodoniModa-Bold.ttf', kind: 'serif' },
+    { id: 'Bodoni Light', file: 'BodoniModa-Regular.ttf', kind: 'serif' },
+    { id: 'Playfair Black', file: 'PlayfairDisplay-Black.ttf', kind: 'serif' },
+    { id: 'Cinzel Decorative', file: 'CinzelDecorative-Black.ttf', kind: 'serif' },
+    { id: 'Blackletter', file: 'UnifrakturCook-Bold.ttf', kind: 'serif' },
+    { id: 'Pirata One', file: 'PirataOne-Regular.ttf', kind: 'serif' },
+    { id: 'Allura', file: 'Allura-Regular.ttf', kind: 'script' },
+    { id: 'Sacramento', file: 'Sacramento-Regular.ttf', kind: 'script' },
+    { id: 'Signature', file: 'MonsieurLaDoulaise-Regular.ttf', kind: 'script' },
+    { id: 'Saint Delafield', file: 'MrsSaintDelafield-Regular.ttf', kind: 'script' },
   ];
   const fam = (id) => `"FL ${id}"`;
   let fontsReady = null;
@@ -348,6 +368,78 @@
   }
   const fillOf = (x, f, w, h) => gradAt(x, f, 0, 0, w, h);
 
+  /* a shape with holes in it (a pin's eye, a brush's bristles, an icon) is made on its own canvas, then laid on */
+  function cutShape(x, w, h, fn) {
+    const pad = 4, c = canvas((w + pad * 2) * Q, (h + pad * 2) * Q), cx = c.getContext('2d');
+    cx.setTransform(Q, 0, 0, Q, (w / 2 + pad) * Q, (h / 2 + pad) * Q);
+    fn(cx);
+    x.drawImage(c, -w / 2 - pad, -h / 2 - pad, w + pad * 2, h + pad * 2);
+  }
+  /*
+   * THE ICONS a flyer's details sit by — drawn, so they are sharp at any size
+   * and take the flyer's colour: a clock by the time, a calendar by the date,
+   * a pin by the address, a phone by the number, and the apps by the handles.
+   * Centred on 0, `s` across, in the current fill colour.
+   */
+  function drawIcon(x, kind, s) {
+    const lw = s * 0.11, hole = () => { x.globalCompositeOperation = 'destination-out'; }, back = () => { x.globalCompositeOperation = 'source-over'; };
+    x.lineCap = 'round'; x.lineJoin = 'round'; x.strokeStyle = x.fillStyle; x.lineWidth = lw;
+    const ring = (r) => { x.beginPath(); x.arc(0, 0, r, 0, Math.PI * 2); x.stroke(); };
+    switch (kind) {
+      case 'pin':
+        x.beginPath(); x.arc(0, -s * 0.12, s * 0.34, Math.PI * 0.85, Math.PI * 2.15); x.lineTo(0, s * 0.48); x.closePath(); x.fill();
+        hole(); x.beginPath(); x.arc(0, -s * 0.12, s * 0.13, 0, Math.PI * 2); x.fill(); back(); break;
+      case 'clock':
+        ring(s * 0.42);
+        x.beginPath(); x.moveTo(0, -s * 0.24); x.lineTo(0, 0); x.lineTo(s * 0.17, s * 0.1); x.stroke(); break;
+      case 'calendar':
+        roundRect(x, -s * 0.42, -s * 0.34, s * 0.84, s * 0.78, s * 0.1); x.stroke();
+        x.fillRect(-s * 0.42, -s * 0.34, s * 0.84, s * 0.2);
+        x.beginPath(); x.moveTo(-s * 0.2, -s * 0.48); x.lineTo(-s * 0.2, -s * 0.26); x.moveTo(s * 0.2, -s * 0.48); x.lineTo(s * 0.2, -s * 0.26); x.stroke();
+        for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) x.fillRect(-s * 0.27 + i * s * 0.2, s * 0.0 + j * s * 0.17, s * 0.12, s * 0.1);
+        break;
+      case 'phone':
+        x.save(); x.rotate(-Math.PI / 4);
+        roundRect(x, -s * 0.09, -s * 0.36, s * 0.18, s * 0.72, s * 0.09); x.fill();
+        roundRect(x, -s * 0.2, -s * 0.48, s * 0.4, s * 0.2, s * 0.08); x.fill();
+        roundRect(x, -s * 0.2, s * 0.28, s * 0.4, s * 0.2, s * 0.08); x.fill();
+        x.restore(); break;
+      case 'ig':
+        x.lineWidth = s * 0.1; roundRect(x, -s * 0.42, -s * 0.42, s * 0.84, s * 0.84, s * 0.24); x.stroke();
+        ring(s * 0.18); x.beginPath(); x.arc(s * 0.24, -s * 0.24, s * 0.06, 0, Math.PI * 2); x.fill(); break;
+      case 'fb':
+        x.beginPath(); x.arc(0, 0, s * 0.46, 0, Math.PI * 2); x.fill();
+        hole(); x.font = `${s * 0.78}px ${fam('Montserrat Black')}, "Arial Black", sans-serif`; x.textAlign = 'center'; x.textBaseline = 'alphabetic'; x.fillText('f', s * 0.04, s * 0.4); back(); break;
+      case 'yt':
+        roundRect(x, -s * 0.48, -s * 0.32, s * 0.96, s * 0.64, s * 0.18); x.fill();
+        hole(); x.beginPath(); x.moveTo(-s * 0.12, -s * 0.16); x.lineTo(s * 0.2, 0); x.lineTo(-s * 0.12, s * 0.16); x.closePath(); x.fill(); back(); break;
+      case 'x':
+        x.lineWidth = s * 0.09; x.beginPath(); x.moveTo(-s * 0.36, -s * 0.4); x.lineTo(s * 0.36, s * 0.4); x.moveTo(s * 0.36, -s * 0.4); x.lineTo(-s * 0.36, s * 0.4); x.stroke(); break;
+      case 'tiktok':
+        x.lineWidth = s * 0.14; x.beginPath(); x.moveTo(s * 0.04, -s * 0.44); x.lineTo(s * 0.04, s * 0.2); x.stroke();
+        x.beginPath(); x.arc(-s * 0.13, s * 0.22, s * 0.18, 0, Math.PI * 2); x.stroke();
+        x.beginPath(); x.moveTo(s * 0.04, -s * 0.42); x.quadraticCurveTo(s * 0.14, -s * 0.2, s * 0.36, -s * 0.18); x.stroke(); break;
+      case 'globe':
+        ring(s * 0.42); x.lineWidth = lw * 0.7;
+        x.beginPath(); x.ellipse(0, 0, s * 0.18, s * 0.42, 0, 0, Math.PI * 2); x.stroke();
+        x.beginPath(); x.moveTo(-s * 0.42, 0); x.lineTo(s * 0.42, 0); x.moveTo(-s * 0.36, -s * 0.2); x.lineTo(s * 0.36, -s * 0.2); x.moveTo(-s * 0.36, s * 0.2); x.lineTo(s * 0.36, s * 0.2); x.stroke(); break;
+      case 'mail':
+        roundRect(x, -s * 0.44, -s * 0.3, s * 0.88, s * 0.6, s * 0.06); x.stroke();
+        x.beginPath(); x.moveTo(-s * 0.4, -s * 0.24); x.lineTo(0, s * 0.06); x.lineTo(s * 0.4, -s * 0.24); x.stroke(); break;
+      case 'mic':
+        roundRect(x, -s * 0.13, -s * 0.46, s * 0.26, s * 0.52, s * 0.13); x.fill();
+        x.beginPath(); x.arc(0, -s * 0.06, s * 0.27, 0.1 * Math.PI, 0.9 * Math.PI); x.stroke();
+        x.beginPath(); x.moveTo(0, s * 0.22); x.lineTo(0, s * 0.42); x.moveTo(-s * 0.16, s * 0.43); x.lineTo(s * 0.16, s * 0.43); x.stroke(); break;
+      case 'live':
+        x.beginPath(); x.arc(0, 0, s * 0.16, 0, Math.PI * 2); x.fill();
+        x.lineWidth = s * 0.08;
+        [0.3, 0.44].forEach((r) => { x.beginPath(); x.arc(0, 0, s * r, -0.3 * Math.PI, 0.3 * Math.PI); x.stroke(); x.beginPath(); x.arc(0, 0, s * r, 0.7 * Math.PI, 1.3 * Math.PI); x.stroke(); });
+        break;
+      default: x.beginPath(); x.arc(0, 0, s * 0.4, 0, Math.PI * 2); x.fill();
+    }
+    back();
+  }
+
   function drawShape(x, L) {
     const w = L.w, h = L.h;
     x.fillStyle = fillOf(x, L.fill, w, h);
@@ -377,18 +469,66 @@
         x.globalCompositeOperation = 'screen'; x.fillStyle = g; x.beginPath(); x.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2); x.fill(); x.globalCompositeOperation = 'source-over';
         break;
       }
-      case 'pin': {
-        const s = Math.min(w, h);
-        x.beginPath(); x.arc(0, -s * 0.12, s * 0.34, Math.PI * 0.85, Math.PI * 2.15); x.lineTo(0, s * 0.48); x.closePath(); x.fill();
-        x.globalCompositeOperation = 'destination-out'; x.beginPath(); x.arc(0, -s * 0.12, s * 0.13, 0, Math.PI * 2); x.fill(); x.globalCompositeOperation = 'source-over';
-        break;
-      }
+      case 'pin': cutShape(x, w, h, (c) => { c.fillStyle = fillOf(c, L.fill, w, h); drawIcon(c, 'pin', Math.min(w, h)); }); break;
       case 'fade': {
         const g = x.createLinearGradient(0, -h / 2, 0, h / 2);
         const col = typeof L.fill === 'string' ? L.fill : '#000000';
         g.addColorStop(0, rgba(col, 0)); g.addColorStop(0.55, rgba(col, (L.strength || 0.85) * 0.75)); g.addColorStop(1, rgba(col, L.strength || 0.85));
         x.fillStyle = g; x.fillRect(-w / 2, -h / 2, w, h); break;
       }
+      /* a banner with a notched tail — JOIN US FOR OUR, THEME:, NIGHT OF */
+      case 'ribbon': {
+        const k = Math.min(h * 0.45, w * 0.18), side = L.tail || 'right';
+        x.beginPath(); x.moveTo(-w / 2, -h / 2); x.lineTo(w / 2, -h / 2);
+        if (side === 'right' || side === 'both') { x.lineTo(w / 2 - k, 0); }
+        x.lineTo(w / 2, h / 2); x.lineTo(-w / 2, h / 2);
+        if (side === 'left' || side === 'both') x.lineTo(-w / 2 + k, 0);
+        x.closePath(); x.fill(); break;
+      }
+      /* >>>>> — the row of arrows that leads into an address */
+      case 'chevrons': {
+        const n = L.n || 5, cw = w / n, t = Math.max(2, cw * 0.32), a = Math.min(cw * 0.5, h * 0.42), dir = L.dir === 'left' ? -1 : 1;
+        x.save(); if (dir < 0) x.scale(-1, 1);
+        for (let i = 0; i < n; i++) {
+          const x0 = -w / 2 + cw * i;
+          x.globalAlpha = L.trail ? 0.35 + 0.65 * (i + 1) / n : 1;
+          x.beginPath(); x.moveTo(x0, -h / 2); x.lineTo(x0 + t, -h / 2); x.lineTo(x0 + t + a, 0); x.lineTo(x0 + t, h / 2); x.lineTo(x0, h / 2); x.lineTo(x0 + a, 0); x.closePath(); x.fill();
+        }
+        x.restore(); break;
+      }
+      /* a swoosh: a crescent of colour that thins to nothing at both ends (the orange arc under a line-up) */
+      case 'swoosh': {
+        const up = L.bend == null ? 1 : L.bend, N = 48, th = L.thick || h * 0.22, base = (h / 2 - th / 2) * (up < 0 ? -1 : 1);
+        const pt = (s) => [-w / 2 + w * s, base - (h - th) * 4 * s * (1 - s) * up];
+        const top = [], bot = [];
+        for (let i = 0; i <= N; i++) {
+          const s = i / N, [px, py] = pt(s), [qx, qy] = pt(Math.min(1, s + 1 / N)), [rx, ry] = pt(Math.max(0, s - 1 / N));
+          const dx = qx - rx, dy = qy - ry, l = Math.hypot(dx, dy) || 1, nx = -dy / l, ny = dx / l, t = th * Math.pow(Math.sin(Math.PI * s), 0.7) / 2;
+          top.push([px + nx * t, py + ny * t]); bot.push([px - nx * t, py - ny * t]);
+        }
+        x.beginPath(); top.forEach(([px, py], i) => (i ? x.lineTo(px, py) : x.moveTo(px, py))); bot.reverse().forEach(([px, py]) => x.lineTo(px, py)); x.closePath(); x.fill();
+        break;
+      }
+      /* a stroke of paint with dry, broken ends — under a THEME word, a date, a name */
+      case 'brush': cutShape(x, w, h, (x) => {
+        x.fillStyle = fillOf(x, L.fill, w, h);
+        const r = rng(L.seed || 5), step = 6;
+        x.beginPath(); x.moveTo(-w / 2 + r() * 14, -h / 2 + r() * 4);
+        for (let px = -w / 2; px <= w / 2; px += step) x.lineTo(px, -h / 2 + (r() - 0.5) * h * 0.08 + (Math.abs(px) > w * 0.42 ? r() * h * 0.25 : 0));
+        for (let py = -h / 2; py <= h / 2; py += step) x.lineTo(w / 2 - r() * w * 0.04, py);
+        for (let px = w / 2; px >= -w / 2; px -= step) x.lineTo(px, h / 2 + (r() - 0.5) * h * 0.08 - (Math.abs(px) > w * 0.42 ? r() * h * 0.25 : 0));
+        for (let py = h / 2; py >= -h / 2; py -= step) x.lineTo(-w / 2 + r() * w * 0.03, py);
+        x.closePath(); x.fill();
+        // the bristles: thin dry streaks through the ends
+        x.globalCompositeOperation = 'destination-out';
+        for (let i = 0; i < 26; i++) {
+          const yy = -h / 2 + r() * h, len = w * (0.04 + r() * 0.16), left = r() > 0.5;
+          x.fillRect(left ? -w / 2 - 2 : w / 2 - len + 2, yy, len, Math.max(1, r() * h * 0.05));
+        }
+        x.globalCompositeOperation = 'source-over';
+      }); break;
+      /* the little icons by the details: clock, calendar, phone, and the social apps */
+      case 'icon': cutShape(x, w, h, (c) => { c.fillStyle = fillOf(c, L.fill, w, h); drawIcon(c, L.icon || 'clock', Math.min(w, h)); }); break;
       default: x.fillRect(-w / 2, -h / 2, w, h);
     }
     x.shadowColor = 'transparent';
@@ -489,6 +629,17 @@
         }
         break;
       }
+      /* shards of stone flying off the foot of a title (BREAK EVERY CHAIN) */
+      case 'debris': {
+        x.globalCompositeOperation = 'source-over';
+        for (let i = 0; i < (L.n || 60); i++) {
+          const px = L.x - L.w / 2 + r() * L.w, py = L.y - L.h / 2 + r() * L.h, sz = 3 + r() * r() * (L.size || 16);
+          x.save(); x.translate(px, py); x.rotate(r() * Math.PI * 2);
+          x.fillStyle = r() > 0.78 ? rgba(c1, 0.95) : rgba(mix(p.deep, '#000000', 0.5), 0.92);
+          x.beginPath(); x.moveTo(-sz, -sz * 0.4); x.lineTo(sz * 0.6, -sz * 0.75); x.lineTo(sz, sz * 0.3); x.lineTo(-sz * 0.25, sz * 0.85); x.closePath(); x.fill(); x.restore();
+        }
+        break;
+      }
       case 'confetti': {
         x.globalCompositeOperation = 'source-over';
         const cols = L.colors || [c1, c2, '#ffffff'];
@@ -497,6 +648,37 @@
           x.save(); x.translate(px, py); x.rotate(r() * Math.PI); x.fillStyle = cols[i % cols.length]; x.globalAlpha = 0.65 + r() * 0.35;
           x.fillRect(-sz / 2, -sz * 0.18, sz, sz * 0.36); x.restore();
         }
+        break;
+      }
+      /* a sunburst behind the preacher: rays all the way round from one point, hot in the middle */
+      case 'burst': {
+        const n = L.n || 36;
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2 + (r() - 0.5) * 0.08, len = Math.max(L.w, L.h) * (0.55 + r() * 0.5), wd = 0.018 + r() * 0.03;
+          const g = x.createLinearGradient(L.x, L.y, L.x + Math.cos(a) * len, L.y + Math.sin(a) * len);
+          g.addColorStop(0, rgba(c2, 0.5)); g.addColorStop(0.25, rgba(c1, 0.32)); g.addColorStop(1, rgba(c1, 0));
+          x.fillStyle = g; x.beginPath(); x.moveTo(L.x, L.y);
+          x.lineTo(L.x + Math.cos(a - wd) * len, L.y + Math.sin(a - wd) * len); x.lineTo(L.x + Math.cos(a + wd) * len, L.y + Math.sin(a + wd) * len); x.closePath(); x.fill();
+        }
+        blob(L.x, L.y, L.w * 0.32, L.h * 0.32, c2, 0.9);
+        blob(L.x, L.y, L.w * 0.6, L.h * 0.6, c1, 0.55);
+        break;
+      }
+      /* smoke and haze drifting through the light — soft overlapping wisps, never a flat fog */
+      case 'smoke': {
+        const n = L.n || 26;
+        for (let i = 0; i < n; i++) {
+          const px = L.x - L.w / 2 + r() * L.w, py = L.y - L.h / 2 + r() * L.h, rx = L.w * (0.12 + r() * 0.22), ry = rx * (0.25 + r() * 0.35);
+          blob(px, py, rx, ry, r() > 0.6 ? c2 : c1, 0.1 + r() * 0.16, (r() - 0.5) * 1.2);
+        }
+        break;
+      }
+      /* one long, thin line of hard light across the page (the gleam through a title) */
+      case 'beam': {
+        const rot = (L.rot || 0) * Math.PI / 180;
+        blob(L.x, L.y, L.w / 2, Math.max(2, L.h * 0.06), '#ffffff', 0.95, rot);
+        blob(L.x, L.y, L.w / 2, Math.max(6, L.h * 0.3), c1, 0.55, rot);
+        blob(L.x, L.y, L.w * 0.3, L.h, c1, 0.25, rot);
         break;
       }
       case 'flare': {
@@ -522,6 +704,16 @@
   };
   const textFillAt = (ctx, L, cx, cy, w, h) => gradAt(ctx, typeof L.fill === 'string' && METALS[L.fill] ? { stops: METALS[L.fill], angle: 90 } : L.fill, cx, cy, w, h);
 
+  /* specks and scratches knocked out of a title — sprayed through a stencil, not printed on plastic */
+  let erodeC = null;
+  function erodeTile() {
+    if (erodeC) return erodeC;
+    erodeC = canvas(240, 240);
+    const x = erodeC.getContext('2d'), r = rng(77);
+    for (let i = 0; i < 620; i++) { x.fillStyle = `rgba(0,0,0,${0.55 + r() * 0.45})`; x.beginPath(); x.arc(r() * 240, r() * 240, 0.3 + r() * r() * 2.4, 0, Math.PI * 2); x.fill(); }
+    for (let i = 0; i < 18; i++) { x.strokeStyle = 'rgba(0,0,0,.7)'; x.lineWidth = 0.4 + r() * 0.8; x.beginPath(); const sx = r() * 240, sy = r() * 240; x.moveTo(sx, sy); x.lineTo(sx + (r() - 0.5) * 50, sy + (r() - 0.5) * 12); x.stroke(); }
+    return erodeC;
+  }
   /* a worn, printed texture for distressed lettering */
   let grungeC = null;
   function grungeTile() {
@@ -544,7 +736,7 @@
   const txtCache = new Map();
   let measC = null;
   function textCanvas(L) {
-    const key = JSON.stringify([Q, L.text, L.font, L.size, L.fit, L.maxH, L.maxW, L.stretch, L.fill, L.stroke, L.strokeColor, L.extrude, L.extrudeColor, L.bevel, L.edge, L.edgeColor, L.glow, L.shadow, L.letter, L.align, L.line, L.slant, L.upper, L.grain, L.imgFill, L.imgFill && IMGS.has(L.imgFill)]);
+    const key = JSON.stringify([Q, L.text, L.font, L.size, L.fit, L.maxH, L.maxW, L.stretch, L.wide, L.fill, L.stroke, L.strokeColor, L.extrude, L.extrudeColor, L.bevel, L.edge, L.edgeColor, L.glow, L.shadow, L.shadowColor, L.letter, L.align, L.line, L.slant, L.upper, L.grain, L.speck, L.erode, L.imgFill, L.imgFillA, L.imgFill && IMGS.has(L.imgFill)]);
     if (txtCache.has(key)) return txtCache.get(key);
     const m = (measC || (measC = canvas(8, 8))).getContext('2d');
     let text = String(L.text == null ? '' : L.text);
@@ -553,7 +745,7 @@
       text = text.toLowerCase().replace(/(^|[\s\n-])([a-z])/g, (m, a, c) => a + c.toUpperCase());
     }
     const lines = (L.upper ? text.toUpperCase() : text).split('\n');
-    const sy = L.stretch || 1;
+    const sy = L.stretch || 1, sx = L.wide || 1;   // taller (condensed) / wider (extended) letters
     let size = L.size || 80;
     const fontOf = (s) => `${s}px ${fam(L.font || 'Anton')}, "Arial Black", Impact, sans-serif`;
     const lsp = (s) => (L.letter || 0) * s;
@@ -561,11 +753,11 @@
       m.font = fontOf(s);
       if (!L.letter || ln.length < 2) {
         const t = m.measureText(ln || ' ');
-        return { l: t.actualBoundingBoxLeft || 0, r: t.actualBoundingBoxRight != null ? t.actualBoundingBoxRight : t.width, a: (t.actualBoundingBoxAscent != null ? t.actualBoundingBoxAscent : s * 0.72) * sy, d: (t.actualBoundingBoxDescent || 0) * sy };
+        return { l: (t.actualBoundingBoxLeft || 0) * sx, r: (t.actualBoundingBoxRight != null ? t.actualBoundingBoxRight : t.width) * sx, a: (t.actualBoundingBoxAscent != null ? t.actualBoundingBoxAscent : s * 0.72) * sy, d: (t.actualBoundingBoxDescent || 0) * sy };
       }
       let x = 0, l = 0, r = 0, a = 0, d = 0; const ch = Array.from(ln);
       ch.forEach((c, i) => { const t = m.measureText(c); if (i === 0) l = t.actualBoundingBoxLeft || 0; r = x + (t.actualBoundingBoxRight != null ? t.actualBoundingBoxRight : t.width); a = Math.max(a, t.actualBoundingBoxAscent || 0); d = Math.max(d, t.actualBoundingBoxDescent || 0); x += t.width + lsp(s); });
-      return { l, r, a: a * sy, d: d * sy };
+      return { l: l * sx, r: r * sx, a: a * sy, d: d * sy };
     };
     const inkW = (ln, s) => { const t = metr(ln, s); return Math.max(1, t.l + t.r); };
     const widest = (s) => Math.max(1, ...lines.map((ln) => inkW(ln, s)));
@@ -597,15 +789,16 @@
     const c = canvas(W * Q, H * Q), x = c.getContext('2d');
     const setT = (ctx) => { ctx.setTransform(Q, 0, 0, Q, 0, 0); if (slant) ctx.transform(1, 0, -slant, 1, slant * midY, 0); };
     const draw = (ctx, dx, dy, how) => lines.forEach((ln, i) => {
-      let px = ox + xs[i] + dx; const py = oy + ys[i] + dy;
-      ctx.save(); ctx.translate(0, py); if (sy !== 1) ctx.scale(1, sy);
-      if (!L.letter || ln.length < 2) ctx[how](ln, px, 0);
-      else for (const ch of ln) { ctx[how](ch, px, 0); px += ctx.measureText(ch).width + lsp(size); }
+      const px = ox + xs[i] + dx, py = oy + ys[i] + dy;
+      ctx.save(); ctx.translate(px, py); if (sy !== 1 || sx !== 1) ctx.scale(sx, sy);
+      if (!L.letter || ln.length < 2) ctx[how](ln, 0, 0);
+      else { let lx = 0; for (const ch of ln) { ctx[how](ch, lx, 0); lx += ctx.measureText(ch).width + lsp(size); } }
       ctx.restore();
     });
     setT(x); x.font = fontOf(size); x.textBaseline = 'alphabetic'; x.lineJoin = 'round';
     if (L.glow) { x.save(); x.shadowColor = L.glow; x.shadowBlur = size * 0.45 * Q; x.fillStyle = L.glow; draw(x, 0, 0, 'fillText'); if (depth) draw(x, depth * 0.55, depth, 'fillText'); x.restore(); }
-    if (L.shadow && L.fill !== 'none') { x.save(); x.shadowColor = 'rgba(0,0,0,.6)'; x.shadowBlur = size * 0.2 * Q; x.shadowOffsetY = size * 0.06 * Q; x.fillStyle = 'rgba(0,0,0,.6)'; draw(x, depth * 0.55, depth, 'fillText'); x.restore(); }
+    // a SOFT shadow in the flyer's own darkest colour — a hard black drop under every word is what reads as clip-art
+    if (L.shadow && L.fill !== 'none') { const sc = L.shadowColor || 'rgba(0,0,0,.6)'; x.save(); x.shadowColor = sc; x.shadowBlur = size * 0.22 * Q; x.shadowOffsetY = size * 0.025 * Q; x.fillStyle = sc; draw(x, depth * 0.55, depth, 'fillText'); x.restore(); }
     /*
      * 3D, AS THE FLYERS DO IT: the letters stand on a solid block of
      * themselves (extrude) that darkens as it goes back — two colours, near and
@@ -636,7 +829,9 @@
       fx.globalCompositeOperation = 'source-over';
       fx.setTransform(1, 0, 0, 1, 0, 0);
       const im = L.imgFill && imgOf(L.imgFill);
-      if (im) { fx.globalCompositeOperation = 'source-atop'; fx.globalAlpha = 0.9; cover(fx, im, 0, 0, face.width, face.height); fx.globalAlpha = 1; }
+      if (im) { fx.globalCompositeOperation = 'source-atop'; fx.globalAlpha = L.imgFillA == null ? 0.9 : L.imgFillA; cover(fx, im, 0, 0, face.width, face.height); fx.globalAlpha = 1; }
+      if (L.erode) { fx.globalCompositeOperation = 'destination-out'; fx.globalAlpha = Math.min(1, L.erode); fx.fillStyle = fx.createPattern(erodeTile(), 'repeat'); fx.fillRect(0, 0, face.width, face.height); fx.globalAlpha = 1; }
+      if (L.speck) { fx.globalCompositeOperation = 'source-atop'; fx.globalAlpha = 0.22 * L.speck; fx.fillStyle = fx.createPattern(grainTile(), 'repeat'); fx.fillRect(0, 0, face.width, face.height); fx.globalAlpha = 1; }
       if (L.grain) { fx.globalCompositeOperation = 'source-atop'; fx.globalAlpha = 0.45; fx.fillStyle = fx.createPattern(grungeTile(), 'repeat'); fx.fillRect(0, 0, face.width, face.height); fx.globalAlpha = 1; }
       if (L.bevel) {
         // a bevel: light catching the top edge of every letter, shade under the bottom one
@@ -653,7 +848,7 @@
         // and a gloss across the upper half
         fx.save(); fx.setTransform(1, 0, 0, 1, 0, 0); fx.globalCompositeOperation = 'source-atop';
         const gg = fx.createLinearGradient(0, (pad - 0) * Q, 0, (pad + inkH_) * Q);
-        gg.addColorStop(0, 'rgba(255,255,255,.28)'); gg.addColorStop(0.48, 'rgba(255,255,255,.06)'); gg.addColorStop(0.5, 'rgba(0,0,0,0)'); gg.addColorStop(1, 'rgba(0,0,0,.12)');
+        gg.addColorStop(0, 'rgba(255,255,255,.16)'); gg.addColorStop(0.5, 'rgba(255,255,255,0)'); gg.addColorStop(1, 'rgba(0,0,0,.10)');
         fx.fillStyle = gg; fx.fillRect(0, 0, face.width, face.height); fx.restore();
       }
       x.setTransform(1, 0, 0, 1, 0, 0);
@@ -861,7 +1056,10 @@
     x.imageSmoothingQuality = 'high';
     x.setTransform(Q, 0, 0, Q, 0, 0);
     x.clearRect(0, 0, S.w, S.h);
-    try { for (const L of S.layers) drawLayer(x, S, L); } finally { Q = 1; }
+    try {
+      for (const L of S.layers) drawLayer(x, S, L);
+      if (S.finish !== false) { x.save(); x.globalCompositeOperation = 'overlay'; x.globalAlpha = 0.05; x.fillStyle = x.createPattern(grainTile(), 'repeat'); x.fillRect(0, 0, S.w, S.h); x.restore(); }
+    } finally { Q = 1; }
     return cv;
   }
 
@@ -1241,7 +1439,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   const CHROME = { stops: ['#ffffff', '#ffffff', '#eceff3', '#d5dae1'], angle: 90 };
   const GOLD = { stops: ['#fff6c7', '#ffe066', '#f5b301', '#ffd84d', '#c97a00'], angle: 90 };
   // refined, not WordArt: a shallow block in the flyer's own dark colour, a soft light on top, a real shadow
-  const solid3d = (p, o) => Object.assign({ extrude: 3, extrudeColor: [mix(p.deep, '#000000', 0.25), mix(p.deep, '#000000', 0.6)], bevel: 0.55, shadow: true }, o || {});
+  const solid3d = (p, o) => Object.assign({ extrude: 2, extrudeColor: [mix(p.deep, '#000000', 0.15), mix(p.deep, '#000000', 0.55)], shadow: true, speck: 0.6 }, o || {});
   function footerWords(f) {
     const k = String((f.kind || '') + ' ' + (f.title || '')).toLowerCase();
     if (/prayer|vigil|fast/.test(k)) return 'PRAYER   |   PRAISE   |   POWER';
@@ -1359,6 +1557,45 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     if (al === 'left') pos.l = o.l; else if (al === 'right') pos.r = o.r; else pos.cx = o.cx;
     return col(items, pos);
   }
+
+  /* ---------------------------------------------------- the small craft of those flyers */
+  /* tiny tracked capitals — PRESENTS, THEME:, MINISTERING — a whisper next to the title */
+  const micro = (text, o) => T(Object.assign({ name: 'Label', text, upper: true, font: 'Montserrat', size: 15, letter: 0.55, fill: rgba('#ffffff', 0.82), shadow: true }, o || {}));
+  /* a thin signature script laid across a title — the accent, never the title itself */
+  const sig = (text, o) => T(Object.assign({ name: 'Script', text, font: 'Signature', size: 110, rot: -7, fill: '#ffffff', shadow: true }, o || {}));
+  /* a group turned about one point, every layer on the same tilt (a whole layout on one angle) */
+  function turn(list, deg, cx, cy) {
+    const a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+    list.filter(Boolean).forEach((L) => { if (L.type === 'bg' || L.type === 'fx') return; const dx = L.x - cx, dy = L.y - cy; L.x = cx + dx * c - dy * s; L.y = cy + dx * s + dy * c; L.rot = (L.rot || 0) + deg; });
+    return list;
+  }
+  /* the handles with each app's icon in front of them */
+  function socialRow(D, o) {
+    const h = String(D.f.handles || '').trim(); if (!h) return [];
+    const ink = o.ink || '#ffffff', size = o.size || 18, ic = Math.round(size * 1.3);
+    const icons = (o.icons || ['ig', 'fb', 'yt']).map((k) => SH({ name: 'Icon', shape: 'icon', icon: k, fill: ink, w: ic, h: ic }));
+    const t = T({ name: 'Handles', text: h, font: o.font || 'Montserrat', size, fill: ink, align: 'left', maxW: o.maxW || 420, shadow: o.shadow !== false });
+    const tb = box(t), gap = Math.round(ic * 0.35), total = icons.length * (ic + gap) + 4 + tb.w;
+    let x = o.l != null ? o.l : o.r != null ? o.r - total : (o.cx || 540) - total / 2;
+    icons.forEach((L) => { L.x = x + ic / 2; L.y = o.cy; x += ic + gap; });
+    put(t, { l: x + 4, cy: o.cy });
+    return icons.concat(t);
+  }
+  /* a torn scrap of paper with a word on it — THIS, THEME, the address */
+  const tornTag = (lines, o) => pill(lines, Object.assign({ shape: 'ragged', fill: '#f7f5f0', ink: '#141414', padX: 24, padY: 12, shadow: true }, o || {}));
+  /* the band of coloured cells the details sit in, edge to edge (time | date | where) */
+  function cells(list, o) {
+    const out = []; let x = o.l;
+    list.filter(Boolean).forEach((c) => {
+      out.push(SH({ name: c.name || 'Cell', shape: 'rect', fill: c.fill, x: x + c.w / 2, y: o.cy, w: c.w, h: o.h, shadow: !!o.shadow }));
+      const ts = c.lines.filter((l) => l && l.text).map((l) => T(Object.assign({ name: (c.name || 'Cell') + ' text', align: 'left', line: 1.0, maxW: c.w - 30 }, l)));
+      out.push(...col(ts, { l: x + 16, cy: o.cy, gap: 3 }));
+      x += c.w;
+    });
+    return out;
+  }
+  /* a colour that answers the flyer's own: teal against red and gold, gold against blue and purple */
+  function answer(p) { const [r, g, b] = hexRgb(p.mid); return r > b + 30 ? '#46d3cb' : '#ffcf3a'; }
 
   const LAYOUTS = {
     /* ── GLORY: two enormous lines, a little tag between, the preacher in front of them ── */
@@ -1691,8 +1928,237 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       L.push(...infoRow(D, H - 74, [d && { name: 'Date', big: `${d.ddth} ${d.mon3}. ${d.year}`, size: 40 }, f.time && { name: 'Time', big: f.time, size: 40, accent: true }, venueText(D) && { name: 'Venue', small: venueLines(D, 3), maxW: 320, smallSize: 14 }], { ink, accent: red, lineH: 56 }));
       return L;
     },
+
+    /* ── JOIN US THIS SUNDAY: huge white capitals on one tilt, the hosts in front, the details on angled bands ── */
+    joinus(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], ps = spsOf(D).slice(0, 2);
+      L.push(BG({ img: D.bg, grade: 'vivid', contrast: 10, sat: 24, keep: 0.12, topShade: 0.2, bottomShade: 0.5, bottomFrom: 0.72, vignette: 0.22,
+        colorWash: [{ stops: [mix(p.mid, '#ffffff', 0.18), p.mid, p.deep], angle: 60, mode: 'soft-light', a: 0.75 },
+          { radial: true, x: 0.92, y: 0.86, r: 0.5, stops: [rgba(p.accent, 0.85), rgba(p.accent, 0)], mode: 'screen', a: 0.45 }] }));
+      // the speaker's own face, huge and ghosted into the colour behind everything
+      if (ps[0]) { const g = hero(ps[0], { cx: 640, t: H * 0.01, b: H * 0.66, mode: 'bust', fade: 0.45 }); if (g) Object.assign(g, { name: 'Ghost', opacity: 0.12, lock: true }); if (g) L.push(g); }
+      L.push(FX({ kind: 'smoke', x: 260, y: H * 0.78, w: 900, h: 480, n: 18, seed: 4, color: p.hi, color2: p.accent, opacity: 0.35 }));
+      L.push(FX({ kind: 'bokeh', x: 540, y: H * 0.45, w: 1080, h: H * 0.8, n: 16, seed: 9, opacity: 0.4 }));
+      L.push(...header(D));
+      const t0 = String(f.title || 'Sunday Service').trim(), sc = splitConnector(t0);
+      let l1, l2, tag = '';
+      if (sc) { l1 = sc.a; l2 = sc.b; tag = sc.conn; }
+      else if (t0.split(/\s+/).length <= 2 && t0.length <= 16) { l1 = 'Join us'; tag = 'for'; l2 = t0; }
+      else [l1, l2] = twoLines(t0);
+      const top = [];
+      const ts = stackLines([l1, l2].filter(Boolean), { t: H * 0.115, cx: 520, fit: 930, maxH: H * 0.165, gap: tag ? 50 : 4,
+        style: { font: 'Montserrat Black', upper: true, fill: '#ffffff', letter: -0.02, shadow: true } });
+      top.push(...ts);
+      if (tag && ts.length === 2) top.push(...tornTag([{ text: tag, upper: true, font: 'Archivo Black', size: 32, fill: p.deep }], { seed: 7, padY: 8 }).place(560, (box(ts[0]).b + box(ts[1]).t) / 2));
+      const tb = ts.bottom;
+      top.push(...socialRow(D, { l: 76, cy: tb + 46, size: 22 }));
+      // the hosts stand in front of the lower line
+      if (ps[1]) L.push(hero(ps[1], { cx: 860, t: tb - H * 0.05, b: H * 0.9, mode: 'chest', extra: lit(p) }));
+      if (ps[0]) L.push(hero(ps[0], { cx: ps[1] ? 590 : 700, t: tb - H * 0.03, b: H * 0.92, mode: 'chest', extra: lit(p) }));
+      // the date band and the dark details band, on the title's tilt
+      const bands = [];
+      const by = H * 0.805, iy = H * 0.915;
+      bands.push(SH({ name: 'Date band', shape: 'rect', fill: { stops: [mix(p.accent, '#c1674b', 0.4), mix(p.mid, '#ba2165', 0.45), mix(p.deep, '#8c1065', 0.4)], angle: 0 }, x: 260, y: by, w: 640, h: H * 0.11 }));
+      if (d) bands.push(put(T({ name: 'Date', text: `${d.mon3}. ${d.ddth}`, upper: true, font: 'Montserrat Black', size: 66, fill: '#ffffff', align: 'left', maxW: 300 }), { l: 70, cy: by }));
+      const times = [f.time, f.time2].filter(Boolean);
+      times.forEach((tm, i) => bands.push(...col([T({ name: 'Time ' + (i + 1), text: tm, font: 'Montserrat Black', size: 30, fill: mix(p.accent, '#ffffff', 0.35), align: 'left' }),
+        T({ name: 'Service ' + (i + 1), text: times.length > 1 ? (i ? 'SECOND SERVICE' : 'FIRST SERVICE') : 'PROMPT', font: 'Montserrat', size: 12, letter: 0.08, fill: '#ffffff', align: 'left' })], { l: 390 + i * 150, cy: by, gap: 2 })));
+      bands.push(SH({ name: 'Details band', shape: 'rect', fill: rgba(mix(p.deep, '#000000', 0.35), 0.95), x: 540, y: iy, w: 1240, h: H * 0.14 }));
+      const vt = venueLines(D, 2);
+      bands.push(...col([f.church && T({ name: 'Church', text: f.church, upper: true, font: 'Montserrat Black', size: 22, fill: mix(p.accent, '#ffffff', 0.3), align: 'left', maxW: 520 }),
+        vt && T({ name: 'Venue', text: vt, upper: true, font: 'Montserrat Black', size: 20, line: 1.05, fill: '#ffffff', align: 'left', maxW: 520 })], { l: 70, cy: iy, gap: 4 }));
+      const names = ps.map((s) => nameParts(s.name).name).filter(Boolean);
+      if (names.length) {
+        const np = nameParts(ps[0].name);
+        bands.push(...col([T({ name: 'Speaker', text: names.join(' & '), upper: true, font: 'Montserrat Black', size: 26, fill: '#ffffff', align: 'right', maxW: 420, line: 1.0 }),
+          np.title && T({ name: 'Speaker title', text: np.title, font: 'Montserrat', size: 18, fill: mix(p.accent, '#ffffff', 0.3), align: 'right' })], { r: 1010, cy: iy, gap: 4 }));
+      }
+      turn(top.concat(bands), -4, 540, H * 0.5);
+      L.push(...top, ...bands);
+      return L;
+    },
+
+    /* ── GLORY OF GOD: an elegant thin Didone title in white over a loud picture, the minister below, three coloured cells ── */
+    didone(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D);
+      L.push(BG({ img: D.bg, grade: 'vivid', contrast: 12, sat: 22, keep: 0.14, topShade: 0.62, topTo: 0.5, bottomShade: 0.45, bottomFrom: 0.78, vignette: 0.3 }));
+      L.push(FX({ kind: 'beams', x: 700, y: H * 0.3, w: 900, h: H * 0.5, n: 3, seed: 3, color: p.accent, opacity: 0.3, from: [[0.88, -0.05], [0.66, -0.06]] }));
+      L.push(FX({ kind: 'glow', x: 540, y: H * 0.64, w: 1000, h: 640, opacity: 0.5 }));
+      L.push(FX({ kind: 'sparks', x: 540, y: H * 0.62, w: 1080, h: H * 0.32, n: 70, seed: 12, opacity: 0.8 }));
+      L.push(...header(D));
+      const kick = String(D.dir.kicker || '').trim();
+      if (kick && kick.length <= 26) L.push(put(T({ name: 'Kicker', text: twoLines(kick).filter(Boolean).join('\n'), upper: true, font: 'Oswald', size: 25, align: 'right', line: 1.02, maxW: 330, shadow: true }), { r: 1010, cy: 80 }));
+      // two lines set to one width, the way a Didone title is justified ("GLORY / OF GOD")
+      const lines = twoLines(f.title || 'Glory of God').filter(Boolean);
+      const ts = stackLines(lines, { t: H * 0.19, fit: 860, maxH: H * (sp ? 0.15 : 0.2), gap: 8,
+        style: { font: 'Bodoni Light', upper: true, fill: { stops: ['#ffffff', '#fff3e6'], angle: 90 }, glow: rgba(mix(p.deep, '#000000', 0.4), 0.35), shadow: true } });
+      L.push(...ts);
+      if (sp) L.push(hero(sp, { cx: 540, t: Math.max(ts.bottom + 18, H * 0.5), b: H + 20, mode: 'waist', fade: 0.1, extra: lit(p) }));
+      if (sp && sp.name) {
+        const np = nameParts(sp.name);
+        L.push(...col([np.title && sig(np.title, { size: 70, rot: -8, align: 'right', fill: '#ffffff' }),
+          T({ name: 'Speaker', text: twoLines(np.name).filter(Boolean).join('\n'), upper: true, font: 'Oswald', size: 32, line: 1.0, align: 'right', shadow: true, maxW: 250 })], { r: 1010, cy: H * 0.71, gap: -14 }));
+      }
+      const vp = venueParts(D);
+      const cl = [
+        f.time && { name: 'Time cell', w: 180, fill: '#fcf3f6', lines: [{ text: f.time, font: 'Oswald', size: 40, fill: '#1c212a' }, { text: f.time2 ? '& ' + f.time2 : 'PROMPT', font: 'Montserrat', size: 13, letter: 0.1, fill: '#1c212a' }] },
+        d && { name: 'Date cell', w: 160, fill: mix(p.mid, '#000000', 0.2), lines: [{ text: d.day3, upper: true, font: 'Oswald', size: 24, fill: '#ffffff' }, { text: `${d.mon3} ${d.ddn}`, upper: true, font: 'Oswald', size: 30, fill: '#ffffff' }, { text: d.year, font: 'Oswald', size: 22, fill: '#ffffff' }] },
+        vp.length && { name: 'Venue cell', w: 440, fill: p.accent, lines: [{ text: vp[0] + (vp.length > 1 ? ',' : ''), upper: true, font: 'Oswald', size: 25, fill: '#2a1a10' }, vp.length > 1 && { text: vp.slice(1).join(', '), font: 'Montserrat', size: 17, line: 1.15, fill: '#2a1a10', maxW: 400 }] },
+      ].filter(Boolean);
+      L.push(...cells(cl, { l: 540 - cl.reduce((a, c) => a + c.w, 0) / 2, cy: H - 74, h: 124, shadow: true }));
+      return L;
+    },
+
+    /* ── UPPER ROOM: a super-heavy wide title lit hot white-to-gold, a script word across it, the details in modules ── */
+    upper(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D);
+      L.push(BG({ img: D.bg, grade: 'vivid', contrast: 16, sat: 26, keep: 0.12, topShade: 0.62, topTo: 0.52, bottomShade: 0.55, bottomFrom: 0.8, vignette: 0.32 }));
+      L.push(FX({ kind: 'beams', x: 380, y: H * 0.42, w: 760, h: H * 0.6, n: 3, seed: 8, color: p.accent, opacity: 0.35, from: [[0.04, -0.05], [0.22, -0.06]] }));
+      L.push(FX({ kind: 'sparks', x: 540, y: H * 0.7, w: 1080, h: H * 0.6, n: 80, seed: 14, opacity: 0.85 }));
+      const hd = header(D, { center: true, t: 34 }); L.push(...hd);
+      const lines = stack(f.title || 'Upper Room', 2);
+      const ts = stackLines(lines, { t: Math.max(hd.bottom + 16, H * 0.15), fit: 880, maxH: H * 0.135, gap: 16,
+        style: { font: 'Montserrat Black', upper: true, letter: -0.015, fill: { stops: ['#fffbe0', mix(p.accent, '#ffffff', 0.45), p.accent, mix(p.accent, '#ff6a00', 0.45)], angle: 70 }, erode: 0.55, glow: rgba(mix(p.accent, '#ff7a00', 0.5), 0.42), shadow: true } });
+      L.push(...ts);
+      const lb = box(ts[ts.length - 1]);
+      L.push(put(T({ name: 'Script word', text: D.script, font: 'Yellowtail', size: 130, maxW: 480, maxH: H * 0.1, fill: '#ffffff', rot: -8, shadow: true }), { r: 1000, cy: lb.b + 6 }));
+      let y = lb.b + 22;
+      if (f.theme) { const th = put(T({ name: 'Theme', text: '(' + f.theme + ')', upper: true, font: 'Montserrat Black', size: 26, line: 0.98, fill: '#ffffff', align: 'left', maxW: 470, shadow: true }), { l: lb.l + 4, t: y }); L.push(th); y = box(th).b; }
+      // the details, in modules: the date, a pin and the address, a black box with the time
+      const iy = Math.max(y + 70, H * 0.6);
+      if (d) L.push(...col([T({ name: 'Day', text: `${d.day3} ${d.ddth}`, upper: true, font: 'Montserrat Black', size: 38, align: 'left', shadow: true }), T({ name: 'Month', text: `${d.month}, ${d.year}`, upper: true, font: 'Montserrat Black', size: 30, align: 'left', shadow: true })], { l: 110, cy: iy, gap: 2 }));
+      const vl = venueLines(D, 3);
+      if (vl) { L.push(SH({ name: 'Pin', shape: 'pin', fill: p.accent, x: 438, y: iy - 20, w: 34, h: 34 })); L.push(put(T({ name: 'Venue', text: vl, upper: true, font: 'Montserrat', size: 15, line: 1.25, align: 'left', maxW: 230, shadow: true }), { l: 462, cy: iy })); }
+      if (f.time) {
+        const g = [T({ name: 'Time label', text: f.time2 ? 'FIRST SERVICE:' : 'SERVICE STARTS:', font: 'Montserrat', size: 13, letter: 0.06, fill: p.accent, align: 'left' }), T({ name: 'Time', text: f.time, font: 'Montserrat Black', size: 34, align: 'left' })];
+        if (f.time2) g.push(T({ name: 'Time 2 label', text: 'SECOND SERVICE:', font: 'Montserrat', size: 13, letter: 0.06, fill: p.accent, align: 'left' }), T({ name: 'Time 2', text: f.time2, font: 'Montserrat Black', size: 34, align: 'left' }));
+        const bh = f.time2 ? 150 : 96;
+        L.push(SH({ name: 'Time box', shape: 'rect', fill: 'rgba(0,0,0,.86)', x: 850, y: iy, w: 230, h: bh }));
+        L.push(...col(g, { l: 752, cy: iy, gap: 3 }));
+      }
+      if (sp) L.push(hero(sp, { cx: 540, t: iy + 80, b: H + 20, mode: 'chest', fade: 0.12, extra: lit(p) }));
+      const contact = f.phone || f.handles;
+      if (contact) {
+        L.push(SH({ name: 'Contact bar', shape: 'pill', fill: '#ffffff', x: 540, y: H - 96, w: 680, h: 62, shadow: true }));
+        L.push(SH({ name: 'Contact icon', shape: 'icon', icon: f.phone ? 'phone' : 'ig', fill: mix(p.mid, '#000000', 0.2), x: 236, y: H - 96, w: 28, h: 28 }));
+        L.push(put(T({ name: 'Contact', text: contact, font: 'Montserrat', size: 20, fill: '#1c1c1f', align: 'left', maxW: 560 }), { l: 262, cy: H - 96 }));
+      }
+      L.push(put(micro(footerWords(f), { size: 13, letter: 0.4, fill: rgba('#ffffff', 0.85), maxW: 980 }), { cx: 540, b: H - 26 }));
+      return L;
+    },
+
+    /* ── BREAK EVERY CHAIN: the theme painted, the title filled with the same fire, debris flying off it — no cut-out ── */
+    theme(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [];
+      L.push(BG({ img: D.bg, grade: 'vivid', contrast: 14, sat: 18, keep: 0.38, topShade: 0.28, topTo: 0.2, bottomShade: 0.88, bottomFrom: 0.7, vignette: 0.42 }));
+      L.push(FX({ kind: 'sparks', x: 720, y: H * 0.45, w: 900, h: H * 0.8, n: 90, seed: 21, opacity: 0.85 }));
+      const lg = D.logo && imgOf(D.logo) ? logoLayers(D, 1010 - 40, 100, 74) : []; L.push(...lg);
+      if (f.church) L.push(put(T({ name: 'Church', text: f.church, upper: true, font: 'Montserrat', size: 18, letter: 0.06, align: 'left', maxW: 520, shadow: true }), { l: 70, cy: 100 }));
+      const lines = stack(f.title || 'Break Every Chain', 3);
+      const titles = lines.map((ln, i) => T({ name: 'Title ' + (i + 1), text: ln, upper: true, font: 'Barlow Black', size: 400, maxW: 700, maxH: H * (lines.length > 2 ? 0.12 : 0.15), align: 'right',
+        fill: { stops: [mix(p.hi, '#ffffff', 0.3), mix(p.accent, p.hi, 0.35), p.accent], angle: 90 }, imgFill: D.bg, imgFillA: 0.26, glow: rgba(p.accent, 0.4), shadow: true }));
+      const tc = col(titles, { r: 1012, t: H * 0.19, gap: 2 }); L.push(...tc);
+      // dark smoke swallows the left letters and shards fly off the bottom: the words are part of the scene
+      L.push(SH({ name: 'Smoke', shape: 'rect', fill: { stops: [rgba(mix(p.deep, '#000000', 0.6), 0.85), rgba(mix(p.deep, '#000000', 0.6), 0)], angle: 0 }, x: 230, y: H * 0.4, w: 460, h: H * 0.62, lock: true }));
+      L.push(FX({ kind: 'debris', x: 760, y: tc.bottom + 4, w: 560, h: 120, n: 70, seed: 33, opacity: 1 }));
+      let y = tc.bottom + 34;
+      if (f.theme) { const th = put(T({ name: 'Theme', text: f.theme, font: 'Montserrat', size: 24, align: 'right', maxW: 560, shadow: true }), { r: 1012, t: y }); L.push(th); y = box(th).b + 8; }
+      if (f.extra) { const ex = put(T({ name: 'Scripture', text: f.extra, font: 'Montserrat', size: 16, align: 'right', line: 1.25, fill: rgba('#ffffff', 0.85), maxW: 420, shadow: true }), { r: 1012, t: y }); L.push(ex); }
+      L.push(...infoRow(D, H - 120, [d && { name: 'Date', big: `${d.day3}. ${d.ddth} ${d.mon3}`, size: 38 }, f.time && { name: 'Time', big: f.time, size: 46, accent: true }, venueText(D) && { name: 'Venue', small: venueLines(D, 3), pin: true, maxW: 300, smallSize: 14 }], { lineH: 54 }));
+      L.push(...socialRow(D, { cx: 540, cy: H - 40, size: 15 }));
+      return L;
+    },
+
+    /* ── MOUNTAIN EXPERIENCE: a heavy italic title filled with the sky itself, the minister in front, small badges round him ── */
+    mountain(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D);
+      L.push(BG({ img: D.bg, grade: 'normal', contrast: 12, sat: 6, keep: 0.42, topShade: 0.6, topTo: 0.32, bottomShade: 0.95, bottomFrom: 0.58, vignette: 0.42 }));
+      L.push(FX({ kind: 'smoke', x: 540, y: H * 0.56, w: 1300, h: 320, n: 22, seed: 6, color: mix(p.hi, p.accent, 0.3), color2: '#ffffff', opacity: 0.3 }));
+      const lg = D.logo && imgOf(D.logo) ? logoLayers(D, 540, 82, 66) : []; L.push(...lg);
+      if (f.church) L.push(put(micro(f.church, { size: 17, letter: 0.55, maxW: 900 }), { cx: 540, t: lg.length ? 132 : 70 }));
+      const [a, b] = twoLines(f.title || 'Mountain Experience');
+      const sky = { font: 'Barlow Black Italic', fill: { stops: ['#ffffff', mix(p.hi, '#ffffff', 0.5), mix(p.accent, '#ffffff', 0.35)], angle: 90 }, imgFill: D.bg, imgFillA: 0.3, shadow: true, speck: 0.4 };
+      const tl = [a && T(Object.assign({ name: 'Title 1', text: a, fit: b ? 720 : 900, maxH: H * 0.15 }, sky)), b && T(Object.assign({ name: 'Title 2', text: b, fit: 820, maxH: H * 0.15 }, sky))].filter(Boolean);
+      const ts = col(tl, { cx: 540, t: H * 0.18, gap: 0 }); L.push(...ts);
+      if (sp) L.push(hero(sp, { cx: 540, t: ts.bottom - H * 0.05, b: H + 20, mode: 'chest', fade: 0.12, extra: lit(p) }));
+      const by = Math.max(ts.bottom + 120, H * 0.66);
+      if (f.time) { L.push(SH({ name: 'Time ring', shape: 'ring', fill: '#ffffff', line: 3, x: 150, y: by, w: 140, h: 140 })); L.push(put(T({ name: 'Time', text: f.time, font: 'Barlow Black Italic', size: 40, maxW: 116, shadow: true }), { cx: 150, cy: by })); }
+      if (sp && sp.name) { const np = nameParts(sp.name); L.push(...col([np.title && micro(np.title, { size: 13, letter: 0.3 }), T({ name: 'Speaker', text: twoLines(np.name).filter(Boolean).join('\n'), upper: true, font: 'Barlow Black Italic', size: 38, line: 0.95, shadow: true, maxW: 220 })], { cx: 150, t: by + 96, gap: 4 })); }
+      if (d) {
+        L.push(SH({ name: 'Highlighter', shape: 'brush', fill: mix(p.accent, '#ffffff', 0.25), x: 925, y: by, w: 230, h: 104, seed: 9, rot: -3 }));
+        L.push(...col([T({ name: 'Day', text: d.ddth, upper: true, font: 'Barlow Black Italic', size: 58, fill: '#0d0d0f' }), T({ name: 'Month', text: `${d.month} ${d.year}`, upper: true, font: 'Montserrat', size: 18, fill: '#0d0d0f' })], { cx: 925, cy: by, gap: 0 }));
+      }
+      const vl = venueLines(D, 3);
+      if (vl) { const g = tornTag([{ text: 'Address:', font: 'Montserrat', size: 15, fill: p.mid === '#000000' ? '#c94a48' : mix(p.mid, '#c94a48', 0.5) }, { text: vl, font: 'Montserrat', size: 15, line: 1.2, maxW: 230 }], { seed: 4, rot: -2, padX: 18, padY: 12 }); L.push(...g.place(915, by + 150)); }
+      L.push(put(micro(footerWords(f), { size: 13, letter: 0.5, fill: rgba('#ffffff', 0.62), maxW: 980 }), { cx: 540, b: H - 26 }));
+      return L;
+    },
+
+    /* ── BREAKING INVISIBLE Barriers: tall white distressed capitals on red, a signature script across them, the minister to the side ── */
+    breaking(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D);
+      L.push(BG({ img: D.bg, grade: 'vivid', contrast: 16, sat: 26, keep: 0.12, topShade: 0.3, bottomShade: 0.55, bottomFrom: 0.72, vignette: 0.3,
+        colorWash: [{ stops: [mix(p.mid, '#ffffff', 0.1), p.mid, p.deep], angle: 90, mode: 'soft-light', a: 0.6 }] }));
+      L.push(FX({ kind: 'glow', x: 780, y: H * 0.62, w: 900, h: 900, opacity: 0.45 }));
+      L.push(FX({ kind: 'smoke', x: 540, y: H * 0.2, w: 1200, h: 420, n: 16, seed: 2, color: p.hi, color2: p.accent, opacity: 0.22 }));
+      const hd = header(D, { center: true, t: 30 }); L.push(...hd);
+      const ws = String(f.title || 'Breaking Invisible Barriers').trim().split(/\s+/);
+      const scriptW = ws.length >= 3 ? ws[ws.length - 1] : '', main = scriptW ? ws.slice(0, -1).join(' ') : ws.join(' ');
+      const ts = stackLines(stack(main, 2), { t: hd.bottom + 18, fit: 960, maxH: H * 0.16, gap: 6,
+        style: { font: 'Anton', upper: true, stretch: 1.12, fill: { stops: ['#ffffff', '#f1f1f1', '#d9d9d9'], angle: 90 }, grain: true, shadow: true } });
+      L.push(...ts);
+      let y = ts.bottom;
+      if (scriptW) { const s = put(T({ name: 'Script word', text: scriptW.charAt(0).toUpperCase() + scriptW.slice(1).toLowerCase(), font: 'Great Vibes', size: 190, maxW: 760, maxH: H * 0.14, fill: answer(p), stroke: 3, strokeColor: '#ffffff', rot: -6, shadow: true }), { cx: 600, cy: y - 6 }); L.push(s); y = box(s).b; }
+      if (f.theme) { const th = put(T({ name: 'Theme', text: f.theme, font: 'Montserrat Italic', size: 30, maxW: 760, shadow: true }), { cx: 560, t: y + 10 }); L.push(th); y = box(th).b; }
+      if (sp) L.push(hero(sp, { cx: 800, t: Math.max(y + 10, H * 0.46), b: H + 20, mode: 'chest', fade: 0.1, extra: lit(p) }));
+      const iy = Math.max(y + 60, H * 0.62);
+      const left = col([d && T({ name: 'Date', text: `${d.day3}. ${d.ddth}\n${d.mon3}. ${d.year}`, font: 'Kanit Italic', size: 40, line: 1.0, align: 'left', shadow: true }),
+        f.time && T({ name: 'Time', text: f.time + (f.time2 ? ' &\n' + f.time2 : ''), font: 'Kanit Italic', size: 40, line: 1.0, fill: p.accent, align: 'left', shadow: true })], { l: 70, t: iy, gap: 14 });
+      L.push(...left);
+      let yy = left.length ? left.bottom + 22 : iy;
+      if (sp && sp.name) {
+        const np = nameParts(sp.name);
+        const g = pill([{ text: 'MINISTERING', font: 'Montserrat', size: 12, letter: 0.15 }, { text: (np.title ? np.title + ' ' : '') + np.name, font: 'Montserrat Black', size: 22, maxW: 300 }], { fill: p.accent, ink: '#141414', radius: 4, padX: 16, padY: 10 });
+        L.push(...g.place(70 + g.w / 2, yy + g.h / 2)); yy += g.h + 18;
+      }
+      const vl = venueLines(D, 3);
+      if (vl) L.push(put(T({ name: 'Venue', text: (f.church ? f.church + ' - ' : '') + vl, font: 'Montserrat', size: 17, line: 1.25, align: 'left', maxW: 380, shadow: true }), { l: 70, t: yy }));
+      return L;
+    },
+
+    /* ── SPIRIT OF DAVID: a gold-foil title with its little word on a badge, the ministers in rank (the main one front and centre) ── */
+    spirit(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], ps = spsOf(D).slice(0, 3);
+      L.push(BG({ img: D.bg, grade: 'dark', contrast: 12, keep: 0.22, topShade: 0.45, bottomShade: 0.95, bottomFrom: 0.56, vignette: 0.5 }));
+      L.push(FX({ kind: 'burst', x: 540, y: H * 0.3, w: 900, h: 900, n: 40, seed: 5, color: p.accent, color2: '#ffffff', opacity: 0.35 }));
+      L.push(FX({ kind: 'bokeh', x: 540, y: H * 0.4, w: 1080, h: H * 0.7, n: 22, seed: 13, opacity: 0.5 }));
+      const hd = header(D, { center: true, t: 28 }); L.push(...hd);
+      L.push(put(micro('PRESENTS', { size: 13, letter: 1.0 }), { cx: 540, t: hd.bottom }));
+      // laid out from the foot up: the details, the theme, the gold title, then the ministers standing on it
+      const iy = H - 104, foil = { font: 'Montserrat Black', upper: true, fill: GOLD, speck: 0.8, extrude: 2, extrudeColor: ['#6a4300', '#2a1a00'], glow: rgba('#ffcf33', 0.25), shadow: true };
+      let tb = iy - 64;
+      if (f.theme) {
+        const g = pill([{ text: 'THEME', font: 'Montserrat', size: 12, letter: 0.2 }], { fill: GOLD, ink: '#2a1a00', radius: 99, padX: 14, padY: 6 });
+        const th = T({ name: 'Theme', text: f.theme, upper: true, font: 'Montserrat', size: 17, align: 'left', maxW: 640, shadow: true });
+        L.push(...hrow([g, th], 540, tb, 14)); tb -= 34;
+      }
+      const sc = splitConnector(f.title);
+      const lines = sc ? [sc.a, sc.b] : twoLines(f.title || 'Spirit of David').filter(Boolean);
+      const ts = stackLines(lines, { b: tb, fit: 860, maxH: H * 0.095, gap: sc ? 30 : 6, style: foil });
+      if (sc && ts.length === 2) { const g = pill([{ text: sc.conn, upper: true, font: 'Montserrat Black', size: 26 }], { fill: GOLD, ink: '#2a1a00', circle: true, padX: 10, padY: 10, shadow: true }); ts.push(...g.place(540, (box(ts[0]).b + box(ts[1]).t) / 2)); }
+      const top = hd.bottom + 50, foot = box(ts[0]).t + 30;
+      if (ps[1]) L.push(hero(ps[1], { cx: 250, t: top + 60, b: foot, mode: 'chest', fade: 0.3, extra: lit(p) }));
+      if (ps[2]) L.push(hero(ps[2], { cx: 830, t: top + 60, b: foot, mode: 'chest', fade: 0.3, extra: lit(p) }));
+      if (ps[0]) L.push(hero(ps[0], { cx: 540, t: top, b: foot + 20, mode: 'chest', fade: 0.3, extra: lit(p) }));
+      [[ps[1], 'left'], [ps[2], 'right']].forEach(([s, al]) => { if (!s || !s.name) return; const np = nameParts(s.name); L.push(...col([np.title && micro(np.title, { size: 11, letter: 0.2, align: al }), T({ name: 'Name', text: twoLines(np.name).filter(Boolean).join('\n'), upper: true, font: 'Montserrat', size: 16, line: 1.05, align: al, shadow: true, maxW: 220 })], al === 'left' ? { l: 52, t: top + 30, gap: 2 } : { r: 1028, t: top + 30, gap: 2 })); });
+      if (ps[0] && ps[0].name) { const np = nameParts(ps[0].name); L.push(...col([np.title && micro(np.title, { size: 12, letter: 0.2 }), T({ name: 'Name', text: np.name, upper: true, font: 'Montserrat Black', size: 20, shadow: true, maxW: 400 })], { cx: 540, b: box(ts[0]).t - 8, gap: 2 })); }
+      L.push(...ts);
+      L.push(...infoRow(D, iy, [d && { name: 'Date', big: `${d.ddth} ${d.mon3}`, small: `${d.day}, ${d.year}`, size: 40 }, f.time && { name: 'Time', big: f.time, small: f.time2 ? 'AND ' + f.time2 : 'PROMPT', size: 40, accent: true }, venueText(D) && { name: 'Venue', small: venueLines(D, 3), pin: true, maxW: 300, smallSize: 14 }], { lineH: 54 }));
+      L.push(...socialRow(D, { cx: 540, cy: H - 28, size: 13, shadow: false }));
+      return L;
+    },
   };
-  const LOOK_NAMES = { glory: 'Glory', fire: 'Fire', encounter: 'Encounter', miracle: 'Spotlight', bible: 'Bible Study', prophetic: 'Gold', sunday: 'Giant words', lineup: 'Line-up', script: 'Script', scenic: 'Scenic', light: 'Light' };
+  const LOOK_NAMES = { glory: 'Glory', fire: 'Fire', encounter: 'Encounter', miracle: 'Spotlight', bible: 'Bible Study', prophetic: 'Gold', sunday: 'Giant words', lineup: 'Line-up', script: 'Script', scenic: 'Scenic', light: 'Light', joinus: 'Join us', didone: 'Elegant', upper: 'Upper Room', theme: 'Theme picture', mountain: 'Sky letters', breaking: 'Breaking', spirit: 'Gold line-up' };
   /* each look's own colours (the AI's colours go on the first few designs; these on the rest, for variety) */
   const SIGNATURE = {
     glory: { deep: '#0b0b10', mid: '#2a2140', accent: '#f6c915', hi: '#ffffff' },
@@ -1706,6 +2172,13 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     script: { deep: '#14063a', mid: '#5b21b6', accent: '#ff3d8b', hi: '#ffe4f2' },
     scenic: { deep: '#012a30', mid: '#0e6f7a', accent: '#7ee0d6', hi: '#ffffff' },
     light: { deep: '#3a2a1a', mid: '#c8102e', accent: '#c8102e', hi: '#ffffff' },
+    joinus: { deep: '#2a0b4a', mid: '#9b2bd0', accent: '#f0a36e', hi: '#ffffff' },
+    didone: { deep: '#34041e', mid: '#b5311c', accent: '#fbcc37', hi: '#ffffff' },
+    upper: { deep: '#4c0804', mid: '#dd4101', accent: '#f9d21a', hi: '#fdfcd1' },
+    theme: { deep: '#190101', mid: '#a50d02', accent: '#f7520a', hi: '#fcf65b' },
+    mountain: { deep: '#09101a', mid: '#10415d', accent: '#39a9b9', hi: '#e5e7e9' },
+    breaking: { deep: '#3a0000', mid: '#c8102e', accent: '#ffd21f', hi: '#ffffff' },
+    spirit: { deep: '#140a00', mid: '#5a3208', accent: '#f5c542', hi: '#fff6dd' },
   };
 
   /** The event, the art direction and the pictures → everything a layout reads. */
@@ -1738,6 +2211,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       // the picture has a face in it: its own colours kept (skin is not regraded), and no blur
       layers.forEach((l) => { if (l.type === 'bg') { l.keepFloor = 0.88; l.blur = 0; } });
     }
+    // every soft shadow in the flyer's own darkest colour (a black one is a sticker's)
+    const tint = rgba(mix(D.pal.deep, '#000000', 0.5), 0.62);
+    layers.forEach((l) => { if (l.type === 'text' && l.shadow && !l.shadowColor) l.shadowColor = tint; });
     return { w: D.w, h: D.h, pal: D.pal, look, painted: !!o.painted, layers };
   }
 
@@ -2209,12 +2685,19 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     gold: { deep: '#2a1400', mid: '#b86f00', accent: '#ffd54a', hi: '#fffbe6' },
     teal: { deep: '#012226', mid: '#0e6f7a', accent: '#ffd23f', hi: '#ffffff' },
   };
+  /* the light each look is built for (the reference it copies): Join us is purple, Upper Room is fire, the gold line-up gold… */
+  const LOOK_TONE = { joinus: 'purple', miracle: 'purple', script: 'purple', didone: 'red', upper: 'red', breaking: 'red', fire: 'red', mountain: 'teal', scenic: 'teal',
+    spirit: 'gold', bible: 'gold', prophetic: 'gold', sunday: 'gold', encounter: 'blue', theme: 'own', glory: 'own', lineup: 'blue', light: 'own' };
   function rebuildDesigns() {
     const sz = sizeOf();
     const looks = (F.dir && F.dir.looks && F.dir.looks.length ? F.dir.looks : Object.keys(LAYOUTS)).filter((l) => LAYOUTS[l]);
     const all = Array.from(new Set(looks.concat(Object.keys(LAYOUTS))));
+    const used = new Map(), n = (b) => used.get(b.key) || 0;
     F.designs = all.map((look, i) => {
-      const bg = F.bgs[i % F.bgs.length];
+      // the AI's picture painted in this look's own light, while it is not already on two designs; else the least used
+      const want = F.bgs.filter((b) => b.tone && b.tone === LOOK_TONE[look] && n(b) < 2);
+      const bg = want[0] || (F.bgs.some((b) => b.tone) ? F.bgs.slice().sort((a, b) => n(a) - n(b))[0] : F.bgs[i % F.bgs.length]);
+      if (bg) used.set(bg.key, n(bg) + 1);
       // the AI's colours on the first designs, each look's own on the rest — a board of different flyers, not one flyer ten times
       // a picture painted in its own light takes colours that match it; the AI's own on the rest
       const tp = bg && bg.tone && TONE_PAL[bg.tone];

@@ -135,7 +135,8 @@ async function t(name, fn) {
     assert.strictEqual(bible.looks[0], 'bible'); assert.strictEqual(bible.palette.length, 4);
     assert.ok(bible.photos.includes('bible-open.jpg'), bible.photos.join());
     const prayer = await fa.direct({ title: 'Prayer Meeting' });
-    assert.strictEqual(prayer.looks[0], 'prophetic');
+    // a prayer meeting leads with the UPPER ROOM reference look; the gold prophetic one is still on offer
+    assert.strictEqual(prayer.looks[0], 'upper'); assert.ok(prayer.looks.includes('prophetic'));
     assert.ok(prayer.photos.includes('praying-hands.jpg'), prayer.photos.join());
     const easter = await fa.direct({ title: 'Easter Sunday', season: 'Easter Sunday' });
     assert.strictEqual(easter.scriptWord, 'Easter');
