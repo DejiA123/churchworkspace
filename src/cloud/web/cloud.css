@@ -2364,8 +2364,9 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .cs-connect-cta small { font-size: 12.5px; color: #9b9ea8; }
 .cs-connect-cta > .mi { width: 18px; height: 18px; margin: 0; color: #8a8d97; }
 
-.cs-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
-.cs-g { position: relative; padding: 0; border: 0; background: none; color: #fff; text-align: left; cursor: pointer; }
+/* minmax(0, …): a 1fr column will not shrink below its longest name, and three 370px columns showed one video and a sliver */
+.cs-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.cs-g { position: relative; min-width: 0; padding: 0; border: 0; background: none; color: #fff; text-align: left; cursor: pointer; }
 .cs-g-pic { display: block; aspect-ratio: 9 / 14; border-radius: 13px; background: linear-gradient(160deg, #23242b, #17181d) center / cover no-repeat; transition: box-shadow .15s; }
 .cs-g-name { display: block; margin-top: 5px; font-size: 11.5px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cs-g .cs-tick { left: auto; right: 6px; top: 6px; box-shadow: 0 0 0 2px rgba(0,0,0,.45); }
@@ -3634,6 +3635,18 @@ body.mw-cloud .cloud-sheet-modal .cloud-files-up, body.mw-cloud .cloud-files-bar
 .csb-facts span { background: #f1f3f6; color: #0f1115; }
 .csb-handtodo { background: #eaf2ff; border-color: rgba(31, 111, 224, .35); color: #0f1115; }
 .csb-ai { background: #f6f7f9; border-color: rgba(15, 23, 42, .08); }
+/* the captions the AI wrote, on the light sheet: they kept the dark sheet's white
+   (white on #f6f7f9, almost invisible), its pale blue times, mint tick and white shimmer */
+.csb-sheet .csb-cap, .csb-sheet .csb-bcap { color: #0f1115; }
+.csb-bpost { background: #fff; border-color: rgba(15, 23, 42, .08); }
+.csb-bmain > small { color: #1f6fe0; }
+.csb-bwait { color: #5d6470; }
+.csb-ai .csb-shim { background-image: linear-gradient(90deg, rgba(15, 23, 42, .06) 0%, rgba(15, 23, 42, .14) 50%, rgba(15, 23, 42, .06) 100%); }
+.csb-ai-st.ok { color: #16a34a; }
+.csb-ai-st.busy { color: #1f6fe0; }
+.csb-ai-st .csb-spin { border-color: rgba(31, 111, 224, .2); border-top-color: #1f6fe0; }
+/* My videos, the scheduler's picker: the names under the pictures were white on white */
+.cp-pick .cs-g, .cp-pick .cs-empty b { color: #0f1115; }
 .csb-plan { background: #eaf2ff; color: #1e3a8a; }
 .csb-style { background: #f1f3f6; border-color: transparent; color: #0f1115; }
 .csb-names-btn { border-color: #cfd4dc; color: #5d6470; }

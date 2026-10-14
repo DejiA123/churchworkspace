@@ -312,6 +312,8 @@ function aiServer() {
     const cards = await page.$$eval('#csCompose .csb-bcap', (xs) => xs.map((x) => x.value));
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'b-real-10-bulk-cards.png') });
     check(cards.length === 3 && cards.every((c) => c.length > 10), 'then a card per post, each with its own AI caption', cards.map((c) => c.slice(0, 40)));
+    const ink = await page.$eval('#csCompose .csb-bcap', (x) => getComputedStyle(x).color);
+    check(ink === 'rgb(15, 17, 21)', 'each card\'s caption is dark, readable text on the light sheet', ink);
     await page.fill('#csCompose .csb-bcap[data-bcap="1"]', 'My own words for clip two');
     // several days, one by one: starts Tonight 7 pm, then exactly every 6 hours
     await page.tap('#csCompose [data-c="quick"][data-k="tonight"]');

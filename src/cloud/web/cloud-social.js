@@ -194,8 +194,9 @@
       if (!res.ok) return S.exports;
       const data = await res.json();
       const out = (data.groups || []).find((g) => g.key === 'output');
+      // every finished video, newest first, as My videos lists them (Home shows its own first 10)
       S.exports = ((out && out.files) || []).filter((f) => isVideo(f.path) || isImage(f.path))
-        .sort((a, b) => b.mtime - a.mtime).slice(0, 40);
+        .sort((a, b) => b.mtime - a.mtime);
     } catch (e) { /* the list is a convenience */ }
     return S.exports;
   }
