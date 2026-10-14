@@ -87,7 +87,7 @@ function init(folder, opts = {}) {
   let saved = [];
   try { saved = JSON.parse(fs.readFileSync(stateFile(), 'utf8')) || []; } catch (e) { saved = []; }
   for (const sb of saved) {
-    const b = Object.assign({}, sb, { running: false, sender: defaultSender, resumed: true });
+    const b = Object.assign({}, sb, { running: false, lanes: 0, sender: defaultSender, resumed: true });
     let again = 0;
     for (const it of b.items) {
       if (it.state === 'running' && onInterrupted) {
@@ -119,7 +119,9 @@ function summary(b) {
   const failed = b.items.filter((x) => x.state === 'failed').length;
   const running = b.items.find((x) => x.state === 'running');
   const total = Math.max(b.total || 0, b.items.length);
-  const pct = total ? Math.round(((done + failed + (running ? running.pct / 100 : 0)) / total) * 100) : 0;
+  // every short being made counts, not only the first (see lanes)
+  const part = b.items.reduce((n, x) => n + (x.state === 'running' ? (x.pct || 0) / 100 : 0), 0);
+  const pct = total ? Math.round(((done + failed + part) / total) * 100) : 0;
   return {
     id: b.id, label: b.label, total, received: b.items.length, sealed: b.sealed,
     done, failed, cancelled: b.cancelled, pct, stalled: b.stalled || null,
@@ -296,8 +298,32 @@ async function runSteps(b, it, steps) {
   try { fs.rmSync(it.file, { force: true }); } catch (e) {}
 }
 
+/*
+ * ►► TWO SHORTS AT ONCE ON A SERVER WITH THE CORES FOR IT. ◄◄
+ * One short leaves a 4-core server half idle: ffmpeg 6 runs its filter graph
+ * on one thread, and each step (voice, picture, captions, outro) waits on the
+ * one before. Measured on 4 cores, two 38 s shorts with captions: 62-66 s one
+ * after the other, 48-57 s side by side — and on Oracle's Ampere eight exports
+ * at once finished in 133 s against 63 s for one alone (ffmpeg.js). So a big
+ * server (quick encodes, 4 GB+, 4+ cores) makes a batch's shorts two at a
+ * time; a small one, and the desktop, one at a time as before. The ffmpeg
+ * turns (ffmpeg.js ffSlots) still cap what runs across everyone's batches.
+ * MW_BATCH_LANES sets it by hand.
+ */
+function lanes() {
+  const set = Math.floor(Number(process.env.MW_BATCH_LANES));
+  if (set >= 1) return Math.min(4, set);
+  const machine = require('./machine');
+  if (!machine.fastEncode() || machine.memoryMB() < 4096) return 1;
+  return Math.max(1, Math.min(3, Math.floor(machine.cpus() / 2)));
+}
+
 function kick(b) {
-  if (b.running) return;
+  while ((b.lanes || 0) < lanes() && !b.cancelled && b.items.some((x) => x.state === 'queued')) lane(b);
+}
+
+function lane(b) {
+  b.lanes = (b.lanes || 0) + 1;
   b.running = true;
   space.run(b.space, async () => {
     try {
@@ -314,8 +340,9 @@ function kick(b) {
         emit(b);
       }
     } finally {
-      b.running = false;
-      if (b.sealed && b.items.every((x) => x.state !== 'queued' && x.state !== 'running')) {
+      b.lanes = Math.max(0, (b.lanes || 0) - 1);
+      b.running = b.lanes > 0;
+      if (!b.running && b.sealed && b.items.every((x) => x.state !== 'queued' && x.state !== 'running')) {
         b.finishedAt = b.finishedAt || now();
         emit(b);
       }

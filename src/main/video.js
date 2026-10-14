@@ -1448,11 +1448,28 @@ function cutPlan(pieces, { durationSec, hasAudio, fps: fpsIn, noFx } = {}) {
   // Nothing removed → plain seek + trim, and the caller keeps its simple -vf path.
   if (ps.length === 1 && !graded) return { inputArgs, chain: null, v: '0:v', a: hasAudio ? '0:a' : null, dur, span, base, pieces: ps };
 
-  let chain = '';
+  /*
+   * ►► ONE DECODED PICTURE, SPLIT — NOT [0:v] NAMED ONCE PER PIECE. ◄◄
+   * Named once per kept piece, the input handed every decoded frame to that
+   * many graph inputs, and ffmpeg 6.1 held each one for every piece not yet
+   * reached. With the pauses taken out (the default for AI shorts), 40 s of
+   * 1080p in ten pieces: 3.4 GB to grab the tracker's stills, and the
+   * blurred-pad encode killed for memory at 14 GB after 100 s — the short then
+   * fell back to the plain crop, speaker off-centre at the edges. Split inside
+   * the graph: 140-250 MB however many pieces, that encode 93 s -> 20 s, and
+   * the same frames at the same times (md5 of picture, sound and the tracker's
+   * stills).
+   */
+  const many = ps.length > 1;
+  const vIn = (i) => (many ? `[pv${i}]` : '[0:v]');
+  const aIn = (i) => (many ? `[pa${i}]` : '[0:a]');
+  const fan = many ? `[0:v]split=${ps.length}${ps.map((p, i) => `[pv${i}]`).join('')};`
+    + (hasAudio ? `[0:a]asplit=${ps.length}${ps.map((p, i) => `[pa${i}]`).join('')};` : '') : '';
+  let chain = fan;
   ps.forEach((p, i) => {
     const s = (p.start - base).toFixed(3), e = (p.end - base).toFixed(3);
-    chain += `[0:v]trim=start=${s}:end=${e},setpts=PTS-STARTPTS${vfx(p)}[cv${i}];`;
-    if (hasAudio) chain += `[0:a]atrim=start=${s}:end=${e},asetpts=PTS-STARTPTS${afx(p)}[ca${i}];`;
+    chain += `${vIn(i)}trim=start=${s}:end=${e},setpts=PTS-STARTPTS${vfx(p)}[cv${i}];`;
+    if (hasAudio) chain += `${aIn(i)}atrim=start=${s}:end=${e},asetpts=PTS-STARTPTS${afx(p)}[ca${i}];`;
   });
   if (ps.length === 1) {
     chain += `[cv0]null[cutv]` + (hasAudio ? `;[ca0]anull[cuta]` : '');
@@ -1471,11 +1488,11 @@ function cutPlan(pieces, { durationSec, hasAudio, fps: fpsIn, noFx } = {}) {
    * would otherwise misplace the crossover).
    */
   const fps = Math.max(1, Math.round(Number(fpsIn) || 30));
-  chain = '';
+  chain = fan;
   ps.forEach((p, i) => {
     const s = (p.start - base).toFixed(3), e = (p.end - base).toFixed(3);
-    chain += `[0:v]trim=start=${s}:end=${e},setpts=PTS-STARTPTS${vfx(p)},fps=${fps},settb=AVTB,format=yuv420p[cv${i}];`;
-    if (hasAudio) chain += `[0:a]atrim=start=${s}:end=${e},asetpts=PTS-STARTPTS${afx(p)},aresample=48000[ca${i}];`;
+    chain += `${vIn(i)}trim=start=${s}:end=${e},setpts=PTS-STARTPTS${vfx(p)},fps=${fps},settb=AVTB,format=yuv420p[cv${i}];`;
+    if (hasAudio) chain += `${aIn(i)}atrim=start=${s}:end=${e},asetpts=PTS-STARTPTS${afx(p)},aresample=48000[ca${i}];`;
   });
   let v = 'cv0', a = hasAudio ? 'ca0' : null, outDur = ps[0].end - ps[0].start;
   for (let i = 1; i < ps.length; i++) {
@@ -1916,6 +1933,10 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
       const padW = info.width + 2 * P;
       const pts = simplifyKeyframes(desired.map(([t, x]) => [t, clampN(x + P, 0, padW - cropW)]));
       const xe = buildLerpExpr(pts, Math.round((padW - cropW) / 2));
+      // the window's left edge exactly as crop places it (rounded, then down to
+      // even for 4:2:0), so the picture laid into the window can be put on the
+      // very same pixel — see padGraph
+      const xi = `2*trunc(round(${xe})/2)`;
       // bg = the same frame stretched to the padded width, cropped back to height,
       // heavily blurred and slightly darkened; fg = the untouched frame centred on it.
       // `srcA` is how the audio is REFERRED TO INSIDE the graph; `mapA` is how it
@@ -1970,8 +1991,21 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
       const ins = voice ? [...inputArgs.slice(0, lastI + 2), '-i', voice, ...inputArgs.slice(lastI + 2)] : inputArgs;
       const voiceIdx = inputArgs.filter((x) => x === '-i').length;
       const padGraph = (fmt) => {
-        let fc = cutPre + `${srcV}split=2[bgs][fgs];[bgs]${bgChain}[bg];`
-          + `[bg][fgs]overlay=${P}:0,crop=${cropW}:${cropH}:x='${xe}':y=0`
+        /*
+         * ►► CROPPED FIRST, THEN THE PICTURE LAID IN. ◄◄
+         * The whole picture was overlaid onto the whole padded canvas (2332 px
+         * wide for a 1080p sermon) and 608 px of it kept. Now the blur is cut to
+         * the window first and the picture laid into just that window, at the
+         * same pixel (xi is crop's own rounding) — every frame bit-for-bit the
+         * same file, measured with framemd5 on 1200 frames. 40 s of 1080p:
+         * filters 19.2 s -> 14.1 s, the whole pass 29.1 s -> 24.6 s.
+         */
+        // (the pan is written twice this way; a Windows command line stops at 32,767
+        // characters, so a heavily keyframed one there keeps the old order)
+        const twice = !(process.platform === 'win32' && xi.length > 8000);
+        let fc = cutPre + (twice
+          ? `${srcV}split=2[bgs][fgs];[bgs]${bgChain},crop=${cropW}:${cropH}:x='${xi}':y=0[bg];[bg][fgs]overlay=x='${P}-(${xi})':y=0:eval=frame`
+          : `${srcV}split=2[bgs][fgs];[bgs]${bgChain}[bg];[bg][fgs]overlay=${P}:0,crop=${cropW}:${cropH}:x='${xe}':y=0`)
           + `,scale=${p.w}:${p.h}:flags=lanczos,setsar=1${motionChain(motion, p.w, p.h) ? ',' + motionChain(motion, p.w, p.h) : ''},format=${fmt}[vout]`;
         if (af && info.hasAudio && !voice) fc += `;${srcA}${af}[aout]`;
         // with the voice playing in, the cut plan's own sound is not used

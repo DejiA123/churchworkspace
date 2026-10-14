@@ -321,7 +321,8 @@ let _hideTimer = null;
       setJobBatch(Math.min(b.total, finished + 1), b.total, 'Exporting short', 'on the server');
       if (cur && cur.label) setStage(`“${cur.label}” — you can close the app, the server carries on.`);
       const share = canSaveHere() && ownBatches().includes(b.id) ? 100 - SAVE_SHARE : 100;
-      setProgress(((finished + (cur ? (cur.pct || 0) / 100 : 0)) / Math.max(1, b.total)) * share);
+      // b.pct counts every short being made (two at a time on a big server, batch.js lanes)
+      setProgress(((b.pct || 0) / 100) * share);
     }
   }
   function setJobBatchExtra() {
