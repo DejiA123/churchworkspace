@@ -197,7 +197,7 @@
       ve.framing = { zoom: 1, offsetX: 0.5, offsetY: 0.5 };
       ve.textOverlays = []; ve.textSel = null; ve.shortFx = null;
       ve.mediaThumbs = {};   // a new recording is a new project — nothing is on top of it yet
-      ve.history = []; ve.future = []; updateUndoRedoButtons();
+      ve.history = []; ve.future = []; ve._undoBase = null; updateUndoRedoButtons();
       setFollow(true, true); // a fresh video starts following the playhead again
       // …and the speaker: the hand framing that switched 🎯 Auto-reframe off
       // belonged to the last recording and was thrown away just above (a
@@ -280,7 +280,7 @@
     ve.sounds = []; ve.soundSel = null; ve.textOverlays = []; ve.textSel = null; ve.mediaThumbs = {};
     ve.capWords = null; ve.capEvents = null; ve.capOffset = 0; ve._capSource = null; ve.capTarget = null;
     ve.capSel = null; ve.capEditing = null; ve.capScope = null;
-    ve.history = []; ve.future = [];
+    ve.history = []; ve.future = []; ve._undoBase = null;
     dropObjectUrl(ve.filmstripUrl); ve.filmstripUrl = null;
     ve.sessionId = null; ve.sessionName = null; ve.sessionThumb = null; ve.sessionDirty = false; ve.sessionAuto = false;
     if (ve.refs.player) ve.refs.player.style.display = 'none';
@@ -6784,8 +6784,53 @@
   // an export's frozen copy (and its task) belongs to that export, never to an undo step:
   // restored by Ctrl+Z, it outlived the export (found by review) — and it is heavy
   const TRANSIENT = new Set(['__snap', '__task', '_thumbing']);
+  /*
+   * ►► UNDO TAKES BACK EVERY CHANGE, NOT ONLY THE TIMELINE'S. ◄◄ A step held
+   * the clips, the text, the sounds — and nothing else: the export quality, the
+   * frame fill, follow the speaker, the cover, the fades, the caption look,
+   * the music and the ending were changed with no way back. A step now holds
+   * those too (the same settings a project saves, and the controls that set
+   * them), and puts them back through the controls' own handlers, so the
+   * studio, the preview and the export all agree on what was undone.
+   */
+  const UNDO_CTRLS = ['veAspect', 'veAutoReframe', 'veFill', 'veFillStrength', 'veFillDim', 'veCover', 'veCoverMode', 'veCoverY', 'veCoverH',
+    'veDenoise', 'veDenoiseLevel', 'veFadeIn', 'veFadeOut', 'veQuality', 'veFps', 'veBitrate', 'veCapShow',
+    'fxSpeed', 'fxRot', 'fxFlipH', 'fxFlipV', 'fxMusicVol',
+    'capStyleSel', 'capFont', 'capSize', 'capSizePct', 'capWords', 'capCase', 'capPos', 'capColor', 'capTrans', 'capTracking', 'capWordHl', 'capWordColor'];
+  function settingsState() {
+    const ctrls = {};
+    for (const id of UNDO_CTRLS) {
+      const el = document.getElementById(id); if (!el) continue;
+      ctrls[id] = el.type === 'checkbox' ? !!el.checked : el.value;
+    }
+    return {
+      aspect: ve.aspect, quality: ve.quality, fps: ve.fps || 0, bitrate: ve.bitrate || 'recommended',
+      fill: ve.fill, denoise: ve.denoise, fade: ve.fade, cover: ve.cover, framing: ve.framing, shortFx: ve.shortFx || null,
+      subject: ve.subject ? { sig: ve.subject.sig, thumb: ve.subject.thumb, at: ve.subject.at } : null,
+      music: ve.music || null, outro: ve.outro || null, outroAll: ve.outroAll !== false, vthumb: ve.vthumb || null,
+      capStyleId: ve.capStyleId, capPos: ve.capPos || null, capWidth: ve.capWidth || null,
+      ctrls,
+    };
+  }
+  function applySettings(lk) {
+    if (!lk) return;
+    const copy = (v) => (v && typeof v === 'object' ? JSON.parse(JSON.stringify(v)) : v);
+    for (const k of ['aspect', 'quality', 'fps', 'bitrate', 'fill', 'denoise', 'fade', 'cover', 'framing', 'shortFx', 'music', 'outro', 'vthumb', 'capStyleId', 'capPos', 'capWidth']) {
+      if (k in lk) ve[k] = copy(lk[k]);
+    }
+    ve.outroAll = lk.outroAll !== false;
+    ve.subject = lk.subject && lk.subject.sig ? copy(lk.subject) : null;
+    // each control that differs is set and told, so its own handler does what it always does
+    for (const [id, v] of Object.entries(lk.ctrls || {})) {
+      const el = document.getElementById(id); if (!el) continue;
+      if (el.type === 'checkbox') { if (el.checked === v) continue; el.checked = v; }
+      else { if (el.value === v) continue; el.value = v; }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }
   function snapshotState(withCaps) {
-    const s = { segments: ve.segments, sel: ve.sel, textOverlays: ve.textOverlays, textSel: ve.textSel, audio: ve.audio, audioSel: ve.audioSel, sounds: ve.sounds || [] };
+    const s = { segments: ve.segments, sel: ve.sel, textOverlays: ve.textOverlays, textSel: ve.textSel, audio: ve.audio, audioSel: ve.audioSel, sounds: ve.sounds || [], look: settingsState() };
     if (withCaps) {
       s.caps = {
         events: ve.capEvents, words: ve.capWords, offset: ve.capOffset || 0,
@@ -6800,7 +6845,8 @@
   /** Does this snapshot carry captions? (so undo/redo stay symmetrical) */
   function snapHasCaps(json) { try { return !!JSON.parse(json).caps; } catch (e) { return false; } }
   function pushHistory(opts) {
-    if (!ve.video) return;
+    if (!ve.video || ve._undoing) return;
+    ve._undoBase = null;   // the step is taken here; the watcher starts again from after it
     touchSession();   // every edit worth undoing is an edit worth keeping
     ve.history.push(snapshotState(opts && opts.captions));
     if (ve.history.length > 60) ve.history.shift();
@@ -6809,6 +6855,10 @@
   }
   function restoreState(json) {
     const s = JSON.parse(json);
+    ve._undoing = true;
+    try { restoreStateNow(s); } finally { ve._undoing = false; ve._undoBase = null; }
+  }
+  function restoreStateNow(s) {
     ve.segments = s.segments; ve.sel = s.sel; ve.textOverlays = s.textOverlays; ve.textSel = s.textSel;
     for (const x of ve.segments || []) if (x) { delete x.__snap; delete x.__task; delete x._thumbing; }
     if (s.audio) { ve.audio = s.audio; ve.audioSel = s.audioSel; }
@@ -6826,16 +6876,60 @@
     // or the panel and the export would keep the placement the operator just
     // took back.
     ve.segments.filter((x) => x.bulk).forEach(syncBulkOverlayFrom);
+    if (s.look) applySettings(s.look);
     renderSegments(); renderTextOverlays(); renderTextTrack(); updateUndoRedoButtons();
+    // …and the picture: a clip's look (Adjust, Filters, Volume) is on the clip, but the
+    // preview, the panel and the timeline badges only show it once told
+    const t = nowT();
+    try { syncClipLook(t); updateMediaLayer(t); markFxBlocks(); if (!$('#fxModal') || !$('#fxModal').classList.contains('hidden')) { renderFxPanel(); paintFxMore(); } } catch (e) {}
+    try { syncExportPrefUi(); updateCropMask(); renderFollowRow(); renderCapStyleGrid(); syncCoverButton(); if (typeof updateMusicButton === 'function') updateMusicButton(); renderClipList(); } catch (e) {}
     updateCapOverlay(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
   }
   /** Commit a PRE-drag snapshot to history, but only if the drag actually changed anything. */
   function commitDragHistory(preSnapJson) {
+    if (ve._undoing) return;
+    ve._undoBase = null;
     touchSession();
     ve.history.push(preSnapJson);
     if (ve.history.length > 60) ve.history.shift();
     ve.future.length = 0;
     updateUndoRedoButtons();
+  }
+  /*
+   * THE SAFETY NET: a change with no undo step of its own still gets one.
+   * After every tap, release, typed key or changed control (once things have
+   * settled) the studio compares where it is with where the last step left it;
+   * if something changed that nothing recorded — a setting, a drag, a control
+   * added later by someone who forgot pushHistory — the "before" goes on the
+   * undo stack. (Pictures and other things the studio fills in by itself are
+   * not compared: they are not anyone's change to undo.)
+   */
+  // (what is SELECTED is not an edit: tapping a clip must not become a step to undo)
+  const UNDO_SKIP = new Set(['thumb', 'img', 'thumbs', 'sel', 'textSel', 'audioSel', 'soundSel']);
+  const undoCmp = (json) => { try { return JSON.stringify(JSON.parse(json), (k, v) => (k.charAt(0) === '_' || UNDO_SKIP.has(k) ? undefined : v)); } catch (e) { return json; } };
+  function undoWatch() {
+    if (!ve.video || ve._undoing || ve._restoring) return;
+    let full;
+    try { full = snapshotState(false); } catch (e) { return; }
+    const cmp = undoCmp(full);
+    if (ve._undoBase && ve._undoBase.cmp !== cmp && ve._undoBase.video === ve.video.path) {
+      ve.history.push(ve._undoBase.full);
+      if (ve.history.length > 60) ve.history.shift();
+      ve.future.length = 0;
+      touchSession();
+      updateUndoRedoButtons();
+    }
+    ve._undoBase = { full, cmp, video: ve.video.path };
+  }
+  {
+    let t = null;
+    const later = () => { clearTimeout(t); t = setTimeout(undoWatch, 700); };
+    for (const ev of ['pointerup', 'change', 'keyup']) document.addEventListener(ev, later, true);
+    // where things stood BEFORE the first change of a gesture (a capture listener runs before any control's own)
+    const before = () => { if (!ve._undoBase && !ve._undoing && ve.video) { clearTimeout(t); undoWatch(); } };
+    for (const ev of ['pointerdown', 'keydown', 'focusin']) document.addEventListener(ev, before, true);
+    // …and a starting point once a video has opened and things have settled, whatever touches it first
+    setInterval(() => { if (!ve._undoBase && !ve._undoing && ve.video && !(ve.refs.player && !ve.refs.player.paused)) undoWatch(); }, 3000);
   }
   // The step being undone decides whether captions travel: undoing a caption
   // change must be redoable, so the opposite stack gets a caption-bearing
@@ -7718,7 +7812,7 @@
     if (data.bulk) { ve.bulk.files = data.bulk.files || []; ve.bulk.overlays = data.bulk.overlays || []; }
 
     // a restored session is a clean starting point, not something to undo INTO
-    ve.history = []; ve.future = []; updateUndoRedoButtons();
+    ve.history = []; ve.future = []; ve._undoBase = null; updateUndoRedoButtons();
     ve.sessionId = data.id && data.id !== 'autosave' ? data.id : (data.projectId || null);
     ve.sessionName = data.name || null;
     ve.sessionAuto = !!data.auto || (data.id === 'autosave' && !data.projectId);   // named after its video by the studio, not by a person (yet)
@@ -14154,7 +14248,7 @@
         const mz = { mean: avg('mean'), lo: avg('lo'), hi: avg('hi'), sat: avg('sat'), edge: avg('edge') };
         if (ms.length) all = all.concat(ms);
         const a = autoFxFor(mz, shortSide);
-        if (!u.pushed) { pushHistory(); u.pushed = true; } else touchSession();
+        fxStep();
         const next = cleanFx(Object.assign(fxOf(s), a));
         if (next) s.fx = next; else delete s.fx;
         looked++;
@@ -14225,13 +14319,23 @@
     const fv = q('fxFlipVBtn'); if (fv) fv.classList.toggle('on', !!(q('fxFlipV') || {}).checked);
     paintFxSlider(q('fxMusicVol'));
   }
+  /*
+   * ONE UNDO STEP PER CHANGE, not one per visit to the panel. It was one per
+   * visit: three sliders moved, one undo took all three back (and a slider is
+   * dozens of input events — those still make one step: a step is a burst of
+   * changes with no pause of more than a moment in it).
+   */
+  function fxStep(force) {
+    if (force || Date.now() - (ve._fxStepAt || 0) > 900) pushHistory(); else touchSession();
+    ve._fxStepAt = force ? 0 : Date.now();
+  }
   /** Set one part of the look — on this clip, or on every clip. */
   function setClipFx(key, value) {
     const u = ve.fxUi;
     if (!fxTarget()) { const s0 = fxPickClip(); u.clipId = s0 ? s0.id : null; }
     const targets = u.scope === 'all' ? fxClips().concat(ve.segments.filter((x) => x.ai)) : [fxTarget()].filter(Boolean);
     if (!targets.length) return;
-    if (!u.pushed) { pushHistory(); u.pushed = true; } else touchSession();
+    fxStep();
     for (const s of targets) {
       const next = cleanFx(Object.assign(fxOf(s), { [key]: value }));
       if (next) s.fx = next; else delete s.fx;
@@ -16239,7 +16343,7 @@
       const u = ve.fxUi;
       const targets = u.scope === 'all' ? fxClips().concat(ve.segments.filter((x) => x.ai)) : [fxTarget()].filter(Boolean);
       if (!targets.some((x) => x.fx)) return;
-      if (!u.pushed) { pushHistory(); u.pushed = true; }
+      fxStep(true);
       targets.forEach((x) => { delete x.fx; });
       syncClipLook(nowT()); updateMediaLayer(nowT()); renderFxPanel(); markFxBlocks();
     });
@@ -16864,7 +16968,7 @@
           .forEach((x, k) => { x.label = `Shot ${k + 1}`; x.seed = true; });
       }
       if (laid) await placeMontageOverlays(ovs);
-      ve.history = []; ve.future = []; updateUndoRedoButtons();   // the montage is the starting point, not edits to undo
+      ve.history = []; ve.future = []; ve._undoBase = null; updateUndoRedoButtons();   // the montage is the starting point, not edits to undo
       renderSegments();
       if (music && music.id) {
         await libRefresh();
@@ -16946,7 +17050,7 @@
           try { renderCapStyleGrid(); } catch (e) {}
         }
         rebuildCapEvents();
-        ve.history = []; ve.future = []; updateUndoRedoButtons();   // the captions came with the edit: nothing to undo
+        ve.history = []; ve.future = []; ve._undoBase = null; updateUndoRedoButtons();   // the captions came with the edit: nothing to undo
         const cc = $('#veCapShow'); if (cc && !cc.checked) cc.checked = true;
         revealCaptions(true);
         updateCapOverlay(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
@@ -17004,7 +17108,7 @@
         resetLiveRender(); // a fresh (fake) load should not inherit stale live-render animation state
         // audio starts as ONE independent full-length clip (like the real load)
         ve.audio = [{ id: uid(), start: 0, end: info.durationSec, color: '#2ea043' }]; ve.audioSel = null; ve.activeRow = 'video';
-        ve.history = []; ve.future = []; updateUndoRedoButtons();
+        ve.history = []; ve.future = []; ve._undoBase = null; updateUndoRedoButtons();
         audioTrackSkeleton('<span class="muted small">(fake — no waveform in tests)</span>'); // normally set by loadWaveform()
         const fitW = ve.refs.timeline.clientWidth || 900; ve.pxPerSec = clamp(fitW / Math.max(1, info.durationSec), 4, 40);
         renderRuler(); renderSegments(); updatePlayhead();
