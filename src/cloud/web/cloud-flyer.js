@@ -1413,7 +1413,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         style: solid3d(p, { font: 'Barlow Italic', upper: true, fill: CHROME, grain: true, extrude: 3, extrudeColor: [mix(p.mid, '#000000', 0.3), mix(p.deep, '#000000', 0.6)], glow: rgba(p.accent, 0.45) }) });
       L.push(...ts);
       if (sp) { const lb = box(ts[ts.length - 1]); L.push(hero(sp, { cx: 540, t: Math.max(lb.t + lb.h * 0.1, y + (ts.bottom - y) * 0.4), b: H - 40, mode: 'chest', fade: 0.3, extra: lit(p) })); }
-      if (d) L.push(...col([d.day3, d.ddth, d.month, d.year].map((s, i) => T({ name: 'Date ' + (i + 1), text: s, font: 'Barlow Italic', size: 56, line: 0.9, fill: p.accent, align: 'left', shadow: true, edge: 2.4, edgeColor: mix(p.deep, '#000000', 0.55) })), { l: 62, t: H * 0.6, gap: -2 }));
+      if (d) L.push(...col([d.day3, d.ddth, d.month, d.year].map((s, i) => T({ name: 'Date ' + (i + 1), text: s, font: 'Barlow Italic', size: 56, line: 0.9, fill: { stops: ['#ffffff', mix(p.accent, '#ffffff', 0.45)], angle: 90 }, align: 'left', shadow: true, edge: 2.4, edgeColor: mix(p.deep, '#000000', 0.55) })), { l: 62, t: H * 0.6, gap: -2 }));
       L.push(...col([f.time && T({ name: 'Time', text: f.time, font: 'Anton', size: 66, align: 'right', shadow: true }), f.time2 && T({ name: 'Time 2', text: f.time2, font: 'Anton', size: 42, align: 'right', shadow: true })], { r: 1016, t: H * 0.6, gap: 6 }));
       if (sp && sp.name) {
         const np = nameParts(sp.name);
@@ -1572,9 +1572,10 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const ts = stackLines(lines, { t: top, fit: 1000, maxH: avail / n - 14, gap: 14,
         style: { font: 'League Gothic', upper: true, stretch: 1.45, fill: { stops: ['#ffffff', mix('#ffffff', p.accent, 0.3), mix(p.accent, p.hi, 0.25)], angle: 90 }, bevel: 0.6, glow: rgba(p.accent, 0.35), shadow: true } });
       L.push(...ts);
-      if (sp) L.push(hero(sp, { cx: 540, t: top + (ts.bottom - top) * 0.4, b: H + 30, mode: 'chest', extra: lit(p) }));
-      L.push(...col([d && T({ name: 'Date', text: `${d.mon3}. ${d.ddth}`, font: 'Anton', size: 50, fill: p.accent, align: 'right', shadow: true }), f.time && T({ name: 'Time', text: f.time, font: 'Anton', size: 50, align: 'right', shadow: true })], { r: 1018, b: H - 50, gap: 4 }));
-      L.push(...col([sp && sp.name && T({ name: 'Speaker', text: sp.name, upper: true, font: 'Montserrat', size: 18, align: 'left', shadow: true, maxW: 300 }),
+      if (sp) L.push(hero(sp, { cx: 780, t: top + (ts.bottom - top) * 0.6, b: H + 30, mode: 'chest', minL: 330, extra: lit(p) }));
+      // the details down the left: the speaker stands on the right, clear of them and of the title's second line
+      L.push(...col([d && T({ name: 'Date', text: `${d.mon3}. ${d.ddth}`, font: 'Anton', size: 50, fill: p.accent, align: 'left', shadow: true, edge: 2, edgeColor: mix(p.deep, '#000000', 0.5) }), f.time && T({ name: 'Time', text: f.time, font: 'Anton', size: 50, align: 'left', shadow: true }),
+        sp && sp.name && T({ name: 'Speaker', text: sp.name, upper: true, font: 'Montserrat', size: 18, align: 'left', shadow: true, maxW: 300 }),
         venueText(D) && T({ name: 'Venue', text: venueLines(D, 3), upper: true, font: 'Montserrat', size: 14, align: 'left', line: 1.22, maxW: 280, shadow: true })], { l: 62, b: H - 50, gap: 10 }));
       return L;
     },
@@ -1643,11 +1644,16 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       L.push(FX({ kind: 'glow', x: 540, y: H * 0.25, w: 1200, h: 800, color: p.hi, opacity: 0.35 }));
       const hd = header(D, { center: true, t: 30 }); L.push(...hd);
       const ws = String(f.title || 'Faith').trim().split(/\s+/);
-      const big = ws.length > 1 ? ws[ws.length - 1] : ws[0], kick = ws.length > 1 ? ws.slice(0, -1).join(' ') : '';
+      // the word that says what it is goes big: PRAYER (meeting), BIBLE (study), SUNDAY (service) — not the generic one
+      const generic = /^(meeting|service|study|night|session|fellowship|programme|program|conference|gathering|hangout|vigil)$/i;
+      let big = ws.length > 1 ? ws[ws.length - 1] : ws[0], kick = ws.length > 1 ? ws.slice(0, -1).join(' ') : '';
+      let below = false;
+      if (ws.length === 2 && generic.test(ws[1])) { big = ws[0]; kick = ws[1]; below = true; }
       let y = H * 0.5;
-      if (kick) { const k = put(T({ name: 'Kicker', text: kick, upper: true, font: 'Montserrat', size: kick.length <= 8 ? 46 : 32, letter: kick.length <= 8 ? 0.6 : 0.4, shadow: true, glow: rgba('#000000', 0.55), maxW: 1000 }), { cx: 540, t: y }); L.push(k); y = box(k).b + 14; }
+      if (kick && !below) { const k = put(T({ name: 'Kicker', text: kick, upper: true, font: 'Montserrat', size: kick.length <= 8 ? 46 : 32, letter: kick.length <= 8 ? 0.6 : 0.4, shadow: true, glow: rgba('#000000', 0.55), maxW: 1000 }), { cx: 540, t: y }); L.push(k); y = box(k).b + 14; }
       const t = put(T({ name: 'Title', text: big, upper: true, font: 'Anton', fit: 1000, maxH: H * 0.2, fill: { stops: ['#ffffff', mix(p.hi, p.accent, 0.4), p.accent], angle: 90 }, grain: true, shadow: true, extrude: 3, extrudeColor: rgba(p.deep, 0.8) }), { cx: 540, t: y });
       L.push(t); y = box(t).b + 26;
+      if (kick && below) { const k = put(T({ name: 'Kicker', text: kick, upper: true, font: 'Montserrat', size: 46, letter: 0.6, shadow: true, glow: rgba('#000000', 0.55), maxW: 1000 }), { cx: 540, t: y - 10 }); L.push(k); y = box(k).b + 22; }
       const cardT = Math.max(y, H - 320), cardB = H - 60, cardW = Math.min(250, (cardB - cardT) * 0.8);
       if (sp) L.push(...card(sp, { l: 66, t: cardT, w: cardW, h: cardB - cardT }, p));
       const ix = sp ? 66 + cardW + 34 : 66;
