@@ -3650,6 +3650,25 @@ body.mw-cloud .cloud-sheet-modal .cloud-files-up, body.mw-cloud .cloud-files-bar
 .csb-plan { background: #eaf2ff; color: #1e3a8a; }
 .csb-style { background: #f1f3f6; border-color: transparent; color: #0f1115; }
 .csb-names-btn { border-color: #cfd4dc; color: #5d6470; }
+/* the accounts a post goes to, on the light sheet: a chosen one kept the dark sheet's
+   white name on its pale blue (unreadable) — dark names, the chosen ones in a clear blue
+   chip with a blue tick, the others plain with a grey ring */
+.csb-acc-pill { background: #f6f7f9; border-color: rgba(15, 23, 42, .1); color: #3b4250; }
+.csb-acc-pill.on { background: #eaf2ff; border-color: #1f6fe0; color: #0f1115; }
+.csb-acc-pill .csb-check { border-color: #c3c8d1; }
+.csb-acc-pill.on .csb-check { background: #1f6fe0; color: #fff; }
+/* the rest of the sheet that still wrote the dark sheet's white or pale text */
+.csb-yt-in { color: #0f1115; }
+.csb-yt-in::placeholder { color: #8b909b; }
+.csb-names small, .csb-lbl { color: #5d6470; }
+.csb-gap, .csb-snap { color: #3b4250; }
+.csb-plan b { color: #0f1115; }
+.csb-igsong { background: #f6f7f9; color: #0f1115; }
+.csb-igsong.on { background: #fbeaf4; }
+.csb-igsong .csb-check { border-color: #c3c8d1; }
+.csb-igsong.on .csb-check { background: #c13584; color: #fff; }
+.csb-send-err { background: #fdecea; color: #b42318; }
+.csb-names { border-top-color: rgba(15, 23, 42, .08); }
 .csb-note { color: #b45309; }
 .csb-sheet .cs-chip.on { background: #0f1115; color: #fff; border-color: #0f1115; }
 .csb-sheet .cs-chip { background: #f1f3f6; color: #0f1115; border-color: transparent; }
