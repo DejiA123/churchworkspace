@@ -430,7 +430,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .ve-preview:fullscreen .ve-fs-exit { display: block; }
 .ve-fs-exit:hover { background: rgba(0,0,0,.85); border-color: #fff; }
 #vePlayer { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; background: #000; }
-/* Sharpen on an iPhone (sharpPreview in veditor.js): the export's kernel drawn over the player, in the player's own box */
+/* The grade layer (sharpPreview in veditor.js): Sharpen, Clarity, the colour table, Vignette, Grain and noise reduction drawn over the player, in its own box */
 #veSharpCv { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; display: none; }
 #veSharpCv.on { display: block; }
 .ve-preview.blurfill #veSharpCv { z-index: 2; }
@@ -1397,6 +1397,64 @@ button.cap-model-pick .cap-model-name { align-items: flex-start; text-align: lef
 .fxq-music svg { flex: none; width: 18px; height: 18px; color: var(--fq-acc2); }
 .fxq-music span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fxq-apply { width: 100%; height: 48px; margin-top: 4px; border: 0; border-radius: 14px; background: linear-gradient(180deg, #a78bfa, #7c3aed); color: #fff; font-size: 15px; font-weight: 750; box-shadow: 0 8px 22px rgba(124,58,237,.35); }
+
+/* ADJUST — every CapCut tool in one row that scrolls sideways */
+.fxq-tools.fxq-tools-row { display: flex; gap: 2px; overflow-x: auto; margin: 0 -16px 10px; padding: 2px 10px 4px; scrollbar-width: none; scroll-snap-type: x proximity; }
+.fxq-tools.fxq-tools-row::-webkit-scrollbar { display: none; }
+.fxq-tools.fxq-tools-row button { flex: 0 0 64px; scroll-snap-align: start; }
+.fxq-tools.fxq-tools-row span { white-space: nowrap; font-size: 11.5px; }
+.fxq-sub { position: absolute; left: 12px; top: 2px; font-size: 11.5px; font-weight: 700; color: var(--fq-mut); }
+.fxq-slide .fxq-sub ~ .fxq-val { top: 0; }
+.fxq-hint { margin: 8px 0 0; font-size: 11.5px; color: var(--fq-mut); text-align: center; }
+/* HSL: eight colour dots, then the chosen colour's three sliders (each track shows what it does) */
+.fxq-swatches { display: flex; justify-content: space-between; gap: 6px; padding: 4px 4px 2px; }
+.fxq-swatches button { position: relative; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; background: var(--sw); box-shadow: inset 0 0 0 1px rgba(0,0,0,.25); }
+.fxq-swatches button.on { box-shadow: 0 0 0 2.5px var(--fq-bg), 0 0 0 4.5px #fff; }
+.fxq-swatches button.changed::after { content: ''; position: absolute; right: -2px; top: -2px; width: 8px; height: 8px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px var(--fq-bg); }
+.fxq-hsl-h input[type=range]::-webkit-slider-runnable-track { background: var(--hue-track, linear-gradient(90deg, #ff3b9a, #ff3b3b, #ffd23b)); }
+.fxq-hsl-s input[type=range]::-webkit-slider-runnable-track { background: linear-gradient(90deg, #808080, var(--band, #ef4444)); }
+.fxq-hsl-l input[type=range]::-webkit-slider-runnable-track { background: linear-gradient(90deg, #111, var(--band, #ef4444), #fff); }
+.fxq-hsl-h input[type=range]::-moz-range-track { background: var(--hue-track, linear-gradient(90deg, #ff3b9a, #ff3b3b, #ffd23b)); }
+.fxq-hsl-s input[type=range]::-moz-range-track { background: linear-gradient(90deg, #808080, var(--band, #ef4444)); }
+.fxq-hsl-l input[type=range]::-moz-range-track { background: linear-gradient(90deg, #111, var(--band, #ef4444), #fff); }
+/* CURVES */
+.fxq-curve-ch { margin-top: 2px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.fxq-curve-ch button { justify-content: center; padding: 0 6px; font-size: 12.5px; }
+.fxq-curve-ch button i { width: 9px; height: 9px; border-radius: 50%; background: var(--sw); box-shadow: 0 0 0 1px rgba(0,0,0,.3); }
+.fxq-curve-ch button.changed { box-shadow: inset 0 0 0 1.5px var(--fq-acc2); }
+.fxq-curve-wrap { margin: 10px auto 0; width: min(100%, 240px); aspect-ratio: 1; border-radius: 12px; background: #16171b; }
+#fxCurveCv { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+/* COLOUR WHEEL */
+.fxq-wheels { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding-top: 4px; }
+.fxq-wheel { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.fxq-wheel span { font-size: 12px; font-weight: 700; color: var(--fq-mut); cursor: pointer; }
+.fxq-wheel.on span { color: #fff; }
+.fxq-wheel.changed span::after { content: ' •'; color: var(--fq-acc2); }
+.fxq-ed[data-for="fxWheels"] .fxq-slide { margin-top: 14px; }
+.fxq-wheel-ring { position: relative; width: min(100%, 92px); aspect-ratio: 1; border-radius: 50%; touch-action: none; cursor: pointer;
+  /* red at the right, green up and to the left, blue down and to the left — where grade.js's wheelTint puts them */
+  background: radial-gradient(circle, #8a8a8a 0, rgba(138,138,138,.85) 18%, rgba(138,138,138,0) 70%),
+    conic-gradient(from 0deg, hsl(90 75% 50%), hsl(60 75% 50%), hsl(30 75% 50%), hsl(0 75% 50%), hsl(330 75% 50%), hsl(300 75% 50%), hsl(270 75% 50%), hsl(240 75% 50%), hsl(210 75% 50%), hsl(180 75% 50%), hsl(150 75% 50%), hsl(120 75% 50%), hsl(90 75% 50%));
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
+.fxq-wheel.on .fxq-wheel-ring { box-shadow: 0 0 0 2.5px var(--fq-bg), 0 0 0 4.5px #fff; }
+.fxq-puck { position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.6), inset 0 0 0 2px #0b0b0d; pointer-events: none; }
+/* QUALITY — CapCut's Video quality list */
+.fxq-q { display: flex; flex-direction: column; gap: 8px; }
+.fxq-qrow { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: #1c1d22; }
+.fxq-qrow.fxq-qcol { flex-direction: column; align-items: stretch; gap: 0; }
+.fxq-qrow.fxq-qcol .fxq-chips { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 10px; }
+.fxq-qrow.fxq-qcol .fxq-chips button { justify-content: center; }
+.fxq-qtx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.fxq-qtx b { font-size: 14px; font-weight: 750; color: #fff; }
+.fxq-qtx small { font-size: 11.5px; line-height: 1.35; color: var(--fq-mut); }
+.fxq-qbtn { flex: none; height: 34px; padding: 0 14px; border: 0; border-radius: 999px; background: #f5f6f8; color: #0b0b0d; font-size: 13px; font-weight: 750; }
+.fxq-switch { position: relative; flex: none; width: 48px; height: 28px; margin: 0; cursor: pointer; }
+.fxq-switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.fxq-switch i { position: absolute; inset: 0; border-radius: 999px; background: #3a3b44; transition: background .2s ease; pointer-events: none; }
+.fxq-switch i::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); transition: transform .2s ease; }
+.fxq-switch input:checked + i { background: var(--fq-acc2); }
+.fxq-switch input:checked + i::after { transform: translateX(20px); }
+.fxq-tabs button.changed::before { content: ''; position: absolute; right: -8px; top: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--fq-acc2); }
 
 /* a clip with a look of its own wears a small purple sliders badge on the timeline */
 .ve-seg.has-fx::before { content: ''; position: absolute; inset: auto; top: 5px; right: 14px; z-index: 3; width: 18px; height: 18px; border-radius: 50%;
@@ -2749,3 +2807,6 @@ body.ve-pfull .ve-preview .ve-fs-exit {
 .ve-pre-btns .primary-btn { min-height: 44px; min-width: 76px; font-weight: 800; }
 .ve-pre-del { min-height: 40px; }
 .ve-pre-del.sure { background: #c62828; border-color: #c62828; color: #fff; font-weight: 800; }
+/* the grade layer over a clip added after the video (gradePicture in veditor.js): its box, transform and grade are copied from the clip */
+.ve-grade-cv { position: absolute; display: none; pointer-events: none; border-radius: 2px; }
+.ve-grade-cv.on { display: block; }

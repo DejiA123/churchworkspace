@@ -58,8 +58,9 @@ const dur = (f) => +execFileSync(ffprobe, ['-v', 'error', '-show_entries', 'form
   check('out-of-range numbers are held in range', video.clipFx({ bri: 5, vol: 9 }).bri === 0.3 && video.clipFx({ vol: 9 }).vol === 2);
   check('an unknown filter is ignored', video.clipFx({ look: 'rm -rf' }) === null);
   const recipe = video.fxVideo({ look: 'bw', sat: 1.3, sharp: 1 });
-  check('the picture recipe: the preview\'s steps, in its order, then its sharpen kernel',
-    /^colorchannelmixer=.*,colorchannelmixer=.*,format=gbrp,convolution=0m='0 -40 0 -40 260 -40 0 -40 0'.*,format=yuv420p$/.test(recipe), recipe);
+  // (the preview's grade layer sharpens the picture, and the browser's filter colours what it drew: the same order here)
+  check('the picture recipe: its sharpen kernel, then the preview\'s steps in its order',
+    /^format=gbrp,convolution=0m='0 -40 0 -40 260 -40 0 -40 0'.*,colorchannelmixer=.*,colorchannelmixer=.*,format=yuv420p$/.test(recipe), recipe);
   // the export colours a pixel exactly as the browser's CSS filters do on the preview
   {
     const cssPx = (rgb, steps) => steps.reduce((p, [n, v]) => {
@@ -122,6 +123,41 @@ const dur = (f) => +execFileSync(ffprobe, ['-v', 'error', '-show_entries', 'form
   head('[6] Tracking frames are never graded');
   const tp = video.cutPlan([{ start: 0, end: 4, fx: { look: 'bw' } }, { start: 5, end: 8 }], { hasAudio: false, noFx: true });
   check('no grade in the tracking cut', tp && !/hue=s=0/.test(tp.chain || ''), tp && tp.chain);
+
+  head('[7] CapCut\'s Adjust and Video quality tools, through every export route');
+  {
+    // the mean red, green and blue of one frame
+    const rgbAt = (file, t) => {
+      const b = execFileSync(ffmpeg, ['-hide_banner', '-v', 'error', '-ss', String(t), '-i', file, '-frames:v', '1', '-vf', 'scale=64:36,format=rgb24', '-f', 'rawvideo', 'pipe:1']);
+      const m = [0, 0, 0]; for (let i = 0; i < b.length; i++) m[i % 3] += b[i];
+      return m.map((v) => v / (b.length / 3));
+    };
+    const ALL = { bril: 0.3, clar: 0.5, hi: -0.2, sh: 0.3, wh: 0.2, bl: -0.2, temp: 0.8, hue: 0.1, fade: 0.1, vig: 0.4, grain: 0.3, dn: 0.45, enh: 1, flick: 1,
+      hsl: { red: [0.2, 0.4, 0.1], blue: [-0.1, 0.3, -0.2] }, curves: { m: [[0, 0], [0.4, 0.45], [1, 1]], r: [[0, 0.02], [1, 1]] }, wheels: { gain: [0.4, 0.1, 0.1], lift: [-0.2, 0.3, 0] } };
+    const kept = video.clipFx(ALL);
+    check('the recipe keeps every new tool', ['bril', 'clar', 'hi', 'sh', 'wh', 'bl', 'temp', 'hue', 'fade', 'vig', 'grain', 'dn', 'enh', 'flick', 'hsl', 'curves', 'wheels'].every((k) => k in kept), JSON.stringify(kept));
+    check('…and drops one left at "no change"', video.clipFx({ clar: 0, vig: 0, hsl: { red: [0, 0, 0] }, curves: { m: [[0, 0], [1, 1]] } }) === null);
+    const vf = video.fxVideo(ALL);
+    check('the picture recipe runs them in the preview\'s order: flicker, noise, Clarity, Sharpen, colour table, Vignette, Grain',
+      /deflicker.*hqdn3d.*gblur.*convolution.*lut3d.*vignette.*noise=/.test(vf), vf);
+    const OUT2 = path.join(dir, 'capcut.mp4');
+    await video.exportShort(ctx, { input: SRC, startSec: 0, endSec: 8, preset: 'source', pieces: [{ start: 0, end: 4, fx: ALL }, { start: 4, end: 8, fx: { clar: -0.4, temp: -0.8 } }], output: OUT2 });
+    const a = rgbAt(OUT2, 2), b0 = rgbAt(SRC, 2), c = rgbAt(OUT2, 6), d0 = rgbAt(SRC, 6);
+    check('timeline export: both clips (two Clarity graphs in one export) — 8 s', Math.abs(dur(OUT2) - 8) < 0.25, dur(OUT2).toFixed(2));
+    check('…the warm clip came out warmer', a[0] - a[2] > b0[0] - b0[2] + 12, `${a.map(Math.round)} vs ${b0.map(Math.round)}`);
+    check('…the cool clip came out cooler', c[2] - c[0] > d0[2] - d0[0] + 12, `${c.map(Math.round)} vs ${d0.map(Math.round)}`);
+    const T2 = path.join(dir, 't2.mp4');
+    await video.trim(ctx, { input: SRC, startSec: 2, endSec: 4, fx: ALL, output: T2 });
+    const t2 = rgbAt(T2, 1), s2 = rgbAt(SRC, 3);
+    check('a clip added after the video (trim) carries them', Math.abs(dur(T2) - 2) < 0.25 && t2[0] - t2[2] > s2[0] - s2[2] + 12, `${t2.map(Math.round)} vs ${s2.map(Math.round)}`);
+    const APP2 = path.join(dir, 'app2.mp4');
+    await video.appendClips(ctx, { input: BASE, clips: [{ path: SRC, fx: ALL }], position: 'end', fill: { mode: 'bars' }, output: APP2 });
+    check('appended with them, the export runs', fs.existsSync(APP2) && dur(APP2) > 10, dur(APP2).toFixed(2));
+    const WH = path.join(dir, 'whole.mp4');
+    await video.applyEdits(ctx, { input: SRC, output: WH, edits: { speed: 0.5, flow: true, fx: ALL } });
+    const w = rgbAt(WH, 4);
+    check('the whole-video copy (Speed & more) carries them, slowed with Optical flow', Math.abs(dur(WH) - 16) < 0.6 && w[0] - w[2] > b0[0] - b0[2] + 12, `${dur(WH).toFixed(2)} s, ${w.map(Math.round)}`);
+  }
 
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {}
   console.log(`\n${pass} PASS / ${fail} FAIL`);

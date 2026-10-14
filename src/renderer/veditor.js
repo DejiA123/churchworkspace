@@ -4148,7 +4148,7 @@
       seen.add(String(s.id));
       let n = layer.querySelector(`[data-mid="${s.id}"]`);
       const want = s.kind === 'image' ? 'IMG' : 'VIDEO';
-      if (n && (n.tagName !== want || n.dataset.msrc !== s.src)) { n.remove(); n = null; }
+      if (n && (n.tagName !== want || n.dataset.msrc !== s.src)) { if (n._grade && n._grade.cv) n._grade.cv.remove(); n.remove(); n = null; }
       if (!n) {
         n = document.createElement(s.kind === 'image' ? 'img' : 'video');
         n.className = 've-media-el';
@@ -4168,7 +4168,7 @@
         n._bg = b;
       } else if (!s.bgBlur && n._bg) { n._bg.remove(); n._bg = null; }
     }
-    Array.from(layer.children).forEach((n) => { if (!seen.has(n.dataset.mid || n.dataset.keyFor || n.dataset.bgFor)) n.remove(); });
+    Array.from(layer.children).forEach((n) => { if (!seen.has(n.dataset.mid || n.dataset.keyFor || n.dataset.bgFor || n.dataset.gradeFor)) n.remove(); });
     updateMediaLayer(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
   }
 
@@ -4177,9 +4177,9 @@
     if (!layer.children.length) return;
     const playing = isPlaying();
     for (const n of Array.from(layer.children)) {
-      if (n.dataset.keyFor || n.dataset.bgFor) continue;   // a key canvas / blur copy — drawn with its source below
+      if (n.dataset.keyFor || n.dataset.bgFor || n.dataset.gradeFor) continue;   // a key canvas / blur copy / grade layer — drawn with its source below
       const s = ve.segments.find((x) => String(x.id) === n.dataset.mid);
-      if (!s) { if (n._keyCv) n._keyCv.remove(); if (n._bg) n._bg.remove(); n.remove(); continue; }
+      if (!s) { if (n._keyCv) n._keyCv.remove(); if (n._bg) n._bg.remove(); if (n._grade && n._grade.cv) n._grade.cv.remove(); n.remove(); continue; }
       const a = tlPos(s), b = a + (s.end - s.start);
       const on = t >= a && t < b;
       n.style.display = on ? 'block' : 'none';
@@ -4219,7 +4219,13 @@
       if (fd > 0) op *= clamp(Math.min(t - a, b - t) / fd, 0, 1);
       n.style.opacity = op < 1 ? String(op) : '';
       // 🎛️ a clip added after the video shows its own look
-      if (isTailClip(s)) { const css = fxCss(s.fx); if (n._fxCss !== css) { n._fxCss = css; n.style.filter = css; } }
+      // (its Clarity, Sharpen, colour table, Vignette and the rest on a grade layer over it, as the main video's)
+      if (isTailClip(s)) {
+        const drawn = gradePicture(n, keyOn(s) ? null : fxOf(s), false);
+        const css = fxCss(s.fx, !drawn);
+        if (n._fxCss !== css) { n._fxCss = css; n.style.filter = css; }
+        if (!drawn) { const sp = fxSharpOf(s.fx); if (sp > 0) setSharpKernel(sp); }
+      } else if (n._grade) layerOff(n._grade);
       // green screen: drawn through the key, as the export will (see drawKeyed)
       if (keyOn(s)) drawKeyed(n, s, r); else hideKeyed(n);
       if (n.tagName !== 'VIDEO') continue;
@@ -6795,7 +6801,7 @@
    */
   const UNDO_CTRLS = ['veAspect', 'veAutoReframe', 'veFill', 'veFillStrength', 'veFillDim', 'veCover', 'veCoverMode', 'veCoverY', 'veCoverH',
     'veDenoise', 'veDenoiseLevel', 'veFadeIn', 'veFadeOut', 'veQuality', 'veFps', 'veBitrate', 'veCapShow',
-    'fxSpeed', 'fxRot', 'fxFlipH', 'fxFlipV', 'fxMusicVol',
+    'fxSpeed', 'fxRot', 'fxFlipH', 'fxFlipV', 'fxMusicVol', 'fxFlow',
     'capStyleSel', 'capFont', 'capSize', 'capSizePct', 'capWords', 'capCase', 'capPos', 'capColor', 'capTrans', 'capTracking', 'capWordHl', 'capWordColor'];
   function settingsState() {
     const ctrls = {};
@@ -13945,8 +13951,21 @@
    * on every clip at once. Speed, rotate, fades and music still work on the
    * WHOLE video and make a separate copy (applyFx), as they always did.
    */
-  const FX_DEFAULT = { look: '', bri: 0, con: 1, sat: 1, sharp: 0, vol: 1 };
-  const FX_INPUTS = { fxBri: 'bri', fxCon: 'con', fxSat: 'sat', fxSharp: 'sharp', fxVol: 'vol' };
+  /*
+   * CapCut's other Adjust tools (Brilliance, Clarity, HSL, Curves, Colour
+   * wheel, Highlights, Shadows, Whites, Blacks, Temp, Hue, Fade, Vignette,
+   * Grain) and its Video quality tools (Enhance quality, Reduce image noise,
+   * Remove flickers) are kept on the clip with the rest of its look. Their
+   * arithmetic is grade.js's, which the export (video.js) and the preview's
+   * grade layer (gradePicture) both run, so what is on screen is what exports.
+   */
+  const FX_DEFAULT = { look: '', bri: 0, con: 1, sat: 1, sharp: 0, vol: 1,
+    bril: 0, clar: 0, hi: 0, sh: 0, wh: 0, bl: 0, temp: 0, hue: 0, fade: 0, vig: 0, grain: 0, dn: 0, enh: 0, flick: 0 };
+  const FX_INPUTS = { fxBri: 'bri', fxCon: 'con', fxSat: 'sat', fxSharp: 'sharp', fxVol: 'vol',
+    fxBril: 'bril', fxClar: 'clar', fxHi: 'hi', fxSh: 'sh', fxWh: 'wh', fxBl: 'bl', fxTemp: 'temp', fxHue: 'hue',
+    fxFade: 'fade', fxVig: 'vig', fxGrain: 'grain', fxDn: 'dn' };
+  /* the Adjust tools that open an editor of their own rather than one slider, and what each keeps */
+  const FX_EDITORS = { fxHsl: 'hsl', fxCurves: 'curves', fxWheels: 'wheels' };
   const FX_LOOKS = ['vivid', 'warm', 'cool', 'bw', 'vintage'];
   const FX_LOOK_CSS = {
     '': '', vivid: 'saturate(1.6) contrast(1.15)', warm: 'sepia(0.25) saturate(1.2) hue-rotate(-8deg)',
@@ -13964,6 +13983,7 @@
     if (Math.abs(sat - 1) > 0.001) o.sat = +sat.toFixed(3);
     if (sharp > 0.001) o.sharp = +sharp.toFixed(2);
     if (Math.abs(vol - 1) > 0.001) o.vol = +vol.toFixed(3);
+    if (window.Grade) Object.assign(o, window.Grade.clean(fx || {}));
     return Object.keys(o).length ? o : null;
   }
   const fxPayload = (s) => cleanFx(s && s.fx) || undefined;
@@ -13978,14 +13998,22 @@
      preview's colours differ from the export's) and sharpPreview draws the
      export's own kernel over the player in WebGL instead. */
   const NO_SVG_VIDEO_FILTER = typeof navigator !== 'undefined' && /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|Edg|Electron/.test(navigator.userAgent);
-  function fxCss(f) {
+  /** How much sharpening a look gets: Sharpen, with Enhance quality's share added. */
+  function fxSharpOf(f) {
+    f = f || {};
+    const G = window.Grade;
+    return G ? G.spatial(G.clean(f), Number(f.sharp) || 0).sharp : (Number(f.sharp) || 0);
+  }
+  function fxCss(f, svgSharp) {
+    const sharp = fxSharpOf(f);
     f = Object.assign({}, FX_DEFAULT, f || {});
     const parts = [];
     if (Math.abs(f.bri) > 0.001) parts.push(`brightness(${(1 + f.bri).toFixed(3)})`);
     if (Math.abs(f.con - 1) > 0.001) parts.push(`contrast(${+f.con.toFixed(3)})`);
     if (Math.abs(f.sat - 1) > 0.001) parts.push(`saturate(${f.sat})`);
     if (FX_LOOK_CSS[f.look]) parts.push(FX_LOOK_CSS[f.look]);
-    if (f.sharp > 0.001 && !NO_SVG_VIDEO_FILTER) parts.push('url(#fxSharpen)');
+    // (only where the grade layer cannot draw it: it draws the sharpening itself, with the rest)
+    if (svgSharp !== false && sharp > 0.001 && !NO_SVG_VIDEO_FILTER) parts.push('url(#fxSharpen)');
     return parts.join(' ');
   }
   function setSharpKernel(sharp) {
@@ -14007,91 +14035,239 @@
    * preview copy smaller than the original gets a proportionally smaller
    * step). No sharpening, or no WebGL: the canvas steps aside, as before.
    */
-  const SHARP_VS = 'attribute vec2 p;varying vec2 uv;void main(){uv=vec2(p.x*.5+.5,.5-p.y*.5);gl_Position=vec4(p,0.,1.);}';
-  const SHARP_FS = 'precision highp float;varying vec2 uv;uniform sampler2D t;uniform vec2 d;uniform float a;'
+  /*
+   * ►► THE GRADE ON THE PREVIEW: CapCut's Adjust and Video quality tools,
+   * drawn live in WebGL over the player — the export's own arithmetic. ◄◄
+   * Reduce noise, Clarity, Sharpen, the colour table (Brilliance, Highlights,
+   * Shadows, Whites, Blacks, Temp, Hue, Fade, HSL, Curves, Colour wheels),
+   * Vignette and Grain — in the export's order (fxVideo in video.js), on a
+   * canvas laid exactly over the player: the same box, transform and browser
+   * grade (which the export also applies after these). The colour table is
+   * grade.js's, the one the export hands to lut3d. One step is one pixel of
+   * the ORIGINAL, where the export works.
+   */
+  // (fl: 1 drawing to the screen, -1 into an off-screen picture — so every picture keeps its top row first, the way a video frame is uploaded)
+  const GL_VS = 'attribute vec2 p;uniform float fl;varying vec2 uv;void main(){uv=vec2(p.x*.5+.5,.5-fl*p.y*.5);gl_Position=vec4(p,0.,1.);}';
+  // pass 1, Reduce noise (a small bilateral: the export's hqdn3d also smooths over time, which a still cannot)
+  const GL_DN = 'precision highp float;varying vec2 uv;uniform sampler2D t;uniform vec2 d;uniform float r;'
+    + 'void main(){vec3 c=texture2D(t,uv).rgb;vec3 s=c;float w=1.;'
+    + 'for(int i=-2;i<=2;i++)for(int j=-2;j<=2;j++){if(i==0&&j==0)continue;vec3 q=texture2D(t,uv+vec2(float(i)*d.x,float(j)*d.y)).rgb;'
+    + 'vec3 e=q-c;float k=exp(-dot(e,e)/(2.*r*r)-float(i*i+j*j)/4.5);s+=q*k;w+=k;}'
+    + 'gl_FragColor=vec4(s/w,1.);}';
+  // passes 2 and 3, the wide blur Clarity takes away (Gaussian, sigma 6 pixels of the original; brightness only)
+  const GL_BLUR = 'precision highp float;varying vec2 uv;uniform sampler2D t;uniform vec2 d;uniform float sg;uniform float lum;'
+    + 'void main(){float s=0.;float w=0.;for(int i=-12;i<=12;i++){float x=float(i);float k=exp(-x*x/(2.*sg*sg));'
+    + 'vec3 q=texture2D(t,uv+d*x).rgb;float v=lum>.5?dot(q,vec3(.299,.587,.114)):q.r;s+=v*k;w+=k;}'
+    + 'gl_FragColor=vec4(s/w,0.,0.,1.);}';
+  // Clarity: the picture's brightness pushed away from (or towards) its wide blur — the colour left as it is
+  const GL_CLAR = 'precision highp float;varying vec2 uv;uniform sampler2D t;uniform sampler2D bl;uniform float cl;'
+    + 'void main(){vec3 c=texture2D(t,uv).rgb;float y=dot(c,vec3(.299,.587,.114));gl_FragColor=vec4(clamp(c+cl*(y-texture2D(bl,uv).r),0.,1.),1.);}';
+  // the last pass: Sharpen (of what Clarity made), the colour table, Vignette, Grain (the export's
+  // noise filter: uniform, ±strength/2 levels of brightness, which is ×1.164 in red, green and blue)
+  const GL_FS = 'precision highp float;varying vec2 uv;uniform sampler2D t;uniform sampler2D lut;'
+    + 'uniform vec2 d;uniform float a;uniform float useLut;uniform float n;uniform float va;uniform vec2 wh;uniform float gr;uniform float seed;'
+    + 'vec3 L(vec3 c){c=clamp(c,0.,1.);float bz=c.b*(n-1.);float b0=floor(bz);float b1=min(b0+1.,n-1.);float f=bz-b0;'
+    + 'vec2 q=vec2((c.r*(n-1.)+.5)/(n*n),(c.g*(n-1.)+.5)/n);'
+    + 'vec3 x=texture2D(lut,q+vec2(b0/n,0.)).rgb;vec3 y=texture2D(lut,q+vec2(b1/n,0.)).rgb;return mix(x,y,f);}'
+    + 'float hash(vec2 p){return fract(sin(dot(p,vec2(12.9898,78.233))+seed)*43758.5453);}'
     + 'void main(){vec3 c=texture2D(t,uv).rgb;'
-    + 'vec3 n=texture2D(t,uv+vec2(d.x,0.)).rgb+texture2D(t,uv-vec2(d.x,0.)).rgb+texture2D(t,uv+vec2(0.,d.y)).rgb+texture2D(t,uv-vec2(0.,d.y)).rgb;'
-    + 'gl_FragColor=vec4(clamp(c*(1.+4.*a)-a*n,0.,1.),1.);}';
-  const SHARP_COPY = ['filter', 'transform', 'transformOrigin', 'transition', 'opacity'];
-  const sharpGl = { cv: null, gl: null, d: null, ua: null, max: 4096, a: 0, raf: 0, drawnT: -1, src: '', broken: false };
-  function sharpGlSetup() {
-    if (sharpGl.gl || sharpGl.broken) return sharpGl.gl;
-    const p = ve.refs.player;
+    + 'if(a>0.){vec3 nb=texture2D(t,uv+vec2(d.x,0.)).rgb+texture2D(t,uv-vec2(d.x,0.)).rgb+texture2D(t,uv+vec2(0.,d.y)).rgb+texture2D(t,uv-vec2(0.,d.y)).rgb;c=c*(1.+4.*a)-a*nb;}'
+    + 'c=clamp(c,0.,1.);if(useLut>.5)c=L(c);'
+    + 'if(va>0.){vec2 px=(uv-.5)*wh;float dd=length(px)/length(wh*.5);float k=cos(va*dd);k=k*k;c*=k*k;}'
+    + 'if(gr>0.){c+=(hash(uv*wh)-.5)*gr*1.164/255.;}'
+    + 'gl_FragColor=vec4(clamp(c,0.,1.),1.);}';
+  /*
+   * One grade layer per picture: the main player has one (#veSharpCv), and so
+   * does each clip added after the video that uses these tools. A layer is a
+   * canvas laid exactly over its picture (the same box, transform, opacity and
+   * CSS grade, copied from it every frame) that draws the picture through the
+   * tools above.
+   */
+  function glProgram(gl, fs) {
+    const sh = (type, src) => {
+      const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o);
+      if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o) || 'shader');
+      return o;
+    };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, GL_VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs));
+    gl.bindAttribLocation(prog, 0, 'p');
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error('link');
+    const u = {}; const loc = (k) => (k in u ? u[k] : (u[k] = gl.getUniformLocation(prog, k)));
+    return { prog, loc };
+  }
+  function glTex(gl) {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    return t;
+  }
+  const MAIN_COPY = ['filter', 'transform', 'transformOrigin', 'transition', 'opacity'];
+  const TAIL_COPY = ['left', 'top', 'width', 'height', 'zIndex', 'objectFit', 'objectPosition', 'filter', 'transform', 'opacity'];
+  let glCount = 0;
+  function newLayer(el, isMain) {
+    const L = { el, isMain, cv: null, gl: null, max: 4096, raf: 0, drawnT: -1, drawnKey: '', src: '', broken: false, key: '', p: null, lutKey: '', fb: [], prog: {} };
+    // a browser keeps only so many WebGL pictures alive at once: past a few, the plain picture
+    if (!isMain && glCount >= 6) { L.broken = true; return L; }
     try {
       const cv = document.createElement('canvas');
-      cv.id = 'veSharpCv'; cv.setAttribute('aria-hidden', 'true');
-      const gl = cv.getContext('webgl', { alpha: false, antialias: false, depth: false, stencil: false });
-      if (!gl || !p) throw new Error('no WebGL');
-      const sh = (type, src) => {
-        const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o);
-        if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o) || 'shader');
-        return o;
-      };
-      const prog = gl.createProgram();
-      gl.attachShader(prog, sh(gl.VERTEX_SHADER, SHARP_VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, SHARP_FS));
-      gl.linkProgram(prog);
-      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error('link');
-      gl.useProgram(prog);
+      if (isMain) cv.id = 'veSharpCv'; else { cv.className = 've-grade-cv'; cv.dataset.gradeFor = el.dataset.mid || ''; }
+      cv.setAttribute('aria-hidden', 'true');
+      const gl = cv.getContext('webgl', { alpha: false, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: true });
+      if (!gl || !el) throw new Error('no WebGL');
+      L.prog = { dn: glProgram(gl, GL_DN), blur: glProgram(gl, GL_BLUR), clar: glProgram(gl, GL_CLAR), fin: glProgram(gl, GL_FS) };
       gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-      const at = gl.getAttribLocation(prog, 'p');
-      gl.enableVertexAttribArray(at); gl.vertexAttribPointer(at, 2, gl.FLOAT, false, 0, 0);
-      gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      sharpGl.d = gl.getUniformLocation(prog, 'd'); sharpGl.ua = gl.getUniformLocation(prog, 'a');
-      sharpGl.max = Math.min(4096, gl.getParameter(gl.MAX_TEXTURE_SIZE) || 4096);
-      // iOS can take the GPU back (the app in the background): the plain player from then on
-      cv.addEventListener('webglcontextlost', () => { sharpGl.broken = true; sharpGl.gl = null; cv.classList.remove('on'); });
-      p.insertAdjacentElement('afterend', cv);
-      sharpGl.cv = cv; sharpGl.gl = gl;
-    } catch (e) { sharpGl.broken = true; }
-    return sharpGl.gl;
+      gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+      L.vid = glTex(gl); L.lut = glTex(gl);
+      L.max = Math.min(4096, gl.getParameter(gl.MAX_TEXTURE_SIZE) || 4096);
+      // iOS can take the GPU back (the app in the background): the plain picture from then on
+      cv.addEventListener('webglcontextlost', () => { L.broken = true; L.gl = null; cv.classList.remove('on'); });
+      el.insertAdjacentElement('afterend', cv);
+      L.cv = cv; L.gl = gl;
+      if (!isMain) glCount++;
+    } catch (e) { L.broken = true; }
+    return L;
   }
-  function sharpGlFrame() {
-    sharpGl.raf = 0;
-    const p = ve.refs.player, cv = sharpGl.cv, gl = sharpGl.gl;
+  function layerFor(el, isMain) {
+    if (!el) return null;
+    if (!el._grade || (el._grade.cv && !el._grade.cv.isConnected && el.isConnected)) el._grade = newLayer(el, isMain);
+    return el._grade;
+  }
+  /* an off-screen picture of the frame's size, to draw a pass into */
+  function glTarget(L, i, w, h) {
+    const gl = L.gl;
+    let f = L.fb[i];
+    if (f && f.w === w && f.h === h) return f;
+    if (!f) { f = { tex: glTex(gl), fb: gl.createFramebuffer() }; L.fb[i] = f; }
+    gl.bindTexture(gl.TEXTURE_2D, f.tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, f.fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, f.tex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    f.w = w; f.h = h;
+    return f;
+  }
+  function glPass(L, prog, src, out, w, h, set) {
+    const gl = L.gl;
+    gl.useProgram(prog.prog);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, out ? out.fb : null);
+    gl.viewport(0, 0, w, h);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, src); gl.uniform1i(prog.loc('t'), 0);
+    gl.uniform1f(prog.loc('fl'), out ? -1 : 1);
+    if (set) set(prog.loc);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+  function layerOff(L) {
+    if (!L) return;
+    L.p = null; L.key = '';
+    if (L.cv) L.cv.classList.remove('on');
+    if (L.raf) { cancelAnimationFrame(L.raf); L.raf = 0; }
+  }
+  function layerFrame(L) {
+    L.raf = 0;
+    const p = L.el, cv = L.cv, gl = L.gl, g = L.p, G = window.Grade;
     if (!cv) return;
-    if (!gl || !(sharpGl.a > 0) || !ve.video || !p) { cv.classList.remove('on'); sharpGl.drawnT = -1; return; }
-    sharpGl.raf = requestAnimationFrame(sharpGlFrame);
-    if (p.style.display === 'none' || p.currentSrc !== sharpGl.src) { cv.classList.remove('on'); sharpGl.drawnT = -1; sharpGl.src = p.currentSrc; }
+    if (p && !p.isConnected) { cv.remove(); return; }
+    // nothing to draw, or the picture is hidden: the layer sleeps until its picture's look is synced again
+    if (!gl || !g || !p || !G || (L.isMain && !ve.video) || p.style.display === 'none') { cv.classList.remove('on'); L.drawnT = -1; return; }
+    L.raf = requestAnimationFrame(() => layerFrame(L));
+    const isVid = p.tagName === 'VIDEO';
+    const src = isVid ? p.currentSrc : p.currentSrc || p.src;
+    if (src !== L.src) { cv.classList.remove('on'); L.drawnT = -1; L.src = src; }
     // a frame still on its way (a seek, a new file): the last one drawn stays up, as the player's own does
-    if (p.style.display === 'none' || p.readyState < 2 || p.seeking || !p.videoWidth) return;
-    for (const k of SHARP_COPY) if (cv.style[k] !== p.style[k]) cv.style[k] = p.style[k];
-    const vw = p.videoWidth, vh = p.videoHeight, k = Math.min(1, sharpGl.max / Math.max(vw, vh));
+    const vw = isVid ? p.videoWidth : p.naturalWidth, vh = isVid ? p.videoHeight : p.naturalHeight;
+    if (!vw || (isVid ? (p.readyState < 2 || p.seeking) : !p.complete)) return;
+    for (const k of (L.isMain ? MAIN_COPY : TAIL_COPY)) if (cv.style[k] !== p.style[k]) cv.style[k] = p.style[k];
+    const k = Math.min(1, L.max / Math.max(vw, vh));
     const w = Math.max(1, Math.round(vw * k)), h = Math.max(1, Math.round(vh * k));
-    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; gl.viewport(0, 0, w, h); sharpGl.drawnT = -1; }
-    if (p.paused && p.currentTime === sharpGl.drawnT) return;
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; L.drawnT = -1; }
+    const t = isVid ? p.currentTime : 0;
+    // grain moves while it plays, as it does in the file
+    if ((!isVid || p.paused) && t === L.drawnT && L.drawnKey === L.key) return;
     try {
+      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, L.vid);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, p);
-      const info = (ve.video && ve.video.info) || {};
+      // one step is one pixel of the ORIGINAL (the export works there; the preview may play a smaller copy)
+      const info = (L.isMain && ve.video && ve.video.info) || {};
       const srcLong = Math.max(info.width || 0, info.height || 0) || Math.max(vw, vh);
-      const step = Math.max(vw, vh) / srcLong;   // texels of THIS video per pixel of the original
-      gl.uniform2f(sharpGl.d, step / vw, step / vh);
-      gl.uniform1f(sharpGl.ua, sharpGl.a);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      sharpGl.drawnT = p.currentTime;
+      const step = (Math.max(vw, vh) / srcLong) * k;
+      const d = [step / w, step / h];
+      let from = L.vid;
+      if (g.dn > 0.01) {
+        const o = glTarget(L, 0, w, h);
+        glPass(L, L.prog.dn, from, o, w, h, (U) => { gl.uniform2f(U('d'), d[0], d[1]); gl.uniform1f(U('r'), 0.015 + 0.07 * g.dn); });
+        from = o.tex;
+      }
+      if (g.cl) {
+        // the export's Gaussian (sigma 6 original pixels), as 25 taps a quarter-sigma apart
+        const sp = G.SPATIAL.clarSigma / 4;
+        const h1 = glTarget(L, 1, w, h), h2 = glTarget(L, 2, w, h);
+        glPass(L, L.prog.blur, from, h1, w, h, (U) => { gl.uniform2f(U('d'), d[0] * sp, 0); gl.uniform1f(U('sg'), 4); gl.uniform1f(U('lum'), 1); });
+        glPass(L, L.prog.blur, h1.tex, h2, w, h, (U) => { gl.uniform2f(U('d'), 0, d[1] * sp); gl.uniform1f(U('sg'), 4); gl.uniform1f(U('lum'), 0); });
+        const o = glTarget(L, 3, w, h);
+        glPass(L, L.prog.clar, from, o, w, h, (U) => {
+          gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, h2.tex); gl.uniform1i(U('bl'), 1); gl.activeTexture(gl.TEXTURE0);
+          gl.uniform1f(U('cl'), g.cl);
+        });
+        from = o.tex;
+      }
+      if (g.lut && L.lutKey !== g.lutKey) {
+        const im = G.lutImage(g.lut);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, L.lut);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, im.width, im.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, im.data);
+        L.lutKey = g.lutKey;
+      }
+      glPass(L, L.prog.fin, from, null, w, h, (U) => {
+        gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, L.lut); gl.uniform1i(U('lut'), 2);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.uniform2f(U('d'), d[0], d[1]);
+        gl.uniform1f(U('a'), g.a);
+        gl.uniform1f(U('useLut'), g.lut ? 1 : 0); gl.uniform1f(U('n'), G.LUT_N);
+        gl.uniform1f(U('va'), g.va); gl.uniform2f(U('wh'), w / step, h / step);
+        gl.uniform1f(U('gr'), g.gr); gl.uniform1f(U('seed'), (t * 997) % 1000);
+      });
+      L.drawnT = t; L.drawnKey = L.key;
       cv.classList.add('on');
     } catch (e) {
       cv.classList.remove('on');
-      // a picture WebGL may not read (another origin): the plain player from now on
-      if (e && e.name === 'SecurityError') { sharpGl.broken = true; sharpGl.gl = null; }
+      // a picture WebGL may not read (another origin): the plain picture from now on
+      if (e && e.name === 'SecurityError') { L.broken = true; L.gl = null; }
     }
   }
-  function sharpPreview(sharp) {
-    // the export's own rounding (fxVideo): a in hundredths
-    const a = Math.round(clamp(Number(sharp) || 0, 0, 2) * 40) / 100;
-    if (a <= 0) {
-      sharpGl.a = 0;
-      if (sharpGl.cv) sharpGl.cv.classList.remove('on');
-      if (sharpGl.raf) { cancelAnimationFrame(sharpGl.raf); sharpGl.raf = 0; }
-      return;
-    }
-    if (!sharpGlSetup()) return;
-    if (sharpGl.a !== a) { sharpGl.a = a; sharpGl.drawnT = -1; }
-    if (!sharpGl.raf) sharpGl.raf = requestAnimationFrame(sharpGlFrame);
+  /** What the grade layer draws for a clip's look; null when there is nothing for it to do. */
+  function gradeParams(f) {
+    const G = window.Grade; if (!G) return null;
+    const g = G.clean(f), sp = G.spatial(g, f.sharp);
+    const o = {
+      a: Math.round(clamp(sp.sharp, 0, 2) * 40) / 100,   // the export's own rounding (fxVideo): a in hundredths
+      cl: Math.abs(sp.clar) > 0.01 ? G.SPATIAL.clarAmount(sp.clar) : 0,
+      dn: sp.dn > 0.01 ? sp.dn : 0,
+      va: sp.vig > 0.01 ? G.SPATIAL.vigAngle(sp.vig) : 0,
+      gr: sp.grain > 0.01 ? G.SPATIAL.grain(sp.grain) : 0,
+      lut: G.needsLut(g) ? g : null,
+    };
+    o.lutKey = o.lut ? JSON.stringify(o.lut) : '';
+    return (o.a || o.cl || o.dn || o.va || o.gr || o.lut) ? o : null;
+  }
+  /** Draw `el` through a look's grade (true), or take the layer down (false: nothing to draw, or no WebGL). */
+  function gradePicture(el, f, isMain) {
+    const g = f ? gradeParams(f) : null;
+    if (!g) { layerOff(el && el._grade); return false; }
+    const L = layerFor(el, isMain);
+    if (!L || L.broken || !L.gl) return false;
+    const key = JSON.stringify([g.a, g.cl, g.dn, g.va, g.gr, g.lutKey]);
+    if (L.key !== key) { L.key = key; L.p = g; L.drawnT = -1; }
+    if (!L.raf) L.raf = requestAnimationFrame(() => layerFrame(L));
+    return true;
+  }
+  function sharpPreview(f) {
+    const p = ve.refs.player;
+    return gradePicture(p, typeof f === 'object' ? f : { sharp: f }, true);
   }
   /** The main video shows the look of the clip under the playhead — and sounds at its volume. */
   function syncClipLook(t) {
@@ -14101,17 +14277,18 @@
     const tgt = ve.fxUi && ve.fxUi.clipId;
     const s = here.find((x) => x.id === tgt) || here[0] || null;
     const f = fxOf(s);
-    const css = fxCss(f);
+    // the grade layer (WebGL) draws Sharpen and the new tools on every screen; where it cannot run, the SVG sharpen
+    const drawn = sharpPreview(f);
+    const css = fxCss(f, !drawn);
     if (ve._fxCss !== css) { ve._fxCss = css; p.style.filter = css; }
-    if (f.sharp > 0) setSharpKernel(f.sharp);
-    if (NO_SVG_VIDEO_FILTER) sharpPreview(f.sharp);
+    if (!drawn) { const sp = fxSharpOf(f); if (sp > 0) setSharpKernel(sp); }
     // a browser plays at most 100%; louder than that is for the export
     const v = clamp(f.vol, 0, 1);
     if (Math.abs((p.volume == null ? 1 : p.volume) - v) > 0.001) p.volume = v;
   }
 
   /* --- the panel --- */
-  ve.fxUi = { scope: 'clip', clipId: null, tab: 'filters', adj: 'fxBri', pushed: false };
+  ve.fxUi = { scope: 'clip', clipId: null, tab: 'filters', adj: 'fxBri', pushed: false, hslBand: 'red', curveCh: 'm', wheel: 'lift', curveDrag: null };
   const fxTarget = () => ve.segments.find((x) => x.id === ve.fxUi.clipId) || null;
   /** Which clip "This clip" means when the panel opens: the selected one, or the one under the playhead. */
   function fxPickClip() {
@@ -14130,14 +14307,14 @@
     if (id === 'fxSat') return Math.round(v >= 1 ? ((v - 1) / 1.5) * 100 : (v - 1) * 100);
     if (id === 'fxSharp') return Math.round((v / 2) * 100);
     if (id === 'fxVol' || id === 'fxMusicVol') return Math.round(v * 100);
-    return v;
+    return Math.round(v * 100);   // the new tools: -100…100 (or 0…100), as CapCut shows them
   }
   const fxSigned = (n) => (n > 0 ? '+' + n : String(n));
   /** Paint a slider's fill (from its "no change" point) and the number riding on its thumb. */
   function paintFxSlider(el) {
     if (!el) return;
     const min = +el.min, max = +el.max, v = +el.value;
-    const zero = el.id === 'fxBri' ? 0 : (el.id === 'fxCon' || el.id === 'fxSat') ? 1 : min;
+    const zero = (el.id === 'fxCon' || el.id === 'fxSat') ? 1 : (min < 0 && max > 0) ? 0 : min;
     const pc = (x) => ((x - min) / (max - min)) * 100;
     const a = Math.min(pc(v), pc(zero)), b = Math.max(pc(v), pc(zero));
     el.style.setProperty('--a', a + '%'); el.style.setProperty('--b', b + '%');
@@ -14147,7 +14324,7 @@
     let out = wrap.querySelector('.fxq-val');
     if (!out) { out = document.createElement('output'); out.className = 'fxq-val'; wrap.appendChild(out); }
     const n = fxShown(el.id, v);
-    out.textContent = el.id === 'fxVol' || el.id === 'fxMusicVol' ? n + '%' : (el.id === 'fxSharp' ? String(n) : fxSigned(n));
+    out.textContent = el.id === 'fxVol' || el.id === 'fxMusicVol' ? n + '%' : (zero === min ? String(n) : fxSigned(n));
     wrap.style.setProperty('--p', String(pc(v) / 100));
     wrap.style.setProperty('--zz', String(pc(zero) / 100));
     wrap.classList.toggle('bipolar', zero !== min);
@@ -14294,23 +14471,36 @@
       el.value = String(f[k]);
       paintFxSlider(el);
     }
+    const used = cleanFx(f) || {};
     m.querySelectorAll('[data-adj]').forEach((b) => {
       b.classList.toggle('on', b.dataset.adj === u.adj);
-      const k = FX_INPUTS[b.dataset.adj];
-      b.classList.toggle('changed', Math.abs(f[k] - FX_DEFAULT[k]) > 0.001);
+      const k = FX_INPUTS[b.dataset.adj] || FX_EDITORS[b.dataset.adj];
+      b.classList.toggle('changed', k in used);
     });
-    m.querySelectorAll('.fxq-pane[data-fxpane="adjust"] .fxq-slide').forEach((x) => x.classList.toggle('hidden', x.dataset.for !== u.adj));
+    m.querySelectorAll('.fxq-pane[data-fxpane="adjust"] > [data-for]').forEach((x) => x.classList.toggle('hidden', x.dataset.for !== u.adj));
+    paintFxEditors(f);
+    // Video quality
+    const q = (id) => document.getElementById(id);
+    if (q('fxEnh')) q('fxEnh').checked = !!f.enh;
+    if (q('fxFlick')) q('fxFlick').checked = !!f.flick;
+    m.querySelectorAll('#fxDnChips [data-dn]').forEach((b, i, all) => {
+      // the chip nearest the setting (a value from elsewhere still lights one)
+      const near = [...all].reduce((a, x) => (Math.abs(+x.dataset.dn - f.dn) < Math.abs(+a.dataset.dn - f.dn) ? x : a));
+      b.classList.toggle('on', b === near);
+    });
     m.querySelectorAll('#fxVolChips [data-vol]').forEach((b) => b.classList.toggle('on', Math.abs(+b.dataset.vol - f.vol) < 0.001));
     const vv = document.getElementById('fxVolV'); if (vv) vv.textContent = Math.round(f.vol * 100) + '%';
     const reset = document.getElementById('fxReset');
     if (reset) reset.disabled = u.tab === 'more' || !(u.scope === 'all' ? list.some((x) => cleanFx(x.fx)) : cleanFx(f));
+    const qn = m.querySelector('[data-fxtab="quality"]');
+    if (qn) qn.classList.toggle('changed', !!(used.enh || used.dn || used.flick));
     paintFxMore();
   }
   /** The whole-video tab: chips and labels from its (unchanged) form controls. */
   function paintFxMore() {
     const q = (id) => document.getElementById(id);
     const sp = parseFloat((q('fxSpeed') || {}).value) || 1;
-    const spV = q('fxSpeedV'); if (spV) spV.textContent = (Math.round(sp * 100) / 100) + '×';
+    const spV = q('fxSpeedV'); if (spV) spV.textContent = (Math.round(sp * 100) / 100) + '×' + (sp < 1 && q('fxFlow') && q('fxFlow').checked ? ' · smooth (Optical flow)' : '');
     document.querySelectorAll('#fxModal .fx-speed-presets [data-speed]').forEach((b) => b.classList.toggle('on', Math.abs(+b.dataset.speed - sp) < 0.001));
     const rot = parseInt((q('fxRot') || {}).value, 10) || 0;
     const rv = q('fxRotV'); if (rv) rv.textContent = rot + '°';
@@ -14320,25 +14510,240 @@
     paintFxSlider(q('fxMusicVol'));
   }
   /*
+   * ►► THE THREE EDITORS: HSL, Curves, Colour wheel. ◄◄
+   * Each changes one part of a nested setting (one colour, one curve, one
+   * wheel) and keeps the clip's others — on every clip at once with "All clips".
+   */
+  const WHEEL_NAMES = { lift: 'Shadows', gamma: 'Midtones', gain: 'Highlights' };
+  const CURVE_INK = { m: '#ffffff', r: '#ef4444', g: '#22c55e', b: '#3b82f6' };
+  const fxStraight = () => [[0, 0], [1, 1]];
+  function paintFxEditors(f) {
+    const u = ve.fxUi, q = (id) => document.getElementById(id);
+    // HSL
+    const band = u.hslBand || 'red';
+    const hv = (f.hsl && f.hsl[band]) || [0, 0, 0];
+    [['fxHslH', 0], ['fxHslS', 1], ['fxHslL', 2]].forEach(([id, i]) => { const el = q(id); if (el) { el.value = String(hv[i]); paintFxSlider(el); } });
+    document.querySelectorAll('#fxHslBands [data-band]').forEach((b) => {
+      b.classList.toggle('on', b.dataset.band === band);
+      b.classList.toggle('changed', !!(f.hsl && f.hsl[b.dataset.band]));
+    });
+    const sw = document.querySelector(`#fxHslBands [data-band="${band}"]`);
+    const wrap = q('fxHslBands') && q('fxHslBands').parentElement;
+    if (wrap && sw) {
+      wrap.style.setProperty('--band', sw.style.getPropertyValue('--sw'));
+      // the Hue track runs from this colour's neighbour on one side to the other (±30°, as the slider moves it)
+      const deg = ((window.Grade && window.Grade.HSL_BANDS.find((x) => x[0] === band)) || [0, 0])[1];
+      wrap.style.setProperty('--hue-track', `linear-gradient(90deg, hsl(${deg - 30} 85% 55%), hsl(${deg} 85% 55%), hsl(${deg + 30} 85% 55%))`);
+    }
+    // Curves
+    const ch = u.curveCh || 'm';
+    document.querySelectorAll('#fxCurveCh [data-curve]').forEach((b) => {
+      b.classList.toggle('on', b.dataset.curve === ch);
+      b.classList.toggle('changed', !!(f.curves && f.curves[b.dataset.curve]));
+    });
+    drawFxCurve(f);
+    // Wheels
+    const wk = u.wheel || 'lift';
+    document.querySelectorAll('#fxWheels [data-wheel]').forEach((w) => {
+      const v = (f.wheels && f.wheels[w.dataset.wheel]) || [0, 0, 0];
+      const puck = w.querySelector('.fxq-puck');
+      if (puck) { puck.style.left = (50 + v[0] * 50) + '%'; puck.style.top = (50 - v[1] * 50) + '%'; }
+      w.classList.toggle('on', w.dataset.wheel === wk);
+      w.classList.toggle('changed', !!(f.wheels && f.wheels[w.dataset.wheel]));
+    });
+    const wl = q('fxWheelL');
+    if (wl) { wl.value = String(((f.wheels && f.wheels[wk]) || [0, 0, 0])[2]); paintFxSlider(wl); }
+    const wn = q('fxWheelLName'); if (wn) wn.textContent = WHEEL_NAMES[wk] + ' brightness';
+  }
+  /** The points of the curve being edited: the one being dragged, else the clip's. */
+  function fxCurvePts(f) {
+    const u = ve.fxUi, ch = u.curveCh || 'm';
+    if (u.curveDrag && u.curveDrag.ch === ch) return u.curveDrag.pts;
+    return ((f.curves && f.curves[ch]) || fxStraight()).map((p) => p.slice());
+  }
+  function drawFxCurve(f) {
+    const cv = document.getElementById('fxCurveCv'); if (!cv || !window.Grade) return;
+    const r = cv.getBoundingClientRect(); if (!r.width) return;
+    const dpr = Math.min(3, window.devicePixelRatio || 1), W = Math.round(r.width * dpr), H = Math.round(r.height * dpr);
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+    const g = cv.getContext('2d'), pad = 10 * dpr, w = W - pad * 2, h = H - pad * 2;
+    const X = (x) => pad + x * w, Y = (y) => pad + (1 - y) * h;
+    g.clearRect(0, 0, W, H);
+    g.strokeStyle = 'rgba(255,255,255,.1)'; g.lineWidth = dpr;
+    for (let i = 0; i <= 4; i++) { g.beginPath(); g.moveTo(X(i / 4), Y(0)); g.lineTo(X(i / 4), Y(1)); g.moveTo(X(0), Y(i / 4)); g.lineTo(X(1), Y(i / 4)); g.stroke(); }
+    g.strokeStyle = 'rgba(255,255,255,.22)'; g.setLineDash([4 * dpr, 4 * dpr]);
+    g.beginPath(); g.moveTo(X(0), Y(0)); g.lineTo(X(1), Y(1)); g.stroke(); g.setLineDash([]);
+    const ch = ve.fxUi.curveCh || 'm', ink = CURVE_INK[ch];
+    // the other channels' curves, faintly, so a change on one is seen against the rest
+    for (const c of window.Grade.CURVE_CH) {
+      if (c === ch || !(f.curves && f.curves[c])) continue;
+      const sp = window.Grade.spline(f.curves[c]);
+      g.strokeStyle = CURVE_INK[c] + '55'; g.lineWidth = 1.5 * dpr; g.beginPath();
+      for (let i = 0; i <= 64; i++) { const x = i / 64; if (i) g.lineTo(X(x), Y(sp(x))); else g.moveTo(X(x), Y(sp(x))); }
+      g.stroke();
+    }
+    const pts = fxCurvePts(f), sp = window.Grade.spline(pts);
+    g.strokeStyle = ink; g.lineWidth = 2.2 * dpr; g.beginPath();
+    for (let i = 0; i <= 128; i++) { const x = i / 128, y = Math.min(1, Math.max(0, sp(x))); if (i) g.lineTo(X(x), Y(y)); else g.moveTo(X(x), Y(y)); }
+    g.stroke();
+    pts.forEach((p, i) => {
+      g.beginPath(); g.arc(X(p[0]), Y(p[1]), (ve.fxUi.curveDrag && ve.fxUi.curveDrag.i === i ? 8 : 6) * dpr, 0, Math.PI * 2);
+      g.fillStyle = '#0b0b0d'; g.fill(); g.lineWidth = 2.2 * dpr; g.strokeStyle = ink; g.stroke();
+    });
+  }
+  function bindFxEditors() {
+    const q = (id) => document.getElementById(id), u = ve.fxUi;
+    const curF = () => fxOf(fxTarget() || fxPickClip());
+    // HSL
+    document.querySelectorAll('#fxHslBands [data-band]').forEach((b) => b.addEventListener('click', () => { u.hslBand = b.dataset.band; renderFxPanel(); }));
+    [['fxHslH', 0], ['fxHslS', 1], ['fxHslL', 2]].forEach(([id, i]) => {
+      const el = q(id); if (!el) return;
+      const put = (v) => {
+        const band = u.hslBand || 'red';
+        setClipFx('hsl', (f) => {
+          const h = Object.assign({}, f.hsl || {});
+          const t = (h[band] || [0, 0, 0]).slice(); t[i] = v; h[band] = t;
+          return h;
+        });
+      };
+      el.addEventListener('input', () => { paintFxSlider(el); put(parseFloat(el.value)); });
+      el.addEventListener('dblclick', () => put(0));
+    });
+    // Curves
+    document.querySelectorAll('#fxCurveCh [data-curve]').forEach((b) => b.addEventListener('click', () => { u.curveCh = b.dataset.curve; u.curveDrag = null; renderFxPanel(); }));
+    const cv = q('fxCurveCv');
+    if (cv) {
+      const at = (e) => {
+        const r = cv.getBoundingClientRect(), pad = 10;
+        return [clamp((e.clientX - r.left - pad) / (r.width - pad * 2), 0, 1), clamp(1 - (e.clientY - r.top - pad) / (r.height - pad * 2), 0, 1), r];
+      };
+      const putCurve = (pts, own) => {
+        const ch = u.curveCh || 'm', v = pts.map((p) => p.slice());
+        setClipFx('curves', (f) => Object.assign({}, f.curves || {}, { [ch]: v }), own);
+      };
+      let lastTap = { t: 0, i: -1 };
+      cv.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        const [x, y, r] = at(e), pts = fxCurvePts(curF());
+        // the nearest point within a finger's reach
+        let best = -1, bd = 22;
+        pts.forEach((p, i) => { const d = Math.hypot((p[0] - x) * (r.width - 20), (p[1] - y) * (r.height - 20)); if (d < bd) { bd = d; best = i; } });
+        const now = Date.now();
+        if (best > 0 && best < pts.length - 1 && lastTap.i === best && now - lastTap.t < 350) {
+          // double-tap: the point goes
+          pts.splice(best, 1); lastTap = { t: 0, i: -1 };
+          putCurve(pts, true);
+          return;
+        }
+        if (best < 0) {
+          if (pts.length >= 12) return;
+          const sp = window.Grade.spline(pts);
+          const ny = clamp(sp(x), 0, 1);
+          pts.push([x, Math.abs(ny - y) * (r.height - 20) < 26 ? ny : y]);
+          pts.sort((a, b) => a[0] - b[0]);
+          best = pts.findIndex((p) => p[0] === x);
+        }
+        lastTap = { t: now, i: best };
+        u.curveDrag = { ch: u.curveCh || 'm', pts, i: best };
+        ve._fxHold = 1;
+        try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+        putCurve(pts);
+      });
+      cv.addEventListener('pointermove', (e) => {
+        const d = u.curveDrag; if (!d) return;
+        const [x, y] = at(e), pts = d.pts, i = d.i, n = pts.length;
+        // the ends move up and down only; a point between stays between its neighbours
+        const nx = i === 0 ? 0 : i === n - 1 ? 1 : clamp(x, pts[i - 1][0] + 0.02, pts[i + 1][0] - 0.02);
+        pts[i] = [+nx.toFixed(3), +y.toFixed(3)];
+        if (!d.raf) d.raf = requestAnimationFrame(() => { d.raf = 0; if (u.curveDrag === d) putCurve(pts); });
+      });
+      const end = () => {
+        const d = u.curveDrag; if (!d) return;
+        if (d.raf) cancelAnimationFrame(d.raf);
+        u.curveDrag = null; ve._fxHold = 0;
+        putCurve(d.pts);
+      };
+      cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+      window.addEventListener('resize', () => { if (!document.getElementById('fxModal').classList.contains('hidden')) drawFxCurve(curF()); });
+    }
+    // Wheels
+    document.querySelectorAll('#fxWheels [data-wheel]').forEach((w) => {
+      const ring = w.querySelector('.fxq-wheel-ring'), k = w.dataset.wheel;
+      const putWheel = (fn, own) => setClipFx('wheels', (f) => {
+        const all = Object.assign({}, f.wheels || {});
+        all[k] = fn((all[k] || [0, 0, 0]).slice());
+        return all;
+      }, own);
+      let drag = false, lastTap = 0;
+      const move = (e) => {
+        const r = ring.getBoundingClientRect();
+        let x = ((e.clientX - r.left) / r.width) * 2 - 1, y = 1 - ((e.clientY - r.top) / r.height) * 2;
+        const m = Math.hypot(x, y); if (m > 1) { x /= m; y /= m; }
+        putWheel((v) => [+x.toFixed(3), +y.toFixed(3), v[2]]);
+      };
+      ring.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        const now = Date.now();
+        if (u.wheel !== k) { u.wheel = k; renderFxPanel(); }
+        if (now - lastTap < 350) { lastTap = 0; putWheel(() => [0, 0, 0], true); return; }
+        lastTap = now; drag = true; ve._fxHold = 1;
+        try { ring.setPointerCapture(e.pointerId); } catch (err) {}
+        // a tap only picks the wheel; it is a drag that tints
+        w._down = [e.clientX, e.clientY];
+      });
+      ring.addEventListener('pointermove', (e) => {
+        if (!drag) return;
+        if (w._down && Math.hypot(e.clientX - w._down[0], e.clientY - w._down[1]) < 4) return;
+        w._down = null; move(e);
+      });
+      const end = () => { drag = false; ve._fxHold = 0; w._down = null; };
+      ring.addEventListener('pointerup', end); ring.addEventListener('pointercancel', end);
+      w.querySelector('span').addEventListener('click', () => { u.wheel = k; renderFxPanel(); });
+    });
+    const wl = q('fxWheelL');
+    if (wl) {
+      const put = (v) => { const k = u.wheel || 'lift'; setClipFx('wheels', (f) => { const all = Object.assign({}, f.wheels || {}); const t = (all[k] || [0, 0, 0]).slice(); t[2] = v; all[k] = t; return all; }); };
+      wl.addEventListener('input', () => { paintFxSlider(wl); put(parseFloat(wl.value)); });
+      wl.addEventListener('dblclick', () => put(0));
+    }
+    // Video quality
+    const enh = q('fxEnh'); if (enh) enh.addEventListener('change', () => setClipFx('enh', enh.checked ? 1 : 0));
+    const fl = q('fxFlick'); if (fl) fl.addEventListener('change', () => setClipFx('flick', fl.checked ? 1 : 0));
+    document.querySelectorAll('#fxDnChips [data-dn]').forEach((b) => b.addEventListener('click', () => setClipFx('dn', +b.dataset.dn)));
+    const au = q('fxAuto2'); if (au) au.addEventListener('click', () => autoEnhance());
+    const st = q('fxStab'); if (st) st.addEventListener('click', () => {
+      closeFxPanel();
+      const b = document.querySelector('[data-vtool="stabilize"]');
+      if (b) b.click(); else moreTool('stabilize');
+    });
+    const flow = q('fxFlow'); if (flow) flow.addEventListener('change', () => paintFxMore());
+  }
+  /*
    * ONE UNDO STEP PER CHANGE, not one per visit to the panel. It was one per
    * visit: three sliders moved, one undo took all three back (and a slider is
    * dozens of input events — those still make one step: a step is a burst of
    * changes with no pause of more than a moment in it).
    */
   function fxStep(force) {
+    // a finger still down on a curve or a wheel: however long it rests, the drag is one step
+    if (!force && ve._fxHold === 2) { touchSession(); ve._fxStepAt = Date.now(); return; }
     if (force || Date.now() - (ve._fxStepAt || 0) > 900) pushHistory(); else touchSession();
+    if (ve._fxHold === 1) ve._fxHold = 2;
     ve._fxStepAt = force ? 0 : Date.now();
   }
-  /** Set one part of the look — on this clip, or on every clip. */
-  function setClipFx(key, value) {
+  /** Set one part of the look — on this clip, or on every clip. `value` may be a
+      function of the clip's look (HSL, Curves, Wheels: one colour, curve or
+      wheel changed, the clip's others kept — on every clip with "All clips"). */
+  function setClipFx(key, value, ownStep) {
     const u = ve.fxUi;
     if (!fxTarget()) { const s0 = fxPickClip(); u.clipId = s0 ? s0.id : null; }
     const targets = u.scope === 'all' ? fxClips().concat(ve.segments.filter((x) => x.ai)) : [fxTarget()].filter(Boolean);
     if (!targets.length) return;
-    fxStep();
-    for (const s of targets) {
-      const next = cleanFx(Object.assign(fxOf(s), { [key]: value }));
-      if (next) s.fx = next; else delete s.fx;
+    const nexts = targets.map((s) => cleanFx(Object.assign(fxOf(s), { [key]: typeof value === 'function' ? value(fxOf(s)) : value })));
+    // nothing changed (a tap that only picked a point or a wheel): no step to undo
+    if (targets.some((s, i) => JSON.stringify(cleanFx(s.fx)) !== JSON.stringify(nexts[i]))) {
+      fxStep(ownStep);
+      targets.forEach((s, i) => { if (nexts[i]) s.fx = nexts[i]; else delete s.fx; });
     }
     // LIVE: the change is on screen as the slider moves — the preview goes to the clip being changed
     // (not while it plays: a playing video is left where it is, and shows it as it reaches that clip)
@@ -14401,6 +14806,8 @@
     const edits = {
       speed: +q('fxSpeed').value, volume: one.vol, look: one.look,
       brightness: one.bri, contrast: one.con, saturation: one.sat, sharpen: one.sharp,
+      // the rest of the look (Clarity, HSL, Curves, Vignette, Enhance, noise…), and Optical flow for a slowed copy
+      fx: cleanFx(one) || undefined, flow: !!(q('fxFlow') && q('fxFlow').checked),
       fadeIn: +q('fxFadeIn').value, fadeOut: +q('fxFadeOut').value, rotate: +q('fxRot').value,
       flipH: q('fxFlipH').checked, flipV: q('fxFlipV').checked,
       // Fall back to the library track, so music chosen in the 🎵 Music panel
@@ -16332,6 +16739,7 @@
     $('#fxLook').addEventListener('change', (e) => setClipFx('look', e.target.value));
     $$('#fxModal [data-adj]').forEach((b) => b.addEventListener('click', () => { ve.fxUi.adj = b.dataset.adj; renderFxPanel(); }));
     { const au = $('#fxAuto'); if (au) au.addEventListener('click', () => { autoEnhance(); }); }
+    bindFxEditors();
     for (const [id, k] of Object.entries(FX_INPUTS)) {
       const el = $('#' + id); if (!el) continue;
       el.addEventListener('input', () => { paintFxSlider(el); setClipFx(k, parseFloat(el.value)); });

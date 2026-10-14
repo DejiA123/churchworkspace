@@ -3,6 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const ff = require('./ffmpeg');
+const Grade = require('../renderer/grade.js');
 const deepfilter = require('./deepfilter');
 
 /** Run async task factories with limited concurrency. */
@@ -1289,7 +1290,19 @@ function clipFx(fx) {
   const sat = numIn(fx.sat, 0, 2.5, 1); if (Math.abs(sat - 1) > 0.001) o.sat = +sat.toFixed(3);
   const sharp = numIn(fx.sharp, 0, 2, 0); if (sharp > 0.001) o.sharp = +sharp.toFixed(2);
   const vol = numIn(fx.vol, 0, 2, 1); if (Math.abs(vol - 1) > 0.001) o.vol = +vol.toFixed(3);
+  // CapCut's other Adjust and Video quality tools (grade.js — the same arithmetic as the preview)
+  Object.assign(o, Grade.clean(fx));
   return Object.keys(o).length ? o : null;
+}
+/* The colour table for a look, written once (named by what is in it) for lut3d. */
+function lutFile(g) {
+  const body = Grade.cube(g);
+  const h = require('crypto').createHash('sha1').update(body).digest('hex').slice(0, 16);
+  const dir = path.join(require('os').tmpdir(), 'mw-luts');
+  const f = path.join(dir, h + '.cube');
+  if (!fs.existsSync(f)) { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(f + '.part', body); fs.renameSync(f + '.part', f); }
+  // a filter-graph path: forward slashes, the drive's colon and any quote escaped
+  return f.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
 }
 /*
  * THE EXPORT DOES WHAT THE PREVIEW SHOWS. The preview colours the playing
@@ -1329,22 +1342,44 @@ function cssStep([name, v]) {
   return '';
 }
 /** The picture side of a look, as filter steps ('' for none). */
+let fxGraphN = 0;
 function fxVideo(fx) {
   const f = clipFx(fx); if (!f) return '';
+  /*
+   * FIRST what the preview's WebGL grade layer draws (gradePicture in veditor.js), in its
+   * order: noise out, Clarity, Sharpen, the colour table, Vignette, Grain —
+   * THEN the browser-filter steps the preview lays over that layer (below).
+   */
+  const sp = Grade.spatial(f, f.sharp);
+  const pre = [];
+  if (sp.flick) pre.push('deflicker=size=5:mode=pm');
+  if (sp.dn > 0.01) { const d = Grade.SPATIAL.dn, k = sp.dn; pre.push(`hqdn3d=${(d.ls * k).toFixed(2)}:${(d.cs * k).toFixed(2)}:${(d.lt * k).toFixed(2)}:${(d.ct * k).toFixed(2)}`); }
+  if (Math.abs(sp.clar) > 0.01) {
+    // Clarity: brightness plus K × (itself minus a wide blur of itself), the colour left alone. ffmpeg's
+    // unsharp cannot reach that wide (25 px at most, and a binomial, not a blur), so: split, Gaussian
+    // blur, the difference (grain extract), scaled by K, put back (grain merge). Fresh names each time,
+    // so several clips in one graph never share one.
+    const n = ++fxGraphN, K = Grade.SPATIAL.clarAmount(sp.clar);
+    pre.push(`format=yuv420p,split[cA${n}][cB${n}];[cB${n}]gblur=sigma=${Grade.SPATIAL.clarSigma}:planes=1[cC${n}];[cA${n}]split[cD${n}][cE${n}];`
+      + `[cD${n}][cC${n}]blend=c0_mode=grainextract:c1_mode=normal:c2_mode=normal,lutyuv=y='clip(128+(val-128)*${K},0,255)'[cF${n}];`
+      + `[cE${n}][cF${n}]blend=c0_mode=grainmerge:c1_mode=normal:c2_mode=normal`);
+  }
+  if (sp.sharp > 0.001) {
+    const a = Math.round(Math.min(2, sp.sharp) * 40), c = 100 + 4 * a;
+    const m = `0 -${a} 0 -${a} ${c} -${a} 0 -${a} 0`;
+    pre.push('format=gbrp', `convolution=0m='${m}':1m='${m}':2m='${m}':0rdiv=0.01:1rdiv=0.01:2rdiv=0.01`);
+  }
+  if (Grade.needsLut(f)) pre.push('format=gbrp', `lut3d=file='${lutFile(f)}':interp=trilinear`);
+  // (in red, green and blue, as the preview darkens it — packed: it has no planar RGB, and on YUV it would scale the brightness's +16 offset too)
+  if (sp.vig > 0.01) pre.push('format=rgb24', `vignette=angle=${Grade.SPATIAL.vigAngle(sp.vig)}:eval=init:dither=0`);
+  if (sp.grain > 0.01) pre.push('format=yuv420p', `noise=c0s=${Grade.SPATIAL.grain(sp.grain)}:c0f=t+u`);
   const steps = [];
   // the preview's order: brightness, contrast, saturation, then the look
   if (f.bri != null) steps.push(['brightness', 1 + f.bri]);
   if (f.con != null) steps.push(['contrast', f.con]);
   if (f.sat != null) steps.push(['saturate', f.sat]);
   if (f.look) steps.push(...LOOK_STEPS[f.look]);
-  const vf = steps.map(cssStep).filter(Boolean);
-  // after the grade, so it crisps the graded picture: the preview's own 3x3
-  // kernel (the #fxSharpen SVG filter, a = 0.4 × sharp) on red, green and blue
-  if (f.sharp != null) {
-    const a = Math.round(Math.min(2, f.sharp) * 40), c = 100 + 4 * a;
-    const m = `0 -${a} 0 -${a} ${c} -${a} 0 -${a} 0`;
-    vf.push('format=gbrp', `convolution=0m='${m}':1m='${m}':2m='${m}':0rdiv=0.01:1rdiv=0.01:2rdiv=0.01`);
-  }
+  const vf = pre.concat(steps.map(cssStep).filter(Boolean));
   if (vf.length) vf.push('format=yuv420p');
   return vf.join(',');
 }
@@ -3013,6 +3048,11 @@ async function freezeFrame(ctx, { input, timeSec, holdSec = 2, output, onProgres
  * (brightness/contrast/saturation), look presets, rotate/flip. Builds one
  * filtergraph and re-encodes.
  */
+/** The frame rate a slowed video is filled back up to: its own (at most 60), 30 when it cannot be read. */
+function flowFps(info) {
+  const f = Number(info && (info.fps || info.frameRate)) || 0;
+  return f > 1 ? Math.min(60, Math.round(f * 1000) / 1000) : 30;
+}
 async function applyEdits(ctx, { input, output, edits = {}, onProgress }) {
   const info = await getInfo(ctx, input);
   const denoiseAf = await denoiseFilter(ctx, { input, denoise: edits.denoise });
@@ -3025,9 +3065,13 @@ async function applyEdits(ctx, { input, output, edits = {}, onProgress }) {
   if (edits.flipH) vf.push('hflip');
   if (edits.flipV) vf.push('vflip');
   // the clip look, by the same formulas the preview shows it with (fxVideo)
-  const grade = fxVideo({ look: edits.look, bri: edits.brightness, con: edits.contrast, sat: edits.saturation, sharp: edits.sharpen });
+  // (and the rest of it — Clarity, HSL, Curves, Vignette, Enhance, noise… — when the clips share one look)
+  const grade = fxVideo(Object.assign({}, edits.fx && typeof edits.fx === 'object' ? edits.fx : {},
+    { look: edits.look, bri: edits.brightness, con: edits.contrast, sat: edits.saturation, sharp: edits.sharpen }));
   if (grade) vf.push(grade);
   if (speed !== 1) vf.push(`setpts=${(1 / speed).toFixed(5)}*PTS`);
+  // OPTICAL FLOW: a slowed video gets new frames made between the real ones (motion-compensated), not each frame shown twice
+  if (edits.flow && speed < 1) vf.push(`minterpolate=fps=${flowFps(info)}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1`);
   if (edits.fadeIn) vf.push(`fade=t=in:st=0:d=${Number(edits.fadeIn)}`);
   if (edits.fadeOut) vf.push(`fade=t=out:st=${Math.max(0, outDur - Number(edits.fadeOut)).toFixed(2)}:d=${Number(edits.fadeOut)}`);
   vf.push('format=yuv420p');

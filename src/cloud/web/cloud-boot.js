@@ -4137,6 +4137,8 @@ let _hideTimer = null;
     style: [
       { icon: 'filters', label: 'Filters', fx: '#fxLook' },
       { icon: 'sliders', label: 'Adjust', fx: '#fxBri' },
+      // CapCut's Video quality: Enhance, Reduce noise, Auto adjust, Remove flickers, Optical flow, Stabilize
+      { icon: 'wand', label: 'Quality', fx: '#fxEnh' },
       { icon: 'palette', label: 'Look', sheet: 'insp', tab: '#veInspTabLook' },
     ],
     shape: [

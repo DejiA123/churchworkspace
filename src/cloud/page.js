@@ -48,6 +48,7 @@ const KEEP_VIEW = 'view-video';
  * tracker, the word book, and the two the caption/text paths call into.
  */
 const RENDERER_SCRIPTS = [
+  'grade.js',        // CapCut's Adjust and Video quality tools: the same colour table and numbers as the export
   'facetrack.js',    // auto-reframe — runs in THIS browser (MW_AI_BASE = /ai/)
   'caplayout.js',    // one layout module for preview and burn
   'wordbook-english.js', // the real words the built-in names may never replace (before wordbook.js)

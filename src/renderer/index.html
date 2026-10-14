@@ -1673,6 +1673,7 @@
       <div class="fxq-tabs" role="tablist">
         <button type="button" data-fxtab="filters" class="on">Filters</button>
         <button type="button" data-fxtab="adjust">Adjust</button>
+        <button type="button" data-fxtab="quality">Quality</button>
         <button type="button" data-fxtab="volume">Volume</button>
         <button type="button" data-fxtab="more">Speed &amp; more</button>
       </div>
@@ -1692,17 +1693,85 @@
 
         <!-- ADJUST: pick one, drag one -->
         <section class="fxq-pane" data-fxpane="adjust">
-          <div class="fxq-tools fxq-tools-5">
+          <div class="fxq-tools fxq-tools-row">
             <button type="button" id="fxAuto" class="fxq-auto" title="Auto enhance: brightness, contrast, colour and sharpness set for this video"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2.8l2.2 5.6 5.9.5-4.5 3.9 1.4 5.8L12 15.5l-5 3.1 1.4-5.8L3.9 8.9l5.9-.5z"/></svg></i><span>Auto</span></button>
             <button type="button" data-adj="fxBri" class="on"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg></i><span>Brightness</span></button>
             <button type="button" data-adj="fxCon"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" stroke="none"/></svg></i><span>Contrast</span></button>
             <button type="button" data-adj="fxSat"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3.2c3.4 4.1 6 7.4 6 10.6a6 6 0 0 1-12 0c0-3.2 2.6-6.5 6-10.6z"/></svg></i><span>Saturation</span></button>
             <button type="button" data-adj="fxSharp"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l8.5 15h-17z"/><path d="M12 9.5v4.5"/></svg></i><span>Sharpen</span></button>
+            <button type="button" data-adj="fxBril"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 7.5v9" /><path d="M12 7.5a4.5 4.5 0 0 1 0 9z" fill="currentColor" stroke="none"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg></i><span>Brilliance</span></button>
+            <button type="button" data-adj="fxClar"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 6-7 12-7-12z"/><path d="M5 9h14M9.5 9 12 21l2.5-12"/></svg></i><span>Clarity</span></button>
+            <button type="button" data-adj="fxHsl"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9.5" r="5"/><circle cx="15" cy="9.5" r="5"/><circle cx="12" cy="14.5" r="5"/></svg></i><span>HSL</span></button>
+            <button type="button" data-adj="fxCurves"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M6.5 17.5c4-.5 4.5-11 11-11"/></svg></i><span>Curves</span></button>
+            <button type="button" data-adj="fxWheels"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v8.5l7.4 4.3M12 12l-7.4 4.3"/></svg></i><span>Colour wheel</span></button>
+            <button type="button" data-adj="fxHi"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12a8.5 8.5 0 0 1 17 0z" fill="currentColor" stroke="none"/></svg></i><span>Highlights</span></button>
+            <button type="button" data-adj="fxSh"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12a8.5 8.5 0 0 0 17 0z" fill="currentColor" stroke="none"/></svg></i><span>Shadows</span></button>
+            <button type="button" data-adj="fxWh"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8 12h8"/></svg></i><span>Whites</span></button>
+            <button type="button" data-adj="fxBl"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="4" fill="currentColor"/></svg></i><span>Blacks</span></button>
+            <button type="button" data-adj="fxTemp"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13.5V5a2 2 0 0 1 4 0v8.5a4 4 0 1 1-4 0z"/><path d="M12 9v7"/></svg></i><span>Temp</span></button>
+            <button type="button" data-adj="fxHue"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/></svg></i><span>Hue</span></button>
+            <button type="button" data-adj="fxFade"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="3"/><path d="M8 5v14M12.5 5v14M17 5v14" stroke-dasharray="1.5 2.5"/></svg></i><span>Fade</span></button>
+            <button type="button" data-adj="fxVig"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><ellipse cx="12" cy="12" rx="5.5" ry="4"/></svg></i><span>Vignette</span></button>
+            <button type="button" data-adj="fxGrain"><i><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="1.2" fill="currentColor"/><circle cx="12" cy="9" r="1.2" fill="currentColor"/><circle cx="17" cy="6.5" r="1.2" fill="currentColor"/><circle cx="8" cy="13" r="1.2" fill="currentColor"/><circle cx="14" cy="14" r="1.2" fill="currentColor"/><circle cx="18" cy="12" r="1.2" fill="currentColor"/><circle cx="6.5" cy="18" r="1.2" fill="currentColor"/><circle cx="12" cy="18.5" r="1.2" fill="currentColor"/><circle cx="17.5" cy="17.5" r="1.2" fill="currentColor"/></svg></i><span>Grain</span></button>
           </div>
           <div class="fxq-slide" data-for="fxBri"><input type="range" id="fxBri" min="-0.3" max="0.3" step="0.01" value="0" aria-label="Brightness"></div>
           <div class="fxq-slide hidden" data-for="fxCon"><input type="range" id="fxCon" min="0.5" max="1.8" step="0.01" value="1" aria-label="Contrast"></div>
           <div class="fxq-slide hidden" data-for="fxSat"><input type="range" id="fxSat" min="0" max="2.5" step="0.02" value="1" aria-label="Saturation"></div>
           <div class="fxq-slide hidden" data-for="fxSharp"><input type="range" id="fxSharp" min="0" max="2" step="0.05" value="0" aria-label="Sharpen"><span id="fxSharpV" class="fxq-hidden">Off</span></div>
+          <div class="fxq-slide hidden" data-for="fxBril"><input type="range" id="fxBril" min="-1" max="1" step="0.01" value="0" aria-label="Brilliance"></div>
+          <div class="fxq-slide hidden" data-for="fxClar"><input type="range" id="fxClar" min="-1" max="1" step="0.01" value="0" aria-label="Clarity"></div>
+          <div class="fxq-slide hidden" data-for="fxHi"><input type="range" id="fxHi" min="-1" max="1" step="0.01" value="0" aria-label="Highlights"></div>
+          <div class="fxq-slide hidden" data-for="fxSh"><input type="range" id="fxSh" min="-1" max="1" step="0.01" value="0" aria-label="Shadows"></div>
+          <div class="fxq-slide hidden" data-for="fxWh"><input type="range" id="fxWh" min="-1" max="1" step="0.01" value="0" aria-label="Whites"></div>
+          <div class="fxq-slide hidden" data-for="fxBl"><input type="range" id="fxBl" min="-1" max="1" step="0.01" value="0" aria-label="Blacks"></div>
+          <div class="fxq-slide hidden" data-for="fxTemp"><input type="range" id="fxTemp" min="-1" max="1" step="0.01" value="0" aria-label="Temperature"></div>
+          <div class="fxq-slide hidden" data-for="fxHue"><input type="range" id="fxHue" min="-1" max="1" step="0.01" value="0" aria-label="Hue"></div>
+          <div class="fxq-slide hidden" data-for="fxFade"><input type="range" id="fxFade" min="0" max="1" step="0.01" value="0" aria-label="Fade"></div>
+          <div class="fxq-slide hidden" data-for="fxVig"><input type="range" id="fxVig" min="0" max="1" step="0.01" value="0" aria-label="Vignette"></div>
+          <div class="fxq-slide hidden" data-for="fxGrain"><input type="range" id="fxGrain" min="0" max="1" step="0.01" value="0" aria-label="Grain"></div>
+          <!-- HSL: one colour at a time — its hue, how strong it is, how light -->
+          <div class="fxq-ed hidden" data-for="fxHsl">
+            <div id="fxHslBands" class="fxq-swatches"><button type="button" data-band="red" style="--sw:#ef4444" aria-label="Red"></button><button type="button" data-band="orange" style="--sw:#f97316" aria-label="Orange"></button><button type="button" data-band="yellow" style="--sw:#facc15" aria-label="Yellow"></button><button type="button" data-band="green" style="--sw:#22c55e" aria-label="Green"></button><button type="button" data-band="cyan" style="--sw:#22d3ee" aria-label="Cyan"></button><button type="button" data-band="blue" style="--sw:#3b82f6" aria-label="Blue"></button><button type="button" data-band="purple" style="--sw:#a855f7" aria-label="Purple"></button><button type="button" data-band="magenta" style="--sw:#ec4899" aria-label="Magenta"></button></div>
+            <div class="fxq-slide fxq-slide-sm fxq-hsl-h"><span class="fxq-sub">Hue</span><input type="range" id="fxHslH" min="-1" max="1" step="0.01" value="0" aria-label="Hue of this colour"></div>
+            <div class="fxq-slide fxq-slide-sm fxq-hsl-s"><span class="fxq-sub">Saturation</span><input type="range" id="fxHslS" min="-1" max="1" step="0.01" value="0" aria-label="Saturation of this colour"></div>
+            <div class="fxq-slide fxq-slide-sm fxq-hsl-l"><span class="fxq-sub">Lightness</span><input type="range" id="fxHslL" min="-1" max="1" step="0.01" value="0" aria-label="Lightness of this colour"></div>
+          </div>
+          <!-- CURVES: tap to add a point, drag it, double-tap it to take it away -->
+          <div class="fxq-ed hidden" data-for="fxCurves">
+            <div class="fxq-chips fxq-curve-ch" id="fxCurveCh">
+              <button type="button" data-curve="m" class="on"><i style="--sw:#fff"></i>RGB</button>
+              <button type="button" data-curve="r"><i style="--sw:#ef4444"></i>Red</button>
+              <button type="button" data-curve="g"><i style="--sw:#22c55e"></i>Green</button>
+              <button type="button" data-curve="b"><i style="--sw:#3b82f6"></i>Blue</button>
+            </div>
+            <div class="fxq-curve-wrap"><canvas id="fxCurveCv" aria-label="Curve: tap to add a point, drag to move it, double-tap to remove it"></canvas></div>
+            <p class="fxq-hint">Tap to add a point · drag to move it · double-tap a point to remove it</p>
+          </div>
+          <!-- COLOUR WHEEL: tint the shadows, the midtones and the highlights, each on its own -->
+          <div class="fxq-ed hidden" data-for="fxWheels">
+            <div class="fxq-wheels" id="fxWheels">
+              <div class="fxq-wheel" data-wheel="lift"><div class="fxq-wheel-ring"><b class="fxq-puck"></b></div><span>Shadows</span></div>
+              <div class="fxq-wheel" data-wheel="gamma"><div class="fxq-wheel-ring"><b class="fxq-puck"></b></div><span>Midtones</span></div>
+              <div class="fxq-wheel" data-wheel="gain"><div class="fxq-wheel-ring"><b class="fxq-puck"></b></div><span>Highlights</span></div>
+            </div>
+            <div class="fxq-slide fxq-slide-sm"><span class="fxq-sub" id="fxWheelLName">Shadows brightness</span><input type="range" id="fxWheelL" min="-1" max="1" step="0.01" value="0" aria-label="Brightness of this range"></div>
+            <p class="fxq-hint">Drag a dot towards a colour · double-tap a wheel to reset it</p>
+          </div>
+        </section>
+
+        <!-- QUALITY: CapCut's Video quality tools -->
+        <section class="fxq-pane" data-fxpane="quality">
+          <div class="fxq-q">
+            <div class="fxq-qrow"><span class="fxq-qtx"><b>Enhance quality</b><small>A cleaner, crisper, clearer picture in one tap</small></span><label class="fxq-switch"><input type="checkbox" id="fxEnh" aria-label="Enhance quality"><i></i></label></div>
+            <div class="fxq-qrow fxq-qcol"><span class="fxq-qtx"><b>Reduce image noise</b><small>Smooths the grain of a dark room or an old phone</small></span>
+              <div class="fxq-chips" id="fxDnChips"><button type="button" data-dn="0">None</button><button type="button" data-dn="0.45">Weak</button><button type="button" data-dn="0.9">Strong</button></div>
+              <input type="range" id="fxDn" class="fxq-hidden" min="0" max="1" step="0.01" value="0" tabindex="-1" aria-hidden="true">
+            </div>
+            <div class="fxq-qrow"><span class="fxq-qtx"><b>Auto adjust</b><small>Brightness, contrast, colour and sharpness set for this video</small></span><button type="button" id="fxAuto2" class="fxq-qbtn">Apply</button></div>
+            <div class="fxq-qrow"><span class="fxq-qtx"><b>Remove flickers</b><small>Steadies light that pulses (LED screens, stage lights)</small></span><label class="fxq-switch"><input type="checkbox" id="fxFlick" aria-label="Remove flickers"><i></i></label></div>
+            <div class="fxq-qrow"><span class="fxq-qtx"><b>Optical flow</b><small>Smooth slow motion: new frames made in between when you slow the video down (Speed &amp; more)</small></span><label class="fxq-switch"><input type="checkbox" id="fxFlow" aria-label="Optical flow"><i></i></label></div>
+            <div class="fxq-qrow"><span class="fxq-qtx"><b>Stabilize</b><small>Takes the shake out of handheld video (makes a steadied copy)</small></span><button type="button" id="fxStab" class="fxq-qbtn">Stabilize</button></div>
+          </div>
         </section>
 
         <!-- VOLUME -->
@@ -2225,6 +2294,7 @@
     </div>
   </div>
 
+  <script src="grade.js"></script>
   <script src="facetrack.js"></script>
   <script src="slide-render.js"></script>
   <script src="layers.js"></script>
