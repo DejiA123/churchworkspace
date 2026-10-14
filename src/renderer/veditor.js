@@ -199,6 +199,10 @@
       ve.mediaThumbs = {};   // a new recording is a new project — nothing is on top of it yet
       ve.history = []; ve.future = []; updateUndoRedoButtons();
       setFollow(true, true); // a fresh video starts following the playhead again
+      // …and the speaker: the hand framing that switched 🎯 Auto-reframe off
+      // belonged to the last recording and was thrown away just above (a
+      // restored project puts its own setting back afterwards, applySession)
+      if (ve._handFramed) { ve._handFramed = false; const rf = $('#veAutoReframe'); if (rf) rf.checked = true; renderFollowRow(); }
       if (ve.refs.capOverlay) ve.refs.capOverlay.classList.add('hidden');
       if (ve.refs.filmstrip) ve.refs.filmstrip.style.backgroundImage = '';
       setupPreview(path, info);
@@ -1461,8 +1465,9 @@
    * the timeline yourself. Auto-following used to be unconditional, so scrolling
    * back to look at something while the video played was impossible: the next
    * frame yanked you straight back to the playhead. Now the timeline stays where
-   * you put it, and following resumes when you press play again (or click the
-   * 🎯 button).
+   * you put it, and following resumes when you press play again (or click
+   * ⇥ Auto-scroll). It is NOT the speaker: that is 🎯 Auto-reframe, in the
+   * Follow tab, and the two share nothing.
    */
   function setFollow(on, quiet) {
     ve.follow = !!on;
@@ -1470,8 +1475,8 @@
     if (b) {
       b.classList.toggle('on', ve.follow);
       b.title = ve.follow
-        ? 'Following the playhead — scroll the timeline to look around freely'
-        : 'Not following — the timeline stays where you put it. Click to follow the playhead again.';
+        ? 'Auto-scroll: the timeline keeps up with the playhead — scroll it yourself to look around freely. (Following the speaker is in the 🎯 Follow tab.)'
+        : 'Auto-scroll is off — the timeline stays where you put it. Click to keep up with the playhead again.';
     }
     if (!quiet && ve.follow) {
       const sc = ve.refs.tlScroll;
@@ -2998,7 +3003,10 @@
     if (ve._exportingAll || (window.__tasksBusy && window.__tasksBusy())) return;
     maybeAskLiveAi(p);
     liveTrackBusy = true;
-    window.FaceTrack.detectElement(p, { nearX: ve.liveFaceCx, nearY: ve.liveFaceCy, lock: followLock() }).then((face) => {
+    // the short's own pick wins over the panel's, exactly as in its export (trackFromFrames)
+    const here = shortAt(p.currentTime || 0);
+    const lock = (here && here.subject ? unpackClipSubject(here) : null) || followLock();
+    window.FaceTrack.detectElement(p, { nearX: ve.liveFaceCx, nearY: ve.liveFaceCy, lock }).then((face) => {
       liveTrackBusy = false;
       if (applyLiveFaceSample(face)) updateCropMask();
     }).catch(() => { liveTrackBusy = false; });
@@ -3082,8 +3090,12 @@
     const w = cropWindow(); // current (face-followed) window BEFORE flipping the toggle
     box.checked = false;
     ve.framing.offsetX = w.ox; ve.framing.offsetY = w.oy;
-    updateCropMask();
-    window.__toast && window.__toast('✋ You\'re framing manually now — tick 🎯 Auto-reframe again to follow the speaker.', 'good');
+    // through the box's own change handler, so everything hanging off it
+    // follows (the 👤 and 🧠 rows, the live tracker, the crop) — a bare
+    // `checked = false` left the Follow tab describing a switch that was on
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+    ve._handFramed = true;   // ↺ on the picture hands the speaker back (#veCropReset, wire())
+    window.__toast && window.__toast('✋ You\'re framing by hand now — tap ↺ on the picture to follow the speaker again.', 'good', 7000);
   }
   function onCropDown(ev) {
     if (!ve.video) return;
@@ -3091,14 +3103,18 @@
     ev.preventDefault(); ev.stopPropagation();
     const cm = ve.canvasMap; if (!cm) return;
     const w0 = cropWindow();
-    ve.cropDrag = { x0: ev.clientX, y0: ev.clientY, ox0: w0.ox, oy0: w0.oy, s: cm.s, map: cm.map, moved: false };
+    // a fingertip rolls further than a mouse jitters: on a touch screen the
+    // picture must really travel before it is a drag (and takes the framing
+    // away from 🎯 Auto-reframe)
+    const slop = window.matchMedia && window.matchMedia('(pointer: coarse)').matches ? 14 : 4;
+    ve.cropDrag = { x0: ev.clientX, y0: ev.clientY, ox0: w0.ox, oy0: w0.oy, s: cm.s, map: cm.map, moved: false, slop };
     const move = (e) => {
       const d = ve.cropDrag; if (!d) return;
       // A tap is not a drag. Full screen's controls come back with a tap on the
       // picture, and that tap must not quietly switch 🎯 Auto-reframe off: the
       // speaker is only handed over to you once the picture actually moves.
       if (!d.moved) {
-        if (Math.abs(e.clientX - d.x0) < 4 && Math.abs(e.clientY - d.y0) < 4) return;
+        if (Math.abs(e.clientX - d.x0) < d.slop && Math.abs(e.clientY - d.y0) < d.slop) return;
         d.moved = true;
         if (reframeOn()) {
           takeManualFraming();
@@ -8096,6 +8112,10 @@
     if (!box) return;
     const row = $('#veFollowRow');
     if (row) row.classList.toggle('hidden', !reframeOn());
+    // the 🧠 row comes and goes with this one. It was only redrawn when a
+    // person had been picked, so with nobody picked, unticking Auto-reframe
+    // left "Who's speaking? Ask the AI" on show for a switch that was off.
+    renderReframeAi();
     if (!ve.subject) {
       box.innerHTML = '<span class="ve-follow-auto muted small">Following whoever the AI thinks is speaking.</span>';
       return;
@@ -8105,7 +8125,6 @@
       <button class="ve-follow-clear" id="veFollowX" title="Stop following them — let the AI decide again">✕</button>`;
     const x = $('#veFollowX');
     if (x) x.addEventListener('click', () => setSubject(null));
-    renderReframeAi();
   }
 
   /* ===================== 🧠 WHO IS THE SPEAKER — THE AI REFEREE ==============
@@ -14522,8 +14541,12 @@
       ve.aspect = lk.aspect; const sel = $('#veAspect'); if (sel) sel.value = lk.aspect;
     }
     if (lk.fill && ve.fill && ve.fill.mode !== lk.fill) setFillMode(lk.fill);
+    // A preset can switch 🎯 following the speaker ON, never off: its card only
+    // ever says "follow the speaker", so an "off" saved with it (most often a
+    // drag on the video it was made from — a framing the preset does not even
+    // carry) switched following off on every video it was put on, unseen.
     const rf = $('#veAutoReframe');
-    if (rf && typeof lk.follow === 'boolean' && rf.checked !== lk.follow) { rf.checked = lk.follow; rf.dispatchEvent(new Event('change', { bubbles: true })); }
+    if (rf && lk.follow === true && !rf.checked) { rf.checked = true; rf.dispatchEvent(new Event('change', { bubbles: true })); }
 
     renderTextOverlays(); renderTextTrack();
     renderLibrary(); renderMusicLane(); renderSegments(); updateMusicButton();
@@ -15754,6 +15777,7 @@
     });
     $('#veAspect').addEventListener('change', (e) => { ve.aspect = e.target.value; updateCropMask(); });
     $('#veAutoReframe').addEventListener('change', () => {
+      ve._handFramed = false;   // set again by takeManualFraming, after this
       if ($('#veAutoReframe').checked && !window.FaceTrack) window.__toast && window.__toast('Face tracking module failed to load — will use a centered crop.', 'error');
       resetLiveTrack(); updateCropMask();   // reset the live guide when toggled
       renderFollowRow();                    // "who to follow" only means anything while reframing
@@ -16092,7 +16116,17 @@
 
     // manual pan/zoom crop (drag to pan, scroll to zoom, ↺ to reset)
     $('#veCropFrame').addEventListener('mousedown', onCropDown);
-    $('#veCropReset').addEventListener('click', (e) => { e.stopPropagation(); resetCrop(); });
+    $('#veCropReset').addEventListener('click', (e) => {
+      e.stopPropagation();
+      resetCrop();
+      // a drag took the framing from 🎯 Auto-reframe: ↺ gives it back in one tap
+      // (an untick in the Follow tab was meant, and is left alone)
+      const rf = $('#veAutoReframe');
+      if (ve._handFramed && rf && !rf.checked && !rf.disabled) {
+        rf.checked = true; rf.dispatchEvent(new Event('change', { bubbles: true }));
+        window.__toast && window.__toast('🎯 Following the speaker again.', 'good', 4000);
+      }
+    });
     ve.refs.preview.addEventListener('wheel', onCropWheel, { passive: false });
 
     // text-on-video overlays (burned into every exported clip automatically)
@@ -16516,7 +16550,10 @@
       if (!ve.video) { window.__toast && window.__toast('Open a video first.', 'error'); return null; }
       setFillMode(mode);
       const say = { crop: '✂️ The video fills the frame (cropped at the sides)', blur: '🌫 The whole video, on a blurred copy of itself', bars: '⬛ The whole video, with black bars' }[ve.fill.mode];
-      window.__toast && window.__toast(say, 'good');
+      // following the speaker IS moving that crop: say when it rests and when it is back
+      const rf = $('#veAutoReframe');
+      const follow = !rf || !rf.checked ? '' : ve.fill.mode === 'crop' ? ' · 🎯 following the speaker' : ' · 🎯 following the speaker rests until Fill (crop)';
+      window.__toast && window.__toast(say + follow, 'good');
       return ve.fill.mode;
     },
     backgroundMode() { return ve.fill.mode; },

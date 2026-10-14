@@ -4163,7 +4163,10 @@ let _hideTimer = null;
       { icon: 'zoom-out', label: 'Zoom out', press: '#veZoomOut' },
       { icon: 'fit', label: 'Fit', press: '#veZoomFit' },
       { icon: 'zoom-in', label: 'Zoom in', press: '#veZoomIn' },
-      { icon: 'eye', label: 'Follow', press: '#veFollow', on: true },
+      // No "Follow" here. It was the desk's follow-the-playhead switch, which
+      // the phone's timeline never reads (its line always sits on the playhead,
+      // veditor.js setCentredPlayhead), and it shared its name with Shape ›
+      // Follow — the one place following the SPEAKER is set.
     ],
     audio: [
       { icon: 'music', label: 'Music', press: '#veMusic' },

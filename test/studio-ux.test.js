@@ -290,7 +290,7 @@ app.whenReady().then(async () => {
   log(follow.stillFollowing === true && follow.followingAt > 0,
     'while playing, the view follows the playhead as before', 'scrollLeft=' + follow.followingAt);
   log(follow.followAfterScroll === false, 'scrolling the timeline yourself switches following OFF');
-  log(follow.btnOn === false, 'and the 🎯 button shows it is off');
+  log(follow.btnOn === false, 'and the ⇥ Auto-scroll button shows it is off');
   log(follow.afterTick === follow.parked,
     'THE BUG: the next playback frame no longer yanks you back to the playhead',
     `stayed at ${follow.afterTick} (playhead is at ${follow.followingAt})`);
