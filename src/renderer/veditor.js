@@ -13879,9 +13879,10 @@
       formulas, in this order (fxVideo in video.js), so the colours match. */
   /* Safari (every iPhone) cannot run an SVG filter on a playing video: with
      url(#fxSharpen) in the filter it drops the WHOLE filter, so brightness,
-     contrast and the rest showed nothing either. There the preview leaves the
+     contrast and the rest showed nothing either. There the filter leaves the
      sharpening out (it used to fake it as extra contrast, which made the
-     preview's colours differ from the export's); the export sharpens for real. */
+     preview's colours differ from the export's) and sharpPreview draws the
+     export's own kernel over the player in WebGL instead. */
   const NO_SVG_VIDEO_FILTER = typeof navigator !== 'undefined' && /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|Edg|Electron/.test(navigator.userAgent);
   function fxCss(f) {
     f = Object.assign({}, FX_DEFAULT, f || {});
@@ -13900,6 +13901,104 @@
     const m = `0 ${-a} 0 ${-a} ${(1 + 4 * a).toFixed(3)} ${-a} 0 ${-a} 0`;
     if (km.getAttribute('kernelMatrix') !== m) km.setAttribute('kernelMatrix', m);
   }
+  /*
+   * ►► SHARPEN ON AN iPHONE: DRAWN, NOT LEFT OUT. ◄◄ Safari cannot run the
+   * SVG kernel on a playing video, so there the preview showed NO sharpening
+   * while the export sharpened for real — the file came out crisper than
+   * anything the phone had shown. Here the export's own kernel (fxVideo in
+   * video.js: 3x3, a = 0.4 × sharp to the hundredth, on sRGB red, green and
+   * blue) runs in WebGL on a canvas laid exactly over the player: the same
+   * box and object-fit, the same transform and the same CSS grade. One step
+   * is one pixel of the ORIGINAL, which is where the export sharpens (a
+   * preview copy smaller than the original gets a proportionally smaller
+   * step). No sharpening, or no WebGL: the canvas steps aside, as before.
+   */
+  const SHARP_VS = 'attribute vec2 p;varying vec2 uv;void main(){uv=vec2(p.x*.5+.5,.5-p.y*.5);gl_Position=vec4(p,0.,1.);}';
+  const SHARP_FS = 'precision highp float;varying vec2 uv;uniform sampler2D t;uniform vec2 d;uniform float a;'
+    + 'void main(){vec3 c=texture2D(t,uv).rgb;'
+    + 'vec3 n=texture2D(t,uv+vec2(d.x,0.)).rgb+texture2D(t,uv-vec2(d.x,0.)).rgb+texture2D(t,uv+vec2(0.,d.y)).rgb+texture2D(t,uv-vec2(0.,d.y)).rgb;'
+    + 'gl_FragColor=vec4(clamp(c*(1.+4.*a)-a*n,0.,1.),1.);}';
+  const SHARP_COPY = ['filter', 'transform', 'transformOrigin', 'transition', 'opacity'];
+  const sharpGl = { cv: null, gl: null, d: null, ua: null, max: 4096, a: 0, raf: 0, drawnT: -1, src: '', broken: false };
+  function sharpGlSetup() {
+    if (sharpGl.gl || sharpGl.broken) return sharpGl.gl;
+    const p = ve.refs.player;
+    try {
+      const cv = document.createElement('canvas');
+      cv.id = 'veSharpCv'; cv.setAttribute('aria-hidden', 'true');
+      const gl = cv.getContext('webgl', { alpha: false, antialias: false, depth: false, stencil: false });
+      if (!gl || !p) throw new Error('no WebGL');
+      const sh = (type, src) => {
+        const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o);
+        if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o) || 'shader');
+        return o;
+      };
+      const prog = gl.createProgram();
+      gl.attachShader(prog, sh(gl.VERTEX_SHADER, SHARP_VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, SHARP_FS));
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error('link');
+      gl.useProgram(prog);
+      gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+      const at = gl.getAttribLocation(prog, 'p');
+      gl.enableVertexAttribArray(at); gl.vertexAttribPointer(at, 2, gl.FLOAT, false, 0, 0);
+      gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      sharpGl.d = gl.getUniformLocation(prog, 'd'); sharpGl.ua = gl.getUniformLocation(prog, 'a');
+      sharpGl.max = Math.min(4096, gl.getParameter(gl.MAX_TEXTURE_SIZE) || 4096);
+      // iOS can take the GPU back (the app in the background): the plain player from then on
+      cv.addEventListener('webglcontextlost', () => { sharpGl.broken = true; sharpGl.gl = null; cv.classList.remove('on'); });
+      p.insertAdjacentElement('afterend', cv);
+      sharpGl.cv = cv; sharpGl.gl = gl;
+    } catch (e) { sharpGl.broken = true; }
+    return sharpGl.gl;
+  }
+  function sharpGlFrame() {
+    sharpGl.raf = 0;
+    const p = ve.refs.player, cv = sharpGl.cv, gl = sharpGl.gl;
+    if (!cv) return;
+    if (!gl || !(sharpGl.a > 0) || !ve.video || !p) { cv.classList.remove('on'); sharpGl.drawnT = -1; return; }
+    sharpGl.raf = requestAnimationFrame(sharpGlFrame);
+    if (p.style.display === 'none' || p.currentSrc !== sharpGl.src) { cv.classList.remove('on'); sharpGl.drawnT = -1; sharpGl.src = p.currentSrc; }
+    // a frame still on its way (a seek, a new file): the last one drawn stays up, as the player's own does
+    if (p.style.display === 'none' || p.readyState < 2 || p.seeking || !p.videoWidth) return;
+    for (const k of SHARP_COPY) if (cv.style[k] !== p.style[k]) cv.style[k] = p.style[k];
+    const vw = p.videoWidth, vh = p.videoHeight, k = Math.min(1, sharpGl.max / Math.max(vw, vh));
+    const w = Math.max(1, Math.round(vw * k)), h = Math.max(1, Math.round(vh * k));
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; gl.viewport(0, 0, w, h); sharpGl.drawnT = -1; }
+    if (p.paused && p.currentTime === sharpGl.drawnT) return;
+    try {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, p);
+      const info = (ve.video && ve.video.info) || {};
+      const srcLong = Math.max(info.width || 0, info.height || 0) || Math.max(vw, vh);
+      const step = Math.max(vw, vh) / srcLong;   // texels of THIS video per pixel of the original
+      gl.uniform2f(sharpGl.d, step / vw, step / vh);
+      gl.uniform1f(sharpGl.ua, sharpGl.a);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      sharpGl.drawnT = p.currentTime;
+      cv.classList.add('on');
+    } catch (e) {
+      cv.classList.remove('on');
+      // a picture WebGL may not read (another origin): the plain player from now on
+      if (e && e.name === 'SecurityError') { sharpGl.broken = true; sharpGl.gl = null; }
+    }
+  }
+  function sharpPreview(sharp) {
+    // the export's own rounding (fxVideo): a in hundredths
+    const a = Math.round(clamp(Number(sharp) || 0, 0, 2) * 40) / 100;
+    if (a <= 0) {
+      sharpGl.a = 0;
+      if (sharpGl.cv) sharpGl.cv.classList.remove('on');
+      if (sharpGl.raf) { cancelAnimationFrame(sharpGl.raf); sharpGl.raf = 0; }
+      return;
+    }
+    if (!sharpGlSetup()) return;
+    if (sharpGl.a !== a) { sharpGl.a = a; sharpGl.drawnT = -1; }
+    if (!sharpGl.raf) sharpGl.raf = requestAnimationFrame(sharpGlFrame);
+  }
   /** The main video shows the look of the clip under the playhead — and sounds at its volume. */
   function syncClipLook(t) {
     const p = ve.refs.player; if (!p || !ve.video) return;
@@ -13911,6 +14010,7 @@
     const css = fxCss(f);
     if (ve._fxCss !== css) { ve._fxCss = css; p.style.filter = css; }
     if (f.sharp > 0) setSharpKernel(f.sharp);
+    if (NO_SVG_VIDEO_FILTER) sharpPreview(f.sharp);
     // a browser plays at most 100%; louder than that is for the export
     const v = clamp(f.vol, 0, 1);
     if (Math.abs((p.volume == null ? 1 : p.volume) - v) > 0.001) p.volume = v;

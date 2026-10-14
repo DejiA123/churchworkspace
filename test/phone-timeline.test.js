@@ -535,10 +535,16 @@ async function waitUp() {
       });
       await sleep(300);
       const f = await page.evaluate(() => document.getElementById('vePlayer').style.filter);
-      // on an iPhone (Safari) an SVG filter on a playing video blanks the WHOLE filter: there sharpen is previewed as contrast
-      check(opened && /brightness\(1\.2/.test(f) && !/url\(/.test(f) && /contrast\(1\.08/.test(f), 'Adjust → Brightness and Sharpen change the preview as the slider moves (on an iPhone, without the SVG filter Safari cannot draw)', { opened, f });
+      const sharp = () => page.evaluate(() => { const c = document.getElementById('veSharpCv'); return c ? { on: c.classList.contains('on'), shown: getComputedStyle(c).display !== 'none', w: c.width, h: c.height, filter: c.style.filter } : null; });
+      const sc = await sharp();
+      // on an iPhone (Safari) an SVG filter on a playing video blanks the WHOLE filter: there the export's own
+      // sharpen kernel is drawn over the player in WebGL, and the colours stay exactly the export's (no fake contrast)
+      check(opened && /brightness\(1\.2/.test(f) && !/url\(|contrast/.test(f) && sc && sc.on && sc.shown && sc.w > 0 && /brightness\(1\.2/.test(sc.filter), 'Adjust → Brightness and Sharpen change the preview as the slider moves (on an iPhone, without the SVG filter Safari cannot draw)', { opened, f, sc });
       if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'adjust.png') });
       await page.evaluate(() => { const set = (id, v) => { const r = document.getElementById(id); r.value = v; r.dispatchEvent(new Event('input', { bubbles: true })); r.dispatchEvent(new Event('change', { bubbles: true })); }; set('fxBri', '0'); set('fxSharp', '0'); });
+      await sleep(200);
+      const sc0 = await sharp();
+      check(sc0 && !sc0.on && !sc0.shown, 'Sharpen back to 0: the drawn layer steps aside and the player shows through', sc0);
       // the clip being changed is not the one on screen: moving the slider brings it on screen, changed
       const live = await page.evaluate(async () => {
         const T = window.VideoEditor.__test, p = document.getElementById('vePlayer');

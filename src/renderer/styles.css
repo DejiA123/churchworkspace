@@ -430,6 +430,10 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .ve-preview:fullscreen .ve-fs-exit { display: block; }
 .ve-fs-exit:hover { background: rgba(0,0,0,.85); border-color: #fff; }
 #vePlayer { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; background: #000; }
+/* Sharpen on an iPhone (sharpPreview in veditor.js): the export's kernel drawn over the player, in the player's own box */
+#veSharpCv { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; display: none; }
+#veSharpCv.on { display: block; }
+.ve-preview.blurfill #veSharpCv { z-index: 2; }
 .ve-novid { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--muted); }
 /* No picture yet: the export frame and its black surround step aside (see
    previewWaiting) and the message sits on its own, inside the preview. */
