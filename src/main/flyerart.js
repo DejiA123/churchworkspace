@@ -92,6 +92,16 @@ const NO_TEXT = 'absolutely no text, no letters, no words, no typography, no log
  */
 function paintPrompt(scene, opts = {}) {
   const people = opts.people ? 'no person in the foreground or the middle of the frame, ' : '';
+  // the title's own idea, painted as the flyer's key art (chains snapping, a mountain moving, a crown on a throne)
+  if (opts.theme) {
+    return [
+      'Cinematic key art for a church event poster: ' + String(scene || 'heavy chains snapping apart in a burst of sparks').slice(0, 500),
+      'epic dramatic photo manipulation, hyper-detailed photoreal textures, volumetric god rays, flying embers and dust, high contrast, rich saturated colour in one hue family, movie poster lighting',
+      'the main subject large in the upper half of the frame or to one side, the lower middle darker and simpler, ' + people + 'a deep vignette at the edges',
+      'not a cartoon, not clip art, not flat',
+      NO_TEXT,
+    ].join(', ');
+  }
   return [
     'Real photograph: ' + String(scene || 'golden light rays breaking through dramatic clouds at sunrise').slice(0, 500),
     'professional event photography, shot on a full-frame camera, 35mm lens, shallow depth of field, natural film grain, photorealistic, true-to-life textures, cinematic colour grade, atmospheric haze, volumetric light, high dynamic range',
@@ -204,8 +214,8 @@ async function paintPollinations(prompt, size, seed) {
  * Paint one background. → { dataUrl, by, prompt } — or throws with a plain
  * sentence the phone can show (the phone then paints its own).
  */
-async function paint({ scene, w = 1080, h = 1350, seed, people = true } = {}) {
-  const prompt = paintPrompt(scene, { people });
+async function paint({ scene, w = 1080, h = 1350, seed, people = true, theme = false } = {}) {
+  const prompt = paintPrompt(scene, { people, theme: !!theme });
   const size = sizeFor(w, h);
   const s = Number.isFinite(+seed) ? Math.abs(Math.round(+seed)) % 2147483647 : Math.floor(Math.random() * 1e9);
   let out = null;
@@ -302,7 +312,7 @@ const DIRECTION_SCHEMA = {
 
 const DIRECTOR_SYSTEM = `You are the art director of a top Nigerian church media team whose event flyers are the ones everyone saves on Pinterest: dramatic, glossy, colourful, cinematic.
 You are given the event. Decide:
-- scenes: SIX different backgrounds for an image model. The FIRST is the theme itself as one epic cinematic picture, the way the best flyers paint their title (BREAK EVERY CHAIN: a lone figure bursting free of chains in a fiery cave; THE DOCTRINES OF FAITH: a robed figure walking between parted walls of sea; WATER FROM THE ROCK: water pouring from a split rock in firelight) — a small figure seen from behind or in silhouette is fine there. The other five: six different ideas in all, never the same picture twice, the way a top designer would build six different flyers for this one event. Think in visual metaphors of the title and theme ("a lamp unto my feet": a lantern glowing on a dark path; "breakthrough": light bursting through cracked rock; "fire": real flames and embers; "word": an ancient scroll on a desk in a beam of light, or a lighthouse beam over a night sea; "harvest": a golden field at sunset), mixed with the stage, crowd and sky pictures church flyers love. Each one sentence describing a REAL PHOTOGRAPH a church photographer could take: a worship stage with coloured spotlights and haze, a crowd with raised hands seen from behind and out of focus, sunlight breaking through real clouds, real fire and sparks, smoke lit in colour, a dim church auditorium with warm stage light, city lights bokeh at night, a real sunrise over hills. Light and atmosphere, never a single object in the middle (the speaker stands there): no glowing books, no candles in the centre, no symbols, no fantasy trees, nothing drawn. Match the event's mood and season (Easter: real sunrise over hills; Christmas: warm golden bokeh lights; prayer: deep blue haze and a single beam of light; Bible study: a dim auditorium with warm amber light, books out of focus at the sides). Never ask for text, letters, logos or faces close up.
+- scenes: SIX pictures for an image model, each one sentence. The FIRST THREE paint the title or theme itself, literally, as the KEY ART of the flyer — the way the flyers everyone saves are built around one dramatic picture of the title's own idea: BREAK EVERY CHAIN: heavy iron chains snapping apart in a burst of sparks in a fiery cave; MOUNTAIN MOVERS: a colossal mountain splitting, rocks flying, white doves and golden light bursting out; WATER FROM THE ROCK: water gushing from a split rock in firelight; ENTHRONEMENT: a jewelled crown glowing on a throne under a beam of light; JERICHO HOUR: massive ancient city gates swinging open, light pouring through; THE DOCTRINES OF FAITH: a robed figure walking between parted walls of sea; BRAND NEW BEGINNING: a man running out through a shattered door into blinding light; PRAYER: hands lifted in silhouette against a blazing sunrise; HARVEST: a golden wheat field at sunset under a dramatic sky. Three DIFFERENT takes on the idea (a different subject, angle or light each), each with its main subject large in the UPPER HALF or to ONE SIDE, the lower middle darker and simpler (the minister stands in front there), epic and cinematic like a movie poster. The LAST THREE are atmosphere for the same event: a worship stage with coloured spotlights and haze, a crowd with raised hands seen from behind out of focus, sunlight breaking through real clouds, real fire and sparks, smoke lit in colour — matching the event's mood and season (Easter: sunrise over hills; Christmas: warm golden bokeh; prayer: deep blue haze and one beam of light). Never ask for text, letters, logos or close-up faces.
 - palette: four hex colours that will grade the picture and colour the type (deep, mid, accent, highlight). Bold and saturated: purple & gold, royal blue & white, crimson & gold, teal & lime, magenta & cyan.
 - scriptWord: one word for flowing script lettering across the speaker, usually the service day or the heart of the theme.
 - kicker: a short uppercase line above the title.
@@ -420,14 +430,40 @@ const POOL = [
   'an open bible on a pulpit under a soft spotlight in a dark auditorium, out of focus at the edges',
   'the silhouette of a cross on a hill against a blazing orange sky, real photograph',
 ];
+/* the title's own idea, when no AI can be asked: its words → the key art the designers would paint */
+const THEME_ART = [
+  [/chain|bondage|captiv|free(dom)?\b|deliver|loose/i, ['heavy iron chains snapping apart in a burst of sparks and fire inside a dark fiery cave, broken links flying', 'a man silhouetted on a cliff edge tearing broken chains from his wrists against a blazing orange sky']],
+  [/mountain|mover|moved|hill/i, ['a colossal mountain splitting apart, rocks flying through the air, white doves and golden light bursting out of the crack', 'a man standing on a misty mountain summit with arms raised as golden rays break through storm clouds']],
+  [/rock|water|river|rain|well|spring|flow/i, ['water gushing in a torrent from a split boulder in a desert canyon lit by firelight and sunbeams', 'a mighty waterfall of light pouring from storm clouds into a dark valley']],
+  [/crown|throne|king|reign|enthron|kingdom|royal/i, ['a jewelled golden crown glowing on a dark throne under a single beam of light, dust in the air', 'a hand reaching down from the clouds placing a radiant crown, golden light rays']],
+  [/gate|door|open|jericho|wall/i, ['massive ancient stone city gates swinging open with brilliant light pouring through, dust and doves', 'ancient walls crumbling and falling with light blazing through the breach, rubble flying']],
+  [/sea|faith|red sea|part|exodus/i, ['a robed figure walking between towering parted walls of sea water, a glowing path of light ahead', 'a stormy sea parting under a beam of light from the sky']],
+  [/new|begin|fresh|level|next|season/i, ['a man running out through a shattered wooden door into blinding white light, splinters flying', 'a sunrise bursting over a new horizon with a long path of light leading to it']],
+  [/fire|altar|revival|burn|flame|pentecost|holy ghost|spirit/i, ['a stone altar engulfed in towering flames, sparks rising into a dark sky', 'tongues of fire descending through a column of light with a white dove, embers everywhere']],
+  [/break|breakthrough|barrier|shatter|smash/i, ['a fist smashing through cracked stone with light bursting out of the cracks, shards flying', 'a wall of glass shattering into a thousand glowing shards in golden light']],
+  [/harvest|thanksgiving|bless|abundan|overflow/i, ['a golden wheat field at sunset under a dramatic sky, warm light rays', 'golden light pouring like a river into an overflowing vessel, sparkles rising']],
+  [/eagle|rise|soar|wing|mount up/i, ['a great eagle soaring through dark storm clouds into golden light', 'an eagle with spread wings above the clouds at sunrise']],
+  [/sword|war|battle|army|victory|conquer/i, ['a glowing sword thrust into a rock with lightning striking around it', 'an army of light standing on a ridge under a storm sky, banners flying']],
+  [/prayer|pray|intercess|vigil|watch|fast/i, ['hands lifted in silhouette against a blazing sunrise with rays of light', 'a lone figure kneeling on a rock in a beam of light breaking through a night storm']],
+  [/word|bible|study|scripture|teach/i, ['an ancient open book glowing with golden light on a stone table, light rays and dust', 'a lighthouse beam sweeping over a dark stormy sea at night']],
+  [/glory|light|shine|radiant/i, ['blinding glory light bursting through parting storm clouds, golden rays', 'a cross of light standing on a hill as heavy clouds part above it']],
+];
+function themeArt(f) {
+  const hay = [f.title, f.theme].filter(Boolean).join(' ');
+  const hits = THEME_ART.filter(([rx]) => rx.test(hay)).flatMap(([, a]) => a);
+  return hits;
+}
 const pick = (arr, n) => { const a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a.slice(0, n); };
 function directByRules(f) {
   const hay = [f.season, f.kind, f.title, f.theme, f.notes].filter(Boolean).join(' ');
   const r = RULES.find((x) => x.rx.test(hay)) || RULES[RULES.length - 1];
   let script = r.script;
   if (r === RULES[RULES.length - 1] && f.dayName) script = f.dayName;
-  const scenes = pick(r.scenes, 3).concat(pick(POOL.filter((p) => !r.scenes.includes(p)), 3));
-  return { scenes: pick(scenes, 6), palette: r.palette.slice(), scriptWord: script, kicker: r.kicker, looks: r.looks.slice() };
+  // the title's own idea first (key art), then the event's atmosphere
+  const art = pick(themeArt(f), 3);
+  const atmos = pick(r.scenes, 3).concat(pick(POOL.filter((p) => !r.scenes.includes(p)), 3));
+  const scenes = art.concat(pick(atmos, 6 - art.length));
+  return { scenes, themeScenes: art.length, palette: r.palette.slice(), scriptWord: script, kicker: r.kicker, looks: r.looks.slice() };
 }
 
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -438,6 +474,8 @@ function clean(d, f) {
   const palette = (Array.isArray(d.palette) ? d.palette : []).map((c) => String(c || '').trim()).filter((c) => HEX.test(c)).slice(0, 4);
   const looks = (Array.isArray(d.looks) ? d.looks : []).filter((l) => LOOKS.includes(l));
   return {
+    // the AI's first three are its key art (DIRECTOR_SYSTEM)
+    themeScenes: scenes.length >= 3 ? 3 : base.themeScenes,
     scenes: scenes.length ? Array.from(new Set(scenes.concat(base.scenes))).slice(0, 6) : base.scenes,
     palette: palette.length === 4 ? palette : base.palette,
     scriptWord: String(d.scriptWord || '').replace(/[^\p{L}' -]/gu, '').trim().slice(0, 14) || base.scriptWord,

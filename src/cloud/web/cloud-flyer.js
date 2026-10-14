@@ -241,7 +241,76 @@
   /* the pictures a scene refers to by key (a scene stays plain JSON, so undo is cheap) */
   const IMGS = new Map();
   const META = new Map();   // picture key -> where the person is in it (preparePerson)
-  const imgOf = (k) => IMGS.get(k) || null;
+  const imgOf = (k) => IMGS.get(k) || (typeof k === 'string' && k.startsWith('tex:') ? texture(k.slice(4)) : null);
+  /*
+   * ►► TITLES WITH A MATERIAL IN THEM. ◄◄ The flyers people save set their
+   * title in something: gold leaf (REVIVE), stone (WATER FROM THE ROCK), fire
+   * (BREAK EVERY CHAIN), brushed steel (JUDAH). These are painted here, once,
+   * from noise — a picture the letters are filled with (imgFill), the bevel
+   * and the block under them doing the rest.
+   */
+  const TEXTURES = ['gold', 'stone', 'fire', 'steel', 'rosegold'];
+  function texture(name) {
+    if (!TEXTURES.includes(name)) return null;
+    const key = 'tex:' + name;
+    if (IMGS.has(key)) return IMGS.get(key);
+    const W = 640, H = 320, c = canvas(W, H), x = c.getContext('2d');
+    const img = x.createImageData(W, H), d = img.data, r = rng(name.length * 977 + 13);
+    // smooth noise of several sizes (value noise, bilinear)
+    const octave = (cells) => {
+      // square cells, the grid wrapping round (a point past an edge reads from the other side, never off the end)
+      const gw = cells + 2, gh = Math.ceil(cells * H / W) + 2, g = new Float32Array(gw * gh).map(() => r());
+      const at = (ix, iy) => g[(((iy % gh) + gh) % gh) * gw + (((ix % gw) + gw) % gw)];
+      return (px, py) => {
+        const fx = (px / W) * cells, fy = (py / W) * cells, ix = Math.floor(fx), iy = Math.floor(fy), tx = fx - ix, ty = fy - iy;
+        const sm = (t) => t * t * (3 - 2 * t), a = at(ix, iy), b = at(ix + 1, iy), cc = at(ix, iy + 1), dd = at(ix + 1, iy + 1);
+        return (a + (b - a) * sm(tx)) * (1 - sm(ty)) + (cc + (dd - cc) * sm(tx)) * sm(ty);
+      };
+    };
+    const n1 = octave(4), n2 = octave(12), n3 = octave(40), n4 = octave(120), nb = octave(160);
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const ramp = (stops, t) => {   // [[t, [r,g,b]], …]
+      t = clamp(t, 0, 1); let i = 0; while (i < stops.length - 2 && t > stops[i + 1][0]) i++;
+      const [t0, c0] = stops[i], [t1, c1] = stops[i + 1], k = clamp((t - t0) / Math.max(1e-6, t1 - t0), 0, 1);
+      return [lerp(c0[0], c1[0], k), lerp(c0[1], c1[1], k), lerp(c0[2], c1[2], k)];
+    };
+    for (let y = 0; y < H; y++) for (let X = 0; X < W; X++) {
+      const v = y / H, i = (y * W + X) * 4;
+      const n = n1(X, y) * 0.5 + n2(X, y) * 0.3 + n3(X, y) * 0.15 + n4(X, y) * 0.05;
+      let col;
+      if (name === 'gold' || name === 'rosegold') {
+        // leaf: bright at the top, a hot band of light across, deep at the foot, mottled and streaked
+        const band = Math.exp(-Math.pow((v - 0.42) / 0.09, 2)) * 0.55, streak = Math.pow(n4(X * 0.2, y * 3), 3) * 0.3;
+        const t = clamp(0.15 + v * 0.75 - band + (n - 0.5) * 0.35 - streak, 0, 1);
+        col = ramp(name === 'gold' ? [[0, [255, 250, 214]], [0.25, [255, 214, 92]], [0.55, [222, 150, 22]], [0.8, [150, 82, 6]], [1, [92, 44, 2]]]
+          : [[0, [255, 236, 226]], [0.3, [244, 176, 150]], [0.6, [196, 110, 88]], [1, [110, 52, 44]]], t);
+      } else if (name === 'stone') {
+        // rock: grey and warm, rough, darker cracks, lit from above
+        const crack = Math.max(0, 1 - Math.abs(n3(X * 0.7, y * 0.7) - 0.5) * 60) * 0.32;
+        const grit = (n4(X * 3, y * 3) - 0.5) * 0.35;
+        const t = clamp(0.25 + v * 0.35 + (n - 0.5) * 0.9 + crack + grit, 0, 1);
+        col = ramp([[0, [214, 208, 198]], [0.4, [150, 142, 132]], [0.75, [88, 82, 76]], [1, [34, 30, 28]]], t);
+      } else if (name === 'fire') {
+        // flames rising: white-yellow at the foot, orange, red, dark at the top, licked by noise
+        const t = clamp(1 - v + (n - 0.5) * 0.9 - n3(X, y + 0) * 0.15, 0, 1);
+        col = ramp([[0, [255, 252, 210]], [0.25, [255, 214, 64]], [0.5, [255, 122, 12]], [0.75, [196, 34, 8]], [1, [70, 6, 4]]], t);
+      } else {
+        // brushed steel: light, dark band, light again, brushed sideways
+        const brush = nb(X * 0.05, y) * 0.25;
+        const t = clamp(0.5 + 0.38 * Math.cos(v * Math.PI * 2.2) * -1 + (n - 0.5) * 0.2 + brush - 0.12, 0, 1);
+        col = ramp([[0, [252, 253, 255]], [0.45, [196, 204, 214]], [0.7, [118, 128, 142]], [1, [58, 64, 74]]], t);
+      }
+      d[i] = col[0]; d[i + 1] = col[1]; d[i + 2] = col[2]; d[i + 3] = 255;
+    }
+    x.putImageData(img, 0, 0);
+    // a glint or two (metal) / hot sparks (fire)
+    if (name === 'gold' || name === 'steel' || name === 'rosegold') {
+      x.globalCompositeOperation = 'screen';
+      for (let k = 0; k < 3; k++) { const gx = r() * W, g = x.createRadialGradient(gx, H * 0.35, 0, gx, H * 0.35, 90); g.addColorStop(0, 'rgba(255,255,255,.55)'); g.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(0, 0, W, H); }
+    }
+    IMGS.set(key, c);
+    return c;
+  }
   function loadImg(src) {
     return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('That picture could not be opened.')); i.src = src; });
   }
@@ -1648,7 +1717,12 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const o = Object.assign({}, st);
     const fam = FACE_FAMILIES.findIndex((f) => f.includes(o.font));
     if (fam >= 0 && VAR.faces && VAR.faces[fam]) o.font = VAR.faces[fam];
-    if ((o.fill === CHROME || o.fill === GOLD) && VAR.fill) o.fill = VAR.fill;
+    const metal = o.fill === CHROME || o.fill === GOLD || (o.fill && o.fill.stops);
+    if (VAR.tex && metal && !o.imgFill) {
+      // a title set in a material: gold leaf, stone, fire, steel — bevelled, on its block
+      Object.assign(o, { fill: '#ffffff', imgFill: 'tex:' + VAR.tex, imgFillA: 1, bevel: Math.max(o.bevel || 0, 0.9), grain: VAR.tex === 'stone', speck: 0, erode: VAR.tex === 'stone' ? 0.25 : o.erode });
+      if (!o.extrude) Object.assign(o, { extrude: 3, extrudeColor: VAR.tex === 'fire' ? ['#5a0d02', '#1a0300'] : VAR.tex === 'stone' ? ['#3a3430', '#0e0c0b'] : ['#6b3a04', '#1e0f01'] });
+    } else if ((o.fill === CHROME || o.fill === GOLD) && VAR.fill) o.fill = VAR.fill;
     return o;
   }
   /** A design's variant: everything that may change about a layout, picked at random. */
@@ -1658,8 +1732,12 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const fills = [CHROME, GOLD, SILVER,
       { stops: ['#fffaf0', mix(pal.accent, '#ffffff', 0.55), pal.accent], angle: 90 },
       { stops: [pal.hi || '#ffffff', mix(pal.hi || '#ffffff', pal.accent, 0.5)], angle: 90 }];
+    // the material for the title, half the time — one that suits the colours (fire with red, steel with blue)
+    const [r, , b] = hexRgb(pal.mid || '#5b21b6');
+    const mats = r > b + 40 ? ['fire', 'gold', 'stone', 'gold'] : b > r + 40 ? ['steel', 'gold', 'stone', 'rosegold'] : ['gold', 'stone', 'rosegold', 'steel'];
     return {
       faces: FACE_FAMILIES.map((f) => (rnd() < 0.35 ? null : pick(f))),   // a third of the time the layout's own face
+      tex: rnd() < 0.5 ? pick(mats) : null,
       fill: rnd() < 0.25 ? null : pick(fills),
       mirror: rnd() < 0.45,
       seed: Math.floor(rnd() * 997),
@@ -2408,6 +2486,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   ];
   const SWATCHES = ['#ffffff', '#111111', '#f5c542', '#facc15', '#ffb300', '#ff5a00', '#e11d2a', '#c81e1e', '#ff2fd6', '#a21caf', '#7c3aed', '#5b21b6', '#1d4ed8', '#38bdf8', '#19e0ff', '#0e7c86', '#22c55e', '#a3ff47', '#c9f731', '#8a6d27'];
   const FILLS = [['Plain', null], ['Gold', 'gold'], ['Rust', 'rust'], ['Silver', 'silver'], ['Fire', 'fire'], ['Ice', 'ice']];
+  const MATERIALS = [['Gold leaf', 'gold'], ['Stone', 'stone'], ['Flames', 'fire'], ['Steel', 'steel'], ['Rose gold', 'rosegold']];
 
   const F = {
     panel: null, kit: null, status: null,
@@ -2687,7 +2766,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     // remember these details for this service (Tuesday's Word Study comes back as typed)
     const ok = occKey(F.occasion);
     if (ok && ok !== 'other' && F.kit) { F.kit.lastFor = Object.assign({}, F.kit.lastFor, { [ok]: presetNow() }); saveKit(true); }
-    F.step = 'pick'; F.bgs = []; F.designs = []; F.dir = null; F.tries++; F.showAll = false;
+    F.step = 'pick'; F.bgs = []; F.designs = []; F.dir = null; F.tries++; F.paintedIn = [];
     const tryNo = F.tries;
     drawPick();
     await loadFonts();
@@ -2712,8 +2791,10 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     rebuildDesigns();
     // then the AI's — three at once, each swapped in as it lands
     // six AI pictures, six ideas, six lights: every design on the board gets its own
-    const scenes = (F.dir.scenes || []).slice(0, 6);
-    for (let j = 0; scenes.length && scenes.length < 6; j++) scenes.push(scenes[j % scenes.length]);
+    // one picture for each of the board's five; the first are the title's own idea painted as key art
+    const scenes = (F.dir.scenes || []).slice(0, BOARD_N);
+    for (let j = 0; scenes.length && scenes.length < BOARD_N; j++) scenes.push(scenes[j % scenes.length]);
+    const nTheme = Math.min(F.dir.themeScenes == null ? 0 : F.dir.themeScenes, 3);
     F.painting = scenes.length;
     drawPick();
     const paintingIn = paintPreacherIn(tryNo, sz);   // alongside the six, not after them
@@ -2721,7 +2802,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       try {
         // each picture in its own light — the AI's colours, royal blue, purple — so the board is as varied as a Pinterest page
         const tone = F.board.tones[i % F.board.tones.length];
-        const out = await window.api.flyer.paint({ scene: tone.words ? scene + ', ' + tone.words : scene, w: sz.w, h: sz.h, seed: Math.floor(Math.random() * 1e9), people: chosenSpeakers().some((s) => (s.photos || []).length) });
+        const theme = i < nTheme;
+        const out = await window.api.flyer.paint({ scene: tone.words ? scene + ', ' + tone.words : scene, theme, w: sz.w, h: sz.h, seed: Math.floor(Math.random() * 1e9), people: chosenSpeakers().some((s) => (s.photos || []).length) });
         if (tryNo !== F.tries) return;
         let im = await loadImg(out.dataUrl);
         // the backup painter signs its pictures in the bottom corner: that strip is cut off
@@ -2729,9 +2811,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         const key = 'ai:' + tryNo + ':' + i;
         IMGS.set(key, im);
         // AI pictures lead; the photos stay on for variety until three AI ones are in
-        const ai = F.bgs.filter((b) => !b.proc).concat({ key, by: out.by, scene, tone: tone.id });
+        const ai = F.bgs.filter((b) => !b.proc).concat({ key, by: out.by, scene, tone: tone.id, theme });
         // AI pictures in order of their light, the studio's photos only standing in until three are here
-        ai.sort((a, b) => F.board.tones.findIndex((t) => t.id === a.tone) - F.board.tones.findIndex((t) => t.id === b.tone));
+        ai.sort((a, b) => (b.theme ? 1 : 0) - (a.theme ? 1 : 0) || F.board.tones.findIndex((t) => t.id === a.tone) - F.board.tones.findIndex((t) => t.id === b.tone));
         F.bgs = ai.concat(F.bgs.filter((b) => b.proc)).slice(0, Math.max(3, ai.length));
         rebuildDesigns();
       } catch (e) { /* the studio's own photographs stand in */ }
@@ -2747,7 +2829,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
    * the scene, lit by it. They become their own designs, marked so that the
    * face is checked before posting: the model can change a face a little.
    */
-  const PAINT_IN_LOOKS = ['glory', 'miracle'];
+  const PAINT_IN_LOOKS = ['glory'];   // one: the board is five
   function refPhoto(sp) {
     const im = sp && imgOf(sp.img); if (!im) return null;
     const k = Math.min(1, 512 / Math.max(iw(im), ih(im)));
@@ -2813,31 +2895,57 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     crimson: { deep: '#26020c', mid: '#8c0f2e', accent: '#f2c46b', hi: '#fff4e6' },
   };
   /*
-   * A NEW BOARD EVERY TIME. The board shows ten designs, not the same
-   * eighteen in the same order: the looks this phone has seen least lately
-   * first (and the AI's first ideas for this event among them), each with a
-   * variant of its own (makeVariant), and the pictures painted in six of
-   * eleven lights picked afresh. "More designs" brings the rest.
+   * ►► FIVE, THE BEST FIRST. ◄◄ Eighteen at once was too many to choose
+   * from. A board is five designs, ranked: how strong the layout is on its
+   * own, whether it suits this event (the AI's own picks, a line-up only when
+   * there are several ministers), what this phone has opened and saved
+   * before, and a little freshness so the five are not the same five every
+   * time. "More designs" brings the next five. Each design is built with a
+   * variant of its own (makeVariant); its picture is painted in one of
+   * eleven lights picked afresh.
    */
-  const BOARD_N = 10;
-  const SEEN_KEY = 'mw-flyer-seen';
-  function seenLooks() { try { return JSON.parse(localStorage.getItem(SEEN_KEY) || '{}') || {}; } catch (e) { return {}; } }
+  const BOARD_N = 5;
+  // how well each layout stands up on its own (from setting them beside the Pinterest flyers)
+  const STRENGTH = { glory: 9, fire: 9, joinus: 9, spirit: 8, prophetic: 8, sunday: 8, upper: 8, miracle: 8, script: 7, encounter: 7, breaking: 7, didone: 7,
+    lineup: 7, mountain: 6, bible: 6, scenic: 6, light: 6, theme: 6 };
+  const SEEN_KEY = 'mw-flyer-seen', LIKED_KEY = 'mw-flyer-liked';
+  const readLS = (k) => { try { return JSON.parse(localStorage.getItem(k) || '{}') || {}; } catch (e) { return {}; } };
+  const seenLooks = () => readLS(SEEN_KEY);
   function markSeen(looks) {
     const seen = seenLooks(), now = Date.now();
     looks.forEach((l) => { seen[l] = now; });
     try { localStorage.setItem(SEEN_KEY, JSON.stringify(seen)); } catch (e) {}
   }
+  /** A layout chosen: opened (1) or saved / posted (3) — it ranks higher on the next boards. */
+  function markLiked(look, w) {
+    if (!look) return;
+    const liked = readLS(LIKED_KEY); liked[look] = Math.min(20, (liked[look] || 0) + (w || 1));
+    try { localStorage.setItem(LIKED_KEY, JSON.stringify(liked)); } catch (e) {}
+  }
   function shuffled(a) { const o = a.slice(); for (let i = o.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [o[i], o[j]] = [o[j], o[i]]; } return o; }
+  function rankLooks() {
+    const seen = seenLooks(), liked = readLS(LIKED_KEY), now = Date.now();
+    const ai = ((F.dir && F.dir.looks) || []).filter((l) => LAYOUTS[l]);
+    const many = chosenSpeakers().filter((s) => (s.photos || []).length || s.photo).length >= 2;
+    const score = (l) => {
+      let v = STRENGTH[l] || 6;
+      const ai0 = ai.indexOf(l); if (ai0 >= 0 && ai0 < 6) v += 3 - ai0 * 0.4;   // the AI's picks for this event, best first
+      v += Math.min(4, (liked[l] || 0) * 0.5);                                   // what this church goes for
+      if (seen[l] && now - seen[l] < 36e5 * 6) v -= 2.5;                         // on the last board or two: rest it
+      if ((l === 'lineup' || l === 'spirit') && !many) v -= 3;                   // a line-up of one is not a line-up
+      if (l === 'lineup' && many) v += 3;
+      return v + Math.random() * 2.2;                                            // freshness
+    };
+    const scored = Object.keys(LAYOUTS).map((l) => [l, score(l)]).sort((a, b) => b[1] - a[1]);
+    return scored.map((x) => x[0]);
+  }
   function newBoard() {
-    const all = Object.keys(LAYOUTS), seen = seenLooks();
-    const ai = ((F.dir && F.dir.looks) || []).filter((l) => LAYOUTS[l]).slice(0, 4);
-    // least lately seen first, the AI's ideas for this event nudged forward, ties broken at random
-    const order = shuffled(all).sort((a, b) => ((seen[a] || 0) - (ai.includes(a) ? 1.5e9 : 0)) - ((seen[b] || 0) - (ai.includes(b) ? 1.5e9 : 0)));
-    const tones = [TONES[0]].concat(shuffled(TONES.slice(1)).slice(0, 5));
+    const order = rankLooks();
+    const tones = [TONES[0]].concat(shuffled(TONES.slice(1)).slice(0, BOARD_N - 1));
     const palettes = shuffled(PALETTES);
     const variants = {};
     order.forEach((look, i) => { variants[look] = makeVariant(palettes[i % palettes.length]); variants[look].pal = palettes[i % palettes.length]; });
-    F.board = { order, tones, variants };
+    F.board = { order, tones, variants, shown: BOARD_N };
     markSeen(order.slice(0, BOARD_N));
   }
   /* the light each look is built for (the reference it copies): Join us is purple, Upper Room is fire, the gold line-up gold… */
@@ -2846,12 +2954,13 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   function rebuildDesigns() {
     const sz = sizeOf();
     if (!F.board) newBoard();
-    const all = F.showAll ? F.board.order : F.board.order.slice(0, BOARD_N);
+    const all = F.board.order.slice(0, Math.max(0, F.board.shown - (F.paintedIn || []).length));
     const used = new Map(), n = (b) => used.get(b.key) || 0;
     F.designs = all.map((look, i) => {
-      // the AI's picture painted in this look's own light, while it is not already on two designs; else the least used
-      const want = F.bgs.filter((b) => b.tone && b.tone === LOOK_TONE[look] && n(b) < 2);
-      const bg = want[0] || (F.bgs.some((b) => b.tone) ? F.bgs.slice().sort((a, b) => n(a) - n(b))[0] : F.bgs[i % F.bgs.length]);
+      // the title's own idea (key art) on the best-ranked designs first; then this look's own light; then the least used
+      const unused = (b) => n(b) < 1;
+      const want = F.bgs.filter((b) => b.theme && unused(b))[0] || F.bgs.filter((b) => b.tone && b.tone === LOOK_TONE[look] && unused(b))[0];
+      const bg = want || (F.bgs.some((b) => b.tone) ? F.bgs.slice().sort((a, b) => n(a) - n(b))[0] : F.bgs[i % F.bgs.length]);
       if (bg) used.set(bg.key, n(bg) + 1);
       // the AI's colours on the first designs, each look's own on the rest — a board of different flyers, not one flyer ten times
       // a picture painted in its own light takes colours that match it; the AI's own on the rest
@@ -2874,13 +2983,16 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     P.body.innerHTML = `<div class="fs-pick">
       <p class="fs-status">${busy ? 'The AI is reading your event…' : F.painting > 0 ? `<i class="fs-spin"></i> Painting ${F.painting} picture${F.painting > 1 ? 's' : ''} with AI — they appear as they’re ready` : 'Tap one to edit every part of it'}</p>
       <div class="fs-grid">${busy ? '<div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div>' : F.designs.map((d, i) => `<button type="button" class="fs-card" data-i="${i}"><canvas></canvas><small>${esc(d.label || LOOK_NAMES[d.look] || d.look)}</small></button>`).join('')}</div>
-      ${!busy && F.board && !F.showAll && F.board.order.length > BOARD_N ? `<button type="button" class="fs-ghost fs-more" data-act="more">${ic('layout')}<span>More designs (${F.board.order.length - BOARD_N})</span></button>` : ''}
+      ${!busy && F.board && F.board.shown < F.board.order.length ? `<button type="button" class="fs-ghost fs-more" data-act="more">${ic('layout')}<span>${BOARD_N} more designs</span></button>` : ''}
     </div>`;
     P.foot.innerHTML = `<button type="button" class="fs-ghost" data-act="back">${ic('back')}<span>Details</span></button><button type="button" class="fs-ghost" data-act="again">${ic('refresh')}<span>New pictures</span></button>`;
     paintThumbs();
     P.body.onclick = (e) => {
-      if (e.target.closest('[data-act="more"]')) { F.showAll = true; markSeen(F.board.order); rebuildDesigns(); drawPick(); return; }
-      const c = e.target.closest('.fs-card'); if (c) openEditor(F.designs[+c.dataset.i]);
+      if (e.target.closest('[data-act="more"]')) {
+        const from = F.board.shown; F.board.shown = Math.min(F.board.order.length, from + BOARD_N);
+        markSeen(F.board.order.slice(from, F.board.shown)); rebuildDesigns(); drawPick(); return;
+      }
+      const c = e.target.closest('.fs-card'); if (c) { const d = F.designs[+c.dataset.i]; markLiked(d && d.look, 1); openEditor(d); }
     };
     P.foot.onclick = (e) => {
       const b = e.target.closest('[data-act]'); if (!b) return;
@@ -3224,12 +3336,14 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     if (!L) return;
     snapshot();
     const isText = L.type === 'text';
-    const html = (isText ? `<h4>Fill</h4><div class="fs-row">${FILLS.map(([n, v]) => `<button type="button" class="fs-chip${(v && L.fill === v) ? ' on' : ''}" data-metal="${v || ''}">${n}</button>`).join('')}<button type="button" class="fs-chip${L.imgFill ? ' on' : ''}" data-photo-fill="1">Picture inside</button></div>` : '')
+    const html = (isText ? `<h4>Fill</h4><div class="fs-row">${FILLS.map(([n, v]) => `<button type="button" class="fs-chip${(v && L.fill === v) ? ' on' : ''}" data-metal="${v || ''}">${n}</button>`).join('')}<button type="button" class="fs-chip${L.imgFill && !String(L.imgFill).startsWith('tex:') ? ' on' : ''}" data-photo-fill="1">Picture inside</button></div>`
+      + `<h4>Material</h4><div class="fs-row">${MATERIALS.map(([n, v]) => `<button type="button" class="fs-chip${L.imgFill === 'tex:' + v ? ' on' : ''}" data-tex="${v}">${n}</button>`).join('')}</div>` : '')
       + swatchRow(typeof L.fill === 'string' ? L.fill : '', 'col')
       + (isText ? `<h4>Gradient</h4><div class="fs-row">${[[F.scene.pal.hi, F.scene.pal.accent], ['#ffffff', '#9ad7ff'], ['#fff3c4', '#ff9d00'], ['#ffd1f7', '#ff2fd6'], ['#ffffff', F.scene.pal.mid]].map((g) => `<button type="button" class="fs-grad" data-grad="${g.join(',')}" style="background:linear-gradient(180deg,${g[0]},${g[1]})"></button>`).join('')}</div>` : '');
     openSheet(html, (sh) => {
       sh.addEventListener('click', (e) => {
-        const b = e.target.closest('[data-col],[data-metal],[data-grad],[data-photo-fill]'); if (!b) return;
+        const b = e.target.closest('[data-col],[data-metal],[data-grad],[data-photo-fill],[data-tex]'); if (!b) return;
+        if (b.dataset.tex) { L.inkSet = true; L.fill = '#ffffff'; L.imgFill = 'tex:' + b.dataset.tex; L.imgFillA = 1; L.bevel = Math.max(L.bevel || 0, 0.9); paint(); return; }
         L.inkSet = true;   // chosen by hand: drawn as chosen (inkFor)
         if (b.dataset.col) { L.fill = b.dataset.col; L.imgFill = ''; }
         if (b.dataset.metal != null) { L.fill = b.dataset.metal || '#ffffff'; L.imgFill = ''; L.grain = !!b.dataset.metal; }
@@ -3481,6 +3595,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   }
   async function saveFlyer(btn) {
     noteUsed();
+    markLiked(F.scene && F.scene.look, 3);
     btn.disabled = true;
     try {
       const blob = await flyerBlob();
