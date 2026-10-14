@@ -1602,6 +1602,27 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     if (m.clean && mode !== 'full') nb = Math.min(nb, Math.max(m.sy + u * 0.45, m.clean));
     return { t: Math.max(0, m.top - u * 0.06), nb, cx: m.cx };
   }
+  function headBox(m, fr, k, left, top) {
+    const u = Math.max(12, m.sy - m.top), cx = left + m.cx * k;
+    return { l: cx - u * 0.42 * k, r: cx + u * 0.42 * k, t: top + (m.top - fr.t) * k, b: top + (m.top + u * 0.85 - fr.t) * k };
+  }
+  /* "MEE_TING": the minister in front of the title may cover the foot of the letters (as the references do),
+     never so much of them that a word cannot be read — the person goes down until the letters show */
+  function keepTitleClear(layers, H) {
+    layers.forEach((im, i) => {
+      if (im.type !== 'image' || !im.head) return;
+      let dy = 0;
+      layers.slice(0, i).forEach((t) => {
+        if (t.type !== 'text' || !/^(Title|Script title|Word)( \d)?$/.test(t.name || '') || t.rot) return;
+        const b = box(t), hd = im.head;
+        if (b.h < 50 || hd.r <= b.l || hd.l >= b.r || hd.t >= b.b || hd.b <= b.t) return;
+        // the head may cover the lowest quarter of a line, no more
+        dy = Math.max(dy, b.b - b.h * 0.25 - hd.t);
+      });
+      if (dy > 0) { dy = Math.min(dy, im.h * 0.3, H * 0.12); im.y += dy; }
+    });
+    layers.forEach((l) => { delete l.head; });
+  }
   let PAINTED = false;   // buildScene: the preacher is painted into the picture itself — no cut-out on top
   function hero(sp, o) {
     if (PAINTED) return null;
@@ -1622,6 +1643,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       w, h, x: X, y: o.t + h / 2,
       fade: whole ? 0 : Math.max(o.fade == null ? 0.22 : o.fade, mode === 'chest' ? 0.34 : 0.2), feather: 1.4,
       frame: { mode, t: o.t, b: o.b, cx: o.cx },
+      // where the head is on the page (keepTitleClear: a face never hides whole letters of the title)
+      head: headBox(m, fr, k, X - w / 2, o.t),
     }, o.extra || {}));
   }
   /* a person on a rounded card (head and shoulders), for a small portrait */
@@ -1897,11 +1920,13 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       let y = hd.bottom + 6;
       L.push(put(T({ name: 'Presents', text: 'presents', font: 'Great Vibes', size: 44, fill: red }), { cx: 540, t: y })); y += 56;
       const [a, b] = twoLines(f.title || 'Thanksgiving Service');
-      const ts = stackLines([a, b].filter(Boolean), { t: y + 40, fit: 900, maxH: H * 0.13, gap: 4, style: { font: 'Playfair Black', upper: true, fill: { stops: ['#e2252b', '#9d0f14'], angle: 90 }, extrude: 2, extrudeColor: rgba('#5a0505', 0.4), shadow: false } });
+      const ts = stackLines([a, b].filter(Boolean), { t: y + 62, fit: 900, maxH: H * 0.13, gap: 4, style: { font: 'Playfair Black', upper: true, fill: { stops: ['#e2252b', '#9d0f14'], angle: 90 }, extrude: 2, extrudeColor: rgba('#5a0505', 0.4), shadow: false } });
       if (ts[1]) Object.assign(ts[1], { fill: '#ffffff', imgFill: 'tex:gold', imgFillA: 1, bevel: 0.9, extrudeColor: ['#6b3a04', '#1e0f01'] });
       ts.forEach((l) => { l.inkSet = true; });
       L.push(...ts);
-      L.push(put(T({ name: 'Script word', text: D.script, font: 'Great Vibes', size: 120, fill: '#c9921a', rot: -6, maxW: 620, shadow: true, inkSet: true }), { cx: 470, cy: box(ts[0]).t + 6 }));
+      // gold on a red title, deep red on a stone or metal one ("Samson" was lost on a silver title); outlined, and sitting mostly above the words
+      const onMetal = !!(ts[0] && ts[0].imgFill);
+      L.push(put(T({ name: 'Script word', text: D.script, font: 'Great Vibes', size: 120, fill: onMetal ? '#b0121a' : '#c9921a', rot: -6, maxW: 620, shadow: true, inkSet: true, edge: 2.4, edgeColor: '#fffaf0' }), { cx: 470, cy: box(ts[0]).t - 16 }));
       y = ts.bottom + 18;
       const top = Math.max(y, H * 0.44), bot = H - 70;
       if (ps.length >= 2) {
@@ -2626,6 +2651,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     VAR = o.variant || null;
     let layers;
     try { layers = LAYOUTS[look](D).filter(Boolean); } finally { PAINTED = false; VAR = null; }
+    keepTitleClear(layers, D.h);
     if (o.variant) {
       if (o.variant.mirror) mirrorLayers(layers, D.w);
       layers.forEach((l) => { if (l.type === 'fx' && l.seed != null) l.seed = l.seed + o.variant.seed; });
