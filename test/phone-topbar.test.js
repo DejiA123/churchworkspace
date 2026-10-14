@@ -77,7 +77,7 @@ const dist = (a, b) => { const p = (h) => [1, 3, 5].map((i) => parseInt(String(h
       return m;
     };
     const BLUE = '#0a4fc4';
-    const HOME = '#f4f1fb';   // Church Space's own Home (design D): a soft lilac page
+    const HOME = '#eaf5fd';   // Church Space's own Home (design D): a soft sky-blue page
 
     console.log('\n[1] the page');
     await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'load' });
