@@ -83,7 +83,11 @@ function frameRgb(ffmpegPath, file, t, maxW = 960) {
  */
 async function people(ffmpegPath, file, t) {
   if (!available()) throw new Error(why());
-  const fr = await frameRgb(ffmpegPath, file, t);
+  return peopleIn(await frameRgb(ffmpegPath, file, t));
+}
+/** The people in a frame already read (frameRgb) — it is handed over, so read it first if it is wanted too. */
+function peopleIn(fr) {
+  if (!available()) return Promise.reject(new Error(why()));
   const w = start();
   const id = ++seq;
   return new Promise((resolve, reject) => {
@@ -95,4 +99,4 @@ async function people(ffmpegPath, file, t) {
 
 function stop() { if (worker) { try { worker.terminate(); } catch (e) {} worker = null; } }
 
-module.exports = { available, why, people, frameRgb, stop, MODEL };
+module.exports = { available, why, people, peopleIn, frameRgb, stop, MODEL };

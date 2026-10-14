@@ -554,7 +554,7 @@ let _hideTimer = null;
     },
     video: {
       info: (input) => call('video:info', { input }),
-      thumbnail: (input, timeSec) => call('video:thumbnail', { input, timeSec }),
+      thumbnail: (input, timeSec, width) => call('video:thumbnail', { input, timeSec, width }),
       // ✂️ Remove pauses heard by the cloud (the server allowed it; the page never asked)
       speechPauses: (a) => call('video:speechPauses', a),
       trim: (a) => call('video:trim', a),
@@ -4322,7 +4322,12 @@ let _hideTimer = null;
     const th = row.querySelector('.cloud-xp-end-thumb i');
     if (th) th.style.backgroundImage = c.img ? `url("${c.img}")` : '';
     const sub = $('#cloudXpCoverSub');
-    if (sub) sub.textContent = c.set ? (c.photo ? 'Your photo' : 'A moment from the video') + ' · tap to change' : 'Choose the picture people see first';
+    // ✨ on by default: every short (and the video) gets the AI's pick, unless one was chosen by hand
+    const auto = c.auto !== false;
+    const box = $('#cloudXpThumbAuto'); if (box) box.checked = auto;
+    row.classList.toggle('on', auto || !!c.set);
+    if (sub) sub.textContent = c.set ? `Video: ${c.photo ? 'your photo' : 'your moment'}${auto ? ' · shorts: ✨ the AI picks each one' : ''}`
+      : auto ? '✨ The AI picks the best moment of every short · tap to choose yourself' : 'Off — platforms show the first frame · tap to choose';
   }
   function syncEnding() {
     const row = $('#cloudXpEnding'); if (!row) return;
@@ -4647,8 +4652,8 @@ let _hideTimer = null;
       </div>
       <div class="cloud-xp-ending cloud-xp-cover" id="cloudXpCover">
         <button type="button" class="cloud-xp-end-thumb" data-xp="cover-pick" aria-label="Choose the video's thumbnail"><i></i></button>
-        <button type="button" class="cloud-xp-end-text" data-xp="cover-pick"><b>Video thumbnail</b><small id="cloudXpCoverSub">Choose the picture people see first</small></button>
-        <span class="cloud-xp-chev" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></span>
+        <button type="button" class="cloud-xp-end-text" data-xp="cover-pick"><b>Thumbnails</b><small id="cloudXpCoverSub">✨ The AI picks the best moment of every short</small></button>
+        <label class="cloud-switch" aria-label="The AI picks every thumbnail"><input type="checkbox" id="cloudXpThumbAuto" /><span></span></label>
       </div>
       <label class="cloud-xp-row"><span>Keep editing while it exports</span><input type="checkbox" data-mirror="#veBgExport" /></label>
       <button type="button" class="cloud-xp-link" data-xp="saved">My videos — save finished ones to this phone</button>
@@ -4678,6 +4683,8 @@ let _hideTimer = null;
         src.dispatchEvent(new Event('change', { bubbles: true }));
       });
     }
+    const thAuto = $('#cloudXpThumbAuto');
+    if (thAuto) thAuto.addEventListener('change', () => { const ed = window.VideoEditor; if (ed && ed.autoThumb) ed.autoThumb(thAuto.checked); syncCover(); });
     const endOn = $('#cloudXpEndOn');
     if (endOn) endOn.addEventListener('change', () => {
       const ed = window.VideoEditor;

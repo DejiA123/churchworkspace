@@ -372,4 +372,63 @@ async function readFlyer({ image, maxWaitMs = 30000 } = {}) {
   return { ok: false, why: lastWhy || 'no AI model would answer' };
 }
 
-module.exports = { VISION, whoIsSpeaking, whereArePeople, readFlyer, state, ready, SYSTEM, _health: () => health, _blocked: () => blocked };
+/*
+ * ►► WHICH OF THESE MAKES THE BEST THUMBNAIL? ◄◄ The server has already found
+ * the speaker in every candidate frame and kept only sharp, well-framed ones
+ * (autothumb.js); what a detector cannot judge is the FACE — eyes open or mid-
+ * blink, a passionate or warm expression or a mouth caught half-way through a
+ * word. The vision model is shown the finalists side by side and picks one.
+ */
+const THUMB_SYSTEM = 'You choose the thumbnail for a short video clip of a church sermon, the one picture that makes people stop scrolling and tap. '
+  + 'You are shown several candidate frames side by side, numbered 1, 2, 3… from left to right. Pick the single best thumbnail: '
+  + 'the speaker clearly visible and in focus, BOTH EYES OPEN, an engaging expression (passionate, joyful, smiling, intense, mid-gesture), face well lit and not blocked by a hand or the microphone. '
+  + 'Reject: blinks or half-closed eyes, looking down at notes, the mouth awkwardly half-way through a word, motion blur, the back of the head, nobody in shot. '
+  + 'Reply with JSON only: {"best": the number of the best picture, "why": a few words}.';
+async function pickThumb({ image, count, maxWaitMs = 25000 } = {}) {
+  const a = cloudwrite.access();
+  if (!a.key) return { ok: false, why: 'no AI key yet' };
+  if (!a.url) return { ok: false, why: 'no address for that AI service' };
+  if (!image || !/^data:image\//.test(image) || !(count > 1)) return { ok: false, why: 'nothing to choose between' };
+  const list = ladder(a, await discover(a));
+  if (!list.length) return { ok: false, why: `${a.providerName} has no model here that can look at pictures` };
+  let lastWhy = '', waited = 0;
+  const noJson = new Set();
+  for (let k = 0; k < list.length; k++) {
+    const model = list[k];
+    const body = Object.assign({
+      model, temperature: 0, max_tokens: 80,
+      messages: [{ role: 'system', content: THUMB_SYSTEM },
+        { role: 'user', content: [{ type: 'text', text: `${count} pictures, numbered 1 to ${count} from left to right. Which is the best thumbnail?` }, { type: 'image_url', image_url: { url: image } }] }],
+    }, tuneFor(model));
+    if (!noJson.has(model)) body.response_format = { type: 'json_object' };
+    let res, errText = '';
+    try {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), ASK_TIMEOUT_MS);
+      try { res = await fetch(a.url, { method: 'POST', headers: a.headers, body: JSON.stringify(body), signal: ac.signal }); }
+      finally { clearTimeout(timer); }
+    } catch (e) { lastWhy = 'could not reach the AI'; continue; }
+    if (res.ok) {
+      let j = null; try { j = await res.json(); } catch (e) {}
+      const r = parseJson(cloudwrite.textFrom(j));
+      const n = Math.round(Number(r && (r.best != null ? r.best : r.picture)));
+      if (!(n >= 1 && n <= count)) { lastWhy = model + ' did not name a picture'; continue; }
+      return { ok: true, best: n - 1, why: String((r && r.why) || '').slice(0, 120), model };
+    }
+    try { errText = (await res.text()).slice(0, 400); } catch (e) {}
+    if (res.status === 401 || res.status === 403) return { ok: false, why: 'the AI key was refused' };
+    if (res.status === 400 && /json_validate_failed|failed to generate json/i.test(errText) && !noJson.has(model)) { noJson.add(model); k--; continue; }
+    if (res.status === 429 || res.status === 503) {
+      const wait = cloudwrite.waitMs(res.headers.get('retry-after')) || 8000;
+      if (waited + wait <= maxWaitMs) { waited += wait; await sleep(wait); k--; continue; }
+      lastWhy = 'the free AI allowance is used up for the moment'; continue;
+    }
+    if ((res.status === 400 || res.status === 404) && (GONE.test(errText) || CANT_SEE.test(errText))) {
+      blocked.set(model, Date.now() + 6 * 3600e3); lastWhy = model + ' cannot look at pictures'; continue;
+    }
+    lastWhy = `the AI answered ${res.status}`;
+  }
+  return { ok: false, why: lastWhy || 'no AI model would answer' };
+}
+
+module.exports = { VISION, whoIsSpeaking, whereArePeople, readFlyer, pickThumb, state, ready, SYSTEM, _health: () => health, _blocked: () => blocked };

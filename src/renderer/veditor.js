@@ -7302,13 +7302,13 @@
     ve._thQ = (ve._thQ || Promise.resolve()).then(go, go);
     return ve._thQ;
   }
-  /** Draw the frame the hidden player holds, cut to the export's shape. */
-  function thDraw(cv, w, h) {
-    const v = ve._thVid, th = ve._th;
-    if (!v || !v.videoWidth || !th) return false;
+  /** Draw the frame the hidden player holds (or a still the server made), cut to the export's shape. */
+  function thDraw(cv, w, h, from) {
+    const v = from || ve._thVid, th = ve._th;
+    const vw = v && (v.videoWidth || v.naturalWidth), vh = v && (v.videoHeight || v.naturalHeight);
+    if (!v || !vw || !th) return false;
     cv.width = Math.max(1, Math.round(w)); cv.height = Math.max(1, Math.round(h));
     const ctx = cv.getContext('2d');
-    const vw = v.videoWidth, vh = v.videoHeight;
     let sx, sy, sw, sh;
     const crop = th.crop;
     if (crop) { sw = crop.cw * vw; sh = crop.ch * vh; sx = crop.ox * vw - sw / 2; sy = crop.oy * vh - sh / 2; }
@@ -7317,6 +7317,27 @@
       if (sar > tar) { sh = vh; sw = vh * tar; sx = (vw - sw) / 2; sy = 0; } else { sw = vw; sh = vw / tar; sx = 0; sy = (vh - sh) / 2; }
     }
     try { ctx.drawImage(v, sx, sy, sw, sh, 0, 0, cv.width, cv.height); return true; } catch (e) { return false; }
+  }
+  /*
+   * ►► ON A PHONE, THE FRAMES COME FROM THE SERVER. ◄◄ iPhone Safari does not
+   * decode a video nobody is watching — the hidden player never had a picture,
+   * and the whole picker was black ("Thumbnail … drag to the moment": nothing
+   * to drag to). In the cloud studio each frame is a still the server cuts
+   * from the original (video:thumbnail), drawn through the same crop.
+   */
+  const thFromServer = () => !!(window.MWCloud && ve.video && ve.video.path);
+  const thStills = new Map();
+  function thStill(t, width) {
+    const key = (ve.video && ve.video.path) + '|' + t.toFixed(2) + '|' + width;
+    if (thStills.has(key)) return thStills.get(key);
+    const p = (async () => {
+      const file = await window.api.video.thumbnail(ve.video.path, t, width);
+      const url = await window.api.fs.readImageDataUrl(file);
+      return await new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = url; });
+    })().catch(() => null);
+    thStills.set(key, p);
+    if (thStills.size > 60) thStills.delete(thStills.keys().next().value);
+    return p;
   }
   /** The big picture: the moment at the export's time u. */
   async function thShowAt(u) {
@@ -7330,16 +7351,18 @@
     try {
       do {
         th.pending = false;
-        await thSeek(thSrcAt(th.pieces, th.u));
+        let still = null;
+        if (thFromServer()) still = await thStill(thSrcAt(th.pieces, th.u), 1280);
+        else await thSeek(thSrcAt(th.pieces, th.u));
         if (ve._th !== th) return;
         const big = th.bigCv || (th.bigCv = document.createElement('canvas'));
         const H = 720, W = Math.round(H * th.ar);
-        if (thDraw(big, W, H) && th.src === 'frame') {
+        if (thDraw(big, W, H, still) && th.src === 'frame') {
           const img = $('#thumbShot'); if (img) img.src = big.toDataURL('image/jpeg', 0.86);
           $('#thumbFrame') && $('#thumbFrame').classList.remove('empty');
         }
         const pc = $('#thumbPickCv'), pick = $('#thumbPick');
-        if (pc && pick) thDraw(pc, pick.clientWidth * 2, pick.clientHeight * 2);
+        if (pc && pick) thDraw(pc, pick.clientWidth * 2, pick.clientHeight * 2, still);
       } while (th.pending && ve._th === th);
     } finally { th.drawing = false; }
   }
@@ -7352,11 +7375,16 @@
     ctx.fillStyle = '#16171b'; ctx.fillRect(0, 0, cv.width, cv.height);
     const cellW = Math.max(18, H * th.ar), n = Math.max(4, Math.min(16, Math.ceil(W / cellW)));
     const tmp = document.createElement('canvas');
+    const server = thFromServer();
+    // from the server: every still asked for at once, each drawn as it comes
+    const stills = server ? Array.from({ length: n }, (x, i) => thStill(thSrcAt(th.pieces, ((i + 0.5) / n) * th.total), 320)) : null;
     for (let i = 0; i < n; i++) {
       if (ve._th !== th) return;
-      await thSeek(thSrcAt(th.pieces, ((i + 0.5) / n) * th.total));
+      let still = null;
+      if (server) still = await stills[i];
+      else await thSeek(thSrcAt(th.pieces, ((i + 0.5) / n) * th.total));
       if (ve._th !== th) return;
-      if (thDraw(tmp, (W / n) * dpr, H * dpr)) ctx.drawImage(tmp, Math.round((i * W / n) * dpr), 0, Math.ceil((W / n) * dpr), cv.height);
+      if (thDraw(tmp, (W / n) * dpr, H * dpr, still)) ctx.drawImage(tmp, Math.round((i * W / n) * dpr), 0, Math.ceil((W / n) * dpr), cv.height);
     }
     thShowAt(th.u);   // the strip borrowed the player: put the chosen frame back
   }
@@ -7453,6 +7481,9 @@
     else setClipThumb(thumbSeg(), null);
     closeThumbPicker();
   }
+  /* ✨ The AI picks every thumbnail that was not chosen by hand: on unless switched off (remembered). */
+  function autoThumbOn() { try { return localStorage.getItem('mw-auto-thumb') !== '0'; } catch (e) { return true; } }
+  function setAutoThumb(on) { try { localStorage.setItem('mw-auto-thumb', on ? '1' : '0'); } catch (e) {} }
   function syncCoverButton() {
     const b = $('#veVideoThumb'); if (!b) return;
     b.disabled = !ve.video;
@@ -7474,7 +7505,23 @@
   async function applyThumbTo(s, filePath) {
     // a short carries its own; the edited video's is the timeline's (ve.vthumb)
     const t = s && (s.id === '__edited' ? ve.vthumb : s.thumbPick);
-    if (!t || !filePath) return filePath;
+    if (!filePath) return filePath;
+    // none chosen by hand: the AI picks this one's own best moment, on the
+    // finished file, before the ending card (autothumb.js) — on by default
+    if (!t) {
+      if (!autoThumbOn() || !s) return filePath;
+      try {
+        const ps = s.id === '__edited' ? editedPieces() : keptPieces(s);
+        const searchEnd = ps && ps.length ? +thTotal(ps).toFixed(3) : 0;
+        const res = await window.api.video.attachThumb({ input: filePath, auto: true, searchEnd });
+        if (res && res.image) {
+          window.__toast && window.__toast(`🖼️ The AI picked ${s.id === '__edited' ? 'the video' : 'this short'}’s thumbnail — `
+            + (res.picked && res.picked.by === 'ai' ? 'the speaker at their best moment.' : 'the speaker, sharp and well framed.'), 'good', 6000);
+          if (window.__thumbMade) window.__thumbMade(res.image, filePath);
+        }
+      } catch (e) { /* the short is made; a platform will show its own first frame */ }
+      return filePath;
+    }
     try {
       // The moment is a SOURCE time; the file starts at the clip's start and
       // has its pauses (and deleted clips) taken out, so it is mapped onto the
@@ -16827,7 +16874,8 @@
     },
     chooseOutro() { openLibrary('clips'); },
     /** 🖼️ The finished video's thumbnail — what the phone's Export sheet shows, and its row opens. */
-    coverInfo() { return ve.vthumb ? { set: true, img: ve.vthumb.img || null, photo: !!ve.vthumb.file } : { set: false }; },
+    coverInfo() { return ve.vthumb ? { set: true, img: ve.vthumb.img || null, photo: !!ve.vthumb.file, auto: autoThumbOn() } : { set: false, auto: autoThumbOn() }; },
+    autoThumb(on) { if (typeof on === 'boolean') setAutoThumb(on); return autoThumbOn(); },
     chooseCover() { return openThumbPicker('__video'); },
     /** The phone's Chroma key tool: the selected overlay, or one under the playhead. */
     chromaKey() { return openChromaKey(); },

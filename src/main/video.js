@@ -1601,8 +1601,14 @@ function needsProxy(info) {
  */
 const COVER_FIRST_MAX_SEC = 15 * 60;
 const COVER_HOLD_SEC = 0.1;
-async function attachThumbnail(ctx, { input, imagePath, atSec = 0, output }) {
+async function attachThumbnail(ctx, { input, imagePath, atSec = 0, output, auto = false, searchEnd = 0 }) {
   const info = await getInfo(ctx, input);
+  // nothing chosen by hand: the AI picks this short's own best moment (autothumb.js)
+  let picked = null;
+  if (auto && !(imagePath && fs.existsSync(imagePath))) {
+    try { picked = await require('./autothumb').pickMoment(ctx, { input, searchEnd, info }); atSec = picked.atSec; }
+    catch (e) { atSec = Math.min(3, (info.durationSec || 0) * 0.3); }
+  }
   const dir = path.dirname(output || input);
   const base = path.basename(output || input).replace(/\.[^.]+$/, '');
   const jpg = path.join(dir, base + '.jpg');
@@ -1674,7 +1680,7 @@ async function attachThumbnail(ctx, { input, imagePath, atSec = 0, output }) {
     // and a container that will not carry one must not fail the export.
     try { fs.rmSync(tmp, { force: true }); } catch (er) {}
   }
-  return { video: input, image: jpg };
+  return { video: input, image: jpg, picked: picked ? { atSec: picked.atSec, by: picked.by, why: picked.why } : null };
 }
 
 /**
