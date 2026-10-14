@@ -994,6 +994,50 @@ let _hideTimer = null;
     const t = String(text || '');
     if (el.textContent !== t) el.textContent = t;
     el.classList.toggle('hidden', !t);
+    stageTips(t);
+  }
+  /*
+   * WHAT THE AI IS DOING, WHILE IT DOES IT. Finding the shorts in a long
+   * sermon takes minutes, and "AI is reading part 1 of 2" told nobody
+   * anything: under each step ("Step 2 of 3 · Reading the sermon from
+   * 0:00–51:20…") a line says, a few seconds at a time, what is being looked
+   * for, so the wait is something to read rather than a stuck-looking bar.
+   */
+  const STEP_TIPS = {
+    1: ['Writing down every word, so the shorts are chosen by what was actually said',
+      'Noting where each sentence starts and ends, to the split second',
+      'Hearing the names, the scriptures and the moments the church responded'],
+    2: ['Looking for a strong first line that stops people scrolling',
+      'Every short has to be a complete thought: nothing cut off mid-sentence',
+      'Picking out the quotable lines, the stories and the big moments',
+      'Leaving out announcements, the offering and the warm-up',
+      'Ranking every moment the way a social media editor would',
+      'Giving each short a title from what is said in it'],
+    3: ['Starting each short on its first real word',
+      'Ending each one on the full stop, not halfway through a thought',
+      'Trimming the long pauses at the edges'],
+  };
+  const tipState = { step: 0, i: 0, timer: null };
+  function stageTips(stage) {
+    const m = /^Step (\d) of \d/.exec(stage || ''), step = m ? +m[1] : 0;
+    let el = $('#overlayTip');
+    if (!step) { clearInterval(tipState.timer); tipState.timer = null; tipState.step = 0; if (el) el.classList.add('hidden'); return; }
+    if (!el) {
+      const pill = $('#overlayStage'); if (!pill) return;
+      el = document.createElement('div'); el.id = 'overlayTip'; el.className = 'overlay-tip'; el.setAttribute('aria-live', 'polite');
+      pill.insertAdjacentElement('afterend', el);
+    }
+    el.classList.remove('hidden');
+    if (tipState.step === step && tipState.timer) return;
+    tipState.step = step; tipState.i = 0; clearInterval(tipState.timer);
+    const show = () => {
+      const list = STEP_TIPS[tipState.step] || [];
+      if (!list.length || !el.isConnected) return;
+      el.classList.remove('in'); void el.offsetWidth;
+      el.textContent = list[tipState.i++ % list.length]; el.classList.add('in');
+    };
+    show();
+    tipState.timer = setInterval(show, 5500);
   }
   function setProgress(p) {
     const pct = Math.max(0, Math.min(100, Number(p) || 0));
@@ -1022,6 +1066,7 @@ let _hideTimer = null;
   function hideOverlay() {
     clearTimeout(_hideTimer); _hideTimer = null;
     showWaiting(0);
+    stageTips('');
     clearOverlaySave();
     const o = $('#overlay'); if (o) { o.classList.add('hidden'); o.classList.remove('on-top'); }
     stopProgress();

@@ -404,8 +404,10 @@ async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, max
     if (cancelled()) throw Object.assign(new Error('Cancelled'), { cancelled: true });
     const { system, prompt } = promptFor(S, secs[k], { minLen, maxLen, idealLen, wide });
     let got = null;
+    // said in plain words: which minutes of the sermon the AI has in front of it ("part 1 of 2" meant nothing to anyone)
+    const span = `${clock(S[secs[k][0]].start)}–${clock(S[secs[k][1]].end)}`;
     await during(READ * k / secs.length, READ * (k + 1) / secs.length,
-      secs.length === 1 ? 'AI is reading the sermon…' : `AI is reading part ${k + 1} of ${secs.length}…`, async () => {
+      secs.length === 1 ? 'Step 2 of 3 · Reading the sermon for its best moments…' : `Step 2 of 3 · Reading ${span} of the sermon…`, async () => {
       for (let attempt = 0; ; attempt++) {
         let out = '';
         try { out = await ask({ system, prompt, maxTokens: wide ? 6000 : 3000 }); } catch (e) { if (e && e.cancelled) throw e; out = ''; }
@@ -462,7 +464,7 @@ async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, max
     const want = Math.max(4, maxClips - uniq.length + 3);
     let out = '';
     try {
-      out = await during(READ, MORE, 'AI is finding more moments…', () => ask({ system, maxTokens: 6000, prompt: prompt + `\n\nThese moments are already chosen:\n${had}\n\nFind ${want} MORE moments in this sermon — different ones, not overlapping any of these — following every rule above. Reply with only: {"moments":[{"from":0,"to":0,"title":"","point":"","strength":0}]}` }));
+      out = await during(READ, MORE, 'Step 2 of 3 · Finding a few more great moments…', () => ask({ system, maxTokens: 6000, prompt: prompt + `\n\nThese moments are already chosen:\n${had}\n\nFind ${want} MORE moments in this sermon — different ones, not overlapping any of these — following every rule above. Reply with only: {"moments":[{"from":0,"to":0,"title":"","point":"","strength":0}]}` }));
     } catch (e) { if (e && e.cancelled) throw e; out = ''; }
     for (const m of parseMoments(out) || []) {
       more++;
@@ -473,7 +475,7 @@ async function planShorts({ sents, minLen = 60, maxLen = 150, idealLen = 90, max
   const picked = choose(uniq, maxClips, secs);
   let edgesMoved = 0;
   try {
-    edgesMoved = await during(MORE, 0.98, 'Perfecting each start and end…', () => refineEdges(picked, S, { ask, minLen, maxLen, retryWaits }));
+    edgesMoved = await during(MORE, 0.98, 'Step 3 of 3 · Perfecting each short’s start and end…', () => refineEdges(picked, S, { ask, minLen, maxLen, retryWaits }));
   } catch (e) { if (e && e.cancelled) throw e; }
   // an edge that moved may now touch a neighbour: the later one gives way at the seam
   picked.sort((x, y) => x.start - y.start);

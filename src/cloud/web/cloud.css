@@ -1457,6 +1457,10 @@ body.mw-cloud #cloudPass:focus { border-color: #1f6fe0; box-shadow: 0 0 0 3px rg
   body.mw-cloud #overlayStage { display: inline-block; margin: 12px auto 0; padding: 7px 14px; border-radius: 999px; max-width: 100%;
     font-size: 14px; font-weight: 650; line-height: 1.35; color: #dbeafe; background: rgba(77,149,239, .16); box-shadow: inset 0 0 0 1px rgba(77,149,239, .32); }
   body.mw-cloud #overlayStage.hidden { display: none; }
+  /* what the AI is looking for, a line at a time, under the step (stageTips in cloud-boot.js) */
+  body.mw-cloud .overlay-tip { margin: 10px auto 0; max-width: 300px; min-height: 2.7em; font-size: 13.5px; line-height: 1.38; color: #9fb3cf; opacity: 0; transform: translateY(4px); }
+  body.mw-cloud .overlay-tip.in { opacity: 1; transform: none; transition: opacity .45s ease, transform .45s ease; }
+  body.mw-cloud .overlay-tip.hidden { display: none; }
   /*
    * The export's overlay, once the video is ON the phone, becomes the last tap
    * (overlaySaveUi in cloud-boot.js): a green tick where the spinner was, the

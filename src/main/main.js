@@ -1593,7 +1593,7 @@ ipcMain.handle('sermon:analyze', wrap(async (e, { input, minLen, maxLen, idealLe
     judge,
     // only the stretch left on the timeline is searched (see analyzeSermon)
     startSec, endSec, ranges,
-    prehear, prehearStage: 'AssemblyAI is listening…',
+    prehear, prehearStage: 'Step 1 of 3 · Listening to every word of the sermon…',
     onProgress: onProgress(e, jobId),
   });
   if (res && res.meta) {
