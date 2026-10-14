@@ -2279,7 +2279,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     let state = 'loading', who = '';
     const draw = () => {
       P.body.innerHTML = `<div class="fs-kit">
-        <p class="fs-note">The best image AIs, from your own <b>free Puter account</b> — it has a free monthly allowance (shown on puter.com), and more can be bought there for pennies if you ever want. The church pays nothing. Three designs: <b>a whole flyer designed by the AI</b> (your words, your logo, ${esc(chosenSpeakers()[0] ? chosenSpeakers()[0].name : 'the preacher')}), <b>him painted into a scene</b>, and a background.</p>
+        <p class="fs-note">The best image AIs, paid from your own <b>Puter account</b> — not the church's. ${premiumEmpty() ? '<b>This account has no balance for premium pictures</b> (Puter\'s free allowance does not cover them); after a top-up on puter.com, tap Make again.' : 'Puter\'s free allowance may not cover premium pictures; a top-up on puter.com does (about 4 cents a Nano Banana picture).'} Three designs: <b>a whole flyer designed by the AI</b> (your words, your logo, ${esc(chosenSpeakers()[0] ? chosenSpeakers()[0].name : 'the preacher')}), <b>him painted into a scene</b>, and a background.</p>
         <div class="fs-occs fs-premium-models">${PUTER_MODELS.map((m) => `<button type="button" class="fs-occ${m.id === model.id ? ' on' : ''}" data-pm="${m.id}"><b>${esc(m.name)}</b><small>${esc(m.by)}</small></button>`).join('')}</div>
         <label class="fs-premium-auto"><input type="checkbox" data-pauto${premiumAuto() ? ' checked' : ''}> Add premium designs every time I make flyers</label>
         <p class="fs-status">${state === 'loading' ? '<i class="fs-spin"></i> Opening Puter…' : state === 'out' ? 'Signed out of Puter.' : state === 'in' ? 'Signed in to Puter' + (who ? ' as <b>' + esc(who) + '</b>' : '') + '.' : state === 'busy' ? '<i class="fs-spin"></i> Painting with ' + esc(model.name) + '… (up to a minute)' : esc(state)}</p>
@@ -2338,19 +2338,25 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         IMGS.set(key, out.im);
         F.premium = (F.premium || []).concat({ key, kind: j.kind, name: model.name });
         made++;
+        try { localStorage.removeItem('mw.flyer.premiumEmpty'); } catch (e) {}
         rebuildDesigns();
         if (F.step === 'pick') { drawPick(); if (F.panel) F.panel.body.scrollTop = 0; }   // new cards, at the top, in sight
       } catch (e) { err = e; if (outOfAllowance(e)) break; }
     }
-    if (err) toast(outOfAllowance(err) ? 'Your free Puter allowance is used up for this month — more can be bought on puter.com, or carry on with the free designs.' : 'Premium AI: ' + puterMsg(err).slice(0, 160), 'error', 11000);
+    if (err && outOfAllowance(err)) {
+      // no balance: not asked again (nor Puter's "Upgrade" box shown) until next month — or until Premium is tapped again by hand
+      try { const d = new Date(); localStorage.setItem('mw.flyer.premiumEmpty', String(new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime())); } catch (e) {}
+    }
+    if (err && !quiet) toast(outOfAllowance(err) ? 'Puter has no balance for premium pictures on this account — its free allowance does not cover them. The free designs carry on; Premium will not ask again this month.' : 'Premium AI: ' + puterMsg(err).slice(0, 160), 'error', 11000);
     if (made && !quiet) toast(`${made} premium design${made > 1 ? 's' : ''} by ${model.name} — at the top of the board.`, 'good', 5000);
     return made > 0;
   }
   /* SEAMLESS: once signed in to Puter, every "Make my flyers" brings premium designs by itself (no tap needed) */
   const premiumAuto = () => { try { return localStorage.getItem('mw.flyer.premiumAuto') === '1'; } catch (e) { return false; } };
   const premiumModel = () => { let id = 'nano'; try { id = localStorage.getItem('mw.flyer.premium') || 'nano'; } catch (e) {} return PUTER_MODELS.find((m) => m.id === id) || PUTER_MODELS[0]; };
+  const premiumEmpty = () => { try { return Date.now() < +(localStorage.getItem('mw.flyer.premiumEmpty') || 0); } catch (e) { return false; } };
   async function autoPremium(tryNo) {
-    if (!premiumAuto()) return;
+    if (!premiumAuto() || premiumEmpty()) return;   // (no balance this month: not tried, no Puter "Upgrade" box)
     try {
       const pu = await loadPuter();
       if (tryNo !== F.tries || !pu.auth.isSignedIn()) return;
