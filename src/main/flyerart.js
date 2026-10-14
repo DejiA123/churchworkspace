@@ -323,11 +323,14 @@ async function paintWith({ scene, w = 1080, h = 1350, seed, refs = [], who } = {
  * only when every word of the title is there, spelt right — one more try if
  * not. With no vision model to check, it comes back marked unchecked.
  */
-const LETTERING = ['huge glossy 3D gold metallic lettering with bevelled edges and light glinting off it', 'massive carved stone lettering with cracks and dust, lit from above',
-  'giant burning letters made of fire and embers', 'bold brushed silver chrome 3D lettering with a strong glow behind it', 'tall elegant gold serif lettering with a soft glow'];
+// BRIGHT, every one: "was the text even visible?" — charred stone and dim fire letters on a dark scene were not
+const LETTERING = ['huge bright glossy 3D gold metallic lettering with bevelled edges, brilliant highlights and a warm glow behind it',
+  'massive bright white chrome 3D lettering with a strong white glow behind it', 'giant blazing letters of white-hot yellow fire with a bright glowing core',
+  'bold bright white lettering with a thick gold outline and a soft glow', 'tall elegant bright gold serif lettering glowing against the darker sky'];
 function titlePrompt(scene, title, look) {
   return [
     `Church event poster key art with the title "${title}" written across the upper middle in ${look}, every letter spelled exactly ${title.split('').join(' ').toUpperCase().replace(/ {3}/g, ' / ')}`,
+    'the lettering is the BRIGHTEST thing in the picture, high contrast against a darker area of sky or shadow directly behind it, every letter crisp and clearly readable from far away',
     'the title is the ONLY text in the image: no other words, letters, numbers, logos or signatures',
     'the scene: ' + String(scene || 'heavenly golden light breaking through dramatic clouds').slice(0, 400),
     'epic cinematic movie-poster composition, dramatic volumetric light, rich saturated colour, hyper-detailed, the lower third darker and simpler, a thin empty strip along the very top',
@@ -356,10 +359,13 @@ async function paintTitle({ scene, title, seed, look } = {}) {
     if (!r || !r.ok) return last;
     const seen = new Set(wordsOf([r.text, r.event].join(' ')));
     const ok = want.every((w) => seen.has(w));
-    last = Object.assign(last, { checked: true, spelt: ok, read: (r.event || r.text || '').slice(0, 80) });
-    if (ok) return last;
+    // "was the text even visible?": spelt right is not enough — dark letters on a dark scene are painted again
+    const legible = r.legible !== false;
+    last = Object.assign(last, { checked: true, spelt: ok, legible, read: (r.event || r.text || '').slice(0, 80) });
+    if (ok && legible) return last;
   }
   if (last && last.checked && !last.spelt) throw new Error('the AI misspelt the title twice (it read “' + (last.read || '') + '”) — the designs without it stand');
+  if (last && last.checked && !last.legible) throw new Error('the AI lettering came out hard to read twice — the designs without it stand');
   return last;
 }
 

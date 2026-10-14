@@ -321,6 +321,7 @@ const FLYER_SYSTEM = 'You read church flyers and posters for a social media team
   + 'Reply with JSON only: {"text": every word on it in reading order, "event": the event or headline, "date": the date as printed, '
   + '"time": the time as printed, "place": the venue or address, "people": [names of speakers or guests as printed], '
   + '"theme": the theme or scripture if printed, "contact": phone/website/handle if printed, "isFlyer": true if it is a flyer or poster, false for an ordinary photo, '
+  + '"legible": true if the main headline stands out clearly from what is behind it (bright on dark or dark on light), false if it is hard to read (dark letters on a dark picture, low contrast, lost in the picture), '
   + '"describe": one short sentence on what the picture shows}. Use "" (or []) for anything not printed. Never guess or invent.';
 async function readFlyer({ image, maxWaitMs = 30000 } = {}) {
   const a = cloudwrite.access();
@@ -354,7 +355,7 @@ async function readFlyer({ image, maxWaitMs = 30000 } = {}) {
       return { ok: true, model,
         text: str(r.text, 1500), event: str(r.event, 120), date: str(r.date, 60), time: str(r.time, 40), place: str(r.place, 120),
         people: (Array.isArray(r.people) ? r.people : []).map((x) => str(x, 60)).filter(Boolean).slice(0, 6),
-        theme: str(r.theme, 120), contact: str(r.contact, 120), isFlyer: r.isFlyer !== false, describe: str(r.describe, 200) };
+        theme: str(r.theme, 120), contact: str(r.contact, 120), isFlyer: r.isFlyer !== false, legible: r.legible !== false, describe: str(r.describe, 200) };
     }
     try { errText = (await res.text()).slice(0, 400); } catch (e) {}
     if (res.status === 401 || res.status === 403) return { ok: false, why: 'the AI key was refused' };

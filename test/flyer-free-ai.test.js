@@ -7,7 +7,8 @@
  *       painters always keep a reserve
  *   [B] AI lettering (Phoenix 1.0): kept when the title reads back spelt
  *       right; one more try when not; refused after two misspellings; marked
- *       unchecked when no vision model can read it; never past the allowance
+ *       unchecked when no vision model can read it; painted again when it
+ *       reads back hard to see (dark on dark); never past the allowance
  *   node test/flyer-free-ai.test.js
  */
 const assert = require('assert');
@@ -61,7 +62,7 @@ const t = async (name, fn) => { try { await fn(); pass++; console.log('  ✓ ' +
   console.log('\n[B] the title lettered by AI, read back before it is offered');
   let reads = [];
   cs.ready = () => true;
-  cs.readFlyer = async () => { const r = reads.shift(); return r ? { ok: true, text: r, event: r } : { ok: false }; };
+  cs.readFlyer = async () => { const r = reads.shift(); if (!r) return { ok: false }; const dark = /^DARK:/.test(r); const t = r.replace(/^DARK:/, ''); return { ok: true, text: t, event: t, legible: !dark }; };
   await t('Phoenix paints it; spelt right, it is kept and marked checked', async () => {
     calls.length = 0; reads = ['BREAK EVERY CHAIN'];
     const r = await fa.paintTitle({ scene: 'chains', title: 'Break Every Chain' });
@@ -77,6 +78,17 @@ const t = async (name, fn) => { try { await fn(); pass++; console.log('  ✓ ' +
   await t('misspelt twice: refused (the other designs stand)', async () => {
     reads = ['BRAEK', 'BREK EVRY'];
     await assert.rejects(fa.paintTitle({ scene: 'chains', title: 'Break Every Chain' }), /misspelt/);
+  });
+  await t('spelt right but hard to read (dark on dark): painted again, the readable one kept', async () => {
+    fs.writeFileSync(path.join(dir, 'flyer-kit', 'cf-allowance.json'), JSON.stringify({ day: new Date().toISOString().slice(0, 10), spent: 0 }));
+    calls.length = 0; reads = ['DARK:PRAYER MEETING', 'PRAYER MEETING'];
+    const r = await fa.paintTitle({ scene: 'x', title: 'Prayer Meeting' });
+    assert.strictEqual(calls.length, 2); assert.ok(r.legible && r.spelt);
+  });
+  await t('hard to read twice: not offered', async () => {
+    fs.writeFileSync(path.join(dir, 'flyer-kit', 'cf-allowance.json'), JSON.stringify({ day: new Date().toISOString().slice(0, 10), spent: 0 }));
+    reads = ['DARK:PRAYER MEETING', 'DARK:PRAYER MEETING'];
+    await assert.rejects(fa.paintTitle({ scene: 'x', title: 'Prayer Meeting' }), /hard to read/);
   });
   await t('no vision model to read it: offered, marked unchecked', async () => {
     fs.writeFileSync(path.join(dir, 'flyer-kit', 'cf-allowance.json'), JSON.stringify({ day: new Date().toISOString().slice(0, 10), spent: 0 }));

@@ -1428,7 +1428,14 @@
 
   /* ================================================================ LAYOUTS */
 
-  const T = (o) => Object.assign({ id: uid(), type: 'text', x: 540, y: 200, rot: 0, s: 1, font: 'Anton', size: 100, fill: '#ffffff', align: 'center', line: 1 }, o);
+  // the details people read on a phone (the address, the handles, a phone number, a detail's note) never smaller than this:
+  // at 14–16 on a 1080 flyer they were specks on the screen. Set here, before a layout places them, so they are placed at their size.
+  const SMALL_INFO = /^(Venue|Handles|Contact|Phone|Minister title)$|note$/;
+  const T = (o) => {
+    const L = Object.assign({ id: uid(), type: 'text', x: 540, y: 200, rot: 0, s: 1, font: 'Anton', size: 100, fill: '#ffffff', align: 'center', line: 1 }, o);
+    if (SMALL_INFO.test(L.name || '') && L.size < 19) L.size = Math.min(19, Math.round(L.size * 1.3));
+    return L;
+  };
   const SH = (o) => Object.assign({ id: uid(), type: 'shape', x: 540, y: 200, rot: 0, s: 1, shape: 'rect', w: 200, h: 80, fill: '#ffffff' }, o);
   const IM = (o) => Object.assign({ id: uid(), type: 'image', x: 540, y: 600, rot: 0, s: 1, w: 500, h: 700 }, o);
   const BG = (o) => Object.assign({ id: 'bg', type: 'bg', name: 'Background', lock: true }, o);
@@ -1808,7 +1815,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     /* ── AI LETTERING: the picture already has the title in it (paintLettering); the minister at the foot, the details round him ── */
     ailetter(D) {
       const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D);
-      L.push(BG({ img: D.bg, grade: 'normal', contrast: 6, keep: 0.6, topShade: 0.25, topTo: 0.08, bottomShade: 0.9, bottomFrom: 0.62, vignette: 0.25 }));
+      // no shade over the top (the AI's lettering is there: a shade dimmed it), a little more contrast to make it stand out
+      L.push(BG({ img: D.bg, grade: 'normal', contrast: 12, keep: 0.7, bottomShade: 0.9, bottomFrom: 0.66, vignette: 0.12 }));
       if (D.f.church) L.push(put(T({ name: 'Church', text: D.f.church, upper: true, font: 'Montserrat', size: 18, letter: 0.08, shadow: true, maxW: 900 }), { cx: 540, t: 18 }));
       if (sp) L.push(hero(sp, { cx: 560, t: H * 0.5, b: H + 10, mode: 'chest', fade: 0.3, extra: lit(p) }));
       L.push(...col([f.time && T({ name: 'Time', text: f.time + (f.time2 ? ' & ' + f.time2 : ''), font: 'Anton', size: 62, fill: p.accent, align: 'left', shadow: true }),
@@ -3065,10 +3073,12 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     F.painting++; if (F.step === 'pick') drawPick();
     try {
       const scene = (F.dir.scenes || [])[0];
+      // (read back on the server: spelt right AND standing out clearly — flyerart.paintTitle)
       const out = await window.api.flyer.paintTitle({ scene, title, seed: Math.floor(Math.random() * 1e9) });
       if (tryNo !== F.tries || !out || !out.dataUrl) return;
+      const im = await loadImg(out.dataUrl);
       const key = 'ail:' + tryNo;
-      IMGS.set(key, await loadImg(out.dataUrl));
+      IMGS.set(key, im);
       F.lettered = { key, checked: !!out.checked, by: out.by };
       rebuildDesigns();
     } catch (e) { /* the day's allowance, a misspelling twice: the other designs stand */ }
@@ -3150,16 +3160,20 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     crimson: { deep: '#26020c', mid: '#8c0f2e', accent: '#f2c46b', hi: '#fff4e6' },
   };
   /*
-   * ►► THREE, THE BEST FIRST. ◄◄ Eighteen at once was too many to choose
-   * from (and five still too many). A board is three designs, ranked: how strong the layout is on its
+   * ►► FOUR, THE BEST FIRST. ◄◄ Eighteen at once was too many to choose
+   * from. A board is four designs, ranked: how strong the layout is on its
    * own, whether it suits this event (the AI's own picks, a line-up only when
    * there are several ministers), what this phone has opened and saved
    * before, and a little freshness so the five are not the same five every
-   * time. "More designs" brings the next three. Each design is built with a
+   * time. "More designs" brings the next four. And the four are four
+   * different flyers, not one flyer in four fonts (a board of three all
+   * orange, the preacher bottom-centre on each): at most two with the
+   * preacher in the middle, a bright page among them when one ranks, and
+   * the pictures painted in lights that alternate warm and cool. Each design is built with a
    * variant of its own (makeVariant); its picture is painted in one of
    * eleven lights picked afresh.
    */
-  const BOARD_N = 3;   // "3 flyers, not 5": three, the best first
+  const BOARD_N = 4;   // "maybe 4 instead of 3": four, the best first
   // how well each layout stands up on its own (from setting them beside the Pinterest flyers)
   const STRENGTH = { glory: 9, fire: 9, joinus: 9, spirit: 8, prophetic: 8, sunday: 8, upper: 8, miracle: 8, script: 7, encounter: 7, breaking: 7, didone: 7,
     lineup: 7, mountain: 6, bible: 6, scenic: 6, light: 6, theme: 6,
@@ -3192,12 +3206,31 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       if (['lineup', 'urgency', 'harvest', 'unique'].includes(l) && many) v += 3;
       return v + Math.random() * 2.2;                                            // freshness
     };
-    const scored = Object.keys(LAYOUTS).filter((l) => l !== 'ailetter').map((l) => [l, score(l)]).sort((a, b) => b[1] - a[1]);
-    return scored.map((x) => x[0]);
+    const scored = Object.keys(LAYOUTS).filter((l) => l !== 'ailetter').map((l) => [l, score(l)]).sort((a, b) => b[1] - a[1]).map((x) => x[0]);
+    // the board's four: at most two with the preacher in the middle, a bright page among them if one is in the top half
+    const board = [], centred = (l) => !SIDE.has(l) && !BRIGHT.has(l) && !GROUP.has(l);
+    for (const l of scored) {
+      if (board.length >= BOARD_N) break;
+      if (centred(l) && board.filter(centred).length >= 2) continue;
+      board.push(l);
+    }
+    if (!board.some((l) => BRIGHT.has(l))) {
+      const b = scored.slice(0, Math.ceil(scored.length / 2)).find((l) => BRIGHT.has(l));
+      if (b) board.splice(Math.min(board.length, BOARD_N - 1), board.length >= BOARD_N ? 1 : 0, b);
+    }
+    for (const l of scored) if (board.length < BOARD_N && !board.includes(l)) board.push(l);
+    return board.concat(scored.filter((l) => !board.includes(l)));
   }
+  // how a layout places the preacher (for a board of different flyers)
+  const SIDE = new Set(['jericho', 'sunday', 'script', 'joinus', 'breaking', 'didone']);
+  const BRIGHT = new Set(['jericho', 'unique', 'thanks', 'mantle', 'light']);
+  const GROUP = new Set(['urgency', 'harvest', 'unique', 'lineup']);
+  const COOL_TONES = ['blue', 'purple', 'teal', 'emerald', 'night', 'royal'];
   function newBoard() {
     const order = rankLooks();
-    const tones = [TONES[0]].concat(shuffled(TONES.slice(1)).slice(0, BOARD_N - 1));
+    // the lights alternate: the AI's own, a cool one, a warm one, a cool one (not four oranges)
+    const cool = shuffled(TONES.filter((t) => COOL_TONES.includes(t.id))), warm = shuffled(TONES.filter((t) => !COOL_TONES.includes(t.id) && t.id !== 'own'));
+    const tones = [TONES[0], cool[0], warm[0], cool[1], warm[1], cool[2]].filter(Boolean);
     const palettes = shuffled(PALETTES);
     const variants = {};
     order.forEach((look, i) => { variants[look] = makeVariant(palettes[i % palettes.length]); variants[look].pal = palettes[i % palettes.length]; });
