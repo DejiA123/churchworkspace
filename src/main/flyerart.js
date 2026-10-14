@@ -149,7 +149,8 @@ async function paintCloudflare(prompt, size, seed, refs) {
     try {
       const res = await fetchTimed(url, { method: 'POST', headers, body }, 120000);
       if (res.status === 401 || res.status === 403) throw Object.assign(new Error('the Cloudflare token was refused — it needs “Workers AI: Read”'), { fatal: true });
-      if (res.status === 429) throw Object.assign(new Error('today’s free Cloudflare allowance is used up (it comes back at 01:00)'), { fatal: true });
+      // busy or over a limit: this model (a big one costs more of the allowance) — the next, smaller one may still paint
+      if (res.status === 429) { benched.set(m.id + (refs ? '+refs' : ''), Date.now() + 20 * 60e3); throw new Error(m.name + ': today’s free Cloudflare allowance is used up, or it is busy'); }
       if (!res.ok) {
         const t = await res.text().catch(() => '');
         if (res.status === 400 || res.status === 404) benched.set(m.id + (refs ? '+refs' : ''), Date.now() + 6 * 3600e3);
@@ -199,11 +200,12 @@ async function paint({ scene, w = 1080, h = 1350, seed, people = true } = {}) {
   if (cfAccount() && cfToken()) {
     try { out = await paintCloudflare(prompt, size, s); } catch (e) { errs.push(e.message); }
   }
+  const cfWhy = errs.slice();   // why Cloudflare did not paint (said on the phone, never silently)
   if (!out) {
     try { out = await paintPollinations(prompt, size, s); } catch (e) { errs.push(e.message); }
   }
   if (!out) throw new Error(errs.join(' · ') || 'no painter could be reached');
-  return { dataUrl: `data:${out.mime};base64,${out.buf.toString('base64')}`, by: out.by, prompt, seed: s };
+  return { dataUrl: `data:${out.mime};base64,${out.buf.toString('base64')}`, by: out.by, prompt, seed: s, cfFailed: cfWhy.length ? cfWhy.join(' · ').slice(0, 300) : '' };
 }
 
 /*
@@ -242,6 +244,30 @@ async function paintWith({ scene, w = 1080, h = 1350, seed, refs = [], who } = {
   const s = Number.isFinite(+seed) ? Math.abs(Math.round(+seed)) % 2147483647 : Math.floor(Math.random() * 1e9);
   const out = await paintCloudflare(prompt, size, s, rs);
   return { dataUrl: `data:${out.mime};base64,${out.buf.toString('base64')}`, by: out.by, prompt, seed: s };
+}
+
+/*
+ * WHICH CLOUDFLARE PAINTERS WORK ON THIS ACCOUNT — each tried once, small,
+ * its answer said plainly (run on the server: see CLOUD.md).
+ */
+async function cfDiagnose() {
+  if (!(cfAccount() && cfToken())) return [{ model: 'Cloudflare', ok: false, said: 'no account id / token on the server' }];
+  const out = [];
+  for (const m of CF_MODELS) {
+    const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cfAccount())}/ai/run/${m.id}`;
+    const headers = { authorization: `Bearer ${cfToken()}` };
+    let body;
+    if (m.form) { body = new FormData(); body.append('prompt', 'golden light through clouds'); body.append('width', '512'); body.append('height', '512'); }
+    else { headers['content-type'] = 'application/json'; body = JSON.stringify(m.json ? Object.assign(m.json('golden light through clouds', { w: 512, h: 512 }, 1), { num_steps: 4 }) : { prompt: 'golden light through clouds', steps: 4 }); }
+    const t0 = Date.now();
+    try {
+      const res = await fetchTimed(url, { method: 'POST', headers, body }, 120000);
+      if (!res.ok) { out.push({ model: m.name, ok: false, said: res.status + ' ' + (await res.text().catch(() => '')).slice(0, 160) }); continue; }
+      const im = await imageFrom(res);
+      out.push({ model: m.name, ok: true, said: Math.round(im.buf.length / 1024) + ' KB in ' + Math.round((Date.now() - t0) / 1000) + 's' });
+    } catch (e) { out.push({ model: m.name, ok: false, said: e.message }); }
+  }
+  return out;
 }
 
 /* --------------------------------------------------------- art direction */
@@ -720,4 +746,4 @@ function kitUsed({ speaker, photo } = {}) {
   return true;
 }
 
-module.exports = { paintWith, paintWithPrompt, kitAddPhoto, inspoAdd, inspoRemove, stockPhotos, stockPath, PHOTO_TAGS, status, paint, direct, init, kitGet, kitSave, kitPic, kitUsed, paintPrompt, sizeFor, directByRules, imageFrom, LOOKS };
+module.exports = { cfDiagnose, paintWith, paintWithPrompt, kitAddPhoto, inspoAdd, inspoRemove, stockPhotos, stockPath, PHOTO_TAGS, status, paint, direct, init, kitGet, kitSave, kitPic, kitUsed, paintPrompt, sizeFor, directByRules, imageFrom, LOOKS };

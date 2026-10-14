@@ -2091,6 +2091,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   /* ------------------------------------------------------ step 2: make + pick */
 
   async function makeFlyers() {
+    F.cfTold = false; F.inTold = false;
     if (!F.fields.title.trim()) { toast('Give it a title first.', 'error'); return; }
     // remember these details for this service (Tuesday's Word Study comes back as typed)
     const ok = occKey(F.occasion);
@@ -2131,7 +2132,10 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         const tone = TONES[i % TONES.length];
         const out = await window.api.flyer.paint({ scene: tone.words ? scene + ', ' + tone.words : scene, w: sz.w, h: sz.h, seed: Math.floor(Math.random() * 1e9), people: chosenSpeakers().some((s) => (s.photos || []).length) });
         if (tryNo !== F.tries) return;
-        const im = await loadImg(out.dataUrl);
+        let im = await loadImg(out.dataUrl);
+        // the backup painter signs its pictures in the bottom corner: that strip is cut off
+        if (/pollinations/i.test(out.by || '')) im = cropBottom(im, 0.06);
+        if (out.cfFailed && !F.cfTold) { F.cfTold = true; toast('Cloudflare did not paint (' + out.cfFailed.slice(0, 140) + ') — the backup painter made these. The best designs need Cloudflare working.', 'error', 12000); }
         const key = 'ai:' + tryNo + ':' + i;
         IMGS.set(key, im);
         // AI pictures lead; the photos stay on for variety until three AI ones are in
@@ -2178,11 +2182,16 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         IMGS.set(key, await loadImg(out.dataUrl));
         F.paintedIn = F.paintedIn.concat({ key, by: out.by, scene, look: PAINT_IN_LOOKS[i % PAINT_IN_LOOKS.length] });
         rebuildDesigns();
-      } catch (e) { /* the ordinary designs stand; this is an extra */ }
+      } catch (e) { if (!F.inTold) { F.inTold = true; toast('The AI could not paint the preacher into a scene: ' + String(e.message || e).slice(0, 160), 'error', 10000); } }
       finally { if (tryNo === F.tries) { F.painting--; if (F.step === 'pick') drawPick(); } }
     }));
   }
 
+  function cropBottom(im, f) {
+    const c = canvas(iw(im), Math.round(ih(im) * (1 - f)));
+    c.getContext('2d').drawImage(im, 0, 0);
+    return c;
+  }
   function chosenSpeakers() {
     const all = (F.kit && F.kit.speakers) || [];
     return F.speakers.map((id) => all.find((s) => s.id === id)).filter(Boolean);
