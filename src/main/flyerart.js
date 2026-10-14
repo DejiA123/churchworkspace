@@ -38,8 +38,17 @@ const cfToken = () => env('CLOUDFLARE_API_TOKEN', 'CF_API_TOKEN', 'CLOUDFLARE_AI
 const polKey = () => env('POLLINATIONS_API_KEY', 'POLLINATIONS_TOKEN');
 
 /* Cloudflare's models, best first. `form`: the FLUX.2 family takes multipart form fields, even for a prompt alone. */
+/*
+ * Best first. FLUX.2 [dev] is the full model (klein, the 4B one, is its small,
+ * fast cousin); Lucid Origin is Leonardo's photoreal model. A model this
+ * account does not have answers 400/404 and is skipped for six hours (benched),
+ * so the list costs nothing where a model is missing. All draw on the same free
+ * daily allowance: the bigger models use more of it per picture.
+ */
 const CF_MODELS = [
-  { id: '@cf/black-forest-labs/flux-2-klein-4b', name: 'FLUX.2', form: true },
+  { id: '@cf/black-forest-labs/flux-2-dev', name: 'FLUX.2 [dev]', form: true },
+  { id: '@cf/leonardo/lucid-origin', name: 'Lucid Origin', form: false, json: (prompt, size, seed) => ({ prompt: prompt.slice(0, 2000), width: size.w, height: size.h, seed, guidance: 4.5, num_steps: 30 }) },
+  { id: '@cf/black-forest-labs/flux-2-klein-4b', name: 'FLUX.2 klein', form: true },
   { id: '@cf/black-forest-labs/flux-1-schnell', name: 'FLUX.1', form: false },
 ];
 // a model that refused (not on this account, a changed name) is skipped for a while, not asked every time
@@ -132,7 +141,7 @@ async function paintCloudflare(prompt, size, seed) {
       if (seed != null) body.append('seed', String(seed));
     } else {
       headers['content-type'] = 'application/json';
-      body = JSON.stringify({ prompt: prompt.slice(0, 2000), steps: 8, seed });
+      body = JSON.stringify(m.json ? m.json(prompt, size, seed) : { prompt: prompt.slice(0, 2000), steps: 8, seed });
     }
     try {
       const res = await fetchTimed(url, { method: 'POST', headers, body }, 120000);
