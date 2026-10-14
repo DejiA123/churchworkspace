@@ -942,7 +942,7 @@
   function imageCanvas(L, im) {
     const w = Math.max(1, Math.round(L.w * Q)), h = Math.max(1, Math.round(L.h * Q));
     const sr = srcOf(L);
-    const key = [IMGS_KEY(im), w, h, sr ? [sr.x, sr.y, sr.w, sr.h].map((v) => (+v).toFixed(4)).join(',') : '', L.gray ? 1 : 0, L.fade || 0, L.glow || '', L.rim || '', L.bright || 0, L.contrast || 0, L.sat || 0, L.radius || 0, L.round ? 1 : 0, L.outline || '', L.tint ? JSON.stringify(L.tint) : '', L.rimW || 0, L.shade || '', L.feather || 0].join('|');
+    const key = [IMGS_KEY(im), w, h, sr ? [sr.x, sr.y, sr.w, sr.h].map((v) => (+v).toFixed(4)).join(',') : '', L.gray ? 1 : 0, L.fade || 0, L.glow || '', L.rim || '', L.bright || 0, L.contrast || 0, L.sat || 0, L.radius || 0, L.round ? 1 : 0, L.outline || '', L.tint ? JSON.stringify(L.tint) : '', L.rimW || 0, L.shade || '', L.feather || 0, L.fadeLight ? 1 : 0, L.hard ? 1 : 0].join('|');
     if (picCache.has(key)) return picCache.get(key);
     const pad = Math.round((L.glow || L.shade ? Math.max(40, L.h * 0.08) : L.outline ? 14 : 0) * Q);
     const c = canvas(w + pad * 2, h + pad * 2), x = c.getContext('2d');
@@ -958,14 +958,38 @@
     else if (L.radius) { roundRect(lx, 0, 0, w, h, L.radius * Q); lx.clip(); }
     if (body) lx.drawImage(body, 0, 0); else lx.drawImage(pic, 0, 0, w, h);
     if (L.feather) {
-      /* a cut-out's edge, softened by a pixel or two: a mask made at the photo's
-         own size and blown up to a poster stair-steps along every shoulder */
-      const fr = Math.max(0.8, L.feather * h / 1000);
-      const mk = canvas(w, h), mx = mk.getContext('2d');
-      mx.filter = `blur(${fr}px)`; mx.drawImage(layer, 0, 0); mx.filter = 'none';
+      /*
+       * ►► NEVER A SHARP CUT-OUT. ◄◄ A person pasted on with a hard edge is
+       * what makes a flyer look home-made ("I never want weird cut-out looking
+       * sharp, no fade"). The edge is soft all round — a mask made at the
+       * photo's own size and blown up stair-steps along every shoulder — and
+       * much softer towards the foot, where a cut-out's worst edges are (a
+       * jacket cut off along a line, an arm ending where the photo did): the
+       * person melts into the picture there instead of stopping.
+       */
+      const fr = Math.max(1.2, L.feather * 1.8 * h / 1000), fr2 = Math.max(4, h * 0.022);
+      const soft = (r) => { const mk = canvas(w, h), mx = mk.getContext('2d'); mx.filter = `blur(${r}px)`; mx.drawImage(layer, 0, 0); mx.filter = 'none'; return mk; };
+      const m1 = soft(fr), m2 = soft(fr2);
+      // the mask: the fine one up top, the very soft one from the waist down
+      const mask = canvas(w, h), mx = mask.getContext('2d');
+      const top = canvas(w, h), tx = top.getContext('2d');
+      tx.drawImage(m1, 0, 0); tx.globalCompositeOperation = 'destination-in';
+      let g = tx.createLinearGradient(0, h * 0.45, 0, h); g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)'); tx.fillStyle = g; tx.fillRect(0, 0, w, h);
+      const low = canvas(w, h), lw = low.getContext('2d');
+      lw.drawImage(m2, 0, 0); lw.globalCompositeOperation = 'destination-in';
+      g = lw.createLinearGradient(0, h * 0.45, 0, h); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,1)'); lw.fillStyle = g; lw.fillRect(0, 0, w, h);
+      mx.drawImage(top, 0, 0); mx.globalCompositeOperation = 'lighter'; mx.drawImage(low, 0, 0);
       const keep = canvas(w, h), kx = keep.getContext('2d');
-      kx.drawImage(layer, 0, 0); kx.globalCompositeOperation = 'destination-in'; kx.drawImage(mk, 0, 0); kx.drawImage(mk, 0, 0);
+      kx.drawImage(layer, 0, 0); kx.globalCompositeOperation = 'destination-in'; kx.drawImage(mask, 0, 0); kx.drawImage(mask, 0, 0);
       lx.clearRect(0, 0, w, h); lx.drawImage(keep, 0, 0);
+      if (!L.round && !L.radius && !L.hard) {
+        // where the photo's own frame cut through them (an arm, a shoulder at its side): faded, never a straight line
+        lx.globalCompositeOperation = 'destination-out';
+        const side = (x0, x1) => { const sg = lx.createLinearGradient(x0, 0, x1, 0); sg.addColorStop(0, 'rgba(0,0,0,1)'); sg.addColorStop(1, 'rgba(0,0,0,0)'); lx.fillStyle = sg; lx.fillRect(Math.min(x0, x1), 0, Math.abs(x1 - x0), h); };
+        side(0, w * 0.09); side(w, w * 0.91);
+        const tg = lx.createLinearGradient(0, 0, 0, h * 0.025); tg.addColorStop(0, 'rgba(0,0,0,.9)'); tg.addColorStop(1, 'rgba(0,0,0,0)'); lx.fillStyle = tg; lx.fillRect(0, 0, w, h * 0.025);
+        lx.globalCompositeOperation = 'source-over';
+      }
     }
     if (L.tint) {
       /* GRADED INTO THE FLYER: the scene's own colour laid over the person
@@ -998,10 +1022,13 @@
       /* the bottom of a person melts into SHADOW, as a designer does it — it
          used to just go see-through, and a white suit fading over the picture
          behind looked like a ghost */
-      lx.globalCompositeOperation = 'source-atop';
-      const sg = lx.createLinearGradient(0, h * (1 - L.fade * 1.6), 0, h);
-      sg.addColorStop(0, 'rgba(0,0,0,0)'); sg.addColorStop(0.55, 'rgba(0,0,0,.45)'); sg.addColorStop(1, 'rgba(0,0,0,.85)');
-      lx.fillStyle = sg; lx.fillRect(0, 0, w, h);
+      // (on a light page, into the light: a dark foot on white reads as dirt)
+      if (!L.fadeLight) {
+        lx.globalCompositeOperation = 'source-atop';
+        const sg = lx.createLinearGradient(0, h * (1 - L.fade * 1.6), 0, h);
+        sg.addColorStop(0, 'rgba(0,0,0,0)'); sg.addColorStop(0.55, 'rgba(0,0,0,.45)'); sg.addColorStop(1, 'rgba(0,0,0,.85)');
+        lx.fillStyle = sg; lx.fillRect(0, 0, w, h);
+      }
       lx.globalCompositeOperation = 'destination-out';
       const g = lx.createLinearGradient(0, h * (1 - L.fade), 0, h);
       g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,1)');
@@ -1204,29 +1231,32 @@
     const line = (pts, r) => { const ps = pts.filter(Boolean); if (ps.length < 2) return; x.lineWidth = r * 2; x.beginPath(); x.moveTo(ps[0].x, ps[0].y); ps.slice(1).forEach((q) => x.lineTo(q.x, q.y)); x.stroke(); };
     const dot = (q, r) => { if (!q) return; x.beginPath(); x.arc(q.x, q.y, r, 0, Math.PI * 2); x.fill(); };
     // the head, generously (hair, a hat, a head-tie)
-    const hr = Math.max(sw * 0.42, Math.hypot(nose.x - sm.x, nose.y - sm.y) * 0.8);
-    x.beginPath(); x.ellipse(nose.x, nose.y - hr * 0.45, hr * 1.25, hr * 1.6, 0, 0, Math.PI * 2); x.fill();
-    line([nose, sm], sw * 0.32);
+    // GENEROUS, all of it: an outline drawn tight took bites out of a sleeve, a head-tie, an agbada, and cut a
+    // pulpit away along a hard line ("too much was removed") — what it removes now is only what is well clear
+    // of the person, and it goes softly (the blur below), so anything left beside them fades, never stops
+    const hr = Math.max(sw * 0.5, Math.hypot(nose.x - sm.x, nose.y - sm.y) * 0.95);
+    x.beginPath(); x.ellipse(nose.x, nose.y - hr * 0.45, hr * 1.5, hr * 1.85, 0, 0, Math.PI * 2); x.fill();
+    line([nose, sm], sw * 0.5);
     // the body to the hips
     const lh = P(23, 0.2), rh = P(24, 0.2);
     const hy = lh && rh ? (lh.y + rh.y) / 2 : sm.y + sw * 1.7;
     const L2 = lh || { x: ls.x, y: hy }, R2 = rh || { x: rs.x, y: hy };
     x.beginPath(); x.moveTo(ls.x, ls.y); x.lineTo(rs.x, rs.y); x.lineTo(R2.x, R2.y); x.lineTo(L2.x, L2.y); x.closePath(); x.fill();
-    x.lineWidth = sw * 0.6; x.stroke();
+    x.lineWidth = sw * 1.0; x.stroke();
     // arms and hands (a microphone in a hand stays)
     [[11, 13, 15, 19, 21], [12, 14, 16, 20, 22]].forEach(([s, e, wr, ix, th]) => {
       const S2 = P(s, 0.2), E = P(e, 0.35), Wr = P(wr, 0.35);
-      line([S2, E, Wr], sw * 0.21);
-      if (Wr) { dot(Wr, sw * 0.36); line([Wr, P(ix, 0.3)], sw * 0.16); line([Wr, P(th, 0.3)], sw * 0.16); }
-      else if (E) dot(E, sw * 0.24);
+      line([S2, E, Wr], sw * 0.36);
+      if (Wr) { dot(Wr, sw * 0.55); line([Wr, P(ix, 0.3)], sw * 0.26); line([Wr, P(th, 0.3)], sw * 0.26); }
+      else if (E) dot(E, sw * 0.4);
     });
     // the legs only when they can be seen (a podium in front of them is not them)
     [[23, 25, 27, 31, 29], [24, 26, 28, 32, 30]].forEach(([hp, kn, an, ft, hl]) => {
       const K = P(kn, 0.6); if (!K) return;
-      line([P(hp, 0.2) || { x: (lh || ls).x, y: hy }, K, P(an, 0.6), P(ft, 0.6)], sw * 0.22);
-      dot(P(hl, 0.6), sw * 0.16);
+      line([P(hp, 0.2) || { x: (lh || ls).x, y: hy }, K, P(an, 0.6), P(ft, 0.6)], sw * 0.32);
+      dot(P(hl, 0.6), sw * 0.24);
     });
-    return softened(c, Math.max(2, sw * 0.05));
+    return softened(c, Math.max(4, sw * 0.16));
   }
   /* the person's own outline: only the biggest shape, trimmed tight (feet at the bottom edge) */
   function tidyCanvas(cv) {
@@ -1583,7 +1613,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       img: sp.img, name: sp.name || 'Speaker', speaker: sp.id || '', photo: sp.photo || '',
       src: { x: 0, y: fr.t / m.h, w: 1, h: (vb - fr.t) / m.h },
       w, h, x: X, y: o.t + h / 2,
-      fade: whole ? 0 : Math.max(o.fade == null ? 0.22 : o.fade, mode === 'chest' ? 0.34 : 0), feather: 1.4,
+      fade: whole ? 0 : Math.max(o.fade == null ? 0.22 : o.fade, mode === 'chest' ? 0.34 : 0.2), feather: 1.4,
       frame: { mode, t: o.t, b: o.b, cx: o.cx },
     }, o.extra || {}));
   }
@@ -1775,6 +1805,179 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   }
 
   const LAYOUTS = {
+    /* ════════ BRIGHT PAGES — a third of the flyers people save are white, cream or gold, not dark ════════ */
+
+    /* ── JERICHO HOUR: a light page, a two-tone heavy title on the left, the minister big on the right, a ribbon with his name ── */
+    jericho(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D), ink = '#1b1b1f';
+      const deepInk = lum(p.mid) < 0.55 ? mix(p.mid, '#000000', 0.15) : '#7a1414';
+      L.push(BG({ img: D.bg, sat: -25, bright: 30, contrast: -6, wash: 'rgba(253,250,244,.62)', grain: 0.3,
+        colorWash: [{ radial: true, x: 0.25, y: 0.3, r: 0.75, stops: ['rgba(255,255,255,.95)', 'rgba(255,255,255,0)'], mode: 'screen', a: 0.8 }] }));
+      const hd = header(D); hd.forEach((l) => { if (l.type === 'text') { l.fill = ink; l.shadow = false; } }); L.push(...hd);
+      if (sp) L.push(hero(sp, { cx: 790, t: H * 0.2, b: H + 20, mode: 'chest', fade: 0.18, minL: 470, extra: { fadeLight: true, shade: 'rgba(40,20,10,.25)' } }));
+      let y = H * 0.17;
+      L.push(put(micro('PRESENTS', { size: 14, letter: 0.9, fill: rgba(ink, 0.75), shadow: false }), { l: 72, t: y })); y += 34;
+      const lines = stack(f.title || 'Jericho Hour', 2);
+      const ts = stackLines(lines, { t: y, cx: 72 + 290, fit: 580, maxH: H * 0.12, gap: 6,
+        style: { font: 'Archivo Black', upper: true, fill: { stops: ['#3c3c44', ink], angle: 90 }, extrude: 2, extrudeColor: rgba('#000000', 0.16), shadow: false } });
+      if (ts[1]) { ts[1].fill = { stops: [mix(deepInk, '#ffffff', 0.15), deepInk], angle: 90 }; ts[1].inkSet = true; }
+      L.push(...ts); y = ts.bottom + 16;
+      const tagText = f.theme || D.dir.kicker || '';
+      if (tagText) { const g = pill([{ text: tagText, upper: true, font: 'Montserrat', size: 17, letter: 0.06 }], { fill: ink, ink: '#ffffff', radius: 2, padX: 14, padY: 8 }); L.push(...g.place(72 + g.w / 2, y + g.h / 2)); y += g.h + 22; }
+      if (d) { const j = put(T({ name: 'Join us', text: `JOIN US THIS ${d.day.toUpperCase()}`, font: 'Montserrat', size: 20, fill: ink, align: 'left', letter: 0.04 }), { l: 72, t: y }); L.push(j); y = box(j).b + 22; }
+      if (f.time) { const g = pill([{ text: f.time + (f.time2 ? ' - ' + f.time2 : ''), font: 'Archivo Black', size: 36 }], { fill: '#ffffff', ink, radius: 40, padX: 26, padY: 10, shadow: true }); L.push(...g.place(72 + g.w / 2, y + g.h / 2)); y += g.h + 22; }
+      if (d) { const dt = put(T({ name: 'Date', text: `${d.day3} ${d.ddth} ${d.month} ${d.year}`, upper: true, font: 'Montserrat', size: 19, fill: ink, align: 'left' }), { l: 72, t: y }); L.push(dt); y = box(dt).b + 14; }
+      const vl = venueLines(D, 3);
+      if (vl) { const v = put(T({ name: 'Venue', text: vl, upper: true, font: 'Montserrat', size: 15, line: 1.25, fill: rgba(ink, 0.85), align: 'left', maxW: 380 }), { l: 72, t: y }); L.push(v); y = box(v).b + 14; }
+      if (f.phone) L.push(put(T({ name: 'Phone', text: 'FOR INFO: ' + f.phone, font: 'Archivo Black', size: 22, fill: ink, align: 'left' }), { l: 72, t: y }));
+      if (sp && sp.name) {
+        L.push(...turn([SH({ name: 'Name ribbon', shape: 'rect', fill: '#ffffff', x: 800, y: H - 150, w: 760, h: 62, shadow: true }),
+          put(T({ name: 'Speaker', text: sp.name, upper: true, font: 'Montserrat Black', size: 26, fill: deepInk, letter: 0.06, maxW: 640 }), { cx: 800, cy: H - 150 })], -14, 800, H - 150));
+      }
+      return L;
+    },
+
+    /* ── UNIQUE EXPERIENCE: a warm light page, a red line over a dark one, two ministers, the details on a tilted cream banner ── */
+    unique(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], ps = spsOf(D).slice(0, 2), ink = '#1d1a18';
+      const red = (() => { const [r, , b] = hexRgb(p.mid); return r > b + 30 && lum(p.mid) < 0.6 ? p.mid : '#d4141a'; })();
+      L.push(BG({ img: D.bg, sat: -30, bright: 32, contrast: -8, wash: 'rgba(255,246,232,.6)', grain: 0.3,
+        colorWash: [{ stops: ['#fffaf2', '#ffe6c4', '#f7c58a'], angle: 90, mode: 'soft-light', a: 0.8 }] }));
+      const hd = header(D, { center: true, t: 30 }); hd.forEach((l) => { if (l.type === 'text') { l.fill = ink; l.shadow = false; } }); L.push(...hd);
+      const [a, b] = twoLines(f.title || 'Unique Experience');
+      let y = hd.bottom + 14;
+      const t1 = stackLines([a || b], { t: y, fit: 900, maxH: H * 0.12, style: { font: 'Anton', upper: true, stretch: 1.15, fill: { stops: [mix(red, '#ffffff', 0.1), red], angle: 90 }, extrude: 2, extrudeColor: rgba('#000000', 0.2), shadow: false } });
+      t1.forEach((l) => { l.inkSet = true; }); L.push(...t1); y = t1.bottom + 4;
+      if (a && b) { const t2 = stackLines([b], { t: y, fit: 900, maxH: H * 0.1, style: { font: 'Anton', upper: true, stretch: 1.15, fill: { stops: ['#3a3634', ink], angle: 90 }, shadow: false } }); L.push(...t2); y = t2.bottom; }
+      if (f.extra || f.theme) { const s = put(micro(f.extra || f.theme, { size: 18, letter: 0.7, fill: ink, shadow: false, maxW: 900 }), { cx: 540, t: y + 14 }); L.push(s); y = box(s).b; }
+      const top = Math.max(y + 20, H * 0.36), bot = H - 150;
+      if (ps.length === 2) {
+        L.push(hero(ps[1], { cx: 760, t: top + 20, b: bot, mode: 'chest', fade: 0.25, extra: { fadeLight: true, shade: 'rgba(60,30,10,.25)' } }));
+        L.push(hero(ps[0], { cx: 330, t: top, b: bot, mode: 'chest', fade: 0.25, extra: { fadeLight: true, shade: 'rgba(60,30,10,.25)' } }));
+        ps.forEach((s, i) => { const np = nameParts(s.name || ''); if (!np.name) return; L.push(...col([np.title && T({ name: 'Speaker title', text: np.title, upper: true, font: 'Montserrat', size: 15, fill: ink, align: i ? 'right' : 'left', letter: 0.1 }), T({ name: 'Speaker', text: np.name, upper: true, font: 'Barlow Black Italic', size: 30, fill: ink, align: i ? 'right' : 'left', maxW: 230 })].filter(Boolean), i ? { r: 1036, cy: top + (bot - top) * 0.55 } : { l: 44, cy: top + (bot - top) * 0.55 })); });
+      } else if (ps[0]) L.push(hero(ps[0], { cx: 540, t: Math.max(y + 10, H * 0.27), b: H - 60, mode: 'chest', fade: 0.12, extra: { fadeLight: true, shade: 'rgba(60,30,10,.25)' } }));   // one: big, standing behind the banner
+      // the tilted cream banner
+      const by = H - 112, band = [SH({ name: 'Banner', shape: 'rect', fill: '#f7e8cf', x: 540, y: by, w: 1240, h: 150, shadow: true })];
+      const line1 = [d && `${d.day3}. ${d.mon3}. ${d.ddth} ${d.year}`, f.time].filter(Boolean).join('  |  ');
+      if (line1) band.push(put(T({ name: 'When', text: line1, upper: true, font: 'Barlow Black Italic', size: 54, fill: ink, maxW: 960 }), { cx: 540, cy: by - 20 }));
+      const vt = venueText(D);
+      if (vt) { const g = venueGroup(vt, red, 860, { size: 18, ink, shadow: false }); band.push(...g.place(540, by + 34)); }
+      L.push(...turn(band, -4, 540, by));
+      return L;
+    },
+
+    /* ── THANKSGIVING: a white sky, a script word in gold over a red and gold-leaf title, the people below ── */
+    thanks(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], ps = spsOf(D).slice(0, 3), ink = '#211b18';
+      const red = '#c5161d';
+      L.push(BG({ img: D.bg, sat: -45, bright: 40, contrast: -12, wash: 'rgba(255,255,255,.66)', grain: 0.25 }));
+      L.push(FX({ kind: 'glow', x: 540, y: H * 0.3, w: 1300, h: 800, color: '#fff6e0', opacity: 0.9 }));
+      const hd = header(D, { center: true, t: 30 }); hd.forEach((l) => { if (l.type === 'text') { l.fill = red; l.shadow = false; } }); L.push(...hd);
+      let y = hd.bottom + 6;
+      L.push(put(T({ name: 'Presents', text: 'presents', font: 'Great Vibes', size: 44, fill: red }), { cx: 540, t: y })); y += 56;
+      const [a, b] = twoLines(f.title || 'Thanksgiving Service');
+      const ts = stackLines([a, b].filter(Boolean), { t: y + 40, fit: 900, maxH: H * 0.13, gap: 4, style: { font: 'Playfair Black', upper: true, fill: { stops: ['#e2252b', '#9d0f14'], angle: 90 }, extrude: 2, extrudeColor: rgba('#5a0505', 0.4), shadow: false } });
+      if (ts[1]) Object.assign(ts[1], { fill: '#ffffff', imgFill: 'tex:gold', imgFillA: 1, bevel: 0.9, extrudeColor: ['#6b3a04', '#1e0f01'] });
+      ts.forEach((l) => { l.inkSet = true; });
+      L.push(...ts);
+      L.push(put(T({ name: 'Script word', text: D.script, font: 'Great Vibes', size: 120, fill: '#c9921a', rot: -6, maxW: 620, shadow: true, inkSet: true }), { cx: 470, cy: box(ts[0]).t + 6 }));
+      y = ts.bottom + 18;
+      const top = Math.max(y, H * 0.44), bot = H - 70;
+      if (ps.length >= 2) {
+        const xs = ps.length === 2 ? [380, 720] : [250, 540, 830];
+        ps.forEach((s, i) => { if (i) L.push(hero(s, { cx: xs[i], t: top + 40, b: bot, mode: 'chest', fade: 0.3, extra: { fadeLight: true, shade: 'rgba(60,30,10,.2)' } })); });
+        L.push(hero(ps[0], { cx: xs[0], t: top, b: bot, mode: 'chest', fade: 0.3, extra: { fadeLight: true, shade: 'rgba(60,30,10,.2)' } }));
+      } else if (ps[0]) L.push(hero(ps[0], { cx: 470, t: top, b: bot, mode: 'chest', fade: 0.3, extra: { fadeLight: true, shade: 'rgba(60,30,10,.2)' } }));
+      if (d) L.push(...col([T({ name: 'Day', text: d.day.toUpperCase(), font: 'Montserrat', size: 18, fill: ink, align: 'right', letter: 0.2 }), T({ name: 'Date', text: `${d.ddth} ${d.mon3.toUpperCase()}`, font: 'Playfair Black', size: 46, fill: ink, align: 'right' }), T({ name: 'Year', text: d.year, font: 'Montserrat', size: 20, fill: ink, align: 'right' })], { r: 1020, cy: H * 0.7, gap: 2 }));
+      if (f.time) L.push(...pill([{ text: f.time, font: 'Archivo Black', size: 36 }], { fill: red, ink: '#ffffff', radius: 6, padX: 18, padY: 8, shadow: true }).place(940, H * 0.81));
+      const vt = venueText(D);
+      if (vt) { L.push(SH({ name: 'Venue bar', shape: 'rect', fill: rgba('#ffffff', 0.9), x: 540, y: H - 40, w: W, h: 64 })); L.push(put(T({ name: 'Venue', text: 'VENUE: ' + vt, upper: true, font: 'Montserrat', size: 18, fill: ink, maxW: 980 }), { cx: 540, cy: H - 40 })); }
+      return L;
+    },
+
+    /* ── PROPHETIC MANTLE: a cream and gold page, a tall elegant serif title in gold, the minister at the foot, the details either side ── */
+    mantle(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D), ink = '#3b2706';
+      L.push(BG({ img: D.bg, sat: -20, bright: 26, contrast: -4, wash: 'rgba(255,244,214,.55)', grain: 0.3,
+        colorWash: [{ stops: ['#fff8e6', '#f6d98a', '#d9a23a'], angle: 90, mode: 'soft-light', a: 0.85 },
+          { radial: true, x: 0.5, y: 0.55, r: 0.55, stops: ['rgba(255,240,190,.95)', 'rgba(255,240,190,0)'], mode: 'screen', a: 0.7 }] }));
+      L.push(FX({ kind: 'beams', x: 540, y: H * 0.55, w: 1000, h: H * 0.6, n: 4, seed: 3, color: '#ffe9a8', opacity: 0.45 }));
+      const hd = header(D); hd.forEach((l) => { if (l.type === 'text') { l.fill = ink; l.shadow = false; } }); L.push(...hd);
+      let y = H * 0.13;
+      if (D.dir.kicker) { const k = put(T({ name: 'Kicker', text: '- ' + D.dir.kicker + ' -', upper: true, font: 'Montserrat', size: 18, letter: 0.3, fill: ink }), { cx: 540, t: y }); L.push(k); y = box(k).b + 12; }
+      const lines = stack(f.title || 'Prophetic Mantle Service', 3), n = lines.length;
+      const ts = stackLines(lines, { t: y, fit: 900, maxH: H * (n === 1 ? 0.2 : n === 2 ? 0.14 : 0.105), gap: 0,
+        style: { font: 'Bodoni Light', upper: true, stretch: 1.5, letter: -0.01, fill: { stops: ['#a8740e', '#e3b53c', '#7a4f05'], angle: 90 }, shadow: false } });
+      ts.forEach((l) => { l.inkSet = true; }); L.push(...ts);
+      if (sp) L.push(hero(sp, { cx: 540, t: Math.max(ts.bottom - 20, H * 0.5), b: H - 90, mode: 'chest', fade: 0.3, extra: { fadeLight: true, shade: 'rgba(80,50,10,.2)', tint: { color: '#f6c445', a: 0.18, fall: 0.4 } } }));
+      if (f.time) L.push(...col([T({ name: 'Time', text: f.time, font: 'Bodoni', size: 52, fill: ink, align: 'left' }), f.time2 && T({ name: 'Time 2', text: f.time2, font: 'Bodoni', size: 52, fill: ink, align: 'left' })].filter(Boolean), { l: 64, cy: H * 0.68, gap: 0 }));
+      if (d) L.push(...col([T({ name: 'Date', text: `${d.day3}. ${d.ddth}`, upper: true, font: 'Bodoni', size: 52, fill: ink, align: 'right' }), T({ name: 'Month', text: d.month.toUpperCase(), font: 'Bodoni', size: 40, fill: ink, align: 'right' })], { r: 1016, cy: H * 0.66, gap: 0 }));
+      if (sp && sp.name) { const np = nameParts(sp.name); L.push(...col([T({ name: 'Ministering', text: 'MINISTERING', font: 'Montserrat', size: 13, letter: 0.2, fill: ink, align: 'right' }), np.title && T({ name: 'Speaker title', text: np.title, font: 'Montserrat Black', size: 22, fill: ink, align: 'right' }), T({ name: 'Speaker', text: np.name, font: 'Montserrat Black', size: 26, fill: ink, align: 'right', maxW: 300 })].filter(Boolean), { r: 1016, t: H * 0.75, gap: 2 })); }
+      const vt = venueText(D);
+      L.push(SH({ name: 'Foot', shape: 'rect', fill: { stops: [rgba('#3b2706', 0), rgba('#3b2706', 0.85)], angle: 90 }, x: 540, y: H - 50, w: W, h: 100 }));
+      if (vt) L.push(put(T({ name: 'Venue', text: [f.church, vt].filter(Boolean).join(' - '), upper: true, font: 'Montserrat', size: 16, letter: 0.12, fill: '#fff7e0', maxW: 980, shadow: true }), { cx: 540, b: H - 34 }));
+      return L;
+    },
+
+    /* ════════ SEVERAL MINISTERS — conferences, conventions, concerts ════════ */
+
+    /* ── URGENCY: the main minister big in the middle, the rest in a row along the foot, each named; the title over the top ── */
+    urgency(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], ps = spsOf(D).slice(0, 6);
+      L.push(BG({ img: D.bg, grade: 'vivid', contrast: 14, sat: 24, keep: 0.14, topShade: 0.35, bottomShade: 0.85, bottomFrom: 0.62, vignette: 0.35,
+        colorWash: [{ stops: [mix(p.accent, '#ffffff', 0.2), p.mid, p.deep], angle: 90, mode: 'soft-light', a: 0.7 }] }));
+      L.push(FX({ kind: 'glow', x: 540, y: H * 0.42, w: 1100, h: 900, opacity: 0.55 }));
+      L.push(...header(D, { center: true, t: 28 }));
+      const tsT = stackLines(stack(f.title || 'Urgency', 2), { t: H * 0.1, fit: 860, maxH: H * 0.12, gap: 4,
+        style: solid3d(p, { font: 'Archivo Black', fill: GOLD, extrude: 4, glow: rgba(p.accent, 0.35) }) });
+      L.push(...tsT);
+      let y = tsT.bottom + 10;
+      if (f.theme) { const th = put(T({ name: 'Theme', text: f.theme, font: 'Great Vibes', size: 60, maxW: 700, shadow: true }), { cx: 540, t: y }); L.push(th); y = box(th).b; }
+      const others = ps.slice(1), rowH = others.length ? H * 0.2 : 0, rowT = H - 70 - rowH;
+      if (ps[0]) L.push(hero(ps[0], { cx: 540, t: Math.max(y + 6, H * 0.28), b: others.length ? rowT + rowH * 0.35 : H - 40, mode: 'chest', fade: 0.3, extra: lit(p) }));
+      if (others.length) {
+        const n = others.length, step = Math.min(220, 1000 / n), x0 = 540 - step * (n - 1) / 2;
+        others.forEach((s, i) => {
+          const cx = x0 + i * step;
+          L.push(hero(s, { cx, t: rowT, b: H - 64, mode: 'chest', fade: 0.25, extra: lit(p) }));
+          const np = nameParts(s.name || '');
+          L.push(...col([np.title && T({ name: 'Minister title', text: np.title, upper: true, font: 'Montserrat', size: 11, letter: 0.1, shadow: true }), T({ name: 'Minister', text: np.name || '', upper: true, font: 'Montserrat Black', size: 14, maxW: step - 10, shadow: true })].filter(Boolean), { cx, b: H - 22, gap: 1 }));
+        });
+      }
+      L.push(...col([f.time && T({ name: 'Time', text: f.time, font: 'Archivo Black', size: 48, fill: p.accent, align: 'left', shadow: true }), d && T({ name: 'Date', text: `${d.day}\n${d.ddth} ${d.mon3}.\n${d.year}`, upper: true, font: 'Barlow Black Italic', size: 34, line: 0.95, align: 'left', shadow: true })].filter(Boolean), { l: 50, cy: H * 0.52, gap: 8 }));
+      const vt = venueLines(D, 2);
+      if (vt) { const g = venueGroup(vt, p.accent, 230, { size: 15 }); L.push(...g.place(1030 - g.w / 2, H * 0.5)); }
+      return L;
+    },
+
+    /* ── THE HARVEST: the ministers in two rows across the top, each named, the title huge beneath them, the details on a bar ── */
+    harvest(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], ps = spsOf(D).slice(0, 7);
+      L.push(BG({ img: D.bg, grade: 'vivid', contrast: 16, sat: 16, keep: 0.12, topShade: 0.5, bottomShade: 0.95, bottomFrom: 0.55, vignette: 0.4 }));
+      L.push(FX({ kind: 'ring', x: 540, y: H * 0.3, w: 760, h: 760, opacity: 0.55 }));
+      L.push(...header(D, { center: true, t: 26 }));
+      const n = ps.length, back = ps.slice(Math.ceil(n / 2)), front = ps.slice(0, Math.ceil(n / 2));
+      const row = (list, t, b, sz) => {
+        if (!list.length) return;
+        const step = Math.min(300, 960 / list.length), x0 = 540 - step * (list.length - 1) / 2;
+        list.forEach((s, i) => {
+          const cx = x0 + i * step;
+          L.push(hero(s, { cx, t, b, mode: 'chest', fade: 0.3, extra: lit(p) }));
+          const np = nameParts(s.name || '');
+          L.push(...col([np.title && T({ name: 'Minister title', text: np.title, upper: true, font: 'Montserrat', size: sz * 0.7, letter: 0.1, shadow: true }), T({ name: 'Minister', text: np.name || '', upper: true, font: 'Montserrat Black', size: sz, maxW: step - 16, shadow: true })].filter(Boolean), { cx: cx + (i < list.length / 2 ? -step * 0.32 : step * 0.32), cy: t + (b - t) * 0.55, gap: 1 }));
+        });
+      };
+      row(back, H * 0.12, H * 0.42, 14);
+      row(front, H * 0.25, H * 0.6, 16);
+      const ts = stackLines(stack(f.title || 'The Harvest', 2), { t: H * 0.6, fit: 900, maxH: H * 0.11, gap: 4,
+        style: solid3d(p, { font: 'Cinzel', upper: true, fill: GOLD, extrude: 3, glow: rgba(p.accent, 0.4) }) });
+      L.push(...ts);
+      let y = ts.bottom + 16;
+      if (d) { const dt = put(T({ name: 'Date', text: `${d.day}, ${d.ddth} OF ${d.month} ${d.year}`, upper: true, font: 'Montserrat', size: 22, letter: 0.08, fill: p.accent, shadow: true }), { cx: 540, t: y }); L.push(dt); y = box(dt).b + 18; }
+      L.push(...infoRow(D, Math.max(y + 40, H - 90), [f.time && { name: 'Time', big: f.time + (f.time2 ? ' - ' + f.time2 : ''), size: 40 }, venueText(D) && { name: 'Venue', small: venueLines(D, 3), maxW: 360, smallSize: 15 }], { lineH: 56 }));
+      return L;
+    },
+
     /* ── GLORY: two enormous lines, a little tag between, the preacher in front of them ── */
     glory(D) {
       const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D);
@@ -2104,7 +2307,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       L.push(...ts); y = ts.bottom;
       if (scriptW) { const s = put(T({ name: 'Script word', text: scriptW.toLowerCase(), font: 'Yellowtail', fill: red, fit: 640, maxH: H * 0.11 }), { cx: 600, t: y - H * 0.03 }); s.rot = -6; L.push(s); y = box(s).b; }
       if (f.theme) { const th = put(T({ name: 'Theme', text: 'Theme: ' + f.theme, upper: true, font: 'Barlow Italic', size: 34, fill: ink, maxW: 820 }), { cx: 540, t: y + 14 }); L.push(th); y = box(th).b; }
-      if (sp) L.push(hero(sp, { cx: 540, t: Math.max(y + 10, H * 0.38), b: H - 60, mode: 'chest', fade: 0.35, extra: { shade: 'rgba(60,30,10,.35)', tint: { color: '#ffb36b', a: 0.25, fall: 0.4 } } }));
+      if (sp) L.push(hero(sp, { cx: 540, t: Math.max(y + 10, H * 0.38), b: H - 60, mode: 'chest', fade: 0.35, extra: { fadeLight: true, shade: 'rgba(60,30,10,.35)', tint: { color: '#ffb36b', a: 0.25, fall: 0.4 } } }));
       L.push(SH({ name: 'Info bar', shape: 'round', radius: 0, fill: { stops: [rgba('#ffffff', 0), rgba('#ffffff', 0.92)], angle: 90 }, x: 540, y: H - 90, w: W, h: 180 }));
       L.push(...infoRow(D, H - 74, [d && { name: 'Date', big: `${d.ddth} ${d.mon3}. ${d.year}`, size: 40 }, f.time && { name: 'Time', big: f.time, size: 40, accent: true }, venueText(D) && { name: 'Venue', small: venueLines(D, 3), maxW: 320, smallSize: 14 }], { ink, accent: red, lineH: 56 }));
       return L;
@@ -2340,7 +2543,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       return L;
     },
   };
-  const LOOK_NAMES = { glory: 'Glory', fire: 'Fire', encounter: 'Encounter', miracle: 'Spotlight', bible: 'Golden classic', prophetic: 'Gold', sunday: 'Giant words', lineup: 'Line-up', script: 'Script', scenic: 'Scenic', light: 'Light', joinus: 'Join us', didone: 'Elegant', upper: 'Upper Room', theme: 'Theme picture', mountain: 'Sky letters', breaking: 'Breaking', spirit: 'Gold line-up' };
+  const LOOK_NAMES = { glory: 'Glory', fire: 'Fire', encounter: 'Encounter', miracle: 'Spotlight', bible: 'Golden classic', prophetic: 'Gold', sunday: 'Giant words', lineup: 'Line-up', script: 'Script', scenic: 'Scenic', light: 'Light', joinus: 'Join us', didone: 'Elegant', upper: 'Upper Room', theme: 'Theme picture', mountain: 'Sky letters', breaking: 'Breaking', spirit: 'Gold line-up',
+    jericho: 'Bright hour', unique: 'Bright duo', thanks: 'Bright sky', mantle: 'Cream & gold', urgency: 'Line-up stage', harvest: 'Rows' };
   /* each look's own colours (the AI's colours go on the first few designs; these on the rest, for variety) */
   const SIGNATURE = {
     glory: { deep: '#0b0b10', mid: '#2a2140', accent: '#f6c915', hi: '#ffffff' },
@@ -2361,6 +2565,12 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     mountain: { deep: '#09101a', mid: '#10415d', accent: '#39a9b9', hi: '#e5e7e9' },
     breaking: { deep: '#3a0000', mid: '#c8102e', accent: '#ffd21f', hi: '#ffffff' },
     spirit: { deep: '#140a00', mid: '#5a3208', accent: '#f5c542', hi: '#fff6dd' },
+    jericho: { deep: '#2a0606', mid: '#8a1010', accent: '#c8102e', hi: '#ffffff' },
+    unique: { deep: '#2a0606', mid: '#c5161d', accent: '#f5c542', hi: '#ffffff' },
+    thanks: { deep: '#2a0606', mid: '#c5161d', accent: '#c9921a', hi: '#ffffff' },
+    mantle: { deep: '#2a1600', mid: '#8a5a08', accent: '#e3b53c', hi: '#fff8e6' },
+    urgency: { deep: '#2a0400', mid: '#d4460b', accent: '#ffd23f', hi: '#ffffff' },
+    harvest: { deep: '#1a0d00', mid: '#7a4a08', accent: '#f5c542', hi: '#fff6dd' },
   };
 
   /* the word written in script across a title — never one the title already says ("PRAYER MEETING / Prayer") */
@@ -2907,7 +3117,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   const BOARD_N = 5;
   // how well each layout stands up on its own (from setting them beside the Pinterest flyers)
   const STRENGTH = { glory: 9, fire: 9, joinus: 9, spirit: 8, prophetic: 8, sunday: 8, upper: 8, miracle: 8, script: 7, encounter: 7, breaking: 7, didone: 7,
-    lineup: 7, mountain: 6, bible: 6, scenic: 6, light: 6, theme: 6 };
+    lineup: 7, mountain: 6, bible: 6, scenic: 6, light: 6, theme: 6,
+    jericho: 8, unique: 8, thanks: 7, mantle: 8, urgency: 8, harvest: 8 };
   const SEEN_KEY = 'mw-flyer-seen', LIKED_KEY = 'mw-flyer-liked';
   const readLS = (k) => { try { return JSON.parse(localStorage.getItem(k) || '{}') || {}; } catch (e) { return {}; } };
   const seenLooks = () => readLS(SEEN_KEY);
@@ -2932,8 +3143,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const ai0 = ai.indexOf(l); if (ai0 >= 0 && ai0 < 6) v += 3 - ai0 * 0.4;   // the AI's picks for this event, best first
       v += Math.min(4, (liked[l] || 0) * 0.5);                                   // what this church goes for
       if (seen[l] && now - seen[l] < 36e5 * 6) v -= 2.5;                         // on the last board or two: rest it
-      if ((l === 'lineup' || l === 'spirit') && !many) v -= 3;                   // a line-up of one is not a line-up
-      if (l === 'lineup' && many) v += 3;
+      if (['lineup', 'spirit', 'urgency', 'harvest'].includes(l) && !many) v -= 4;   // a line-up of one is not a line-up
+      if (['lineup', 'urgency', 'harvest', 'unique'].includes(l) && many) v += 3;
       return v + Math.random() * 2.2;                                            // freshness
     };
     const scored = Object.keys(LAYOUTS).map((l) => [l, score(l)]).sort((a, b) => b[1] - a[1]);
@@ -2950,7 +3161,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   }
   /* the light each look is built for (the reference it copies): Join us is purple, Upper Room is fire, the gold line-up gold… */
   const LOOK_TONE = { joinus: 'purple', miracle: 'purple', script: 'purple', didone: 'red', upper: 'red', breaking: 'red', fire: 'red', mountain: 'teal', scenic: 'teal',
-    spirit: 'gold', bible: 'gold', prophetic: 'gold', sunday: 'gold', encounter: 'blue', theme: 'own', glory: 'own', lineup: 'blue', light: 'own' };
+    spirit: 'gold', bible: 'gold', prophetic: 'gold', sunday: 'gold', encounter: 'blue', theme: 'own', glory: 'own', lineup: 'blue', light: 'own',
+    jericho: 'own', unique: 'gold', thanks: 'own', mantle: 'gold', urgency: 'red', harvest: 'gold' };
   function rebuildDesigns() {
     const sz = sizeOf();
     if (!F.board) newBoard();
