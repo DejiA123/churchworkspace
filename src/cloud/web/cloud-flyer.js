@@ -1029,6 +1029,36 @@
     return { w: L.w || 0, h: L.h || 0 };
   }
 
+  /*
+   * ►► EVERY WORD READABLE. ◄◄ A word in one plain colour is read against
+   * whatever is under it once the flyer is drawn up to it: a purple "7PM" on
+   * a dark red picture, dark letters on a bar the palette made dark. Where it
+   * would not stand out, it is drawn white (or near-black on something
+   * light). A colour picked by hand in the editor is left as chosen.
+   */
+  const lumOf = (r, g, b) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+  function inkFor(x, L) {
+    if (L.inkSet || L.imgFill || typeof L.fill !== 'string' || !/^#[0-9a-f]{6}$/i.test(L.fill) || (L.opacity != null && L.opacity < 0.6)) return L;
+    try {
+      const b = boxOf(L), s = L.s || 1, sideways = Math.abs(((L.rot || 0) % 180 + 180) % 180 - 90) < 30;
+      let w = b.w * s * 0.8, h = b.h * s * 0.7; if (sideways) { const t = w; w = h; h = t; }
+      const cw = x.canvas.width, ch = x.canvas.height;
+      const X0 = Math.max(0, Math.floor((L.x - w / 2) * Q)), Y0 = Math.max(0, Math.floor((L.y - h / 2) * Q));
+      const X1 = Math.min(cw, Math.ceil((L.x + w / 2) * Q)), Y1 = Math.min(ch, Math.ceil((L.y + h / 2) * Q));
+      if (X1 - X0 < 2 || Y1 - Y0 < 2) return L;
+      const d = x.getImageData(X0, Y0, X1 - X0, Y1 - Y0).data;
+      const step = Math.max(1, Math.floor(d.length / 4 / 4000)) * 4;
+      let sum = 0, n = 0;
+      for (let i = 0; i < d.length; i += step) { if (d[i + 3] < 8) continue; sum += lumOf(d[i], d[i + 1], d[i + 2]); n++; }
+      if (!n) return L;
+      const bg = sum / n, [r, g, bl] = hexRgb(L.fill), fg = lumOf(r, g, bl);
+      const ratio = (Math.max(bg, fg) + 0.05) / (Math.min(bg, fg) + 0.05);
+      if (ratio >= 2.6) return L;
+      const ink = bg < 0.32 ? '#ffffff' : '#141414';
+      return Object.assign({}, L, { fill: ink });
+    } catch (e) { return L; }   // (a picture another site sent cannot be read: drawn as it is)
+  }
+
   function drawLayer(x, S, L) {
     if (L.hidden) return;
     if (L.type === 'bg') return drawBg(x, S, L);
@@ -1040,7 +1070,7 @@
     const s = L.s || 1; if (s !== 1) x.scale(s, s);
     if (L.flip) x.scale(-1, 1);
     if (L.type === 'text') {
-      const t = textCanvas(L);
+      const t = textCanvas(inkFor(x, L));
       x.drawImage(t.c, -t.w / 2, -t.h / 2, t.w, t.h);
     } else if (L.type === 'image') {
       const im = imgOf(L.img);
@@ -1325,7 +1355,8 @@
   }
   /* the lines of a title, each set exactly as wide as the block — the stacked look */
   function stackLines(lines, o) {
-    return col(lines.filter(Boolean).map((ln, i, a) => T(Object.assign({ name: (o.name || 'Title') + (a.length > 1 ? ' ' + (i + 1) : ''), text: ln, fit: o.fit, maxH: o.maxH }, o.style || {}))),
+    const style = varyStyle(o.style || {});
+    return col(lines.filter(Boolean).map((ln, i, a) => T(Object.assign({ name: (o.name || 'Title') + (a.length > 1 ? ' ' + (i + 1) : ''), text: ln, fit: o.fit, maxH: o.maxH }, style))),
       { t: o.t, b: o.b, cx: o.cx == null ? 540 : o.cx, gap: o.gap == null ? 12 : o.gap });
   }
   /* a tilted block keeps its lines on the tilt */
@@ -1596,6 +1627,74 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   }
   /* a colour that answers the flyer's own: teal against red and gold, gold against blue and purple */
   function answer(p) { const [r, g, b] = hexRgb(p.mid); return r > b + 30 ? '#46d3cb' : '#ffcf3a'; }
+
+  /*
+   * ►► NO TWO BOARDS THE SAME. ◄◄ Every design on a board is built with a
+   * variant of its own (makeVariant): the title in another face of the same
+   * family (a condensed title stays condensed, an italic one italic), in
+   * another finish (chrome, gold, silver, warm, the flyer's own colours),
+   * the whole layout mirrored or not, the sparks and light in a fresh
+   * pattern. The layout's character stays; the flyer is a new one.
+   */
+  const FACE_FAMILIES = [
+    ['Anton', 'League Gothic', 'Bebas Neue', 'Oswald', 'Barlow Black', 'Big Shoulders'],
+    ['Barlow Italic', 'Barlow Black Italic', 'Kanit Italic', 'Montserrat Italic'],
+    ['Montserrat Black', 'Kanit Black', 'Archivo Black'],
+  ];
+  const SILVER = { stops: ['#ffffff', '#eef1f5', '#b9c1cc', '#f4f6f9'], angle: 90 };
+  let VAR = null;   // buildScene: the variant of the design being built
+  function varyStyle(st) {
+    if (!VAR) return st;
+    const o = Object.assign({}, st);
+    const fam = FACE_FAMILIES.findIndex((f) => f.includes(o.font));
+    if (fam >= 0 && VAR.faces && VAR.faces[fam]) o.font = VAR.faces[fam];
+    if ((o.fill === CHROME || o.fill === GOLD) && VAR.fill) o.fill = VAR.fill;
+    return o;
+  }
+  /** A design's variant: everything that may change about a layout, picked at random. */
+  function makeVariant(pal, rnd) {
+    rnd = rnd || Math.random;
+    const pick = (a) => a[Math.floor(rnd() * a.length)];
+    const fills = [CHROME, GOLD, SILVER,
+      { stops: ['#fffaf0', mix(pal.accent, '#ffffff', 0.55), pal.accent], angle: 90 },
+      { stops: [pal.hi || '#ffffff', mix(pal.hi || '#ffffff', pal.accent, 0.5)], angle: 90 }];
+    return {
+      faces: FACE_FAMILIES.map((f) => (rnd() < 0.35 ? null : pick(f))),   // a third of the time the layout's own face
+      fill: rnd() < 0.25 ? null : pick(fills),
+      mirror: rnd() < 0.45,
+      seed: Math.floor(rnd() * 997),
+    };
+  }
+  /* the whole flyer the other way round — but an address keeps its pin before it, and the handles their icons */
+  function mirrorLayers(layers, w) {
+    const orig = new Map(layers.map((l) => [l, l.x]));
+    layers.forEach((l) => {
+      if (l.type === 'bg') { (l.colorWash || []).forEach((c) => { if (c.radial && c.x != null) c.x = 1 - c.x; }); return; }
+      if (l.x == null) return;
+      l.x = w - l.x;
+      // a tilt goes the other way; a word stood on its end stays reading the way it did
+      if (l.rot && Math.abs(Math.abs(l.rot) - 90) > 25) l.rot = -l.rot;
+      if (l.type === 'text' && (l.align === 'left' || l.align === 'right')) l.align = l.align === 'left' ? 'right' : 'left';
+    });
+    const keepOrder = (members) => {
+      if (members.length < 2) return;
+      const bs = members.map((m) => { const b = box(Object.assign({}, m, { x: orig.get(m) })); return b; });
+      const l0 = Math.min(...bs.map((b) => b.l)), r0 = Math.max(...bs.map((b) => b.r)), dx = (w - r0) - l0;
+      members.forEach((m) => { m.x = orig.get(m) + dx; if (m.type === 'text' && (m.align === 'left' || m.align === 'right')) m.align = m.align === 'left' ? 'right' : 'left'; });
+    };
+    layers.forEach((l, i) => { if (l.name === 'Pin' && layers[i + 1] && layers[i + 1].name === 'Venue') keepOrder([l, layers[i + 1]]); });
+    const icons = []; layers.forEach((l) => { if (l.name === 'Icon' || l.name === 'Handles') icons.push(l); });
+    if (icons.some((l) => l.name === 'Handles')) keepOrder(icons);
+    const byName = (n) => layers.find((l) => l.name === n);
+    if (byName('Contact icon') && byName('Contact')) keepOrder([byName('Contact icon'), byName('Contact')]);
+    // a phrase split across the page ("A NIGHT ——— OF") still reads left to right
+    layers.forEach((a) => {
+      const b = a.type === 'text' && byName(a.name + ' 2');
+      if (!b || Math.abs(a.y - b.y) > 12) return;
+      if (a.x > b.x) { const ax = a.x, al = a.align; a.x = b.x; a.align = b.align; b.x = ax; b.align = al; }
+    });
+    return layers;
+  }
 
   const LAYOUTS = {
     /* ── GLORY: two enormous lines, a little tag between, the preacher in front of them ── */
@@ -1894,9 +1993,13 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const t = put(T({ name: 'Title', text: big, upper: true, font: 'Anton', fit: 1000, maxH: H * 0.2, fill: { stops: ['#ffffff', mix(p.hi, p.accent, 0.4), p.accent], angle: 90 }, grain: true, shadow: true, extrude: 3, extrudeColor: rgba(p.deep, 0.8) }), { cx: 540, t: y });
       L.push(t); y = box(t).b + 26;
       if (kick && below) { const k = put(T({ name: 'Kicker', text: kick, upper: true, font: 'Montserrat', size: 46, letter: 0.6, shadow: true, glow: rgba('#000000', 0.55), maxW: 1000 }), { cx: 540, t: y - 10 }); L.push(k); y = box(k).b + 22; }
-      const cardT = Math.max(y, H - 320), cardB = H - 60, cardW = Math.min(250, (cardB - cardT) * 0.8);
-      if (sp) L.push(...card(sp, { l: 66, t: cardT, w: cardW, h: cardB - cardT }, p));
-      const ix = sp ? 66 + cardW + 34 : 66;
+      // the preacher stands in the sky, the big word across their chest (a small card at the foot left the top half empty)
+      if (sp) {
+        const tb = box(t), at = L.indexOf(hd[hd.length - 1]) + 1 || 3;
+        L.splice(at, 0, hero(sp, { cx: 540, t: hd.bottom + 18, b: tb.t + tb.h * 0.62, mode: 'chest', fade: 0.35, extra: lit(p) }));
+      }
+      const cardT = Math.max(y, H - 320), cardB = H - 60;
+      const ix = 96;
       L.push(...col([sp && sp.name && T({ name: 'With', text: 'With ' + sp.name, font: 'Great Vibes', size: 44, align: 'left', shadow: true, maxW: 1010 - ix }),
         d && T({ name: 'Date', text: `${d.day3}. ${d.ddth} ${d.month}`, font: 'Montserrat', size: 24, align: 'left', shadow: true, maxW: 1010 - ix }),
         f.time && T({ name: 'Time', text: f.time + (f.time2 ? ' & ' + f.time2 : ' Prompt'), font: 'Anton', size: 52, align: 'left', shadow: true }),
@@ -2025,7 +2128,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       let y = lb.b + 22;
       if (f.theme) { const th = put(T({ name: 'Theme', text: '(' + f.theme + ')', upper: true, font: 'Montserrat Black', size: 26, line: 0.98, fill: '#ffffff', align: 'left', maxW: 470, shadow: true }), { l: lb.l + 4, t: y }); L.push(th); y = box(th).b; }
       // the details, in modules: the date, a pin and the address, a black box with the time
-      const iy = Math.max(y + 70, H * 0.6);
+      // (just under the title, so the preacher below can be big — they were a stamp at the foot)
+      const iy = sp ? Math.max(y + 64, H * 0.4) : Math.max(y + 70, H * 0.6);
+      if (sp) L.push(hero(sp, { cx: 540, t: iy + 84, b: H + 20, mode: 'chest', fade: 0.12, extra: lit(p) }));
       if (d) L.push(...col([T({ name: 'Day', text: `${d.day3} ${d.ddth}`, upper: true, font: 'Montserrat Black', size: 38, align: 'left', shadow: true }), T({ name: 'Month', text: `${d.month}, ${d.year}`, upper: true, font: 'Montserrat Black', size: 30, align: 'left', shadow: true })], { l: 110, cy: iy, gap: 2 }));
       const vl = venueLines(D, 3);
       if (vl) { L.push(SH({ name: 'Pin', shape: 'pin', fill: p.accent, x: 438, y: iy - 20, w: 34, h: 34 })); L.push(put(T({ name: 'Venue', text: vl, upper: true, font: 'Montserrat', size: 15, line: 1.25, align: 'left', maxW: 230, shadow: true }), { l: 462, cy: iy })); }
@@ -2036,7 +2141,6 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         L.push(SH({ name: 'Time box', shape: 'rect', fill: 'rgba(0,0,0,.86)', x: 850, y: iy, w: 230, h: bh }));
         L.push(...col(g, { l: 752, cy: iy, gap: 3 }));
       }
-      if (sp) L.push(hero(sp, { cx: 540, t: iy + 80, b: H + 20, mode: 'chest', fade: 0.12, extra: lit(p) }));
       const contact = f.phone || f.handles;
       if (contact) {
         L.push(SH({ name: 'Contact bar', shape: 'pill', fill: '#ffffff', x: 540, y: H - 96, w: 680, h: 62, shadow: true }));
@@ -2158,7 +2262,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       return L;
     },
   };
-  const LOOK_NAMES = { glory: 'Glory', fire: 'Fire', encounter: 'Encounter', miracle: 'Spotlight', bible: 'Bible Study', prophetic: 'Gold', sunday: 'Giant words', lineup: 'Line-up', script: 'Script', scenic: 'Scenic', light: 'Light', joinus: 'Join us', didone: 'Elegant', upper: 'Upper Room', theme: 'Theme picture', mountain: 'Sky letters', breaking: 'Breaking', spirit: 'Gold line-up' };
+  const LOOK_NAMES = { glory: 'Glory', fire: 'Fire', encounter: 'Encounter', miracle: 'Spotlight', bible: 'Golden classic', prophetic: 'Gold', sunday: 'Giant words', lineup: 'Line-up', script: 'Script', scenic: 'Scenic', light: 'Light', joinus: 'Join us', didone: 'Elegant', upper: 'Upper Room', theme: 'Theme picture', mountain: 'Sky letters', breaking: 'Breaking', spirit: 'Gold line-up' };
   /* each look's own colours (the AI's colours go on the first few designs; these on the rest, for variety) */
   const SIGNATURE = {
     glory: { deep: '#0b0b10', mid: '#2a2140', accent: '#f6c915', hi: '#ffffff' },
@@ -2181,6 +2285,13 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     spirit: { deep: '#140a00', mid: '#5a3208', accent: '#f5c542', hi: '#fff6dd' },
   };
 
+  /* the word written in script across a title — never one the title already says ("PRAYER MEETING / Prayer") */
+  function scriptWordFor(want, title, dp) {
+    const t = String(title || '').toLowerCase();
+    const ok = (w) => w && !t.includes(String(w).toLowerCase());
+    const day = dp ? dp.dayName : '';
+    return [want, day, 'Glory', 'Power', 'Grace'].find(ok) || 'Glory';
+  }
   /** The event, the art direction and the pictures → everything a layout reads. */
   function dataFor(o) {
     const f = Object.assign({}, o.fields || {});
@@ -2193,7 +2304,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     return {
       w: o.w || 1080, h: o.h || 1350, pal, dir, f, bg: o.bg, logo: o.logo,
       sp: (o.speakers || []).map((s) => ({ name: s.name, img: s.img, id: s.id, photo: s.photo })),
-      script: dir.scriptWord || (dp ? dp.dayName : 'Sunday'),
+      script: scriptWordFor(dir.scriptWord, f.title, dp),
       d: dp ? { day3: dp.day.slice(0, 3), day: dp.day, dayName: dp.dayName, ddn: dp.dd.replace(/\D+$/, ''), ddth: dp.dd, month: dp.month, mon3: dp.month.slice(0, 3), year: dp.year } : null,
     };
   }
@@ -2203,8 +2314,13 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const D = dataFor(o);
     const look = LAYOUTS[o.look] ? o.look : 'glory';
     PAINTED = !!o.painted;
+    VAR = o.variant || null;
     let layers;
-    try { layers = LAYOUTS[look](D).filter(Boolean); } finally { PAINTED = false; }
+    try { layers = LAYOUTS[look](D).filter(Boolean); } finally { PAINTED = false; VAR = null; }
+    if (o.variant) {
+      if (o.variant.mirror) mirrorLayers(layers, D.w);
+      layers.forEach((l) => { if (l.type === 'fx' && l.seed != null) l.seed = l.seed + o.variant.seed; });
+    }
     // a painted-in preacher stands in the picture: the light effects go behind the words only, not over a face
     if (o.painted) {
       layers = layers.filter((l) => !(l.type === 'fx' && /glow|ring|sparks/.test(l.kind)));
@@ -2214,7 +2330,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     // every soft shadow in the flyer's own darkest colour (a black one is a sticker's)
     const tint = rgba(mix(D.pal.deep, '#000000', 0.5), 0.62);
     layers.forEach((l) => { if (l.type === 'text' && l.shadow && !l.shadowColor) l.shadowColor = tint; });
-    return { w: D.w, h: D.h, pal: D.pal, look, painted: !!o.painted, layers };
+    return { w: D.w, h: D.h, pal: D.pal, look, painted: !!o.painted, variant: o.variant || null, layers };
   }
 
   /* A cut-out, tidied — the upload path keeps a data URL (see tidyCanvas). */
@@ -2571,7 +2687,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     // remember these details for this service (Tuesday's Word Study comes back as typed)
     const ok = occKey(F.occasion);
     if (ok && ok !== 'other' && F.kit) { F.kit.lastFor = Object.assign({}, F.kit.lastFor, { [ok]: presetNow() }); saveKit(true); }
-    F.step = 'pick'; F.bgs = []; F.designs = []; F.dir = null; F.tries++;
+    F.step = 'pick'; F.bgs = []; F.designs = []; F.dir = null; F.tries++; F.showAll = false;
     const tryNo = F.tries;
     drawPick();
     await loadFonts();
@@ -2584,6 +2700,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     F.dir = dir || { scenes: ['heavenly golden light rays through purple clouds'], palette: ['#1a0638', '#5b21b6', '#f5c542', '#ffffff'], scriptWord: dp ? dp.dayName : 'Sunday', kicker: 'WORSHIP WITH US THIS', looks: Object.keys(LAYOUTS) };
     const pp = F.dir.palette || [];
     F.pal = { deep: pp[0] || '#14052e', mid: pp[1] || '#5b21b6', accent: pp[2] || '#f5c542', hi: pp[3] || '#ffffff' };
+    newBoard();
     // the app's own photographs first (on screen at once); the AI's join them as they are painted
     const sz = sizeOf();
     const stock = await Promise.all((F.dir.photos || []).slice(0, 3).map(async (n) => {
@@ -2603,7 +2720,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     await Promise.all(scenes.map(async (scene, i) => {
       try {
         // each picture in its own light — the AI's colours, royal blue, purple — so the board is as varied as a Pinterest page
-        const tone = TONES[i % TONES.length];
+        const tone = F.board.tones[i % F.board.tones.length];
         const out = await window.api.flyer.paint({ scene: tone.words ? scene + ', ' + tone.words : scene, w: sz.w, h: sz.h, seed: Math.floor(Math.random() * 1e9), people: chosenSpeakers().some((s) => (s.photos || []).length) });
         if (tryNo !== F.tries) return;
         let im = await loadImg(out.dataUrl);
@@ -2614,7 +2731,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         // AI pictures lead; the photos stay on for variety until three AI ones are in
         const ai = F.bgs.filter((b) => !b.proc).concat({ key, by: out.by, scene, tone: tone.id });
         // AI pictures in order of their light, the studio's photos only standing in until three are here
-        ai.sort((a, b) => TONES.findIndex((t) => t.id === a.tone) - TONES.findIndex((t) => t.id === b.tone));
+        ai.sort((a, b) => F.board.tones.findIndex((t) => t.id === a.tone) - F.board.tones.findIndex((t) => t.id === b.tone));
         F.bgs = ai.concat(F.bgs.filter((b) => b.proc)).slice(0, Math.max(3, ai.length));
         rebuildDesigns();
       } catch (e) { /* the studio's own photographs stand in */ }
@@ -2676,6 +2793,11 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     { id: 'red', words: 'the whole scene lit in deep crimson red and warm orange light, glowing embers' },
     { id: 'gold', words: 'the whole scene bathed in warm golden sunlight and amber haze, glowing highlights' },
     { id: 'teal', words: 'the whole scene lit in deep teal and emerald light with soft white highlights' },
+    { id: 'emerald', words: 'the whole scene lit in deep emerald green light with warm golden highlights' },
+    { id: 'sunset', words: 'the whole scene lit by a burning sunset, magenta sky fading to orange, warm rim light' },
+    { id: 'night', words: 'a dark midnight-blue night with a single bright white light source and soft haze' },
+    { id: 'royal', words: 'the whole scene lit in royal blue with rich gold highlights and warm haze' },
+    { id: 'crimson', words: 'the whole scene lit in deep crimson and wine red light with soft gold highlights' },
   ];
   const TONE_PAL = {
     own: 'own',
@@ -2684,14 +2806,47 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     red: { deep: '#240003', mid: '#a5111d', accent: '#ffc21a', hi: '#fff3e0' },
     gold: { deep: '#2a1400', mid: '#b86f00', accent: '#ffd54a', hi: '#fffbe6' },
     teal: { deep: '#012226', mid: '#0e6f7a', accent: '#ffd23f', hi: '#ffffff' },
+    emerald: { deep: '#01200f', mid: '#0a6b37', accent: '#f6c945', hi: '#ffffff' },
+    sunset: { deep: '#2c0c46', mid: '#d9466f', accent: '#ffb347', hi: '#fff1e0' },
+    night: { deep: '#02040f', mid: '#16245a', accent: '#8fd3ff', hi: '#ffffff' },
+    royal: { deep: '#06103a', mid: '#1d3fb8', accent: '#f5c542', hi: '#ffffff' },
+    crimson: { deep: '#26020c', mid: '#8c0f2e', accent: '#f2c46b', hi: '#fff4e6' },
   };
+  /*
+   * A NEW BOARD EVERY TIME. The board shows ten designs, not the same
+   * eighteen in the same order: the looks this phone has seen least lately
+   * first (and the AI's first ideas for this event among them), each with a
+   * variant of its own (makeVariant), and the pictures painted in six of
+   * eleven lights picked afresh. "More designs" brings the rest.
+   */
+  const BOARD_N = 10;
+  const SEEN_KEY = 'mw-flyer-seen';
+  function seenLooks() { try { return JSON.parse(localStorage.getItem(SEEN_KEY) || '{}') || {}; } catch (e) { return {}; } }
+  function markSeen(looks) {
+    const seen = seenLooks(), now = Date.now();
+    looks.forEach((l) => { seen[l] = now; });
+    try { localStorage.setItem(SEEN_KEY, JSON.stringify(seen)); } catch (e) {}
+  }
+  function shuffled(a) { const o = a.slice(); for (let i = o.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [o[i], o[j]] = [o[j], o[i]]; } return o; }
+  function newBoard() {
+    const all = Object.keys(LAYOUTS), seen = seenLooks();
+    const ai = ((F.dir && F.dir.looks) || []).filter((l) => LAYOUTS[l]).slice(0, 4);
+    // least lately seen first, the AI's ideas for this event nudged forward, ties broken at random
+    const order = shuffled(all).sort((a, b) => ((seen[a] || 0) - (ai.includes(a) ? 1.5e9 : 0)) - ((seen[b] || 0) - (ai.includes(b) ? 1.5e9 : 0)));
+    const tones = [TONES[0]].concat(shuffled(TONES.slice(1)).slice(0, 5));
+    const palettes = shuffled(PALETTES);
+    const variants = {};
+    order.forEach((look, i) => { variants[look] = makeVariant(palettes[i % palettes.length]); variants[look].pal = palettes[i % palettes.length]; });
+    F.board = { order, tones, variants };
+    markSeen(order.slice(0, BOARD_N));
+  }
   /* the light each look is built for (the reference it copies): Join us is purple, Upper Room is fire, the gold line-up gold… */
   const LOOK_TONE = { joinus: 'purple', miracle: 'purple', script: 'purple', didone: 'red', upper: 'red', breaking: 'red', fire: 'red', mountain: 'teal', scenic: 'teal',
     spirit: 'gold', bible: 'gold', prophetic: 'gold', sunday: 'gold', encounter: 'blue', theme: 'own', glory: 'own', lineup: 'blue', light: 'own' };
   function rebuildDesigns() {
     const sz = sizeOf();
-    const looks = (F.dir && F.dir.looks && F.dir.looks.length ? F.dir.looks : Object.keys(LAYOUTS)).filter((l) => LAYOUTS[l]);
-    const all = Array.from(new Set(looks.concat(Object.keys(LAYOUTS))));
+    if (!F.board) newBoard();
+    const all = F.showAll ? F.board.order : F.board.order.slice(0, BOARD_N);
     const used = new Map(), n = (b) => used.get(b.key) || 0;
     F.designs = all.map((look, i) => {
       // the AI's picture painted in this look's own light, while it is not already on two designs; else the least used
@@ -2701,11 +2856,12 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       // the AI's colours on the first designs, each look's own on the rest — a board of different flyers, not one flyer ten times
       // a picture painted in its own light takes colours that match it; the AI's own on the rest
       const tp = bg && bg.tone && TONE_PAL[bg.tone];
-      const pal = tp ? (tp === 'own' ? F.pal : tp) : (i < 3 || !SIGNATURE[look] ? F.pal : SIGNATURE[look]);
-      return buildScene({ look, w: sz.w, h: sz.h, pal, dir: F.dir, fields: F.fields, speakers: speakersFor(i), logo: IMGS.has('logo') ? 'logo' : null, bg: bg && bg.key });
+      const v = F.board.variants[look];
+      const pal = tp ? (tp === 'own' ? F.pal : tp) : (i === 0 ? F.pal : v.pal || SIGNATURE[look] || F.pal);
+      return buildScene({ look, w: sz.w, h: sz.h, pal, dir: F.dir, fields: F.fields, speakers: speakersFor(i), logo: IMGS.has('logo') ? 'logo' : null, bg: bg && bg.key, variant: v });
     });
     // the preacher painted into the scene (paintPreacherIn): first on the board, labelled so the face is checked
-    const pin = (F.paintedIn || []).map((b) => Object.assign(buildScene({ look: b.look, painted: true, w: sz.w, h: sz.h, pal: F.pal, dir: F.dir, fields: F.fields, speakers: speakersFor(0), logo: IMGS.has('logo') ? 'logo' : null, bg: b.key }), { label: 'AI scene · check the face' }));
+    const pin = (F.paintedIn || []).map((b) => Object.assign(buildScene({ look: b.look, painted: true, w: sz.w, h: sz.h, pal: F.pal, dir: F.dir, fields: F.fields, speakers: speakersFor(0), logo: IMGS.has('logo') ? 'logo' : null, bg: b.key, variant: F.board.variants[b.look] }), { label: 'AI scene · check the face' }));
     F.designs = pin.concat(F.designs);
     if (F.step === 'pick') paintThumbs();
   }
@@ -2718,10 +2874,14 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     P.body.innerHTML = `<div class="fs-pick">
       <p class="fs-status">${busy ? 'The AI is reading your event…' : F.painting > 0 ? `<i class="fs-spin"></i> Painting ${F.painting} picture${F.painting > 1 ? 's' : ''} with AI — they appear as they’re ready` : 'Tap one to edit every part of it'}</p>
       <div class="fs-grid">${busy ? '<div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div>' : F.designs.map((d, i) => `<button type="button" class="fs-card" data-i="${i}"><canvas></canvas><small>${esc(d.label || LOOK_NAMES[d.look] || d.look)}</small></button>`).join('')}</div>
+      ${!busy && F.board && !F.showAll && F.board.order.length > BOARD_N ? `<button type="button" class="fs-ghost fs-more" data-act="more">${ic('layout')}<span>More designs (${F.board.order.length - BOARD_N})</span></button>` : ''}
     </div>`;
     P.foot.innerHTML = `<button type="button" class="fs-ghost" data-act="back">${ic('back')}<span>Details</span></button><button type="button" class="fs-ghost" data-act="again">${ic('refresh')}<span>New pictures</span></button>`;
     paintThumbs();
-    P.body.onclick = (e) => { const c = e.target.closest('.fs-card'); if (c) openEditor(F.designs[+c.dataset.i]); };
+    P.body.onclick = (e) => {
+      if (e.target.closest('[data-act="more"]')) { F.showAll = true; markSeen(F.board.order); rebuildDesigns(); drawPick(); return; }
+      const c = e.target.closest('.fs-card'); if (c) openEditor(F.designs[+c.dataset.i]);
+    };
     P.foot.onclick = (e) => {
       const b = e.target.closest('[data-act]'); if (!b) return;
       if (b.dataset.act === 'back') { F.step = 'make'; F.tries++; drawMake(); }
@@ -3070,6 +3230,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     openSheet(html, (sh) => {
       sh.addEventListener('click', (e) => {
         const b = e.target.closest('[data-col],[data-metal],[data-grad],[data-photo-fill]'); if (!b) return;
+        L.inkSet = true;   // chosen by hand: drawn as chosen (inkFor)
         if (b.dataset.col) { L.fill = b.dataset.col; L.imgFill = ''; }
         if (b.dataset.metal != null) { L.fill = b.dataset.metal || '#ffffff'; L.imgFill = ''; L.grain = !!b.dataset.metal; }
         if (b.dataset.grad) { L.fill = { stops: b.dataset.grad.split(','), angle: 90 }; L.imgFill = ''; }
@@ -3077,7 +3238,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         paint();
       });
       const pick = $('input[type=color]', sh);
-      if (pick) pick.addEventListener('input', () => { L.fill = pick.value; L.imgFill = ''; paint(); });
+      if (pick) pick.addEventListener('input', () => { L.fill = pick.value; L.imgFill = ''; L.inkSet = true; paint(); });
     });
   }
   function sheetEffects(L) {
@@ -3497,5 +3658,5 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
 
   /* "My church" straight from Home (This week → Edit) */
   async function openKitAlone(onSaved) { await loadKit(); openKit(onSaved); }
-  root.MWFlyerStudio = { open, openKit: openKitAlone, _state: F };
+  root.MWFlyerStudio = { open, openKit: openKitAlone, _state: F, _rebuild: () => rebuildDesigns() };
 })();

@@ -4038,6 +4038,8 @@ html, body.mw-cloud, body.mw-cloud .cloud-home .ch-scroll, body.mw-cloud #cloudG
 .fs-svc select:last-of-type { grid-column: 1 / 4; }
 .fs-svc .fs-x { grid-row: 1; grid-column: 4; }
 .fs-kit .fs-ghost { width: 100%; margin-top: 8px; }
+/* the rest of the designs, after the board's ten */
+.fs-pick .fs-more { display: flex; width: 100%; margin-top: 14px; }
 .fs-inspo em { position: absolute; left: 4px; bottom: 4px; padding: 1px 5px; border-radius: 6px; font-style: normal; font-size: 10px; font-weight: 700; color: #fff; background: rgba(22, 163, 74, .9); }
 .fs-inspo img { object-fit: cover; object-position: center; }
 
