@@ -149,7 +149,11 @@ function pace(t = clock()) {
 /** What is left of the day at all (never the margin). */
 function hardLeft() { const l = load(); return l.exhausted ? 0 : Math.max(0, DAY() - MARGIN() - l.spent - heldTotal()); }
 /** What may be spent now, as the day is paced. */
-function available() { return Math.max(0, Math.min(hardLeft(), (DAY() - MARGIN()) * pace() - load().spent - heldTotal())); }
+function available() {
+  // pacing is for a busy church: with one or two people at it, they may use what is left of the day
+  if (activeCount() < 3) return hardLeft();
+  return Math.max(0, Math.min(hardLeft(), (DAY() - MARGIN()) * pace() - load().spent - heldTotal()));
+}
 /** What this person may still paint fresh today. */
 function shareOf(who) {
   if (who === LIBRARY) return Infinity;

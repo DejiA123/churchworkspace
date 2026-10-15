@@ -61,6 +61,7 @@ const t = async (name, fn) => { try { await fn(); pass++; console.log('  ✓ ' +
   });
   await t('reservations: a hundred asking at once get only what the day holds', () => {
     fresh();
+    budget.touch('q1'); budget.touch('q2'); budget.touch('q3');   // a busy church: paced
     const can = Math.floor(budget.available() / 1500);
     let granted = 0; for (let i = 0; i < 100; i++) if (budget.reserve(1500, 'p' + i)) granted++;
     assert.strictEqual(granted, can);   // what the day holds by now (9,500 at most: the 500 margin is never spent)
@@ -69,6 +70,8 @@ const t = async (name, fn) => { try { await fn(); pass++; console.log('  ✓ ' +
   await t('paced: early in the day only part of it is out', () => {
     fresh();
     budget._clock(() => Date.parse('2026-10-15T06:00:00Z'));
+    assert.ok(budget.available() > 9000, 'one person alone: the rest of the day');
+    budget.touch('x1'); budget.touch('x2'); budget.touch('x3');
     const a = budget.available(); assert.ok(a > 1500 && a < 2700, a);
     budget._clock(() => NOW);
   });
