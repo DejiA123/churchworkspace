@@ -4142,3 +4142,4 @@ body.mw-cloud.mw-home .cloud-home { background: #eaf5fd; color: #0d1b2c; }
 .fs-lib-pic figcaption { font-size: 10.5px; line-height: 1.25; padding: 4px 6px 6px; color: var(--muted, #6b7280); }
 .fs-lib-x { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(0,0,0,.6); color: #fff; font-size: 17px; line-height: 26px; padding: 0; cursor: pointer; }
 .fs-lib h3 small { font-weight: 500; opacity: .6; }
+.csb-play[data-c="play"] { cursor: pointer; z-index: 2; width: 52px; height: 52px; }

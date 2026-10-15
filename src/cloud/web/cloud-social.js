@@ -1239,7 +1239,7 @@
       return `<div class="csb-prev${isVideo(f) ? '' : ' pic'}" data-thumb="${escAttr(f)}">`
         + `<span class="csb-pill">${a ? platMark(a.platform, 'sm') : mi('eye')}<span>${a ? esc((PLAT[a.platform] || {}).name || '') + ' preview' : 'Preview'}</span></span>`
         + `<button type="button" class="csb-pill right" data-c="change">${mi('refresh')}<span>Change</span></button>`
-        + (isVideo(f) ? `<i class="csb-play">${mi('play')}</i>` : '')
+        + (isVideo(f) ? `<i class="csb-play" data-c="play" data-f="${escAttr(f)}" role="button" aria-label="Play">${mi('play')}</i>` : '')
         + `<span class="csb-prev-txt"><b>${esc(a ? '@' + String(a.name || '').replace(/^@/, '').replace(/\s+/g, '').toLowerCase() : '@yourchurch')}</b>`
         + `<span class="csb-prev-cap" id="csbPrevCap">${body ? esc(body) : st.ai && st.ai.stage !== 'done' && st.ai.stage !== 'fail' ? '<i class="csb-shim w80"></i><i class="csb-shim w60"></i>' : '<em>Your caption shows here</em>'}</span>`
         + (tags ? `<span class="csb-prev-tags" id="csbPrevTags">${esc(tags)}</span>` : '')
