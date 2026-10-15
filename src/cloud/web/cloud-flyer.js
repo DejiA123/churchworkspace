@@ -1577,7 +1577,8 @@
     return v;
   }
   function venueParts(D) {
-    return withoutChurch(D.f.venue, D.f.church).split(/\s*,\s*/).filter(Boolean).slice(0, 3);
+    // exactly as typed in the details (the church's name was being cut off the front — not wanted)
+    return String(D.f.venue || '').split(/\s*,\s*/).filter(Boolean).slice(0, 3);
   }
   const venueText = (D) => venueParts(D).join(', ');
   const venueLines = (D, n) => { const p = venueParts(D); if (p.length <= n) return p.join(',\n'); return [p.slice(0, p.length - n + 1).join(', ')].concat(p.slice(p.length - n + 1)).join(',\n'); };
