@@ -292,6 +292,24 @@ function wanted(days = 14) {
   return { slots, titles };
 }
 
+/** Everything on the shelf, newest first (for the owner's library page). */
+function list() {
+  const L = load();
+  const pic = (e) => ({ id: e.id, file: e.file, kind: e.kind, theme: e.theme, tone: e.tone, shape: e.shape, tier: e.tier, by: e.by, at: e.at, uses: e.uses || 0 });
+  return {
+    pictures: L.pics.slice().sort((a, b) => (b.at || 0) - (a.at || 0)).map(pic),
+    letterings: L.letters.slice().sort((a, b) => (b.at || 0) - (a.at || 0)).map((e) => ({ id: e.id, file: e.file, title: e.title, by: e.by, at: e.at, uses: e.uses || 0 })),
+  };
+}
+/** Take a picture or a lettering off the shelf for good. */
+function remove(id) {
+  const L = load();
+  const e = L.pics.find((x) => x.id === id) || L.letters.find((x) => x.id === id);
+  if (!e) return false;
+  drop(L.pics.includes(e) ? L.pics : L.letters, e);
+  save();
+  return true;
+}
 function report() {
   const L = load();
   return { pictures: L.pics.length, letterings: L.letters.length, premium: L.pics.filter((e) => e.tier === 'premium').length };
@@ -300,4 +318,4 @@ function report() {
 function _clock(fn) { clock = fn || (() => Date.now()); }
 function _reset() { idx = null; if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; } }
 
-module.exports = { init, shapeOf, keyOf, add, take, takeId, handOutNew, filePath, readOut, stock, addLetter, takeLetter, letterStock, note, noteLetter, wanted, report, flush, _clock, _reset };
+module.exports = { list, remove, init, shapeOf, keyOf, add, take, takeId, handOutNew, filePath, readOut, stock, addLetter, takeLetter, letterStock, note, noteLetter, wanted, report, flush, _clock, _reset };

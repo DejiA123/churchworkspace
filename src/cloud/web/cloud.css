@@ -4132,3 +4132,13 @@ body.mw-cloud.mw-home .cloud-home { background: #eaf5fd; color: #0d1b2c; }
 @media (min-width: 900px) { .ch-bar { display: none; } .cloud-home .ch-scroll { padding-bottom: 40px; } }
 /* one help button on Home (the guide's own "?" sits on the other screens) */
 .cloud-home .ch-ask { display: none; }
+
+/* the church picture library (owner's page) */
+.fs-lib-bar { height: 10px; border-radius: 999px; background: rgba(127,127,127,.18); overflow: hidden; margin: 6px 0 8px; }
+.fs-lib-bar i { display: block; height: 100%; background: linear-gradient(90deg, #f38020, #f5c542); border-radius: inherit; }
+.fs-lib-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.fs-lib-pic { position: relative; margin: 0; border-radius: 10px; overflow: hidden; background: rgba(127,127,127,.12); }
+.fs-lib-pic img { display: block; width: 100%; aspect-ratio: 4 / 5; object-fit: cover; }
+.fs-lib-pic figcaption { font-size: 10.5px; line-height: 1.25; padding: 4px 6px 6px; color: var(--muted, #6b7280); }
+.fs-lib-x { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(0,0,0,.6); color: #fff; font-size: 17px; line-height: 26px; padding: 0; cursor: pointer; }
+.fs-lib h3 small { font-weight: 500; opacity: .6; }

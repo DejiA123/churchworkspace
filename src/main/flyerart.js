@@ -116,6 +116,7 @@ function status() {
     // the day as this person finds it: plenty (fresh paintings), limited (fresh and the library), resting (the library)
     level: cf ? r.level : 'none', resetsAt: r.resetsAt, library: lib.pictures, letterings: lib.letterings,
     premium: cf && r.level === 'plenty',
+    owner: space.isOwner(),
     // AI lettering: fresh while the day allows, from the library (read back, spelt right) after that
     lettering: cf,
     painter: cf ? 'cloudflare' : 'pollinations',
@@ -1105,7 +1106,11 @@ async function fillerTick(now = Date.now(), opts = {}) {
   try {
     const d = new Date(now), mins = d.getUTCHours() * 60 + d.getUTCMinutes(), day = d.toISOString().slice(0, 10);
     let room = 0, mode = '';
-    if (mins >= 23 * 60 + 55) return { painted: 0, letters: 0, why: 'too near midnight' };   // nothing started that would cross it
+    if (opts.now) {
+      // the owner's "Fill the library now": up to 3,000 of what the pace has released, leaving 1,000 for flyers being made
+      room = Math.min(3000, budget.available() - 1000); mode = 'now';
+      if (room < 160) return { painted: 0, letters: 0, why: 'no room' };
+    } else if (mins >= 23 * 60 + 55) return { painted: 0, letters: 0, why: 'too near midnight' };   // nothing started that would cross it
     if (mins >= 21 * 60) { room = budget.hardLeft() - (mins < 23 * 60 ? 1500 : 0); mode = 'end of day'; }
     else if (mins < 6 * 60) {
       if (prewarmed.day !== day) prewarmed = { day, spent: 0 };
@@ -1113,7 +1118,7 @@ async function fillerTick(now = Date.now(), opts = {}) {
       room = Math.min(budget.available() / 2, budget.DAY() * 0.15 - prewarmed.spent); mode = 'morning';
     }
     if (room < 160) return { painted: 0, letters: 0, why: 'no room' };
-    const usersWaiting = () => budget.report(budget.LIBRARY).queueUsers > 0 || (Date.now() - now > 9 * 60e3);
+    const usersWaiting = () => budget.report(budget.LIBRARY).queueUsers > 0 || (!opts.now && Date.now() - now > 9 * 60e3);
     const max = opts.max || 8;
     let painted = 0, letters = 0, spentHere = 0;
     const L = budget.LIBRARY;
@@ -1122,7 +1127,7 @@ async function fillerTick(now = Date.now(), opts = {}) {
     const want = bank.wanted();
     // 1. letterings asked for and not had (only with the reader to check them: a misspelling is never kept)
     let cs = null; try { cs = require('./cloudsee'); } catch (e) { cs = null; }
-    if (mode === 'end of day' && cs && cs.ready && cs.ready()) {
+    if (mode !== 'morning' && cs && cs.ready && cs.ready()) {
       for (const t of want.titles) {
         if (usersWaiting() || painted + letters >= max || room - spentHere < neuronsFor(CF_PHOENIX, { w: 832, h: 1024 }) * 2) break;
         const before = spentNow();
@@ -1133,7 +1138,7 @@ async function fillerTick(now = Date.now(), opts = {}) {
     // 2. the pictures people asked for most, of which the library has fewest
     const jobs = want.slots.filter((x) => x.have < 6).map((x) => x.recipe);
     // the morning: the services of the next two days, from what was asked for them before (or the rules' scenes)
-    if (mode === 'morning') {
+    if (mode === 'morning' || mode === 'now') {
       const kit = readKit(), soon = [d.getUTCDay(), (d.getUTCDay() + 1) % 7, (d.getUTCDay() + 2) % 7];
       const kinds = new Set((kit.services || []).filter((sv) => soon.includes(sv.day)).map((sv) => kindKey({ title: sv.name, kind: sv.kind })));
       jobs.sort((a, b) => (kinds.has(b.kind) ? 1 : 0) - (kinds.has(a.kind) ? 1 : 0));
@@ -1166,4 +1171,26 @@ async function paintFor(r) {
 }
 
 const libraryPath = (name) => bank.filePath(name);
-module.exports = { libraryPath, startFiller, stopFiller, fillerTick, kindKey, paintTitle, titlePrompt, neuronsFor, cfDiagnose, paintWith, paintWithPrompt, kitAddPhoto, inspoAdd, inspoRemove, stockPhotos, stockPath, PHOTO_TAGS, status, paint, direct, init, kitGet, kitSave, kitPic, kitUsed, paintPrompt, sizeFor, directByRules, imageFrom, LOOKS };
+/*
+ * ►► THE CHURCH LIBRARY, FOR ITS OWNER. ◄◄ What is on the shelf (every AI
+ * picture and lettering kept for the church), the day's free allowance in plain
+ * words, a picture taken off the shelf for good, and "fill it now" for a quiet
+ * day before a big event. The studio's owner only.
+ */
+function ownerOnly() { if (!space.isOwner()) throw new Error('Only the studio’s owner can open the church’s picture library.'); }
+function libraryView() {
+  ownerOnly();
+  const r = budget.report(space.person());
+  return Object.assign(bank.list(), {
+    allowance: { cloudflare: !!(cfAccount() && cfToken()), spent: r.spent, left: r.left, available: r.available, level: r.level, resetsAt: r.resetsAt, active: r.active, day: budget.DAY() },
+  });
+}
+function libraryRemove({ id } = {}) { ownerOnly(); return { ok: bank.remove(String(id || '')) }; }
+async function libraryFill() {
+  ownerOnly();
+  if (!(cfAccount() && cfToken())) throw new Error('Filling the library needs the free Cloudflare account on the server.');
+  const out = await fillerTick(Date.now(), { now: true, max: 12 });
+  bank.flush();
+  return out;
+}
+module.exports = { libraryView, libraryRemove, libraryFill, libraryPath, startFiller, stopFiller, fillerTick, kindKey, paintTitle, titlePrompt, neuronsFor, cfDiagnose, paintWith, paintWithPrompt, kitAddPhoto, inspoAdd, inspoRemove, stockPhotos, stockPath, PHOTO_TAGS, status, paint, direct, init, kitGet, kitSave, kitPic, kitUsed, paintPrompt, sizeFor, directByRules, imageFrom, LOOKS };

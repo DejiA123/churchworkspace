@@ -121,6 +121,16 @@ const t = async (name, fn) => { try { await fn(); pass++; console.log('  ✓ ' +
     const withP = await as('finn', () => fa.paint({ scene: 'x', slot: 1, tone: 'blue', event: ev, people: true }));
     assert.notStrictEqual(withP.file, np.file);
   });
+  await t('the owner sees the library and can take a picture off the shelf; nobody else can', async () => {
+    const view = space.run(null, () => fa.libraryView(), 'owner1', true);
+    assert.ok(view.pictures.length >= 1 && view.allowance && view.allowance.cloudflare);
+    assert.throws(() => space.run(null, () => fa.libraryView(), 'member1', false), /owner/);
+    assert.throws(() => space.run(null, () => fa.libraryRemove({ id: view.pictures[0].id }), 'member1', false), /owner/);
+    const gone = view.pictures[0];
+    assert.ok(space.run(null, () => fa.libraryRemove({ id: gone.id }), 'owner1', true).ok);
+    assert.ok(!space.run(null, () => fa.libraryView(), 'owner1', true).pictures.some((x) => x.id === gone.id));
+    assert.strictEqual(fa.libraryPath(gone.file), '');
+  });
   await t('the library’s pictures are served by name, from its folder only', () => {
     const f = fs.readdirSync(path.join(dir, 'flyer-library')).find((n) => /\.png$/.test(n));
     assert.ok(fa.libraryPath(f));

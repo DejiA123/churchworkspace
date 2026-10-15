@@ -41,8 +41,14 @@ function init(userDataDir) {
 const validId = (id) => typeof id === 'string' && /^[a-z0-9]{6,32}$/.test(id);
 
 /** Run `fn` as space `id` (null or undefined = the owner); `person` is who is signed in (their account id), when known. */
-function run(id, fn, person) {
-  return als.run({ id: validId(id) ? id : null, person: typeof person === 'string' && /^[\w-]{1,64}$/.test(person) ? person : null }, fn);
+function run(id, fn, person, owner) {
+  return als.run({ id: validId(id) ? id : null, person: typeof person === 'string' && /^[\w-]{1,64}$/.test(person) ? person : null, owner: owner === true }, fn);
+}
+
+/** Is the studio's owner (its admin) doing this? The desktop app always is. */
+function isOwner() {
+  const s = als.getStore();
+  return !s || s.owner === true;
 }
 
 /**
@@ -77,4 +83,4 @@ function rootOf(id) {
   return validId(id) && ROOT ? path.join(ROOT, id) : null;
 }
 
-module.exports = { init, run, current, person, pathFor, rootOf, validId };
+module.exports = { init, run, current, person, isOwner, pathFor, rootOf, validId };

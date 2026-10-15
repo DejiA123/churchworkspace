@@ -226,6 +226,9 @@ const ALLOWED = {
   'flyer:paint': true,
   'flyer:paintWith': true,
   'flyer:paintTitle': true,
+  'flyer:library': true,
+  'flyer:libraryRemove': true,
+  'flyer:libraryFill': true,
   'flyer:kitGet': true,
   'flyer:kitSave': true,
   'flyer:kitPic': true,
@@ -1214,7 +1217,8 @@ async function handle(req, res) {
 
   // Everything from here on runs in the signed-in person's own space.
   const me = userOf(req, url);
-  return space.run(me ? me.space : null, () => authedRoutes(req, res, url, p, me), me ? me.uid : null);
+  // (no accounts yet: whoever has the code is the owner)
+  return space.run(me ? me.space : null, () => authedRoutes(req, res, url, p, me), me ? me.uid : null, me ? !!me.owner : !users.length);
 }
 
 async function authedRoutes(req, res, url, p, me) {

@@ -2966,6 +2966,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
           <div class="fs-seg">${SIZES.map((s) => `<button type="button" data-size="${s.id}" class="${F.size === s.id ? 'on' : ''}">${esc(s.name)}</button>`).join('')}</div>
         </section>
         <button type="button" class="fs-kit-link" data-act="kit">${ic('church')}<span><b>My church</b><small>${esc(k.church ? k.church : 'Name, logo, address, speakers and service days — set once')}</small></span>${ic('back').replace('fs-ic', 'fs-ic fs-chev')}</button>
+        ${F.status && F.status.owner && F.status.cloudflare && window.api.flyer.library ? `<button type="button" class="fs-kit-link" data-act="library">${ic('photo')}<span><b>Church picture library</b><small>Every AI picture kept for the church · today’s free allowance (only you see this)</small></span>${ic('back').replace('fs-ic', 'fs-ic fs-chev')}</button>` : ''}
         <p class="fs-note">${F.status && !F.status.cloudflare ? 'Pictures are painted free by FLUX. For faster, sharper ones (FLUX.2, about 70 a day, free), add a free Cloudflare account to the server — see CLOUD.md.' : `Pictures are painted free by ${painter}. Your words are set exactly as you type them.`}</p>
       </div>`;
     P.foot.innerHTML = `<button type="button" class="fs-go" data-act="make">${ic('spark')}<span>Make my flyers</span></button>`;
@@ -3025,6 +3026,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       }
       if (b.dataset.size) { F.size = b.dataset.size; return drawMake(); }
       if (b.dataset.act === 'kit') return openKit();
+      if (b.dataset.act === 'library') return openLibrary();
       if (b.dataset.act === 'addsp') return addSpeaker(true);
       if (b.dataset.act === 'bulk') {
         const s = ((F.kit && F.kit.speakers) || []).find((x) => x.id === b.dataset.id);
@@ -4002,6 +4004,60 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   }
 
   /* ============================================================ MY CHURCH */
+
+  /*
+   * ►► THE CHURCH PICTURE LIBRARY (the owner's page). ◄◄ Every AI picture and
+   * AI-lettered title the studio has kept for the church, by kind of event;
+   * any of them taken off the shelf with one tap; the day's free allowance in
+   * plain words; and "Fill the library now" for a quiet day before a big one.
+   */
+  const KIND_NAMES = { prayer: 'Prayer meetings', word: 'Bible study', sunday: 'Sunday services', vibes: 'Youth', glory: 'Conferences & revivals', thanksgiving: 'Thanksgiving & celebrations', easter: 'Easter', christmas: 'Christmas', crossover: 'Crossover & New Year', general: 'Other' };
+  function openLibrary() {
+    const P = C.openPanel({ id: 'cloudFlyerLibrary', title: 'Church picture library', cls: 'cp-flyer-kit' });
+    let lib = null, busy = '';
+    const when = (iso) => { try { return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); } catch (e) { return 'midnight UTC'; } };
+    const thumb = (x, cls) => `<figure class="fs-lib-pic ${cls || ''}"><img loading="lazy" src="${escAttr(window.MW_FLYER_LIB_URL(x.file))}" alt=""><figcaption>${esc([x.tone && x.tone !== 'own' ? x.tone : '', x.tier === 'premium' ? 'premium' : '', x.uses ? 'used ' + x.uses + '×' : 'not used yet'].filter(Boolean).join(' · '))}</figcaption><button type="button" class="fs-lib-x" data-rm="${escAttr(x.id)}" aria-label="Remove">×</button></figure>`;
+    const draw = () => {
+      if (!lib) { P.body.innerHTML = `<p class="fs-status"><i class="fs-spin"></i> Opening the library…</p>`; return; }
+      const a = lib.allowance || {};
+      const used = Math.min(100, Math.round(((a.spent || 0) / (a.day || 10000)) * 100));
+      const words = !a.cloudflare ? 'No Cloudflare account on the server.' : a.level === 'plenty' ? 'Plenty left for fresh paintings right now.' : a.level === 'limited' ? 'Running low — boards are mixing fresh paintings with library pictures.' : `Painted its share for now — boards use the library until more is released (the day resets at ${when(a.resetsAt)}).`;
+      const groups = {};
+      for (const x of lib.pictures) (groups[x.kind] || (groups[x.kind] = [])).push(x);
+      P.body.innerHTML = `<div class="fs-kit fs-lib">
+        <section class="fs-sec"><h3>Today’s free AI allowance</h3>
+          <div class="fs-lib-bar"><i style="width:${used}%"></i></div>
+          <p class="fs-note">${used}% of today’s free painting used${a.active ? ` · ${a.active} ${a.active === 1 ? 'person' : 'people'} making flyers this hour` : ''}. ${esc(words)}</p>
+          <button type="button" class="fs-ghost" data-act="fill"${busy ? ' disabled' : ''}>${busy ? '<i class="fs-spin"></i> ' + esc(busy) : ic('spark') + '<span>Fill the library now</span>'}</button>
+          <p class="fs-note">Paints up to a dozen pictures for your next services and for what people asked for, from what today has released — leaving some for flyers being made. The library also fills itself every night.</p>
+        </section>
+        <section class="fs-sec"><h3>AI-lettered titles <small>(${lib.letterings.length})</small></h3>
+          ${lib.letterings.length ? `<div class="fs-lib-grid">${lib.letterings.map((x) => thumb(Object.assign({}, x, { tone: x.title }), 'fs-lib-letter')).join('')}</div>` : '<p class="fs-note">None yet. Each AI-lettered title that is read back spelt right is kept here for everyone.</p>'}
+        </section>
+        ${Object.keys(groups).length ? Object.keys(groups).map((k) => `<section class="fs-sec"><h3>${esc(KIND_NAMES[k] || k)} <small>(${groups[k].length})</small></h3><div class="fs-lib-grid">${groups[k].map((x) => thumb(x)).join('')}</div></section>`).join('')
+          : '<section class="fs-sec"><p class="fs-note">No pictures yet. Every picture the AI paints is kept here and handed to the next person making that kind of flyer — the library grows every day.</p></section>'}
+        <p class="fs-note">Tap × to take a picture off the shelf for good (nobody will be given it again).</p>
+      </div>`;
+    };
+    const load = async () => { try { lib = await window.api.flyer.library(); } catch (e) { toast(e.message || 'The library could not be opened.', 'error'); lib = { pictures: [], letterings: [], allowance: {} }; } draw(); };
+    P.body.onclick = async (e) => {
+      const rm = e.target.closest('[data-rm]');
+      if (rm) {
+        const id = rm.dataset.rm;
+        try { await window.api.flyer.libraryRemove({ id }); lib.pictures = lib.pictures.filter((x) => x.id !== id); lib.letterings = lib.letterings.filter((x) => x.id !== id); draw(); toast('Taken off the shelf.'); } catch (er) { toast(er.message, 'error'); }
+        return;
+      }
+      if (e.target.closest('[data-act="fill"]') && !busy) {
+        busy = 'Painting for the library…'; draw();
+        try {
+          const r = await window.api.flyer.libraryFill();
+          toast(r && (r.painted || r.letters) ? `${r.painted || 0} picture${r.painted === 1 ? '' : 's'}${r.letters ? ` and ${r.letters} title${r.letters === 1 ? '' : 's'}` : ''} added to the library.` : 'Nothing to paint just now — today’s free allowance is kept for the flyers being made.');
+        } catch (er) { toast(er.message, 'error'); }
+        busy = ''; await load();
+      }
+    };
+    draw(); load();
+  }
 
   function openKit(onSaved) {
     const P = C.openPanel({ id: 'cloudFlyerKit', title: 'My church', cls: 'cp-flyer-kit' });
