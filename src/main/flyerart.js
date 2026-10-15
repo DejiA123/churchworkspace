@@ -31,6 +31,9 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const budget = require('./aibudget');   // the day's free allowance, shared fairly (reservations, pacing, a share each, a queue)
+const bank = require('./flyerbank');    // the church's picture library: painted once, kept for everyone
+const space = require('./space');       // who is asking (their fair share; the pictures they have already seen)
 
 const env = (...names) => { for (const n of names) { const v = String(process.env[n] || '').trim(); if (v) return v; } return ''; };
 const cfAccount = () => env('CLOUDFLARE_ACCOUNT_ID', 'CF_ACCOUNT_ID');
@@ -66,34 +69,34 @@ const CF_BIG = [
  * before the cheap ones are used.
  */
 const CF_KLEIN9 = { id: '@cf/black-forest-labs/flux-2-klein-9b', name: 'FLUX.2 klein 9B', form: true, refs: true };
-const CF_PHOENIX = { id: '@cf/leonardo/phoenix-1.0', name: 'Phoenix 1.0', form: false, json: (prompt, size, seed) => ({ prompt: prompt.slice(0, 2000), width: size.w, height: size.h, seed, guidance: 3.5, num_steps: 28, negative_prompt: 'misspelled text, extra words, gibberish letters, watermark, signature, logo, blurry text' }) };
-const DAY_NEURONS = () => Math.max(1000, Number(process.env.CLOUDFLARE_DAILY_NEURONS) || 10000);
-/** What a picture costs of the allowance (Cloudflare's price list, in neurons). */
+const CF_PHOENIX = { id: '@cf/leonardo/phoenix-1.0', name: 'Phoenix 1.0', form: false, json: (prompt, size, seed) => ({ prompt: prompt.slice(0, 2000), width: size.w, height: size.h, seed, guidance: 3.5, num_steps: 25, negative_prompt: 'misspelled text, extra words, gibberish letters, watermark, signature, logo, blurry text' }) };
+/*
+ * WHAT A PICTURE COSTS, in neurons — Cloudflare's published prices (Workers AI
+ * pricing, October 2026), rounded UP where a size falls between tiles: the real
+ * daily cap must never be reached (past it, every AI picture fails till midnight).
+ *   klein 4B: 26.05 per output 512x512 tile (+5.37 per reference tile)
+ *   klein 9B: 1,363.64 for the first megapixel, 181.82 per more (and per reference megapixel), +5%
+ *   Phoenix 1.0: 530 per 512 tile + 10 a step;  Lucid Origin: 636 a tile + 12 a step
+ *   FLUX.1 schnell: always 1024x1024 — 4 tiles at 4.8 + 9.6 a step;  FLUX.2 dev: 37.5 per tile a step
+ */
 function neuronsFor(m, size, refs) {
-  const mp = (size.w * size.h) / (1024 * 1024), tiles = Math.ceil(size.w / 512) * Math.ceil(size.h / 512);
-  const refMp = (refs || []).length * 0.4;
-  if (m.id.includes('klein-9b')) return 1364 + Math.max(0, mp - 1) * 182 + refMp * 182;
-  if (m.id.includes('klein-4b')) return 160 + refMp * 40;
-  if (m.id.includes('schnell')) return 460;
-  if (m.id.includes('phoenix')) return tiles * 530;
-  if (m.id.includes('lucid')) return tiles * 636;
+  const tiles = Math.ceil(size.w / 512) * Math.ceil(size.h / 512), mp = (size.w * size.h) / (1024 * 1024);
+  // reference photos: the phone sends them at most 496px, but whatever came is priced as up to a megapixel (4 tiles)
+  const nRefs = (refs || []).length;
+  if (m.id.includes('klein-9b')) return Math.ceil((1363.64 + Math.max(0, mp - 1) * 181.82 + nRefs * 181.82) * 1.05);
+  if (m.id.includes('klein-4b')) return Math.ceil(tiles * 26.05 + nRefs * 4 * 5.37);
+  if (m.id.includes('schnell')) return Math.ceil(4 * 4.8 + 8 * 9.6);
+  if (m.id.includes('phoenix')) return tiles * 530 + 25 * 10;
+  if (m.id.includes('lucid')) return tiles * 636 + 30 * 12;
+  if (m.id.includes('flux-2-dev')) return Math.ceil((tiles + nRefs) * 37.5 * 25);
   return 5000;
 }
-/* the day's spend, kept on disk (a restart does not forget it); the day is Cloudflare's: UTC */
-const ledgerFile = () => path.join(KIT_DIR, 'cf-allowance.json');
-function ledger() {
-  const day = new Date().toISOString().slice(0, 10);
-  let l = null; try { l = JSON.parse(fs.readFileSync(ledgerFile(), 'utf8')); } catch (e) { l = null; }
-  return l && l.day === day ? l : { day, spent: 0 };
-}
-function spend(n) { const l = ledger(); l.spent = Math.round(l.spent + n); try { fs.mkdirSync(KIT_DIR, { recursive: true }); fs.writeFileSync(ledgerFile(), JSON.stringify(l)); } catch (e) {} }
-const allowanceLeft = () => Math.max(0, DAY_NEURONS() - ledger().spent);
-const RESERVE = 900;   // always left for the cheap painters: a flyer can always be made
+const allowanceLeft = () => budget.hardLeft();
 const cfPaid = () => /^(1|true|yes)$/i.test(String(process.env.CLOUDFLARE_PAID || ''));
-/** The models to try for a picture, best first: the premium one only while the day can afford it. */
-function cfModels(tier, size, refs) {
+/** The models to try for a picture, best first: the premium one only when asked for (the caller decides with the allowance). */
+function cfModels(tier) {
   if (cfPaid()) return [CF_KLEIN9].concat(CF_BIG, CF_CHEAP);
-  if (tier === 'premium' && size && allowanceLeft() - neuronsFor(CF_KLEIN9, size, refs) >= RESERVE) return [CF_KLEIN9].concat(CF_CHEAP);
+  if (tier === 'premium') return [CF_KLEIN9].concat(CF_CHEAP);
   return CF_CHEAP;
 }
 // a model that refused (not on this account, a changed name) is skipped for a while, not asked every time
@@ -107,11 +110,14 @@ function status() {
   else { try { const cw = require('./cloudwrite'); if (cw.access && cw.access().key) writer = 'groq'; } catch (e) { /* none */ } }
   // the same free Cloudflare account that paints the pictures also has a writer: the art director
   if (writer === 'rules' && cf) writer = 'cloudflare';
-  const left = cf ? (cfPaid() ? 1e9 : allowanceLeft()) : 0;
+  const who = space.person(), r = budget.report(who), lib = bank.report();
   return {
-    allowanceLeft: cf && !cfPaid() ? left : null,
-    premium: cf && (cfPaid() || left - 1450 >= RESERVE),
-    lettering: cf && (cfPaid() || left - 2120 >= RESERVE),
+    allowanceLeft: cf && !cfPaid() ? r.left : null,
+    // the day as this person finds it: plenty (fresh paintings), limited (fresh and the library), resting (the library)
+    level: cf ? r.level : 'none', resetsAt: r.resetsAt, library: lib.pictures, letterings: lib.letterings,
+    premium: cf && r.level === 'plenty',
+    // AI lettering: fresh while the day allows, from the library (read back, spelt right) after that
+    lettering: cf,
     painter: cf ? 'cloudflare' : 'pollinations',
     painterName: cf ? 'FLUX.2 (Cloudflare, free)' : 'FLUX (Pollinations, free)',
     cloudflare: cf,
@@ -156,9 +162,9 @@ function paintPrompt(scene, opts = {}) {
 }
 
 function sizeFor(w, h) {
-  // multiples of 64 the models like, as big as they paint well (about 1.5 megapixels): the flyer is HD
+  // multiples of 64 the models like, 1024 wide (Cloudflare prices by 512-pixel tiles: 1088 wide paid for a third tile)
   const ar = (+w || 4) / (+h || 5);
-  let W = 1088, H = Math.round(W / ar);
+  let W = 1024, H = Math.round(W / ar);
   if (H > 1472) { H = 1472; W = Math.round(H * ar); }
   const r64 = (v) => Math.max(256, Math.round(v / 64) * 64);
   return { w: r64(W), h: r64(H) };
@@ -186,10 +192,27 @@ async function imageFrom(res) {
   return { buf, mime };
 }
 
-async function paintCloudflare(prompt, size, seed, refs, tier, only) {
+/*
+ * ONE CLOUDFLARE PAINTING, PAID FOR PROPERLY. Each model's cost is RESERVED
+ * from the day before the call (aibudget: nothing can slip past between the
+ * look and the spend), the call waits its turn in the queue, and the cost is
+ * settled when the picture arrives — or given back when Cloudflare refused
+ * before doing any work. A call that timed out or broke on Cloudflare's side
+ * is counted as spent: it may have been painted, and the real cap must never
+ * be reached. A model the day (or this person's share) cannot afford is
+ * skipped for the next, cheaper one. `ctx`: { who, paced, person } for the
+ * reservation (the night filler paints for the library: who 'library').
+ */
+// after a run of failures on Cloudflare's side, a minute's pause (the library answers) rather than spending on errors
+let cfDown = { fails: 0, until: 0 };
+async function paintCloudflare(prompt, size, seed, refs, tier, only, ctx = {}) {
   const errs = [];
-  for (const m of (only || cfModels(tier, size, refs))) {
-    if (benchedNow(m.id + (refs ? '+refs' : ''))) continue;
+  const who = ctx.who || space.person();
+  let short = false;
+  if (cfDown.until > Date.now()) throw Object.assign(new Error('Cloudflare is not answering just now'), { short: true });
+  for (const m of (only || cfModels(tier))) {
+    const benchKey = m.id + (refs ? '+refs' : '');
+    if (benchedNow(benchKey)) continue;
     if (refs && !m.refs) continue;   // a picture with the preacher in it needs a model that takes reference photos
     const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cfAccount())}/ai/run/${m.id}`;
     const headers = { authorization: `Bearer ${cfToken()}` };
@@ -204,33 +227,56 @@ async function paintCloudflare(prompt, size, seed, refs, tier, only) {
       (refs || []).slice(0, 4).forEach((r, i) => body.append('input_image_' + i, new Blob([r.buf], { type: r.mime }), 'ref' + i + (r.mime === 'image/png' ? '.png' : '.jpg')));
     } else {
       headers['content-type'] = 'application/json';
-      body = JSON.stringify(m.json ? m.json(prompt, size, seed) : { prompt: prompt.slice(0, 2000), steps: 8, seed });
+      // (FLUX.1 schnell takes a prompt and steps only — and always paints 1024x1024)
+      body = JSON.stringify(m.json ? m.json(prompt, size, seed) : { prompt: prompt.slice(0, 2000), steps: 8 });
     }
+    const est = neuronsFor(m, size, refs);
+    const ticket = budget.reserve(est, who, { paced: ctx.paced, person: ctx.person });
+    if (!ticket) { short = true; errs.push(m.name + ': not within today’s allowance'); continue; }
+    let billed = false;
     try {
-      const res = await fetchTimed(url, { method: 'POST', headers, body }, 120000);
-      if (res.status === 401 || res.status === 403) throw Object.assign(new Error('the Cloudflare token was refused — it needs “Workers AI: Read”'), { fatal: true });
-      // busy or over a limit: this model (a big one costs more of the allowance) — the next, smaller one may still paint
-      if (res.status === 429) {
-        const t = await res.text().catch(() => '');
-        // the day's free neurons are shared by every model: no point asking the next one
-        if (/daily free allocation|neurons/i.test(t)) { spend(DAY_NEURONS()); throw Object.assign(new Error('today’s free Cloudflare allowance (10,000 neurons) is used up — it comes back at midnight UTC (1am in Ireland)'), { fatal: true }); }
-        benched.set(m.id + (refs ? '+refs' : ''), Date.now() + 20 * 60e3);
-        throw new Error(m.name + ': Cloudflare is busy');
-      }
-      if (!res.ok) {
-        const t = await res.text().catch(() => '');
-        if (res.status === 400 || res.status === 404) benched.set(m.id + (refs ? '+refs' : ''), Date.now() + 6 * 3600e3);
-        throw new Error(`${m.name}: ${res.status} ${t.slice(0, 160)}`);
-      }
-      const out = await imageFrom(res);
-      if (!cfPaid()) spend(neuronsFor(m, size, refs));
-      return Object.assign(out, { by: m.name + ' · Cloudflare' });
+      const out = await budget.turn(who, () => withDeadline(120000, async (signal) => {
+        let res;
+        try { res = await fetch(url, { method: 'POST', headers, body, signal }); }
+        catch (e) { billed = e && e.name === 'AbortError'; throw Object.assign(e, { down: true }); }   // a timeout may still have been painted (and paid)
+        if (res.status === 401 || res.status === 403) throw Object.assign(new Error('the Cloudflare token was refused — it needs “Workers AI: Read”'), { fatal: true });
+        if (res.status === 429) {
+          const t = await res.text().catch(() => '');
+          // the day's free neurons are shared by every model: no point asking the next one
+          if (/daily free allocation|3036/i.test(t)) { budget.exhaust(ticket); throw Object.assign(new Error('today’s free Cloudflare allowance is used up — it comes back at midnight UTC'), { fatal: true, short: true }); }
+          // "capacity temporarily exceeded" (3040) or a rate limit: a short pause for this model (not twenty minutes for everyone)
+          const ra = Math.min(300, Math.max(20, Number(res.headers.get('retry-after')) || 45));
+          benched.set(benchKey, Date.now() + ra * 1000);
+          throw new Error(m.name + ': Cloudflare is busy');
+        }
+        if (!res.ok) {
+          const t = await res.text().catch(() => '');
+          if (res.status === 400 || res.status === 404) benched.set(benchKey, Date.now() + 6 * 3600e3);
+          // a gateway error comes before any painting (nothing billed); a 500 may come after it
+          else if (res.status === 500) billed = true;
+          throw Object.assign(new Error(`${m.name}: ${res.status} ${t.slice(0, 160)}`), { down: res.status >= 500 });
+        }
+        billed = true;   // answered 200: painted (and paid), whatever the answer holds
+        return imageFrom(res);   // read under the same deadline: a stalled download is let go too
+      }));
+      budget.settle(ticket, est);
+      cfDown.fails = 0;
+      return Object.assign(out, { by: m.name + ' · Cloudflare', model: m.id, cost: est });
     } catch (e) {
+      if (billed) budget.settle(ticket, est); else budget.release(ticket);
+      if (e.down && ++cfDown.fails >= 3) cfDown = { fails: 0, until: Date.now() + 60e3 };
       errs.push(e.message);
-      if (e.fatal) throw e;
+      if (e.queued) { short = true; break; }   // the queue is long: the library answers this one
+      if (e.fatal) throw Object.assign(e, { short: !!e.short });
     }
   }
-  throw new Error(errs.join('; ') || 'Cloudflare painted nothing');
+  throw Object.assign(new Error(errs.join('; ') || 'Cloudflare painted nothing'), { short });
+}
+/* a whole exchange — the request AND reading the answer — under one deadline */
+async function withDeadline(ms, fn) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), ms);
+  try { return await fn(ac.signal); } finally { clearTimeout(t); }
 }
 
 async function paintPollinations(prompt, size, seed) {
@@ -244,9 +290,12 @@ async function paintPollinations(prompt, size, seed) {
   const errs = [];
   for (const t of tries) {
     try {
-      const res = await fetchTimed(t.url, { headers: t.headers }, 120000);
-      if (!res.ok) { errs.push(`${res.status}`); continue; }
-      const out = await imageFrom(res);
+      const out = await withDeadline(45000, async (signal) => {
+        const res = await fetch(t.url, { headers: t.headers, signal });
+        if (!res.ok) throw new Error(String(res.status));
+        return imageFrom(res);
+      }).catch((e) => { errs.push(e.message); return null; });
+      if (!out) continue;
       if (out.buf.length < 8000) { errs.push('an empty picture'); continue; }
       return Object.assign(out, { by: 'FLUX · Pollinations' });
     } catch (e) { errs.push(e.message); }
@@ -254,25 +303,87 @@ async function paintPollinations(prompt, size, seed) {
   throw new Error('Pollinations did not paint (' + errs.join(', ') + ')');
 }
 
+/* the kind of event a picture is for (the library files it under this): prayer, word, easter, christmas… */
+function kindKey(ev) {
+  const e = ev && typeof ev === 'object' ? ev : {};
+  const hay = [e.season, e.kind, e.title, e.theme].filter(Boolean).join(' ');
+  const r = RULES.find((x) => x.rx.test(hay)) || RULES[RULES.length - 1];
+  return bank.keyOf(r.script) || 'general';
+}
+const dataUrlOf = (o) => `data:${o.mime};base64,${o.buf.toString('base64')}`;
+const inflight = new Map();   // a slot being painted right now → the library id it will have
+
 /**
- * Paint one background. → { dataUrl, by, prompt } — or throws with a plain
- * sentence the phone can show (the phone then paints its own).
+ * Paint one background. → { dataUrl, by, prompt, bank? } — or throws with a
+ * plain sentence the phone can show (the phone then uses the studio's photos).
+ *
+ * ►► ONE ALLOWANCE, A HUNDRED PEOPLE. ◄◄ The church's library comes first
+ * whenever the day is not plenty: a picture painted earlier for this kind of
+ * event, in this light, that THIS person has not seen — free. Fresh paintings
+ * go on what the library does not have yet (and are kept in it for the next
+ * person); the top design gets FLUX.2 klein 9B only while the day is plenty.
+ * Two people asking for the same thing at the same moment share one painting.
  */
-async function paint({ scene, w = 1080, h = 1350, seed, people = true, theme = false, tier = 'normal' } = {}) {
+async function paint({ scene, w = 1080, h = 1350, seed, people = true, theme = false, tier = 'normal', slot, tone, event } = {}) {
+  const who = space.person();
   const prompt = paintPrompt(scene, { people, theme: !!theme });
   const size = sizeFor(w, h);
   const s = Number.isFinite(+seed) ? Math.abs(Math.round(+seed)) % 2147483647 : Math.floor(Math.random() * 1e9);
-  let out = null;
+  const ev = event && typeof event === 'object' ? event : {};
+  const kind = kindKey(ev), themeK = theme ? bank.keyOf([ev.title, ev.theme].filter(Boolean).join(' ')) : '';
+  const toneId = String(tone || 'own').replace(/[^\w-]/g, '').slice(0, 20) || 'own';
+  const top = slot == null ? tier === 'premium' : +slot === 0;
+  const q = { shape: bank.shapeOf(size.w, size.h), kind, theme: themeK, tone: toneId, people: people !== false, premium: top };
+  const slotKey = [q.shape, themeK ? 'theme:' + themeK : kind, toneId, q.people ? 'p' : 'np'].join('|');
+  const recipe = { scene: String(scene || '').slice(0, 600), w: +w || 1080, h: +h || 1350, people: q.people, theme: !!theme, themeText: themeK, kind, tone: toneId, shape: q.shape };
+  const cf = !!(cfAccount() && cfToken());
+  const lvl = cf ? budget.level(who) : 'resting';
   const errs = [];
-  if (cfAccount() && cfToken()) {
-    try { out = await paintCloudflare(prompt, size, s, null, tier); } catch (e) { errs.push(e.message); }
+  let out = null, fresh = false;
+  const fromLibrary = (qq, again) => bank.take(qq || q, who, { again });
+
+  // 1. the library, when the day is not plenty (everyone's fresh paintings are shared out fairly)
+  if (lvl !== 'plenty') out = fromLibrary();
+  // 2. the same picture being painted for someone else right now: wait for it rather than paint it twice
+  //    (holding nothing while waiting — no place in the queue, no reservation; never on one's own painting)
+  const flying = inflight.get(slotKey);
+  if (!out && cf && lvl !== 'plenty' && flying && flying.owner !== who) {
+    // at most a few seconds: then the library (a slow painting is nobody else's wait)
+    const id = await Promise.race([flying.id, new Promise((r) => setTimeout(() => r(null), 12000))]);
+    if (id) out = bank.takeId(id, who);
+    if (!out) out = fromLibrary();
   }
+  // 3. a fresh painting, kept in the library for the next person
+  if (!out && cf) {
+    // the top design gets FLUX.2 klein 9B while the day is plenty — and only if this person can still afford the
+    // board's AI-lettered title too (it comes first: lettered once, it serves every flyer with that title after)
+    const words = String(ev.title || '').trim().split(/\s+/).filter(Boolean).length;
+    const letterFirst = words >= 1 && words <= 4 && !bank.letterStock(ev.title, who);
+    const premium = top && lvl === 'plenty' && (!letterFirst || budget.personLeft(who) >= neuronsFor(CF_KLEIN9, size) + neuronsFor(CF_PHOENIX, { w: 832, h: 1024 }));
+    const job = paintCloudflare(prompt, size, s, null, premium ? 'premium' : 'normal', null, { who }).then((o) => {
+      let e = null;
+      // kept for the next person — best effort: a full disk never costs this person their picture
+      try { e = bank.add(o.buf, o.mime, { kind, theme: themeK, tone: toneId, shape: q.shape, tier: /klein-9b|flux-2-dev|lucid/.test(o.model || '') ? 'premium' : 'normal', by: o.by, people: q.people, prompt: scene }, who); } catch (er) { e = null; }
+      return { o, e };
+    });
+    const entry = { owner: who, id: job.then((r) => (r.e ? r.e.id : null), () => null) };
+    inflight.set(slotKey, entry);
+    entry.id.then(() => { if (inflight.get(slotKey) === entry) inflight.delete(slotKey); });
+    // kept in the library: the phone loads it from there (and keeps it); if it could not be kept, the picture itself
+    try { const r = await job; out = r.e ? Object.assign(bank.handOutNew(r.e), { bank: false }) : { dataUrl: dataUrlOf(r.o), by: r.o.by }; fresh = true; } catch (e) { errs.push(e.message); }
+  }
+  // 4. the day cannot paint it: the library's best (any light; then any picture for this kind of event)
+  if (!out) out = fromLibrary();
+  if (!out && themeK) out = fromLibrary(Object.assign({}, q, { theme: '' }));
+  if (!out) out = fromLibrary(null, true);   // seen long ago is better than none
+  bank.note(slotKey, recipe, !!out);
   const cfWhy = errs.slice();   // why Cloudflare did not paint (said on the phone, never silently)
-  if (!out) {
-    try { out = await paintPollinations(prompt, size, s); } catch (e) { errs.push(e.message); }
+  // 5. Pollinations: only with a key now (keyless requests are refused there) — or on a server with no Cloudflare at all
+  if (!out && (polKey() || !cf)) {
+    try { const o = await paintPollinations(prompt, size, s); out = { dataUrl: dataUrlOf(o), by: o.by }; } catch (e) { errs.push(e.message); }
   }
-  if (!out) throw new Error(errs.join(' · ') || 'no painter could be reached');
-  return { dataUrl: `data:${out.mime};base64,${out.buf.toString('base64')}`, by: out.by, prompt, seed: s, cfFailed: cfWhy.length ? cfWhy.join(' · ').slice(0, 300) : '' };
+  if (!out) throw new Error(errs.join(' · ') || (cf ? 'today’s free AI pictures are resting and the library has none for this yet' : 'no painter could be reached'));
+  return Object.assign(out, { prompt, seed: s, fresh, tone: out.tone || toneId, cfFailed: !fresh && cfWhy.length ? cfWhy.join(' · ').slice(0, 300) : '' });
 }
 
 /*
@@ -309,8 +420,11 @@ async function paintWith({ scene, w = 1080, h = 1350, seed, refs = [], who } = {
   const prompt = paintWithPrompt(scene, who);
   const size = sizeFor(w, h);
   const s = Number.isFinite(+seed) ? Math.abs(Math.round(+seed)) % 2147483647 : Math.floor(Math.random() * 1e9);
-  const out = await paintCloudflare(prompt, size, s, rs, 'premium');
-  return { dataUrl: `data:${out.mime};base64,${out.buf.toString('base64')}`, by: out.by, prompt, seed: s };
+  const person = space.person();
+  // their own photo: never put in the library; klein 9B only while the day is plenty, the 4B (about 160) otherwise
+  const out = await paintCloudflare(prompt, size, s, rs, budget.level(person) === 'plenty' ? 'premium' : 'normal', null, { who: person })
+    .catch((e) => { throw new Error(e.short ? 'today’s free AI painting is resting — the other designs stand' : e.message); });
+  return { dataUrl: dataUrlOf(out), by: out.by, prompt, seed: s };
 }
 
 /*
@@ -337,35 +451,50 @@ function titlePrompt(scene, title, look) {
   ].join(', ');
 }
 const wordsOf = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9 ]+/g, ' ').split(/\s+/).filter((w) => w.length > 1);
-async function paintTitle({ scene, title, seed, look } = {}) {
-  if (!(cfAccount() && cfToken())) throw new Error('AI lettering needs the free Cloudflare account on the server.');
+async function paintTitle({ scene, title, seed, look, event, fresh: forceFresh } = {}) {
   title = String(title || '').trim().replace(/\s+/g, ' ').slice(0, 32);
   if (!title || title.split(' ').length > 4) throw new Error('AI lettering is for a short title (four words at most).');
-  const size = { w: 832, h: 1024 };   // 4 tiles: about 2,100 neurons, two a day on the free allowance
-  if (!cfPaid() && allowanceLeft() - neuronsFor(CF_PHOENIX, size) < RESERVE) throw new Error('today’s free allowance for AI lettering is used — it comes back at midnight UTC');
+  const who = space.person(), forLibrary = who === budget.LIBRARY;
+  // the church's library first: this title, lettered earlier, read back spelt right, that this person has not had — free
+  if (!forLibrary && !forceFresh) { const lib = bank.takeLetter(title, who); if (lib) return Object.assign(lib, { prompt: '', seed: 0 }); }
+  if (!(cfAccount() && cfToken())) throw new Error('AI lettering needs the free Cloudflare account on the server.');
+  if (!forLibrary) bank.noteLetter(title, scene);   // asked for: tonight's leftover allowance letters it, if today cannot
+  const size = { w: 832, h: 1024 };   // 4 tiles, 25 steps: about 2,370 neurons
   const want = wordsOf(title);
   let cs = null; try { cs = require('./cloudsee'); } catch (e) { cs = null; }
   const style = look || LETTERING[Math.floor(Math.random() * LETTERING.length)];
-  let last = null;
+  let last = null, tries = 0;
   for (let attempt = 0; attempt < 2; attempt++) {
-    if (attempt && !cfPaid() && allowanceLeft() - neuronsFor(CF_PHOENIX, size) < RESERVE) break;
     const s = Number.isFinite(+seed) && !attempt ? Math.abs(Math.round(+seed)) % 2147483647 : Math.floor(Math.random() * 1e9);
     const prompt = titlePrompt(scene, title, style);
-    const out = await paintCloudflare(prompt, size, s, null, 'premium', [CF_PHOENIX]);
-    const dataUrl = `data:${out.mime};base64,${out.buf.toString('base64')}`;
+    let out;
+    try { out = await paintCloudflare(prompt, size, s, null, 'premium', [CF_PHOENIX], { who }); }
+    catch (e) {
+      if (last) break;   // a second try the day cannot afford: the first stands as it is
+      throw new Error(e.short ? 'today’s free AI lettering is resting (the church library has none of this title yet) — the designs without it stand' : e.message);
+    }
+    tries++;
+    const dataUrl = dataUrlOf(out);
     last = { dataUrl, by: out.by, prompt, seed: s, checked: false, spelt: null };
-    if (!cs || !cs.ready || !cs.ready()) return last;
+    if (!cs || !cs.ready || !cs.ready()) return forLibrary ? null : last;   // unchecked: offered to this person, never kept for others
     const r = await cs.readFlyer({ image: dataUrl, maxWaitMs: 20000 }).catch(() => ({ ok: false }));
-    if (!r || !r.ok) return last;
+    if (!r || !r.ok) return forLibrary ? null : last;
     const seen = new Set(wordsOf([r.text, r.event].join(' ')));
     const ok = want.every((w) => seen.has(w));
     // "was the text even visible?": spelt right is not enough — dark letters on a dark scene are painted again
     const legible = r.legible !== false;
     last = Object.assign(last, { checked: true, spelt: ok, legible, read: (r.event || r.text || '').slice(0, 80) });
-    if (ok && legible) return last;
+    if (ok && legible) {
+      // read back right: kept, so every flyer with this title after it can have it free
+      let kept = null;
+      try { kept = bank.addLetter(out.buf, out.mime, { title, style, by: out.by, checked: true, spelt: true, legible: true, w: size.w, h: size.h }, forLibrary ? null : who); } catch (e) { kept = null; }
+      if (kept) { delete last.dataUrl; last.file = kept.file; }
+      return last;
+    }
   }
-  if (last && last.checked && !last.spelt) throw new Error('the AI misspelt the title twice (it read “' + (last.read || '') + '”) — the designs without it stand');
-  if (last && last.checked && !last.legible) throw new Error('the AI lettering came out hard to read twice — the designs without it stand');
+  const times = tries > 1 ? 'twice' : 'and today cannot afford another try';
+  if (last && last.checked && !last.spelt) throw new Error('the AI misspelt the title ' + times + ' (it read “' + (last.read || '') + '”) — the designs without it stand');
+  if (last && last.checked && !last.legible) throw new Error('the AI lettering came out hard to read ' + times + ' — the designs without it stand');
   return last;
 }
 
@@ -453,7 +582,10 @@ async function directWithClaude(f) {
 }
 
 /* Cloudflare Workers AI's free writers, best first (a model the account lacks is skipped) */
-const CF_WRITERS = ['@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/meta/llama-3.1-8b-instruct-fast', '@cf/meta/llama-3.1-8b-instruct'];
+// (llama-3.1-8b-instruct was retired by Cloudflare on 30 May 2026)
+const CF_WRITERS = ['@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/meta/llama-3.1-8b-instruct-fast'];
+// what one art direction costs of the day (a ~1,500-token prompt, up to 1,200 tokens back, at the 70B's prices), rounded up
+const WRITER_NEURONS = 300;
 function jsonIn(text) {
   if (text && typeof text === 'object') return text;
   const t = String(text || ''); const a = t.indexOf('{'), b = t.lastIndexOf('}');
@@ -463,20 +595,35 @@ function jsonIn(text) {
 async function directWithCloudflare(f) {
   const system = DIRECTOR_SYSTEM + '\nAnswer with ONE JSON object only, no prose, with keys: scenes (array of 6 strings), palette (array of 4 hex strings like "#1a0638"), scriptWord (string), kicker (string), looks (array of layout names).';
   const until = Date.now() + 30000;   // the whole art direction, never longer than this — then the pool
+  const who = space.person();
   for (const id of CF_WRITERS) {
     if (benchedNow(id)) continue;
     const left = until - Date.now(); if (left < 4000) break;
+    // the same allowance as the pictures: set aside first (it used to be spent and never written down)
+    const ticket = budget.reserve(WRITER_NEURONS, who);
+    if (!ticket) return null;   // the day is for the pictures now: the rules direct this one
+    let billed = false;
     try {
-      const res = await fetchTimed(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cfAccount())}/ai/run/${id}`, {
-        method: 'POST', headers: { authorization: `Bearer ${cfToken()}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ messages: [{ role: 'system', content: system }, { role: 'user', content: fieldsText(f) + '\n(Surprise me: this is request ' + Math.floor(Math.random() * 1e6) + ', so make the six scenes different from any you gave before.)' }], max_tokens: 1200, temperature: 1.0 }),
-      }, Math.min(25000, left));
-      if (res.status === 400 || res.status === 404) { benched.set(id, Date.now() + 6 * 3600e3); continue; }
-      if (!res.ok) continue;
-      const j = await res.json().catch(() => null);
+      // the request and its answer under one deadline (a stalled answer is let go, and counted)
+      const r = await withDeadline(Math.min(25000, left), async (signal) => {
+        const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(cfAccount())}/ai/run/${id}`, {
+          method: 'POST', headers: { authorization: `Bearer ${cfToken()}`, 'content-type': 'application/json' }, signal,
+          body: JSON.stringify({ messages: [{ role: 'system', content: system }, { role: 'user', content: fieldsText(f) + '\n(Surprise me: this is request ' + Math.floor(Math.random() * 1e6) + ', so make the six scenes different from any you gave before.)' }], max_tokens: 1200, temperature: 1.0 }),
+        });
+        if (res.ok) billed = true;
+        return { status: res.status, ok: res.ok, text: res.ok ? '' : await res.text().catch(() => ''), j: res.ok ? await res.json().catch(() => null) : null };
+      });
+      if (r.status === 400 || r.status === 404) { benched.set(id, Date.now() + 6 * 3600e3); budget.release(ticket); continue; }
+      if (r.status === 429) { budget.release(ticket); if (/daily free allocation|3036/i.test(r.text)) { budget.exhaust(ticket); return null; } continue; }
+      if (!r.ok) { if (r.status === 500) budget.settle(ticket, WRITER_NEURONS); else budget.release(ticket); continue; }
+      const j = r.j;
+      const u = j && j.result && j.result.usage;
+      // what it really used, when Cloudflare says (its prices for the 70B: about 27 a thousand tokens in, 205 out)
+      const used = u && u.prompt_tokens != null ? Math.ceil((+u.prompt_tokens || 0) * 0.0267 + (+u.completion_tokens || 0) * 0.2048) + 5 : WRITER_NEURONS;
+      budget.settle(ticket, Math.min(WRITER_NEURONS * 2, used));
       const d = jsonIn(j && j.result && j.result.response);
       if (d && Array.isArray(d.scenes) && d.scenes.length) return d;
-    } catch (e) { /* the next writer */ }
+    } catch (e) { if (billed || (e && e.name === 'AbortError')) budget.settle(ticket, WRITER_NEURONS); else budget.release(ticket); /* the next writer */ }
   }
   return null;
 }
@@ -649,9 +796,23 @@ function stockPath(name) {
   return fs.existsSync(full) ? full : '';
 }
 
-/** The event → what to paint and how it should look. Never throws: the rules are always there. */
-async function direct(fields = {}) {
-  const f = fields || {};
+/*
+ * ONE ART DIRECTION FOR AN EVENT, NOT A HUNDRED. When the whole church makes
+ * flyers for Friday's prayer meeting, the writer is asked once; for a quarter
+ * of an hour the same direction serves everyone (its scenes in a new order
+ * each time — the pictures, the lights and the layouts make every board its
+ * own). The free writers have limits too, and so does the allowance.
+ */
+const DIRECTED = new Map();
+const directKey = (f) => bank.keyOf([f.title, f.theme, f.kind, f.season, f.dateText].join(' ')) + '|' + (f.speakers || []).map((x) => x && x.name).join(',');
+/* a shared direction, for one more board: the same ideas, each set (key art, atmosphere) in a new order */
+function directionFor(base, f) {
+  const out = JSON.parse(JSON.stringify(base));
+  const n = Math.min(out.themeScenes || 0, out.scenes.length);
+  out.scenes = pick(out.scenes.slice(0, n), n).concat(pick(out.scenes.slice(n), out.scenes.length - n));
+  return Object.assign(out, { photos: stockPhotos(f, out.scenes), shared: true });
+}
+async function directFresh(f) {
   const st = status();
   let d = null, by = 'rules';
   try {
@@ -664,12 +825,29 @@ async function direct(fields = {}) {
     try { d = await directWithCloudflare(f); by = 'cloudflare'; } catch (e) { d = null; }
   }
   if (!d) by = 'rules';
-  const out = clean(d, f);
-  if (by === 'rules') {
+  return Object.assign(clean(d, f), { by });
+}
+/** The event → what to paint and how it should look. Never throws: the rules are always there. */
+async function direct(fields = {}) {
+  const f = fields || {};
+  const key = directKey(f), hit = DIRECTED.get(key);
+  // the same event asked again within the quarter hour (or while it is being asked): one writer call serves all
+  if (hit && Date.now() - hit.at < 15 * 60e3) {
+    const base = await hit.p.catch(() => null);
+    if (base) return directionFor(base, f);
+  }
+  const p = directFresh(f);
+  const entry = { at: Date.now(), p: p.then((o) => (o.by === 'rules' ? null : o)) };
+  entry.p.catch(() => {});
+  DIRECTED.set(key, entry);
+  if (DIRECTED.size > 200) DIRECTED.delete(DIRECTED.keys().next().value);
+  const out = await p.catch(() => Object.assign(clean(null, f), { by: 'rules' }));
+  if (out.by === 'rules') {
+    if (DIRECTED.get(key) === entry) DIRECTED.delete(key);   // the rules are no writer's answer: the next one asks again
     const board = (readKit().inspo || []).filter((i) => (i.palette || []).length === 4);
     if (board.length && Math.random() < 0.6) out.palette = board[Math.floor(Math.random() * board.length)].palette.slice();
   }
-  return Object.assign(out, { by, photos: stockPhotos(f, out.scenes) });
+  return Object.assign(JSON.parse(JSON.stringify(out)), { photos: stockPhotos(f, out.scenes) });
 }
 
 /* ------------------------------------------------------------- the kit */
@@ -682,7 +860,12 @@ async function direct(fields = {}) {
  * on the server, so every phone of the media team has the same kit.
  */
 let KIT_DIR = path.join(os.tmpdir(), 'mw-flyer-kit');
-function init(userData) { KIT_DIR = path.join(userData, 'flyer-kit'); }
+function init(userData) {
+  KIT_DIR = path.join(userData, 'flyer-kit');
+  // their own folders: the kit's tidy-up (kitSave) removes whatever in its folder is not the kit — it used to remove the ledger
+  budget.init(path.join(userData, 'flyer-ai'), path.join(KIT_DIR, 'cf-allowance.json'));
+  bank.init(path.join(userData, 'flyer-library'));
+}
 const kitFile = () => path.join(KIT_DIR, 'kit.json');
 
 const DEFAULT_KIT = {
@@ -897,4 +1080,90 @@ function kitUsed({ speaker, photo } = {}) {
   return true;
 }
 
-module.exports = { paintTitle, titlePrompt, neuronsFor, cfDiagnose, paintWith, paintWithPrompt, kitAddPhoto, inspoAdd, inspoRemove, stockPhotos, stockPath, PHOTO_TAGS, status, paint, direct, init, kitGet, kitSave, kitPic, kitUsed, paintPrompt, sizeFor, directByRules, imageFrom, LOOKS };
+/*
+ * ►► THE NIGHT FILLER: NOTHING OF THE DAY GOES TO WASTE. ◄◄ The allowance
+ * does not carry over — what is not painted by midnight UTC is simply lost. So
+ * in the last hours of the day (from 21:00 UTC, keeping a little back for late
+ * flyers until 23:00) whatever is left paints for the church's LIBRARY: first
+ * the titles people asked to have AI-lettered and could not (read back, spelt
+ * right — or not kept), then the pictures people asked for most that the
+ * library has fewest of, from the very requests they made. And just after the
+ * reset, a little of the new day readies the library for the services of the
+ * next two days (the kit's week). Runs inside the server, every ten minutes.
+ */
+let fillerTimer = null, filling = false, prewarmed = { day: '', spent: 0 };
+function startFiller() {
+  if (fillerTimer) return;
+  // a tick a minute after boot (a server restarted often still fills), then every ten minutes after each one ends
+  const next = (ms) => { fillerTimer = setTimeout(async () => { try { await fillerTick(); } catch (e) { /* never the server's end */ } if (fillerTimer) next(10 * 60e3); }, ms); if (fillerTimer.unref) fillerTimer.unref(); };
+  next(60e3);
+}
+function stopFiller() { if (fillerTimer) clearTimeout(fillerTimer); fillerTimer = null; }
+async function fillerTick(now = Date.now(), opts = {}) {
+  if (filling || !(cfAccount() && cfToken()) || cfPaid()) return { painted: 0, letters: 0, why: 'not now' };
+  filling = true;
+  try {
+    const d = new Date(now), mins = d.getUTCHours() * 60 + d.getUTCMinutes(), day = d.toISOString().slice(0, 10);
+    let room = 0, mode = '';
+    if (mins >= 23 * 60 + 55) return { painted: 0, letters: 0, why: 'too near midnight' };   // nothing started that would cross it
+    if (mins >= 21 * 60) { room = budget.hardLeft() - (mins < 23 * 60 ? 1500 : 0); mode = 'end of day'; }
+    else if (mins < 6 * 60) {
+      if (prewarmed.day !== day) prewarmed = { day, spent: 0 };
+      // a little of the new day: at most 15% of it, and never more than half of what the pace has released
+      room = Math.min(budget.available() / 2, budget.DAY() * 0.15 - prewarmed.spent); mode = 'morning';
+    }
+    if (room < 160) return { painted: 0, letters: 0, why: 'no room' };
+    const usersWaiting = () => budget.report(budget.LIBRARY).queueUsers > 0 || (Date.now() - now > 9 * 60e3);
+    const max = opts.max || 8;
+    let painted = 0, letters = 0, spentHere = 0;
+    const L = budget.LIBRARY;
+    const asLibrary = (fn) => space.run(null, fn, L);
+    const spentNow = () => budget.report(L).spent;
+    const want = bank.wanted();
+    // 1. letterings asked for and not had (only with the reader to check them: a misspelling is never kept)
+    let cs = null; try { cs = require('./cloudsee'); } catch (e) { cs = null; }
+    if (mode === 'end of day' && cs && cs.ready && cs.ready()) {
+      for (const t of want.titles) {
+        if (usersWaiting() || painted + letters >= max || room - spentHere < neuronsFor(CF_PHOENIX, { w: 832, h: 1024 }) * 2) break;
+        const before = spentNow();
+        try { const r = await asLibrary(() => paintTitle({ title: t.title, scene: t.scene, fresh: true })); if (r) letters++; } catch (e) { /* the next */ }
+        spentHere += Math.max(0, spentNow() - before);
+      }
+    }
+    // 2. the pictures people asked for most, of which the library has fewest
+    const jobs = want.slots.filter((x) => x.have < 6).map((x) => x.recipe);
+    // the morning: the services of the next two days, from what was asked for them before (or the rules' scenes)
+    if (mode === 'morning') {
+      const kit = readKit(), soon = [d.getUTCDay(), (d.getUTCDay() + 1) % 7, (d.getUTCDay() + 2) % 7];
+      const kinds = new Set((kit.services || []).filter((sv) => soon.includes(sv.day)).map((sv) => kindKey({ title: sv.name, kind: sv.kind })));
+      jobs.sort((a, b) => (kinds.has(b.kind) ? 1 : 0) - (kinds.has(a.kind) ? 1 : 0));
+      for (const k of kinds) {
+        if (jobs.some((r) => r.kind === k)) continue;
+        const sv = (kit.services || []).find((x) => kindKey({ title: x.name, kind: x.kind }) === k);
+        const scenes = directByRules({ title: sv ? sv.name : k, kind: sv ? sv.kind : k }).scenes.slice(0, 2);
+        scenes.forEach((sc) => jobs.push({ scene: sc, w: 1080, h: 1350, people: true, theme: false, kind: k, tone: 'own', shape: 'post' }));
+      }
+    }
+    for (const r of jobs) {
+      if (usersWaiting() || painted + letters >= max || room - spentHere < 200) break;   // people first, always
+      const before = spentNow();
+      try {
+        const out = await asLibrary(() => paintFor(r));
+        if (out) painted++;
+      } catch (e) { if (/allowance|resting/i.test(e.message)) break; }
+      spentHere += Math.max(0, spentNow() - before);
+    }
+    if (mode === 'morning') prewarmed.spent += spentHere;
+    return { painted, letters, mode, spent: spentHere };
+  } finally { filling = false; }
+}
+/* one library picture from a recorded request (the light's words are already in its scene) */
+async function paintFor(r) {
+  const size = sizeFor(r.w, r.h);
+  const prompt = paintPrompt(r.scene, { people: r.people !== false, theme: !!r.theme });
+  const o = await paintCloudflare(prompt, size, Math.floor(Math.random() * 1e9), null, 'normal', null, { who: budget.LIBRARY });
+  return bank.add(o.buf, o.mime, { kind: r.kind, theme: r.themeText || '', tone: r.tone, shape: r.shape || bank.shapeOf(size.w, size.h), tier: 'normal', by: o.by, people: r.people !== false, prompt: r.scene }, null);
+}
+
+const libraryPath = (name) => bank.filePath(name);
+module.exports = { libraryPath, startFiller, stopFiller, fillerTick, kindKey, paintTitle, titlePrompt, neuronsFor, cfDiagnose, paintWith, paintWithPrompt, kitAddPhoto, inspoAdd, inspoRemove, stockPhotos, stockPath, PHOTO_TAGS, status, paint, direct, init, kitGet, kitSave, kitPic, kitUsed, paintPrompt, sizeFor, directByRules, imageFrom, LOOKS };

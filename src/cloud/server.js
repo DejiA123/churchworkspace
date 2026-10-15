@@ -131,6 +131,8 @@ console.log('  data:   ' + DATA);
 console.log('  media:  ' + MEDIA);
 
 require('../main/main');       // 195 handlers, registered exactly as on the desktop
+// the night filler: what is left of the day's free AI allowance paints for the church's picture library (flyerart)
+try { require('../main/flyerart').startFiller(); } catch (e) { /* flyers still work without it */ }
 
 const rpc = require('../main/rpc');
 const cloud = cloudApi;

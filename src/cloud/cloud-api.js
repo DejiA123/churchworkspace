@@ -1214,7 +1214,7 @@ async function handle(req, res) {
 
   // Everything from here on runs in the signed-in person's own space.
   const me = userOf(req, url);
-  return space.run(me ? me.space : null, () => authedRoutes(req, res, url, p, me));
+  return space.run(me ? me.space : null, () => authedRoutes(req, res, url, p, me), me ? me.uid : null);
 }
 
 async function authedRoutes(req, res, url, p, me) {
@@ -1374,6 +1374,13 @@ async function authedRoutes(req, res, url, p, me) {
     if (!file) return send(res, 502, 'text/plain', (out && out.error) || 'That song could not be fetched.');
     if (!allowedPath(file)) return send(res, 403, 'text/plain', 'forbidden');
     return sendFile(req, res, path.resolve(file), {});
+  }
+
+  /* the church's flyer picture library (flyerart/flyerbank): by name only, from that folder only; kept by the phone */
+  if (p === '/api/flyer-library') {
+    const full = require('../main/flyerart').libraryPath(url.searchParams.get('f') || '');
+    if (!full) return send(res, 404, 'text/plain', 'not found');
+    return sendFile(req, res, full, { cache: 'private, max-age=31536000, immutable' });
   }
 
   if (p === '/api/media' || p === '/api/file') {

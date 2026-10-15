@@ -493,6 +493,7 @@ let _hideTimer = null;
   /* ------------------------------------------------------- files as URLs */
 
   /** A path on the studio machine, as something this browser can load. */
+  window.MW_FLYER_LIB_URL = (f) => '/api/flyer-library?f=' + encodeURIComponent(f) + (token ? '&k=' + encodeURIComponent(token) : '');
   window.MW_FILE_URL = (p) => '/api/media?p=' + encodeURIComponent(p) + (token ? '&k=' + encodeURIComponent(token) : '');
   /** A free song from the music shelf, played through the server (cloud-api.js /api/free-song). */
   /** A narrator voice's sample line, made once on the server (cloud-api.js /api/voice-sample). */

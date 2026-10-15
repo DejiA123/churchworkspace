@@ -145,7 +145,8 @@ async function t(name, fn) {
   if (saved) process.env.ANTHROPIC_API_KEY = saved;
   await t('pictures are asked for at HD sizes the models take', () => {
     const a = fa.sizeFor(1080, 1350), b = fa.sizeFor(1080, 1920);
-    assert.ok(a.w * a.h >= 1.4e6 && a.w % 64 === 0 && a.h % 64 === 0, JSON.stringify(a));
+    // 1024 wide (Cloudflare prices by 512-pixel tiles: a 1024x1280 post is six of them), HD for a 1080 flyer
+    assert.ok(a.w === 1024 && a.h === 1280 && a.w % 64 === 0 && a.h % 64 === 0, JSON.stringify(a));
     assert.ok(b.h <= 1472 && b.w % 64 === 0, JSON.stringify(b));
   });
   await t('the prompt asks for no words in the picture', () => {

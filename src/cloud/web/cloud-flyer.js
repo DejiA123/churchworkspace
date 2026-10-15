@@ -3041,13 +3041,15 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     // remember these details for this service (Tuesday's Word Study comes back as typed)
     const ok = occKey(F.occasion);
     if (ok && ok !== 'other' && F.kit) { F.kit.lastFor = Object.assign({}, F.kit.lastFor, { [ok]: presetNow() }); saveKit(true); }
-    F.step = 'pick'; F.bgs = []; F.designs = []; F.dir = null; F.tries++; F.paintedIn = []; F.lettered = null;
+    // "New pictures" keeps the AI-lettered title it already has (another would spend the day's dearest painting again)
+    const keepLetter = F.lettered && F.lettered.title === String(F.fields.title || '').trim() ? F.lettered : null;
+    F.step = 'pick'; F.bgs = []; F.designs = []; F.dir = null; F.tries++; F.paintedIn = []; F.lettered = keepLetter;
     const tryNo = F.tries;
     drawPick();
     await loadFonts();
     const dp = dateParts(F.fields.date);
     // the day's free allowance, as it stands now (what is left decides the better painters and the AI lettering)
-    try { const st = await window.api.flyer.status(); if (st) F.status = st; } catch (e) { /* the last one known stands */ }
+    try { const st = await window.api.flyer.status(); if (st) F.status = Object.assign(st, { note: allowanceNote(st) }); } catch (e) { /* the last one known stands */ }
     await Promise.all(Object.keys(LAYOUTS).map((l, i) => speakersFor(i)).flat().map((s) => bankPic(s.photo)));
     const fields = Object.assign({}, F.fields, { dateText: dp ? dp.long : '', dayName: dp ? dp.dayName : '', season: F.occasion && F.occasion.seasonal ? F.occasion.name : '', speakers: chosenSpeakers().map((s) => ({ name: s.name })) });
     let dir = null;
@@ -3083,15 +3085,19 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         const theme = i < nTheme;
         // the board's top two get the better free painter (FLUX.2 klein 9B) while the day's allowance lasts
         const tier = i < 2 && F.status && F.status.premium ? 'premium' : 'normal';
-        const out = await window.api.flyer.paint({ scene: tone.words ? scene + ', ' + tone.words : scene, theme, tier, w: sz.w, h: sz.h, seed: Math.floor(Math.random() * 1e9), people: chosenSpeakers().some((s) => (s.photos || []).length) });
+        // what the picture is FOR travels with it: the server keeps every painting in the church's library under
+        // that (the kind of event, the theme, the light, the shape) and hands the next person one they have not seen
+        const out = await window.api.flyer.paint({ scene: tone.words ? scene + ', ' + tone.words : scene, theme, tier, w: sz.w, h: sz.h, seed: Math.floor(Math.random() * 1e9), people: chosenSpeakers().some((s) => (s.photos || []).length),
+          slot: i, tone: tone.id, event: eventOf() });
         if (tryNo !== F.tries) return;
-        let im = await loadImg(out.dataUrl);
+        let im = await loadImg(picSrc(out));
         // the backup painter signs its pictures in the bottom corner: that strip is cut off
         if (/pollinations/i.test(out.by || '')) im = cropBottom(im, 0.06);
         const key = 'ai:' + tryNo + ':' + i;
         IMGS.set(key, im);
         // AI pictures lead; the photos stay on for variety until three AI ones are in
-        const ai = F.bgs.filter((b) => !b.proc).concat({ key, by: out.by, scene, tone: tone.id, theme });
+        // (a library picture says what light it is really in, and whether it is the theme's own key art)
+        const ai = F.bgs.filter((b) => !b.proc).concat({ key, by: out.by + (out.bank ? ' · library' : ''), scene, tone: out.tone || tone.id, theme: out.themeArt != null && out.bank ? !!out.themeArt : theme });
         // AI pictures in order of their light, the studio's photos only standing in until three are here
         ai.sort((a, b) => (b.theme ? 1 : 0) - (a.theme ? 1 : 0) || F.board.tones.findIndex((t) => t.id === a.tone) - F.board.tones.findIndex((t) => t.id === b.tone));
         F.bgs = ai.concat(F.bgs.filter((b) => b.proc)).slice(0, Math.max(3, ai.length));
@@ -3110,20 +3116,42 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
    * studio adds the minister and the details. The server reads it back and
    * keeps it only when the title is spelt right (flyerart.paintTitle).
    */
+  /*
+   * THE DAY'S FREE AI, SAID PLAINLY. One allowance a day for the whole church:
+   * when it is busy the board mixes fresh paintings with the church library's
+   * (painted for someone earlier, new to you); when it has painted its share,
+   * the library's — and when it comes back, in this phone's own time.
+   */
+  function allowanceNote(st) {
+    if (!st || !st.cloudflare || !st.level || st.level === 'plenty' || st.level === 'none') return '';
+    let back = 'midnight UTC';
+    try { if (st.resetsAt) back = new Date(st.resetsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }); } catch (e) { /* as it is */ }
+    if (st.level === 'limited') return 'A busy day for the free AI: your board mixes fresh paintings with pictures from the church library — all new to you.';
+    return st.library ? `The free AI has painted its share for today (it’s back at ${back}). Your pictures come from the church library — ones you haven’t had.`
+      : `The free AI has painted its share for today (it’s back at ${back}). Your board uses the studio’s own photographs until then.`;
+  }
+  /* a picture from the server: from the church's library by its link (the phone keeps it), else as sent */
+  const picSrc = (out) => (out.file && window.MW_FLYER_LIB_URL ? window.MW_FLYER_LIB_URL(out.file) : out.dataUrl);
+  /* the event, as the server's library files its pictures: the kind of service, the title, the theme, the season */
+  function eventOf() {
+    return { title: String(F.fields.title || '').slice(0, 80), theme: String(F.fields.theme || '').slice(0, 80), kind: String(F.fields.kind || (F.occasion && F.occasion.name) || '').slice(0, 60),
+      season: F.occasion && F.occasion.seasonal ? String(F.occasion.name || '').slice(0, 60) : '' };
+  }
   async function paintLettering(tryNo) {
-    F.lettered = null;
     const title = String(F.fields.title || '').trim();
+    if (F.lettered && F.lettered.title === title) return;   // kept from the last board
+    F.lettered = null;
     if (!(F.status && F.status.lettering) || !title || title.split(/\s+/).length > 4 || !window.api.flyer.paintTitle) return;
     F.painting++; if (F.step === 'pick') drawPick();
     try {
       const scene = (F.dir.scenes || [])[0];
       // (read back on the server: spelt right AND standing out clearly — flyerart.paintTitle)
-      const out = await window.api.flyer.paintTitle({ scene, title, seed: Math.floor(Math.random() * 1e9) });
-      if (tryNo !== F.tries || !out || !out.dataUrl) return;
-      const im = await loadImg(out.dataUrl);
+      const out = await window.api.flyer.paintTitle({ scene, title, seed: Math.floor(Math.random() * 1e9), event: eventOf() });
+      if (tryNo !== F.tries || !out || !(out.dataUrl || out.file)) return;
+      const im = await loadImg(picSrc(out));
       const key = 'ail:' + tryNo;
       IMGS.set(key, im);
-      F.lettered = { key, checked: !!out.checked, by: out.by };
+      F.lettered = { key, title, checked: !!out.checked, by: out.by + (out.bank ? ' · library' : '') };
       rebuildDesigns();
     } catch (e) { /* the day's allowance, a misspelling twice: the other designs stand */ }
     finally { if (tryNo === F.tries) { F.painting--; if (F.step === 'pick') drawPick(); } }
@@ -3139,7 +3167,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   const PAINT_IN_LOOKS = ['glory'];   // one, and only on a board without the AI lettering (the board is three)
   function refPhoto(sp) {
     const im = sp && imgOf(sp.img); if (!im) return null;
-    const k = Math.min(1, 512 / Math.max(iw(im), ih(im)));
+    const k = Math.min(1, 496 / Math.max(iw(im), ih(im)));   // Cloudflare: reference photos smaller than 512x512
     const c = canvas(iw(im) * k, ih(im) * k), x = c.getContext('2d');
     x.fillStyle = '#7a7a7a'; x.fillRect(0, 0, c.width, c.height);
     x.drawImage(im, 0, 0, c.width, c.height);
@@ -3156,7 +3184,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     F.painting += scenes.length; if (F.step === 'pick') drawPick();
     await Promise.all(scenes.map(async (scene, i) => {
       try {
-        const out = await window.api.flyer.paintWith({ scene, w: sz.w, h: sz.h, seed: Math.floor(Math.random() * 1e9), refs: [ref] });
+        const out = await window.api.flyer.paintWith({ scene, w: sz.w, h: sz.h, seed: Math.floor(Math.random() * 1e9), refs: [ref], event: eventOf() });
         if (tryNo !== F.tries) return;
         const key = 'aiin:' + tryNo + ':' + i;
         IMGS.set(key, await loadImg(out.dataUrl));
@@ -3315,8 +3343,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   /* "Made by Cloudflare" under a design whose picture Cloudflare's free AI painted (FLUX.2, Phoenix), the model named */
   function madeByTag(by) {
     if (!/cloudflare/i.test(by || '')) return '';
-    const model = String(by).replace(/\s*·\s*Cloudflare.*$/i, '').trim();
-    return `<em class="fs-by" title="${escAttr('Painted by ' + by)}"><b>☁</b> Made by Cloudflare AI${model ? `<i>${esc(model)}</i>` : ''}</em>`;
+    const model = String(by).replace(/\s*·\s*Cloudflare.*$/i, '').trim(), lib = /library/i.test(by);
+    // a picture from the church's library was painted for someone earlier and kept: new to this person, and free
+    return `<em class="fs-by" title="${escAttr('Painted by ' + by.replace(/\s*·\s*library/i, '') + (lib ? ' for the church’s picture library' : ''))}"><b>☁</b> Made by Cloudflare AI${model || lib ? `<i>${esc([model, lib ? 'from the church library' : ''].filter(Boolean).join(' · '))}</i>` : ''}</em>`;
   }
   function drawPick() {
     const P = F.panel; if (!P) return;
@@ -3325,10 +3354,12 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const busy = !F.designs.length;
     P.body.innerHTML = `<div class="fs-pick">
       <p class="fs-status">${busy ? 'The AI is reading your event…' : F.painting > 0 ? `<i class="fs-spin"></i> Painting ${F.painting} picture${F.painting > 1 ? 's' : ''} with AI — they appear as they’re ready` : 'Tap one to edit every part of it'}</p>
+      ${!busy && F.status && F.status.note ? `<p class="fs-allow">${esc(F.status.note)}</p>` : ''}
       <div class="fs-grid">${busy ? '<div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div>' : F.designs.map((d, i) => `<button type="button" class="fs-card" data-i="${i}"><canvas></canvas><small>${esc(d.label || LOOK_NAMES[d.look] || d.look)}</small>${madeByTag(d.madeBy)}</button>`).join('')}</div>
       ${!busy && F.board && F.board.shown < F.board.order.length ? `<button type="button" class="fs-ghost fs-more" data-act="more">${ic('layout')}<span>${BOARD_N} more designs</span></button>` : ''}
     </div>`;
-    P.foot.innerHTML = `<button type="button" class="fs-ghost" data-act="back">${ic('back')}<span>Details</span></button><button type="button" class="fs-ghost" data-act="again">${ic('refresh')}<span>New pictures</span></button>`;
+    // one board at a time: "New pictures" waits until this one is painted (each tap used to start five more paintings)
+    P.foot.innerHTML = `<button type="button" class="fs-ghost" data-act="back">${ic('back')}<span>Details</span></button><button type="button" class="fs-ghost" data-act="again"${F.painting > 0 || busy ? ' disabled' : ''}>${ic('refresh')}<span>New pictures</span></button>`;
     paintThumbs();
     P.body.onclick = (e) => {
       if (e.target.closest('[data-act="more"]')) {
@@ -3340,7 +3371,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     P.foot.onclick = (e) => {
       const b = e.target.closest('[data-act]'); if (!b) return;
       if (b.dataset.act === 'back') { F.step = 'make'; F.tries++; drawMake(); }
-      if (b.dataset.act === 'again') makeFlyers();
+      if (b.dataset.act === 'again' && !(F.painting > 0) && !b.disabled) makeFlyers();
     };
   }
   function paintThumbs() {

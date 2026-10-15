@@ -40,9 +40,18 @@ function init(userDataDir) {
 
 const validId = (id) => typeof id === 'string' && /^[a-z0-9]{6,32}$/.test(id);
 
-/** Run `fn` as space `id` (null or undefined = the owner). */
-function run(id, fn) {
-  return als.run({ id: validId(id) ? id : null }, fn);
+/** Run `fn` as space `id` (null or undefined = the owner); `person` is who is signed in (their account id), when known. */
+function run(id, fn, person) {
+  return als.run({ id: validId(id) ? id : null, person: typeof person === 'string' && /^[\w-]{1,64}$/.test(person) ? person : null }, fn);
+}
+
+/**
+ * WHO is doing this, for a fair share of something the whole church has one of
+ * (the free AI allowance): their account, else their space, else the owner.
+ */
+function person() {
+  const s = als.getStore();
+  return (s && (s.person || s.id)) || 'owner';
 }
 
 /** The space of the work running now; null for the owner (and the desktop). */
@@ -68,4 +77,4 @@ function rootOf(id) {
   return validId(id) && ROOT ? path.join(ROOT, id) : null;
 }
 
-module.exports = { init, run, current, pathFor, rootOf, validId };
+module.exports = { init, run, current, person, pathFor, rootOf, validId };
