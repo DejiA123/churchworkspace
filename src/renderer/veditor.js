@@ -7613,7 +7613,8 @@
       try {
         const ps = s.id === '__edited' ? editedPieces() : keptPieces(s);
         const searchEnd = ps && ps.length ? +thTotal(ps).toFixed(3) : 0;
-        const res = await window.api.video.attachThumb({ input: filePath, auto: true, searchEnd });
+        // the ending card is never a thumbnail: its length is cut off the end whatever the pieces add up to
+        const res = await window.api.video.attachThumb({ input: filePath, auto: true, searchEnd, outroSec: ve.outro ? outroDur() || 3 : 0 });
         if (res && res.image) {
           window.__toast && window.__toast(`🖼️ The AI picked ${s.id === '__edited' ? 'the video' : 'this short'}’s thumbnail — `
             + (res.picked && res.picked.by === 'ai' ? 'the speaker at their best moment.' : 'the speaker, sharp and well framed.'), 'good', 6000);

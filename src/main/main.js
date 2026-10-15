@@ -1686,8 +1686,8 @@ ipcMain.handle('video:extractFrames', wrap(async (e, { input, startSec, endSec, 
 }));
 // The picture people see before they press play. Writes a JPEG beside the short
 // and embeds the same frame as cover art (see video.attachThumbnail).
-ipcMain.handle('video:attachThumb', wrap(async (e, { input, imagePath, atSec, auto, searchEnd }) =>
-  video.attachThumbnail(getCtx(), { input, imagePath, atSec, auto: !!auto, searchEnd: +searchEnd || 0 })));
+ipcMain.handle('video:attachThumb', wrap(async (e, { input, imagePath, atSec, auto, searchEnd, outroSec }) =>
+  video.attachThumbnail(getCtx(), { input, imagePath, atSec, auto: !!auto, searchEnd: +searchEnd || 0, outroSec: +outroSec || 0 })));
 
 ipcMain.handle('fs:rmdir', wrap(async (e, { dir }) => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch (er) {} return true; }));
 

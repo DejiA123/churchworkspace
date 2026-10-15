@@ -1594,7 +1594,7 @@
           + '<div class="csb-bposts">' + st.files.map((f, i) => {
             const own = st.batchCaps[f];
             const writing = st.writingFile === f;
-            return `<div class="csb-bpost"><span class="csb-bpic" data-thumb="${escAttr(f)}">${isVideo(f) ? `<i class="csb-play sm">${mi('play')}</i>` : ''}</span>`
+            return `<div class="csb-bpost"><span class="csb-bpic"${isVideo(f) ? ` data-c="play" data-f="${escAttr(f)}" role="button" aria-label="Play"` : ''} data-thumb="${escAttr(f)}">${isVideo(f) ? `<i class="csb-play sm">${mi('play')}</i>` : ''}</span>`
               + `<div class="csb-bmain"><small>${mi('clock')}${esc(times[i] ? shortWhen(times[i]) : '')}</small>`
               + (own ? `<textarea class="cs-input csb-bcap" data-bcap="${i}" rows="4" maxlength="2200">${esc(own.caption || '')}</textarea>`
                 : writing ? '<div class="csb-shims"><i class="csb-shim w90"></i><i class="csb-shim w75"></i><i class="csb-shim w50"></i></div>'
@@ -1690,7 +1690,8 @@
       const ready = st.files.length && picked().length;
       const busy = !many() && st.ai && st.ai.stage && st.ai.stage !== 'done' && st.ai.stage !== 'fail';
       const label = edit ? 'Save changes' : n === 0 && handTo ? `Continue to ${handTo}` : many() ? `Schedule ${st.files.length} posts`
-        : st.quick === 'now' ? `Post ${n > 1 ? n + ' now' : 'now'}` : `Schedule ${n > 1 ? n + ' posts' : 'post'}`;
+        // one video to several accounts is ONE post (it was "Schedule 5 posts" for one video on five accounts)
+        : st.quick === 'now' ? `Post now${n > 1 ? ` · ${n} accounts` : ''}` : `Schedule post${n > 1 ? ` · ${n} accounts` : ''}`;
       const ws = whenSummary();
       panel.foot.innerHTML = '<div class="csb-bar">'
         + `<button type="button" class="csb-when" data-c="whenjump">${mi('clock')}<span><b>${esc(ws.main)}</b><small>${esc(ws.sub)}</small></span></button>`
@@ -1895,6 +1896,12 @@
       const b = e.target.closest('[data-c]'); if (!b || b.disabled) return;
       const c = b.dataset.c;
       if (c === 'exports') return pickExports();
+      // a video in the list of posts: played right here, over the list
+      if (c === 'play' && b.dataset.f) {
+        const pp = C.openPanel({ id: 'cloudPostPlay', title: 'Preview', cls: 'cp-postplay' });
+        pp.body.innerHTML = `<video class="cs-video" src="${escAttr(C.fileUrl(b.dataset.f))}" controls autoplay playsinline style="width:100%;max-height:70vh;border-radius:14px;background:#000"></video>`;
+        return;
+      }
       if (c === 'change') {
         if (many()) return pickExports();
         // what the AI wrote for the old file goes with it; what the person typed stays

@@ -62,9 +62,11 @@ function mainFace(people) {
  * The moment (seconds into `input`) that makes the best thumbnail.
  * Returns { atSec, by: 'ai' | 'detector' | 'detail', why }.
  */
-async function pickMoment(ctx, { input, searchEnd, n = 14, info }) {
+async function pickMoment(ctx, { input, searchEnd, outroSec = 0, n = 14, info }) {
   const pd = require('./persondetect');
-  const dur = Math.max(0.2, Math.min(searchEnd > 0 ? searchEnd : Infinity, (info && info.durationSec) || searchEnd || 0));
+  // never the ending card: the file's length less the outro (plus a second), whatever the pieces were thought to add up to
+  const fileEnd = info && info.durationSec ? info.durationSec - (outroSec > 0 ? outroSec + 1 : 0) : Infinity;
+  const dur = Math.max(0.2, Math.min(searchEnd > 0 ? searchEnd : Infinity, fileEnd > 0.5 ? fileEnd : Infinity, (info && info.durationSec) || searchEnd || 0));
   // not the first second (a cut, a word half-said) nor the last (the short is ending)
   const a = Math.min(1.0, dur * 0.1), b = Math.max(a + 0.1, dur - Math.min(1.0, dur * 0.1));
   const times = [];
