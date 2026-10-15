@@ -1561,7 +1561,8 @@
   function nameParts(n) { const s = String(n || '').trim(); const m = HON.exec(s); return m && s.length > m[0].length ? { title: m[1], name: s.slice(m[0].length) } : { title: '', name: s }; }
   /* the address as a flyer prints it: not the church's name again, three parts at most */
   // "The Power House Int'l Galway (H91 958A)" under "The Power House International": the name is not printed twice
-  const nameWords = (t) => String(t || '').toLowerCase().replace(/\bint'?l\b|\bintl\b/g, 'international').replace(/\bmin\b\.?/g, 'ministries')
+  // (a phone types the apostrophe curly: Int’l)
+  const nameWords = (t) => String(t || '').toLowerCase().replace(/\bint['’‘ʼ`]?l\b|\bintl\b/g, 'international').replace(/\bmin\b\.?/g, 'ministries')
     .replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter((w) => w && w !== 'the').join(' ');
   function withoutChurch(venue, church) {
     const ch = nameWords(church), v = String(venue || '').trim();
@@ -1614,8 +1615,10 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     if (m.clean && mode !== 'full') nb = Math.min(nb, Math.max(m.sy + u * 0.45, m.clean));
     return { t: Math.max(0, m.top - u * 0.06), nb, cx: m.cx };
   }
-  function headBox(m, fr, k, left, top) {
-    const u = Math.max(12, m.sy - m.top), cx = left + m.cx * k;
+  function headBox(m, fr, k, left, top, im) {
+    // the head is the top of the silhouette (m.cx is the middle of the shoulders, which a turned pose moves off the face)
+    const q = im ? quickMeta(im) : null, hx = q ? q.cx * (m.w / Math.max(1, q.w)) : m.cx;
+    const u = Math.max(12, m.sy - m.top), cx = left + hx * k;
     return { l: cx - u * 0.42 * k, r: cx + u * 0.42 * k, t: top + (m.top - fr.t) * k, b: top + (m.top + u * 0.85 - fr.t) * k };
   }
   /* "MEE_TING": the minister in front of the title may cover the foot of the letters (as the references do),
@@ -1633,7 +1636,6 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       });
       if (dy > 0) { dy = Math.min(dy, im.h * 0.3, H * 0.12); im.y += dy; }
     });
-    layers.forEach((l) => { delete l.head; });
   }
   let PAINTED = false;   // buildScene: the preacher is painted into the picture itself — no cut-out on top
   function hero(sp, o) {
@@ -1656,7 +1658,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       fade: whole ? 0 : Math.max(o.fade == null ? 0.22 : o.fade, mode === 'chest' ? 0.34 : 0.2), feather: 1.4,
       frame: { mode, t: o.t, b: o.b, cx: o.cx },
       // where the head is on the page (keepTitleClear: a face never hides whole letters of the title)
-      head: headBox(m, fr, k, X - w / 2, o.t),
+      head: headBox(m, fr, k, X - w / 2, o.t, im),
     }, o.extra || {}));
   }
   /* a person on a rounded card (head and shoulders), for a small portrait */
@@ -1821,6 +1823,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     layers.forEach((l) => {
       if (l.type === 'bg') { (l.colorWash || []).forEach((c) => { if (c.radial && c.x != null) c.x = 1 - c.x; }); return; }
       if (l.x == null) return;
+      // a person is moved, not flipped: their FACE goes to the mirrored place (a photo with the face off-centre —
+      // seated, turned to clap — had the face pushed off the edge when only the picture's middle was mirrored)
+      if (l.type === 'image' && l.head) { const hx = (l.head.l + l.head.r) / 2, d = hx - l.x; l.x = (w - hx) - d; return; }
       l.x = w - l.x;
       // a tilt goes the other way; a word stood on its end stays reading the way it did
       if (l.rot && Math.abs(Math.abs(l.rot) - 90) > 25) l.rot = -l.rot;
@@ -2668,6 +2673,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       if (o.variant.mirror) mirrorLayers(layers, D.w);
       layers.forEach((l) => { if (l.type === 'fx' && l.seed != null) l.seed = l.seed + o.variant.seed; });
     }
+    layers.forEach((l) => { delete l.head; });
     // a painted-in preacher stands in the picture: the light effects go behind the words only, not over a face
     if (o.painted) {
       layers = layers.filter((l) => !(l.type === 'fx' && /glow|ring|sparks/.test(l.kind)));
