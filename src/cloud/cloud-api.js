@@ -1099,6 +1099,26 @@ async function handle(req, res) {
    * down again each time the home-screen app opened, and the Font picker sat
    * empty until the last had arrived.
    */
+  /*
+   * ►► THE PUBLIC PAGE: "how will people contact me?" ◄◄ Outside the sign-in
+   * gate on purpose: what Church Space does, how to reach its founder (email,
+   * call, WhatsApp, a contact card for the phone) and a "Request a demo" form
+   * whose enquiries wait in the owner's app. Nothing of this church's studio
+   * is on it. The QR code at events points here, not at the sign-in page.
+   */
+  if ((p === '/hello' || p === '/hello/') && req.method === 'GET') return sendWeb(req, res, 'hello.html', 'public, max-age=300');
+  if (p === '/hello/contact.vcf') {
+    let card = '';
+    try { card = fs.readFileSync(path.join(WEB_DIR, 'hello', 'contact.vcf'), 'utf8').replace(/\r?\n/g, '\r\n'); } catch (e) { return send(res, 404, 'text/plain', 'not found'); }
+    return send(res, 200, 'text/vcard; charset=utf-8', card, { 'Content-Disposition': 'attachment; filename="Ayodeji-Church-Space.vcf"', 'Cache-Control': 'public, max-age=3600' });
+  }
+  if (p.startsWith('/hello/')) {
+    const name = p.slice(7);
+    if (!/^[a-z0-9-]{1,40}\.(jpg|png)$/.test(name)) return send(res, 404, 'text/plain', 'not found');
+    return sendWeb(req, res, 'hello/' + name, 'public, max-age=86400');
+  }
+  if (p === '/api/hello/enquiry' && req.method === 'POST') return takeEnquiry(req, res);
+
   /* the flyer studio's own photographs (Unsplash licence) — named, from that folder only (flyerart.js) */
   if (p.startsWith('/flyerphotos/')) {
     let name = '';
@@ -1221,7 +1241,60 @@ async function handle(req, res) {
   return space.run(me ? me.space : null, () => authedRoutes(req, res, url, p, me), me ? me.uid : null, me ? !!me.owner : !users.length);
 }
 
+/*
+ * ENQUIRIES from the public page's "Request a demo" form: kept in the data
+ * folder (the newest 500), for the studio's owner only. Anyone on the
+ * internet can post the form, so it is small, plain and rate-limited: five an
+ * hour from one address, two hundred a day in all; a filled-in hidden field
+ * (a robot) is thanked and dropped.
+ */
+const enquiryFile = () => (cfg.dirs.uploads ? path.join(path.dirname(cfg.dirs.uploads), 'enquiries.json') : '');
+const enquiryHits = new Map();   // ip -> [times]
+let enquiryDay = { day: '', n: 0 };
+function readEnquiries() {
+  try { const j = JSON.parse(fs.readFileSync(enquiryFile(), 'utf8')); return Array.isArray(j) ? j : []; } catch (e) { return []; }
+}
+function writeEnquiries(list) {
+  const f = enquiryFile(); if (!f) return false;
+  try {
+    const tmp = f + '.' + process.pid + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(list.slice(0, 500), null, 1), { mode: 0o600 });
+    fs.renameSync(tmp, f);
+    return true;
+  } catch (e) { return false; }
+}
+async function takeEnquiry(req, res) {
+  const ip = clientIp(req), now = Date.now();
+  const hits = (enquiryHits.get(ip) || []).filter((t) => now - t < 3600e3);
+  const day = new Date(now).toISOString().slice(0, 10);
+  if (enquiryDay.day !== day) enquiryDay = { day, n: 0 };
+  if (hits.length >= 5 || enquiryDay.n >= 200) return json(res, 429, { error: 'Thank you — we have your details already. Please email dejiaugustine@gmail.com if it is urgent.' });
+  let body;
+  try { body = JSON.parse((await readBody(req, 4096)).toString('utf-8') || '{}'); } catch (e) { return json(res, 400, { error: 'That did not send. Please try again.' }); }
+  const clean = (v, n) => String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
+  if (clean(body.website, 200)) return json(res, 200, { ok: true });   // the hidden field: a robot
+  const e = { name: clean(body.name, 80), church: clean(body.church, 120), contact: clean(body.contact, 120), message: clean(body.message, 600) };
+  if (!e.name || !e.contact) return json(res, 400, { error: 'Please add your name and a phone number or email.' });
+  hits.push(now); enquiryHits.set(ip, hits); enquiryDay.n++;
+  if (enquiryHits.size > 5000) enquiryHits.clear();
+  const list = readEnquiries();
+  list.unshift(Object.assign({ id: crypto.randomBytes(6).toString('hex'), at: new Date(now).toISOString(), seen: false }, e));
+  if (!writeEnquiries(list)) return json(res, 500, { error: 'That did not send. Please email dejiaugustine@gmail.com instead.' });
+  return json(res, 200, { ok: true });
+}
+
 async function authedRoutes(req, res, url, p, me) {
+  // the public page's enquiries: the owner's to read, mark read and remove
+  if (p === '/api/hello/enquiries' || p.startsWith('/api/hello/enquiries/')) {
+    if (!isOwner(me)) return json(res, 403, { error: 'Only the studio’s owner sees the enquiries.' });
+    if (p === '/api/hello/enquiries') return json(res, 200, { ok: true, items: readEnquiries() });
+    if (req.method !== 'POST') return json(res, 405, { error: 'POST' });
+    let body; try { body = JSON.parse((await readBody(req, 2048)).toString('utf-8') || '{}'); } catch (e) { return json(res, 400, { error: 'Bad request.' }); }
+    const list = readEnquiries();
+    if (p === '/api/hello/enquiries/seen') { list.forEach((x) => { x.seen = true; }); writeEnquiries(list); return json(res, 200, { ok: true }); }
+    if (p === '/api/hello/enquiries/remove') { writeEnquiries(list.filter((x) => x.id !== String(body.id || ''))); return json(res, 200, { ok: true }); }
+    return json(res, 404, { error: 'not found' });
+  }
   if (p === '/api/me') {
     return json(res, 200, { ok: true, me: publicUser(me), accounts: users.length, people: me && me.owner ? users.map(publicUser) : undefined });
   }

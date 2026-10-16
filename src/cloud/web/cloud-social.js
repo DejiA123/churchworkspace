@@ -293,6 +293,7 @@
           <span class="ch-new-plus" aria-hidden="true">+</span>
         </button>
         <div id="chInvite"></div>
+        <div id="chEnq"></div>
         <!-- the tools, as app icons -->
         <nav class="ch-tools" aria-label="Tools">
           <button type="button" class="ch-tool" data-tool="shorts">${TI('t-shorts', mi('scissors'))}<span class="ch-tool-tx">AI Shorts</span></button>
@@ -434,6 +435,52 @@
     });
   }
 
+  /*
+   * ►► ENQUIRIES FROM THE PUBLIC PAGE (/hello: "Request a demo"). ◄◄ The
+   * owner's home shows how many came in; tap for each one, with a tap to call,
+   * WhatsApp or email them back. Nobody else sees them (the server says 403).
+   */
+  async function paintEnquiries() {
+    const slot = $('#chEnq'); if (!slot || !C.api) return;
+    if (C.me && !C.me.owner) { slot.innerHTML = ''; return; }
+    let items = [];
+    try { items = (await C.api('/api/hello/enquiries')).items || []; } catch (e) { slot.innerHTML = ''; return; }
+    const fresh = items.filter((x) => !x.seen).length;
+    slot.innerHTML = items.length ? `<button type="button" class="ch-enq${fresh ? ' new' : ''}"><span class="ch-enq-ic">${mi('mail')}</span><span class="ch-enq-tx"><b>${fresh ? `${fresh} new ${fresh === 1 ? 'enquiry' : 'enquiries'}` : 'Enquiries'}</b><small>From your Church Space page · ${items.length} in all</small></span>${mi('chev-right')}</button>` : '';
+    const b = slot.querySelector('.ch-enq'); if (b) b.onclick = () => openEnquiries(items);
+  }
+  function openEnquiries(items) {
+    const p = C.openPanel({ id: 'cloudEnquiries', title: 'Enquiries', cls: 'cp-enquiries' });
+    const when = (iso) => { try { return new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; } };
+    const reach = (c) => {
+      const v = String(c || '').trim();
+      if (/@/.test(v)) return `<a class="enq-act" href="mailto:${C.escAttr(v)}?subject=Church%20Space">Email</a>`;
+      const digits = v.replace(/[^\d+]/g, '');
+      if (digits.replace(/\D/g, '').length >= 7) {
+        const intl = digits.startsWith('+') ? digits.slice(1) : digits.startsWith('0') ? '353' + digits.slice(1) : digits;
+        return `<a class="enq-act" href="tel:${C.escAttr(digits)}">Call</a><a class="enq-act" href="https://wa.me/${C.escAttr(intl.replace(/\D/g, ''))}" target="_blank" rel="noopener">WhatsApp</a>`;
+      }
+      return '';
+    };
+    const draw = () => {
+      p.body.innerHTML = items.length ? `<div class="enq-list">${items.map((x) => `<div class="enq${x.seen ? '' : ' new'}">
+          <div class="enq-top"><b>${esc(x.name)}</b><small>${esc(when(x.at))}</small></div>
+          ${x.church ? `<div class="enq-church">${esc(x.church)}</div>` : ''}
+          <div class="enq-contact">${esc(x.contact)}</div>
+          ${x.message ? `<p class="enq-msg">${esc(x.message)}</p>` : ''}
+          <div class="enq-acts">${reach(x.contact)}<button type="button" class="enq-act ghost" data-rm="${C.escAttr(x.id)}">Remove</button></div>
+        </div>`).join('')}</div>`
+        : '<p class="enq-empty">No enquiries yet. They arrive here from the “Request a demo” form on your public page.</p>';
+    };
+    draw();
+    p.body.onclick = async (e) => {
+      const rm = e.target.closest('[data-rm]'); if (!rm) return;
+      try { await C.api('/api/hello/enquiries/remove', { id: rm.dataset.rm }); items = items.filter((x) => x.id !== rm.dataset.rm); draw(); paintEnquiries(); } catch (er) { /* stays */ }
+    };
+    // opened: they are read now
+    if (items.some((x) => !x.seen)) C.api('/api/hello/enquiries/seen', {}).then(() => { items.forEach((x) => { x.seen = true; }); paintEnquiries(); }).catch(() => {});
+  }
+
   async function renderHome(refresh) {
     registerTours();
     const el = $('#cloudHome') || buildHome();
@@ -443,6 +490,7 @@
       window.MWGuide.invite('home', $('#chInvite'));
     }
     $('#chHello').textContent = greeting() + (C.me && C.me.name ? ', ' + C.me.name.split(' ')[0] : '');
+    paintEnquiries();
     const where = (C.hello && C.hello.standalone) ? 'Working on the church’s cloud server' : 'Working on the church’s studio machine';
     void where;
     $('#chWhere').textContent = '';

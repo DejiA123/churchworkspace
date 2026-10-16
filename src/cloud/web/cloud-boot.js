@@ -70,6 +70,7 @@ let _hideTimer = null;
     eventListeners: {}, // server events other views want (the scheduler)
   };
   window.MWCloud = cloud;
+  cloud.api = (p, b) => api(p, b);   // signed-in JSON calls (the owner's enquiries…)
 
   /* ------------------------------------------------------------ transport */
 
@@ -4072,6 +4073,7 @@ let _hideTimer = null;
     'clock': '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     'send': '<path d="M21.5 2.5 10.6 13.4"/><path d="m21.5 2.5-7 19-3.9-8.1-8.1-3.9z"/>',
     'chev-right': '<path d="m9 18 6-6-6-6"/>',
+    'mail': '<rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><path d="m3 7 9 6 9-6"/>',
     'refresh': '<path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/>',
     'grid': '<rect width="7" height="7" x="3" y="3" rx="1.5"/><rect width="7" height="7" x="14" y="3" rx="1.5"/><rect width="7" height="7" x="3" y="14" rx="1.5"/><rect width="7" height="7" x="14" y="14" rx="1.5"/>',
     'stop': '<rect width="12" height="12" x="6" y="6" rx="2"/>',

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Church Space · media studio for churches</title>
+<meta name="description" content="AI Shorts, AI Montage, flyers, captions and social posts for church media teams, all from your phone.">
+<meta name="theme-color" content="#0284c7">
+<link rel="icon" href="/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta property="og:title" content="Church Space">
+<meta property="og:description" content="Everything a church media team needs, in one app.">
+<meta property="og:image" content="/hello/flyer-1.jpg">
+<style>
+  :root { --ink: #0d1b2c; --muted: #4b5d73; --line: #d7e6f3; --bg: #eef6fd; --card: #ffffff; --blue: #0284c7; --blue2: #38bdf8; --gold: #f5c542; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+  a { color: inherit; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 18px; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 18px 0 8px; }
+  .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 800; font-size: 21px; letter-spacing: -.3px; }
+  .tile { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; color: #fff; background: linear-gradient(140deg, var(--blue), var(--blue2)); box-shadow: 0 6px 16px rgba(2, 132, 199, .28); }
+  .tile svg { width: 62%; height: 62%; }
+  .signin { font-size: 14px; font-weight: 600; color: var(--blue); text-decoration: none; padding: 8px 12px; border-radius: 999px; background: #fff; border: 1px solid var(--line); }
+  .hero { padding: 26px 0 8px; }
+  h1 { font-size: clamp(32px, 7vw, 54px); line-height: 1.05; letter-spacing: -1.2px; margin: 0 0 14px; }
+  h1 em { font-style: normal; background: linear-gradient(140deg, var(--blue), var(--blue2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lead { font-size: 18px; line-height: 1.5; color: var(--muted); margin: 0 0 22px; max-width: 620px; }
+  .ctas { display: flex; flex-wrap: wrap; gap: 10px; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 50px; padding: 0 20px; border-radius: 14px; font-size: 16px; font-weight: 700; text-decoration: none; border: 0; cursor: pointer; font-family: inherit; }
+  .btn.primary { color: #fff; background: linear-gradient(140deg, var(--blue), var(--blue2)); box-shadow: 0 10px 24px rgba(2, 132, 199, .3); }
+  .btn.ghost { background: #fff; color: var(--ink); border: 1px solid var(--line); }
+  .btn svg { width: 20px; height: 20px; flex: none; }
+  .strip { display: flex; gap: 12px; overflow-x: auto; padding: 26px 2px 10px; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; }
+  .strip img { width: 210px; aspect-ratio: 4 / 5; object-fit: cover; border-radius: 16px; flex: none; scroll-snap-align: start; box-shadow: 0 12px 26px rgba(13, 27, 44, .18); }
+  h2 { font-size: 28px; letter-spacing: -.6px; margin: 34px 0 14px; }
+  .feats { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; }
+  .feat { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+  .feat b { font-size: 19px; letter-spacing: -.2px; }
+  .feat p { margin: 0; color: var(--muted); line-height: 1.45; font-size: 15.5px; }
+  .feat img { width: 100%; max-height: 330px; object-fit: cover; object-position: top; border-radius: 14px; border: 1px solid var(--line); margin-top: auto; }
+  .contact { margin: 34px 0 0; background: linear-gradient(140deg, #063a66, #0284c7); color: #fff; border-radius: 24px; padding: 22px; }
+  .contact h2 { margin: 0 0 6px; color: #fff; }
+  .contact p { margin: 0 0 16px; color: #d5ecff; line-height: 1.5; }
+  .ways { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+  .way { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 16px; background: rgba(255, 255, 255, .12); text-decoration: none; color: #fff; border: 1px solid rgba(255, 255, 255, .18); }
+  .way svg { width: 26px; height: 26px; flex: none; }
+  .way span { display: flex; flex-direction: column; min-width: 0; }
+  .way small { color: #cfe8ff; font-size: 13.5px; overflow-wrap: anywhere; }
+  .form { margin-top: 18px; background: var(--card); color: var(--ink); border-radius: 18px; padding: 18px; }
+  .form h3 { margin: 0 0 4px; font-size: 20px; }
+  .form > p { color: var(--muted); margin: 0 0 14px; }
+  label { display: block; font-size: 14px; font-weight: 600; margin: 12px 0 6px; }
+  input, textarea { width: 100%; font: inherit; font-size: 16px; padding: 13px 14px; border-radius: 12px; border: 1px solid var(--line); background: #f7fbff; color: var(--ink); }
+  textarea { min-height: 90px; resize: vertical; }
+  .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+  .form .btn { width: 100%; margin-top: 16px; }
+  .msg { margin-top: 12px; font-weight: 600; }
+  .msg.ok { color: #0a7a3d; } .msg.err { color: #b42318; }
+  footer { padding: 30px 0 40px; color: var(--muted); font-size: 14px; text-align: center; }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink: #eef5fc; --muted: #a9bccf; --line: #213449; --bg: #0b1622; --card: #111f2e; }
+    .btn.ghost, .signin { background: #111f2e; }
+    input, textarea { background: #0b1622; }
+    .form .btn.primary { color: #fff; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="brand" href="/hello"><span class="tile"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M10 2.5h4v5.5h5.5v4H14v9.5h-4V12H4.5V8H10z"/></svg></span>Church Space</a>
+    <a class="signin" href="/">Sign in</a>
+  </header>
+
+  <section class="hero">
+    <h1>Everything a church media team needs, <em>in one app</em></h1>
+    <p class="lead">AI Shorts, AI Montage, flyers, captions and social posts. Made for church media teams, and all from your phone.</p>
+    <div class="ctas">
+      <a class="btn primary" href="#demo">Request a demo</a>
+      <a class="btn ghost" href="/hello/contact.vcf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>Save my contact</a>
+    </div>
+    <div class="strip" aria-label="Flyers made with Church Space">
+      <img src="/hello/flyer-1.jpg" alt="A prayer meeting flyer made with Church Space" loading="lazy">
+      <img src="/hello/flyer-2.jpg" alt="A prayer meeting flyer made with Church Space" loading="lazy">
+      <img src="/hello/flyer-3.jpg" alt="A prayer meeting flyer made with Church Space" loading="lazy">
+      <img src="/hello/flyer-4.jpg" alt="A prayer meeting flyer made with Church Space" loading="lazy">
+    </div>
+  </section>
+
+  <h2>What it does</h2>
+  <div class="feats">
+    <div class="feat"><b>AI Shorts: sermon to shorts</b><p>Drop in the whole sermon. AI finds the strongest moments and cuts vertical shorts with bold captions that follow the voice.</p><img src="/hello/app-shorts.jpg" alt="A sermon short with captions" loading="lazy"></div>
+    <div class="feat"><b>AI Montage: made to go viral</b><p>Upload any video. AI turns it into a short, engaging montage, the best moments first, made to stop the scroll and get shared.</p><img src="/hello/app-montage.jpg" alt="The AI Montage screen" loading="lazy"></div>
+    <div class="feat"><b>Event flyers in seconds</b><p>Type the event and AI designs a full board of flyers in your church’s style: title, minister, date, time and venue set for you.</p><img src="/hello/app-home.jpg" alt="The Church Space home screen" loading="lazy"></div>
+    <div class="feat"><b>A month of posts, everywhere</b><p>AI writes every caption from what is said, then schedules TikTok, Instagram, Facebook and YouTube day by day.</p><img src="/hello/app-posts.jpg" alt="A month of posts with AI captions" loading="lazy"></div>
+  </div>
+
+  <section class="contact" id="contact">
+    <h2>Get Church Space for your church</h2>
+    <p>Talk to Ayodeji: a quick demo, questions, or setting it up for your media team.</p>
+    <div class="ways">
+      <a class="way" href="mailto:dejiaugustine@gmail.com?subject=Church%20Space&amp;body=Hi%20Ayodeji%2C%20I%20saw%20Church%20Space%20and%20would%20like%20to%20know%20more."><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg><span><b>Email</b><small>dejiaugustine@gmail.com</small></span></a>
+      <a class="way" href="tel:+353860736836"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg><span><b>Call</b><small>086 073 6836</small></span></a>
+      <a class="way" href="https://wa.me/353860736836?text=Hi%20Ayodeji%2C%20I%20saw%20Church%20Space%20and%20would%20like%20to%20know%20more." target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-12.4 7.4L3 21l2.1-5.4A8.4 8.4 0 1 1 21 11.5z"/></svg><span><b>WhatsApp</b><small>Message Ayodeji</small></span></a>
+      <a class="way" href="/hello/contact.vcf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg><span><b>Save my contact</b><small>Adds Ayodeji to your phone</small></span></a>
+    </div>
+
+    <form class="form" id="demo" novalidate>
+      <h3>Request a demo</h3>
+      <p>Leave your details and Ayodeji will get back to you.</p>
+      <label for="fName">Your name</label>
+      <input id="fName" name="name" autocomplete="name" maxlength="80" required>
+      <label for="fChurch">Church <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+      <input id="fChurch" name="church" autocomplete="organization" maxlength="120">
+      <label for="fContact">Phone or email</label>
+      <input id="fContact" name="contact" autocomplete="email" inputmode="email" maxlength="120" required>
+      <label for="fMsg">Anything you’d like to ask? <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+      <textarea id="fMsg" name="message" maxlength="600"></textarea>
+      <div class="hp" aria-hidden="true"><label for="fWeb">Leave this empty</label><input id="fWeb" name="website" tabindex="-1" autocomplete="off"></div>
+      <button class="btn primary" type="submit" id="fGo">Request a demo</button>
+      <div class="msg" id="fMsgOut" role="status" aria-live="polite"></div>
+    </form>
+  </section>
+
+  <footer>Church Space · media studio for churches<br><a href="/">Already using it? Sign in</a></footer>
+</div>
+<script>
+(function () {
+  var form = document.getElementById('demo'), go = document.getElementById('fGo'), out = document.getElementById('fMsgOut');
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var v = function (id) { return (document.getElementById(id).value || '').trim(); };
+    var body = { name: v('fName'), church: v('fChurch'), contact: v('fContact'), message: v('fMsg'), website: v('fWeb') };
+    out.className = 'msg'; out.textContent = '';
+    if (!body.name || !body.contact) { out.className = 'msg err'; out.textContent = 'Please add your name and a phone number or email.'; return; }
+    go.disabled = true; go.textContent = 'Sending…';
+    fetch('/api/hello/enquiry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || 'That did not send.'); return j; }); })
+      .then(function () { form.reset(); out.className = 'msg ok'; out.textContent = 'Thank you! Ayodeji will be in touch soon.'; go.textContent = 'Sent'; })
+      .catch(function (err) { out.className = 'msg err'; out.textContent = (err && err.message) || 'That did not send. Please try again, or email dejiaugustine@gmail.com.'; go.disabled = false; go.textContent = 'Request a demo'; });
+  });
+})();
+</script>
+</body>
+</html>

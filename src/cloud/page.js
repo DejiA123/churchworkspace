@@ -270,6 +270,7 @@ ${styles}
         <div id="cloudGateMsg" class="cloud-gate-msg" role="alert" aria-live="assertive"></div>
       </div>
     </form>
+    <a class="cloud-gate-hello" href="/hello">New to Church Space? <b>Get it for your church</b></a>
   </div>
 
   <!-- Files on the studio machine: what you can open, and what you can send. -->
