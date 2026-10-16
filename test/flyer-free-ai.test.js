@@ -122,6 +122,13 @@ const t = async (name, fn) => { try { await fn(); pass++; console.log('  ✓ ' +
     const b2 = await as('ben', () => fa.paint({ scene: 'light', slot: 1, tone: 'blue', event: ev }));
     assert.notStrictEqual(b2.file, a.file, 'not the same one again');
   });
+  await t('“more designs” takes pictures from the library only — never a fresh painting', async () => {
+    const n = calls.length;
+    const m = await as('zoe', () => fa.paint({ scene: 'x', slot: 5, tone: 'blue', event: ev, libraryOnly: true }));
+    assert.ok(m.bank && m.file); assert.strictEqual(calls.length, n);
+    await assert.rejects(as('zoe', () => fa.paint({ scene: 'x', slot: 6, tone: 'blue', event: { title: 'Harvest Thanksgiving' }, libraryOnly: true })), /no more pictures/);
+    assert.strictEqual(calls.length, n);
+  });
   await t('an Easter picture never goes on a prayer-meeting flyer', async () => {
     const e = await as('cara', () => fa.paint({ scene: 'sunrise', slot: 1, tone: 'gold', event: { title: 'Easter Sunday' } }));
     const p = await as('dan', () => fa.paint({ scene: 'x', slot: 1, tone: 'gold', event: ev }).catch(() => null));

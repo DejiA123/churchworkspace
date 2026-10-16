@@ -325,7 +325,7 @@ const inflight = new Map();   // a slot being painted right now → the library 
  * person); the top design gets FLUX.2 klein 9B only while the day is plenty.
  * Two people asking for the same thing at the same moment share one painting.
  */
-async function paint({ scene, w = 1080, h = 1350, seed, people = true, theme = false, tier = 'normal', slot, tone, event } = {}) {
+async function paint({ scene, w = 1080, h = 1350, seed, people = true, theme = false, tier = 'normal', slot, tone, event, libraryOnly = false } = {}) {
   const who = space.person();
   const prompt = paintPrompt(scene, { people, theme: !!theme });
   const size = sizeFor(w, h);
@@ -343,6 +343,12 @@ async function paint({ scene, w = 1080, h = 1350, seed, people = true, theme = f
   let out = null, fresh = false;
   const fromLibrary = (qq, again) => bank.take(qq || q, who, { again });
 
+  // "more designs": a picture each from the library (free) — never a fresh painting, never one already on this board
+  if (libraryOnly) {
+    out = fromLibrary() || (themeK ? fromLibrary(Object.assign({}, q, { theme: '' })) : null) || fromLibrary(null, true);
+    if (!out) throw new Error('the church library has no more pictures for this yet');
+    return Object.assign(out, { prompt, seed: s, fresh: false, tone: out.tone || toneId });
+  }
   // 1. the library, when the day is not plenty (everyone's fresh paintings are shared out fairly)
   if (lvl !== 'plenty') out = fromLibrary();
   // 2. the same picture being painted for someone else right now: wait for it rather than paint it twice

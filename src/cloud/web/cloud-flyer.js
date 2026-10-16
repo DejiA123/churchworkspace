@@ -831,7 +831,7 @@
     const inkW = (ln, s) => { const t = metr(ln, s); return Math.max(1, t.l + t.r); };
     const widest = (s) => Math.max(1, ...lines.map((ln) => inkW(ln, s)));
     // a long single line that would have to shrink below two-thirds of its size is broken in two instead (an address stays readable)
-    if (L.maxW && !L.fit && lines.length === 1 && /\s/.test(lines[0]) && widest(size) > L.maxW / 0.66) {
+    if (L.maxW && !L.fit && lines.length === 1 && /\s/.test(lines[0]) && widest(size) > L.maxW / (SMALL_INFO.test(L.name || '') ? 0.9 : 0.66)) {
       const ws = lines[0].split(/\s+/); let best = 1, diff = 1e9;
       for (let i = 1; i < ws.length; i++) { const dd = Math.abs(inkW(ws.slice(0, i).join(' '), size) - inkW(ws.slice(i).join(' '), size)); if (dd < diff) { diff = dd; best = i; } }
       lines.splice(0, 1, ws.slice(0, best).join(' '), ws.slice(best).join(' '));
@@ -1652,6 +1652,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     let X = o.cx + (m.w / 2 - fr.cx) * k;
     if (o.maxR != null) X = Math.min(X, o.maxR - w / 2);
     if (o.minL != null) X = Math.max(X, o.minL + w / 2);
+    // never the face off the page: whatever the layout asked, the head stays inside it
+    { const hb = headBox(m, fr, k, X - w / 2, o.t, im), pad = 24;
+      if (hb.r > W - pad) X -= hb.r - (W - pad); else if (hb.l < pad) X += pad - hb.l; }
     return IM(Object.assign({
       img: sp.img, name: sp.name || 'Speaker', speaker: sp.id || '', photo: sp.photo || '',
       src: { x: 0, y: fr.t / m.h, w: 1, h: (vb - fr.t) / m.h },
@@ -1828,6 +1831,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       // seated, turned to clap — had the face pushed off the edge when only the picture's middle was mirrored)
       if (l.type === 'image' && l.head) { const hx = (l.head.l + l.head.r) / 2, d = hx - l.x; l.x = (w - hx) - d; return; }
       l.x = w - l.x;
+      // a sideways gradient turns with the page (a fade to the right becomes a fade to the left)
+      if (l.fill && l.fill.stops && l.fill.angle != null && !l.fill.flipped) l.fill = Object.assign({}, l.fill, { angle: (540 - l.fill.angle) % 360, flipped: true });
       // a tilt goes the other way; a word stood on its end stays reading the way it did
       if (l.rot && Math.abs(Math.abs(l.rot) - 90) > 25) l.rot = -l.rot;
       if (l.type === 'text' && (l.align === 'left' || l.align === 'right')) l.align = l.align === 'left' ? 'right' : 'left';
@@ -1979,7 +1984,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       if (sp && sp.name) { const np = nameParts(sp.name); L.push(...col([T({ name: 'Ministering', text: 'MINISTERING', font: 'Montserrat', size: 13, letter: 0.2, fill: ink, align: 'right' }), np.title && T({ name: 'Speaker title', text: np.title, font: 'Montserrat Black', size: 22, fill: ink, align: 'right' }), T({ name: 'Speaker', text: np.name, font: 'Montserrat Black', size: 26, fill: ink, align: 'right', maxW: 300 })].filter(Boolean), { r: 1016, t: H * 0.75, gap: 2 })); }
       const vt = venueText(D);
       L.push(SH({ name: 'Foot', shape: 'rect', fill: { stops: [rgba('#3b2706', 0), rgba('#3b2706', 0.85)], angle: 90 }, x: 540, y: H - 50, w: W, h: 100 }));
-      if (vt) L.push(put(T({ name: 'Venue', text: [f.church, vt].filter(Boolean).join(' - '), upper: true, font: 'Montserrat', size: 16, letter: 0.12, fill: '#fff7e0', maxW: 980, shadow: true }), { cx: 540, b: H - 34 }));
+      // the church's name once (the address may start with it)
+      const foot = f.church && !nameWords(vt).startsWith(nameWords(f.church)) ? [f.church, vt].join(' - ') : vt;
+      if (vt) L.push(put(T({ name: 'Venue', text: foot, upper: true, font: 'Montserrat', size: 18, letter: 0.08, fill: '#fff7e0', maxW: 980, shadow: true }), { cx: 540, b: H - 30 }));
       return L;
     },
 
@@ -2506,9 +2513,10 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const lines = stack(f.title || 'Break Every Chain', 3);
       const titles = lines.map((ln, i) => T({ name: 'Title ' + (i + 1), text: ln, upper: true, font: 'Barlow Black', size: 400, maxW: 700, maxH: H * (lines.length > 2 ? 0.12 : 0.15), align: 'right',
         fill: { stops: [mix(p.hi, '#ffffff', 0.3), mix(p.accent, p.hi, 0.35), p.accent], angle: 90 }, imgFill: D.bg, imgFillA: 0.26, glow: rgba(p.accent, 0.4), shadow: true }));
-      const tc = col(titles, { r: 1012, t: H * 0.19, gap: 2 }); L.push(...tc);
-      // dark smoke swallows the left letters and shards fly off the bottom: the words are part of the scene
-      L.push(SH({ name: 'Smoke', shape: 'rect', fill: { stops: [rgba(mix(p.deep, '#000000', 0.6), 0.85), rgba(mix(p.deep, '#000000', 0.6), 0)], angle: 0 }, x: 230, y: H * 0.4, w: 460, h: H * 0.62, lock: true }));
+      const tc = col(titles, { r: 1012, t: H * 0.19, gap: 2 });
+      // dark smoke at the side, BEHIND the words (over them it blacked out half the title — and mirrored, it was a hard panel)
+      L.push(SH({ name: 'Smoke', shape: 'rect', fill: { stops: [rgba(mix(p.deep, '#000000', 0.6), 0.6), rgba(mix(p.deep, '#000000', 0.6), 0)], angle: 0 }, x: 200, y: H * 0.4, w: 400, h: H * 0.62, lock: true }));
+      L.push(...tc);
       L.push(FX({ kind: 'debris', x: 760, y: tc.bottom + 4, w: 560, h: 120, n: 70, seed: 33, opacity: 1 }));
       let y = tc.bottom + 34;
       if (f.theme) { const th = put(T({ name: 'Theme', text: f.theme, font: 'Montserrat', size: 24, align: 'right', maxW: 560, shadow: true }), { r: 1012, t: y }); L.push(th); y = box(th).b + 8; }
@@ -2526,7 +2534,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const lg = D.logo && imgOf(D.logo) ? logoLayers(D, 540, 82, 66) : []; L.push(...lg);
       if (f.church) L.push(put(micro(f.church, { size: 17, letter: 0.55, maxW: 900 }), { cx: 540, t: lg.length ? 132 : 70 }));
       const [a, b] = twoLines(f.title || 'Mountain Experience');
-      const sky = { font: 'Barlow Black Italic', fill: { stops: ['#ffffff', mix(p.hi, '#ffffff', 0.5), mix(p.accent, '#ffffff', 0.35)], angle: 90 }, imgFill: D.bg, imgFillA: 0.3, shadow: true, speck: 0.4 };
+      // bright, edged and only a touch of the sky in it: with more, it faded into a purple picture
+      const sky = { font: 'Barlow Black Italic', fill: { stops: ['#ffffff', mix(p.hi, '#ffffff', 0.6), mix(p.accent, '#ffffff', 0.25)], angle: 90 }, imgFill: D.bg, imgFillA: 0.12, shadow: true, speck: 0.12,
+        edge: 2.4, edgeColor: mix(p.deep, '#000000', 0.55), glow: rgba('#000000', 0.35) };
       const tl = [a && T(Object.assign({ name: 'Title 1', text: a, fit: b ? 720 : 900, maxH: H * 0.15 }, sky)), b && T(Object.assign({ name: 'Title 2', text: b, fit: 820, maxH: H * 0.15 }, sky))].filter(Boolean);
       const ts = col(tl, { cx: 540, t: H * 0.18, gap: 0 }); L.push(...ts);
       if (sp) L.push(hero(sp, { cx: 540, t: ts.bottom - H * 0.05, b: H + 20, mode: 'chest', fade: 0.12, extra: lit(p) }));
@@ -3100,7 +3110,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         IMGS.set(key, im);
         // AI pictures lead; the photos stay on for variety until three AI ones are in
         // (a library picture says what light it is really in, and whether it is the theme's own key art)
-        const ai = F.bgs.filter((b) => !b.proc).concat({ key, by: out.by + (out.bank ? ' · library' : ''), scene, tone: out.tone || tone.id, theme: out.themeArt != null && out.bank ? !!out.themeArt : theme });
+        const ai = F.bgs.filter((b) => !b.proc).concat({ key, file: out.file, by: out.by + (out.bank ? ' · library' : ''), scene, tone: out.tone || tone.id, theme: out.themeArt != null && out.bank ? !!out.themeArt : theme });
         // AI pictures in order of their light, the studio's photos only standing in until three are here
         ai.sort((a, b) => (b.theme ? 1 : 0) - (a.theme ? 1 : 0) || F.board.tones.findIndex((t) => t.id === a.tone) - F.board.tones.findIndex((t) => t.id === b.tone));
         F.bgs = ai.concat(F.bgs.filter((b) => b.proc)).slice(0, Math.max(3, ai.length));
@@ -3343,6 +3353,32 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     if (F.step === 'pick') paintThumbs();
   }
 
+  /*
+   * MORE DESIGNS, MORE PICTURES. "4 more designs" used to dress the same four
+   * pictures again (one chain picture behind five flyers): each new design now
+   * fetches its own from the church's library — free, never a fresh painting —
+   * and swaps it in when it lands; the board's own pictures stand in meanwhile.
+   */
+  async function morePictures(n) {
+    if (!(F.status && F.status.cloudflare) || !F.dir || !window.api.flyer.paint) return;
+    const tryNo = F.tries, sz = sizeOf();
+    const scenes = F.dir.scenes || [];
+    const people = chosenSpeakers().some((s) => (s.photos || []).length);
+    await Promise.all(Array.from({ length: n }, async (_, j) => {
+      const tone = F.board.tones[(F.bgs.length + j) % F.board.tones.length] || TONES[0];
+      try {
+        const out = await window.api.flyer.paint({ scene: scenes[(BOARD_N + j) % Math.max(1, scenes.length)] || 'light', w: sz.w, h: sz.h, people, slot: BOARD_N + j, tone: tone.id, event: eventOf(), libraryOnly: true });
+        if (tryNo !== F.tries || !out || !(out.file || out.dataUrl)) return;
+        if (F.bgs.some((b) => b.file && b.file === out.file)) return;   // already on this board
+        const key = 'lib:' + tryNo + ':' + (out.file || j);
+        IMGS.set(key, await loadImg(picSrc(out)));
+        if (tryNo !== F.tries) return;
+        F.bgs = F.bgs.concat({ key, file: out.file, by: out.by + ' · library', tone: out.tone || tone.id, theme: !!out.themeArt });
+        rebuildDesigns();
+      } catch (e) { /* the board's own pictures stand */ }
+    }));
+  }
+
   /* "Made by Cloudflare" under a design whose picture Cloudflare's free AI painted (FLUX.2, Phoenix), the model named */
   function madeByTag(by) {
     if (!/cloudflare/i.test(by || '')) return '';
@@ -3367,7 +3403,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     P.body.onclick = (e) => {
       if (e.target.closest('[data-act="more"]')) {
         const from = F.board.shown; F.board.shown = Math.min(F.board.order.length, from + BOARD_N);
-        markSeen(F.board.order.slice(from, F.board.shown)); rebuildDesigns(); drawPick(); return;
+        markSeen(F.board.order.slice(from, F.board.shown)); rebuildDesigns(); drawPick();
+        morePictures(F.board.shown - from);
+        return;
       }
       const c = e.target.closest('.fs-card'); if (c) { const d = F.designs[+c.dataset.i]; markLiked(d && d.look, 1); openEditor(d); }
     };
