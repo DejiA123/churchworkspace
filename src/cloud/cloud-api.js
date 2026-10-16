@@ -1016,7 +1016,9 @@ function browse(exts) {
     { key: 'videos', label: 'Videos folder', dir: d.videos },
   ];
   return groups.map((g) => {
-    const items = listDir(g.dir, { exts: exts || VIDEO_EXT }).filter((f) => {
+    // What was sent from a phone is listed whatever it is (a photo, a song),
+    // or a photo sent from the phone never showed up in "Added from your phone".
+    const items = listDir(g.dir, { exts: exts || (g.key === 'uploads' ? PICKABLE_EXT : VIDEO_EXT) }).filter((f) => {
       const k = process.platform === 'win32' ? f.path.toLowerCase() : f.path;
       if (seen.has(k)) return false;
       seen.add(k);
@@ -1643,7 +1645,13 @@ function receiveUpload(req, res, url) {
     // 14, not 15: the 15th character of an ISO stamp is the dot before the
     // milliseconds, and a file called '20260916121756.-sermon.mp4' looks broken.
     const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
-    const full = path.join(dir, `${stamp}-${cleaned}`);
+    // An iPhone calls every photo it hands over "image.jpg": three sent at once
+    // finish in the same second, and the second would have replaced the first.
+    // A name that is taken gets -2, -3… (nothing is awaited between the look
+    // and the rename, so two finishing together cannot both take one name).
+    const stem = cleaned.slice(0, cleaned.length - ext.length);
+    let full = path.join(dir, `${stamp}-${cleaned}`);
+    for (let n = 2; fs.existsSync(full) && n < 10000; n++) full = path.join(dir, `${stamp}-${stem}-${n}${ext}`);
     try { fs.renameSync(partial, full); }
     catch (e) { return json(res, 500, { error: 'Could not finish saving the file: ' + e.message }); }
     push('upload:progress', { id, name: cleaned, percent: 100, done: true, path: full });

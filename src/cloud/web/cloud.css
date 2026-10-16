@@ -3659,7 +3659,7 @@ body.mw-cloud .cloud-sheet-modal .cloud-files-up, body.mw-cloud .cloud-files-bar
 .csb-ai-st.ok { color: #16a34a; }
 .csb-ai-st.busy { color: #1f6fe0; }
 .csb-ai-st .csb-spin { border-color: rgba(31, 111, 224, .2); border-top-color: #1f6fe0; }
-/* My videos, the scheduler's picker: the names under the pictures were white on white */
+/* My Uploads, the scheduler's picker: the names under the pictures were white on white */
 .cp-pick .cs-g, .cp-pick .cs-empty b { color: #0f1115; }
 .csb-plan { background: #eaf2ff; color: #1e3a8a; }
 .csb-style { background: #f1f3f6; border-color: transparent; color: #0f1115; }

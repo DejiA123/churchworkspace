@@ -67,16 +67,16 @@ const up = async () => { for (let k = 0; k < 80; k++) { try { await new Promise(
     await page.locator('#chSocialCard').tap(); await sleep(800);
     check(await page.evaluate(() => document.body.classList.contains('mw-sched')), '"Post online" opens Posts');
     await page.evaluate(() => window.MWSocial.go('home')); await sleep(600);
-    // Add a video → the phone's own picker (My videos opens behind it to show it arriving)
+    // Add a video → the phone's own picker (My Uploads opens behind it to show it arriving)
     const [chooser] = await Promise.all([
       page.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null),
       page.locator('#cloudHome [data-tool="upload"]').tap(),
     ]);
     await sleep(600);
     const filesOpen = await page.evaluate(() => { const m = document.getElementById('cloudFilesModal'); return !!m && !m.classList.contains('hidden'); });
-    check(!!chooser && filesOpen, '"Add a video" opens the phone\'s picker, with My videos behind it', { chooser: !!chooser, filesOpen });
-    // one place for videos: My videos, by that name
-    check(await page.evaluate(() => (document.querySelector('#cloudFilesModal .cloud-files-title') || {}).textContent === 'My videos'), 'the videos sheet is called My videos');
+    check(!!chooser && filesOpen, '"Add a video" opens the phone\'s picker, with My Uploads behind it', { chooser: !!chooser, filesOpen });
+    // one place for videos and photos: My Uploads, by that name
+    check(await page.evaluate(() => (document.querySelector('#cloudFilesModal .cloud-files-title') || {}).textContent === 'My Uploads'), 'the uploads sheet is called My Uploads');
     await page.evaluate(() => { const x = document.getElementById('cloudFilesClose'); if (x) x.click(); }); await sleep(500);
     await page.evaluate(() => window.MWSocial.go('home')); await sleep(600);
     // the two cards

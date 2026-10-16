@@ -6,7 +6,7 @@
  * server, like before, but only me." The first space made on a studio is its
  * owner's. Here:
  *
- *   [1] the owner's My videos says how much is free, always, and that only
+ *   [1] the owner's My Uploads says how much is free, always, and that only
  *       they can see it
  *   [2] anyone else's does not — and the server never even sends it to them:
  *       not with the list of videos, not after a delete, not in /api/status
@@ -58,7 +58,7 @@ const up = async () => { for (let k = 0; k < 80; k++) { try { await new Promise(
     check(os1.freeBytes > 0 && 'outputDir' in os1, 'the owner\'s status has the free space', { freeBytes: os1.freeBytes });
     check(ms1.ok && ms1.running && !('freeBytes' in ms1) && !('outputDir' in ms1) && !('uploads' in ms1) && !('signedInDevices' in ms1), 'someone else\'s status only says the studio is running', ms1);
 
-    console.log('\n[phone] My videos');
+    console.log('\n[phone] My Uploads');
     const look = async (token) => {
       const ctx = await browser.newContext({ ...devices['iPhone 13'] });
       await ctx.addInitScript((t) => { try { localStorage.setItem('mw.cloud.token', t); } catch (e) {} }, token);

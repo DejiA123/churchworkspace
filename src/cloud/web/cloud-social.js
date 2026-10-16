@@ -150,7 +150,8 @@
    * "Short · 2 Oct", from the time stamp the studio put on it.
    */
   function titleFromFile(p) {
-    const raw = baseName(p).replace(/\.[a-z0-9]+$/i, '');
+    // (what came from a phone is saved as "20261016161916-IMG_0042.MOV": the stamp is the server's, not a name)
+    const raw = baseName(p).replace(/\.[a-z0-9]+$/i, '').replace(/^\d{14}-(?=.)/, '');
     const m = /(\d{4})(\d{2})(\d{2})[-_](\d{2})(\d{2})(\d{2})?$/.exec(raw);
     const n = raw.replace(/[-_]?\d{8}[-_]\d{4,6}$/, '')
       .replace(/^(short|edited|export|clip)[-_]+/i, '')
@@ -205,8 +206,12 @@
       if (!res.ok) return S.exports;
       const data = await res.json();
       const out = (data.groups || []).find((g) => g.key === 'output');
-      // every finished video, newest first, as My videos lists them (Home shows its own first 10)
+      // every finished video, newest first, as My Uploads lists them (Home shows its own first 10)
       S.exports = ((out && out.files) || []).filter((f) => isVideo(f.path) || isImage(f.path))
+        .sort((a, b) => b.mtime - a.mtime);
+      // …and what was added from the phone (videos and photos), for My Uploads in Post
+      const phone = (data.groups || []).find((g) => g.key === 'uploads');
+      S.phoneFiles = ((phone && phone.files) || []).filter((f) => isVideo(f.path) || isImage(f.path))
         .sort((a, b) => b.mtime - a.mtime);
     } catch (e) { /* the list is a convenience */ }
     return S.exports;
@@ -280,7 +285,7 @@
    * one-tap reach stay — a big New project card, the tools as app icons — but
    * in Church Space's own colours (violet to gold), and with what no video
    * app has: this week's services, each a tap from its flyer. Every door the
-   * page had is still here (Studio and projects, Montage, Post, My videos,
+   * page had is still here (Studio and projects, Montage, Post, My Uploads,
    * Help, your space).
    */
   function buildHome() {
@@ -331,7 +336,7 @@
         <button type="button" class="on" data-bar="home">${mi('home')}<span>Home</span></button>
         <button type="button" data-go="projects">${mi('film')}<span>Projects</span></button>
         <button type="button" data-home="flyers">${mi('image')}<span>Flyers</span></button>
-        <button type="button" data-home="files">${mi('folder')}<span>My videos</span></button>
+        <button type="button" data-home="files">${mi('folder')}<span>My Uploads</span></button>
       </nav>`;
     document.body.appendChild(el);
     el.querySelector('.ch-chip-slot').appendChild(C.jobChip());
@@ -341,7 +346,7 @@
       if (b.dataset.bar === 'home') { const sc = el.querySelector('.ch-scroll'); if (sc) sc.scrollTo({ top: 0, behavior: 'smooth' }); return; }
       if (b.dataset.tool === 'shorts' || b.dataset.tool === 'captions') return homeTool(b.dataset.tool);
       if (b.dataset.tool === 'saved') { const d = document.getElementById('cloudDownloads'); return d && d.click(); }
-      // "Add a video": straight to the phone's own picker — My videos opens behind it to show it arriving
+      // "Add a video": straight to the phone's own picker — My Uploads opens behind it to show it arriving
       if (b.dataset.tool === 'upload') { const f = document.getElementById('cloudFiles'); if (f) f.click(); const u = document.getElementById('cloudUpload'); return u && u.click(); }
       if (b.dataset.tool === 'help') return window.MWGuide && window.MWGuide.openHelp && window.MWGuide.openHelp();
       if (b.dataset.proj) return openProject(b.dataset.proj);
@@ -419,7 +424,7 @@
         { target: '#cloudHome .ch-montage', emoji: '✨', title: 'AI Montage', body: 'Pick photos and videos. The AI makes the edit.' },
         { target: '#cloudHome .ch-flyer', emoji: '🎨', title: 'Flyers', body: 'Pick the service, tap Make. The AI paints the picture; your words stay exactly as typed.' },
         { target: '#chSocialCard', emoji: '📅', title: 'Post online', body: 'Send your videos and flyers to social media.' },
-        { target: '#cloudHome [data-home="files"]', emoji: '📁', title: 'My videos', body: 'All your videos are kept here: the ones you added, and the shorts you made.' },
+        { target: '#cloudHome [data-home="files"]', emoji: '📁', title: 'My Uploads', body: 'Everything is kept here: the videos and photos you added from your phone, and the shorts you made.' },
         { target: '#chAsk .mwg-ask', emoji: '❓', title: 'Need help?', body: 'Tap ? any time to see these tips again.' },
       ],
     });
@@ -1301,7 +1306,7 @@
       if (!st.files.length) {
         const err = st.sendErr ? `<p class="csb-send-err">${mi('alert')}<span>${esc(st.sendErr)}</span></p>` : '';
         return '<div class="csb-choose">'
-          + `<button type="button" class="csb-src" data-c="exports"><span class="csb-src-ic">${mi('film')}</span><b>My videos</b><small>The shorts and videos you made</small></button>`
+          + `<button type="button" class="csb-src" data-c="exports"><span class="csb-src-ic">${mi('film')}</span><b>My Uploads</b><small>What you made, and videos and photos you added</small></button>`
           + `<button type="button" class="csb-src" data-c="device"><span class="csb-src-ic">${mi('upload')}</span><b>From this ${phone() ? 'phone' : 'computer'}</b><small>Videos or flyers — pick one, or many at once</small></button>`
           + '</div>' + err;
       }
@@ -1873,14 +1878,14 @@
 
     async function pickExports() {
       await loadExports();
-      const sub = C.openPanel({ id: 'csPickExports', title: 'My videos', cls: 'cp-pick' });
-      const files = S.exports;
+      const sub = C.openPanel({ id: 'csPickExports', title: 'My Uploads', cls: 'cp-pick' });
+      const files = S.exports.concat(S.phoneFiles || []).sort((a, b) => b.mtime - a.mtime);
       const chosen = new Set();
       const drawPick = () => {
         sub.body.innerHTML = files.length
           ? '<div class="cs-grid">' + files.map((f) => `<button type="button" class="cs-g${chosen.has(f.path) ? ' on' : ''}" data-f="${escAttr(f.path)}">`
             + `<span class="cs-g-pic" data-thumb="${escAttr(f.path)}"></span><span class="cs-g-name">${esc(titleFromFile(f.path))}</span><i class="cs-tick">${mi('check')}</i></button>`).join('') + '</div>'
-          : `<div class="cs-empty"><div class="cs-empty-art solo">${mi('film')}</div><b>No exports yet</b><p>Shorts and videos you export from the Video Studio appear here.</p></div>`;
+          : `<div class="cs-empty"><div class="cs-empty-art solo">${mi('film')}</div><b>Nothing here yet</b><p>Shorts you export, and videos and photos you add from your phone, appear here.</p></div>`;
         sub.foot.innerHTML = `<button type="button" class="cs-btn primary wide" data-done${chosen.size ? '' : ' disabled'}>${chosen.size > 1 ? `Use these ${chosen.size}` : 'Use this one'}</button>`;
         paintThumbs(sub.body);
       };
@@ -2892,7 +2897,7 @@
 
     // 2 — the videos: one inviting card when there are none, then their pictures
     const tiles = MT.items.map((it, i) => `<div class="mt-tile" data-i="${i}">${it.kind === 'image'
-        ? `<img src="${attr(it.url)}" alt="" draggable="false" />` : (it.poster ? `<img src="${attr(it.poster)}" alt="" draggable="false" />` : '<span class="mt-load"></span>') + (talk
+        ? (it.thumb ? `<img src="${attr(it.thumb)}" alt="" draggable="false" />` : '<span class="mt-load"></span>') : (it.poster ? `<img src="${attr(it.poster)}" alt="" draggable="false" />` : '<span class="mt-load"></span>') + (talk
           ? `<button type="button" class="mt-part${mtHasPart(it) ? ' on' : ''}" data-mt-part="${i}" aria-label="Choose the part to use">${mi('scissors')}<span>${mtHasPart(it) ? mtClock(it.from || 0) + '–' + mtClock(it.to || it.secs) : 'Trim'}</span></button>`
           : `<span class="mt-dur">${mi('play')}${it.secs ? mtClock(it.secs) : ''}</span>`)}
         ${MT.order === 'mine' ? `<span class="mt-num">${i + 1}</span>` : ''}
@@ -2900,14 +2905,14 @@
     const videos = n
       ? `<div class="mt-grid${MT.order === 'mine' ? ' mt-ordered' : ''}">${tiles}
           <button type="button" class="mt-addt" data-mt="add"><span class="mt-addt-ic">${mi('plus')}</span><span>Phone</span></button>
-          <button type="button" class="mt-addt" data-mt="addsrv"><span class="mt-addt-ic">${mi('folder')}</span><span>My videos</span></button></div>
+          <button type="button" class="mt-addt" data-mt="addsrv"><span class="mt-addt-ic">${mi('folder')}</span><span>My Uploads</span></button></div>
         ${!talk && n > 1 ? '<small class="mt-hint">Hold a tile and drag it to change the order.</small>' : ''}`
       : `<div class="mt-empty">
           <span class="mt-empty-top"><span class="mt-empty-ic">${mi(talk ? 'film' : 'image')}</span>
             <span class="mt-empty-t"><b>${talk ? 'Add a video of someone speaking' : 'Add your clips and photos'}</b>
             <small>${talk ? 'A sermon, a talk, a testimony — the AI finds the best lines' : 'Two or more. They play one after another, with music.'}</small></span></span>
           <span class="mt-empty-btns"><button type="button" class="mt-btn mt-btn-hi" data-mt="add">${mi('phone')}<span>From phone</span></button>
-            <button type="button" class="mt-btn" data-mt="addsrv">${mi('folder')}<span>My videos</span></button></span></div>`;
+            <button type="button" class="mt-btn" data-mt="addsrv">${mi('folder')}<span>My Uploads</span></button></span></div>`;
 
     // 3 — fine-tune: one list, each row its value, opened in place
     const keepRow = `<label class="mt-swline"${talk ? ' hidden' : ''}><span>Keep the clips’ own sound${MT.song || MT.songFile || MT.free ? ' under the music' : ''}</span>
@@ -2949,7 +2954,7 @@
       if (d.open && !MT.acc.has(k)) { MT.acc.add(k); d.classList.add('mt-opening'); }
       else if (!d.open) MT.acc.delete(k);
     }));
-    const go = !ready ? (talk ? 'Add a video to start' : 'Add 2 clips or photos to start') : talk ? 'Make my viral montage' : 'Make my montage';
+    const go = !ready ? (talk ? (n ? 'Viral needs a video — or choose Standard' : 'Add a video to start') : 'Add 2 clips or photos to start') : talk ? 'Make my viral montage' : 'Make my montage';
     p.foot.innerHTML = `<button type="button" class="mt-go" data-mt="go"${ready ? '' : ' disabled'}>${ready ? mi('sparkles') : ''}<span>${go}</span></button>`;
     if (!p._wired) { p._wired = true; mtWire(p); }
     if (MT.preview) mtPreviewPaint();   // a sample still loading or playing keeps its line after a redraw
@@ -3170,12 +3175,15 @@
       document.body.appendChild(inp);
     };
     make('mtPick', 'video/*,image/*', true, (files) => {
-      for (const f of files.slice(0, Math.max(0, 60 - MT.items.length))) {
+      const room = Math.max(0, MT_MAX - MT.items.length);
+      for (const f of files.slice(0, room)) {
         const kind = /^image\//.test(f.type) || /\.(jpe?g|png|webp|heic|heif|avif|gif)$/i.test(f.name) ? 'image' : 'video';
         const it = { file: f, kind, url: URL.createObjectURL(f) };
         MT.items.push(it);
-        if (kind === 'video') mtPoster(it);
+        mtPicture(it);
       }
+      mtFitMode();
+      if (files.length > room) C.island({ kind: 'warn', title: room ? `${room} of the ${files.length} were added` : 'The montage is full', sub: `A montage takes up to ${MT_MAX} clips and photos.`, ms: 5000 });
       mtPaint();
     });
     make('mtSong', 'audio/*,.mp3,.m4a,.wav,.aac', false, (files) => {
@@ -3261,12 +3269,13 @@
     const paths = (Array.isArray(got) ? got : got ? [got] : []).filter((x) => typeof x === 'string');
     if (!paths.length) return;
     const have = new Set(MT.items.map((it) => it.path).filter(Boolean));
-    for (const p of paths.slice(0, Math.max(0, 60 - MT.items.length))) {
+    for (const p of paths.slice(0, Math.max(0, MT_MAX - MT.items.length))) {
       if (have.has(p)) continue;
       const name = String(p).split(/[\\/]/).pop();
       const kind = /\.(jpe?g|png|webp|heic|avif)$/i.test(name) ? 'image' : 'video';
       const it = { path: p, name, kind, file: null, url: kind === 'image' ? C.fileUrl(p) : '' };
       MT.items.push(it);
+      if (kind === 'image') mtPicture(it);   // a small picture of it, like a photo from the phone
       if (kind === 'video') {
         // its picture and length, from the server (the phone does not have the file)
         (async () => {
@@ -3276,6 +3285,7 @@
         })();
       }
     }
+    mtFitMode();
     mtPaint();
   }
 
@@ -3356,12 +3366,89 @@
     $('[data-mp-len]', p.body).textContent = D ? mtClock(B - A) : '…';
   }
 
+  /*
+   * ►► FIFTY PHOTOS AT ONCE. ◄◄ Each tile shows a small picture made from the
+   * photo, one photo at a time: forty full-size iPhone photos (12–48
+   * megapixels each) drawn at once took more memory than the iPhone gives a
+   * page, and the app was closed and reloaded under the operator. Videos'
+   * first frames are taken one at a time too (a phone plays only so many
+   * videos at once). The sheet is redrawn once a moment, not once a picture.
+   */
+  const MT_MAX = 60;
+  /*
+   * Photos only, in Viral: Viral is cut from what someone SAYS in a video, so
+   * with nothing but photos its button stayed grey ("Add a video to start")
+   * and forty photos seemed to do nothing. Photos alone make a Standard
+   * montage (one after another, with music), and the sheet says so.
+   */
+  function mtFitMode() {
+    if (MT.mode !== 'talk' || !MT.items.length || MT.items.some((it) => it.kind === 'video')) return;
+    MT.mode = 'music';
+    C.island({ kind: 'info', title: 'Photos make a Standard montage', sub: 'One after another, with music. Viral needs a video of someone speaking.', ms: 5500 });
+  }
+  let mtPicQueue = Promise.resolve(), mtPaintTimer = null;
+  function mtPaintSoon() { if (!mtPaintTimer) mtPaintTimer = setTimeout(() => { mtPaintTimer = null; mtPaint(); }, 250); }
+  function mtPicture(it) {
+    mtPicQueue = mtPicQueue.then(() => (MT.items.includes(it) ? (it.kind === 'image' ? mtPhotoThumb(it) : mtPoster(it)) : null)).catch(() => {}).then(mtPaintSoon);
+  }
+  function mtPhotoThumb(it) {
+    return new Promise((resolve) => {
+      const im = new Image();
+      const done = () => { im.onload = im.onerror = null; im.removeAttribute('src'); resolve(); };
+      im.onload = () => {
+        try {
+          const k = 320 / Math.max(1, Math.min(im.naturalWidth, im.naturalHeight));
+          const c = document.createElement('canvas');
+          c.width = Math.max(1, Math.round(im.naturalWidth * Math.min(1, k))); c.height = Math.max(1, Math.round(im.naturalHeight * Math.min(1, k)));
+          c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+          it.thumb = c.toDataURL('image/jpeg', 0.75);
+          c.width = c.height = 0;
+        } catch (e) { it.thumb = ''; }
+        done();
+      };
+      im.onerror = () => { it.thumb = ''; it.bad = true; done(); };
+      im.src = it.url;
+    });
+  }
+  /*
+   * A photo is sent at the size the montage can use: its short side at most
+   * 2400 pixels (a 1920-tall frame, with room to zoom), as a JPEG — a tenth
+   * of a 48-megapixel original, so fifty go up in minutes, not an hour. The
+   * phone turns it the right way up as it draws it.
+   */
+  function mtShrinkPhoto(file) {
+    if (/gif$/i.test(file.type || '') || /\.gif$/i.test(file.name || '')) return Promise.resolve(file);
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(file);
+      const im = new Image();
+      const keep = () => { URL.revokeObjectURL(url); resolve(file); };
+      im.onerror = keep;
+      im.onload = () => {
+        const w = im.naturalWidth, h = im.naturalHeight;
+        const k = Math.min(1, 2400 / Math.max(1, Math.min(w, h)));
+        if (k >= 1 && file.size < 3 * 1024 * 1024 && /jpe?g$/i.test(file.type || '')) return keep();
+        try {
+          const c = document.createElement('canvas');
+          c.width = Math.round(w * k); c.height = Math.round(h * k);
+          c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+          c.toBlob((b) => {
+            c.width = c.height = 0; URL.revokeObjectURL(url);
+            if (!b || b.size >= file.size) return resolve(file);
+            resolve(new File([b], String(file.name || 'photo').replace(/\.[a-z0-9]+$/i, '') + '.jpg', { type: 'image/jpeg', lastModified: file.lastModified }));
+          }, 'image/jpeg', 0.9);
+        } catch (e) { keep(); }
+      };
+      im.src = url;
+    });
+  }
+
   function mtPoster(it) {
     const v = document.createElement('video');
     v.muted = true; v.playsInline = true; v.preload = 'auto';
     v.setAttribute('playsinline', ''); v.setAttribute('muted', '');
-    let done = false;
-    const finish = () => { done = true; try { v.removeAttribute('src'); v.load(); } catch (e) {} };
+    let done = false, settle = null;
+    const over = new Promise((r) => { settle = r; });
+    const finish = () => { if (done) return; done = true; try { v.removeAttribute('src'); v.load(); } catch (e) {} settle(); };
     const grab = () => {
       if (done) return;
       try {
@@ -3371,7 +3458,6 @@
         it.poster = c.toDataURL('image/jpeg', 0.7);
       } catch (e) { /* the play mark alone */ }
       finish();
-      mtPaint();
     };
     v.addEventListener('loadedmetadata', () => {
       it.secs = v.duration || 0;
@@ -3380,8 +3466,10 @@
     v.addEventListener('seeked', grab);
     v.addEventListener('error', finish);
     setTimeout(() => { if (!done && v.readyState >= 2) grab(); }, 2500);
+    setTimeout(finish, 8000);   // never holds up the pictures after it
     v.src = it.url;
     v.load();
+    return over;
   }
 
   /*
@@ -3446,15 +3534,26 @@
       const paths = [];
       const sizeOf = (it) => (it.file && it.file.size) || it.size || 1;
       const total = MT.items.reduce((n, it) => n + sizeOf(it), 0) + ((MT.songFile && MT.songFile.size) || 0);
-      let done = 0;
-      for (let i = 0; i < MT.items.length; i++) {
-        const it = MT.items[i];
-        if (it.path) { paths.push(it.path); done += sizeOf(it); continue; }
-        mtProgress(`Sending ${i + 1} of ${MT.items.length}…`, (done / total) * 30);
-        it.path = await C.uploadFile(it.file, (pc) => mtProgress(`Sending ${i + 1} of ${MT.items.length}…`, ((done + sizeOf(it) * pc / 100) / total) * 30));
-        done += sizeOf(it);
-        paths.push(it.path);
-      }
+      // three at a time, each photo at the size the montage can use (mtShrinkPhoto)
+      const part = new Map();   // item -> share of it sent (0..1)
+      let finished = 0, next = 0;
+      const items = MT.items.slice();
+      const say = () => {
+        const got = items.reduce((n, it) => n + sizeOf(it) * (it.path ? 1 : part.get(it) || 0), 0);
+        mtProgress(`Sending ${Math.min(items.length, finished + 1)} of ${items.length}…`, (got / total) * 30);
+      };
+      say();
+      const worker = async () => {
+        while (next < items.length) {
+          const it = items[next++];
+          if (it.path) { finished++; continue; }
+          const file = it.kind === 'image' ? await mtShrinkPhoto(it.file) : it.file;
+          it.path = await C.uploadFile(file, (pc) => { part.set(it, pc / 100); say(); });
+          finished++; say();
+        }
+      };
+      await Promise.all([worker(), worker(), worker()]);
+      for (const it of items) paths.push(it.path);
       // 2) the song joins the music library, so it is on the music lane afterwards
       let song = MT.song;
       // a free song: fetched onto the server's music library (once), credited in the post

@@ -96,7 +96,7 @@ async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise
     await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
     for (let k = 0; k < 60; k++) { if (!(await page.evaluate(() => document.querySelectorAll('#cloudUploadBar .cloud-up-row').length))) break; await sleep(500); }
     const names = await page.evaluate(() => [...document.querySelectorAll('#cloudFilesList .cf-row')].map((r) => r.textContent).join('|'));
-    check(/sermon\.mp4/.test(names), 'and it arrives', names.slice(0, 120));
+    check(/sermon/i.test(names), 'and it arrives', names.slice(0, 120));
   } finally { await browser.close(); srv.kill(); }
   console.log(`${pass} PASS / ${fail} FAIL`); process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('FATAL', e); process.exit(1); });

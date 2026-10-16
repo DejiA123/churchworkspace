@@ -282,7 +282,7 @@ ${styles}
         <button id="cloudFilesClose" type="button" class="cloud-files-x" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></svg></button>
       </div>
       <div class="cloud-files-bar">
-        <button id="cloudUpload" type="button" class="primary-btn cloud-files-up"><i class="mi" data-i="upload"></i><span>Send a video from this phone</span></button>
+        <button id="cloudUpload" type="button" class="primary-btn cloud-files-up"><i class="mi" data-i="upload"></i><span>Add videos &amp; photos</span></button>
         <button id="cloudFilesRefresh" type="button" class="cloud-files-icon" aria-label="Refresh" title="Refresh"><i class="mi" data-i="refresh"></i></button>
       </div>
       <div id="cloudFilesDisk" class="cloud-files-disk hidden"></div>

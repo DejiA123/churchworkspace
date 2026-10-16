@@ -1714,9 +1714,11 @@ let _hideTimer = null;
     const kind = opts.picking ? (pickState.kind || 'video') : 'video';
     const up = $('#cloudUpload span');
     // (one short line: "Send a video or picture from this phone" ran off the button)
-    if (up) up.textContent = `Send ${String(SEND_WHAT[kind]).length <= 10 ? SEND_WHAT[kind] + ' ' : ''}from ${window.matchMedia('(max-width: 900px)').matches ? 'this phone' : 'this computer'}`;
+    if (up) up.textContent = opts.picking
+      ? `Send ${String(SEND_WHAT[kind]).length <= 10 ? SEND_WHAT[kind] + ' ' : ''}from ${window.matchMedia('(max-width: 900px)').matches ? 'this phone' : 'this computer'}`
+      : 'Add videos & photos';   // (sends any of them: videos, photos, songs)
     const title = m.querySelector('.cloud-files-title');
-    if (title) title.textContent = opts.picking ? PICK_TITLE[kind] : 'My videos';
+    if (title) title.textContent = opts.picking ? PICK_TITLE[kind] : 'My Uploads';
     setSelecting(false);
     /*
      * PICKING SEVERAL (the AI Montage's "From your files"): a tap ticks a video
@@ -1824,7 +1826,7 @@ let _hideTimer = null;
     }
     if (!any) {
       html = `<div class="cloud-files-empty"><div class="cf-empty-art">${mi('folder')}</div><b>Nothing here yet</b>`
-        + `<p>${exts ? 'Nothing of that kind, anyway. ' : ''}Send ${SEND_WHAT[picking ? (pickState.kind || 'video') : 'video']} with the button above.</p></div>`;
+        + `<p>${exts ? 'Nothing of that kind, anyway. ' : ''}Send ${SEND_WHAT[picking ? (pickState.kind || 'video') : 'media']} with the button above.</p></div>`;
     }
     list.innerHTML = html;
     const sel = $('#cloudFilesSelect');
@@ -2048,6 +2050,8 @@ let _hideTimer = null;
       const p = el.dataset.thumb;
       if (fileThumbs.get(p)) return paintAll(p);
       if (fileThumbs.has(p)) return;     // on its way
+      // a photo is its own picture (a frame "1 second in" of a photo is nothing)
+      if (/\.(png|jpe?g|webp|gif)$/i.test(p)) { fileThumbs.set(p, window.MW_FILE_URL(p)); return paintAll(p); }
       fileThumbs.set(p, '');
       thumbQueue = thumbQueue.then(async () => {
         try {
@@ -2104,17 +2108,75 @@ let _hideTimer = null;
       const h = Object.assign({ 'Content-Type': 'application/octet-stream' }, authHeaders());
       for (const k of Object.keys(h)) x.setRequestHeader(k, h[k]);
       x.responseType = 'text';
-      if (onSent) x.upload.onprogress = (e) => { if (e.lengthComputable) onSent(e.loaded); };
+      /*
+       * A piece that goes quiet is cut off and tried again: an iPhone that
+       * locks, or leaves the app for Photos, can leave a request hanging with
+       * neither progress nor an error, and the bar sat there for ever.
+       */
+      let quiet = null, stalled = false;
+      const wake = () => { clearTimeout(quiet); quiet = setTimeout(() => { stalled = true; try { x.abort(); } catch (e) {} }, 60e3); };
+      x.upload.onprogress = (e) => { wake(); if (onSent && e.lengthComputable) onSent(e.loaded); };
       x.onload = () => {
-        let j = {};
-        try { j = JSON.parse(x.responseText || '{}'); } catch (e) { j = {}; }
-        resolve({ status: x.status, ok: x.status >= 200 && x.status < 300, json: async () => j });
+        clearTimeout(quiet);
+        let j = null;
+        try { j = JSON.parse(x.responseText || '{}'); } catch (e) { j = null; }
+        // j null: not this studio's answer (a proxy's error page while it restarts)
+        resolve({ status: x.status, ok: x.status >= 200 && x.status < 300, ours: !!j, json: async () => j || {} });
       };
-      const fail = (why) => { const e = new Error(why); e.name = why === 'aborted' ? 'AbortError' : 'NetworkError'; reject(e); };
+      const fail = (why) => { clearTimeout(quiet); const e = new Error(why); e.name = why === 'aborted' && !stalled ? 'AbortError' : 'NetworkError'; reject(e); };
       x.onerror = () => fail('network');
-      x.onabort = () => fail('aborted');
+      x.onabort = () => fail(stalled ? 'stalled' : 'aborted');
+      x.ontimeout = () => fail('network');
       if (signal) { if (signal.aborted) return fail('aborted'); signal.addEventListener('abort', () => { try { x.abort(); } catch (e) {} }, { once: true }); }
+      wake();
       x.send(body);
+    });
+  }
+
+  /* Wait before trying a piece again: `ms`, or less if the signal or the app comes back. */
+  function waitToRetry(ms, signal) {
+    return new Promise((resolve) => {
+      let t = null;
+      const done = () => {
+        clearTimeout(t);
+        window.removeEventListener('online', soon);
+        document.removeEventListener('visibilitychange', soon);
+        if (signal) signal.removeEventListener('abort', done);
+        resolve();
+      };
+      const soon = () => { if (navigator.onLine !== false && document.visibilityState !== 'hidden') { clearTimeout(t); t = setTimeout(done, 400); } };
+      t = setTimeout(done, ms);
+      window.addEventListener('online', soon);
+      document.addEventListener('visibilitychange', soon);
+      if (signal) signal.addEventListener('abort', done, { once: true });
+    });
+  }
+
+  /*
+   * An iPhone photo kept as HEIC (from Files, or AirDropped in) is turned into
+   * a JPEG on the phone before it goes: the studio, the flyers and every
+   * platform read JPEG, none of them HEIC. The iPhone's browser can open HEIC;
+   * one that cannot says what to do instead.
+   */
+  const isHeic = (f) => /^image\/hei[cf]/i.test(f.type || '') || /\.hei[cf]$/i.test(f.name || '');
+  function heicToJpeg(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const c = document.createElement('canvas');
+          c.width = img.naturalWidth; c.height = img.naturalHeight;
+          c.getContext('2d').drawImage(img, 0, 0);
+          c.toBlob((b) => {
+            URL.revokeObjectURL(url);
+            if (!b) return reject(new Error('This HEIC photo could not be turned into a JPEG. Choose it from Photos instead.'));
+            resolve(new File([b], String(file.name || 'photo').replace(/\.hei[cf]$/i, '') + '.jpg', { type: 'image/jpeg', lastModified: file.lastModified }));
+          }, 'image/jpeg', 0.92);
+        } catch (e) { URL.revokeObjectURL(url); reject(new Error('This HEIC photo is too big to convert here. Choose it from Photos instead.')); }
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('This is an iPhone HEIC photo this browser cannot open. Choose it from Photos instead, or send it from the iPhone.')); };
+      img.src = url;
     });
   }
 
@@ -2139,12 +2201,34 @@ let _hideTimer = null;
       const e = new Error('Stopped.'); e.stopped = true; return e;
     };
 
+    // An empty file: an iPhone photo kept only in iCloud that has not come down yet
+    if (file.size && isHeic(file)) file = await heicToJpeg(file);
+    if (!file.size) throw new Error('This file is empty. If it is kept in iCloud, open it in Photos first so it downloads, then add it again.');
+
     // Where did we get to last time (if this is a retry of the same id)?
-    try {
-      const probe = await fetch(q('&probe=1'), { method: 'POST', headers: authHeaders() });
-      const info = await probe.json();
-      if (info && info.have) sent = Math.min(info.have, file.size);
-    } catch (e) { sent = 0; }
+    const probeHave = () => fetch(q('&probe=1'), { method: 'POST', headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : null)).then((j) => (j && typeof j.have === 'number' ? Math.min(j.have, file.size) : null)).catch(() => null);
+    sent = (await probeHave()) || 0;
+
+    /*
+     * ►► A LOST CONNECTION IS NOT A LOST UPLOAD. ◄◄ The signal drops (Wi-Fi to
+     * 5G), the iPhone locks or leaves for another app, the studio restarts for
+     * an update: the piece is tried again — sooner when the signal or the app
+     * comes back — from wherever the server says it got to, for up to five
+     * minutes without any progress, before the upload gives up.
+     */
+    let misses = 0, lostAt = 0;
+    const tryAgain = async () => {
+      if (!lostAt) lostAt = Date.now();
+      if (Date.now() - lostAt > 5 * 60e3) throw new Error('The connection was lost for too long. Try again where the signal is better.');
+      // the file the phone handed over must still be readable (an iPhone can drop it)
+      try { await file.slice(sent, Math.min(file.size, sent + 1)).arrayBuffer(); }
+      catch (e) { throw new Error('The phone no longer lets the app read this file. Please choose it again.'); }
+      await waitToRetry(Math.min(10e3, 1500 * Math.pow(1.6, misses++)), ac.signal);
+      if (ctl.cancelled) throw stopped();
+      const have = await probeHave();
+      if (have != null) sent = have;
+    };
 
     while (sent < file.size) {
       if (ctl.cancelled) throw stopped();
@@ -2157,17 +2241,20 @@ let _hideTimer = null;
           (n) => { if (onProgress) onProgress(Math.min(99, Math.floor(((base + n) / file.size) * 100)), { sent: base + n, total: file.size }); });
       } catch (e) {
         if (ctl.cancelled) throw stopped();
-        // A dropped connection is not a lost upload — wait and pick up where the
-        // server says it got to.
-        await new Promise((r) => setTimeout(r, 1500));
-        if (ctl.cancelled) throw stopped();
-        const probe = await fetch(q('&probe=1'), { method: 'POST', headers: authHeaders() }).then((r) => r.json()).catch(() => null);
-        if (probe && typeof probe.have === 'number') { sent = probe.have; continue; }
-        throw new Error('The upload stopped and could not be picked up again.');
+        await tryAgain();
+        continue;
       }
       if (res.status === 401) { signedOut(); throw new Error('Signed out.'); }
       const out = await res.json();
+      // the studio restarting (its proxy answers 502–504), or a piece cut off on the way in
+      if (!res.ours || res.status === 502 || res.status === 503 || res.status === 504 || (res.status === 500 && out.error === 'Upload interrupted.')) {
+        await tryAgain();
+        continue;
+      }
+      // out of step with what the server has: carry on from there
+      if (res.status === 409 && typeof out.have === 'number') { sent = Math.min(out.have, file.size); continue; }
       if (!res.ok) throw new Error(out.error || 'Upload failed.');
+      misses = 0; lostAt = 0;
       if (out.partial) { sent = out.have; }
       else if (out.ok && out.path) { if (onProgress) onProgress(100); if (currentUpload === ctl) currentUpload = null; return out.path; }
       else sent = end;
@@ -2313,7 +2400,9 @@ let _hideTimer = null;
       const input = document.createElement('input');
       input.type = 'file';
       if (multi) input.multiple = true;
-      if (exts && exts.length) input.accept = acceptFor(exts);
+      // anything a church sends: its videos, photos and songs (the iPhone then
+      // hands over its HEIC photos as JPEG and its videos as MP4)
+      input.accept = exts && exts.length ? acceptFor(exts) : 'video/*,image/*,audio/*';
       input.addEventListener('change', async () => {
         const files = Array.from(input.files || []);
         if (!files.length) return resolve(null);
@@ -4252,7 +4341,7 @@ let _hideTimer = null;
       { icon: 'layers', label: 'Projects', projects: true },
       { icon: 'clapper', label: 'Outros', press: '#veClips' },
       { icon: 'package', label: 'Batch', press: '#veBulk' },
-      { icon: 'folder', label: 'My videos', press: '#cloudDownloads' },
+      { icon: 'folder', label: 'My Uploads', press: '#cloudDownloads' },
       { icon: 'book', label: 'Help', press: '#cloudHelp' },
       { icon: 'trash', label: 'Delete', deleteProject: true },
     ],
@@ -4460,8 +4549,8 @@ let _hideTimer = null;
       b.setAttribute('aria-label', label);
     };
     chip('#cloudFiles', 'folder', 'Files');
-    // one place for videos, by one name, everywhere: My videos (finished ones first, each with Save)
-    chip('#cloudDownloads', 'folder', 'My videos');
+    // one place for videos, by one name, everywhere: My Uploads (finished ones first, each with Save)
+    chip('#cloudDownloads', 'folder', 'My Uploads');
 
     const actions = $('#cloudBar .cloud-bar-actions') || $('#cloudBar');
     const qWrap = document.createElement('label');
@@ -4687,7 +4776,7 @@ let _hideTimer = null;
         <label class="cloud-switch" aria-label="The AI picks every thumbnail"><input type="checkbox" id="cloudXpThumbAuto" /><span></span></label>
       </div>
       <label class="cloud-xp-row"><span>Keep editing while it exports</span><input type="checkbox" data-mirror="#veBgExport" /></label>
-      <button type="button" class="cloud-xp-link" data-xp="saved">My videos — save finished ones to this phone</button>
+      <button type="button" class="cloud-xp-link" data-xp="saved">My Uploads — save finished ones to this phone</button>
       <button type="button" class="cloud-xp-link" data-xp="more">More export settings</button>`;
     document.body.appendChild(xs);
     // The library's "from my PC" is the desk talking; here it is this phone.
