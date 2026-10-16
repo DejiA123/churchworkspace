@@ -2503,9 +2503,10 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       return L;
     },
 
-    /* ── BREAK EVERY CHAIN: the theme painted, the title filled with the same fire, debris flying off it — no cut-out ── */
+    /* ── BREAK EVERY CHAIN: the theme painted, the title filled with the same fire, debris flying off it — the minister
+       stepping out of the smoke beside it ("why does one of them not have the speaker on it?") ── */
     theme(D) {
-      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [];
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], sp = sp0(D);
       L.push(BG({ img: D.bg, grade: 'vivid', contrast: 14, sat: 18, keep: 0.38, topShade: 0.28, topTo: 0.2, bottomShade: 0.88, bottomFrom: 0.7, vignette: 0.42 }));
       L.push(FX({ kind: 'sparks', x: 720, y: H * 0.45, w: 900, h: H * 0.8, n: 90, seed: 21, opacity: 0.85 }));
       const lg = D.logo && imgOf(D.logo) ? logoLayers(D, 1010 - 40, 100, 74) : []; L.push(...lg);
@@ -2518,6 +2519,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       L.push(SH({ name: 'Smoke', shape: 'rect', fill: { stops: [rgba(mix(p.deep, '#000000', 0.6), 0.6), rgba(mix(p.deep, '#000000', 0.6), 0)], angle: 0 }, x: 200, y: H * 0.4, w: 400, h: H * 0.62, lock: true }));
       L.push(...tc);
       L.push(FX({ kind: 'debris', x: 760, y: tc.bottom + 4, w: 560, h: 120, n: 70, seed: 33, opacity: 1 }));
+      // the minister on the smoky side, under the title, clear of the theme lines on the right
+      if (sp) L.push(hero(sp, { cx: 290, t: tc.bottom - H * 0.04, b: H - 150, mode: 'chest', fade: 0.3, maxR: 560, extra: lit(p) }));
       let y = tc.bottom + 34;
       if (f.theme) { const th = put(T({ name: 'Theme', text: f.theme, font: 'Montserrat', size: 24, align: 'right', maxW: 560, shadow: true }), { r: 1012, t: y }); L.push(th); y = box(th).b + 8; }
       if (f.extra) { const ex = put(T({ name: 'Scripture', text: f.extra, font: 'Montserrat', size: 16, align: 'right', line: 1.25, fill: rgba('#ffffff', 0.85), maxW: 420, shadow: true }), { r: 1012, t: y }); L.push(ex); }
