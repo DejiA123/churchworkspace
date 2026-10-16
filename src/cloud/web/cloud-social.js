@@ -440,35 +440,57 @@
    * owner's home shows how many came in; tap for each one, with a tap to call,
    * WhatsApp or email them back. Nobody else sees them (the server says 403).
    */
+  let enqLook = 0;   // the newest look at the list: an older reply that lands late is ignored
   async function paintEnquiries() {
     const slot = $('#chEnq'); if (!slot || !C.api) return;
     if (C.me && !C.me.owner) { slot.innerHTML = ''; return; }
+    const look = ++enqLook;
     let items = [];
-    try { items = (await C.api('/api/hello/enquiries')).items || []; } catch (e) { slot.innerHTML = ''; return; }
+    try { items = (await C.api('/api/hello/enquiries')).items || []; } catch (e) { if (look === enqLook) slot.innerHTML = ''; return; }
+    if (look !== enqLook) return;
     const fresh = items.filter((x) => !x.seen).length;
     slot.innerHTML = items.length ? `<button type="button" class="ch-enq${fresh ? ' new' : ''}"><span class="ch-enq-ic">${mi('mail')}</span><span class="ch-enq-tx"><b>${fresh ? `${fresh} new ${fresh === 1 ? 'enquiry' : 'enquiries'}` : 'Enquiries'}</b><small>From your Church Space page · ${items.length} in all</small></span>${mi('chev-right')}</button>` : '';
-    const b = slot.querySelector('.ch-enq'); if (b) b.onclick = () => openEnquiries(items);
+    const b = slot.querySelector('.ch-enq'); if (b) b.onclick = () => openEnquiries();
   }
-  function openEnquiries(items) {
+  /*
+   * How to answer someone, from whatever they typed as their contact: an email
+   * address in it (only the address: nothing after it can add a copy or text
+   * to the owner's reply), and the first phone number in it. WhatsApp needs
+   * the country: given (+ or 00), an Irish mobile (08…), or a long number
+   * that already starts with one; any other local number is a call only.
+   */
+  function enquiryReach(c) {
+    const v = String(c || '');
+    const out = [];
+    const mail = /[^\s@?&#%,;:\/<>"'()[\]]+@[^\s@?&#%,;:\/<>"'()[\]]+\.[a-z]{2,}/i.exec(v);
+    if (mail) out.push(`<a class="enq-act" href="mailto:${C.escAttr(mail[0])}?subject=Church%20Space">Email</a>`);
+    const run = /(\+|\b00)?\d[\d\s().-]{5,}\d/.exec(mail ? v.replace(mail[0], ' ') : v);
+    const digits = run ? run[0].replace(/\D/g, '') : '';
+    if (digits.length >= 7 && digits.length <= 17) {   // 15 digits at most, after a 00
+      let intl = '';
+      if (run[0].startsWith('+')) intl = digits;
+      else if (digits.startsWith('00')) intl = digits.slice(2);
+      else if (/^08\d{8}$/.test(digits)) intl = '353' + digits.slice(1);
+      else if (!digits.startsWith('0') && digits.length >= 10) intl = digits;
+      out.push(`<a class="enq-act" href="tel:${intl ? '+' + intl : digits}">Call</a>`);
+      if (intl) out.push(`<a class="enq-act" href="https://wa.me/${intl}" target="_blank" rel="noopener">WhatsApp</a>`);
+    }
+    return out.join('');
+  }
+  async function openEnquiries() {
     const p = C.openPanel({ id: 'cloudEnquiries', title: 'Enquiries', cls: 'cp-enquiries' });
+    p.body.innerHTML = '<p class="enq-empty">Loading…</p>';
+    // the list as it is now, not as Home last saw it
+    let items;
+    try { items = (await C.api('/api/hello/enquiries')).items || []; } catch (e) { p.body.innerHTML = '<p class="enq-empty">The enquiries did not load. Check the connection and try again.</p>'; return; }
     const when = (iso) => { try { return new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; } };
-    const reach = (c) => {
-      const v = String(c || '').trim();
-      if (/@/.test(v)) return `<a class="enq-act" href="mailto:${C.escAttr(v)}?subject=Church%20Space">Email</a>`;
-      const digits = v.replace(/[^\d+]/g, '');
-      if (digits.replace(/\D/g, '').length >= 7) {
-        const intl = digits.startsWith('+') ? digits.slice(1) : digits.startsWith('0') ? '353' + digits.slice(1) : digits;
-        return `<a class="enq-act" href="tel:${C.escAttr(digits)}">Call</a><a class="enq-act" href="https://wa.me/${C.escAttr(intl.replace(/\D/g, ''))}" target="_blank" rel="noopener">WhatsApp</a>`;
-      }
-      return '';
-    };
     const draw = () => {
       p.body.innerHTML = items.length ? `<div class="enq-list">${items.map((x) => `<div class="enq${x.seen ? '' : ' new'}">
           <div class="enq-top"><b>${esc(x.name)}</b><small>${esc(when(x.at))}</small></div>
           ${x.church ? `<div class="enq-church">${esc(x.church)}</div>` : ''}
           <div class="enq-contact">${esc(x.contact)}</div>
           ${x.message ? `<p class="enq-msg">${esc(x.message)}</p>` : ''}
-          <div class="enq-acts">${reach(x.contact)}<button type="button" class="enq-act ghost" data-rm="${C.escAttr(x.id)}">Remove</button></div>
+          <div class="enq-acts">${enquiryReach(x.contact)}<button type="button" class="enq-act ghost" data-rm="${C.escAttr(x.id)}">Remove</button></div>
         </div>`).join('')}</div>`
         : '<p class="enq-empty">No enquiries yet. They arrive here from the “Request a demo” form on your public page.</p>';
     };
@@ -477,8 +499,9 @@
       const rm = e.target.closest('[data-rm]'); if (!rm) return;
       try { await C.api('/api/hello/enquiries/remove', { id: rm.dataset.rm }); items = items.filter((x) => x.id !== rm.dataset.rm); draw(); paintEnquiries(); } catch (er) { /* stays */ }
     };
-    // opened: they are read now
-    if (items.some((x) => !x.seen)) C.api('/api/hello/enquiries/seen', {}).then(() => { items.forEach((x) => { x.seen = true; }); paintEnquiries(); }).catch(() => {});
+    // opened: the ones shown are read now (one that arrives meanwhile stays new)
+    const shown = items.filter((x) => !x.seen).map((x) => x.id);
+    if (shown.length) { enqLook++; C.api('/api/hello/enquiries/seen', { ids: shown }).then(() => paintEnquiries()).catch(() => {}); }
   }
 
   async function renderHome(refresh) {
@@ -490,7 +513,6 @@
       window.MWGuide.invite('home', $('#chInvite'));
     }
     $('#chHello').textContent = greeting() + (C.me && C.me.name ? ', ' + C.me.name.split(' ')[0] : '');
-    paintEnquiries();
     const where = (C.hello && C.hello.standalone) ? 'Working on the church’s cloud server' : 'Working on the church’s studio machine';
     void where;
     $('#chWhere').textContent = '';
@@ -506,6 +528,7 @@
     renderHomeSocial();
     renderHomeJobs(C.jobList());
     if (!refresh) return;
+    paintEnquiries();
     loadProjects().then(() => renderHome());
     loadExports().then(renderHomeReady);
     loadSocial(true).then(renderHomeSocial);

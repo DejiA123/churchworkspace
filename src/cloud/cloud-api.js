@@ -419,10 +419,21 @@ const json = (res, code, obj) => send(res, code, 'application/json; charset=utf-
 function clientIp(req) {
   // Behind a tunnel or a reverse proxy the socket address is the proxy's. The
   // forwarded address is only as trustworthy as whatever set it, which is why
-  // it is used for RATE LIMITING and nothing else.
-  const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-  const a = fwd || (req.socket && req.socket.remoteAddress) || '';
-  return a.replace(/^::ffff:/, '') || 'unknown';
+  // it is used for RATE LIMITING and nothing else — and only when the socket
+  // really is a proxy here (this machine or its private network): someone
+  // reaching the port directly is judged by their own address. Of the
+  // forwarded addresses the LAST is the one the proxy saw: Caddy replaces
+  // whatever the visitor sent, Cloudflare's tunnel appends to it, so the first
+  // is the visitor's to invent.
+  const sock = String((req.socket && req.socket.remoteAddress) || '').replace(/^::ffff:/, '');
+  if (privateAddr(sock)) {
+    const fwd = String(req.headers['x-forwarded-for'] || '').split(',').map((s) => s.trim()).filter(Boolean);
+    if (fwd.length) return fwd[fwd.length - 1].replace(/^::ffff:/, '');
+  }
+  return sock || 'unknown';
+}
+function privateAddr(a) {
+  return /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|::1$|f[cd][0-9a-f]{2}:|fe80:)/i.test(a);
 }
 
 function readBody(req, limit) {
@@ -1106,14 +1117,26 @@ async function handle(req, res) {
    * whose enquiries wait in the owner's app. Nothing of this church's studio
    * is on it. The QR code at events points here, not at the sign-in page.
    */
-  if ((p === '/hello' || p === '/hello/') && req.method === 'GET') return sendWeb(req, res, 'hello.html', 'public, max-age=300');
+  // Links on the page and the card follow the address the studio is on now
+  // (a changed domain needs no edit here); a Host that is not a plain domain
+  // name keeps the files' own.
+  const publicHost = () => {
+    const host = String(req.headers.host || '');
+    return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(host) ? host.toLowerCase() : '';
+  };
+  if (p === '/hello' && (req.method === 'GET' || req.method === 'HEAD')) {
+    let page = '';
+    try { page = fs.readFileSync(path.join(WEB_DIR, 'hello.html'), 'utf8'); } catch (e) { return send(res, 404, 'text/plain', 'not found'); }
+    // Link previews (WhatsApp, Facebook) need the picture's full address.
+    const host = publicHost();
+    if (host) page = page.replace(/(<meta property="og:(?:image|url)" content=")\//g, '$1https://' + host + '/');
+    return send(res, 200, 'text/html; charset=utf-8', page, { 'Cache-Control': 'public, max-age=300' });
+  }
   if (p === '/hello/contact.vcf') {
     let card = '';
     try { card = fs.readFileSync(path.join(WEB_DIR, 'hello', 'contact.vcf'), 'utf8').replace(/\r?\n/g, '\r\n'); } catch (e) { return send(res, 404, 'text/plain', 'not found'); }
-    // The card's web link follows the address the studio is on now (a
-    // changed domain needs no edit here); the file's own link is the fallback.
-    const host = String(req.headers.host || '');
-    if (/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(host)) card = card.replace(/^URL:.*$/m, 'URL:https://' + host.toLowerCase() + '/hello');
+    const host = publicHost();
+    if (host) card = card.replace(/^URL:.*$/m, 'URL:https://' + host + '/hello');
     return send(res, 200, 'text/vcard; charset=utf-8', card, { 'Content-Disposition': 'attachment; filename="Ayodeji-Church-Space.vcf"', 'Cache-Control': 'public, max-age=3600' });
   }
   if (p.startsWith('/hello/')) {
@@ -1247,14 +1270,20 @@ async function handle(req, res) {
 
 /*
  * ENQUIRIES from the public page's "Request a demo" form: kept in the data
- * folder (the newest 500), for the studio's owner only. Anyone on the
- * internet can post the form, so it is small, plain and rate-limited: five an
- * hour from one address, two hundred a day in all; a filled-in hidden field
- * (a robot) is thanked and dropped.
+ * folder (up to 500), for the studio's owner only. Anyone on the internet can
+ * post the form, so it is small, plain and rate-limited: twenty an hour from
+ * one address (a church's or an event's Wi-Fi is many people), three hundred a
+ * day in all, a few at a time, each given 15 seconds to arrive. A filled-in
+ * hidden field (a robot) is thanked and dropped. Room for a new one is made
+ * from enquiries the owner has READ — an unread one is never pushed out; a
+ * list full of unread ones closes the form until the owner looks.
  */
 const enquiryFile = () => (cfg.dirs.uploads ? path.join(path.dirname(cfg.dirs.uploads), 'enquiries.json') : '');
-const enquiryHits = new Map();   // ip -> [times]
+const ENQUIRY = { perHour: 20, perDay: 300, keep: 500, atOnce: 20, atOnceEach: 3, waitMs: 15e3 };
+const enquiryHits = new Map();   // ip -> [times], oldest first
+const enquiryOpen = new Map();   // ip -> requests still arriving
 let enquiryDay = { day: '', n: 0 };
+const ENQUIRY_BUSY = 'The form is busy right now, sorry. Please email dejiaugustine@gmail.com or WhatsApp 086 073 6836 instead.';
 function readEnquiries() {
   try { const j = JSON.parse(fs.readFileSync(enquiryFile(), 'utf8')); return Array.isArray(j) ? j : []; } catch (e) { return []; }
 }
@@ -1262,28 +1291,51 @@ function writeEnquiries(list) {
   const f = enquiryFile(); if (!f) return false;
   try {
     const tmp = f + '.' + process.pid + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(list.slice(0, 500), null, 1), { mode: 0o600 });
+    fs.writeFileSync(tmp, JSON.stringify(list, null, 1), { mode: 0o600 });
     fs.renameSync(tmp, f);
     return true;
   } catch (e) { return false; }
 }
 async function takeEnquiry(req, res) {
-  const ip = clientIp(req), now = Date.now();
-  const hits = (enquiryHits.get(ip) || []).filter((t) => now - t < 3600e3);
-  const day = new Date(now).toISOString().slice(0, 10);
-  if (enquiryDay.day !== day) enquiryDay = { day, n: 0 };
-  if (hits.length >= 5 || enquiryDay.n >= 200) return json(res, 429, { error: 'Thank you — we have your details already. Please email dejiaugustine@gmail.com if it is urgent.' });
-  let body;
-  try { body = JSON.parse((await readBody(req, 4096)).toString('utf-8') || '{}'); } catch (e) { return json(res, 400, { error: 'That did not send. Please try again.' }); }
+  const ip = clientIp(req);
+  const open = enquiryOpen.get(ip) || 0;
+  let all = 0; for (const n of enquiryOpen.values()) all += n;
+  if (open >= ENQUIRY.atOnceEach || all >= ENQUIRY.atOnce) return json(res, 429, { error: ENQUIRY_BUSY });
+  enquiryOpen.set(ip, open + 1);
+  const slow = setTimeout(() => req.destroy(new Error('too slow')), ENQUIRY.waitMs);
+  let raw;
+  try { raw = await readBody(req, 4096); } catch (e) { raw = null; } finally {
+    clearTimeout(slow);
+    const left = (enquiryOpen.get(ip) || 1) - 1;
+    if (left > 0) enquiryOpen.set(ip, left); else enquiryOpen.delete(ip);
+  }
+  let body = null;
+  try { body = raw && JSON.parse(raw.toString('utf-8') || '{}'); } catch (e) { body = null; }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return json(res, 400, { error: 'That did not send. Please try again.' });
   const clean = (v, n) => String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
   if (clean(body.website, 200)) return json(res, 200, { ok: true });   // the hidden field: a robot
   const e = { name: clean(body.name, 80), church: clean(body.church, 120), contact: clean(body.contact, 120), message: clean(body.message, 600) };
   if (!e.name || !e.contact) return json(res, 400, { error: 'Please add your name and a phone number or email.' });
-  hits.push(now); enquiryHits.set(ip, hits); enquiryDay.n++;
-  if (enquiryHits.size > 5000) enquiryHits.clear();
+
+  // From here to the reply nothing is awaited: the limits are checked and
+  // counted in one step, so requests sent together cannot all slip under them.
+  const now = Date.now();
+  let hits = enquiryHits.get(ip);
+  if (!hits) { if (enquiryHits.size > 5000) enquiryHits.clear(); hits = []; enquiryHits.set(ip, hits); }
+  while (hits.length && now - hits[0] >= 3600e3) hits.shift();
+  const day = new Date(now).toISOString().slice(0, 10);
+  if (enquiryDay.day !== day) enquiryDay = { day, n: 0 };
+  if (hits.length >= ENQUIRY.perHour || enquiryDay.n >= ENQUIRY.perDay) return json(res, 429, { error: ENQUIRY_BUSY });
   const list = readEnquiries();
+  while (list.length >= ENQUIRY.keep) {
+    let i = list.length - 1;
+    while (i >= 0 && !list[i].seen) i--;
+    if (i < 0) return json(res, 429, { error: ENQUIRY_BUSY });   // all unread: none is pushed out
+    list.splice(i, 1);
+  }
   list.unshift(Object.assign({ id: crypto.randomBytes(6).toString('hex'), at: new Date(now).toISOString(), seen: false }, e));
   if (!writeEnquiries(list)) return json(res, 500, { error: 'That did not send. Please email dejiaugustine@gmail.com instead.' });
+  hits.push(now); enquiryDay.n++;
   return json(res, 200, { ok: true });
 }
 
@@ -1293,9 +1345,15 @@ async function authedRoutes(req, res, url, p, me) {
     if (!isOwner(me)) return json(res, 403, { error: 'Only the studio’s owner sees the enquiries.' });
     if (p === '/api/hello/enquiries') return json(res, 200, { ok: true, items: readEnquiries() });
     if (req.method !== 'POST') return json(res, 405, { error: 'POST' });
-    let body; try { body = JSON.parse((await readBody(req, 2048)).toString('utf-8') || '{}'); } catch (e) { return json(res, 400, { error: 'Bad request.' }); }
+    let body; try { body = JSON.parse((await readBody(req, 64 * 1024)).toString('utf-8') || '{}'); } catch (e) { return json(res, 400, { error: 'Bad request.' }); }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) body = {};
     const list = readEnquiries();
-    if (p === '/api/hello/enquiries/seen') { list.forEach((x) => { x.seen = true; }); writeEnquiries(list); return json(res, 200, { ok: true }); }
+    if (p === '/api/hello/enquiries/seen') {
+      // only the ones the owner was shown: one that came in meanwhile stays new
+      const ids = Array.isArray(body.ids) ? new Set(body.ids.map(String)) : null;
+      list.forEach((x) => { if (!ids || ids.has(x.id)) x.seen = true; });
+      writeEnquiries(list); return json(res, 200, { ok: true });
+    }
     if (p === '/api/hello/enquiries/remove') { writeEnquiries(list.filter((x) => x.id !== String(body.id || ''))); return json(res, 200, { ok: true }); }
     return json(res, 404, { error: 'not found' });
   }
