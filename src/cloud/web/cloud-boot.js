@@ -1618,11 +1618,37 @@ let _hideTimer = null;
    * the studio cannot. Videos keep their plain list (a video/* family can make
    * iOS re-compress a video from Photos).
    */
+  /*
+   * What the phone's picker may offer. Kinds, not only endings: an iPhone
+   * keeps its photos as HEIC and some videos as HEVC, and a list of endings
+   * alone greyed those out in Photos ("Recently Saved" could not be added).
+   * With image/* and video/* the iPhone hands over a JPEG or MP4 it can read.
+   */
   function acceptFor(exts) {
     const list = exts.filter((e) => e !== '.heic' && e !== '.heif');
-    if (list.length && list.every((e) => AUDIO_RE.test(e))) list.push('audio/*');
+    if (list.some((e) => VID_RE.test(e))) list.unshift('video/*');
+    if (list.some((e) => PIC_RE.test(e))) list.unshift('image/*');
+    if (list.length && list.some((e) => AUDIO_RE.test(e))) list.unshift('audio/*');
     return list.join(',');
   }
+  /*
+   * Open the phone's picker on this <input type=file>. It is put on the page
+   * and held until it answers: an input left off the page can be thrown away
+   * while the iPhone's Photos is open (long enough to scroll an album), and
+   * then the tick did nothing. Closing the picker without choosing answers
+   * too ('cancel'), so nothing waits for ever.
+   */
+  const openPickers = new Set();
+  function openPicker(input, onCancel) {
+    input.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0';
+    document.body.appendChild(input);
+    openPickers.add(input);
+    const done = () => { openPickers.delete(input); setTimeout(() => input.remove(), 0); };
+    input.addEventListener('change', done, { once: true });
+    input.addEventListener('cancel', () => { done(); if (onCancel) onCancel(); }, { once: true });
+    input.click();
+  }
+  cloud.openPicker = openPicker;
 
   function pickFiles(filters, multi) {
     // a second ask while one is open answers the first with "nothing", instead
@@ -2288,12 +2314,8 @@ let _hideTimer = null;
       input.type = 'file';
       if (multi) input.multiple = true;
       if (exts && exts.length) input.accept = acceptFor(exts);
-      input.style.position = 'fixed';
-      input.style.left = '-9999px';
-      document.body.appendChild(input);
       input.addEventListener('change', async () => {
         const files = Array.from(input.files || []);
-        input.remove();
         if (!files.length) return resolve(null);
         const keys = [];
         if (h.onPicked) { try { h.onPicked(files, () => keys.forEach((k) => stopUpload(k))); } catch (e) {} }
@@ -2305,7 +2327,7 @@ let _hideTimer = null;
         await refreshFiles();
         resolve(multi ? paths : paths[0]);
       }, { once: true });
-      input.click();
+      openPicker(input, () => resolve(null));
     });
   }
 

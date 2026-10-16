@@ -3954,7 +3954,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       toast(`${files.length} photos added to ${s.name || 'the bank'}. Tap one in My church to fix its cut-out.`, 'good', 6000);
       await then();
     };
-    inp.click();
+    if (C && C.openPicker) C.openPicker(inp); else inp.click();
   }
 
   async function repaintBackground() {
@@ -3977,7 +3977,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const file = inp.files && inp.files[0]; if (!file) return;
       try { then(await shrinkToDataUrl(file, o.max || 1800, o.png)); } catch (e) { toast(e.message || 'That picture could not be opened.', 'error'); }
     };
-    inp.click();
+    if (C && C.openPicker) C.openPicker(inp); else inp.click();
   }
   /* a phone photo is 12 megapixels; a flyer needs a fraction of that */
   async function shrinkToDataUrl(file, max, png) {
@@ -4246,7 +4246,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       }
       then();
     };
-    inp.click();
+    if (C && C.openPicker) C.openPicker(inp); else inp.click();
   }
 
   /* a new speaker straight from the Make page: photo → cut out → name → kept in the kit */

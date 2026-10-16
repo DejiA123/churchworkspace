@@ -2942,9 +2942,7 @@
           ${row('look', 'wand', 'Vibe', V.look, lookBody)}
           ${row('order', 'shuffle', 'Order', V.order, orderBody, talk)}
           ${capsRow}
-        </div></section>
-      <input type="file" id="mtPick" accept="video/*,image/*" multiple hidden />
-      <input type="file" id="mtSong" accept="audio/*,.mp3,.m4a,.wav,.aac" hidden />`;
+        </div></section>`;
     // a row opened or closed stays so through every redraw; one the operator opens eases in
     $$('details.mt-acc', p.body).forEach((d) => d.addEventListener('toggle', () => {
       const k = d.dataset.acc;
@@ -3130,29 +3128,16 @@
       if (d.mtStyle) { MT.style = d.mtStyle; return mtPaint(); }
       if (d.mtLen) { MT.len = d.mtLen === 'all' || d.mtLen === 'custom' ? d.mtLen : +d.mtLen; return mtPaint(); }
       if (d.mtAspect) { MT.aspect = d.mtAspect; return mtPaint(); }
-      if (d.mt === 'add') return $('#mtPick', p.body).click();
+      if (d.mt === 'add') return document.getElementById('mtPick').click();
       if (d.mt === 'addsrv') return mtAddFromFiles();
-      if (d.mt === 'song') return $('#mtSong', p.body).click();
+      if (d.mt === 'song') return document.getElementById('mtSong').click();
       if (d.mt === 'go') return mtMake();
     };
     p.body.addEventListener('click', onClick);
     p.foot.addEventListener('click', onClick);
+    mtPickers();
     p.body.addEventListener('change', (e) => {
-      if (e.target.id === 'mtPick') {
-        for (const f of Array.from(e.target.files || []).slice(0, 60 - MT.items.length)) {
-          const kind = /^image\//.test(f.type) || /\.(jpe?g|png|webp|heic|avif)$/i.test(f.name) ? 'image' : 'video';
-          const it = { file: f, kind, url: URL.createObjectURL(f) };
-          MT.items.push(it);
-          if (kind === 'video') mtPoster(it);
-        }
-        e.target.value = '';
-        mtPaint();
-      } else if (e.target.id === 'mtSong') {
-        const f = e.target.files && e.target.files[0];
-        if (f) { MT.songFile = f; MT.song = null; MT.free = null; MT.musTab = 'mine'; if (MT.songFileUrl) { URL.revokeObjectURL(MT.songFileUrl); MT.songFileUrl = null; } }
-        e.target.value = '';
-        mtPaint();
-      } else if (e.target.id === 'mtKeep') MT.keep = e.target.checked;
+      if (e.target.id === 'mtKeep') MT.keep = e.target.checked;
       else if (e.target.id === 'mtCaps') MT.caps = e.target.checked;
     });
     mtWireDrag(p);
@@ -3166,6 +3151,37 @@
         const ss = Math.max(0, Math.min(59, parseInt($('#mtSec', p.body).value, 10) || 0));
         MT.custom = Math.max(8, Math.min(600, mm * 60 + ss));
       }
+    });
+  }
+
+  /*
+   * The phone's own pickers for clips, photos and a song. They live on the
+   * page, NOT inside the sheet: the sheet is redrawn whenever anything changes
+   * (music loading, a poster arriving), and a picker redrawn away while the
+   * iPhone's Photos was open answered into nothing, so the tick did nothing.
+   */
+  function mtPickers() {
+    const make = (id, accept, multiple, take) => {
+      if (document.getElementById(id)) return;
+      const inp = document.createElement('input');
+      inp.type = 'file'; inp.id = id; inp.accept = accept; inp.multiple = multiple;
+      inp.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0';
+      inp.addEventListener('change', () => { const files = Array.from(inp.files || []); inp.value = ''; if (files.length) take(files); });
+      document.body.appendChild(inp);
+    };
+    make('mtPick', 'video/*,image/*', true, (files) => {
+      for (const f of files.slice(0, Math.max(0, 60 - MT.items.length))) {
+        const kind = /^image\//.test(f.type) || /\.(jpe?g|png|webp|heic|heif|avif|gif)$/i.test(f.name) ? 'image' : 'video';
+        const it = { file: f, kind, url: URL.createObjectURL(f) };
+        MT.items.push(it);
+        if (kind === 'video') mtPoster(it);
+      }
+      mtPaint();
+    });
+    make('mtSong', 'audio/*,.mp3,.m4a,.wav,.aac', false, (files) => {
+      MT.songFile = files[0]; MT.song = null; MT.free = null; MT.musTab = 'mine';
+      if (MT.songFileUrl) { URL.revokeObjectURL(MT.songFileUrl); MT.songFileUrl = null; }
+      mtPaint();
     });
   }
 
