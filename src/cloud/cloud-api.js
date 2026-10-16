@@ -1110,6 +1110,10 @@ async function handle(req, res) {
   if (p === '/hello/contact.vcf') {
     let card = '';
     try { card = fs.readFileSync(path.join(WEB_DIR, 'hello', 'contact.vcf'), 'utf8').replace(/\r?\n/g, '\r\n'); } catch (e) { return send(res, 404, 'text/plain', 'not found'); }
+    // The card's web link follows the address the studio is on now (a
+    // changed domain needs no edit here); the file's own link is the fallback.
+    const host = String(req.headers.host || '');
+    if (/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(host)) card = card.replace(/^URL:.*$/m, 'URL:https://' + host.toLowerCase() + '/hello');
     return send(res, 200, 'text/vcard; charset=utf-8', card, { 'Content-Disposition': 'attachment; filename="Ayodeji-Church-Space.vcf"', 'Cache-Control': 'public, max-age=3600' });
   }
   if (p.startsWith('/hello/')) {
