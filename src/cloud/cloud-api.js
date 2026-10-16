@@ -1137,7 +1137,7 @@ async function handle(req, res) {
     try { card = fs.readFileSync(path.join(WEB_DIR, 'hello', 'contact.vcf'), 'utf8').replace(/\r?\n/g, '\r\n'); } catch (e) { return send(res, 404, 'text/plain', 'not found'); }
     const host = publicHost();
     if (host) card = card.replace(/^URL:.*$/m, 'URL:https://' + host + '/hello');
-    return send(res, 200, 'text/vcard; charset=utf-8', card, { 'Content-Disposition': 'attachment; filename="Ayodeji-Church-Space.vcf"', 'Cache-Control': 'public, max-age=3600' });
+    return send(res, 200, 'text/vcard; charset=utf-8', card, { 'Content-Disposition': 'attachment; filename="Deji-Church-Space.vcf"', 'Cache-Control': 'public, max-age=3600' });
   }
   if (p.startsWith('/hello/')) {
     const name = p.slice(7);
