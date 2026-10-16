@@ -136,7 +136,9 @@ function assetKey(version) {
   if (_assetKey && _assetKey.version === version) return _assetKey.key;
   const h = crypto.createHash('sha1');
   const files = [INDEX, ...[...RENDERER_SCRIPTS, ...RENDERER_STYLES].map((f) => path.join(RENDERER_DIR, f)),
-    ...['cloud-boot.js', 'cloud-social.js', 'cloud-flyer.js', 'cloud.css', 'sw.js'].map((f) => path.join(__dirname, 'web', f))];
+    ...['cloud-boot.js', 'cloud-social.js', 'cloud-flyer.js', 'cloud.css', 'sw.js'].map((f) => path.join(__dirname, 'web', f)),
+    // the home-screen icon too: a new one is a new version (phones fetch it again)
+    ...['apple-touch-icon.png', 'icon-192.png', 'icon-512.png'].map((f) => path.join(__dirname, 'web', 'icons', f))];
   for (const f of files) { try { h.update(fs.readFileSync(f)); } catch (e) {} }
   const key = version + '-' + h.digest('hex').slice(0, 10);
   _assetKey = { version, key };
