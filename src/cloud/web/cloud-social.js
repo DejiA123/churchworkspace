@@ -164,7 +164,12 @@
     }
     return n.charAt(0).toUpperCase() + n.slice(1);
   }
-  /** A picture of this video for a card. Made once per file, on the studio machine. */
+  /**
+   * A picture of this video for a card. The thumbnail chosen at export (the
+   * AI's pick, or the one picked by hand) is kept beside the video as
+   * <name>.jpg, and that is the picture the card shows; a video without one
+   * gets a frame made once, on the studio machine.
+   */
   function thumbFor(p, onReady) {
     if (!p) return '';
     if (isImage(p)) return C.fileUrl(p);
@@ -172,10 +177,16 @@
     if (got) return C.fileUrl(got);
     if (got === undefined) {
       S.thumbs.set(p, '');
-      window.api.video.thumbnail(p, 1).then((t) => {
+      const frame = () => window.api.video.thumbnail(p, 1).then((t) => {
         S.thumbs.set(p, t || '');
         if (t && onReady) onReady(C.fileUrl(t));
       }).catch(() => {});
+      const cover = p.replace(/\.[a-z0-9]+$/i, '.jpg');
+      if (cover === p) { frame(); return ''; }
+      const im = new Image();
+      im.onload = () => { S.thumbs.set(p, cover); if (onReady) onReady(C.fileUrl(cover)); };
+      im.onerror = frame;
+      im.src = C.fileUrl(cover);
     }
     return '';
   }
