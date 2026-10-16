@@ -63,7 +63,7 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
   width: 26px; height: 26px; flex: none;
   display: grid; place-items: center;
   border-radius: 8px;
-  background: linear-gradient(180deg, #5658d6, #4648be);   /* the app icon's indigo */
+  background: linear-gradient(140deg, #0284c7, #38bdf8);   /* the app icon's sky blue */
   color: #fff;
   font-size: 14px;
 }
@@ -119,7 +119,7 @@ body.mw-cloud #app { padding-top: calc(46px + env(safe-area-inset-top)); }
   width: 52px; height: 52px; margin: 0 auto 12px;
   display: grid; place-items: center;
   border-radius: 15px;
-  background: linear-gradient(180deg, #5658d6, #4648be);   /* the app icon's indigo */
+  background: linear-gradient(140deg, #0284c7, #38bdf8);   /* the app icon's sky blue */
   color: #fff;
   font-size: 26px;
 }
@@ -4143,3 +4143,6 @@ body.mw-cloud.mw-home .cloud-home { background: #eaf5fd; color: #0d1b2c; }
 .fs-lib-x { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(0,0,0,.6); color: #fff; font-size: 17px; line-height: 26px; padding: 0; cursor: pointer; }
 .fs-lib h3 small { font-weight: 500; opacity: .6; }
 .csb-play[data-c="play"] { cursor: pointer; z-index: 2; width: 52px; height: 52px; }
+
+/* the cross in the logos: drawn, white on the tile (the ✝ character is a purple emoji on iPhones) */
+.mw-cross { display: block; width: 62%; height: 62%; margin: auto; }

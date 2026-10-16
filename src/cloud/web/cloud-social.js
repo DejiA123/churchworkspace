@@ -280,7 +280,7 @@
     el.innerHTML = `
       <main class="ch-scroll">
         <header class="ch-top">
-          <div class="ch-brand"><span class="ch-logo">✝</span><span class="ch-name">Church Space</span></div>
+          <div class="ch-brand"><span class="ch-logo"><svg class="mw-cross" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M10 2.5h4v5.5h5.5v4H14v9.5h-4V12H4.5V8H10z"/></svg></span><span class="ch-name">Church Space</span></div>
           <div class="ch-acts"><span class="ch-chip-slot"></span><span class="ch-ask" id="chAsk"></span>
             <button type="button" class="ch-round ch-help" data-tool="help" aria-label="Help"><i class="ch-q">?</i></button>
             <button type="button" class="ch-round ch-me" data-home="me" aria-label="Your space"><b id="chMeInitial">${esc(((C.me && C.me.name) || '').charAt(0).toUpperCase()) || mi('user')}</b></button>

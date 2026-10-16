@@ -221,7 +221,7 @@ ${styles}
   <!-- The cloud bar replaces the desktop sidebar: who you are connected to,
        how the work is getting home, and the way back to your files. -->
   <div id="cloudBar" class="cloud-bar">
-    <div class="cloud-brand"><span class="cloud-logo">✝</span><span class="cloud-name">Church Space</span><span id="cloudWhere" class="cloud-where"></span></div>
+    <div class="cloud-brand"><span class="cloud-logo"><svg class="mw-cross" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M10 2.5h4v5.5h5.5v4H14v9.5h-4V12H4.5V8H10z"/></svg></span><span class="cloud-name">Church Space</span><span id="cloudWhere" class="cloud-where"></span></div>
     <div class="cloud-bar-actions">
       <button id="cloudFiles" class="cloud-chip" title="Your recordings and finished exports on the studio machine">📁 Files</button>
       <button id="cloudDownloads" class="cloud-chip" title="Everything this session has finished — tap to save it to this phone">⬇ Saved <span id="cloudDlCount" class="cloud-badge hidden">0</span></button>
@@ -234,7 +234,7 @@ ${styles}
     <form class="cloud-gate-box" id="cloudGateForm" autocomplete="off" novalidate>
       <!-- the same blue banner as Home, so the app looks like one app from the first screen -->
       <div class="cg-hero">
-        <div class="cloud-gate-logo">✝</div>
+        <div class="cloud-gate-logo"><svg class="mw-cross" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M10 2.5h4v5.5h5.5v4H14v9.5h-4V12H4.5V8H10z"/></svg></div>
         <h1>Church Space</h1>
         <p class="cloud-gate-sub">Turn sermons into shorts, captions and posts.</p>
       </div>
