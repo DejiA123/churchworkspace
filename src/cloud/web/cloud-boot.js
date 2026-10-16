@@ -1643,12 +1643,34 @@ let _hideTimer = null;
     input.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0';
     document.body.appendChild(input);
     openPickers.add(input);
-    const done = () => { openPickers.delete(input); setTimeout(() => input.remove(), 0); };
+    const done = () => { pickWait(false); openPickers.delete(input); setTimeout(() => input.remove(), 0); };
     input.addEventListener('change', done, { once: true });
     input.addEventListener('cancel', () => { done(); if (onCancel) onCancel(); }, { once: true });
+    pickWait(true);
     input.click();
   }
   cloud.openPicker = openPicker;
+  /*
+   * ►► WHILE THE PHONE GETS THEM READY. ◄◄ After ✓ in the iPhone's Photos, the
+   * phone copies every chosen photo (and turns HEIC into JPEG) before the app
+   * hears of a single one: with fifty, that looked like the ✓ did nothing.
+   * From the moment a picker opens until its files arrive, or it is closed
+   * without choosing, the island says what is going on (a tap puts it away).
+   */
+  let pickWaitTimer = null;
+  function pickWait(on) {
+    clearTimeout(pickWaitTimer);
+    if (!on) { islandHide('pickwait'); return; }
+    island({ id: 'pickwait', kind: 'info', spin: true, sticky: true, title: 'Waiting for your photos and videos…',
+      sub: 'After you tap ✓ your phone gets them ready. With many, that takes a moment.' });
+    pickWaitTimer = setTimeout(() => islandHide('pickwait'), 5 * 60e3);
+  }
+  cloud.pickWait = pickWait;
+  /* the picker answered with nothing at all (not a Cancel: that answers 'cancel') */
+  function pickedNothing() {
+    island({ kind: 'warn', title: 'Nothing came through from your phone', sub: 'If the photos are kept in iCloud, open them in Photos first so they download, then try again.', ms: 7000 });
+  }
+  cloud.pickedNothing = pickedNothing;
 
   function pickFiles(filters, multi) {
     // a second ask while one is open answers the first with "nothing", instead
@@ -2165,9 +2187,11 @@ let _hideTimer = null;
       const img = new Image();
       img.onload = () => {
         try {
+          // an iPhone draws at most about 16 million pixels: a 48-megapixel photo is made smaller to fit
+          const k = Math.min(1, Math.sqrt(16e6 / Math.max(1, img.naturalWidth * img.naturalHeight)));
           const c = document.createElement('canvas');
-          c.width = img.naturalWidth; c.height = img.naturalHeight;
-          c.getContext('2d').drawImage(img, 0, 0);
+          c.width = Math.max(1, Math.floor(img.naturalWidth * k)); c.height = Math.max(1, Math.floor(img.naturalHeight * k));
+          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
           c.toBlob((b) => {
             URL.revokeObjectURL(url);
             if (!b) return reject(new Error('This HEIC photo could not be turned into a JPEG. Choose it from Photos instead.'));
@@ -2180,7 +2204,45 @@ let _hideTimer = null;
     });
   }
 
+  /*
+   * ►► EVERY UPLOAD FROM THIS PHONE IS ONE OF ITS OWN ROWS. ◄◄ The AI Montage's
+   * photos and videos (and a flyer, a song) went up beside My Uploads' own,
+   * and My Uploads showed them as someone else's: a code for a name, no size,
+   * no Stop, and a row left at 37% for ever if one was cut off. Each is now a
+   * row like any other — its name, how much of how much, time left, Stop.
+   */
   async function uploadFile(file, onProgress, ctlIn) {
+    if (ctlIn) return uploadFileCore(file, onProgress, ctlIn);   // sendFiles' row already shows it
+    const key = 'f' + (++upSeq);
+    const r = { name: file.name, pct: 0, state: 'run', file, ctl: newUploadCtl(), total: file.size || 0, sent: 0 };
+    upRows.set(key, r);
+    renderUploads();
+    try {
+      return await uploadFileCore(file, (pc, b) => {
+        r.pct = pc;
+        trackRate(r, b);
+        paintUploadPct(key);
+        if (onProgress) onProgress(pc, b);
+      }, r.ctl);
+    } finally {
+      upRows.delete(key);
+      renderUploads();
+    }
+  }
+  /* how fast it is going (from where it started, for a resumed one), steadied */
+  function trackRate(r, b) {
+    if (!b) return;
+    r.sent = b.sent; r.total = b.total;
+    const now = Date.now();
+    if (r.b0 == null) { r.b0 = b.sent; r.t0 = now; }
+    const secs = (now - r.t0) / 1000;
+    if (secs > 1.5 && b.sent > r.b0) {
+      const rate = (b.sent - r.b0) / secs;
+      r.rate = r.rate ? r.rate * 0.7 + rate * 0.3 : rate;
+    }
+  }
+
+  async function uploadFileCore(file, onProgress, ctlIn) {
     const CHUNK = 8 * 1024 * 1024;
     const id = 'u' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
     const q = (extra) => `/api/upload?name=${encodeURIComponent(nameWithExt(file))}&id=${id}&size=${file.size}${extra || ''}`;
@@ -2289,7 +2351,7 @@ let _hideTimer = null;
     bar.classList.add('multi');
     const rows = Array.from(upRows.entries());
     bar.innerHTML = rows.map(([k, r]) => `<div class="cloud-up-row${r.state === 'wait' ? ' wait' : ''}" data-up="${k}">`
-      + `<div class="cloud-upload-name">${escHtml(r.name)}</div>`
+      + `<div class="cloud-upload-name">${escHtml(phoneMadeName(r.name) || r.name)}</div>`
       + (r.state === 'wait' ? '<div class="cloud-up-wait">Waiting…</div>'
         : `<div class="cloud-up-mid"><div class="progress"><div class="progress-bar" style="width:${Math.max(2, Math.min(100, r.pct || 0))}%"></div></div>`
           + `<div class="cloud-up-pct">${upLine(r)}</div></div>`)
@@ -2335,17 +2397,7 @@ let _hideTimer = null;
       r.t0 = Date.now(); r.b0 = null;
       uploadFile(r.file, (pc, b) => {
         r.pct = pc;
-        if (b) {
-          r.sent = b.sent; r.total = b.total;
-          // the speed since it started (from where it started, for a resumed one), steadied
-          const now = Date.now();
-          if (r.b0 == null) { r.b0 = b.sent; r.t0 = now; }
-          const secs = (now - r.t0) / 1000;
-          if (secs > 1.5 && b.sent > r.b0) {
-            const rate = (b.sent - r.b0) / secs;
-            r.rate = r.rate ? r.rate * 0.7 + rate * 0.3 : rate;
-          }
-        }
+        trackRate(r, b);
         paintUploadPct(key);
         if (r.onPct) { try { r.onPct(pc, r); } catch (e) {} }
       }, r.ctl)
@@ -2376,15 +2428,29 @@ let _hideTimer = null;
     for (const x of results) if (x.error && !x.error.stopped) toast('⚠️ ' + (x.name ? x.name + ': ' : '') + (x.error.message || x.error), 'error');
     if (stopped) island({ kind: 'info', title: stopped > 1 ? `${stopped} uploads stopped` : 'Upload stopped', sub: 'Nothing of them was kept on the server.', ms: 3500 });
   }
-  /* an upload reported by the server (another device's): shown, without a Stop of ours */
+  /*
+   * An upload reported by the server (another device's): shown, without a
+   * Stop of ours — and taken away once it has said nothing for 45 seconds
+   * (one cut off never says "done", and its row stayed at 37% for good).
+   */
+  let srvSweep = null;
   function showUploadProgress(d) {
     if (!d || !d.id) return;
     for (const r of upRows.values()) if (r.ctl && r.ctl.id === d.id) return;
     const key = 'srv-' + d.id;
     if (d.done) { upRows.delete(key); renderUploads(); return; }
     const had = upRows.has(key);
-    upRows.set(key, Object.assign(upRows.get(key) || { name: d.name || 'Sending…', state: 'run' }, { pct: d.percent || 0 }));
+    upRows.set(key, Object.assign(upRows.get(key) || { name: d.name || 'Sending…', state: 'run' }, { pct: d.percent || 0, seen: Date.now() }));
     if (had) paintUploadPct(key); else renderUploads();
+    if (!srvSweep) srvSweep = setInterval(() => {
+      let gone = false, left = false;
+      for (const [k, r] of upRows) {
+        if (!k.startsWith('srv-')) continue;
+        if (Date.now() - (r.seen || 0) > 45e3) { upRows.delete(k); gone = true; } else left = true;
+      }
+      if (gone) renderUploads();
+      if (!left) { clearInterval(srvSweep); srvSweep = null; }
+    }, 15e3);
   }
 
   /** Pick files off this device and send them; resolves with studio paths. */
@@ -2405,7 +2471,7 @@ let _hideTimer = null;
       input.accept = exts && exts.length ? acceptFor(exts) : 'video/*,image/*,audio/*';
       input.addEventListener('change', async () => {
         const files = Array.from(input.files || []);
-        if (!files.length) return resolve(null);
+        if (!files.length) { pickedNothing(); return resolve(null); }
         const keys = [];
         if (h.onPicked) { try { h.onPicked(files, () => keys.forEach((k) => stopUpload(k))); } catch (e) {} }
         const results = await sendFilesNow(files, h.onProgress ? (i, pc, row) => h.onProgress(i, pc, { sent: row.sent, total: row.total, rate: row.rate }) : null, keys);
@@ -3508,7 +3574,21 @@ let _hideTimer = null;
    * ("20261012132409-Prayer Meeting.mov") is "Prayer Meeting". The real name
    * stays on the row's tooltip.
    */
+  /*
+   * What an iPhone calls what it hands over is no name at all: a code
+   * ("dfb51b68-1ada-4640-b66c-c70527dbd560.mov") or "image.jpg". Those are
+   * shown as what they are — "Video from your phone" — and real names as they are.
+   */
+  function phoneMadeName(name) {
+    const m = /^(?:\d{14}-)?(.+?)\.([a-z0-9]+)$/i.exec(String(name || ''));
+    if (!m) return '';
+    const stem = m[1], ext = m[2].toLowerCase();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(-\d+)?$/i.test(stem) && !/^image(-\d+)?$/i.test(stem)) return '';
+    return (/^(jpe?g|png|heic|heif|webp|gif|avif)$/.test(ext) ? 'Photo' : /^(mp3|m4a|wav|aac|ogg|flac|opus|wma)$/.test(ext) ? 'Song' : 'Video') + ' from your phone';
+  }
   function friendlyName(name) {
+    const made = phoneMadeName(name);
+    if (made) return made;
     const raw = String(name || '').replace(/\.[a-z0-9]+$/i, '');
     const n = raw.replace(/^\d{12,14}[-_ ]+/, '')
       .replace(/[-_]?\d{8}[-_]\d{4,6}$/, '')

@@ -4169,3 +4169,7 @@ body.mw-cloud.mw-home .cloud-home { background: #eaf5fd; color: #0d1b2c; }
 .enq-act { display: inline-flex; align-items: center; padding: 8px 14px; border-radius: 999px; background: #0284c7; color: #fff; text-decoration: none; font-weight: 600; font-size: 14px; border: 0; font-family: inherit; cursor: pointer; }
 .enq-act.ghost { background: rgba(127, 127, 127, .16); color: inherit; }
 .enq-empty { opacity: .75; line-height: 1.5; }
+
+/* a montage photo the phone could not draw: a plain picture mark (not a spinner for ever) */
+.mt-tile .mt-nopic { position: absolute; inset: 0; display: grid; place-items: center; color: #94a3b8; background: #eef2f7; }
+.mt-tile .mt-nopic .mi { width: 28px; height: 28px; }

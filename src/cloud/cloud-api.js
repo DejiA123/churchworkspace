@@ -1592,6 +1592,7 @@ function receiveUpload(req, res, url) {
     if (live && live.req) { try { live.req.destroy(); } catch (e) {} }
     uploads.delete(id);
     setTimeout(() => { try { fs.rmSync(partial, { force: true }); } catch (e) {} }, 300);   // after the cut-off piece lets go of it
+    push('upload:progress', { id, name: cleaned, done: true, stopped: true });   // its row goes on every device
     return json(res, 200, { ok: true, discarded: true });
   }
 

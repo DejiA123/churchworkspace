@@ -2897,7 +2897,7 @@
 
     // 2 — the videos: one inviting card when there are none, then their pictures
     const tiles = MT.items.map((it, i) => `<div class="mt-tile" data-i="${i}">${it.kind === 'image'
-        ? (it.thumb ? `<img src="${attr(it.thumb)}" alt="" draggable="false" />` : '<span class="mt-load"></span>') : (it.poster ? `<img src="${attr(it.poster)}" alt="" draggable="false" />` : '<span class="mt-load"></span>') + (talk
+        ? (it.thumb ? `<img src="${attr(it.thumb)}" alt="" draggable="false" />` : it.bad ? `<span class="mt-nopic">${mi('image')}</span>` : '<span class="mt-load"></span>') : (it.poster ? `<img src="${attr(it.poster)}" alt="" draggable="false" />` : '<span class="mt-load"></span>') + (talk
           ? `<button type="button" class="mt-part${mtHasPart(it) ? ' on' : ''}" data-mt-part="${i}" aria-label="Choose the part to use">${mi('scissors')}<span>${mtHasPart(it) ? mtClock(it.from || 0) + '–' + mtClock(it.to || it.secs) : 'Trim'}</span></button>`
           : `<span class="mt-dur">${mi('play')}${it.secs ? mtClock(it.secs) : ''}</span>`)}
         ${MT.order === 'mine' ? `<span class="mt-num">${i + 1}</span>` : ''}
@@ -3133,9 +3133,9 @@
       if (d.mtStyle) { MT.style = d.mtStyle; return mtPaint(); }
       if (d.mtLen) { MT.len = d.mtLen === 'all' || d.mtLen === 'custom' ? d.mtLen : +d.mtLen; return mtPaint(); }
       if (d.mtAspect) { MT.aspect = d.mtAspect; return mtPaint(); }
-      if (d.mt === 'add') return document.getElementById('mtPick').click();
+      if (d.mt === 'add') { if (C.pickWait) C.pickWait(true); return document.getElementById('mtPick').click(); }
       if (d.mt === 'addsrv') return mtAddFromFiles();
-      if (d.mt === 'song') return document.getElementById('mtSong').click();
+      if (d.mt === 'song') { if (C.pickWait) C.pickWait(true); return document.getElementById('mtSong').click(); }
       if (d.mt === 'go') return mtMake();
     };
     p.body.addEventListener('click', onClick);
@@ -3171,7 +3171,12 @@
       const inp = document.createElement('input');
       inp.type = 'file'; inp.id = id; inp.accept = accept; inp.multiple = multiple;
       inp.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0';
-      inp.addEventListener('change', () => { const files = Array.from(inp.files || []); inp.value = ''; if (files.length) take(files); });
+      inp.addEventListener('change', () => {
+        if (C.pickWait) C.pickWait(false);
+        const files = Array.from(inp.files || []); inp.value = '';
+        if (files.length) take(files); else if (C.pickedNothing) C.pickedNothing();
+      });
+      inp.addEventListener('cancel', () => { if (C.pickWait) C.pickWait(false); });
       document.body.appendChild(inp);
     };
     make('mtPick', 'video/*,image/*', true, (files) => {
@@ -3182,8 +3187,11 @@
         MT.items.push(it);
         mtPicture(it);
       }
-      mtFitMode();
+      const added = Math.min(room, files.length);
+      const switched = mtFitMode(true);
+      const what = (k) => (k === 1 ? '1 photo or clip' : `${k} photos and clips`);
       if (files.length > room) C.island({ kind: 'warn', title: room ? `${room} of the ${files.length} were added` : 'The montage is full', sub: `A montage takes up to ${MT_MAX} clips and photos.`, ms: 5000 });
+      else C.island({ kind: 'good', title: `${what(added)} added`, sub: switched ? 'Photos make a Standard montage: one after another, with music. Viral needs a video of someone speaking.' : '', ms: switched ? 6000 : 2500 });
       mtPaint();
     });
     make('mtSong', 'audio/*,.mp3,.m4a,.wav,.aac', false, (files) => {
@@ -3381,10 +3389,11 @@
    * and forty photos seemed to do nothing. Photos alone make a Standard
    * montage (one after another, with music), and the sheet says so.
    */
-  function mtFitMode() {
-    if (MT.mode !== 'talk' || !MT.items.length || MT.items.some((it) => it.kind === 'video')) return;
+  function mtFitMode(quiet) {
+    if (MT.mode !== 'talk' || !MT.items.length || MT.items.some((it) => it.kind === 'video')) return false;
     MT.mode = 'music';
-    C.island({ kind: 'info', title: 'Photos make a Standard montage', sub: 'One after another, with music. Viral needs a video of someone speaking.', ms: 5500 });
+    if (!quiet) C.island({ kind: 'info', title: 'Photos make a Standard montage', sub: 'One after another, with music. Viral needs a video of someone speaking.', ms: 5500 });
+    return true;
   }
   let mtPicQueue = Promise.resolve(), mtPaintTimer = null;
   function mtPaintSoon() { if (!mtPaintTimer) mtPaintTimer = setTimeout(() => { mtPaintTimer = null; mtPaint(); }, 250); }
@@ -3425,7 +3434,7 @@
       im.onerror = keep;
       im.onload = () => {
         const w = im.naturalWidth, h = im.naturalHeight;
-        const k = Math.min(1, 2400 / Math.max(1, Math.min(w, h)));
+        const k = Math.min(1, 2400 / Math.max(1, Math.min(w, h)), Math.sqrt(16e6 / Math.max(1, w * h)));   // (and the phone's canvas limit, for a panorama)
         if (k >= 1 && file.size < 3 * 1024 * 1024 && /jpe?g$/i.test(file.type || '')) return keep();
         try {
           const c = document.createElement('canvas');
@@ -3538,17 +3547,23 @@
       const part = new Map();   // item -> share of it sent (0..1)
       let finished = 0, next = 0;
       const items = MT.items.slice();
+      // one that fails (or is stopped) stops the others taking more; what is sent stays sent,
+      // and their progress no longer draws "Sending…" over the message that says why it stopped
+      let failed = null;
       const say = () => {
+        if (failed) return;
         const got = items.reduce((n, it) => n + sizeOf(it) * (it.path ? 1 : part.get(it) || 0), 0);
         mtProgress(`Sending ${Math.min(items.length, finished + 1)} of ${items.length}…`, (got / total) * 30);
       };
       say();
       const worker = async () => {
-        while (next < items.length) {
+        while (next < items.length && !failed) {
           const it = items[next++];
           if (it.path) { finished++; continue; }
-          const file = it.kind === 'image' ? await mtShrinkPhoto(it.file) : it.file;
-          it.path = await C.uploadFile(file, (pc) => { part.set(it, pc / 100); say(); });
+          try {
+            const file = it.kind === 'image' ? await mtShrinkPhoto(it.file) : it.file;
+            it.path = await C.uploadFile(file, (pc) => { part.set(it, pc / 100); say(); });
+          } catch (e) { failed = failed || e; throw e; }
           finished++; say();
         }
       };
@@ -3608,8 +3623,10 @@
       if (off) off();
       MT.busy = false;
       const p = MT.panel; if (!p) return;
+      const sentSome = MT.items.some((it) => it.path && it.file);
+      const why = e && e.stopped ? 'Sending was stopped.' : (e && e.message) || 'Something went wrong.';
       p.body.innerHTML = `<div class="mt-run"><div class="mt-orb bad">!</div><b class="mt-stage">That montage didn’t finish</b>
-        <small class="mt-note">${C.esc((e && e.message) || 'Something went wrong.')}</small></div>`;
+        <small class="mt-note">${C.esc(why)}${sentSome ? ' Tap Make again to carry on: what was already sent is not sent again.' : ''}</small></div>`;
       p.foot.innerHTML = '<button type="button" class="mt-go" data-mt="back">Back to my clips</button>';
       p.foot.onclick = (ev) => { if (ev.target.closest('[data-mt="back"]')) { p.foot.onclick = null; mtPaint(); } };
     }
