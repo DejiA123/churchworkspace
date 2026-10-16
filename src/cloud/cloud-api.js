@@ -1283,7 +1283,7 @@ const ENQUIRY = { perHour: 20, perDay: 300, keep: 500, atOnce: 20, atOnceEach: 3
 const enquiryHits = new Map();   // ip -> [times], oldest first
 const enquiryOpen = new Map();   // ip -> requests still arriving
 let enquiryDay = { day: '', n: 0 };
-const ENQUIRY_BUSY = 'The form is busy right now, sorry. Please email dejiaugustine@gmail.com or WhatsApp 086 073 6836 instead.';
+const ENQUIRY_BUSY = 'The form is busy right now, sorry. Please email churchspace7@gmail.com or WhatsApp 086 073 6836 instead.';
 function readEnquiries() {
   try { const j = JSON.parse(fs.readFileSync(enquiryFile(), 'utf8')); return Array.isArray(j) ? j : []; } catch (e) { return []; }
 }
@@ -1334,7 +1334,7 @@ async function takeEnquiry(req, res) {
     list.splice(i, 1);
   }
   list.unshift(Object.assign({ id: crypto.randomBytes(6).toString('hex'), at: new Date(now).toISOString(), seen: false }, e));
-  if (!writeEnquiries(list)) return json(res, 500, { error: 'That did not send. Please email dejiaugustine@gmail.com instead.' });
+  if (!writeEnquiries(list)) return json(res, 500, { error: 'That did not send. Please email churchspace7@gmail.com instead.' });
   hits.push(now); enquiryDay.n++;
   return json(res, 200, { ok: true });
 }
