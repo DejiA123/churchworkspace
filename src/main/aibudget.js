@@ -155,16 +155,19 @@ function pace(t = clock()) {
 /** What is left of the day at all (never the margin). */
 function hardLeft() { const l = load(); return l.exhausted ? 0 : Math.max(0, DAY() - MARGIN() - l.spent - heldTotal()); }
 /** What may be spent now, as the day is paced. */
+function pacedAvailable() { return Math.max(0, Math.min(hardLeft(), (DAY() - MARGIN()) * pace() - load().spent - heldTotal())); }
 function available() {
-  // pacing is for a busy church: with one or two people at it, they may use what is left of the day
+  // pacing is for a busy church: with one or two people at it, they may use what is left of the day — for the
+  // cheap pictures; the dear ones (klein 9B, AI lettering) wait for the pace ("plenty", below) whoever is at it,
+  // or one person's three boards at 5am spend the whole day (they did)
   if (activeCount() < 3) return hardLeft();
-  return Math.max(0, Math.min(hardLeft(), (DAY() - MARGIN()) * pace() - load().spent - heldTotal()));
+  return pacedAvailable();
 }
 /** What this person may still paint fresh today. */
 function shareOf(who) {
   if (who === LIBRARY) return Infinity;
   const others = activeCount() - (lastSeen.has(who) && clock() - lastSeen.get(who) < ACTIVE_MS ? 1 : 0);
-  return PER_PERSON() * (others <= 0 ? 3 : 1);
+  return PER_PERSON() * (others <= 0 ? 2 : 1);
 }
 function personLeft(who) {
   if (who === LIBRARY) return Infinity;
@@ -276,7 +279,7 @@ function turn(who, fn, opts = {}) {
 function level(who = 'owner') {
   if (paid()) return 'plenty';
   const a = available(), p = personLeft(who);
-  if (a >= PLENTY && p >= PLENTY * 0.5) return 'plenty';
+  if (pacedAvailable() >= PLENTY && p >= PLENTY * 0.5) return 'plenty';
   if (Math.min(a, p) >= CHEAP) return 'limited';
   return 'resting';
 }

@@ -83,6 +83,16 @@ const t = async (name, fn) => { try { await fn(); pass++; console.log('  ✓ ' +
     assert.ok(budget.reserve(157, 'b'), 'the others still can');
   });
 
+  await t('one person at 5am: fresh cheap pictures yes, but no 9B or AI lettering until the day is paced to plenty', async () => {
+    fresh(); calls.length = 0;
+    budget._clock(() => Date.parse('2026-10-15T05:00:00Z'));
+    const b = await board('early');
+    assert.ok(b.every((x) => x.file), JSON.stringify(b.map((x) => x.error)));
+    assert.ok(!calls.some((c) => /klein-9b/.test(c)), calls.join());
+    await assert.rejects(as('early', () => fa.paintTitle({ scene: 'x', title: 'Prayer Meeting' })), /resting/);
+    budget._clock(() => NOW);
+  });
+
   console.log('\n[B] a hundred people making the same flyer at once');
   await t('never past the day; every picture answered (fresh, or the library’s)', async () => {
     fresh(); calls.length = 0; delay = 15;

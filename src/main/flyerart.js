@@ -460,6 +460,8 @@ async function paintTitle({ scene, title, seed, look, event, fresh: forceFresh }
   if (!forLibrary && !forceFresh) { const lib = bank.takeLetter(title, who); if (lib) return Object.assign(lib, { prompt: '', seed: 0 }); }
   if (!(cfAccount() && cfToken())) throw new Error('AI lettering needs the free Cloudflare account on the server.');
   if (!forLibrary) bank.noteLetter(title, scene);   // asked for: tonight's leftover allowance letters it, if today cannot
+  // a fresh lettering is the dearest painting there is (about 2,400): only while the day, as paced, has plenty
+  if (!forLibrary && !forceFresh && !cfPaid() && budget.level(who) !== 'plenty') throw new Error('today’s free AI lettering is resting (the church library has none of this title yet) — the designs without it stand');
   const size = { w: 832, h: 1024 };   // 4 tiles, 25 steps: about 2,370 neurons
   const want = wordsOf(title);
   let cs = null; try { cs = require('./cloudsee'); } catch (e) { cs = null; }
