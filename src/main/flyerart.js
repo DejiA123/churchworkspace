@@ -1112,7 +1112,7 @@ async function fillerTick(now = Date.now(), opts = {}) {
       if (room < 160) return { painted: 0, letters: 0, why: 'no room' };
     } else if (mins >= 23 * 60 + 55) return { painted: 0, letters: 0, why: 'too near midnight' };   // nothing started that would cross it
     if (mins >= 21 * 60) { room = budget.hardLeft() - (mins < 23 * 60 ? 1500 : 0); mode = 'end of day'; }
-    else if (mins < 6 * 60) {
+    else if (mins >= 30 && mins < 6 * 60) {   // not in the first half hour: Cloudflare's own reset can lag midnight
       if (prewarmed.day !== day) prewarmed = { day, spent: 0 };
       // a little of the new day: at most 15% of it, and never more than half of what the pace has released
       room = Math.min(budget.available() / 2, budget.DAY() * 0.15 - prewarmed.spent); mode = 'morning';

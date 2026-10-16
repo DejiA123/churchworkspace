@@ -184,6 +184,17 @@ const t = async (name, fn) => { try { await fn(); pass++; console.log('  ✓ ' +
     answer = null;
     assert.strictEqual(budget.hardLeft(), 0);
   });
+  await t('…for half an hour only: then Cloudflare is asked again (its reset can lag midnight)', () => {
+    budget._clock(() => NOW + 31 * 60e3);
+    assert.ok(budget.hardLeft() > 9000, budget.hardLeft());
+    budget._clock(() => NOW);
+  });
+  await t('a ledger left “exhausted” by the old version is asked again at once', () => {
+    fresh();
+    fs.writeFileSync(budget.file(), JSON.stringify({ day: '2026-10-15', spent: 10000, exhausted: true }));
+    budget._reset();
+    assert.ok(budget.hardLeft() > 9000, budget.hardLeft());
+  });
   await t('…but heard for a call booked yesterday, it does not empty the new day', () => {
     fresh();
     budget._clock(() => Date.parse('2026-10-14T23:59:50Z'));

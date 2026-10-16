@@ -3348,7 +3348,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     if (!/cloudflare/i.test(by || '')) return '';
     const model = String(by).replace(/\s*·\s*Cloudflare.*$/i, '').trim(), lib = /library/i.test(by);
     // a picture from the church's library was painted for someone earlier and kept: new to this person, and free
-    return `<em class="fs-by" title="${escAttr('Painted by ' + by.replace(/\s*·\s*library/i, '') + (lib ? ' for the church’s picture library' : ''))}"><b>☁</b> Made by Cloudflare AI${model || lib ? `<i>${esc([model, lib ? 'from the church library' : ''].filter(Boolean).join(' · '))}</i>` : ''}</em>`;
+    return `<em class="fs-by" title="${escAttr('Painted by ' + by.replace(/\s*·\s*library/i, '') + (lib ? ' for the church’s picture library' : ''))}"><b>☁</b> Made by Cloudflare AI${model || lib ? `<i>${esc([model, lib ? 'library' : ''].filter(Boolean).join(' · '))}</i>` : ''}</em>`;
   }
   function drawPick() {
     const P = F.panel; if (!P) return;

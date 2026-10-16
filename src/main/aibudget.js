@@ -86,7 +86,8 @@ function fromDisk(day) {
     spent += Math.max(0, +o.n || 0);
     if (o.who) byWho[o.who] = (+byWho[o.who] || 0) + (+o.n || 0);
   }
-  return { day, spent: Math.round(spent), byWho, exhausted: !!l.exhausted };
+  // (a ledger from before the pause had a time kept "exhausted: true": asked again at once)
+  return { day, spent: Math.round(spent), byWho, exhausted: typeof l.exhausted === 'number' ? l.exhausted : l.exhausted ? 1 : false, spentBefore: l.exhausted === true ? 0 : l.spentBefore };
 }
 function load() {
   const day = dayOf(clock());
@@ -94,6 +95,11 @@ function load() {
   try { st = fs.statSync(file()); } catch (e) { st = null; }
   if (!mem || (st && st.mtimeMs > memAt + 1)) { mem = fromDisk(day); memAt = st ? st.mtimeMs : 0; }
   if (mem.day !== day) mem = { day, spent: 0, byWho: {}, exhausted: false };   // midnight UTC: a new allowance
+  // "used up" pauses painting for half an hour, then Cloudflare is asked again (a refusal costs nothing):
+  // its own reset can lag midnight, and one early answer used to cost the whole new day
+  if (mem.exhausted && clock() - (typeof mem.exhausted === 'number' ? mem.exhausted : 0) > EXHAUSTED_MS) {
+    mem.spent = Math.max(0, +mem.spentBefore || 0); mem.exhausted = false; delete mem.spentBefore;
+  }
   return mem;
 }
 function save() {
@@ -101,7 +107,7 @@ function save() {
     fs.mkdirSync(DIR, { recursive: true });
     const open = {};
     for (const h of held.values()) open[h.id] = { id: h.id, n: h.n, who: h.who, day: h.day };
-    const body = JSON.stringify({ day: mem.day, spent: mem.spent, byWho: mem.byWho, open, exhausted: !!mem.exhausted });
+    const body = JSON.stringify({ day: mem.day, spent: mem.spent, byWho: mem.byWho, open, exhausted: mem.exhausted || false, spentBefore: mem.spentBefore });
     const tmp = file() + '.' + process.pid + '.' + (++seq) + '.tmp';
     const fd = fs.openSync(tmp, 'w');
     try { fs.writeSync(fd, body); try { fs.fsyncSync(fd); } catch (e) { /* not every disk */ } } finally { fs.closeSync(fd); }
@@ -200,10 +206,12 @@ function release(t) { if (t && held.delete(t.id)) save(); }
  * that heard it was booked on yesterday (a reply that arrives just after
  * midnight must not empty the new day).
  */
+const EXHAUSTED_MS = 30 * 60e3;
 function exhaust(t) {
   const l = load();
   if (t && t.day && t.day !== l.day) return;
-  l.exhausted = true; l.spent = Math.max(l.spent, DAY());
+  if (!l.exhausted) l.spentBefore = l.spent;
+  l.exhausted = clock(); l.spent = Math.max(l.spent, DAY());
   save();
 }
 
