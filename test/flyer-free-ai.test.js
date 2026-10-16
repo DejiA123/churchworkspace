@@ -162,10 +162,14 @@ const t = async (name, fn) => { try { await fn(); pass++; console.log('  ✓ ' +
     await assert.rejects(as('anna', () => fa.paintTitle({ scene: 'x', title: 'Prayer Meeting' })), /hard to read twice/);
     assert.strictEqual(bank.report().letterings, 0);
   });
-  await t('no reader to check it: offered to this person, never kept for others', async () => {
+  await t('a word painted twice (“PRAYER MEETING MEETING”) is not offered', async () => {
+    fresh(); reads = ['PRAYER MEETING MEETING', 'PRAYER MEETING MEETING'];
+    await assert.rejects(as('anna', () => fa.paintTitle({ scene: 'x', title: 'Prayer Meeting' })), /misspelt/);
+    assert.strictEqual(bank.report().letterings, 0);
+  });
+  await t('no reader to check it: never shown unread, never kept', async () => {
     fresh(); cs.ready = () => false;
-    const r = await as('anna', () => fa.paintTitle({ scene: 'x', title: 'Prayer Meeting' }));
-    assert.strictEqual(r.checked, false); assert.ok(r.dataUrl);
+    await assert.rejects(as('anna', () => fa.paintTitle({ scene: 'x', title: 'Prayer Meeting' })), /checks its spelling/);
     assert.strictEqual(bank.report().letterings, 0);
     cs.ready = () => true;
   });

@@ -477,11 +477,19 @@ async function paintTitle({ scene, title, seed, look, event, fresh: forceFresh }
     tries++;
     const dataUrl = dataUrlOf(out);
     last = { dataUrl, by: out.by, prompt, seed: s, checked: false, spelt: null };
-    if (!cs || !cs.ready || !cs.ready()) return forLibrary ? null : last;   // unchecked: offered to this person, never kept for others
-    const r = await cs.readFlyer({ image: dataUrl, maxWaitMs: 20000 }).catch(() => ({ ok: false }));
-    if (!r || !r.ok) return forLibrary ? null : last;
+    // never shown unread: "PRAYER MEETING MEETING" went out marked "check the spelling" — a lettering
+    // nobody could read back is not offered at all (the typeset designs stand)
+    if (!cs || !cs.ready || !cs.ready()) throw new Error('AI lettering needs the reader that checks its spelling — the designs without it stand');
+    let r = await cs.readFlyer({ image: dataUrl, maxWaitMs: 20000 }).catch(() => ({ ok: false }));
+    if (!r || !r.ok) { await new Promise((ok) => setTimeout(ok, 3000)); r = await cs.readFlyer({ image: dataUrl, maxWaitMs: 20000 }).catch(() => ({ ok: false })); }
+    if (!r || !r.ok) throw new Error('the AI lettering could not be read back to check it — the designs without it stand');
+    const readWords = wordsOf(r.text || r.event || '');
     const seen = new Set(wordsOf([r.text, r.event].join(' ')));
-    const ok = want.every((w) => seen.has(w));
+    // every word there, spelt right — and nothing more: no word twice ("MEETING MEETING"), no stray words
+    const count = (list, w) => list.filter((x) => x === w).length;
+    const doubled = want.some((w) => count(readWords, w) > count(want, w));
+    const extra = readWords.filter((w) => !want.includes(w) && w.length > 2).length;
+    const ok = want.every((w) => seen.has(w)) && !doubled && extra <= 1;
     // "was the text even visible?": spelt right is not enough — dark letters on a dark scene are painted again
     const legible = r.legible !== false;
     last = Object.assign(last, { checked: true, spelt: ok, legible, read: (r.event || r.text || '').slice(0, 80) });
