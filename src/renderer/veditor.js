@@ -1733,12 +1733,19 @@
   function animateTextBoxes(t) {
     const layer = ve.refs.textLayer;
     if (!layer || ve.textEditing || !ve.textOverlays.length) return;
-    const want = ve.textOverlays.filter((o) => t >= o.start && t <= o.end).map((o) => o.id).join(',');
+    const want = ve.textOverlays.filter((o) => textOnAt(o, t)).map((o) => o.id).join(',');
     const have = Array.from(layer.querySelectorAll('.ve-text-box')).map((b) => b.dataset.id).join(',');
     if (want !== have) { renderTextOverlays(); return; }
     const fr = outputFrameRect();
     for (const box of layer.querySelectorAll('.ve-text-box')) {
       const o = ve.textOverlays.find((x) => x.id === box.dataset.id);
+      if (o && isTitle(o)) {
+        // a title's move, this frame (unchanged while it simply sits there)
+        const c = box.querySelector('.ve-title');
+        const h = c && titleHtmlAt(o, textFontPx(o, fr.h), t);
+        if (c && c._h !== h) { c._h = h; c.innerHTML = h; }
+        continue;
+      }
       if (!o || !o.anim || o.anim === 'none') continue;
       const c = box.querySelector('.ve-text-content'); if (!c) continue;
       const css = textAnimCss(o, t, fr.h);
@@ -4336,7 +4343,8 @@
     const layer = ve.refs.textLayer; if (!layer) return;
     if (ve.textEditing) return; // don't clobber the contenteditable box mid-typing
     const t = nowT();
-    const visible = ve.video ? ve.textOverlays.filter((o) => t >= o.start && t <= o.end) : [];
+    // (a title set to repeat is on only during its appearances — textShowAt)
+    const visible = ve.video ? ve.textOverlays.filter((o) => textOnAt(o, t)) : [];
     // Font size must be COMPUTED IN PIXELS from the preview's height. A CSS
     // percentage font-size is relative to the PARENT'S font size (~14px), so the
     // old `${sizePct*100}%` rendered ~1px-tall, invisible text — the user saw an
@@ -4356,13 +4364,19 @@
     // The box is CENTER-anchored on (o.x, o.y) and hugs the text vertically
     // (height:auto), so the words always sit INSIDE the dashed drag border —
     // no more text spilling below the lines when the font outgrows a fixed box.
-    const html = visible.map((o) => `
+    const html = visible.map((o) => (isTitle(o) ? `
+      <div class="ve-text-box ve-title-box${ve.textSel === o.id ? ' sel' : ''}" data-id="${o.id}" style="
+        left:${(fr.left + o.x * fr.w).toFixed(2)}px; top:${(fr.top + o.y * fr.h).toFixed(2)}px; width:max-content; transform:translate(-50%,-50%);">
+        <div class="ve-text-content ve-title" style="pointer-events:auto;outline:none;">${titleHtmlAt(o, textFontPx(o, fr.h), t)}</div>
+        <button class="ve-text-del" data-del="${o.id}" title="Delete">✕</button>
+        <div class="ve-text-resize" data-resize="${o.id}" title="Drag to make it bigger or smaller"></div>
+      </div>` : `
       <div class="ve-text-box${ve.textSel === o.id ? ' sel' : ''}" data-id="${o.id}" style="
         left:${(fr.left + o.x * fr.w).toFixed(2)}px; top:${(fr.top + o.y * fr.h).toFixed(2)}px; width:${(o.w * fr.w).toFixed(2)}px; transform:translate(-50%,-50%);">
         <div class="ve-text-content" style="${textLookCss(o, textFontPx(o, fr.h))}${textAnimCss(o, t, fr.h)}pointer-events:auto;outline:none;">${escape2(o.text)}</div>
         <button class="ve-text-del" data-del="${o.id}" title="Delete">✕</button>
         <div class="ve-text-resize" data-resize="${o.id}" title="Drag to resize"></div>
-      </div>`).join('');
+      </div>`)).join('');
     // the same boxes in the same places (a scrub between two texts, a timeupdate
     // with nothing new) are not rebuilt — that was an innerHTML every frame
     if (layer._html === html && layer.childElementCount === visible.length) { updateTextTools(); return; }
@@ -4383,6 +4397,13 @@
     const o = id && ve.textOverlays.find((x) => x.id === id); if (!o) return;
     ve.textSel = id;
     ve._textOnLane = false;
+    // A title's words are typed in the panel (its lines are boxes inside a
+    // drawing, not one block of text): the panel comes up on its first line.
+    if (isTitle(o)) {
+      renderTextOverlays(); updateTextTools();
+      const i1 = $('#vtT1'); if (i1) { i1.focus(); try { i1.select(); } catch (e) {} }
+      return;
+    }
     // Re-fetch the live box; if a prior render removed it, render once (with the
     // guard cleared) and fetch again.
     let box = ve.refs.textLayer.querySelector(`.ve-text-box[data-id="${id}"]`);
@@ -4946,6 +4967,7 @@
   }
   /** The animation as inline CSS on a text's words, for a frame `frameH` tall. */
   function textAnimCss(o, t, frameH) {
+    if (isTitle(o)) return '';   // a title moves by its own drawing (titleHtml)
     // The text being worked on stands still while the video does: a selected
     // title that keeps shrinking under the cursor cannot be placed.
     if (ve.textSel === o.id && ve.refs.player && ve.refs.player.paused) return '';
@@ -5101,11 +5123,18 @@
     m.innerHTML = `
       <div class="cap-box ve-tpl-box">
         <div class="cap-head"><strong>Text templates</strong><button type="button" class="ghost-btn small" data-tpl-close>✕</button></div>
-        <div class="ve-tpl-grid">${TEXT_TEMPLATES.map((t) => `<button type="button" class="ve-tpl-card" data-tpl="${t.id}" title="${attr2(t.name)}"><span class="ve-tpl-demo">${templateCardHtml(t)}</span><span class="ve-tpl-name">${escape2(t.name)}</span></button>`).join('')}</div>
+        <div class="ve-tpl-scroll">
+          <div class="ve-tpl-sec"><b>Trending</b><small>Animated: they slide in, and a name can come back every few seconds</small></div>
+          <div class="ve-ttl-grid">${TITLE_TPLS.map((t) => `<button type="button" class="ve-ttl-card" data-ttl="${t.id}" title="${attr2(t.name)}"><span class="ve-ttl-demo" data-ttl-demo="${t.id}"></span><span class="ve-tpl-name">${escape2(t.name)}</span></button>`).join('')}</div>
+          <div class="ve-tpl-sec"><b>Titles</b></div>
+          <div class="ve-tpl-grid">${TEXT_TEMPLATES.map((t) => `<button type="button" class="ve-tpl-card" data-tpl="${t.id}" title="${attr2(t.name)}"><span class="ve-tpl-demo">${templateCardHtml(t)}</span><span class="ve-tpl-name">${escape2(t.name)}</span></button>`).join('')}</div>
+        </div>
       </div>`;
     document.body.appendChild(m);
     m.addEventListener('click', (e) => {
       if (e.target === m || e.target.closest('[data-tpl-close]')) return closeTextTemplates();
+      const tc = e.target.closest('[data-ttl]');
+      if (tc) { addTitleTemplate(tc.dataset.ttl); return; }
       const c = e.target.closest('[data-tpl]');
       if (c) addTextTemplate(c.dataset.tpl);
     });
@@ -5117,10 +5146,292 @@
     try { await loadCapFonts(); } catch (e) {}
     const m = textTplModal();
     m.classList.remove('hidden');
+    runTitleDemos();
   }
   function closeTextTemplates() {
     const m = document.getElementById('veTextTplModal');
     if (m) m.classList.add('hidden');
+  }
+
+  /*
+   * ►► ANIMATED TITLES — CapCut's "Trending" templates. ◄◄ "The speaker name
+   * could be Bishop David Richman: his name slides in from time to time — every
+   * 12 seconds it appears for about 4 — and I choose how long it stays."
+   *
+   * A title is ONE graphic (a coloured bar and the boxes of words beside it,
+   * say), not a stack of separate texts, and it moves as one: the bar comes in,
+   * then the words slide out from behind it, and at the end they slide back
+   * and the bar goes. `titleHtml` draws it from how far into its arrival and
+   * its leaving it is; the preview calls it every frame, and the export
+   * rasterises the very same drawing frame by frame (textOverlayPngs), so the
+   * file moves exactly the way the preview did.
+   *
+   * With Repeat on, it comes back every `every` seconds and stays `hold`
+   * seconds each time, from its start to its end on the timeline.
+   */
+  const TITLE_IN = 0.62;       // the arrival, seconds
+  const TITLE_OUT = 0.38;      // the leaving
+  const TITLE_FPS = 30;        // frames drawn for the export's arrival and leaving
+  /*
+   * Each look: its sample words, size (a fraction of the frame's height), colour,
+   * typeface, and how it moves — reveal (a bar comes, the words slide out from
+   * behind it), wipe (drawn across from the left), sweep (a glowing band opens,
+   * the words come in on it) or pop (in with a bounce).
+   */
+  const TITLE_TPLS = [
+    { id: 'bar2', name: 'Name & title', text: 'SIMPLE TITLE', text2: 'TEXT TITLE', sizePct: 0.034, accent: '#e11d2e', anim: 'reveal', font: 'Montserrat', caps: true, x: 0.06 },
+    { id: 'bar1', name: 'Username', text: 'Username', text2: '', sizePct: 0.036, accent: '#b5121b', anim: 'reveal', font: 'Montserrat', x: 0.06 },
+    { id: 'podcast', name: 'Podcast', text: 'Podcast', text2: '', sizePct: 0.042, accent: '#3aa23a', anim: 'reveal', font: 'Poppins', x: 0.06, barW: 0.4 },
+    { id: 'news', name: 'Breaking news', text: 'Breaking News', text2: '', sizePct: 0.036, accent: '#1d4ed8', anim: 'reveal', font: 'Archivo Black', x: 0.06, edge: true, barW: 0.42 },
+    { id: 'bracket', name: 'News bracket', text: 'Breaking News', text2: '', sizePct: 0.036, accent: '#f2b51c', anim: 'reveal', font: 'Poppins', x: 0.06, bracket: true },
+    { id: 'thanks', name: 'Thank you', text: 'THANK YOU', text2: 'FOR WATCHING', sizePct: 0.03, accent: '#e3262b', anim: 'reveal', font: 'Montserrat', caps: true, x: 0.06, barW: 0.5, under: true },
+    { id: 'plain', name: 'Simple text', text: 'SIMPLE TEXT', text2: '', sizePct: 0.04, accent: '#ffffff', anim: 'wipe', font: 'Archivo Black', caps: true, x: 0.5, pad: '0.16em 0.42em 0.12em' },
+    { id: 'marker', name: 'Highlighter', text: 'What inspired', text2: 'us this week?', sizePct: 0.042, accent: '#f7e463', anim: 'wipe', font: 'Playfair Display', x: 0.5, pad: '0.07em 0.22em 0.05em', left: true },
+    { id: 'brush', name: 'Brush', text: 'SUMMER', text2: 'DIARIES', sizePct: 0.052, accent: '#f5c51d', anim: 'wipe', font: 'Rubik', caps: true, x: 0.5, pad: '0.14em 0.38em 0.08em', rough: true },
+    { id: 'glow', name: 'Title here', text: 'TITLE HERE', text2: '', sizePct: 0.034, accent: '#1d5bff', anim: 'sweep', font: 'Archivo Black', caps: true, x: 0.5 },
+    { id: 'pill', name: 'New post', text: 'NEW POST', text2: '', sizePct: 0.045, accent: '#1f5bff', anim: 'pop', font: 'Luckiest Guy', x: 0.5 },
+    { id: 'popword', name: 'Pop', text: 'SIMPLE', text2: '', sizePct: 0.085, accent: '#ff3ea5', anim: 'pop', font: 'Luckiest Guy', x: 0.5 },
+    { id: 'neon', name: 'Neon', text: 'LUCK', text2: '', sizePct: 0.08, accent: '#1c64f2', anim: 'pop', font: 'Luckiest Guy', x: 0.5 },
+    { id: 'abc', name: 'Bold yellow', text: 'Abc', text2: '', sizePct: 0.1, accent: '#ffe14d', anim: 'pop', font: 'Anton', x: 0.5 },
+  ];
+  const titleTpl = (o) => TITLE_TPLS.find((x) => x.id === (o && o.ttl)) || TITLE_TPLS[0];
+  const isTitle = (o) => !!(o && o.kind === 'title');
+  /* the typeface a title is drawn in — fetched (and inlined for the export) like any other */
+  function titleFontsOf(o) { return [titleTpl(o).font]; }
+  const tEase = {
+    out: (p) => 1 - Math.pow(1 - p, 3),
+    inOut: (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2),
+    back: (p) => { const c1 = 1.55, c3 = c1 + 1; return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2); },
+  };
+  const tSeg = (u, a, d) => clamp((u - a) / d, 0, 1);
+  /** How long one appearance lasts, and how often it comes back. */
+  function titleRepeat(o) {
+    const r = o.repeat || {};
+    const every = clamp(Number(r.every) || 12, 2, 600);
+    const hold = clamp(Number(r.hold) || 4, TITLE_IN + TITLE_OUT + 0.2, Math.max(TITLE_IN + TITLE_OUT + 0.2, every - 0.5));
+    return { on: !!r.on, every, hold };
+  }
+  /** Every appearance of a text that overlaps [from, to): [start, end] pairs. */
+  function textShows(o, from = -Infinity, to = Infinity) {
+    const R = isTitle(o) ? titleRepeat(o) : null;
+    if (!R || !R.on) return (o.start < to && o.end > from) ? [[o.start, o.end]] : [];
+    const out = [];
+    for (let k = Math.max(0, Math.floor((from - o.start) / R.every) - 1); out.length < 20000; k++) {
+      const a = o.start + k * R.every;
+      if (a >= o.end - 0.05 || a >= to) break;
+      const b = Math.min(o.end, a + R.hold);
+      if (b > from) out.push([a, b]);
+    }
+    return out;
+  }
+  /** The appearance showing at t, or null. */
+  function textShowAt(o, t) {
+    if (!(t >= o.start && t <= o.end)) return null;
+    const R = isTitle(o) ? titleRepeat(o) : null;
+    if (!R || !R.on) return [o.start, o.end];
+    const k = Math.floor((t - o.start) / R.every);
+    const a = o.start + k * R.every, b = Math.min(o.end, a + R.hold);
+    return (t <= b && a < o.end - 0.05) ? [a, b] : null;
+  }
+  const textOnAt = (o, t) => !!textShowAt(o, t);
+  /**
+   * Where the title is in its move, `u` seconds into an appearance `L` long:
+   * bar (0 gone … 1 full), l1 / l2 (how far each line has come out), k
+   * (scale), op (opacity), x (slide, in em), w1 / w2 (wiped away, leaving).
+   */
+  function titleState(o, u, L) {
+    const v = L - u;   // seconds left
+    const anim = titleTpl(o).anim;
+    const st = { bar: 1, l1: 1, l2: 1, u: 1, k: 1, op: 1, x: 0, w1: 0, w2: 0, r: 0 };
+    if (anim === 'reveal') {
+      // the bar first, then the words slide out from behind it (line 2 a beat behind, the
+      // underline drawn along); leaving: line 2, then line 1 slide back, the bar goes last
+      st.bar = Math.min(tEase.out(tSeg(u, 0, 0.16)), tEase.out(tSeg(v, 0, 0.12)));
+      st.l1 = Math.min(tEase.out(tSeg(u, 0.10, 0.45)), tEase.inOut(tSeg(v, 0.10, 0.24)));
+      st.l2 = Math.min(tEase.out(tSeg(u, 0.17, 0.45)), tEase.inOut(tSeg(v, 0.14, 0.24)));
+      st.u = Math.min(tEase.out(tSeg(u, 0.08, 0.42)), tEase.inOut(tSeg(v, 0.10, 0.22)));
+    } else if (anim === 'pop') {
+      // in from the left with a bounce past its size; leaving, it shrinks away
+      const p = tSeg(u, 0, 0.45);
+      const q = tSeg(v, 0, 0.26);
+      st.k = (0.35 + 0.65 * tEase.back(p)) * (0.55 + 0.45 * q);   // (the back ease overshoots past 1, then settles)
+      st.op = Math.min(tSeg(u, 0, 0.12), q);
+      st.x = (1 - tEase.out(p)) * -0.8;
+      st.r = (1 - tEase.out(p)) * -6;
+    } else if (anim === 'wipe') {
+      // drawn across each line from the left; leaving, wiped off to the right
+      st.l1 = tEase.out(tSeg(u, 0, 0.42));
+      st.l2 = tEase.out(tSeg(u, 0.14, 0.42));
+      st.w2 = 1 - tEase.inOut(tSeg(v, 0.12, 0.26));
+      st.w1 = 1 - tEase.inOut(tSeg(v, 0.04, 0.26));
+    } else if (anim === 'sweep') {
+      // a glowing band opens from the middle, and the words come in on it
+      st.bar = Math.min(tEase.out(tSeg(u, 0, 0.32)), tEase.inOut(tSeg(v, 0, 0.2)));
+      st.l1 = Math.min(tSeg(u, 0.16, 0.26), tSeg(v, 0.16, 0.16));
+      st.x = (1 - tEase.out(tSeg(u, 0.16, 0.42))) * -0.7 + (1 - tEase.inOut(tSeg(v, 0.12, 0.2))) * 0.5;
+    }
+    return st;
+  }
+  /** The title fully in — what is shown while it is being placed or edited. */
+  const TITLE_FULL = { bar: 1, l1: 1, l2: 1, u: 1, k: 1, op: 1, x: 0, w1: 0, w2: 0, r: 0 };
+  /** A colour moved part of the way to white (a band's bright middle, a glow). */
+  function titleMix(hex, k) {
+    const n = parseInt(String(hex).slice(1), 16);
+    const m = (c) => Math.round(c + (255 - c) * k);
+    return `rgb(${m((n >> 16) & 255)},${m((n >> 8) & 255)},${m(n & 255)})`;
+  }
+  /** The title drawn at `fontPx` (its letters' height) in state `st`. Pure HTML with
+   *  inline styles in em, so the preview and the rasteriser draw it identically. */
+  function titleHtml(o, fontPx, st) {
+    const tp = titleTpl(o);
+    const e = (x) => escape2(String(x || ''));
+    const col = (c, d) => (/^#[0-9a-fA-F]{6}$/.test(String(c || '')) ? String(c) : d);
+    const accent = col(o.accent, tp.accent);
+    const t1 = e(o.text), t2 = String(o.text2 || '').trim() ? e(o.text2) : '';
+    const both = t1 + (t2 ? '<br>' + t2 : '');
+    const f = (n) => (Math.round(n * 1000) / 1000);
+    // (font-weight normal: these files ARE the heavy cut — asking for bold would have the browser fake a heavier one)
+    const root = `font-size:${f(fontPx)}px;font-weight:400;font-style:normal;line-height:1;white-space:nowrap;`
+      + `font-family:'${tp.font}',sans-serif;${tp.caps ? 'text-transform:uppercase;' : ''}`;
+    if (tp.anim === 'reveal') {
+      const line = (txt, p, i) => `<div style="background:#ffffff;color:#111111;padding:0.17em 0.42em 0.13em;${i ? 'margin-top:0.1em;' : ''}`
+        + `${tp.edge ? `border:0.08em solid ${accent};` : ''}transform:translateX(${f(-(1 - p) * 104)}%);">${txt}</div>`;
+      const bar = tp.bracket
+        // a "[" that hugs the start of the box
+        ? `<div style="width:0.38em;flex:none;margin:-0.2em 0;border:0.13em solid ${accent};border-right:0;border-radius:0.16em 0 0 0.16em;`
+          + `transform:scaleY(${f(st.bar)});opacity:${f(Math.min(1, st.bar * 2))};"></div>`
+        : `<div style="width:${tp.barW || 0.3}em;flex:none;background:${accent};${tp.under ? 'margin-bottom:-0.36em;' : ''}`
+          + `transform:scaleY(${f(st.bar)});transform-origin:50% 50%;"></div>`;
+      // an underline in the bar's colour, drawn along under the words (Thank you)
+      const under = tp.under ? `<div style="position:absolute;left:0;right:0;bottom:-0.36em;height:0.2em;background:${accent};`
+        + `transform:scaleX(${f(st.u)});transform-origin:0 50%;"></div>` : '';
+      return `<div style="${root}display:inline-flex;align-items:stretch;position:relative;${tp.under ? 'margin-bottom:0.36em;' : ''}">`
+        + bar + '<div style="overflow:hidden;display:flex;flex-direction:column;align-items:flex-start;">'
+        + line(t1, st.l1, 0) + (t2 ? line(t2, st.l2, 1) : '') + '</div>' + under + '</div>';
+    }
+    if (tp.anim === 'wipe') {
+      // a torn-paper edge for the brush look
+      const rough = tp.rough ? 'clip-path:polygon(1% 14%,7% 3%,22% 9%,37% 1%,54% 7%,71% 0%,88% 8%,99% 3%,97% 32%,100% 56%,97% 79%,99% 98%,83% 92%,66% 100%,48% 93%,31% 99%,15% 92%,2% 98%,3% 71%,0% 46%,2% 26%);' : '';
+      const line = (txt, p, w, i) => {
+        const clip = `inset(-0.3em ${f((1 - p) * 100)}% -0.3em ${f(w * 100)}%)`;
+        return `<div style="${i ? 'margin-top:0.04em;' : ''}clip-path:${clip};-webkit-clip-path:${clip};">`
+          + `<div style="background:${accent};color:#111111;padding:${tp.pad || '0.08em 0.24em 0.06em'};${rough}">${txt}</div></div>`;
+      };
+      return `<div style="${root}display:inline-flex;flex-direction:column;align-items:${tp.left ? 'flex-start' : 'center'};line-height:1.08;">`
+        + line(t1, st.l1, st.w1, 0) + (t2 ? line(t2, st.l2, st.w2, 1) : '') + '</div>';
+    }
+    if (tp.anim === 'sweep') {
+      // a band of light in the title's colour, soft at both ends, bright in the middle
+      const band = `linear-gradient(90deg,rgba(0,0,0,0) 0%,${accent} 16%,${titleMix(accent, 0.3)} 50%,${accent} 84%,rgba(0,0,0,0) 100%)`;
+      return `<div style="${root}position:relative;display:inline-block;padding:0.32em 1.15em 0.26em;">`
+        + `<div style="position:absolute;left:0;right:0;top:0;bottom:0;background:${band};transform:scaleX(${f(st.bar)});"></div>`
+        + `<div style="position:absolute;left:12%;right:12%;top:0.05em;height:0.08em;background:${titleMix(accent, 0.75)};opacity:${f(0.6 * st.bar)};transform:scaleX(${f(st.bar)});"></div>`
+        + `<div style="position:relative;color:#ffffff;font-style:italic;letter-spacing:0.02em;text-align:center;`
+        + `text-shadow:0 0.05em 0.22em rgba(0,0,0,.45);transform:translateX(${f(st.x)}em);opacity:${f(st.l1)};">${both}</div></div>`;
+    }
+    const move = `transform:translateX(${f(st.x)}em) scale(${f(st.k)}) rotate(${f(st.r)}deg);opacity:${f(st.op)};transform-origin:50% 50%;`;
+    if (tp.id === 'pill') {
+      return `<div style="${root}display:inline-block;${move}">`
+        + `<div style="background:${accent};color:#ffffff;border:0.09em solid #ffffff;border-radius:0.36em;`
+        + `padding:0.2em 0.5em 0.06em;letter-spacing:0.02em;-webkit-text-stroke:0.1em #0b1a4d;paint-order:stroke fill;text-align:center;`
+        + `box-shadow:0 0.08em 0.22em rgba(0,0,0,.35);">${both}</div></div>`;
+    }
+    if (tp.id === 'neon') {
+      // white letters, a thick edge in the colour, and a glow round it
+      return `<div style="${root}display:inline-block;${move}">`
+        + `<div style="color:#ffffff;font-style:italic;letter-spacing:0.02em;text-align:center;-webkit-text-stroke:0.2em ${accent};paint-order:stroke fill;`
+        + `text-shadow:0 0 0.16em ${accent},0 0 0.42em ${titleMix(accent, 0.25)},0 0 0.85em ${accent};">${both}</div></div>`;
+    }
+    if (tp.id === 'abc') {
+      return `<div style="${root}display:inline-block;${move}">`
+        + `<div style="color:${accent};text-align:center;-webkit-text-stroke:0.14em #111111;paint-order:stroke fill;letter-spacing:0.01em;">${both}</div></div>`;
+    }
+    // popword: big bubbly letters in white with a coloured fill
+    return `<div style="${root}display:inline-block;${move}">`
+      + `<div style="color:${accent};letter-spacing:0.03em;-webkit-text-stroke:0.16em #ffffff;paint-order:stroke fill;text-shadow:0 0.07em 0 rgba(0,0,0,.28);text-align:center;">`
+      + `${both}</div></div>`;
+  }
+  /** The title as it is at timeline time t (whole while it is picked and the video is still). */
+  function titleHtmlAt(o, fontPx, t) {
+    if (ve.textSel === o.id && ve.refs.player && ve.refs.player.paused) return titleHtml(o, fontPx, TITLE_FULL);
+    const show = textShowAt(o, t);
+    if (!show) return titleHtml(o, fontPx, TITLE_FULL);
+    return titleHtml(o, fontPx, titleState(o, t - show[0], show[1] - show[0]));
+  }
+
+  /* the name typed into a name banner last time: next week's sermon has the same speaker */
+  const TITLE_LAST_KEY = 'mw-title-last';
+  const titleIsName = (id) => id === 'bar2' || id === 'bar1' || id === 'podcast' || id === 'news' || id === 'bracket';
+  function rememberTitle(o) {
+    if (!isTitle(o) || !titleIsName(titleTpl(o).id) || !String(o.text || '').trim()) return;
+    try { localStorage.setItem(TITLE_LAST_KEY, JSON.stringify({ text: String(o.text).slice(0, 120), text2: String(o.text2 || '').slice(0, 120) })); } catch (e) {}
+  }
+  /**
+   * A Trending title at the playhead. A name banner comes back every 12 s for
+   * 4 s from here to the end of the video (trim its block to stop it sooner;
+   * the panel changes how often and how long); the others are up once, for 4 s.
+   */
+  async function addTitleTemplate(id) {
+    if (!ve.video) { window.__toast && window.__toast('Open a video first.', 'error'); return null; }
+    const tp = TITLE_TPLS.find((x) => x.id === id); if (!tp) return null;
+    try { await loadCapFonts(); } catch (e) {}
+    try {
+      await Promise.race([Promise.all(titleFontsOf({ ttl: id }).map((f) => (document.fonts && document.fonts.load ? document.fonts.load(`40px '${f}'`) : null))),
+        new Promise((r) => setTimeout(r, 1500))]);
+    } catch (e) {}
+    pushHistory();
+    const t = ve.refs.player.currentTime || 0;
+    const D = dur() || t + 12;
+    const named = titleIsName(tp.id);
+    let last = null;
+    try { last = JSON.parse(localStorage.getItem(TITLE_LAST_KEY) || 'null'); } catch (e) { last = null; }
+    const fr = outputFrameRect();
+    const wide = !!(fr && fr.w > fr.h);
+    const start = clamp(t, 0, Math.max(0, D - 1));
+    const o = {
+      id: uid(), kind: 'title', ttl: tp.id,
+      text: named && last && last.text ? last.text : tp.text,
+      text2: named && last && last.text ? (tp.id === 'bar2' ? (last.text2 || '') : '') : tp.text2,
+      x: 0.5, y: named || tp.id === 'thanks' ? 0.74 : (tp.anim === 'wipe' ? 0.3 : 0.2), w: 0.8, h: 0.1,
+      sizePct: tp.sizePct * (wide ? 0.8 : 1), accent: tp.accent, color: '#111111', font: titleFontsOf({ ttl: tp.id })[0],
+      start, end: named ? D : Math.min(D, start + 4), anim: 'none',
+      repeat: { on: named, every: 12, hold: 4 },
+    };
+    ve.textOverlays.push(o); ve.textSel = o.id; ve._textOnLane = false; ve.textEditing = null;
+    renderTextOverlays();
+    // a name banner sits at the left, its bar a little in from the edge (measured once drawn)
+    const el = ve.refs.textLayer && ve.refs.textLayer.querySelector(`.ve-text-box[data-id="${o.id}"]`);
+    if (el && fr && fr.w && tp.x < 0.5) o.x = tp.x + (el.offsetWidth / fr.w) / 2;
+    clampTextIntoFrame(o);
+    renderTextOverlays(); renderTextTrack(); updateTextTools();
+    closeTextTemplates();
+    window.__toast && window.__toast(named
+      ? `“${tp.name}” added: it slides in every 12 s and stays 4 s. Type the name below, and change how often and how long beside it.`
+      : `“${tp.name}” added: type your words below.`, 'good', 7000);
+    return o.id;
+  }
+  /* the Trending cards perform their move, over and over, while the gallery is open */
+  let ttlDemoRaf = null;
+  function runTitleDemos() {
+    const m = document.getElementById('veTextTplModal');
+    if (ttlDemoRaf != null) cancelAnimationFrame(ttlDemoRaf);
+    const PER = 3.4, L = 2.7;
+    const tick = () => {
+      ttlDemoRaf = null;
+      if (!m || m.classList.contains('hidden') || !document.body.contains(m)) return;
+      const now = performance.now() / 1000;
+      m.querySelectorAll('[data-ttl-demo]').forEach((el, i) => {
+        const tp = TITLE_TPLS.find((x) => x.id === el.dataset.ttlDemo); if (!tp) return;
+        const demo = { ttl: tp.id, text: tp.text, text2: tp.text2, accent: tp.accent };
+        const u = (now + i * 0.37) % PER;
+        const st = u < L ? titleState(demo, u, L) : { bar: 0, l1: 0, l2: 0, u: 0, k: 0.35, op: 0, x: -0.8, w1: 1, w2: 1, r: 0 };
+        const px = clamp(tp.sizePct * 330, 10, 30);
+        const h = titleHtml(demo, px, st);
+        if (el._h !== h) { el._h = h; el.innerHTML = h; }
+      });
+      ttlDemoRaf = requestAnimationFrame(tick);
+    };
+    tick();
   }
 
   /** The animation picker for the selected text: tiles that show each move. */
@@ -5259,9 +5570,25 @@
     put('#vtBgColor', /^#[0-9a-f]{6}$/i.test(o.bgColor || '') ? o.bgColor : '#000000');
     const bgc = $('#vtBgColor'); if (bgc && bgc.disabled !== !o.bg) bgc.disabled = !o.bg;
     put('#vtAnim', TEXT_ANIM_IDS.includes(o.anim) ? o.anim : 'none');
+    // an animated title: its words, its colour, and when it comes back
+    const tt = isTitle(o);
+    if (bar.classList.contains('is-title') !== tt) bar.classList.toggle('is-title', tt);
+    if (tt) {
+      put('#vtT1', o.text || '');
+      put('#vtT2', o.text2 || '');
+      put('#vtAccent', /^#[0-9a-f]{6}$/i.test(o.accent || '') ? o.accent : titleTpl(o).accent);
+      const R = titleRepeat(o);
+      const rep = $('#vtRepeat'); if (rep && rep.checked !== R.on) rep.checked = R.on;
+      put('#vtEvery', String(Math.round(R.every * 10) / 10));
+      // on screen: each time it comes back — or, not repeating, the whole time it is up
+      put('#vtHold', String(Math.round((R.on ? R.hold : (o.end - o.start)) * 10) / 10));
+      const ev = $('#vtEvery'); if (ev && ev.disabled !== !R.on) ev.disabled = !R.on;
+      if (bar.classList.contains('vt-repeating') !== R.on) bar.classList.toggle('vt-repeating', R.on);
+    }
   }
   /** Repaint one text box in place — works while it is being typed in, where renderTextOverlays stands still. */
   function paintTextLive(o) {
+    if (isTitle(o)) { renderTextOverlays(); return; }   // a title is a drawing: drawn again, whole
     const c = ve.refs.textLayer && ve.refs.textLayer.querySelector(`.ve-text-box[data-id="${o.id}"] .ve-text-content`);
     if (c) {
       c.style.cssText = textLookCss(o, textFontPx(o, previewH())) + 'pointer-events:auto;outline:none;';
@@ -5274,6 +5601,11 @@
     const o = selectedTextOverlay(); if (!o) return;
     pushHistory();
     mutate(o);
+    if (isTitle(o)) {
+      renderTextOverlays(); clampTextIntoFrame(o);
+      renderTextOverlays(); renderTextTrack(); updateTextTools();
+      return;
+    }
     // update the live DOM node directly (works even while contenteditable-editing,
     // where renderTextOverlays is deliberately guarded from re-rendering)
     const c = ve.refs.textLayer.querySelector(`.ve-text-box[data-id="${o.id}"] .ve-text-content`);
@@ -5357,6 +5689,8 @@
     const fr = outputFrameRect();
     const preSnap = snapshotState();
     const x0 = ev.clientX, y0 = ev.clientY, ox0 = o.x, oy0 = o.y, w0 = o.w, h0 = o.h;
+    // a title has no width of its own to drag: its corner makes the whole thing bigger or smaller
+    const sz0 = o.sizePct || 0.034, bw0 = Math.max(20, box.offsetWidth || 0);
     let moved = false;
     const move = (e) => {
       if (Math.abs(e.clientX - x0) > 3 || Math.abs(e.clientY - y0) > 3) moved = true;
@@ -5364,7 +5698,8 @@
       const dx = (e.clientX - x0) / (fr.w || 1), dy = (e.clientY - y0) / (fr.h || 1);
       // box height hugs the text, so resizing only changes WIDTH (font size sets height)
       // — measured against the export frame, which is what o.w is a fraction of.
-      if (resizing) { o.w = clamp(w0 + ((e.clientX - x0) * 2) / (fr.w || 1), 0.06, 1); }
+      if (resizing && isTitle(o)) { o.sizePct = clamp(sz0 * (1 + ((e.clientX - x0) * 2) / bw0), 0.012, 0.2); clampTextIntoFrame(o); }
+      else if (resizing) { o.w = clamp(w0 + ((e.clientX - x0) * 2) / (fr.w || 1), 0.06, 1); }
       else {
         o.x = ox0 + dx; o.y = oy0 + dy;
         // e.shiftKey (or alt) on the desk: move freely, no snapping
@@ -5400,7 +5735,7 @@
       const left = o.start * ve.pxPerSec, width = Math.max(6, (o.end - o.start) * ve.pxPerSec);
       return `<div class="ve-text-clip${ve.textSel === o.id ? ' sel' : ''}" data-id="${o.id}" style="left:${left}px;width:${width}px;">`
         + `<div class="ve-tc-h l" data-tedge="l" title="Drag to change when the text starts"></div>`
-        + `<span class="ve-tc-label">${escape2(o.text)}</span>`
+        + `<span class="ve-tc-label">${escape2(o.text)}${isTitle(o) && titleRepeat(o).on ? ` · 🔁 every ${Math.round(titleRepeat(o).every)}s` : ''}</span>`
         + `<div class="ve-tc-h r" data-tedge="r" title="Drag to keep the text on screen longer"></div>`
         + `</div>`;
     }).join('');
@@ -6190,6 +6525,72 @@
       `<div style="${textLookCss(o, fontPx)}">` +
       `${escape2(o.text)}</div></div>`;
   }
+  /**
+   * ►► AN ANIMATED TITLE, FOR THE FILE. ◄◄ Its arrival and its leaving are
+   * drawn ONCE, frame by frame, from the very drawing the preview shows
+   * (titleHtml), over just the part of the picture it covers — then a list
+   * says which of those frames is up when, for every appearance in this clip.
+   * The burn plays it as one strip (video.writeStrip: a concat of those
+   * pictures), so a name that comes back eighty times in a sermon costs the
+   * same thirty-odd pictures as a name that comes once.
+   */
+  async function titleStrip(o, s, g, mode, outW, outH, css) {
+    const lay = overlayLayout(o, g, mode, outW, outH);
+    const fontPx = lay.fontPx;
+    // its size at this scale, measured on the page (same fonts, same drawing)
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;left:-99999px;top:0;visibility:hidden;width:max-content;';
+    probe.innerHTML = titleHtml(o, fontPx, TITLE_FULL);
+    document.body.appendChild(probe);
+    const tw = probe.offsetWidth, th = probe.offsetHeight;
+    probe.remove();
+    if (!tw || !th) return null;
+    // room round it for the pop's bounce and slide, and for shadows
+    const padX = Math.ceil(fontPx * 1.2 + tw * 0.12), padY = Math.ceil(fontPx * 0.6 + th * 0.15);
+    const even = (n) => Math.floor(n / 2) * 2;
+    const bx = clamp(even(lay.left - tw / 2 - padX), 0, Math.max(0, outW - 2));
+    const by = clamp(even(lay.top - th / 2 - padY), 0, Math.max(0, outH - 2));
+    const bw = Math.max(2, Math.min(outW - bx, even(Math.ceil(tw + padX * 2) + 2)));
+    const bh = Math.max(2, Math.min(outH - by, even(Math.ceil(th + padY * 2) + 2)));
+    const draw = (st) => window.rasterizeFlyer(css,
+      `<div style="position:relative;width:${bw}px;height:${bh}px;overflow:hidden;">`
+      + (st ? `<div style="position:absolute;left:${(lay.left - bx).toFixed(2)}px;top:${(lay.top - by).toFixed(2)}px;width:max-content;transform:translate(-50%,-50%);">${titleHtml(o, fontPx, st)}</div>` : '')
+      + '</div>', bw, bh, { transparent: true });
+    const FPS = TITLE_FPS;
+    const nIn = Math.ceil(TITLE_IN * FPS), nOut = Math.ceil(TITLE_OUT * FPS);
+    const pngs = [];
+    for (let i = 0; i < nIn; i++) pngs.push(await draw(titleState(o, i / FPS, 1e4)));                          // arriving
+    pngs.push(await draw(TITLE_FULL));                                                                         // up
+    for (let j = 0; j < nOut; j++) pngs.push(await draw(titleState(o, 1e4 - (TITLE_OUT - j / FPS), 1e4)));     // leaving
+    pngs.push(await draw(null));                                                                               // nothing
+    const HOLD = nIn, OUT0 = nIn + 1, BLANK = pngs.length - 1;
+    // which picture is up when, in SOURCE time, appearance by appearance
+    const segs = [];
+    for (const [a, b] of textShows(o, s.start, s.end)) {
+      const L = b - a;
+      const inEnd = a + Math.min(TITLE_IN, L);
+      for (let i = 0; i < nIn && a + i / FPS < inEnd; i++) segs.push([a + i / FPS, Math.min(inEnd, a + (i + 1) / FPS), i]);
+      const outStart = L >= TITLE_IN + TITLE_OUT ? b - TITLE_OUT : b;   // too short to leave: it is simply cut
+      if (outStart > inEnd) segs.push([inEnd, outStart, HOLD]);
+      for (let j = 0; j < nOut && outStart + j / FPS < b; j++) segs.push([outStart + j / FPS, Math.min(b, outStart + (j + 1) / FPS), OUT0 + j]);
+    }
+    // …on the clip's own clock (a short with pauses taken out), the gaps blank. Each
+    // duration is a difference of rounded ABSOLUTE times, so eighty appearances
+    // do not add up a drift.
+    const r6 = (x) => Math.round(x * 1e6) / 1e6;
+    const seq = [];
+    let at = 0;
+    for (const [t0, t1, f] of segs) {
+      const a0 = Math.max(t0, s.start), a1 = Math.min(t1, s.end);
+      if (a1 <= a0) continue;
+      const o0 = r6(Math.max(0, outTime(s, a0, 'start'))), o1 = r6(Math.max(0, outTime(s, a1, 'end')));
+      if (o0 > at + 1e-6) { seq.push([BLANK, r6(o0 - at)]); at = o0; }
+      if (o1 > at + 1e-6) { seq.push([f, r6(o1 - at)]); at = o1; }
+    }
+    if (!seq.length) return null;
+    seq.push([BLANK, 0.1]);   // it ends on nothing (the strip's last picture is held a moment)
+    return { strip: { pngs, seq, band: { x: bx, y: by, w: bw, h: bh }, frame: { w: outW, h: outH }, fps: FPS }, start: 0, end: at, anim: 'none' };
+  }
   /** Rasterise every overlay overlapping this clip into transparent PNGs sized
    *  to the export frame, with clip-relative show/hide times. */
   async function textOverlayPngs(s, outW, outH, mode) {
@@ -6209,6 +6610,7 @@
     const page = `position:relative;width:${outW}px;height:${outH}px;overflow:hidden;`;
     const out = [];
     for (const o of ovs) {
+      if (isTitle(o)) { const it = await titleStrip(o, s, g, mode, outW, outH, css); if (it) out.push(it); continue; }
       const body = `<div style="${page}">${textOverlayHtml(o, g, mode, outW, outH)}</div>`;
       const png = await window.rasterizeFlyer(css, body, outW, outH, { transparent: true });
       // through srcToOut, so text after a closed pause, a deleted stretch or a
@@ -6659,7 +7061,7 @@
     const fontPx = textFontPx(o, fr.h);
     const el = ve.refs.textLayer && ve.refs.textLayer.querySelector(`.ve-text-box[data-id="${o.id}"]`);
     // …measured as FRACTIONS OF THE FRAME, which is what o.x / o.y are
-    const bw = Math.min(el ? el.offsetWidth : fr.w, maxLine * fontPx * 0.58) / fr.w;
+    const bw = (el && isTitle(o) ? el.offsetWidth : Math.min(el ? el.offsetWidth : fr.w, maxLine * fontPx * 0.58)) / fr.w;
     const bh = (el ? el.offsetHeight : lines.length * fontPx * 1.3) / fr.h;
     // slim margins so text can sit almost at the very top/bottom of the frame —
     // the burn side's own glyph clamp still guarantees nothing gets cut off
@@ -16442,6 +16844,67 @@
       renderTextOverlays(); renderTextTrack(); updateTextTools();
     });
     const vtAnim = $('#vtAnim'); if (vtAnim) vtAnim.addEventListener('change', () => { if (ve.textSel) setTextAnim(ve.textSel, vtAnim.value); });
+    /*
+     * ►► AN ANIMATED TITLE'S CONTROLS. ◄◄ Its two lines are typed here (the
+     * title redraws as you type, one undo step per field), its colour is the
+     * bar's (or the panel's), and Repeat brings it back every so many seconds
+     * for so many — the speaker's name sliding in every 12 s for 4.
+     */
+    const tPick = () => { const o = selectedTextOverlay(); return o && isTitle(o) ? o : null; };
+    const vtT1 = $('#vtT1'), vtT2 = $('#vtT2');
+    let tTyping = false;
+    [[vtT1, 'text'], [vtT2, 'text2']].forEach(([inp, key]) => {
+      if (!inp) return;
+      inp.addEventListener('input', () => {
+        const o = tPick(); if (!o) return;
+        if (!tTyping) { tTyping = true; pushHistory(); }
+        o[key] = inp.value;
+        rememberTitle(o);
+        renderTextOverlays(); renderTextTrack();
+      });
+      inp.addEventListener('change', () => {
+        tTyping = false;
+        const o = tPick(); if (!o) return;
+        if (!String(o.text || '').trim()) o.text = titleTpl(o).text;   // a title always says something
+        clampTextIntoFrame(o); renderTextOverlays(); renderTextTrack(); updateTextTools();
+        if (typeof touchSession === 'function') touchSession();
+      });
+      inp.addEventListener('keydown', (k) => {
+        k.stopPropagation();   // typing is not the timeline's shortcuts
+        if (k.key === 'Enter') { k.preventDefault(); if (inp === vtT1 && vtT2) vtT2.focus(); else inp.blur(); }
+      });
+    });
+    const vtAccent = $('#vtAccent');
+    if (vtAccent) {
+      vtAccent.addEventListener('input', () => { const o = tPick(); if (o) { o.accent = vtAccent.value; renderTextOverlays(); } });
+      vtAccent.addEventListener('change', () => applyTextProp((o) => { if (isTitle(o)) o.accent = vtAccent.value; }));
+    }
+    const vtRepeat = $('#vtRepeat');
+    if (vtRepeat) vtRepeat.addEventListener('change', () => applyTextProp((o) => {
+      if (!isTitle(o)) return;
+      const R = titleRepeat(o);
+      o.repeat = { on: vtRepeat.checked, every: R.every, hold: R.on ? R.hold : clamp(o.end - o.start, TITLE_IN + TITLE_OUT + 0.2, R.every - 0.5) };
+      // repeating runs on to the end of the video (trim its block to stop it sooner);
+      // not repeating, it is up once, for as long as it was each time
+      if (vtRepeat.checked) o.end = Math.max(o.end, dur() || o.end);
+      else o.end = Math.min(dur() || Infinity, o.start + titleRepeat(o).hold);
+    }));
+    const num = (inp, fn) => { if (inp) { inp.addEventListener('change', () => { const v = parseFloat(inp.value); if (v > 0) applyTextProp((o) => { if (isTitle(o)) fn(o, v); }); updateTextTools(); }); inp.addEventListener('keydown', (k) => k.stopPropagation()); } };
+    num($('#vtEvery'), (o, v) => {
+      const R = titleRepeat(o);
+      o.repeat = { on: R.on, every: clamp(v, 2, 600), hold: R.hold };
+      o.repeat.hold = titleRepeat(o).hold;   // (kept shorter than the gap it comes back in)
+    });
+    num($('#vtHold'), (o, v) => {
+      const R = titleRepeat(o);
+      if (R.on) {
+        // staying longer than the gap between appearances: the gap opens to fit it
+        const hold = clamp(v, TITLE_IN + TITLE_OUT + 0.2, 600);
+        o.repeat = { on: true, every: Math.max(R.every, hold + 0.5), hold };
+      } else {
+        o.end = Math.min(dur() || Infinity, o.start + clamp(v, TITLE_IN + TITLE_OUT + 0.2, 3600));
+      }
+    });
     // Clicking anywhere on the preview OUTSIDE a text box deselects the text:
     // commits any in-progress edit, hides the style toolbar, drops the drag border.
     ve.refs.preview.addEventListener('mousedown', (e) => {
@@ -17810,8 +18273,24 @@
       // own HTML/CSS (this is what actually gets burned in).
       async textPngsForShort(start, end, w, h, mode) {
         const r = await textOverlayPngs({ start, end, label: 'test' }, w, h, mode);
-        return r ? r.map((x) => ({ png: Array.from(x.png), start: x.start, end: x.end })) : null;
+        return r ? r.map((x) => (x.strip
+          ? { strip: { frames: x.strip.pngs.length, seq: x.strip.seq, band: x.strip.band, frame: x.strip.frame, fps: x.strip.fps, first: Array.from(x.strip.pngs[Math.floor(x.strip.pngs.length / 2)] || []) }, start: x.start, end: x.end }
+          : { png: Array.from(x.png), start: x.start, end: x.end })) : null;
       },
+      // the real burn of the text (titles' strips included) onto the open video, kept beside it
+      async burnTextNow(start, end, w, h, mode) {
+        const images = await textOverlayPngs({ start, end, label: 'test' }, w, h, mode);
+        if (!images || !images.length) return null;
+        return window.api.overlays.burnImages({ input: ve.video.path, images, jobId: 'title-test', deleteInput: false, outName: 'title-test' });
+      },
+      textOverlaysRaw() { return JSON.parse(JSON.stringify(ve.textOverlays)); },
+      // an animated title's drawing: whole, or `u` seconds into an appearance `L` long
+      titleSample(id, px, u, L) {
+        const tp = TITLE_TPLS.find((x) => x.id === id); if (!tp) return '';
+        const o = { ttl: id, text: tp.text, text2: tp.text2, accent: tp.accent };
+        return titleHtml(o, px, u == null ? TITLE_FULL : titleState(o, u, L || 4));
+      },
+      titleIds() { return TITLE_TPLS.map((t) => t.id); },
       overlayLayout(id, mode, outW, outH) {
         const o = ve.textOverlays.find((x) => x.id === id);
         return o ? overlayLayout(o, textExportGeom(), mode, outW, outH) : null;

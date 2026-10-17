@@ -677,6 +677,14 @@ body.mw-cloud #cloudPass:focus { border-color: #1f6fe0; box-shadow: 0 0 0 3px rg
   body.mw-cloud #view-video.ve-pro .ve-text-tools input[type=color]:disabled { opacity: .35; }
   body.mw-cloud #view-video.ve-pro .ve-text-tools #vtAnim { flex: 1 1 120px; font-size: 15px; text-overflow: ellipsis; }
   body.mw-cloud #view-video.ve-pro .ve-text-tools #vtDelete { margin-left: auto; }
+  /* an animated title: its two lines across the panel, then its colour and when it comes back */
+  body.mw-cloud #view-video.ve-pro .ve-text-tools .vt-title { flex: 1 1 100%; flex-wrap: wrap; gap: 10px; }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools .vt-tline {
+    flex: 1 1 100%; width: auto; height: 44px; font-size: 16px; padding: 0 12px; border-radius: 12px;
+    background: var(--ph-panel-2, #1c1d23); color: #fff; border: 1px solid rgba(255,255,255,.08);
+  }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools :is(.vt-rep, .vt-rep-n) { height: 44px; color: #d4d7df; font-size: 15px; font-weight: 650; gap: 7px; }
+  body.mw-cloud #view-video.ve-pro .ve-text-tools .vt-rep input[type=checkbox] { width: 22px; height: 22px; accent-color: #1f6fe0; }
   /* B, AA, outline and panel are on/off switches: on is plain to see (white
      with blue letters), off is the dark button — otherwise nobody can tell
      whether ALL CAPS or bold is on without looking at the picture */

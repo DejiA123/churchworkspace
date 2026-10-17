@@ -2329,6 +2329,19 @@ const textFps = (info) => Math.min(60, Math.max(24, Math.round(Number(info && in
  * that exists only for the text's own window, so it costs nothing outside it.
  */
 function textOverlaySteps({ idx, base, out, im, W, H, fps = 30 }) {
+  // an animated title: its strip of frames (writeStrip), laid on its own band of the picture
+  if (im.strip) {
+    const S = im.strip;
+    const fw = (S.frame && Number(S.frame.w)) || W, fh = (S.frame && Number(S.frame.h)) || H;
+    const kx = W / fw, ky = H / fh;
+    const ev = (n) => Math.max(0, Math.round(n / 2) * 2);
+    const bx = Math.min(W - 2, ev(S.band.x * kx)), by = Math.min(H - 2, ev(S.band.y * ky));
+    const bw = Math.max(2, Math.min(W - bx, ev(S.band.w * kx))), bh = Math.max(2, Math.min(H - by, ev(S.band.h * ky)));
+    const scaled = Math.abs(kx - 1) > 1e-3 || Math.abs(ky - 1) > 1e-3;
+    return [`[${idx}:v]format=rgba,setpts=PTS-STARTPTS${scaled ? `,scale=${bw}:${bh}:flags=lanczos` : ''},fps=${S.fps || 30}[ov${idx}]`,
+      // eof_action=pass: after its last appearance the picture is left alone
+      `[${base}][ov${idx}]overlay=${bx}:${by}:eof_action=pass[${out}]`];
+  }
   const s = Math.max(0, Number(im.start) || 0);
   const e = Math.max(s + 0.05, Number(im.end) || s + 1);
   const f = (v) => Number(v).toFixed(3);
@@ -2366,6 +2379,48 @@ function textOverlaySteps({ idx, base, out, im, W, H, fps = 30 }) {
   return [`${chain}[ov${idx}]`, `[${base}][ov${idx}]overlay=x=${x}:y=${y}:eval=frame:eof_action=pass[${out}]`];
 }
 
+/** The input arguments for one text picture: a still PNG, or an animated title's strip. */
+const textInputArgs = (im) => (im.strip ? ['-f', 'concat', '-safe', '0', '-i', im.path] : ['-i', im.path]);
+
+/**
+ * An animated title's frames on disk, and the concat list that plays them:
+ * which picture is up for how long, appearance after appearance (the renderer's
+ * titleStrip). The names are made here, never taken from what was sent.
+ */
+function writeStrip(strip, dir, key) {
+  const pngs = Array.isArray(strip && strip.pngs) ? strip.pngs : [];
+  const seq = Array.isArray(strip && strip.seq) ? strip.seq : [];
+  if (!pngs.length || !seq.length) return null;
+  const names = pngs.map((b, j) => {
+    const n = `${key}-${j}.png`;
+    fs.writeFileSync(path.join(dir, n), Buffer.from(b));
+    return n;
+  });
+  const lines = ['ffconcat version 1.0'];
+  let last = null;
+  for (const e of seq) {
+    const n = names[Number(e && e[0]) | 0];
+    const d = Number(e && e[1]);
+    if (!n || !(d > 0)) continue;
+    lines.push(`file '${n}'`, `duration ${d.toFixed(6)}`);
+    last = n;
+  }
+  if (!last) return null;
+  // the demuxer only gives the LAST entry its duration when the file is named once more
+  lines.push(`file '${last}'`);
+  const list = path.join(dir, `${key}.txt`);
+  fs.writeFileSync(list, lines.join('\n') + '\n', 'utf-8');
+  const b = strip.band || {};
+  return {
+    path: list,
+    strip: {
+      band: { x: Number(b.x) || 0, y: Number(b.y) || 0, w: Math.max(2, Number(b.w) || 2), h: Math.max(2, Number(b.h) || 2) },
+      frame: strip.frame && Number(strip.frame.w) && Number(strip.frame.h) ? { w: Number(strip.frame.w), h: Number(strip.frame.h) } : null,
+      fps: Math.max(1, Math.min(60, Number(strip.fps) || 30)),
+    },
+  };
+}
+
 /**
  * Composite transparent PNG overlays (each already rendered at the picture's own
  * aspect ratio by the renderer) onto a video for their own time windows.
@@ -2385,7 +2440,7 @@ async function burnImageOverlays(ctx, { input, images = [], output, onProgress }
 
   const build = (fmt) => {
     const args = ['-i', input];
-    images.forEach((im) => args.push('-i', im.path));
+    images.forEach((im) => args.push(...textInputArgs(im)));
     const parts = [];
     let cur = '0:v';
     images.forEach((im, idx) => {
@@ -2610,7 +2665,7 @@ async function burnCaptionFrames(ctx, { input, track, output, onProgress, images
     parts.push(`[${base}][ov]overlay=${bx}:${by}:eof_action=pass[cap]`);
     parts.push(`[cap]format=${fmt}[vout]`);
     const args = ['-i', input, '-f', 'concat', '-safe', '0', '-i', listPath];
-    pics.forEach((im) => args.push('-i', im.path));
+    pics.forEach((im) => args.push(...textInputArgs(im)));
     args.push('-filter_complex', parts.join(';'), '-map', '[vout]');
     if (info.hasAudio) args.push('-map', '0:a');
     return args;
@@ -3606,7 +3661,7 @@ module.exports = { cssStep, LOOK_STEPS,
   extractAudio, autoTrimSilence, merge, joinPieces, normalizePieces, addCaptions, exportShort, filmstrip, makeProxy, needsProxy, applyEdits,
   extractFrames, detectSceneCuts, exportShortReframed, exportShortFramed, attachThumbnail, waveform, stabilize, reverseClip, freezeFrame, hms, cutPlan,
   exportOverlayComposite, burnImageOverlays, burnCaptionTrack,
-  TEXT_ANIMS, textAnimOf, textAnimTimes, textAnimScale, TEXT_RISE, textOverlaySteps,
+  TEXT_ANIMS, textAnimOf, textAnimTimes, textAnimScale, TEXT_RISE, textOverlaySteps, writeStrip,
   cleanMotion, motionExpr, motionAt, motionChain, MOTION_MAX_Z, keyOf, inPreviewLane, transparentPng, writeTrackFrames, burnCaptionFrames,
   cropFirstChain, fillChain,
   simplifyKeyframes, buildLerpExpr, isCleanEncode,

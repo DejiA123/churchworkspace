@@ -884,6 +884,17 @@
                     <option value="pop">Pop</option>
                     <option value="zoom">Zoom</option>
                   </select>
+                  <!-- An ANIMATED TITLE's own controls — its words, its colour, and when it
+                       comes back — shown in place of the text ones while a title is picked:
+                       a name that slides in every 12 seconds and stays on screen for 4. -->
+                  <span class="vt-title">
+                    <input type="text" id="vtT1" class="vt-tline" placeholder="Name" autocomplete="off" spellcheck="false" enterkeyhint="next" aria-label="Title, first line" />
+                    <input type="text" id="vtT2" class="vt-tline" placeholder="Second line (optional)" autocomplete="off" spellcheck="false" enterkeyhint="done" aria-label="Title, second line" />
+                    <input type="color" id="vtAccent" title="The title's colour" aria-label="Title colour" />
+                    <label class="vt-rep" title="Bring the title back again and again, from where it starts to where it ends on the timeline"><input type="checkbox" id="vtRepeat" /> Repeat</label>
+                    <label class="vt-rep-n vt-every" title="How often it comes back">every <input type="number" id="vtEvery" min="2" max="600" step="1" inputmode="numeric" enterkeyhint="done" aria-label="Comes back every, seconds" /> s</label>
+                    <label class="vt-rep-n" title="How long it stays on the screen each time">on screen <input type="number" id="vtHold" min="1.5" max="600" step="0.5" inputmode="decimal" enterkeyhint="done" aria-label="Stays on screen, seconds" /> s</label>
+                  </span>
                   <button id="vtDelete" title="Delete this text">🗑</button>
                   <button id="vtDone" class="vt-done" title="Done">✓</button>
                 </div>

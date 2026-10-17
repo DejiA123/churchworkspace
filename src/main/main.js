@@ -2378,14 +2378,24 @@ ipcMain.handle('captions:burn', wrap(async (e, { input, events, opts, jobId, out
 // putTrackFrames) — so the page drawing them never has to hold them all.
 ipcMain.handle('captions:trackPut', wrap(async (e, a) => video.putTrackFrames(a || {})));
 
-ipcMain.handle('captions:burnTrack', wrap(async (e, { input, track, jobId, outName, deleteInput, images }) => {
-  const list = (images || []).filter((im) => im && im.png);
-  const dir = list.length ? fs.mkdtempSync(path.join(app.getPath('temp'), 'mw-captxt-')) : null;
-  const files = list.map((im, i) => {
-    const p = path.join(dir, `txt${i}.png`);
+/*
+ * The text pictures sent by the renderer, on disk: a still text is one PNG; an
+ * animated title (im.strip) is its handful of frames and the concat list that
+ * plays them at every appearance (video.writeStrip).
+ */
+function writeTextImages(list, dir, prefix) {
+  return list.map((im, i) => {
+    if (im.strip) return video.writeStrip(im.strip, dir, `${prefix}s${i}`);
+    const p = path.join(dir, `${prefix}${i}.png`);
     fs.writeFileSync(p, Buffer.from(im.png));
     return { path: p, start: im.start, end: im.end, anim: im.anim, cx: im.cx, cy: im.cy };
-  });
+  }).filter(Boolean);
+}
+
+ipcMain.handle('captions:burnTrack', wrap(async (e, { input, track, jobId, outName, deleteInput, images }) => {
+  const list = (images || []).filter((im) => im && (im.png || im.strip));
+  const dir = list.length ? fs.mkdtempSync(path.join(app.getPath('temp'), 'mw-captxt-')) : null;
+  const files = list.length ? writeTextImages(list, dir, 'txt') : [];
   const output = outPath(`${(outName || 'captioned').replace(/[^\w.-]+/g, '_').slice(0, 60)}-${stamp()}.mp4`);
   try {
     await video.burnCaptionTrack(getCtx(), { input, track, output, images: files, onProgress: onProgress(e, jobId) });
@@ -2414,14 +2424,11 @@ ipcMain.handle('overlays:burn', wrap(async (e, { input, overlays, jobId, outName
 // preview and the export share one text engine, so nothing can drift between
 // what the operator placed and what lands in the file.
 ipcMain.handle('overlays:burnImages', wrap(async (e, { input, images, jobId, outName, deleteInput }) => {
-  const list = (images || []).filter((im) => im && im.png);
+  const list = (images || []).filter((im) => im && (im.png || im.strip));
   if (!list.length) throw new Error('No text to add.');
   const dir = fs.mkdtempSync(path.join(app.getPath('temp'), 'mw-ovlpng-'));
-  const files = list.map((im, i) => {
-    const p = path.join(dir, `ovl${i}.png`);
-    fs.writeFileSync(p, Buffer.from(im.png));
-    return { path: p, start: im.start, end: im.end, anim: im.anim, cx: im.cx, cy: im.cy };
-  });
+  const files = writeTextImages(list, dir, 'ovl');
+  if (!files.length) throw new Error('No text to add.');
   const output = outPath(`${(outName || 'text').replace(/[^\w.-]+/g, '_').slice(0, 60)}-${stamp()}.mp4`);
   await video.burnImageOverlays(getCtx(), { input, images: files, output, onProgress: onProgress(e, jobId) });
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch (er) {}
