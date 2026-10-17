@@ -1663,6 +1663,19 @@ ipcMain.handle('llm:removeModel', wrap(async (e, { modelId }) => {
 
 // `pieces` (present when the user closed gaps on this clip) cuts the pauses out
 // inside the export's own pass — no joined intermediate to render first.
+// A title for a stretch of a sermon from the words said in it: the same pick a
+// "Key moment" gets (titleFromClip), its hookiest whole sentence. '' when the
+// words give nothing better than a placeholder.
+ipcMain.handle('sermon:titleFor', wrap(async (e, { words } = {}) => {
+  const chunks = (Array.isArray(words) ? words : []).slice(0, 4000)
+    .filter((w) => w && typeof w.text === 'string' && w.text.trim())
+    .map((w) => ({ text: String(w.text).slice(0, 200), start: Number(w.start) || 0, end: Number(w.end) || 0 }));
+  if (chunks.length < 3) return '';
+  const sentsArr = highlights.buildSentences(chunks);
+  const title = highlights.titleFromClip({ sentsArr, text: sentsArr.map((x) => x.text).join(' ') }, 0);
+  return /^Key moment \d+$/.test(title) ? '' : title;
+}));
+
 ipcMain.handle('sermon:exportShort', wrap(async (e, { input, startSec, endSec, preset, quality, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, label, jobId, draft }) => {
   const safe = fileSafeTitle(label || 'short');
   const output = outPath(`short-${safe}-${stamp()}.mp4`);

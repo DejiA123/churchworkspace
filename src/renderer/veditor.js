@@ -10670,17 +10670,52 @@
     return { start: p[0].start, end: p[p.length - 1].end, pieces: p, cuts, xfades,
              kept: raw - xfades.reduce((a, x) => a + x.d, 0) };
   }
+  /*
+   * WHAT AN EDITED VIDEO IS CALLED. It was named after the recording's file
+   * ("Media Church Work Space media…"), so every video saved from one sermon
+   * looked the same in My Uploads. Now it is called by the title it really has:
+   *   1. the AI short it was cut from (one covering most of it), by its title
+   *   2. its clip's own name, when it is one clip someone named
+   *   3. the project's name, when someone gave it one
+   *   4. its hookiest sentence, from the words said in it (as a "Key moment"
+   *      short's title is made)
+   * and the recording's name only when there is nothing else to go by.
+   */
+  const PLACEHOLDER_LABEL = /^(full video|clip|manual|short|edited|key( moment)?( \d+)?|clip \d+)( copy| \(\d+\))*$/i;
+  const namedLabel = (l) => !!(l && String(l).trim() && !PLACEHOLDER_LABEL.test(String(l).trim()));
+  async function editedTitle(span) {
+    const own = prettyVideoName((ve.video.path.split(/[\\/]/).pop() || ''));
+    const len = Math.max(0.1, span.kept);
+    const inSpan = (a, b) => span.pieces.reduce((n, p) => n + Math.max(0, Math.min(p.end, b) - Math.max(p.start, a)), 0);
+    let best = null, most = 0;
+    for (const s of shortsOf()) { const o = inSpan(s.start, s.end); if (o > most) { best = s; most = o; } }
+    if (best && most >= 0.5 * len && namedLabel(best.label)) return best.label.trim();
+    const main = mainClips();
+    if (main.length === 1 && namedLabel(main[0].label)) return main[0].label.trim();
+    if (ve.sessionName && !ve.sessionAuto && namedLabel(ve.sessionName) && ve.sessionName !== own) return ve.sessionName.trim();
+    const off = ve.capOffset || 0;
+    let words = (ve.capWords || []).map((w) => ({ text: w.text, start: w.start + off, end: w.end + off }));
+    if (!words.length && ve._scanWords) for (const v of ve._scanWords.values()) words.push(...(v.words || []));
+    words = words.filter((w) => w && w.text && inSpan(w.start, Math.max(w.end, w.start + 0.01)) > 0).sort((a, b) => a.start - b.start).slice(0, 3000);
+    if (words.length >= 3 && window.api.sermon && window.api.sermon.titleFor) {
+      try { const t = await window.api.sermon.titleFor({ words }); if (namedLabel(t)) return String(t).trim(); } catch (e) { /* the recording's name will do */ }
+    }
+    return own;
+  }
   async function exportEditedVideo() {
     if (!ve.video) return window.__toast && window.__toast('Open a video first.', 'error');
     saveSessionNow();
     const span = editedSpan();
     if (!span) return window.__toast && window.__toast('Nothing on the timeline to export — the main track is empty.', 'error');
+    const title = await editedTitle(span).catch(() => '');
     const jobId = window.__newJobId();
     // A synthetic segment so the text / music / outro steps work exactly as they
     // do for a short. `seed` keeps it out of the clip list if anything renders.
     // …and the gaps and transitions, so text and captions are re-timed onto the
     // export's own clock (srcToOut) instead of drifting after each join
-    const whole = { id: '__edited', start: span.start, end: span.end, label: 'edited', seed: true, cuts: span.cuts, xfades: span.xfades };
+    // …called by its title, so each step's file (text, captions, the end clip) keeps it
+    const whole = { id: '__edited', start: span.start, end: span.end, label: title || 'edited', seed: true, cuts: span.cuts, xfades: span.xfades };
+    const stem = title ? title.replace(/[^\w.-]+/g, '_').slice(0, 50) : 'edited';
     // The longest export in the app — a whole service — and therefore the one
     // that most needs to be walkable-away-from.
     const task = startTask(`Saving your edited video (${fmt(span.kept)})`, { durationSec: span.kept, quality: qualityCfg() });
@@ -10746,7 +10781,7 @@
         denoise: denoiseCfg(), fadeIn: fadeInCfg(), fadeOut: fadeOutCfg(),
         // keyframed push-ins on every clip, on the edited video's own clock
         motion,
-        label: (ve.video.path.split(/[\\/]/).pop() || 'video').replace(/\.[^.]+$/, '') + '-edited',
+        label: title || (ve.video.path.split(/[\\/]/).pop() || 'video').replace(/\.[^.]+$/, '') + '-edited',
         jobId,
       }), J(whole, 'encode'));
       if (late) {
@@ -10754,7 +10789,7 @@
         if (post.length) {
           const jid = window.__newJobId();
           out = await window.__runJob(`📺 Laying ${post.length === 1 ? 'your overlay' : post.length + ' overlays'} onto the video…`, jid,
-            () => window.api.video.overlayComposite({ base: out, overlays: post, jobId: jid, deleteInput: true, outName: 'edited-overlay' }), J(whole, 'overlays'));
+            () => window.api.video.overlayComposite({ base: out, overlays: post, jobId: jid, deleteInput: true, outName: `${stem}-overlay` }), J(whole, 'overlays'));
         }
       }
       /*
@@ -10778,7 +10813,7 @@
         }
         const ja = window.__newJobId();
         out = await window.__runJob(`🎞 Adding ${clips.length === 1 ? 'the clip' : clips.length + ' clips'} that come after…`, ja,
-          () => window.api.video.appendClips({ input: out, clips, position: 'end', fill: { mode: 'blur' }, jobId: ja, deleteInput: true, outName: 'edited-plus' }));
+          () => window.api.video.appendClips({ input: out, clips, position: 'end', fill: { mode: 'blur' }, jobId: ja, deleteInput: true, outName: `${stem}-plus` }));
       }
       const info = ve.video.info;
       const size = { w: info.width, h: info.height };
@@ -18366,6 +18401,7 @@
         return window.api.overlays.burnImages({ input: ve.video.path, images, jobId: 'title-test', deleteInput: false, outName: 'title-test' });
       },
       textOverlaysRaw() { return JSON.parse(JSON.stringify(ve.textOverlays)); },
+      async editedTitle() { const sp = editedSpan(); return sp ? editedTitle(sp) : null; },
       // a title's appearances as a short from `start` to `end` gets them, and whether the preview shows it at t
       titleShows(id, start, end) { const o = ve.textOverlays.find((x) => x.id === id); return o ? textShows(o, start, end, titleFrom(o, { start, end })) : null; },
       textUpAt(id, t) { const o = ve.textOverlays.find((x) => x.id === id); return o ? textOnAt(o, t) : null; },

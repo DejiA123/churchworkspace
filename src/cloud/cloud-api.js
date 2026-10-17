@@ -210,6 +210,7 @@ const ALLOWED = {
 
   // long → short
   'sermon:analyze': true,
+  'sermon:titleFor': true,
   'batch:open': true,
   'batch:add': true,
   'batch:seal': true,

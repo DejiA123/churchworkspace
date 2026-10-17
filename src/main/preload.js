@@ -266,6 +266,7 @@ contextBridge.exposeInMainWorld('api', {
   sermon: {
     analyze: (a) => call('sermon:analyze', a),
     exportShort: (a) => call('sermon:exportShort', a),
+    titleFor: (a) => call('sermon:titleFor', a),
     exportReframed: (a) => call('sermon:exportReframed', a),
     exportFramed: (a) => call('sermon:exportFramed', a),
     extractFrames: (a) => call('video:extractFrames', a),
