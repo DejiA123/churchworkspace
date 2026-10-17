@@ -5204,36 +5204,55 @@
     back: (p) => { const c1 = 1.55, c3 = c1 + 1; return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2); },
   };
   const tSeg = (u, a, d) => clamp((u - a) / d, 0, 1);
-  /** How long one appearance lasts, and how often it comes back. */
+  /** How long one appearance lasts, how often it comes back, and whether every
+   *  short starts it afresh (the default). */
   function titleRepeat(o) {
     const r = o.repeat || {};
     const every = clamp(Number(r.every) || 12, 2, 600);
     const hold = clamp(Number(r.hold) || 4, TITLE_IN + TITLE_OUT + 0.2, Math.max(TITLE_IN + TITLE_OUT + 0.2, every - 0.5));
-    return { on: !!r.on, every, hold };
+    return { on: !!r.on, every, hold, fresh: r.fresh !== false };
   }
-  /** Every appearance of a text that overlaps [from, to): [start, end] pairs. */
-  function textShows(o, from = -Infinity, to = Infinity) {
+  /*
+   * FRESH IN EVERY SHORT. A name banner that comes back every 12 seconds counted
+   * its 12 seconds from where it was put on the whole sermon, so a short cut from
+   * 5:48 caught it wherever that count happened to be — halfway out, or not due
+   * for eleven seconds. Now each short starts it afresh: it slides in as the
+   * short begins, then comes back every 12 seconds of THAT short. The clips on the
+   * main track are the shorts, so the preview counts from the start of the short
+   * the playhead is in (shortAt); a whole-video export keeps one count from start
+   * to end.
+   */
+  function titleFrom(o, s) {
+    if (!s || s.seed || !isTitle(o) || !titleRepeat(o).fresh) return o.start;
+    return Math.max(o.start, s.start);
+  }
+  const titleFromAt = (o, t) => (isTitle(o) ? titleFrom(o, shortAt(t)) : o.start);
+  /** Every appearance of a text that overlaps [from, to): [start, end] pairs,
+   *  counted from `at` (its start, or the start of the short it is in). */
+  function textShows(o, from = -Infinity, to = Infinity, at = o.start) {
+    const a0 = Math.max(o.start, at);
     const R = isTitle(o) ? titleRepeat(o) : null;
-    if (!R || !R.on) return (o.start < to && o.end > from) ? [[o.start, o.end]] : [];
+    if (!R || !R.on) return (a0 < to && o.end > from && a0 < o.end) ? [[a0, o.end]] : [];
     const out = [];
-    for (let k = Math.max(0, Math.floor((from - o.start) / R.every) - 1); out.length < 20000; k++) {
-      const a = o.start + k * R.every;
+    for (let k = Math.max(0, Math.floor((from - a0) / R.every) - 1); out.length < 20000; k++) {
+      const a = a0 + k * R.every;
       if (a >= o.end - 0.05 || a >= to) break;
       const b = Math.min(o.end, a + R.hold);
       if (b > from) out.push([a, b]);
     }
     return out;
   }
-  /** The appearance showing at t, or null. */
-  function textShowAt(o, t) {
-    if (!(t >= o.start && t <= o.end)) return null;
+  /** The appearance showing at t, or null (counted from `at`, as textShows). */
+  function textShowAt(o, t, at = o.start) {
+    const a0 = Math.max(o.start, at);
+    if (!(t >= a0 && t <= o.end)) return null;
     const R = isTitle(o) ? titleRepeat(o) : null;
-    if (!R || !R.on) return [o.start, o.end];
-    const k = Math.floor((t - o.start) / R.every);
-    const a = o.start + k * R.every, b = Math.min(o.end, a + R.hold);
+    if (!R || !R.on) return [a0, o.end];
+    const k = Math.floor((t - a0) / R.every);
+    const a = a0 + k * R.every, b = Math.min(o.end, a + R.hold);
     return (t <= b && a < o.end - 0.05) ? [a, b] : null;
   }
-  const textOnAt = (o, t) => !!textShowAt(o, t);
+  const textOnAt = (o, t) => !!textShowAt(o, t, titleFromAt(o, t));
   /**
    * Where the title is in its move, `u` seconds into an appearance `L` long:
    * bar (0 gone … 1 full), l1 / l2 (how far each line has come out), k
@@ -5354,7 +5373,7 @@
   /** The title as it is at timeline time t (whole while it is picked and the video is still). */
   function titleHtmlAt(o, fontPx, t) {
     if (ve.textSel === o.id && ve.refs.player && ve.refs.player.paused) return titleHtml(o, fontPx, TITLE_FULL);
-    const show = textShowAt(o, t);
+    const show = textShowAt(o, t, titleFromAt(o, t));
     if (!show) return titleHtml(o, fontPx, TITLE_FULL);
     return titleHtml(o, fontPx, titleState(o, t - show[0], show[1] - show[0]));
   }
@@ -5586,6 +5605,7 @@
       // on screen: each time it comes back — or, not repeating, the whole time it is up
       put('#vtHold', String(Math.round((R.on ? R.hold : (o.end - o.start)) * 10) / 10));
       const ev = $('#vtEvery'); if (ev && ev.disabled !== !R.on) ev.disabled = !R.on;
+      const fr = $('#vtFresh'); if (fr && fr.checked !== R.fresh) fr.checked = R.fresh;
       if (bar.classList.contains('vt-repeating') !== R.on) bar.classList.toggle('vt-repeating', R.on);
     }
   }
@@ -6569,7 +6589,7 @@
     const HOLD = nIn, OUT0 = nIn + 1, BLANK = pngs.length - 1;
     // which picture is up when, in SOURCE time, appearance by appearance
     const segs = [];
-    for (const [a, b] of textShows(o, s.start, s.end)) {
+    for (const [a, b] of textShows(o, s.start, s.end, titleFrom(o, s))) {
       const L = b - a;
       const inEnd = a + Math.min(TITLE_IN, L);
       for (let i = 0; i < nIn && a + i / FPS < inEnd; i++) segs.push([a + i / FPS, Math.min(inEnd, a + (i + 1) / FPS), i]);
@@ -16918,16 +16938,21 @@
     if (vtRepeat) vtRepeat.addEventListener('change', () => applyTextProp((o) => {
       if (!isTitle(o)) return;
       const R = titleRepeat(o);
-      o.repeat = { on: vtRepeat.checked, every: R.every, hold: R.on ? R.hold : clamp(o.end - o.start, TITLE_IN + TITLE_OUT + 0.2, R.every - 0.5) };
+      o.repeat = { on: vtRepeat.checked, every: R.every, hold: R.on ? R.hold : clamp(o.end - o.start, TITLE_IN + TITLE_OUT + 0.2, R.every - 0.5), fresh: R.fresh };
       // repeating runs on to the end of the video (trim its block to stop it sooner);
       // not repeating, it is up once, for as long as it was each time
       if (vtRepeat.checked) o.end = Math.max(o.end, dur() || o.end);
       else o.end = Math.min(dur() || Infinity, o.start + titleRepeat(o).hold);
     }));
+    // ✓ Fresh in every short: each short starts the title as it begins
+    const vtFresh = $('#vtFresh');
+    if (vtFresh) vtFresh.addEventListener('change', () => applyTextProp((o) => {
+      if (isTitle(o)) o.repeat = Object.assign({}, o.repeat || {}, { fresh: vtFresh.checked });
+    }));
     const num = (inp, fn) => { if (inp) { inp.addEventListener('change', () => { const v = parseFloat(inp.value); if (v > 0) applyTextProp((o) => { if (isTitle(o)) fn(o, v); }); updateTextTools(); }); inp.addEventListener('keydown', (k) => k.stopPropagation()); } };
     num($('#vtEvery'), (o, v) => {
       const R = titleRepeat(o);
-      o.repeat = { on: R.on, every: clamp(v, 2, 600), hold: R.hold };
+      o.repeat = { on: R.on, every: clamp(v, 2, 600), hold: R.hold, fresh: R.fresh };
       o.repeat.hold = titleRepeat(o).hold;   // (kept shorter than the gap it comes back in)
     });
     num($('#vtHold'), (o, v) => {
@@ -16935,7 +16960,7 @@
       if (R.on) {
         // staying longer than the gap between appearances: the gap opens to fit it
         const hold = clamp(v, TITLE_IN + TITLE_OUT + 0.2, 600);
-        o.repeat = { on: true, every: Math.max(R.every, hold + 0.5), hold };
+        o.repeat = { on: true, every: Math.max(R.every, hold + 0.5), hold, fresh: R.fresh };
       } else {
         o.end = Math.min(dur() || Infinity, o.start + clamp(v, TITLE_IN + TITLE_OUT + 0.2, 3600));
       }
@@ -17845,7 +17870,7 @@
       const t = nowT();
       if (!textOnAt(o, t)) {
         const gap = (s) => (t < s[0] ? s[0] - t : t - s[1]);
-        const show = textShows(o).reduce((b, s) => (!b || gap(s) < gap(b) ? s : b), null);
+        const show = textShows(o, -Infinity, Infinity, titleFromAt(o, t)).reduce((b, s) => (!b || gap(s) < gap(b) ? s : b), null);
         if (show) { try { ve.refs.player.currentTime = Math.min(show[1] - 0.05, show[0] + (isTitle(o) ? 1 : 0.3)); updatePlayhead(); } catch (e) {} }
       }
       ve._textOnLane = false;
@@ -18341,6 +18366,9 @@
         return window.api.overlays.burnImages({ input: ve.video.path, images, jobId: 'title-test', deleteInput: false, outName: 'title-test' });
       },
       textOverlaysRaw() { return JSON.parse(JSON.stringify(ve.textOverlays)); },
+      // a title's appearances as a short from `start` to `end` gets them, and whether the preview shows it at t
+      titleShows(id, start, end) { const o = ve.textOverlays.find((x) => x.id === id); return o ? textShows(o, start, end, titleFrom(o, { start, end })) : null; },
+      textUpAt(id, t) { const o = ve.textOverlays.find((x) => x.id === id); return o ? textOnAt(o, t) : null; },
       // an animated title's drawing: whole, or `u` seconds into an appearance `L` long
       titleSample(id, px, u, L) {
         const tp = TITLE_TPLS.find((x) => x.id === id); if (!tp) return '';
