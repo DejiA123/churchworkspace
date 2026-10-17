@@ -15389,7 +15389,8 @@
     $$('.lib-tab').forEach((b) => b.classList.toggle('active', b.dataset.libtab === tab));
     $$('.lib-pane').forEach((p) => p.classList.toggle('hidden', p.dataset.libpane !== tab));
     const title = $('#libTitle');
-    if (title) title.textContent = tab === 'clips' ? '🎬 My clips' : tab === 'youtube' ? '▶️ Music from YouTube' : '🎵 My music';
+    if (title) title.textContent = tab === 'clips' ? 'Clips' : 'Music';
+    libSubtitle();
     const hint = $('#libHint');
     if (hint) hint.textContent = tab === 'clips'
       ? 'The clip you pick is added to the END of every short you export.'
@@ -15401,24 +15402,53 @@
     renderMusicList(); renderClipGrid(); renderMusicBar(); renderOutroBar();
   }
 
+  /* The library's look: line icons, and a colour of its own for every song
+   * (from its name, so a song keeps its colour), like an album cover. */
+  const LIB_ICON = {
+    play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.6v12.8a1 1 0 0 0 1.52.85l10.4-6.4a1 1 0 0 0 0-1.7L9.52 4.75A1 1 0 0 0 8 5.6z"/></svg>',
+    pause: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>',
+    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  };
+  function libHue(name) { let h = 7; for (const ch of String(name || '')) h = (h * 31 + ch.codePointAt(0)) % 360; return h; }
+  /** ▶ / ⏸ on a song's Listen button (its cover). */
+  function setLibPlay(b, on) {
+    b.classList.toggle('playing', on);
+    const i = b.querySelector('i');
+    if (i) i.innerHTML = on ? LIB_ICON.pause : LIB_ICON.play; else b.textContent = on ? '⏸' : '▶';
+  }
+  /** Under the title: how many there are, and that they are kept for every project. */
+  function libSubtitle() {
+    const sub = $('#libSub'); if (!sub) return;
+    const tab = ve.libTab || 'music';
+    const n = (((ve.lib && ve.lib[tab === 'clips' ? 'clips' : 'music']) || [])).length;
+    sub.textContent = tab === 'youtube' ? 'Search for a song to put under your video'
+      : tab === 'clips' ? (n ? `${n} clip${n === 1 ? '' : 's'} · intros and outros for every short` : 'Intros and outros for every short')
+      : (n ? `${n} song${n === 1 ? '' : 's'} · kept for every project` : 'Your songs, kept for every project');
+  }
+
   function renderMusicList() {
     const el = $('#libMusicList'); if (!el) return;
     const list = (ve.lib && ve.lib.music) || [];
+    libSubtitle();
     if (!list.length) {
-      el.innerHTML = `<p class="muted small lib-empty">No music saved yet. Tap <b>➕ Add music</b> — or grab a track from the <b>▶️ YouTube</b> tab.</p>`;
+      el.innerHTML = `<p class="muted small lib-empty">No music saved yet. Tap <b>Add music</b> above — or find a song in the <b>YouTube</b> tab.</p>`;
       return;
     }
-    el.innerHTML = list.map((m) => `
-      <div class="lib-row${ve.music && ve.music.id === m.id ? ' sel' : ''}" data-musicid="${m.id}">
-        <span class="lib-row-icon">${m.source === 'youtube' ? '▶️' : '🎵'}</span>
+    const a = ve.refs && ve.refs.musicAudio;
+    el.innerHTML = list.map((m) => {
+      const on = !!(ve.music && ve.music.id === m.id), playing = !!(a && !a.paused && ve._auditionId === m.id);
+      return `
+      <div class="lib-row${on ? ' sel' : ''}" data-musicid="${m.id}">
+        <button class="lib-art${playing ? ' playing' : ''}" style="--h:${libHue(m.name)}" data-musicplay="${m.id}" title="Listen" aria-label="Listen"><i>${playing ? LIB_ICON.pause : LIB_ICON.play}</i></button>
         <span class="lib-row-main">
           <b>${escape2(m.name)}</b>
-          <span class="muted small">${fmtDur(m.durationSec)}${m.source === 'youtube' ? ' · from YouTube' : ''}</span>
+          <span class="muted small">${fmtDur(m.durationSec)}${m.source === 'youtube' ? ' · from YouTube' : m.source === 'video' ? ' · from a video' : ''}</span>
         </span>
-        <button class="lib-mini" data-musicplay="${m.id}" title="Listen">▶</button>
-        <button class="primary-btn small" data-musicuse="${m.id}">${ve.music && ve.music.id === m.id ? '✓ In use' : 'Use'}</button>
-        <button class="lib-mini danger" data-musicdel="${m.id}" title="Remove from my library">🗑</button>
-      </div>`).join('');
+        <button class="primary-btn small lib-use${on ? ' on' : ''}" data-musicuse="${m.id}">${on ? LIB_ICON.check + '<span>In use</span>' : 'Use'}</button>
+        <button class="lib-mini danger" data-musicdel="${m.id}" title="Remove from my library" aria-label="Remove from my library">${LIB_ICON.trash}</button>
+      </div>`;
+    }).join('');
     $$('[data-musicuse]', el).forEach((b) => b.addEventListener('click', () => useMusic(b.dataset.musicuse)));
     $$('[data-musicplay]', el).forEach((b) => b.addEventListener('click', () => auditionMusic(b.dataset.musicplay)));
     $$('[data-musicdel]', el).forEach((b) => b.addEventListener('click', () => removeFromLibrary('music', b.dataset.musicdel)));
@@ -15427,6 +15457,7 @@
   function renderClipGrid() {
     const el = $('#libClipList'); if (!el) return;
     const list = (ve.lib && ve.lib.clips) || [];
+    libSubtitle();
     if (!list.length) {
       el.innerHTML = `<p class="muted small lib-empty">No clips saved yet. Tap <b>➕ Add a clip</b> and your outro is one tap away from then on.</p>`;
       return;
@@ -15453,6 +15484,7 @@
     bar.classList.toggle('hidden', !m || ve.libTab === 'clips');
     if (!m) return;
     $('#libChosenName').textContent = m.name;
+    const art = $('#libChosenArt'); if (art) art.style.setProperty('--h', libHue(m.name));
     const v = $('#libMusicVol'); if (v) v.value = String(m.volume);
     const vv = $('#libMusicVolV'); if (vv) vv.textContent = Math.round(m.volume * 100) + '%';
     const fi = $('#libMusicFadeIn'); if (fi) fi.value = String(m.fadeIn);
@@ -15807,13 +15839,13 @@
     wireMusicGain(a);   // this IS a tap — the first song can be heard at its level too
     setMusicLevel(a, 0.7); a.currentTime = 0;
     const pr = a.play(); if (pr && pr.catch) pr.catch(() => {});
-    $$('[data-musicplay]').forEach((b) => { b.textContent = b.dataset.musicplay === id ? '⏸' : '▶'; });
+    $$('[data-musicplay]').forEach((b) => setLibPlay(b, b.dataset.musicplay === id));
   }
   function stopAudition() {
     const a = ve.refs.musicAudio;
     if (a) a.pause();
     ve._auditionId = null;
-    $$('[data-musicplay]').forEach((b) => { b.textContent = '▶'; });
+    $$('[data-musicplay]').forEach((b) => setLibPlay(b, false));
   }
 
   function updateMusicButton() {
@@ -16105,7 +16137,7 @@
     // results are text cards. The title/channel/length is what you pick on anyway.
     el.innerHTML = res.map((r) => `
       <div class="lib-row">
-        <span class="lib-row-icon">▶️</span>
+        <span class="lib-row-icon lib-yt" aria-hidden="true">${LIB_ICON.play}</span>
         <span class="lib-row-main">
           <b>${escape2(r.title)}</b>
           <span class="muted small">${escape2(r.uploader || 'YouTube')}${r.durationSec ? ' · ' + fmtDur(r.durationSec) : ''}${r.copyrightFree ? ' · <span class="lib-free-badge" title="The title or channel declares this track no-copyright / royalty-free">🛡️ Copyright-free</span>' : ''}</span>

@@ -4904,7 +4904,7 @@ let _hideTimer = null;
     // The library's "from my PC" is the desk talking; here it is this phone.
     {
       const where = onPhone() ? 'this phone' : 'this computer';
-      const lm = $('#libAddMusic'); if (lm) lm.textContent = `➕ Add music from ${where}`;
+      const lm = $('#libAddMusic'); if (lm) (lm.querySelector('b') || lm).textContent = onPhone() ? 'Add from phone' : `Add music from ${where}`;
       const lc = $('#libAddClip'); if (lc) lc.textContent = `➕ Add a clip from ${where}`;
     }
     $('#cloudXpQuality').addEventListener('change', (e) => { setQuality(e.target.value); syncQualityPill(); });

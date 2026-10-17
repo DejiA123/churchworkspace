@@ -1453,6 +1453,110 @@ body.mw-cloud #cloudPass:focus { border-color: #1f6fe0; box-shadow: 0 0 0 3px rg
   body.mw-cloud .fxq-grab { display: block; position: absolute; top: 7px; left: 50%; width: 38px; height: 5px; margin-left: -19px; border-radius: 3px; background: #3a3b43; }
   body.mw-cloud .fxq-pane { padding-bottom: 14px; }
 
+  /* ------------------------------------------------- 🎵 My music, on a phone
+   * A sheet like Thumbnail's: a grab bar, the title with what is in it, the
+   * three shelves as one segmented control, two big tiles to add a song, the
+   * songs as cards each with a cover of its own colour (tap the cover to
+   * listen), and what is playing under the video in one panel at the bottom
+   * (Volume, the fades, a switch for starting at the top of every short).
+   * Every control is the same element with the same id doing the same thing;
+   * only the look changed. */
+  body.mw-cloud #libModal .lib-box {
+    position: relative; background: var(--ph-panel); border: 0; border-top: 1px solid rgba(255,255,255,.07);
+    border-radius: 22px 22px 0 0; box-shadow: 0 -20px 60px rgba(0,0,0,.55); animation: cloudSheetUp .25s ease-out;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Roboto, "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  body.mw-cloud #libModal .lib-box::before { content: ''; position: absolute; top: 7px; left: 50%; width: 38px; height: 5px; margin-left: -19px; border-radius: 3px; background: #3a3b43; }
+  body.mw-cloud #libModal .cap-head { padding: 22px 14px 2px 20px; border: 0; gap: 10px; }
+  body.mw-cloud #libModal .cap-head h2 { font-size: 21px; font-weight: 800; letter-spacing: -.3px; color: var(--ph-text); }
+  body.mw-cloud #libModal .lib-sub { font-size: 13px; color: var(--ph-muted); }
+  /* Done takes the ✕'s corner (the same close), and the songs get the room a
+     footer took: the footer's box steps aside so Done is laid out up there. */
+  body.mw-cloud #libModal #libClose { display: none; }
+  body.mw-cloud #libModal .cap-head { padding-right: 96px; }
+  body.mw-cloud #libModal .cap-foot, body.mw-cloud #libModal .cap-foot-btns { display: contents; }
+  body.mw-cloud #libModal #libHint { display: none; }
+  body.mw-cloud #libModal #libDone { position: absolute; top: 24px; right: 14px; z-index: 2; width: auto; height: 36px; min-height: 0; margin: 0; padding: 0 18px;
+    border: 0; border-radius: 18px; font-size: 15px; font-weight: 750; }
+  /* the three shelves: one segmented control */
+  body.mw-cloud #libModal .lib-tabs { flex: none; display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; height: 38px; margin: 12px 16px 2px;
+    padding: 3px; border: 0; border-radius: 11px; background: #23242a; }
+  body.mw-cloud #libModal .lib-tab { width: auto; height: 100%; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 8px; background: none;
+    color: var(--ph-muted); font-size: 14px; font-weight: 700; }
+  body.mw-cloud #libModal .lib-tab.active { color: #fff; background: #3a3b44; box-shadow: 0 2px 8px rgba(0,0,0,.35); }
+  body.mw-cloud #libModal .lib-pane { min-height: 170px; padding: 14px 16px; }
+  /* add a song: two buttons side by side, the phone's own first */
+  body.mw-cloud #libModal [data-libpane="music"] .lib-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 14px; }
+  body.mw-cloud #libModal .lib-add { display: flex; align-items: center; justify-content: center; gap: 7px; width: auto; height: 44px; min-height: 0; margin: 0;
+    padding: 0 10px; border-radius: 14px; white-space: nowrap; box-shadow: none; color: #fff; }
+  body.mw-cloud #libModal .lib-add i svg { width: 17px; height: 17px; }
+  body.mw-cloud #libModal .lib-add b { font-size: 14px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
+  body.mw-cloud #libModal .lib-add small { display: none; }
+  body.mw-cloud #libModal #libAddMusic { border: 0; background: var(--ph-accent); }
+  body.mw-cloud #libModal #libAddMusicVideo { border: 1px solid var(--ph-line); background: var(--ph-panel-2); }
+  body.mw-cloud #libModal .lib-help { display: none; }
+  /* the songs */
+  body.mw-cloud #libModal .lib-list { gap: 8px; }
+  body.mw-cloud #libModal .lib-row { gap: 12px; padding: 9px 9px 9px 9px; border: 1px solid transparent; border-radius: 16px; background: var(--ph-panel-2); }
+  body.mw-cloud #libModal .lib-row.sel { border-color: rgba(80,150,255,.55); background: linear-gradient(90deg, rgba(31,111,224,.22), rgba(31,111,224,.07)); }
+  body.mw-cloud #libModal .lib-art, body.mw-cloud #libModal .lib-yt { width: 52px; height: 52px; border-radius: 12px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); }
+  body.mw-cloud #libModal .lib-art i { width: 28px; height: 28px; margin: -14px 0 0 -14px; }
+  body.mw-cloud #libModal .lib-art i svg { width: 13px; height: 13px; }
+  body.mw-cloud #libModal .lib-art.playing::after { border-radius: 15px; }
+  body.mw-cloud #libModal .lib-yt svg { width: 20px; height: 20px; }
+  body.mw-cloud #libModal .lib-row-main { gap: 3px; }
+  body.mw-cloud #libModal .lib-row-main b { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; word-break: break-word;
+    font-size: 15px; font-weight: 700; line-height: 1.25; color: var(--ph-text); }
+  body.mw-cloud #libModal .lib-row-main .small { font-size: 12.5px; color: var(--ph-muted); font-variant-numeric: tabular-nums; }
+  body.mw-cloud #libModal .lib-row .primary-btn { flex: none; width: auto; height: 34px; min-height: 0; margin: 0; padding: 0 16px; border: 0; border-radius: 17px;
+    background: #30313a; color: #fff; font-size: 14px; font-weight: 700; box-shadow: none; }
+  body.mw-cloud #libModal .lib-use.on { padding: 0 13px 0 10px; background: var(--ph-accent); }
+  body.mw-cloud #libModal .lib-use svg { width: 15px; height: 15px; }
+  body.mw-cloud #libModal .lib-mini.danger { flex: none; width: 34px; height: 34px; min-height: 0; margin: 0 -2px 0 -4px; padding: 0; border: 0; border-radius: 17px;
+    display: grid; place-items: center; background: transparent; color: #80838e; }
+  body.mw-cloud #libModal .lib-mini.danger:active { color: #ff6b6b; background: rgba(255,90,90,.12); }
+  body.mw-cloud #libModal .lib-mini svg { width: 19px; height: 19px; }
+  body.mw-cloud #libModal .lib-empty { padding: 22px 10px; font-size: 14px; line-height: 1.45; color: var(--ph-muted); }
+  /* what is playing under the video */
+  body.mw-cloud #libModal .lib-chosen { flex: none; padding: 12px 16px 6px; border-top: 1px solid var(--ph-line); background: var(--ph-panel); }
+  body.mw-cloud #libModal .lib-chosen-head { justify-content: flex-start; gap: 11px; margin-bottom: 4px; }
+  body.mw-cloud #libModal .lib-chosen-art { width: 38px; height: 38px; border-radius: 10px; }
+  body.mw-cloud #libModal .lib-chosen-art svg { width: 22px; height: 22px; }
+  body.mw-cloud #libModal .lib-chosen-name { font-size: 15px; }
+  body.mw-cloud #libModal .lib-chosen-name small { margin-bottom: 1px; font-size: 12px; font-weight: 650; color: var(--ph-accent-text); }
+  body.mw-cloud #libModal .lib-chosen-name b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ph-text); }
+  body.mw-cloud #libModal #libMusicRemove { flex: none; width: auto; height: 32px; min-height: 0; margin: 0; padding: 0 14px; border: 0; border-radius: 16px;
+    background: rgba(255,90,90,.13); color: #ff8a80; font-size: 14px; font-weight: 700; }
+  body.mw-cloud #libModal .lib-chosen-rows { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
+  body.mw-cloud #libModal .lib-slider { min-height: 42px; gap: 10px; font-size: 14px; color: var(--ph-muted); }
+  body.mw-cloud #libModal .lib-lbl { flex: none; }
+  body.mw-cloud #libModal .lib-vol { grid-column: 1 / -1; }
+  body.mw-cloud #libModal .lib-vol input[type=range] { flex: 1; width: auto; min-width: 0; accent-color: var(--ph-accent); }
+  body.mw-cloud #libModal #libMusicVolV { flex: none; min-width: 46px; text-align: right; font-size: 14px; font-weight: 700; color: var(--ph-text); font-variant-numeric: tabular-nums; }
+  body.mw-cloud #libModal .lib-fade { justify-content: space-between; gap: 6px; padding: 0 10px 0 13px; border-radius: 12px; background: var(--ph-panel-2); }
+  body.mw-cloud #libModal .lib-fade .lib-lbl { margin-right: auto; }
+  body.mw-cloud #libModal .lib-fade input[type=number] { width: 54px; height: 32px; margin: 0; padding: 0 4px; border: 0; border-radius: 9px; background: #2c2d36;
+    color: var(--ph-text); text-align: center; font-weight: 700; }
+  body.mw-cloud #libModal .lib-bed { grid-column: 1 / -1; display: flex; flex-direction: row-reverse; justify-content: space-between; align-items: center; gap: 12px;
+    min-height: 46px; font-size: 14.5px; color: var(--ph-text); }
+  /* "start at the top of every short" is a switch */
+  body.mw-cloud #libModal .lib-bed input { -webkit-appearance: none; appearance: none; flex: none; position: relative; width: 50px; height: 30px; margin: 0;
+    border: 0; border-radius: 15px; background: #3a3b44; transition: background .2s ease; cursor: pointer; }
+  body.mw-cloud #libModal .lib-bed input::after { content: ''; position: absolute; top: 2px; left: 2px; width: 26px; height: 26px; border-radius: 50%;
+    background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,.35); transition: transform .2s ease; }
+  body.mw-cloud #libModal .lib-bed input:checked { background: #30d158; }
+  body.mw-cloud #libModal .lib-bed input:checked::after { transform: translateX(20px); }
+  /* YouTube and My clips, in the same hand */
+  body.mw-cloud #libModal [data-libpane="youtube"] .lib-actions { flex-wrap: nowrap; gap: 8px; }
+  body.mw-cloud #libModal #libYtQuery { min-width: 0; height: 42px; padding: 0 14px; border: 1px solid var(--ph-line); border-radius: 12px; background: var(--ph-panel-2); color: var(--ph-text); }
+  body.mw-cloud #libModal #libYtSearch { flex: none; width: auto; height: 42px; min-height: 0; margin: 0; padding: 0 16px; border-radius: 12px; }
+  body.mw-cloud #libModal .lib-chip { padding: 7px 13px; border-radius: 16px; font-size: 13px; background: var(--ph-panel-2); border-color: var(--ph-line); }
+  body.mw-cloud #libModal .lib-free-toggle, body.mw-cloud #libModal .lib-note { border-radius: 12px; }
+  body.mw-cloud #libModal [data-libpane="clips"] .lib-actions .primary-btn { width: 100%; height: 46px; border-radius: 14px; font-size: 15px; }
+  body.mw-cloud #libModal .lib-card { border: 1px solid var(--ph-line); border-radius: 14px; background: var(--ph-panel-2); }
+  body.mw-cloud #libModal .lib-card.sel { border-color: rgba(80,150,255,.6); }
+
   /* 16px stops iOS zooming the whole page when a field takes focus. */
   body.mw-cloud input[type="text"],
   body.mw-cloud input[type="number"],

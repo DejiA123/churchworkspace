@@ -1873,21 +1873,21 @@
   <div id="libModal" class="cap-modal hidden">
     <div class="lib-box">
       <div class="cap-head">
-        <h2 id="libTitle">🎵 Music &amp; clips</h2>
-        <button id="libClose" class="icon-btn">✕</button>
+        <div class="lib-titles"><h2 id="libTitle">Music</h2><span id="libSub" class="lib-sub"></span></div>
+        <button id="libClose" class="icon-btn" aria-label="Close">✕</button>
       </div>
-      <div class="lib-tabs">
-        <button class="lib-tab active" data-libtab="music">🎵 My music</button>
-        <button class="lib-tab" data-libtab="youtube">▶️ YouTube</button>
-        <button class="lib-tab" data-libtab="clips">🎬 My clips</button>
+      <div class="lib-tabs" role="tablist">
+        <button class="lib-tab active" data-libtab="music">My music</button>
+        <button class="lib-tab" data-libtab="youtube">YouTube</button>
+        <button class="lib-tab" data-libtab="clips">My clips</button>
       </div>
 
       <!-- ---- MY MUSIC ---- -->
       <div class="lib-pane" data-libpane="music">
         <div class="lib-actions">
-          <button id="libAddMusic" class="primary-btn small">➕ Add music from my PC</button>
-          <button id="libAddMusicVideo" class="ghost-btn small" title="An instrumental you screen-recorded, for example — only its sound is kept">🎬 Sound from a video</button>
-          <span class="muted small">MP3, WAV, M4A, AAC, OGG, FLAC — or the sound of a video (a screen recording of an instrumental). Saved here for every project.</span>
+          <button id="libAddMusic" class="primary-btn small lib-add"><i aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></i><b>Add music from my PC</b><small>MP3 · M4A · WAV · AAC</small></button>
+          <button id="libAddMusicVideo" class="ghost-btn small lib-add" title="An instrumental you screen-recorded, for example — only its sound is kept"><i aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="5" width="13" height="14" rx="3"/><path d="M16 10.5l5-3v9l-5-3z"/></svg></i><b>Sound from a video</b><small>A screen recording, say</small></button>
+          <span class="muted small lib-help">MP3, WAV, M4A, AAC, OGG, FLAC — or the sound of a video (a screen recording of an instrumental). Saved here for every project.</span>
         </div>
         <div id="libMusicList" class="lib-list"></div>
       </div>
@@ -1931,14 +1931,15 @@
       <!-- ---- chosen music: live controls ---- -->
       <div id="libMusicBar" class="lib-chosen hidden">
         <div class="lib-chosen-head">
-          <span class="lib-chosen-name">🎵 <b id="libChosenName">—</b></span>
-          <button id="libMusicRemove" class="ghost-btn small">🔇 Remove music</button>
+          <span class="lib-chosen-art" id="libChosenArt" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3" fill="currentColor"/><circle cx="18" cy="16" r="3" fill="currentColor"/></svg></span>
+          <span class="lib-chosen-name"><small>Playing under your video</small><b id="libChosenName">—</b></span>
+          <button id="libMusicRemove" class="ghost-btn small">Remove</button>
         </div>
         <div class="lib-chosen-rows">
-          <label class="lib-slider">Volume <input type="range" id="libMusicVol" min="0" max="10" step="0.05" value="0.25" title="Up to 1000% — a boost for songs that were made quiet" /><span id="libMusicVolV" class="muted small">25%</span></label>
-          <label class="lib-slider">Fade in <input type="number" id="libMusicFadeIn" min="0" max="10" step="0.5" value="1" /><span class="muted small">s</span></label>
-          <label class="lib-slider">Fade out <input type="number" id="libMusicFadeOut" min="0" max="10" step="0.5" value="1.5" /><span class="muted small">s</span></label>
-          <label class="cap-inline" title="Every short starts the song from its beginning. Turn off to use whatever part of the song sits under that clip on the timeline."><input type="checkbox" id="libMusicBed" checked /> 🔁 Start the song at the top of every short</label>
+          <label class="lib-slider lib-vol"><span class="lib-lbl">Volume</span> <input type="range" id="libMusicVol" min="0" max="10" step="0.05" value="0.25" title="Up to 1000% — a boost for songs that were made quiet" /><span id="libMusicVolV" class="muted small">25%</span></label>
+          <label class="lib-slider lib-fade"><span class="lib-lbl">Fade in</span> <input type="number" id="libMusicFadeIn" min="0" max="10" step="0.5" value="1" /><span class="muted small">s</span></label>
+          <label class="lib-slider lib-fade"><span class="lib-lbl">Fade out</span> <input type="number" id="libMusicFadeOut" min="0" max="10" step="0.5" value="1.5" /><span class="muted small">s</span></label>
+          <label class="cap-inline lib-bed" title="Every short starts the song from its beginning. Turn off to use whatever part of the song sits under that clip on the timeline."><input type="checkbox" id="libMusicBed" checked /> <span>Start the song at the top of every short</span></label>
         </div>
       </div>
 
