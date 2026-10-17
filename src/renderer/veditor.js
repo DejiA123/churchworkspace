@@ -5730,6 +5730,18 @@
       + (tiny ? '' : `<div class="ve-cc-h r" data-cedge="r" title="Drag to keep this caption on screen longer"></div>`)
       + `</div>`;
   }
+  /** The caption line at `at` (the lines' own time) — the one on the picture — or else the nearest. */
+  function capIndexAt(at) {
+    const evs = ve.capEvents || [];
+    let best = 0, bestD = Infinity;
+    for (let i = 0; i < evs.length; i++) {
+      const c = evs[i]; if (!c) continue;
+      if (at >= c.start && at < c.end) return i;
+      const d = at < c.start ? c.start - at : at - c.end;
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
+  }
   /** Scroll the timeline so caption i is comfortably on screen. */
   function scrollCapIntoView(i) {
     const c = (ve.capEvents || [])[i], sc = ve.refs.tlScroll;
@@ -12076,7 +12088,9 @@
   function revealCaptions(quiet) {
     if (!capBlocksVisible()) return false;
     const evs = ve.capEvents;
-    const zoomed = zoomForCaptions(0);
+    // the lane is brought in where the playhead IS — zooming to the first line
+    // took the playhead back to it (at 6:14, opening the captions went to 1:08)
+    const zoomed = zoomForCaptions(capIndexAt(ve.refs.player ? (ve.refs.player.currentTime || 0) - capOff() : 0));
     renderCapTrack();
     const cc = $('#veCapShow'); if (cc && !cc.checked) cc.checked = true; // captions live on the preview too
     updateCapOverlay(ve.refs.player.currentTime || 0);
@@ -12487,10 +12501,45 @@
       window.__toast && window.__toast(ve._cloudAdoptNote, 'good', 12000);
       ve._cloudAdoptNote = null;
     }
+    /*
+     * ►► IT OPENS WHERE YOU ARE. ◄◄ The window opened on its first line, and the
+     * cursor going there took the playhead back with it: at 6:14 on the
+     * timeline, the editor showed 1:08. It opens on the line where the playhead
+     * is — the one on the picture — or the nearest one to it, with a few lines
+     * before it still in sight; the cursor (and so the playhead) is on that line.
+     */
     const list = document.getElementById('capList');
-    if (list) list.scrollTop = 0;
-    const first = document.querySelector('#capList .cap-text');
-    if (first) setTimeout(() => { first.focus(); first.select(); }, 30);
+    const p = ve.refs.player;
+    const row = capRowNear(p ? (p.currentTime || 0) - capOff() : 0, s);
+    if (list) {
+      list.scrollTop = 0;
+      if (row) {
+        const r = row.getBoundingClientRect(), l = list.getBoundingClientRect();
+        list.scrollTop = Math.max(0, r.top - l.top - Math.max(0, list.clientHeight - row.offsetHeight) / 4);
+      }
+    }
+    const inp = row && row.querySelector('.cap-text');
+    if (inp) setTimeout(() => { try { inp.focus({ preventScroll: true }); } catch (e) { inp.focus(); } inp.select(); }, 30);
+  }
+  /**
+   * The row of the caption line at `at` (seconds, the lines' own time) — the
+   * line on the picture there — or else the nearest one to it. A short's window
+   * opened while the playhead is outside that short starts on its first line.
+   */
+  function capRowNear(at, scope) {
+    const rows = Array.from(document.querySelectorAll('#capList .cap-row'));
+    if (!rows.length) return null;
+    if (scope && (at < scope.start - 0.5 || at > scope.end + 0.5)) return rows[0];
+    let best = null, bestD = Infinity;
+    for (const row of rows) {
+      const inp = row.querySelector('.cap-text');
+      const e = inp && (ve.capEvents || [])[+inp.dataset.i];
+      if (!e) continue;
+      if (at >= e.start && at < e.end) return row;
+      const d = at < e.start ? e.start - at : at - e.end;
+      if (d < bestD) { bestD = d; best = row; }
+    }
+    return best || rows[0];
   }
 
   /** Leaving the window always drops the scope, or the next opener inherits it. */
