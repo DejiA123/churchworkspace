@@ -5535,7 +5535,10 @@
   function updateTextTools() {
     const bar = $('#veTextTools'); if (!bar) return;
     const o = selectedTextOverlay();
-    if (!ve.video || !o) { bar.classList.add('hidden'); bar.dataset.for = ''; return; }
+    // a panel put away takes its keyboard with it (a box left focused under a hidden
+    // panel kept the iPhone's keyboard up, with nothing to type into)
+    const away = () => { const a = document.activeElement; if (a && bar.contains(a) && a.blur) a.blur(); };
+    if (!ve.video || !o) { away(); bar.classList.add('hidden'); bar.dataset.for = ''; return; }
     /*
      * On a phone the panel is docked over the bottom of the screen — over the
      * timeline. A text block picked ON THE TIMELINE is being trimmed or moved
@@ -5543,7 +5546,7 @@
      * CapCut); tapping the text on the picture brings the panel up.
      */
     if (ve._textOnLane && ve.textEditing !== o.id && window.matchMedia && window.matchMedia('(max-width: 900px)').matches) {
-      bar.classList.add('hidden'); bar.dataset.for = ''; return;
+      away(); bar.classList.add('hidden'); bar.dataset.for = ''; return;
     }
     if (bar.classList.contains('hidden')) bar.classList.remove('hidden');
     if (bar.dataset.for !== String(o.id)) {
@@ -17795,6 +17798,28 @@
       return false;
     },
     editSelectedCaption() { if (capLineSelected()) editCaption(ve.capSel); },
+    /* The phone's Text tools (shown while a text block on the timeline is picked). */
+    selectedTextOnLane() { return ve.textSel && ve._textOnLane && ve.textOverlays.some((o) => o.id === ve.textSel) ? ve.textSel : null; },
+    deleteSelectedText() {
+      const o = selectedTextOverlay();
+      if (!o) { window.__toast && window.__toast('Tap a text on the timeline first, then Delete.', 'error'); return false; }
+      removeTextOverlay(o.id);
+      window.__toast && window.__toast(`“${String(o.text || 'Text').slice(0, 32)}” deleted. Undo (↶) puts it back.`, 'good');
+      return true;
+    },
+    /** Edit: the text on the picture with its panel (the playhead taken to its nearest showing if it is not on now). */
+    editSelectedText() {
+      const o = selectedTextOverlay(); if (!o) return;
+      const t = nowT();
+      if (!textOnAt(o, t)) {
+        const gap = (s) => (t < s[0] ? s[0] - t : t - s[1]);
+        const show = textShows(o).reduce((b, s) => (!b || gap(s) < gap(b) ? s : b), null);
+        if (show) { try { ve.refs.player.currentTime = Math.min(show[1] - 0.05, show[0] + (isTitle(o) ? 1 : 0.3)); updatePlayhead(); } catch (e) {} }
+      }
+      ve._textOnLane = false;
+      renderTextOverlays(); renderTextTrack();
+      startEditingText(o.id);
+    },
     /** ＋ Add caption: a new line at the playhead (or the next gap), open for typing. */
     addCaptionHere() { return addCaptionHere(); },
     /** 🎙 AI voice: type a line, it is spoken and laid on the Sounds row. */

@@ -4393,6 +4393,14 @@ let _hideTimer = null;
     /* What a caption block on the timeline can do. Comes up by itself when
      * one is tapped (see followCaptionPick) — the way CapCut swaps its tools
      * for the thing you picked — so Delete is right there. */
+    /* What a TEXT block on the timeline can do (a title's too) — comes up by
+     * itself when one is tapped there (followTextPick), Delete first. */
+    textpick: [
+      { icon: 'trash', label: 'Delete', call: 'deleteSelectedText' },
+      { icon: 'pen', label: 'Edit', call: 'editSelectedText' },
+      { icon: 'type', label: 'Add text', press: '#veAddText' },
+      { icon: 'template', label: 'Templates', call: 'textTemplates' },
+    ],
     caption: [
       { icon: 'trash', label: 'Delete', call: 'deleteSelectedCaption' },
       { icon: 'pen', label: 'Edit words', call: 'editSelectedCaption' },
@@ -4610,7 +4618,8 @@ let _hideTimer = null;
           window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0;
         }
       };
-      document.addEventListener('focusout', () => setTimeout(settle, 120));
+      // again once the keyboard has finished sliding away (it takes ~300 ms)
+      document.addEventListener('focusout', () => { setTimeout(settle, 120); setTimeout(settle, 450); });
       window.addEventListener('scroll', () => { if (!typing()) settle(); }, { passive: true });
       if (window.visualViewport) window.visualViewport.addEventListener('resize', () => setTimeout(settle, 120));
     }
@@ -4799,6 +4808,36 @@ let _hideTimer = null;
       // after Back has not changed the selection, but means "show me its tools"
       const onTap = (e) => setTimeout(() => {
         if (e && e.target && e.target.closest && e.target.closest('#veCapTrack')) had = -1;
+        follow();
+      }, 0);
+      document.addEventListener('pointerup', onTap);
+      document.addEventListener('click', onTap);
+    })();
+
+    /*
+     * Tap a text block on the timeline and the Text tools come up — Delete
+     * right there, as for a caption; let go of it (tap elsewhere, delete it,
+     * open it on the picture, where its own panel has Delete) and the dock
+     * goes back to where it was.
+     */
+    (function followTextPick() {
+      const track = $('#veTextTrack');
+      if (!track) return;
+      let had = null, back = 'main';
+      const follow = () => {
+        const E = window.VideoEditor;
+        const now = E && E.selectedTextOnLane ? E.selectedTextOnLane() : null;
+        if (now === had) return;
+        had = now;
+        const cur = dock.querySelector('.cloud-dock-row.on');
+        const curName = cur ? cur.dataset.row : 'main';
+        if (now) {
+          if (curName !== 'textpick') { back = curName === 'caption' ? 'main' : curName; showRow('textpick'); }
+        } else if (curName === 'textpick') showRow(back || 'main');
+      };
+      new MutationObserver(follow).observe(track, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+      const onTap = (e) => setTimeout(() => {
+        if (e && e.target && e.target.closest && e.target.closest('#veTextTrack')) had = null;
         follow();
       }, 0);
       document.addEventListener('pointerup', onTap);
@@ -5092,7 +5131,12 @@ let _hideTimer = null;
         // shrinking it under the keyboard changed the very text being sized.
         const ae = document.activeElement;
         const inPanel = !!(ae && ae.closest && ae.closest('#veTextTools, .ve-text-box'));
-        const limit = Math.min(dock.getBoundingClientRect().top, vv && !inPanel ? vv.offsetTop + vv.height : window.innerHeight);
+        // Nothing being typed: no keyboard, whatever the visual viewport last said.
+        // iOS does not always say when its keyboard has gone, and the studio stayed
+        // squeezed into the top half over a keyboard-sized black gap.
+        const typingNow = !!ae && ae !== document.body && (ae.isContentEditable || ae.tagName === 'TEXTAREA'
+          || (ae.tagName === 'INPUT' && !/^(button|checkbox|radio|range|file|submit|reset|color|image|hidden)$/i.test(ae.type || '')));
+        const limit = Math.min(dock.getBoundingClientRect().top, vv && typingNow && !inPanel ? vv.offsetTop + vv.height : window.innerHeight);
         // the studio's content ends where its padding starts; it must end at the dock
         const over = Math.ceil((vr.bottom - pb) - limit);
         if (over > 1) view.style.paddingBottom = (pb + over) + 'px';
@@ -5106,6 +5150,8 @@ let _hideTimer = null;
       };
       let lastTop = null;
       cloud.fitTimeline = fitTl;
+      // typing stopped: fitted again once the keyboard has had time to go
+      document.addEventListener('focusout', () => { setTimeout(fitTl, 350); setTimeout(fitTl, 900); });
       window.addEventListener('resize', fitTl);
       window.addEventListener('orientationchange', () => setTimeout(fitTl, 350));
       if (window.visualViewport) window.visualViewport.addEventListener('resize', fitTl);
