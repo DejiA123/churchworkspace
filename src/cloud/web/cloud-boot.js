@@ -1646,7 +1646,6 @@ let _hideTimer = null;
     const done = () => { pickWait(false); openPickers.delete(input); setTimeout(() => input.remove(), 0); };
     input.addEventListener('change', done, { once: true });
     input.addEventListener('cancel', () => { done(); if (onCancel) onCancel(); }, { once: true });
-    pickWait(true);
     input.click();
   }
   cloud.openPicker = openPicker;
@@ -1654,16 +1653,20 @@ let _hideTimer = null;
    * ►► WHILE THE PHONE GETS THEM READY. ◄◄ After ✓ in the iPhone's Photos, the
    * phone copies every chosen photo (and turns HEIC into JPEG) before the app
    * hears of a single one: with fifty, that looked like the ✓ did nothing.
-   * From the moment a picker opens until its files arrive, or it is closed
-   * without choosing, the island says what is going on (a tap puts it away).
+   * The button that opened the picker says so, in place — "Getting them from
+   * your phone…" with a spinner — until the files arrive or the picker is
+   * closed without choosing. No pop-up over the screen ("I don't want that").
    */
   let pickWaitTimer = null;
   function pickWait(on) {
     clearTimeout(pickWaitTimer);
-    if (!on) { islandHide('pickwait'); return; }
-    island({ id: 'pickwait', kind: 'info', spin: true, sticky: true, title: 'Waiting for your photos and videos…',
-      sub: 'After you tap ✓ your phone gets them ready. With many, that takes a moment.' });
-    pickWaitTimer = setTimeout(() => islandHide('pickwait'), 5 * 60e3);
+    const up = $('#cloudUpload'), label = up && up.querySelector('span');
+    if (up && label) {
+      if (on && !up.classList.contains('waiting')) { up.dataset.label = label.textContent; label.textContent = 'Getting them from your phone…'; }
+      if (!on && up.classList.contains('waiting') && up.dataset.label) label.textContent = up.dataset.label;
+      up.classList.toggle('waiting', !!on);
+    }
+    if (on) pickWaitTimer = setTimeout(() => pickWait(false), 3 * 60e3);
   }
   cloud.pickWait = pickWait;
   /* the picker answered with nothing at all (not a Cancel: that answers 'cancel') */
@@ -5963,10 +5966,13 @@ let _hideTimer = null;
       if (b.dataset.act === 'view') viewFile(row.dataset.path); else offerDownload(row.dataset.path);
     });
     on('#cloudUpload', 'click', async () => {
+      pickWait(true);   // the button says "Getting them from your phone…" until they come (or the picker is closed)
       const picking = $('#cloudFilesModal').dataset.picking === '1';
       const chosen = await chooseFromDevice(picking ? pickState.multi : true, picking ? pickState.exts : null);
       if (picking && chosen) finishPick(chosen);
     });
+    // (a phone that does not say the picker was closed: the next tap elsewhere puts the button back)
+    on('#cloudFilesModal', 'pointerdown', (ev) => { if (!ev.target.closest('#cloudUpload') && $('#cloudUpload.waiting')) pickWait(false); });
     on('#cloudUploadBar', 'click', (ev) => {
       const b = ev.target.closest('[data-upstop]');
       if (b) stopUpload(b.dataset.upstop);

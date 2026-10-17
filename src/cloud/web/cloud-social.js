@@ -2936,7 +2936,8 @@
         <div class="mt-kinds">${MT_MODES.map(([v, name]) => `<button type="button" class="mt-kind${MT.mode === v ? ' on' : ''}" data-mt-mode="${v}" aria-pressed="${MT.mode === v}">
           ${mtArt(v)}<span class="mt-kind-t"><b>${name}</b><small>${MT_KIND[v].sub}</small></span><span class="mt-tick">${mi('check')}</span></button>`).join('')}</div></section>
       <section class="mt-sec">${head(2, talk ? 'Your videos' : 'Your clips & photos', n ? `${n} added` : talk ? '1 or more' : '2 or more')}
-        ${videos}</section>
+        ${MT.picking ? '<div class="mt-picking"><i class="cf-spin"></i><span>Getting your photos and videos from your phone…</span></div>' : ''}
+        ${videos}${MT.note ? `<small class="mt-note${MT.note.warn ? ' warn' : ''}">${esc(MT.note.text)}</small>` : ''}</section>
       <section class="mt-sec mt-tune">${head(3, 'Fine-tune', 'optional')}
         <div class="mt-group">
           ${row('music', 'music', 'Music', V.music, mtMusicHtml() + keepRow)}
@@ -3098,7 +3099,7 @@
       const d = b.dataset;
       if (d.mtOrder) { MT.order = d.mtOrder; return mtPaint(); }
       if (d.mtMode) {
-        MT.mode = d.mtMode;
+        MT.mode = d.mtMode; MT.note = null;
         if (MT.mode === 'talk' && MT.len === 'all') MT.len = 30;
         // a viral edit has music under it unless the operator says otherwise
         if (MT.mode === 'talk' && !MT.song && !MT.songFile && !MT.free && MT.freeList && MT.freeList.tracks && MT.freeList.tracks.length) MT.free = 'auto';
@@ -3112,7 +3113,7 @@
         return mtPaint();
       }
       if (d.mtPart != null) return mtChoosePart(MT.items[+d.mtPart]);
-      if (d.mtDel != null) { const it = MT.items.splice(+d.mtDel, 1)[0]; if (it) URL.revokeObjectURL(it.url); return mtPaint(); }
+      if (d.mtDel != null) { const it = MT.items.splice(+d.mtDel, 1)[0]; if (it) URL.revokeObjectURL(it.url); MT.note = null; return mtPaint(); }
       if (d.mtSong != null) { MT.song = d.mtSong ? MT.lib.find((m) => m.id === d.mtSong) || null : null; MT.songFile = null; MT.free = null; MT.musTab = d.mtSong ? 'mine' : 'none'; if (!d.mtSong) mtPreviewStop(); return mtPaint(); }
       if (d.mtFree) {
         MT.free = d.mtFree; MT.song = null; MT.songFile = null; MT.musTab = 'free';
@@ -3133,14 +3134,28 @@
       if (d.mtStyle) { MT.style = d.mtStyle; return mtPaint(); }
       if (d.mtLen) { MT.len = d.mtLen === 'all' || d.mtLen === 'custom' ? d.mtLen : +d.mtLen; return mtPaint(); }
       if (d.mtAspect) { MT.aspect = d.mtAspect; return mtPaint(); }
-      if (d.mt === 'add') { if (C.pickWait) C.pickWait(true); return document.getElementById('mtPick').click(); }
+      if (d.mt === 'add') {
+        const pick = document.getElementById('mtPick');
+        MT.picking = true; MT.note = null;
+        clearTimeout(mtPickTimer);
+        mtPickTimer = setTimeout(() => { if (MT.picking) { mtPickingOff(); mtPaint(); } }, 3 * 60e3);
+        pick.click();   // (first, while the tap still counts as the operator's)
+        return mtPaint();
+      }
       if (d.mt === 'addsrv') return mtAddFromFiles();
-      if (d.mt === 'song') { if (C.pickWait) C.pickWait(true); return document.getElementById('mtSong').click(); }
+      if (d.mt === 'song') return document.getElementById('mtSong').click();
       if (d.mt === 'go') return mtMake();
     };
     p.body.addEventListener('click', onClick);
     p.foot.addEventListener('click', onClick);
     mtPickers();
+    // (a phone that does not say the picker was closed: the next tap elsewhere takes the line away —
+    // the element itself, not a redraw, so the tap still lands where it was aimed)
+    p.body.addEventListener('pointerdown', (e) => {
+      if (!MT.picking || e.target.closest('[data-mt="add"]')) return;
+      mtPickingOff();
+      const w = p.body.querySelector('.mt-picking'); if (w) w.remove();
+    }, true);
     p.body.addEventListener('change', (e) => {
       if (e.target.id === 'mtKeep') MT.keep = e.target.checked;
       else if (e.target.id === 'mtCaps') MT.caps = e.target.checked;
@@ -3172,11 +3187,12 @@
       inp.type = 'file'; inp.id = id; inp.accept = accept; inp.multiple = multiple;
       inp.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0';
       inp.addEventListener('change', () => {
-        if (C.pickWait) C.pickWait(false);
+        mtPickingOff();
         const files = Array.from(inp.files || []); inp.value = '';
-        if (files.length) take(files); else if (C.pickedNothing) C.pickedNothing();
+        if (files.length) take(files);
+        else { MT.note = { warn: true, text: 'Nothing came through from your phone. If they are kept in iCloud, open them in Photos first so they download, then add them again.' }; mtPaint(); }
       });
-      inp.addEventListener('cancel', () => { if (C.pickWait) C.pickWait(false); });
+      inp.addEventListener('cancel', () => { mtPickingOff(); mtPaint(); });
       document.body.appendChild(inp);
     };
     make('mtPick', 'video/*,image/*', true, (files) => {
@@ -3187,11 +3203,11 @@
         MT.items.push(it);
         mtPicture(it);
       }
-      const added = Math.min(room, files.length);
-      const switched = mtFitMode(true);
-      const what = (k) => (k === 1 ? '1 photo or clip' : `${k} photos and clips`);
-      if (files.length > room) C.island({ kind: 'warn', title: room ? `${room} of the ${files.length} were added` : 'The montage is full', sub: `A montage takes up to ${MT_MAX} clips and photos.`, ms: 5000 });
-      else C.island({ kind: 'good', title: `${what(added)} added`, sub: switched ? 'Photos make a Standard montage: one after another, with music. Viral needs a video of someone speaking.' : '', ms: switched ? 6000 : 2500 });
+      // what needs saying is said in the sheet, under the tiles — no pop-ups
+      const switched = mtFitMode();
+      MT.note = files.length > room
+        ? { warn: true, text: room ? `A montage takes up to ${MT_MAX} clips and photos: ${room} of the ${files.length} were added.` : `A montage takes up to ${MT_MAX} clips and photos, and this one is full.` }
+        : switched ? { text: 'Photos make a Standard montage: one after another, with music. Viral needs a video of someone speaking.' } : null;
       mtPaint();
     });
     make('mtSong', 'audio/*,.mp3,.m4a,.wav,.aac', false, (files) => {
@@ -3293,7 +3309,7 @@
         })();
       }
     }
-    mtFitMode();
+    MT.note = mtFitMode() ? { text: 'Photos make a Standard montage: one after another, with music. Viral needs a video of someone speaking.' } : null;
     mtPaint();
   }
 
@@ -3389,12 +3405,14 @@
    * and forty photos seemed to do nothing. Photos alone make a Standard
    * montage (one after another, with music), and the sheet says so.
    */
-  function mtFitMode(quiet) {
+  function mtFitMode() {
     if (MT.mode !== 'talk' || !MT.items.length || MT.items.some((it) => it.kind === 'video')) return false;
     MT.mode = 'music';
-    if (!quiet) C.island({ kind: 'info', title: 'Photos make a Standard montage', sub: 'One after another, with music. Viral needs a video of someone speaking.', ms: 5500 });
     return true;
   }
+  /* the picker answered (or was closed): the "Getting your photos…" line goes */
+  let mtPickTimer = null;
+  function mtPickingOff() { clearTimeout(mtPickTimer); MT.picking = false; }
   let mtPicQueue = Promise.resolve(), mtPaintTimer = null;
   function mtPaintSoon() { if (!mtPaintTimer) mtPaintTimer = setTimeout(() => { mtPaintTimer = null; mtPaint(); }, 250); }
   function mtPicture(it) {

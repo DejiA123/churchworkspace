@@ -4173,3 +4173,11 @@ body.mw-cloud.mw-home .cloud-home { background: #eaf5fd; color: #0d1b2c; }
 /* a montage photo the phone could not draw: a plain picture mark (not a spinner for ever) */
 .mt-tile .mt-nopic { position: absolute; inset: 0; display: grid; place-items: center; color: #94a3b8; background: #eef2f7; }
 .mt-tile .mt-nopic .mi { width: 28px; height: 28px; }
+
+/* the phone's picker is open, or the phone is getting the chosen files ready: the button says so in place */
+#cloudUpload.waiting .mi { display: none; }
+#cloudUpload.waiting::before { content: ''; width: 18px; height: 18px; flex: none; border-radius: 50%; border: 2.5px solid rgba(255, 255, 255, .35); border-top-color: #fff; animation: cfSpin .8s linear infinite; }
+.mt-picking { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 12px 14px; border-radius: 14px; background: #eef6fd; color: #0d1b2c; font-size: 14.5px; font-weight: 600; }
+.mt-picking .cf-spin { border-color: rgba(2, 132, 199, .25); border-top-color: #0284c7; flex: none; }
+.mt-note { display: block; margin: 10px 0 0; padding: 10px 12px; border-radius: 12px; background: #f1f5f9; color: #3b4250; font-size: 13.5px; line-height: 1.45; }
+.mt-note.warn { background: #fff7e6; color: #7a4b00; }
