@@ -5142,8 +5142,23 @@ let _hideTimer = null;
           || (ae.tagName === 'INPUT' && !/^(button|checkbox|radio|range|file|submit|reset|color|image|hidden)$/i.test(ae.type || '')));
         const limit = Math.min(dock.getBoundingClientRect().top, vv && typingNow && !inPanel ? vv.offsetTop + vv.height : window.innerHeight);
         // the studio's content ends where its padding starts; it must end at the dock
-        const over = Math.ceil((vr.bottom - pb) - limit);
+        // the timeline as tall as its lanes (video, text, captions, sound, music),
+        // up to half the room: the picture gives the space, not the music lane
+        tl.style.flexBasis = '';
+        const base = tl.getBoundingClientRect().height;
+        const need = tl.scrollHeight + 2;
+        if (need > base + 2) tl.style.flexBasis = Math.min(need, Math.max(base, (limit - vr.top) * 0.5)) + 'px';
+        let over = Math.ceil((vr.bottom - pb) - limit);
         if (over > 1) view.style.paddingBottom = (pb + over) + 'px';
+        // …and never behind the tools: whatever lane is lowest ends above them
+        const lanes = tl.querySelectorAll('.ve-track, .ve-text-track, .ve-cap-track, .ve-audio-track, .ve-music-track, .ve-sfx-track');
+        let low = 0;
+        for (const ln of lanes) { const r = ln.getBoundingClientRect(); if (r.height && r.bottom > low) low = r.bottom; }
+        const hid = Math.ceil(low + 4 - limit);
+        if (low && hid > 1 && tl.scrollHeight <= tl.clientHeight + 4) {
+          const cur = parseFloat(view.style.paddingBottom) || pb;
+          view.style.paddingBottom = (cur + hid) + 'px';
+        }
         fitting = false;
         more();
         // The picture can MOVE without changing size (iOS shifting the page);
@@ -5163,6 +5178,9 @@ let _hideTimer = null;
         const ro2 = new ResizeObserver(() => requestAnimationFrame(fitTl));
         const dockEl = $('#cloudDock'), viewEl = $('#view-video');
         for (const el of [dockEl, viewEl]) if (el) ro2.observe(el);
+        // a lane appearing (a title, music) grows the timeline to show it
+        const inner2 = $('#veTlScroll') || tl.firstElementChild;
+        if (inner2) ro2.observe(inner2);
       }
       setTimeout(fitTl, 300); setTimeout(fitTl, 1500);
     }
