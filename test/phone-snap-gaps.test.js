@@ -13,6 +13,8 @@
  *   [4] swiping the timeline: the place under the line is the right moment of
  *       the recording (15 s on the timeline = 30 s in)
  *   [5] Snap off: the gaps show again, where the footage was cut
+ *   [6] the song slides exactly where the finger puts it — not pulled back to
+ *       0:00 by the magnet or by the footage cut before the first clip (CapCut)
  *   node test/phone-snap-gaps.test.js
  */
 const path = require('path'), fs = require('fs'), os = require('os'), http = require('http');
@@ -47,6 +49,8 @@ async function waitUp() {
   const VID = path.join(MEDIA, 'service.webm');
   execFileSync(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=360x640:r=15:d=40', '-f', 'lavfi', '-i', 'sine=f=220:d=40',
     '-c:v', 'libvpx-vp9', '-b:v', '300k', '-deadline', 'realtime', '-cpu-used', '8', '-g', '15', '-c:a', 'libopus', '-shortest', VID]);
+  const SONG = path.join(MEDIA, 'song.mp3');
+  execFileSync(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'sine=f=440:r=22050:d=60', '-ac', '1', '-c:a', 'libmp3lame', '-b:a', '64k', SONG]);
   const srv = spawn(process.execPath, [path.join(ROOT, 'src/cloud/server.js'), '--port', String(PORT), '--host', '127.0.0.1', '--code', CODE, '--data', DATA, '--media', MEDIA], { stdio: 'ignore' });
   const browser = await chromium.launch();
   try {
@@ -62,8 +66,9 @@ async function waitUp() {
     await page.waitForFunction(() => document.getElementById('vePlayer').readyState >= 2, null, { timeout: 30000 });
     await sleep(1200);
     const cdp = await ctx.newCDPSession(page);
-    const finger = async (x0, y, dx) => {
+    const finger = async (x0, y, dx, hold) => {
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x0, y }] });
+      if (hold) await sleep(hold);
       for (let k = 1; k <= 12; k++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x0 + (dx * k) / 12, y }] }); await sleep(16); }
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
       await sleep(500);
@@ -125,6 +130,30 @@ async function waitUp() {
     const at = await page.evaluate(() => document.getElementById('vePlayer').currentTime);
     check(Math.abs(at - want) < 0.6, `15 s along the timeline is ${want.toFixed(1)} s into the recording`, { at, want });
 
+    console.log('\n=== [6] the song slides where it is put ===');
+    await page.evaluate(async (f) => { const T = window.VideoEditor.__test; const e = await window.api.library.add('music', f); await T.libReload(); T.useMusic(e.id); }, SONG);
+    await page.evaluate(() => { document.getElementById('veTlScroll').scrollLeft = 0; });
+    await sleep(700);
+    const songBox = () => page.evaluate(() => { const n = document.querySelector('.ve-music-seg'), tr = document.getElementById('veMusicTrack').getBoundingClientRect(); const r = n.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height, at: Math.round(r.left - tr.left) }; });
+    let sb = await songBox();
+    check(sb.at <= 1, 'the song starts at 0:00 with the video', sb);
+    await page.touchscreen.tap(sb.x + 60, sb.y + sb.h / 2);   // pick it
+    await sleep(400);
+    sb = await songBox();
+    await finger(sb.x + 60, sb.y + sb.h / 2, 5 * s.pps, 600);   // hold, slide 5 s right
+    let sbA = await songBox(), m = await page.evaluate(() => window.VideoEditor.__test.music());
+    check(Math.abs(sbA.at - 5 * s.pps) <= 0.35 * s.pps && Math.abs(m.tlStart - (start + 5)) < 0.4,
+      'slid 5 s right, the song sits 5 s in — exactly where it was put', { at: sbA.at, want: Math.round(5 * s.pps), tlStart: m.tlStart, clipStart: start });
+    sb = await songBox();
+    await finger(sb.x + 60, sb.y + sb.h / 2, -3 * s.pps, 600);   // and 3 s back
+    sbA = await songBox(); m = await page.evaluate(() => window.VideoEditor.__test.music());
+    check(Math.abs(sbA.at - 2 * s.pps) <= 0.35 * s.pps && Math.abs(m.tlStart - (start + 2)) < 0.4,
+      'slid 3 s back, it sits 2 s in — not pulled to 0:00 or to an edge', { at: sbA.at, want: Math.round(2 * s.pps), tlStart: m.tlStart });
+    // what plays there (the preview asks the export's own question, musicFor)
+    const hear = await page.evaluate((c) => [c + 1.5, c + 2.6].map((t) => window.VideoEditor.__test.musicPosAt(t)), start);
+    check(hear[0] == null && hear[1] != null && Math.abs(hear[1] - 0.6) < 0.4, '…and it comes in 2 s into the video, from the top of the song', hear);
+    if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'snap-song.png') });
+
     console.log('\n=== [5] Snap off ===');
     await page.evaluate(() => document.getElementById('veSnap').click());
     await sleep(600);
@@ -142,3 +171,4 @@ async function waitUp() {
   console.log(`\n${pass} PASS / ${fail} FAIL`);
   process.exit(fail ? 1 : 0);
 })();
+

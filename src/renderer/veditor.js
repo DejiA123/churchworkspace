@@ -240,6 +240,14 @@
   }
   /** A recording span → its drawn width (seconds); what was cut from inside it takes no room. */
   const tvLen = (a, b) => Math.max(0, tv(b) - tv(a));
+  /*
+   * ►► A DRAGGED THING GOES WHERE THE FINGER PUTS IT. ◄◄ Something that started
+   * at recording time t0, slid dv seconds along the TIMELINE as drawn: where it
+   * lands. With Snap closing gaps, adding dv to the recording time instead made
+   * a song or a sound jump over cut footage — or, slid into what was cut before
+   * the first clip, sit at 0:00 however far it was dragged: "the audio snaps".
+   */
+  const slid = (t0, dv) => vt(Math.max(0, tv(t0) + dv));
   /** Is t in footage the timeline shows (with Snap closing the gaps)? Where the next shown footage starts. */
   function packHop(t) {
     const m = packMap(); if (!m) return null;
@@ -3408,9 +3416,10 @@
     const x0 = trackX(ev), s0 = s.start, e0 = s.end, len = e0 - s0;
     const move = (e) => {
       const dt = (trackX(e) - x0) / ve.pxPerSec;
-      if (edge === 'l') { s.start = clamp(snapT(s0 + dt).t, 0, s.end - 0.3); }
-      else if (edge === 'r') { s.end = clamp(snapT(e0 + dt).t, s.start + 0.3, dur()); }
-      else { const ns = clamp(s0 + dt, 0, dur() - len); s.start = ns; s.end = ns + len; }
+      // (sound is never pulled by the magnet, as in CapCut: it goes exactly where it is put)
+      if (edge === 'l') { s.start = clamp(slid(s0, dt), 0, s.end - 0.3); }
+      else if (edge === 'r') { s.end = clamp(slid(e0, dt), s.start + 0.3, dur()); }
+      else { const ns = clamp(slid(s0, dt), 0, dur() - len); s.start = ns; s.end = ns + len; }
       renderAudioSegments();
     };
     const up = () => {
@@ -5971,12 +5980,12 @@
         const move = (e) => {
           const dt = (e.clientX - x0) / ve.pxPerSec;
           if (edge === 'l') {
-            o.start = clamp(snapT(s0 + dt).t, 0, o.end - 0.3);
+            o.start = clamp(snapT(slid(s0, dt)).t, 0, o.end - 0.3);
           } else if (edge === 'r') {
-            o.end = clamp(snapT(e0 + dt).t, o.start + 0.3, dur());
+            o.end = clamp(snapT(slid(e0, dt)).t, o.start + 0.3, dur());
           } else {
             const len = e0 - s0;
-            let ns = clamp(s0 + dt, 0, dur() - len);
+            let ns = clamp(slid(s0, dt), 0, dur() - len);
             const sl = snapT(ns), sr = snapT(ns + len);
             if (sl.snapped) ns = clamp(sl.t, 0, dur() - len);
             else if (sr.snapped) ns = clamp(sr.t - len, 0, dur() - len);
@@ -16342,17 +16351,18 @@
       moved = true;
       // dragged or trimmed, it is put HERE: it stops being a per-short bed
       m.bed = false;
+      // (never pulled by the magnet, as in CapCut: the song goes exactly where it is put)
       if (edge === 'l') {
         // the start comes later (or earlier, back to the song's own start)
-        const nt = clamp(snapT(t0 + dt).t, Math.max(0, t0 - src0), t0 + len0 - MIN);
+        const nt = clamp(slid(t0, dt), Math.max(0, t0 - src0), t0 + len0 - MIN);
         m.tlStart = nt; m.srcStart = src0 + (nt - t0); m.len = len0 - (nt - t0);
       } else if (edge === 'r') {
         const most = Math.min(dur(), songD > 0 ? t0 + (songD - src0) : dur());
-        const ne = clamp(snapT(t0 + len0 + dt).t, t0 + MIN, Math.max(t0 + MIN, most));
+        const ne = clamp(slid(t0 + len0, dt), t0 + MIN, Math.max(t0 + MIN, most));
         m.tlStart = t0; m.srcStart = src0; m.len = ne - t0;
       } else {
         m.srcStart = src0; m.len = len0;
-        m.tlStart = clamp(snapT(t0 + dt).t, 0, Math.max(0, dur() - 0.5));
+        m.tlStart = clamp(slid(t0, dt), 0, Math.max(0, dur() - 0.5));
       }
       renderMusicLane();
     };
@@ -16831,7 +16841,7 @@
         const dt = (ev.clientX - x0) / ve.pxPerSec;
         if (!moved && Math.abs(ev.clientX - x0) < 3) return;
         moved = true;
-        x.start = Math.max(0, Math.min(dur(), s0 + dt));
+        x.start = Math.max(0, Math.min(dur(), slid(s0, dt)));
         const c = document.querySelector(`#veSfxTrack .ve-sfx-clip[data-sid="${x.id}"]`);
         if (c) c.style.left = (tv(x.start) * ve.pxPerSec) + 'px';
       };
