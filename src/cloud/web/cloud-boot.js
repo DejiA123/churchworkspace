@@ -5452,6 +5452,76 @@ let _hideTimer = null;
   const panelOf = (id) => panels.find((p) => p.id === id) || null;
 
   /*
+   * ►► EVERY SHEET PULLS DOWN TO CLOSE. ◄◄ "I should be able to drag the Music
+   * screen down — not only tap Done — and the same for every window like it."
+   * One rule for all of them, so they behave alike: a sheet that comes up from
+   * the bottom (Music, Thumbnail, Video quality, Captions, My Uploads, the
+   * studio's Shorts / settings / Export sheets…) follows a finger that takes it
+   * by its top — the grab bar and the title — and goes away when let go far
+   * enough down; let go sooner, it springs back. It closes exactly as its own
+   * Done / ✕ does (that button is pressed), so nothing it does on closing is
+   * skipped. A card in the middle of a wide screen is left alone, and so is a
+   * finger that lands on a button or a box being typed in.
+   * (The panels made by openPanel have this of their own.)
+   */
+  function installPullDown(sheetClose) {
+    const TOP = 64;        // how far down the sheet a pull may start: its grab bar and title
+    const FAR = 80;        // how far it must be pulled to close
+    const phone = () => !window.matchMedia || window.matchMedia('(max-width: 900px)').matches;
+    // a studio sheet (body.mw-sheet): its header bar and the panel under it move together
+    const studioSheet = () => {
+      const b = document.body.classList;
+      if (!b.contains('mw-sheet')) return null;
+      const body = b.contains('mw-sheet-shorts') ? $('#view-video .ve-bin') : b.contains('mw-sheet-insp') ? $('#view-video .ve-side')
+        : b.contains('mw-sheet-export') ? $('.cloud-export-sheet') : null;
+      return [$('#cloudSheetHead'), body].filter(Boolean);
+    };
+    const closeOf = (m) => {
+      if (sheetClose[m.id]) return sheetClose[m.id];
+      const btn = m.querySelector('[id$="Close"], [id$="Done"], button[aria-label="Close"], button[aria-label="Done"]');
+      return btn ? () => btn.click() : () => m.classList.add('hidden');
+    };
+    let drag = null;
+    document.addEventListener('touchstart', (e) => {
+      drag = null;
+      if (!phone() || e.touches.length !== 1) return;
+      const t = e.touches[0], el = e.target;
+      if (!el || !el.closest || el.closest('button, input, select, textarea, a, label, [contenteditable="true"]')) return;
+      // the studio's own sheet, by its header bar
+      if (el.closest('#cloudSheetHead')) {
+        const parts = studioSheet();
+        if (parts && parts.length) drag = { parts, y0: t.clientY, dy: 0, close: () => { const d = $('#cloudSheetHead .cloud-sheet-done'); if (d) d.click(); } };
+      } else {
+        const m = el.closest('.cap-modal:not(.hidden), .fx-side:not(.hidden)');
+        const box = m && (el.closest('.cap-box, .lib-box') || m.querySelector('.cap-box, .lib-box'));
+        if (!box) return;
+        const r = box.getBoundingClientRect();
+        if (t.clientY - r.top > TOP || t.clientY < r.top) return;          // only by its top
+        if (r.bottom < window.innerHeight - 6) return;                      // a card in the middle, not a sheet
+        drag = { parts: [box], y0: t.clientY, dy: 0, close: closeOf(m) };
+      }
+      if (drag) for (const p of drag.parts) p.style.transition = 'none';
+    }, { passive: true, capture: true });
+    document.addEventListener('touchmove', (e) => {
+      if (!drag) return;
+      drag.dy = Math.max(0, e.touches[0].clientY - drag.y0);
+      for (const p of drag.parts) p.style.transform = drag.dy ? `translateY(${drag.dy}px)` : '';
+    }, { passive: true, capture: true });
+    const end = () => {
+      if (!drag) return;
+      const d = drag; drag = null;
+      const away = d.dy > FAR;
+      for (const p of d.parts) { p.style.transition = 'transform .22s ease'; p.style.transform = away ? 'translateY(100%)' : ''; }
+      setTimeout(() => {
+        if (away) d.close();
+        for (const p of d.parts) { p.style.transition = ''; p.style.transform = ''; }
+      }, away ? 200 : 230);
+    };
+    document.addEventListener('touchend', end, { capture: true });
+    document.addEventListener('touchcancel', end, { capture: true });
+  }
+
+  /*
    * AN iPHONE THAT GIVES THE APP A SHORT SCREEN.
    *
    * iOS 26 has a bug (WebKit 301108): a home-screen app with the see-through
@@ -6226,32 +6296,13 @@ let _hideTimer = null;
     });
     on('#cloudHelpClose', 'click', () => $('#cloudHelpModal').classList.add('hidden'));
     // Every sheet also puts itself away from a tap on the dimmed space above it,
-    // or a pull down by its top — never only the ✕ (something can sit over it).
+    // or a pull down by its top (installPullDown) — never only the ✕ (something can sit over it).
     const sheetClose = { cloudFilesModal: closeFilesModal };
     $$('.cap-modal.cloud-sheet-modal, #cloudHelpModal').forEach((m) => {
       const close = () => (sheetClose[m.id] ? sheetClose[m.id]() : m.classList.add('hidden'));
       m.addEventListener('click', (e) => { if (e.target === m) close(); });
-      const box = m.querySelector('.cap-box');
-      const top = box && box.firstElementChild;
-      if (!top) return;
-      let y0 = null, dy = 0;
-      top.addEventListener('touchstart', (e) => {
-        if (e.target.closest('button')) return;
-        y0 = e.touches[0].clientY; dy = 0; box.style.transition = 'none';
-      }, { passive: true });
-      top.addEventListener('touchmove', (e) => {
-        if (y0 == null) return;
-        dy = Math.max(0, e.touches[0].clientY - y0);
-        box.style.transform = dy ? `translateY(${dy}px)` : '';
-      }, { passive: true });
-      const end = () => {
-        if (y0 == null) return;
-        y0 = null; box.style.transition = ''; box.style.transform = '';
-        if (dy > 80) close();
-      };
-      top.addEventListener('touchend', end);
-      top.addEventListener('touchcancel', end);
     });
+    installPullDown(sheetClose);
 
     // The studio's own "open the output folder" button, which the cloud page
     // keeps because the export path ends there.
