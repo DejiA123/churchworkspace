@@ -15486,16 +15486,83 @@
     $$('.lib-pane').forEach((p) => p.classList.toggle('hidden', p.dataset.libpane !== tab));
     const title = $('#libTitle');
     if (title) title.textContent = tab === 'clips' ? 'Clips' : 'Music';
+    if (tab === 'free' && !ve.free) freeRefresh();
     libSubtitle();
     const hint = $('#libHint');
     if (hint) hint.textContent = tab === 'clips'
       ? 'The clip you pick is added to the END of every short you export.'
+      : tab === 'free' ? 'Tap ▶ to listen, Use to put it under every clip you export.'
       : 'The track you pick plays under every clip you export.';
     if (tab === 'youtube') ytRefreshStatus();
   }
 
   function renderLibrary() {
-    renderMusicList(); renderClipGrid(); renderMusicBar(); renderOutroBar();
+    renderMusicList(); renderFreeList(); renderClipGrid(); renderMusicBar(); renderOutroBar();
+  }
+
+  /* ---- 🎧 Free music: Mixkit's lo-fi, upbeat, worship… (freemusic.js), by mood.
+   * ▶ and Use both fetch the song into My music first (once), so it previews,
+   * sits on the music lane and mixes into exports like any other song. ---- */
+  async function freeRefresh() {
+    if (!window.api.freeMusic) return;
+    try { ve.free = await window.api.freeMusic.list(false); } catch (e) { ve.free = null; }
+    renderFreeList();
+  }
+  function renderFreeList() {
+    const el = $('#libFreeList'), moods = $('#libFreeMoods'); if (!el || !moods) return;
+    const F = ve.free;
+    if (!F || !F.tracks || !F.tracks.length) {
+      moods.innerHTML = '';
+      el.innerHTML = `<p class="muted small lib-empty">${F ? 'The free music could not be reached just now — try again in a moment.' : 'Loading free music…'}</p>`;
+      return;
+    }
+    const mood = F.moods.some((m) => m.id === ve.freeMood) ? ve.freeMood : F.moods[0].id;
+    moods.innerHTML = F.moods.filter((m) => F.tracks.some((t) => t.mood === m.id))
+      .map((m) => `<button class="lib-chip${m.id === mood ? ' on' : ''}" data-freemood="${attr2(m.id)}">${escape2(m.name)}</button>`).join('');
+    const a = ve.refs && ve.refs.musicAudio;
+    el.innerHTML = F.tracks.filter((t) => t.mood === mood).map((t) => {
+      const lib = t.inLibrary, on = !!(lib && ve.music && ve.music.id === lib);
+      const playing = !!(lib && a && !a.paused && ve._auditionId === lib), busy = ve._freeBusy === t.id;
+      return `
+      <div class="lib-row${on ? ' sel' : ''}" data-freeid="${attr2(t.id)}">
+        <button class="lib-art${playing ? ' playing' : ''}" style="--h:${libHue(t.title)}" data-freeplay="${attr2(t.id)}" title="Listen" aria-label="Listen to ${attr2(t.title)}"><i>${busy ? '…' : playing ? LIB_ICON.pause : LIB_ICON.play}</i></button>
+        <span class="lib-row-main">
+          <b>${escape2(t.title)}</b>
+          <span class="muted small">${t.artist ? 'by ' + escape2(t.artist) : ''}${lib ? ' · in My music' : ''}</span>
+        </span>
+        <button class="primary-btn small lib-use${on ? ' on' : ''}" data-freeuse="${attr2(t.id)}"${busy ? ' disabled' : ''}>${on ? LIB_ICON.check + '<span>In use</span>' : busy ? 'Getting…' : 'Use'}</button>
+      </div>`;
+    }).join('');
+    $$('[data-freemood]', moods).forEach((b) => b.addEventListener('click', () => { ve.freeMood = b.dataset.freemood; renderFreeList(); }));
+    $$('[data-freeplay]', el).forEach((b) => b.addEventListener('click', () => freePlay(b.dataset.freeplay)));
+    $$('[data-freeuse]', el).forEach((b) => b.addEventListener('click', () => freeUse(b.dataset.freeuse)));
+  }
+  /** The song into My music (once): its library entry. */
+  async function freeFetch(id) {
+    const t = ((ve.free && ve.free.tracks) || []).find((x) => x.id === id);
+    if (t && t.inLibrary && ((ve.lib && ve.lib.music) || []).some((m) => m.id === t.inLibrary)) return { id: t.inLibrary };
+    if (ve._freeBusy) return null;
+    ve._freeBusy = id; renderFreeList();
+    try {
+      const entry = await window.api.freeMusic.get(id);
+      if (t) t.inLibrary = entry.id;
+      await libRefresh();
+      return entry;
+    } catch (e) {
+      window.__toast && window.__toast('⚠️ ' + (e.message || 'That song could not be fetched — try another.'), 'error');
+      return null;
+    } finally { ve._freeBusy = null; renderFreeList(); }
+  }
+  async function freePlay(id) {
+    const t = ((ve.free && ve.free.tracks) || []).find((x) => x.id === id);
+    const a = ve.refs && ve.refs.musicAudio;
+    if (t && t.inLibrary && ve._auditionId === t.inLibrary && a && !a.paused) { stopAudition(); return renderFreeList(); }
+    const entry = await freeFetch(id);
+    if (entry) { auditionMusic(entry.id); renderFreeList(); }
+  }
+  async function freeUse(id) {
+    const entry = await freeFetch(id);
+    if (entry) { stopAudition(); useMusic(entry.id); }
   }
 
   /* The library's look: line icons, and a colour of its own for every song
@@ -15519,6 +15586,7 @@
     const tab = ve.libTab || 'music';
     const n = (((ve.lib && ve.lib[tab === 'clips' ? 'clips' : 'music']) || [])).length;
     sub.textContent = tab === 'youtube' ? 'Search for a song to put under your video'
+      : tab === 'free' ? 'Lo-fi, upbeat, worship and more · free to post'
       : tab === 'clips' ? (n ? `${n} clip${n === 1 ? '' : 's'} · intros and outros for every short` : 'Intros and outros for every short')
       : (n ? `${n} song${n === 1 ? '' : 's'} · kept for every project` : 'Your songs, kept for every project');
   }
@@ -15942,6 +16010,7 @@
     if (a) a.pause();
     ve._auditionId = null;
     $$('[data-musicplay]').forEach((b) => setLibPlay(b, false));
+    $$('[data-freeplay]').forEach((b) => setLibPlay(b, false));
   }
 
   function updateMusicButton() {

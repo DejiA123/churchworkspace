@@ -2814,7 +2814,7 @@
   const MT = { items: [], song: null, songFile: null, style: 'hype', len: 30, custom: 120, aspect: '9:16', keep: true, brief: '', busy: false, order: 'ai', caps: true, mode: 'talk', free: null, freeMood: null, voice: '',
     acc: new Set() };   // the rows of "Fine-tune" that are open (kept across redraws)
   /* which free mood suits which style, for "✨ Pick for me" */
-  const MT_MOOD_OF = { hype: 'hype', fun: 'hype', cinematic: 'epic', worship: 'uplift', emotional: 'calm' };
+  const MT_MOOD_OF = { hype: 'hype', fun: 'upbeat', cinematic: 'epic', worship: 'uplift', emotional: 'calm' };
   /*
    * ►► TWO KINDS OF EDIT. ◄◄ A music montage is cut from what the clips LOOK
    * like, to a song. A viral talk edit is cut from what is SAID: the AI hears
@@ -3015,10 +3015,10 @@
         <div class="mt-row mt-moods">${F.moods.map((m) => `<button type="button" class="mt-chip${mood === m.id ? ' on' : ''}" data-mt-mood="${attr(m.id)}">${esc(mtWord(m.name))}</button>`).join('')}</div>
         <div class="mt-list">
           ${row({ key: 'auto', sel: MT.free === 'auto', title: 'Pick for me', sub: `a different ${mtWord(mName)} song each time`, pick: 'data-mt-free="auto"' })}
-          ${shown.map((t) => row({ key: 'free:' + t.id, sel: MT.free === t.id, title: t.title, sub: mName.replace(/^\S+\s/, ''), pick: `data-mt-free="${attr(t.id)}"`, play: true })).join('')}
+          ${shown.map((t) => row({ key: 'free:' + t.id, sel: MT.free === t.id, title: t.title, sub: t.artist ? 'by ' + t.artist : mName.replace(/^\S+\s/, ''), pick: `data-mt-free="${attr(t.id)}"`, play: true })).join('')}
           ${!all && songs.length > MT_LIST_SHOW ? `<button type="button" class="mt-more" data-mt-all="${attr(mood)}">Show all ${songs.length} ${esc(mtWord(mName))} songs</button>` : ''}
         </div>
-        <small class="mt-hint">Free and safe to post — no copyright flags. The post credits the artist.</small>`;
+        <small class="mt-hint">Free and safe to post — no copyright flags, no credit needed (Mixkit).</small>`;
     }
     if (tab === 'mine') {
       return `${tabs}

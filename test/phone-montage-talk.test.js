@@ -71,7 +71,7 @@ async function waitUp() {
   execFileSync(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=360x640:r=15:d=40', '-f', 'lavfi', '-i', 'sine=f=220:d=40',
     '-c:v', 'libvpx-vp9', '-b:v', '300k', '-deadline', 'realtime', '-cpu-used', '8', '-c:a', 'libopus', '-shortest', VID]);
   const srv = spawn(process.execPath, [path.join(ROOT, 'src/cloud/server.js'), '--port', String(PORT), '--host', '127.0.0.1',
-    '--code', CODE, '--data', DATA, '--media', MEDIA], { stdio: 'ignore' });
+    '--code', CODE, '--data', DATA, '--media', MEDIA], { stdio: 'ignore', env: Object.assign({}, process.env, { MW_FREE_MUSIC_BASE: 'http://127.0.0.1:9/music/' }) });
   const browser = await chromium.launch();
   const done = async () => { try { await browser.close(); } catch (e) {} try { srv.kill(); } catch (e) {} try { fs.rmSync(WORK, { recursive: true, force: true }); } catch (e) {} };
   try {
@@ -119,7 +119,7 @@ async function waitUp() {
       songs: document.querySelectorAll('#cloudMontage [data-mt-free]:not([data-mt-free="auto"])').length,
     }));
     check(extra.narrator, 'the Viral Montage offers a narrator', extra);
-    check(extra.moods.length === 4 && extra.pick && extra.songs >= 3, 'free, safe-to-post music is on the page by mood — and "✨ Pick for me" is on by default', extra);
+    check(extra.moods.length === 7 && extra.pick && extra.songs >= 3, 'free, safe-to-post music is on the page by mood — and "✨ Pick for me" is on by default', extra);
     // ✨ Pick for me deals the mood's songs like cards: ten picks in a row, ten different songs
     const dealt = await page.evaluate(() => {
       const D = window.MWCloud._freeDeal;
@@ -177,22 +177,22 @@ async function waitUp() {
     await sleep(200);
     await page.locator('#cloudMontage [data-mt-voice=""] .mt-song-t').tap();
     await sleep(200);
-    // a FREE song plays through the server (incompetech will not play inside another site, and
+    // a FREE song plays through the server (Mixkit is not in the page's own site, and
     // an iPhone needs the sound to start on the tap): one the server already has streams at once
-    await page.evaluate((w) => window.api.library.add('music', w, 'Movement Proposition · Kevin MacLeod', 'free:movement-proposition'), wav);
+    await page.evaluate((w) => window.api.library.add('music', w, 'Sports Highlights · Ahjay Stelino', 'free:mk51'), wav);
     await page.locator('#cloudMontage [data-mt-tab="free"]').tap();
     await sleep(200);
     await page.locator('#cloudMontage [data-mt-mood="hype"]').tap();
     await sleep(200);
-    await page.locator('#cloudMontage [data-mt-play="free:movement-proposition"]').tap();
+    await page.locator('#cloudMontage [data-mt-play="free:mk51"]').tap();
     let fp = null;
-    for (let i = 0; i < 25; i++) { await sleep(200); fp = await page.evaluate(() => ({ on: !!document.querySelector('#cloudMontage [data-mt-play="free:movement-proposition"].on'), sub: (document.querySelector('#cloudMontage [data-mt-sub="free:movement-proposition"]') || {}).textContent })); if (/Playing · 0:0[1-9]/.test(fp.sub)) break; }
+    for (let i = 0; i < 25; i++) { await sleep(200); fp = await page.evaluate(() => ({ on: !!document.querySelector('#cloudMontage [data-mt-play="free:mk51"].on'), sub: (document.querySelector('#cloudMontage [data-mt-sub="free:mk51"]') || {}).textContent })); if (/Playing · 0:0[1-9]/.test(fp.sub)) break; }
     check(fp.on && /Playing · 0:0[1-9]/.test(fp.sub), '▶ on a free song plays it through the server', fp);
-    await page.locator('#cloudMontage [data-mt-play="free:movement-proposition"]').tap();
+    await page.locator('#cloudMontage [data-mt-play="free:mk51"]').tap();
     await sleep(200);
-    // one the server cannot fetch (no internet here) says so, and the button goes back to ▶
+    // one the server cannot fetch (a stand-in Mixkit that is not there) says so, and the button goes back to ▶
     // (whichever other song is listed: which titles the server can reach depends on the internet here)
-    const other = await page.evaluate(() => [...document.querySelectorAll('#cloudMontage [data-mt-play^="free:"]')].map((b) => b.dataset.mtPlay).find((k) => k !== 'free:movement-proposition'));
+    const other = await page.evaluate(() => [...document.querySelectorAll('#cloudMontage [data-mt-play^="free:"]')].map((b) => b.dataset.mtPlay).find((k) => k !== 'free:mk51'));
     await page.locator(`#cloudMontage [data-mt-play="${other}"]`).tap();
     let bad = null;
     for (let i = 0; i < 60; i++) { await sleep(250); bad = await page.evaluate(() => ({ on: !!document.querySelector('#cloudMontage [data-mt-play].on'), island: document.body.innerText.includes('That song would not play') })); if (bad.island) break; }
@@ -202,7 +202,7 @@ async function waitUp() {
     if (process.env.MW_SHOTS) { await page.evaluate(() => document.querySelector('#cloudMontage .mt-seg').scrollIntoView({ block: 'start' })); await sleep(300); await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'montage-music.png') }); }
     await page.locator('#cloudMontage [data-mt-mood="epic"]').tap();
     await sleep(200);
-    check(await page.evaluate(() => [...document.querySelectorAll('#cloudMontage [data-mt-free]:not([data-mt-free="auto"])')].some((b) => /Heroic Age/.test(b.textContent))), 'a mood shows its songs (Epic: "Heroic Age"…)');
+    check(await page.evaluate(() => [...document.querySelectorAll('#cloudMontage [data-mt-free]:not([data-mt-free="auto"])')].some((b) => /Epical Drums/.test(b.textContent))), 'a mood shows its songs (Epic: "Epical Drums"…)');
     await page.setInputFiles('#mtPick', VID);
     await sleep(800);
     const b = await st();
