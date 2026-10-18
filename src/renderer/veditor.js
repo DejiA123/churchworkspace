@@ -366,6 +366,7 @@
     const playsHevc = hevc && !!(player.canPlayType('video/mp4; codecs="hvc1.1.6.L93.B0"') || player.canPlayType('video/mp4; codecs="hev1.1.6.L93.B0"'));
     if (codecUnplayable && !playsHevc) { showPreparing(nov, player, info.vcodec); makeProxyBg(origPath); return; }
     player.src = fileUrl(origPath); player.load(); nov.style.display = 'none'; player.style.display = 'block'; previewWaiting(false);
+    lightPreviewBg(origPath, info);
     if (playsHevc) {
       const fallBack = () => {
         if (!ve.video || ve.video.path !== origPath || ve.video.proxy || ve.video.proxying) return;
@@ -393,6 +394,58 @@
     nov.innerHTML = `<div class="ve-wait-ic">⏳</div>
       <p class="ve-wait-title">Getting your video ready to play… <b class="ve-prep-pct">0%</b></p>
       <p class="ve-wait-sub">You can already make shorts, add captions and edit while this finishes.</p>`;
+  }
+  /*
+   * ►► ON A PHONE, A LIGHT COPY TO PLAY. ◄◄ The phone used to stream the
+   * original — a 1.7 GB recording at full size, a whole picture only every few
+   * seconds — so Play waited and every seek fetched megabytes from the server.
+   * A heavy video now gets a light copy made beside it on the server (720p, a
+   * whole picture every second: makeProxy, kept for next time), and the phone
+   * changes over to it the moment it is ready, at the same moment of the video,
+   * while it is paused and nobody is moving the timeline. The original still
+   * plays until then, and is still what AI and every export are made from.
+   */
+  function lightPreviewBg(origPath, info) {
+    if (!window.MWCloud || !ve.video || !window.api.video.makeProxy) return;
+    const mbps = info.durationSec > 0 ? ((info.sizeBytes || 0) * 8) / info.durationSec / 1e6 : 0;
+    const long = Math.max(info.width || 0, info.height || 0);
+    if (!(mbps > 5 || long > 1280)) return;
+    const v = ve.video;
+    // (the one being made for a video since closed stops: the server makes one at a time for this phone)
+    const last = ve._lightJob;
+    if (last && last.path !== origPath && last.v.lighting) { try { Promise.resolve(window.api.job.cancel(last.jobId)).catch(() => {}); } catch (e) {} }
+    v.lighting = true;
+    const jobId = window.__newJobId ? window.__newJobId() : 'lp' + Date.now();
+    ve._proxyJobId = jobId;
+    ve._lightJob = { jobId, path: origPath, v };
+    window.api.video.makeProxy({ input: origPath, jobId }).then((proxy) => {
+      v.lighting = false;
+      if (ve.video !== v || !proxy) return;
+      v.proxy = proxy;
+      const p = ve.refs.player;
+      if (v.proxying) {   // the original would not play after all: this IS the preview now
+        v.proxying = false;
+        p.src = fileUrl(proxy); p.load();
+        $('#veNoVid').style.display = 'none'; p.style.display = 'block';
+        previewWaiting(false);
+        return;
+      }
+      const swap = () => {
+        if (ve.video !== v) return;
+        if (!p.paused || p.seeking || ve._scrubWant != null || userScrolling() || ve.tailRun) return setTimeout(swap, 700);
+        const at = p.currentTime || 0;
+        p.src = fileUrl(proxy); p.load();
+        p.addEventListener('loadedmetadata', () => { try { if (at > 0.05) p.currentTime = at; } catch (e) {} }, { once: true });
+      };
+      swap();
+    }, () => {
+      v.lighting = false;
+      if (ve.video !== v || !v.proxying) return;
+      v.proxying = false;
+      previewWaiting(true);
+      $('#veNoVid').innerHTML = `<div class="ve-wait-ic">🎬</div><p class="ve-wait-title">This video can't be previewed here</p>
+        <p class="ve-wait-sub">Making shorts, captions, editing and exporting all still work.</p>`;
+    });
   }
   async function makeProxyBg(origPath) {
     if (ve.video) ve.video.proxying = true;
@@ -1477,7 +1530,7 @@
   function scrubTo(t) {
     const p = ve.refs.player; if (!p) return;
     $('#veTime').textContent = `${fmt(t)} / ${fmt(playEnd())}`;
-    if (p.seeking && ve.tailT == null && !(hasTail() && t > dur() + 0.001)) { ve._scrubWant = t; return; }
+    if (p.seeking && ve.tailT == null && !(hasTail() && t > dur() + 0.001)) { ve._scrubWant = t; ve._scrubWantAt = performance.now(); return; }
     ve._scrubWant = null;
     ve._scrubbing = true;
     try { seekTo(t); } finally { ve._scrubbing = false; }
@@ -1536,7 +1589,9 @@
     const sc = ve.refs.tlScroll;
     if (centred()) {
       // the clips move, not the line (and never under a finger that is moving them)
-      if (!userScrolling() && Math.abs(sc.scrollLeft - (x - centreGap())) > 0.5) setScrollLeft(sc, Math.max(0, x - centreGap()));
+      // (nor under a flick still coasting from one: snapping it would stop it dead, a beat behind the finger)
+      const coasting = !isPlaying() && performance.now() - (ve._userScrollAt || 0) < 250;
+      if (!userScrolling() && !coasting && Math.abs(sc.scrollLeft - (x - centreGap())) > 0.5) setScrollLeft(sc, Math.max(0, x - centreGap()));
     } else if (sc && isPlaying() && ve.follow !== false) {
       if (x < sc.scrollLeft + 20 || x > sc.scrollLeft + sc.clientWidth - 60) setScrollLeft(sc, Math.max(0, x - 80));
     }
@@ -7139,7 +7194,18 @@
 
   /* ---------------- transport ---------------- */
   /* ---- the tail clock: playing on past the end of the main video ---- */
-  function nowT() { return ve.tailT != null ? ve.tailT : ((ve.refs && ve.refs.player && ve.refs.player.currentTime) || 0); }
+  /*
+   * ►► NO JUMPING BACK. ◄◄ While a swipe's newest wish waits for the seek before
+   * it to land (scrubTo), the player still reports the OLDER time — and when
+   * that seek landed, the timeline was snapped back to it: on a slow network
+   * the line jumped back to where the finger had been a moment ago. The time
+   * under the line is the newest wish until the player gets there.
+   */
+  function nowT() {
+    if (ve.tailT != null) return ve.tailT;
+    if (ve._scrubWant != null && performance.now() - (ve._scrubWantAt || 0) < 4000) return ve._scrubWant;
+    return (ve.refs && ve.refs.player && ve.refs.player.currentTime) || 0;
+  }
   function isPlaying() { return !!ve.tailRun || !!(ve.refs && ve.refs.player && !ve.refs.player.paused); }
   function hasTail() { return playEnd() > dur() + 0.05; }
   function enterTail(t, play) {
@@ -17799,6 +17865,7 @@
       }
       // a format the phone cannot play (or one that kept failing) — build the preview copy
       showPreparing($('#veNoVid'), p, info.vcodec);
+      if (v.lighting) { v.proxying = true; return; }   // the light copy is already being made: it is shown when ready
       makeProxyBg(v.path);
     });
     // live % while a preview proxy builds
