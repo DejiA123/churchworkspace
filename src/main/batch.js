@@ -221,20 +221,37 @@ function cancel({ id } = {}) {
 
 /* ------------------------------------------------------------------ running */
 
-function fill(v, outs, depth = 0) {
+/*
+ * A NAME, NOT A PATH. "Name it after the file before it" (outName: the music,
+ * the sounds) was recorded as that file's stand-in, and the stand-in became the
+ * file's whole path: ".../Media/Church Work Space/short-Ignore_The_Multitude…",
+ * squashed into a name and cut at 60 characters, so every short of a batch
+ * came out "Media Church Work Space media…" with its title cut off. Where a name
+ * is wanted, it is that file's own name, as the phone would have made it
+ * (outNameFor): no folder, no extension, no time stamp.
+ */
+const nameOf = (p) => path.basename(String(p)).replace(/\.[^.]+$/, '').replace(/-\d{8}-\d{6}(-\d+)?$/, '') || 'clip';
+function fill(v, outs, depth = 0, key = '') {
   if (depth > 10 || v == null) return v;
   if (typeof v === 'string') {
+    // a name made from an earlier file's ("…-logo"): that file's name in its place
+    if (key === 'outName' && /@@step-\d+@@/.test(v)) {
+      return v.replace(/@@step-(\d+)@@(\.[a-z0-9]+)?/gi, (x, n) => {
+        if (!outs[Number(n)]) throw new Error('A step used a file that was never made.');
+        return nameOf(outs[Number(n)]);
+      });
+    }
     const m = v.match(PLACEHOLDER);
     if (!m) return v;
     const out = outs[Number(m[1])];
     if (!out) throw new Error('A step used a file that was never made.');
-    return out;
+    return key === 'outName' ? nameOf(out) : out;
   }
   if (Array.isArray(v)) return v.map((x) => fill(x, outs, depth + 1));
   if (ArrayBuffer.isView(v) || v instanceof ArrayBuffer) return v;
   if (typeof v === 'object') {
     const o = {};
-    for (const k of Object.keys(v)) o[k] = fill(v[k], outs, depth + 1);
+    for (const k of Object.keys(v)) o[k] = fill(v[k], outs, depth + 1, k);
     return o;
   }
   return v;
@@ -350,4 +367,4 @@ function lane(b) {
   });
 }
 
-module.exports = { init, open, add, seal, list, cancel, PLACEHOLDER, STEPS, _batches: batches };
+module.exports = { init, open, add, seal, list, cancel, PLACEHOLDER, STEPS, _batches: batches, _fill: fill };
