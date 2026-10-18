@@ -73,14 +73,14 @@ const up = async () => { for (let k = 0; k < 80; k++) { try { await new Promise(
       return T.segments().find((s) => s.end - s.start < 60).id;
     });
 
-    let sawBadge = false, cam = null;
+    let sawBadge = false, sawBusy = false, cam = null;
     for (let i = 0; i < 90 && !cam; i++) {
       await sleep(500);
-      const st = await page.evaluate((id) => ({ badge: !!document.querySelector('.ve-cam-busy.on'), cam: window.VideoEditor.__test.camOf(id) }), id);
-      sawBadge = sawBadge || st.badge; cam = st.cam;
+      const st = await page.evaluate((id) => ({ badge: !!document.querySelector('.ve-cam-busy'), busy: window.VideoEditor.__test.camBusy(), cam: window.VideoEditor.__test.camOf(id) }), id);
+      sawBadge = sawBadge || st.badge; sawBusy = sawBusy || st.busy; cam = st.cam;
     }
     check(!!cam && cam.n > 2, 'paused in a short, its camera path is worked out (the export\'s own tracking)', cam ? cam.n + ' keyframes' : 'none');
-    check(sawBadge, 'the person is told while it is worked out ("Finding the speaker in this short…")');
+    check(!sawBadge, 'it is worked out quietly — no "Finding the speaker in this short…" over the picture', { sawBadge, sawBusy });
 
     // paused and scrubbed: the frame is where the speaker is, and where the export will put it
     const at = await page.evaluate(async (id) => {

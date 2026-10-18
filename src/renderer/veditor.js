@@ -9949,19 +9949,14 @@
     const s = shortAt((p && p.currentTime) || 0);
     if (!s || camCached(s) || camJob.failed.has(camKey(s))) return;
     const key = camKey(s);
+    // worked out quietly: no "Finding the speaker…" over the picture (the
+    // preview follows the live guess meanwhile, then the path)
     camJob.busy = true;
-    setCamBusy(true);
     const { input, ss, ee, pieces } = clipFootage(s);
     camPath(s, input, ss, ee, pieces, () => !reframeOn())
       .then((kf) => { if (!kf || !kf.length) camJob.failed.add(key); })
       .catch(() => camJob.failed.add(key))
-      .then(() => { camJob.busy = false; setCamBusy(false); updateCropMask(); });
-  }
-  function setCamBusy(on) {
-    const host = ve.refs.drop; if (!host) return;
-    let el = host.querySelector('.ve-cam-busy');
-    if (!el) { el = document.createElement('div'); el.className = 've-cam-busy'; el.innerHTML = '<i></i><span>Finding the speaker in this short…</span>'; host.appendChild(el); }
-    el.classList.toggle('on', !!on);
+      .then(() => { camJob.busy = false; updateCropMask(); });
   }
 
   /** Overlay-lane (PiP) clips whose timeline window overlaps [s.start, s.end]. */
