@@ -256,7 +256,12 @@
   async function loadVideo(path) {
     try {
       window.__showOverlay && window.__showOverlay('Reading video…');
-      const info = await window.api.video.info(path);
+      // a video kept on this phone opens with no signal: what the studio said about it was kept with it
+      const keptRec = window.MWOffline && window.MWOffline.keptFor(path);
+      const askInfo = Promise.resolve(window.api.video.info(path));
+      const info = keptRec && keptRec.info
+        ? await Promise.race([askInfo, new Promise((r) => setTimeout(() => r(keptRec.info), 4000))]).catch(() => keptRec.info)
+        : await askInfo;
       ve.video = { path, info, proxy: null, proxying: false };
       ve.segments = []; ve.sel = null; dropObjectUrl(ve.filmstripUrl); ve.filmstripUrl = null;
       ve.audio = []; ve.audioSel = null; ve.activeRow = 'video';
@@ -425,6 +430,13 @@
   // proxy in the background. The original file is still used for AI + export.
   function setupPreview(origPath, info) {
     const player = ve.refs.player, nov = $('#veNoVid');
+    // kept on this phone: play the copy that was kept (the phone answers it — sw.js), no signal needed
+    const keptRec = window.MWOffline && window.MWOffline.keptFor(origPath);
+    if (keptRec && keptRec.play) {
+      if (keptRec.play !== origPath && ve.video) ve.video.proxy = keptRec.play;
+      player.src = fileUrl(keptRec.play); player.load(); nov.style.display = 'none'; player.style.display = 'block'; previewWaiting(false);
+      return;
+    }
     const codecUnplayable = /hevc|h265|hev1|hvc1|prores|mpeg2|vc1|wmv/i.test(info.vcodec || '');
     // HEVC is what every iPhone records, and Safari — and Chrome on hardware
     // that decodes it — plays it as it is. Asking the browser first means a
@@ -8491,13 +8503,17 @@
   const SESSION_SWEEP_MS = 15000;
   function startSessionSweep() {
     if (ve._sessionSweep) return;
+    // the app going to the background (or closed) saves at once — and onto the phone (keepOnPhone)
+    const flushNow = () => { if (ve.video && ve._sessionTimer) { clearTimeout(ve._sessionTimer); writeAutosave().catch(() => {}); } };
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushNow(); });
+    window.addEventListener('pagehide', flushNow);
     ve._sessionSweep = setInterval(() => {
       if (!ve.video) return;
       let json = null;
       try { json = JSON.stringify(collectSession()); } catch (e) { return; }
       if (!json || json === ve._sessionLastJson) return;
       ve._sessionLastJson = json;
-      window.api.sessions.autosave(JSON.parse(json)).catch(() => {});
+      sendAutosave(JSON.parse(json)).catch(() => {});
       saveProject(JSON.parse(json));
     }, SESSION_SWEEP_MS);
   }
@@ -8512,9 +8528,40 @@
    * from Projects. (Watching a video happens in the Files viewer; opening it
    * in the studio is starting work on it, so that makes its project at once.)
    */
+  /*
+   * ►► THE NEWEST EDIT IS ALWAYS THE ONE THAT LANDS. ◄◄ With no signal a save
+   * waits and tries again (cloud-boot.js), and every few seconds brought
+   * another — so when the signal came back they all went at once, and an OLDER
+   * one could land after a newer one and put the edit back. Now there is one
+   * save on its way at a time, and while it is, only the newest waiting one is
+   * kept to go next (saveProject does the same for the project).
+   */
+  function sendAutosave(data) {
+    if (ve._asBusy) { ve._asNext = data; return ve._asBusy; }
+    ve._asBusy = Promise.resolve(window.api.sessions.autosave(data)).finally(() => {
+      ve._asBusy = null;
+      const n = ve._asNext; ve._asNext = null;
+      if (n) sendAutosave(n).catch(() => {});
+    });
+    return ve._asBusy;
+  }
+  /*
+   * …AND IT IS KEPT ON THE PHONE UNTIL THE STUDIO HAS IT (cloud-boot.js
+   * MWOffline): an app closed with no signal sends it the next time it opens
+   * (sendKeptEdits) — only if it is still newer than the studio's copy.
+   */
+  function keepOnPhone(data) {
+    const K = window.MWOffline; if (!K || !data || !data.video || !data.video.path) return null;
+    const rec = { key: ve.sessionId || 'video:' + data.video.path, id: ve.sessionId || null, video: data.video.path,
+      name: ve.sessionName || null, auto: !ve.sessionId || !!ve.sessionAuto, at: Date.now(), data };
+    K.putPending(rec);
+    return rec;
+  }
   function saveProject(data) {
     if (!data || !window.api.sessions || !window.api.sessions.save) return Promise.resolve(null);
     if (!ve.sessionId && !ve.sessionDirty) return Promise.resolve(null);
+    const kept = keepOnPhone(data);
+    if (kept) data = Object.assign({}, data, { _kept: { key: kept.key, at: kept.at } });
     if (ve._projSaving) { ve._projAgain = data; return ve._projSaving; }
     if (!ve.sessionThumb) { grabSessionThumb(); if (ve.sessionThumb) data.thumb = ve.sessionThumb; }
     const forVideo = ve.video && ve.video.path;
@@ -8524,8 +8571,13 @@
     const adopt = ve.sessionId ? Promise.resolve(null)
       : Promise.resolve(window.api.sessions.list()).then((rows) => (rows || []).find((r) => r.fromAutosave && r.videoPath === forVideo) || null, () => null);
     ve._projSaving = adopt.then((hit) => { if (hit && !ve.sessionId && ve.video && ve.video.path === forVideo) { ve.sessionId = hit.id; ve.sessionAuto = true; } })
-      .then(() => window.api.sessions.save(ve.sessionId || null, name, Object.assign({}, data, { name, auto, projectId: undefined, fromAutosave: undefined })))
+      .then(() => window.api.sessions.save(ve.sessionId || null, name, Object.assign({}, data, { name, auto, projectId: undefined, fromAutosave: undefined, _kept: undefined })))
       .then((res) => {
+        // the studio has it: crossed off on the phone (a newer one waiting stays)
+        if (res && res.id && data._kept && window.MWOffline) {
+          window.MWOffline.donePending(data._kept.key, data._kept.at);
+          if (data._kept.key !== res.id) window.MWOffline.donePending(res.id, data._kept.at);
+        }
         // a different video was opened while this was on its way: it is not that one's project
         if (res && res.id && ve.video && ve.video.path === forVideo) {
           if (!ve.sessionId) { ve.sessionId = res.id; ve.sessionAuto = true; }
@@ -8564,11 +8616,15 @@
     ve._sessionTimer = null;
     const data = collectSession();
     if (!data) return;
+    // both at once: with no signal a save waits for one (cloud-boot.js), and the
+    // project's save is the one that is also kept on the phone (keepOnPhone) —
+    // it must not wait behind the other to be kept
+    const as = sendAutosave(data);
+    saveProject(data);
     try {
-      await window.api.sessions.autosave(data);
+      await as;
       ve.sessionSavedAt = Date.now();
       try { ve._sessionLastJson = JSON.stringify(data); } catch (e) {}
-      saveProject(data);
     } catch (e) { /* the sweep will try again */ }
   }
 
@@ -8759,9 +8815,45 @@
   }
   const FILM_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/></svg>';
 
+  /*
+   * Edits the phone kept because the studio could not be reached (keepOnPhone):
+   * sent now — each only if it is newer than the studio's own copy, so work
+   * done on another device since is never put back. If the studio cannot be
+   * reached yet, they simply wait for next time.
+   */
+  function sendKeptEdits() {
+    // once at a time (the app opening and the studio opening may both ask)
+    if (!ve._keptSending) ve._keptSending = sendKeptEditsNow().finally(() => { ve._keptSending = null; });
+    return ve._keptSending;
+  }
+  async function sendKeptEditsNow() {
+    const K = window.MWOffline; if (!K || !window.api.sessions || !window.api.sessions.list) return 0;
+    const recs = (await K.allPending()).sort((a, b) => a.at - b.at);
+    if (!recs.length) return 0;
+    const rows = await Promise.race([Promise.resolve(window.api.sessions.list()).catch(() => null), new Promise((r) => setTimeout(() => r(null), 8000))]);
+    if (!rows) return 0;
+    let sent = 0, newest = null;
+    for (const r of recs) {
+      const row = r.id ? rows.find((x) => x.id === r.id) : rows.find((x) => x.videoPath === r.video);
+      if (r.id && !row) { await K.donePending(r.key, r.at); continue; }          // deleted since: not brought back
+      const theirs = row && row.savedAt ? Date.parse(row.savedAt) : 0;
+      if (row && theirs >= r.at) { await K.donePending(r.key, r.at); continue; }  // the studio's is as new or newer
+      const name = (row && row.name) || r.name || prettyVideoName(String(r.video).split(/[\\/]/).pop());
+      const data = Object.assign({}, r.data, { name, auto: r.auto !== false, projectId: undefined, fromAutosave: undefined, _kept: undefined });
+      try {
+        const res = await window.api.sessions.save(row ? row.id : null, name, data);
+        if (res && res.id) { await K.donePending(r.key, r.at); sent++; if (!newest || r.at > newest.at) newest = r; }
+      } catch (e) { /* stays for next time */ }
+    }
+    // the newest one is also what "Continue editing" offers
+    if (newest) { try { await window.api.sessions.autosave(Object.assign({}, newest.data, { _kept: undefined })); } catch (e) {} }
+    if (sent) window.__toast && window.__toast(`☁️ ${sent === 1 ? 'An edit' : sent + ' edits'} made with no signal ${sent === 1 ? 'was' : 'were'} saved to the studio.`, 'good', 5000);
+    return sent;
+  }
   async function offerResume() {
     if (ve.video || ve._resumeOffered) return;
     ve._resumeOffered = true;
+    try { await sendKeptEdits(); } catch (e) {}
     let saved = null;
     try { saved = await window.api.sessions.autosaveGet(); } catch (e) { return; }
     if (!saved || !saved.video || !saved.video.path || saved.videoMissing) return;
@@ -18197,6 +18289,37 @@
       await writeAutosave();
       return true;
     },
+    /*
+     * The copy to keep on a phone for offline use (cloud-social.js keepToggle):
+     * the light copy for a heavy video or one a phone may not play (makeProxy,
+     * made once and kept on the studio), the video itself otherwise.
+     */
+    async keepCopyFor(path) {
+      const info = await window.api.video.info(path);
+      const mbps = info.durationSec > 0 ? ((info.sizeBytes || 0) * 8) / info.durationSec / 1e6 : 0;
+      const long = Math.max(info.width || 0, info.height || 0);
+      const unplayable = /hevc|h265|hev1|hvc1|prores|mpeg2|vc1|wmv/i.test(info.vcodec || '');
+      let play = path;
+      if (unplayable || mbps > 5 || long > 1280) {
+        play = await window.api.video.makeProxy({ input: path, jobId: window.__newJobId ? window.__newJobId() : 'keep' + Date.now() });
+      }
+      return { play, info };
+    },
+    /** The open video was just kept on the phone: play the kept copy from now on, at the same moment. */
+    useKeptCopy() {
+      const v = ve.video, k = v && window.MWOffline && window.MWOffline.keptFor(v.path);
+      if (!k || !k.play) return false;
+      const p = ve.refs.player, want = fileUrl(k.play);
+      if (k.play !== v.path) v.proxy = k.play;
+      if ((p.getAttribute('src') || '') === want) return true;   // already playing it: the phone answers it from now on
+      const at = p.currentTime || 0;
+      if (!p.paused) p.pause();
+      p.src = want; p.load();
+      p.addEventListener('loadedmetadata', () => { try { if (at > 0.05) p.currentTime = at; } catch (e) {} }, { once: true });
+      return true;
+    },
+    /** Edits kept on this phone while the studio could not be reached: sent now (cloud-boot.js, on opening). */
+    sendKeptEdits() { return sendKeptEdits(); },
     /** Is a video open? (The home screen says "continue" rather than "open".) */
     hasVideo() { return !!ve.video; },
     /** Close the open video — the studio goes back to empty (its file is being deleted). */

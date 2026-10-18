@@ -2204,6 +2204,13 @@ body.mw-cloud .cloud-home .mwg-invite .mwg-x { color: #6b7280; opacity: 1; }
 .pj-more { flex: none; width: 40px; height: 40px; border: 0; border-radius: 12px; display: grid; place-items: center; background: rgba(255,255,255,.06); color: #d8d9df; }
 .pj-more:last-child { margin-right: 8px; }
 .pj-more .mi { width: 18px; height: 18px; margin: 0; }
+/* ⬇ keep on this phone: ✓ green once it is here, a percentage while it comes down */
+.pj-keep.on { background: rgba(48,209,88,.16); color: #30d158; }
+.pj-keep.busy { color: #8ec0ff; }
+.pj-keep-pct { font-size: 11px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.pv-cur-keep { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 0; border-radius: 10px; background: transparent; color: #1f6fe0; font-size: 13px; font-weight: 650; }
+.pv-cur-keep .mi { width: 14px; height: 14px; margin: 0; }
+.pv-cur-keep.on { background: transparent; color: #1a9c47; }
 .pj-del { color: #ff8a80; }
 .pj-hint { margin: 0 2px 12px; font-size: 13px; color: #9b9ea8; }
 .pj-empty { padding: 30px 12px; text-align: center; color: #9b9ea8; }

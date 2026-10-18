@@ -506,6 +506,116 @@ let _hideTimer = null;
   window.MW_FONT_URL = (file) => '/fonts/' + encodeURIComponent(file);
   const downloadUrl = (p) => '/api/file?p=' + encodeURIComponent(p) + '&dl=1' + (token ? '&k=' + encodeURIComponent(token) : '');
 
+  /*
+   * ►► ON THIS PHONE: A VIDEO THAT PLAYS WITH NO SIGNAL, AND EDITS THAT WAIT FOR ONE. ◄◄
+   *
+   * KEPT VIDEOS. "Keep on this phone" (Projects) downloads the copy the studio
+   * plays — the light copy for a big recording, the video itself for a small
+   * one — into a cache of the phone's own (Cache Storage, which streams to disk,
+   * never through memory). The service worker (sw.js) answers the studio's
+   * requests for that file from there, a part at a time as a video asks for it,
+   * so playing and scrubbing need no signal at all. Every other video is
+   * fetched exactly as before. The phone is asked to keep the space for good
+   * (storage.persist), and a download that would not fit is refused up front.
+   *
+   * EDITS THAT WAIT. Every save the studio sends is ALSO written here first
+   * (IndexedDB, "pending") and crossed off only when the studio confirms it.
+   * So an app closed with no signal loses nothing: next time it opens, a save
+   * still pending is sent — but only if it is newer than the studio's own copy,
+   * so an edit made on another device since is never overwritten by an old one.
+   */
+  const MWOffline = (() => {
+    const MEDIA_CACHE = 'mw-offline-media';   // (sw.js keeps it across updates)
+    const keyFor = (p) => '/offline-media?p=' + encodeURIComponent(p);
+    let dbp = null;
+    const db = () => dbp || (dbp = new Promise((res, rej) => {
+      if (!window.indexedDB) return rej(new Error('no IndexedDB'));
+      const r = indexedDB.open('mw-offline', 1);
+      r.onupgradeneeded = () => {
+        const d = r.result;
+        if (!d.objectStoreNames.contains('pending')) d.createObjectStore('pending', { keyPath: 'key' });
+        if (!d.objectStoreNames.contains('kept')) d.createObjectStore('kept', { keyPath: 'video' });
+      };
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => { dbp = null; rej(r.error); };
+    }));
+    const done = (r) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+    const store = async (name, mode) => (await db()).transaction(name, mode).objectStore(name);
+    const kept = new Map();   // video path → { video, play, size, info, at }
+    const keptReady = (async () => { try { for (const k of await done((await store('kept', 'readonly')).getAll())) kept.set(k.video, k); } catch (e) {} })();
+    const busy = new Map();   // video path → { got, total }
+    const listeners = new Set();
+    const tell = () => { for (const f of listeners) { try { f(); } catch (e) {} } };
+    const swTell = () => { try { const c = navigator.serviceWorker && navigator.serviceWorker.controller; if (c) c.postMessage({ mwKept: true }); } catch (e) {} };
+
+    async function keep(video, play, info) {
+      if (busy.has(video)) return;
+      if (!window.caches || !window.ReadableStream) throw new Error('This browser cannot keep videos for offline use.');
+      busy.set(video, { got: 0, total: 0 }); tell();
+      try {
+        const res = await fetch(window.MW_FILE_URL(play));
+        if (!res.ok || !res.body) throw new Error('The studio would not send the video (' + res.status + ').');
+        const total = Number(res.headers.get('content-length')) || 0;
+        try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) {}
+        try {
+          const est = navigator.storage && navigator.storage.estimate ? await navigator.storage.estimate() : null;
+          if (est && est.quota && total && est.quota - (est.usage || 0) < total * 1.1) {
+            try { res.body.cancel(); } catch (e) {}
+            throw new Error(`Not enough room on this phone (it needs ${Math.ceil(total / 1e6)} MB).`);
+          }
+        } catch (e) { if (/room/.test(e.message)) throw e; }
+        const reader = res.body.getReader();
+        const st = busy.get(video); st.total = total;
+        let last = 0;
+        const body = new ReadableStream({
+          async pull(c) {
+            const { done: end, value } = await reader.read();
+            if (end) { c.close(); return; }
+            st.got += value.byteLength;
+            if (Date.now() - last > 300) { last = Date.now(); tell(); }
+            c.enqueue(value);
+          },
+          cancel(r) { try { reader.cancel(r); } catch (e) {} },
+        });
+        const cache = await caches.open(MEDIA_CACHE);
+        await cache.put(keyFor(play), new Response(body, { headers: { 'content-type': res.headers.get('content-type') || 'video/mp4' } }));
+        if (total && st.got !== total) { await cache.delete(keyFor(play)); throw new Error('The download was cut short — try again with a better signal.'); }
+        const rec = { video, play, size: st.got, info: info || null, at: Date.now() };
+        await done((await store('kept', 'readwrite')).put(rec));
+        kept.set(video, rec);
+        swTell();
+        return rec;
+      } finally { busy.delete(video); tell(); }
+    }
+    async function unkeep(video) {
+      const k = kept.get(video);
+      try { if (k) await (await caches.open(MEDIA_CACHE)).delete(keyFor(k.play)); } catch (e) {}
+      try { await done((await store('kept', 'readwrite')).delete(video)); } catch (e) {}
+      kept.delete(video); swTell(); tell();
+    }
+
+    /* edits waiting for the studio */
+    async function putPending(rec) { try { await done((await store('pending', 'readwrite')).put(rec)); } catch (e) {} }
+    async function donePending(key, at) {
+      try {
+        const s = await store('pending', 'readwrite');
+        const cur = await done(s.get(key));
+        if (cur && cur.at <= at) await done(s.delete(key));
+      } catch (e) {}
+    }
+    async function allPending() { try { return await done((await store('pending', 'readonly')).getAll()); } catch (e) { return []; } }
+
+    return {
+      keep, unkeep, keptReady,
+      keptFor: (video) => kept.get(video) || null,
+      progress: (video) => busy.get(video) || null,
+      onChange: (f) => { listeners.add(f); return () => listeners.delete(f); },
+      putPending, donePending, allPending,
+      online: () => cloud.online !== false && navigator.onLine !== false,
+    };
+  })();
+  window.MWOffline = MWOffline;
+
   /* MediaPipe loads its own runtime by appending names to this base, so it has
    * to be a plain path with no query on it. Served unauthenticated for exactly
    * that reason — see the note in cloud-api.js. */
@@ -1348,7 +1458,30 @@ let _hideTimer = null;
 
   let jobProgressCbs = [];
 
+  /*
+   * NO SIGNAL: said once, calmly, after a few seconds without the studio (a
+   * blip is not news) — that editing carries on, the edits are kept on this
+   * phone, and whether this video plays from the phone. And when it is back.
+   */
+  let offTimer = null, offSaid = false;
+  function linkNotice(ok) {
+    clearTimeout(offTimer);
+    if (!ok) {
+      offTimer = setTimeout(() => {
+        if (cloud.online !== false || offSaid) return;
+        offSaid = true;
+        const ed = window.VideoEditor, src = ed && ed.sourcePath ? ed.sourcePath() : null;
+        const here = !!(src && MWOffline.keptFor(src));
+        island({ id: 'offline', kind: 'warn', title: 'No signal — keep editing',
+          sub: (here ? 'This video plays from your phone. ' : '') + 'Your edits are kept on this phone and saved when you are back.', ms: 7000 });
+      }, 3000);
+    } else if (offSaid) {
+      offSaid = false;
+      island({ id: 'offline', kind: 'good', title: 'Back online', sub: 'Your edits are saved to the studio', ms: 3500 });
+    }
+  }
   function setLink(ok) {
+    linkNotice(!!ok);
     cloud.online = !!ok;
     const el = $('#cloudLink');
     if (el) {
@@ -6329,6 +6462,8 @@ let _hideTimer = null;
       $('#cloudGate').classList.add('gone');
       await startStudio();
       hideSplash();
+      // edits made with no signal and kept on this phone go to the studio now (veditor.js sendKeptEdits)
+      try { if (window.VideoEditor && window.VideoEditor.sendKeptEdits) window.VideoEditor.sendKeptEdits().catch(() => {}); } catch (e) {}
     } else {
       hideSplash();
       // no spaces yet: the first one is made here, and it is the owner's

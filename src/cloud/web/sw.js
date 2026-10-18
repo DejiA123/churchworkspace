@@ -19,7 +19,12 @@
  *                how a phone fills its disk and then cannot scrub.
  *
  * So the rule is: the SHELL is cached, the STUDIO's work never is. The fetch
- * handler simply does not answer anything under /api/.
+ * handler simply does not answer anything under /api/ — with ONE exception,
+ * asked for by name: a video the operator chose "Keep on this phone" for
+ * (cloud-boot.js MWOffline). That file was downloaded on purpose, whole, into
+ * its own cache; its /api/media requests are answered from there, a byte range
+ * at a time, so it plays and scrubs with no signal. Any other media request —
+ * and any hiccup reading the kept one — goes to the network exactly as before.
  *
  * The version rides in the registration URL (`/sw.js?v=2.66.0`). A new build
  * means a new script URL, a new worker, a new cache name, and the old cache
@@ -34,6 +39,34 @@ const AI_CACHE = 'mw-ai-' + VERSION;
 // that is updated most days should not fetch 3.2 MB of them each time. Bump the
 // number if a bundled font file ever does change.
 const FONT_CACHE = 'mw-fonts-1';
+// Videos kept on this phone (cloud-boot.js MWOffline). Never per version: an
+// update must not throw away a sermon someone downloaded to edit on the train.
+const OFFLINE_MEDIA = 'mw-offline-media';
+const offlineKey = (p) => '/offline-media?p=' + encodeURIComponent(p);
+let kept = null;   // the studio paths kept on this phone
+function loadKept() {
+  return caches.open(OFFLINE_MEDIA).then((c) => c.keys()).then((keys) => {
+    kept = new Set(keys.map((k) => { try { return new URL(k.url).searchParams.get('p'); } catch (e) { return null; } }).filter(Boolean));
+    return kept;
+  }).catch(() => (kept = kept || new Set()));
+}
+loadKept();
+self.addEventListener('message', (e) => { if (e.data && e.data.mwKept) e.waitUntil ? e.waitUntil(loadKept()) : loadKept(); });
+/* A kept video, answered as a server answers one: the part the player asks for. */
+async function rangedFrom(req, hit) {
+  const blob = await hit.blob();
+  const size = blob.size, type = hit.headers.get('content-type') || 'video/mp4';
+  const h = req.headers.get('range');
+  const m = h && /bytes=(\d*)-(\d*)/.exec(h);
+  if (!m) return new Response(blob, { status: 200, headers: { 'Content-Type': type, 'Content-Length': String(size), 'Accept-Ranges': 'bytes' } });
+  let a, b;
+  if (m[1] === '') { a = Math.max(0, size - Number(m[2] || 0)); b = size - 1; }
+  else { a = Number(m[1]); b = m[2] ? Math.min(Number(m[2]), size - 1) : size - 1; }
+  if (!(a < size) || b < a) return new Response(null, { status: 416, headers: { 'Content-Range': 'bytes */' + size } });
+  return new Response(blob.slice(a, b + 1), { status: 206, headers: {
+    'Content-Type': type, 'Content-Length': String(b - a + 1), 'Content-Range': `bytes ${a}-${b}/${size}`, 'Accept-Ranges': 'bytes',
+  } });
+}
 
 /* The page, and everything it needs to draw the desk. */
 const SHELL = [
@@ -72,7 +105,7 @@ self.addEventListener('install', (e) => {
 
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
-    const keep = new Set([SHELL_CACHE, AI_CACHE, FONT_CACHE]);
+    const keep = new Set([SHELL_CACHE, AI_CACHE, FONT_CACHE, OFFLINE_MEDIA]);
     for (const k of await caches.keys()) if (!keep.has(k)) await caches.delete(k);
     await self.clients.claim();
   })());
@@ -90,6 +123,23 @@ self.addEventListener('fetch', (e) => {
   if (url.origin !== self.location.origin) return;
 
   const p = url.pathname;
+
+  // A video kept on this phone: from the phone (see the note at the top).
+  if (p === '/api/media') {
+    const mp = url.searchParams.get('p');
+    if (!mp || (kept && !kept.has(mp))) return;   // not kept: untouched, as always
+    e.respondWith((async () => {
+      try {
+        const k = kept || await loadKept();
+        if (k.has(mp)) {
+          const hit = await (await caches.open(OFFLINE_MEDIA)).match(offlineKey(mp));
+          if (hit) return await rangedFrom(req, hit);
+        }
+      } catch (er) { /* fall through to the network */ }
+      return fetch(req);
+    })());
+    return;
+  }
 
   // The studio's own work: never cached, never replayed, never touched.
   if (p.startsWith('/api/')) return;

@@ -761,10 +761,49 @@
       + `<span class="pj-tx"><b>${esc(projName(r.name))}</b>`
       + `<small>${openNow ? '<i class="pj-now">Open now</i> · ' : ''}${r.videoMissing ? 'Its video was deleted' : esc(`Edited ${agoWords(r.savedAt)}`) + (bits ? ' · ' + esc(bits) : '')}</small></span>`
       + (o.manage ? '' : `<span class="pj-go">${mi('chev-right')}</span>`) + '</button>'
+      + (o.manage && r.videoPath && !r.videoMissing ? keepBtnHtml(r.videoPath, 'pj-more') : '')
       + (o.manage ? `<button type="button" class="pj-more" data-pjren="${escAttr(r.id)}" aria-label="Rename">${mi('pen')}</button>`
         + `<button type="button" class="pj-more" data-pjdup="${escAttr(r.id)}" aria-label="Duplicate"${r.videoMissing ? ' disabled' : ''}>${mi('copy')}</button>`
         + `<button type="button" class="pj-more pj-del" data-pjdel="${escAttr(r.id)}" aria-label="Delete">${mi('trash')}</button>` : '')
       + '</div>';
+  }
+  /*
+   * ⬇ KEEP ON THIS PHONE (cloud-boot.js MWOffline): the video is downloaded so
+   * it plays and scrubs with no signal; ✓ when it is here (tap to free the room).
+   */
+  function keepBtnHtml(video, cls) {
+    const K = window.MWOffline; if (!K) return '';
+    const k = K.keptFor(video), pr = K.progress(video);
+    const label = k ? 'On this phone — tap to remove' : pr ? 'Keeping it on this phone…' : 'Keep on this phone (works with no signal)';
+    const pct = pr && pr.total ? Math.round((pr.got / pr.total) * 100) + '%' : '';
+    return `<button type="button" class="${cls} pj-keep${k ? ' on' : ''}${pr ? ' busy' : ''}" data-pjkeep="${escAttr(video)}" aria-label="${escAttr(label)}" title="${escAttr(label)}">`
+      + (pr ? `<span class="pj-keep-pct">${pct || '…'}</span>` : mi(k ? 'check' : 'download'))
+      + (cls === 'pv-cur-keep' ? `<span>${k ? 'On this phone' : pr ? 'Keeping…' : 'Keep offline'}</span>` : '') + '</button>';
+  }
+  async function keepToggle(video) {
+    const K = window.MWOffline, ed = window.VideoEditor;
+    if (!K || !ed || !ed.keepCopyFor || K.progress(video)) return;
+    if (K.keptFor(video)) {
+      if (!window.confirm('Remove this video from your phone?\n\nThe project and the video on the studio stay — it just needs a signal to play again.')) return;
+      await K.unkeep(video);
+      C.island({ id: 'keep', title: 'Removed from this phone', sub: 'It plays from the studio again', ms: 3000 });
+      return renderProjectsView();
+    }
+    C.island({ id: 'keep', title: 'Getting it ready to keep…', spin: true, sticky: true });
+    const off = K.onChange(() => {
+      const pr = K.progress(video);
+      if (pr) C.island({ id: 'keep', title: `Keeping it on this phone… ${pr.total ? Math.round((pr.got / pr.total) * 100) + '%' : ''}`, sub: 'Stay on Wi-Fi until it is done', spin: true, sticky: true });
+      if (S.view === 'projects') { const b = document.querySelector(`[data-pjkeep="${CSS.escape(video)}"]`); if (b) b.outerHTML = keepBtnHtml(video, b.classList.contains('pv-cur-keep') ? 'pv-cur-keep' : 'pj-more'); }
+    });
+    try {
+      const { play, info } = await ed.keepCopyFor(video);
+      const rec = await K.keep(video, play, info);
+      C.island({ id: 'keep', kind: 'good', title: 'Kept on this phone', sub: `It plays and scrubs with no signal${rec && rec.size ? ' · ' + Math.round(rec.size / 1e6) + ' MB' : ''}`, ms: 4500 });
+      if (ed.useKeptCopy) ed.useKeptCopy();
+    } catch (e) {
+      C.island({ id: 'keep', kind: 'warn', title: 'It could not be kept on this phone', sub: (e && e.message) || 'Try again on Wi-Fi', ms: 6000 });
+    } finally { off(); }
+    if (S.view === 'projects') renderProjectsView();
   }
   // the home screen lists no projects (the Video Studio card says how many and opens them) — kept for a home that has the list
   function renderHomeProjects() {
@@ -842,8 +881,9 @@
     document.body.appendChild(el);
     el.querySelector('.cs-chip-slot').appendChild(C.jobChip());
     el.addEventListener('click', async (e) => {
-      const b = e.target.closest('[data-go],[data-pv],[data-proj],[data-pjren],[data-pjdup],[data-pjdel]');
+      const b = e.target.closest('[data-go],[data-pv],[data-proj],[data-pjren],[data-pjdup],[data-pjdel],[data-pjkeep]');
       if (!b || b.disabled) return;
+      if (b.dataset.pjkeep) return keepToggle(b.dataset.pjkeep);
       if (b.dataset.go) return go(b.dataset.go);
       if (b.dataset.pv === 'new') {
         // the picker first, straight from the tap (a phone only opens one from a tap); the open project is saved meanwhile
@@ -912,7 +952,7 @@
     if (hasVid) {
       const nm = curRow ? curRow.name : String((ed.sourcePath && ed.sourcePath()) || '').split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
       cur.innerHTML = `<button type="button" class="pv-cont" data-pv="continue"><span class="pv-cont-k">Open in the editor</span><b>${esc(nm || 'Your video')}</b><span class="pv-cont-go">Continue ${mi('chev-right')}</span></button>`
-        + `<div class="pv-cur-acts"><button type="button" class="pv-cur-dup" data-pv="duplicate">${mi('copy')}Duplicate</button>`
+        + `<div class="pv-cur-acts">${ed.sourcePath && ed.sourcePath() ? keepBtnHtml(ed.sourcePath(), 'pv-cur-keep') : ''}<button type="button" class="pv-cur-dup" data-pv="duplicate">${mi('copy')}Duplicate</button>`
         + `<button type="button" class="pv-cur-del" data-pv="delete">${mi('trash')}Delete this project</button></div>`;
     }
     const others = rows.filter((r) => r.id !== openId);
