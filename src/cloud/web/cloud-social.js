@@ -886,7 +886,7 @@
     return el;
   }
   /* ⧉ Duplicate: the same video and every edit, as a project of its own
-     ("… (copy)"), first in the list, to try something without losing this. */
+     ("Copy of …"), first in the list, to try something without losing this. */
   async function duplicateProject(id) {
     let row = null;
     try { row = await window.api.sessions.duplicate(id); } catch (e) { row = null; }

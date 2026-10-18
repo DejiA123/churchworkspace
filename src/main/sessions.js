@@ -154,8 +154,9 @@ function rename(id, name) {
 
 /**
  * A copy of a project to take somewhere else: the same video and every edit
- * (clips, shorts, captions, text, music), under a name of its own: "Gospel
- * Jamz 2026 Day 2 (copy)", then "(copy 2)". The recording is shared, not
+ * (clips, shorts, captions, text, music), under a name of its own: "Copy of
+ * Gospel Jamz 2026 Day 2", then "Copy 2 of …". The word comes FIRST, where a
+ * name cut short in the list still shows it. The recording is shared, not
  * copied: a project is only its edit.
  */
 function duplicate(id, name) {
@@ -165,12 +166,14 @@ function duplicate(id, name) {
   const copy = Object.assign({}, data);
   delete copy.id; delete copy.videoMissing; delete copy.summary; delete copy.projectId; delete copy.fromAutosave;
   copy.auto = false;   // named by a person now: the studio does not rename it after its video
-  const base = String(data.name || 'Untitled session').replace(/\s*\(copy(?: \d+)?\)$/i, '').trim() || 'Untitled session';
+  // the name it is a copy of: "Copy of …" / "Copy 2 of …" (and the first copies' "… (copy)") taken off
+  const base = String(data.name || 'Untitled session').trim()
+    .replace(/^copy(?: \d+)? of\s+/i, '').replace(/\s*\(copy(?: \d+)?\)$/i, '').trim() || 'Untitled session';
   let nm = String(name || '').trim().slice(0, 80);
   if (!nm) {
     const taken = new Set(listRaw().map((r) => r.name));
-    nm = `${base} (copy)`;
-    for (let n = 2; taken.has(nm) && n < 1000; n++) nm = `${base} (copy ${n})`;
+    nm = `Copy of ${base}`;
+    for (let n = 2; taken.has(nm) && n < 1000; n++) nm = `Copy ${n} of ${base}`;
   }
   return save({ name: nm, data: copy });
 }

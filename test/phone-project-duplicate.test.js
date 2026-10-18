@@ -7,8 +7,9 @@
  *  available." Now:
  *   [1] the project open in the editor has Duplicate under it: a copy with the
  *       same video and edits (its shorts, its text) is first in the list as
- *       "… (copy)"
- *   [2] every other project's row has its own Duplicate button: "(copy 2)"
+ *       "Copy of …" (the word first, where a name cut short still shows it)
+ *   [2] every other project's row has its own Duplicate button: a copy of a
+ *       copy is "Copy 2 of …" (not "Copy of Copy of …")
  *   [3] the copy opens in the editor with the edits, and changing it leaves
  *       the original exactly as it was
  *
@@ -105,19 +106,19 @@ async function waitUp() {
     await sleep(500);
     let rows = await list();
     const copy1 = rows.find((r) => r.id !== origId);
-    check(rows.length === 2 && !!copy1 && / \(copy\)$/.test(copy1.name), 'a copy is made, called “… (copy)”', rows.map((r) => r.name));
+    check(rows.length === 2 && !!copy1 && copy1.name === 'Copy of ' + rows.find((r) => r.id === origId).name, 'a copy is made, called “Copy of …”', rows.map((r) => r.name));
     const c1 = copy1 ? await load(copy1.id) : null;
     check(c1 && JSON.stringify(shape(c1)) === JSON.stringify(shape(orig)) && shape(orig).shorts === 2,
       'with the same video and edits (its two shorts, its text)', { orig: shape(orig), copy: shape(c1) });
     const firstRow = await page.evaluate(() => { const r = document.querySelector('#cloudProjView .pj-row b'); return r && r.textContent; });
-    check(/\(copy\)$/.test(firstRow || ''), 'and it is in the list', firstRow);
+    check(/^Copy of /.test(firstRow || ''), 'and it is in the list, “Copy” first', firstRow);
 
     console.log('\n=== [2] a project in the list: its own Duplicate ===');
     await page.tap(`#cloudProjView [data-pjdup="${copy1.id}"]`);
     await page.waitForFunction(() => document.querySelectorAll('#cloudProjView .pj-row').length >= 2, null, { timeout: 15000 });
     rows = await list();
     const copy2 = rows.find((r) => r.id !== origId && r.id !== copy1.id);
-    check(rows.length === 3 && copy2 && / \(copy 2\)$/.test(copy2.name), 'the row’s Duplicate makes “… (copy 2)”', rows.map((r) => r.name));
+    check(rows.length === 3 && copy2 && copy2.name === 'Copy 2 of ' + rows.find((r) => r.id === origId).name, 'the row’s Duplicate (of the copy) makes “Copy 2 of …”', rows.map((r) => r.name));
 
     console.log('\n=== [3] the copy is a project of its own ===');
     await page.evaluate((id) => window.MWSocial.openProject(id), copy1.id);
