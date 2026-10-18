@@ -3048,7 +3048,7 @@
     const tab = mtMusTab();
     const tabs = `<div class="mt-seg" role="tablist">
         <button type="button" class="${tab === 'none' ? 'on' : ''}" data-mt-song="">No music</button>
-        ${hasFree ? `<button type="button" class="${tab === 'free' ? 'on' : ''}" data-mt-tab="free">Free songs</button>` : ''}
+        ${hasFree ? `<button type="button" class="${tab === 'free' ? 'on' : ''}" data-mt-tab="free">Tracks</button>` : ''}
         <button type="button" class="${tab === 'mine' ? 'on' : ''}" data-mt-tab="mine">My songs</button></div>`;
     const playing = MT.preview && MT.preview.key;
     const row = ({ key, sel, title, sub, pick, play }) => `<div class="mt-song${sel ? ' on' : ''}" ${pick}>

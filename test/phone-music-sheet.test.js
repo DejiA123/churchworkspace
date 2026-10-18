@@ -93,10 +93,18 @@ async function waitUp() {
     await page.waitForFunction(() => document.getElementById('vePlayer').readyState >= 2, null, { timeout: 30000 });
     for (const f of SONGS) await page.evaluate((p) => window.api.library.add('music', p), f);
     // opened the way a person does: the dock's Music
+    // …and a Track fetched from the Tracks shelf: in the library, but not one of YOUR songs
+    await page.evaluate((p) => window.api.library.add('music', p, 'Lo-Fi 01 by Lily J', 'free:mk763'), SONGS[0]);
     await page.evaluate(() => document.getElementById('veMusic').click());
+    await sleep(600);
+    const T = (fn, arg) => page.evaluate(fn, arg);
+    const first = await T(() => ({ tab: (document.querySelector('#libModal .lib-tab.active') || {}).textContent, pane: !document.querySelector('.lib-pane[data-libpane="free"]').classList.contains('hidden') }));
+    check(first.tab === 'Tracks' && first.pane, '🎵 Music opens on Tracks, the first shelf', first);
+    await page.tap('#libModal .lib-tab[data-libtab="music"]');
     await page.waitForSelector('#libMusicList [data-musicuse]', { timeout: 15000 });
     await sleep(500);
-    const T = (fn, arg) => page.evaluate(fn, arg);
+    const mine = await T(() => ({ names: Array.from(document.querySelectorAll('#libMusicList .lib-row b')).map((b) => b.textContent), sub: document.getElementById('libSub').textContent }));
+    check(mine.names.length === 4 && !mine.names.some((n) => /Lo-Fi 01/.test(n)) && /^4 songs/.test(mine.sub), 'My music is only the songs YOU added (a Track is not among them)', mine);
     const ids = await T(() => Array.from(document.querySelectorAll('#libMusicList [data-musicuse]')).map((b) => b.dataset.musicuse));
     const music = () => T(() => window.VideoEditor.__test.musicState());
 
@@ -173,7 +181,7 @@ async function waitUp() {
     const shelf = async (t) => { await page.tap(`#libModal .lib-tab[data-libtab="${t}"]`); await sleep(300);
       return T((t) => ({ pane: !document.querySelector(`.lib-pane[data-libpane="${t}"]`).classList.contains('hidden'), active: document.querySelector('.lib-tab.active').dataset.libtab, title: document.getElementById('libTitle').textContent }), t); };
     const tabs = await T(() => [...document.querySelectorAll('#libModal .lib-tab')].map((b) => b.dataset.libtab));
-    check(tabs.join() === 'music,free,clips', 'the shelves are My music, Free music and My clips — no YouTube', tabs);
+    check(tabs.join() === 'free,music,clips', 'the shelves are Tracks (first), My music and My clips — no YouTube', tabs);
     const fr = await shelf('free'), cl = await shelf('clips'), mu = await shelf('music');
     check(fr.pane && fr.active === 'free' && cl.pane && cl.active === 'clips' && cl.title === 'Clips' && mu.pane && mu.title === 'Music', 'Free music, My clips and back to My music', { fr, cl, mu });
 

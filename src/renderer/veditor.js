@@ -62,7 +62,7 @@
     // Saved media library (see the MEDIA LIBRARY section): the background music
     // bed under every exported clip, and the outro tacked onto the end of each.
     lib: { music: [], clips: [] },
-    libTab: 'music',
+    libTab: 'free',
     music: null,       // { id, name, file, durationSec, volume, fadeIn, fadeOut, duck, bed, tlStart, len }
     outro: null,       // a library clip appended to every short
     outroAll: true,
@@ -15743,6 +15743,8 @@
   }
 
   function openLibrary(tab) {
+    // 🎵 Music opens on Tracks, the first shelf (CapCut's library first; your own uploads one tap over)
+    if (tab === 'music') tab = 'free';
     const m = $('#libModal'); if (!m) return;
     setLibTab(tab || ve.libTab || 'music');
     m.classList.remove('hidden');
@@ -15796,7 +15798,7 @@
     const F = ve.free;
     if (!F || !F.tracks || !F.tracks.length) {
       moods.innerHTML = '';
-      el.innerHTML = `<p class="muted small lib-empty">${F ? 'The free music could not be reached just now — try again in a moment.' : 'Loading free music…'}</p>`;
+      el.innerHTML = `<p class="muted small lib-empty">${F ? 'The tracks could not be reached just now — try again in a moment.' : 'Loading tracks…'}</p>`;
       return;
     }
     const favs = freeFavs(), anyFav = F.tracks.some((t) => favs.has(t.id));
@@ -15816,7 +15818,7 @@
         <button class="lib-art${playing ? ' playing' : ''}" style="--h:${libHue(t.title)}" data-freeplay="${attr2(t.id)}" title="Listen" aria-label="Listen to ${attr2(t.title)}"><i>${busy ? '…' : playing ? LIB_ICON.pause : LIB_ICON.play}</i></button>
         <span class="lib-row-main">
           <b>${escape2(t.title)}</b>
-          <span class="muted small">${t.artist ? 'by ' + escape2(t.artist) : ''}${lib ? ' · in My music' : ''}</span>
+          <span class="muted small">${t.artist ? 'by ' + escape2(t.artist) : ''}</span>
         </span>
         <button class="lib-fav${favs.has(t.id) ? ' on' : ''}" data-freefav="${attr2(t.id)}" aria-label="${favs.has(t.id) ? 'Take out of favourites' : 'Add to favourites'}" title="${favs.has(t.id) ? 'Take out of favourites' : 'Add to favourites'}">${HEART(favs.has(t.id))}</button>
         <button class="primary-btn small lib-use${on ? ' on' : ''}" data-freeuse="${attr2(t.id)}"${busy ? ' disabled' : ''}>${on ? LIB_ICON.check + '<span>In use</span>' : busy ? 'Getting…' : 'Use'}</button>
@@ -15874,19 +15876,22 @@
   function libSubtitle() {
     const sub = $('#libSub'); if (!sub) return;
     const tab = ve.libTab || 'music';
-    const n = (((ve.lib && ve.lib[tab === 'clips' ? 'clips' : 'music']) || [])).length;
+    const n = tab === 'clips' ? ((ve.lib && ve.lib.clips) || []).length : ownMusic().length;
     sub.textContent = tab === 'youtube' ? 'Search for a song to put under your video'
       : tab === 'free' ? 'Lo-fi, upbeat, worship and more · free to post'
       : tab === 'clips' ? (n ? `${n} clip${n === 1 ? '' : 's'} · intros and outros for every short` : 'Intros and outros for every short')
       : (n ? `${n} song${n === 1 ? '' : 's'} · kept for every project` : 'Your songs, kept for every project');
   }
 
+  /* My music is what YOU put there (a phone, a video): a Track fetched to be heard or used lives in the
+     library too — that is how it plays and exports — but it is shown on Tracks, not here */
+  const ownMusic = () => ((ve.lib && ve.lib.music) || []).filter((m) => !/^free:/.test(m.source || ''));
   function renderMusicList() {
     const el = $('#libMusicList'); if (!el) return;
-    const list = (ve.lib && ve.lib.music) || [];
+    const list = ownMusic();
     libSubtitle();
     if (!list.length) {
-      el.innerHTML = `<p class="muted small lib-empty">No music saved yet. Tap <b>Add music</b> above — or pick one from <b>Free music</b>.</p>`;
+      el.innerHTML = `<p class="muted small lib-empty">No songs of your own yet. Tap <b>Add from phone</b> above — or pick one from <b>Tracks</b>.</p>`;
       return;
     }
     const a = ve.refs && ve.refs.musicAudio;
