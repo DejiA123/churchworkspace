@@ -245,7 +245,7 @@ body.mw-cloud .cloud-sheet-modal .cloud-files-box {
 }
 .cloud-files-head small { font-size: 12px; font-weight: 600; letter-spacing: .2px; text-transform: none; color: #6b6e78; }
 .cf-row {
-  position: relative; overflow: hidden;
+  position: relative; overflow: hidden; overflow: clip;
   display: flex; align-items: center; gap: 2px;
   max-height: 120px; margin-bottom: 8px; padding: 6px;
   border-radius: 16px; background: #1c1d23;
@@ -286,6 +286,17 @@ body.mw-cloud .cloud-sheet-modal .cloud-files-box {
 .cf-no { background: rgba(255,255,255,.1); color: #fff; }
 .cf-yes { background: #ff453a; color: #fff; }
 .cf-row.sure .cf-sure { transform: none; }
+.cf-ren {
+  position: absolute; inset: 0; margin: 0;
+  display: flex; align-items: center; gap: 8px; padding: 0 8px 0 12px;
+  background: #1c2433; transform: translateX(102%);
+  transition: transform .3s cubic-bezier(.2,.9,.25,1);
+}
+.cf-row.renaming .cf-ren { transform: none; }
+.cf-ren input { flex: 1; min-width: 0; height: 42px; margin: 0; padding: 0 12px; border: 0; border-radius: 12px;
+  background: rgba(255,255,255,.1); color: #fff; font: inherit; font-size: 16px; font-weight: 650; }
+.cf-ren-ok { flex: none; height: 40px; padding: 0 16px; border: 0; border-radius: 12px; background: #1f6fe0; color: #fff; font-size: 14px; font-weight: 750; }
+.cf-selecting .cf-ren { display: none; }
 .cf-row.busy { opacity: .5; pointer-events: none; }
 .cf-row.gone { opacity: 0; transform: translateX(-40px); max-height: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; }
 .cf-check {
@@ -3704,6 +3715,9 @@ body.mw-cloud .cloud-sheet-modal .cloud-files-up, body.mw-cloud .cloud-files-bar
 .cloud-sheet-modal .cf-open { background: #0f1115; color: #fff; }
 .cloud-sheet-modal .cf-sure { background: #fff1f0; }
 .cloud-sheet-modal .cf-sure span { color: #b42318; }
+.cloud-sheet-modal .cf-ren { background: #eef4ff; }
+.cloud-sheet-modal .cf-ren input { background: #fff; color: #0f1115; box-shadow: inset 0 0 0 1.5px #1f6fe0; }
+.cloud-sheet-modal .cf-ren-ok { background: #0f1115; }
 .cloud-sheet-modal .cf-no { background: #eef0f3; color: #0f1115; }
 .cloud-sheet-modal .cf-check { box-shadow: inset 0 0 0 2px #c4c9d2; }
 .cloud-sheet-modal .cf-selecting .cf-row.chosen, .cloud-sheet-modal .cf-picking-multi .cf-row.chosen { background: #eaf2ff; box-shadow: inset 0 0 0 1.5px #1f6fe0; }

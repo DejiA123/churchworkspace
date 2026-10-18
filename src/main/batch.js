@@ -101,6 +101,14 @@ function rememberTitle(file, label) {
 }
 /** The title a finished short was made under, or null. */
 function titleFor(file) { return titles.get(file) || null; }
+/** A new name for a video in My Uploads, chosen on the phone ('' = back to its own). */
+function setTitle(file, title) {
+  const t = String(title || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  if (t) { titles.delete(file); titles.set(file, t); } else titles.delete(file);
+  clearTimeout(titlesTimer);
+  try { fs.writeFileSync(titlesFile() + '.tmp', JSON.stringify(Array.from(titles))); fs.renameSync(titlesFile() + '.tmp', titlesFile()); } catch (e) { /* kept for this run */ }
+  return t || null;
+}
 
 /** Called once at start-up with a folder on the persistent disk. */
 let onInterrupted = null;
@@ -395,4 +403,4 @@ function lane(b) {
   });
 }
 
-module.exports = { init, open, add, seal, list, cancel, PLACEHOLDER, STEPS, titleFor, _batches: batches, _fill: fill, _rememberTitle: rememberTitle };
+module.exports = { init, open, add, seal, list, cancel, PLACEHOLDER, STEPS, titleFor, setTitle, _batches: batches, _fill: fill, _rememberTitle: rememberTitle };

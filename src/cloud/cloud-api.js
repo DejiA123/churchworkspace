@@ -981,6 +981,26 @@ async function deleteFiles(req, res, me) {
 }
 
 /*
+ * RENAMING a video in My Uploads. Only its name in the list changes, never the
+ * file: a planned post, a saved edit or an autosave that points at the file
+ * keeps working. The same folders as deleting (exports and uploads only).
+ */
+async function renameFile(req, res) {
+  let body;
+  try { body = JSON.parse((await readBody(req, 64 * 1024)).toString('utf-8') || '{}'); }
+  catch (e) { return json(res, 400, { error: 'Bad request.' }); }
+  if (typeof body.path !== 'string' || !body.path) return json(res, 400, { error: 'Nothing to rename.' });
+  const full = path.resolve(body.path);
+  const mine = dirsFor();
+  const folders = [mine.output, mine.uploads].filter(Boolean).map((d) => path.resolve(d));
+  const same = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+  if (!folders.some((d) => same(path.dirname(full), d))) return json(res, 403, { error: 'Only finished videos and what was sent from a phone can be renamed here.' });
+  if (!fs.existsSync(full)) return json(res, 404, { error: 'That video is not there any more.' });
+  const title = require('../main/batch').setTitle(full, body.title);
+  return json(res, 200, { ok: true, path: body.path, title });
+}
+
+/*
  * An upload that was given up on leaves its part file behind (that is what
  * lets a dropped one carry on). Nobody comes back for one after two days, and
  * a half-sent service recording is gigabytes, so they are swept up.
@@ -1029,7 +1049,8 @@ function browse(exts) {
       return true;
     }).sort((a, b) => b.mtime - a.mtime);
     // a short made on the server: the title it was made under (batch.titleFor)
-    if (g.key === 'output') for (const f of items) { const t = batchTitle(f.path); if (t) f.title = t; }
+    // (or the name it was given in My Uploads — renameFile)
+    if (g.key === 'output' || g.key === 'uploads') for (const f of items) { const t = batchTitle(f.path); if (t) f.title = t; }
     return { key: g.key, label: g.label, dir: g.dir, files: items };
   }).filter((g) => g.dir);
 }
@@ -1547,6 +1568,11 @@ async function authedRoutes(req, res, url, p, me) {
   if (p === '/api/delete' && req.method === 'POST') {
     if (!cfg.allowUpload) return json(res, 403, { error: 'Changing files on this studio from a phone is switched off.' });
     return deleteFiles(req, res, me);
+  }
+
+  if (p === '/api/rename' && req.method === 'POST') {
+    if (!cfg.allowUpload) return json(res, 403, { error: 'Changing files on this studio from a phone is switched off.' });
+    return renameFile(req, res);
   }
 
   if (p === '/api/status') return json(res, 200, status({ me }));

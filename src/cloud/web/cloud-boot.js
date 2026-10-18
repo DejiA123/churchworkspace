@@ -1812,11 +1812,15 @@ let _hideTimer = null;
       + '</button>'
       + (picking
         ? '<button type="button" class="cf-open" data-act="open">Open</button>'
-        : `<button type="button" class="cf-btn" data-act="save" aria-label="Save to this phone" title="Save to this phone">${mi('download')}</button>`
+        : (del ? `<button type="button" class="cf-btn cf-ren-btn" data-act="rename" aria-label="Rename" title="Rename">${mi('pen')}</button>` : '')
+          + `<button type="button" class="cf-btn" data-act="save" aria-label="Save to this phone" title="Save to this phone">${mi('download')}</button>`
           + (del ? `<button type="button" class="cf-btn cf-bin" data-act="delete" aria-label="Delete" title="Delete">${mi('trash')}</button>` : ''))
       + (del ? `<div class="cf-sure"><span>Delete ${fmtSize(f.size)} for good?</span>`
         + '<button type="button" class="cf-no" data-act="cancel">Cancel</button>'
         + '<button type="button" class="cf-yes" data-act="confirm">Delete</button></div>' : '')
+      + (del ? `<form class="cf-ren" data-act-form="rename"><input type="text" maxlength="120" enterkeyhint="done" aria-label="New name" value="${escAttr(f.title || friendlyName(f.name))}">`
+        + '<button type="button" class="cf-no" data-act="cancel">Cancel</button>'
+        + '<button type="submit" class="cf-ren-ok">Save</button></form>' : '')
       + '</div>';
   }
 
@@ -1889,7 +1893,26 @@ let _hideTimer = null;
   }
 
   /* ---- deleting ---- */
-  function closeSure() { for (const r of $$('#cloudFilesList .cf-row.sure')) r.classList.remove('sure'); }
+  function closeSure() { for (const r of $$('#cloudFilesList .cf-row.sure, #cloudFilesList .cf-row.renaming')) r.classList.remove('sure', 'renaming'); }
+  /* ---- renaming: only the name it is listed under changes (cloud-api.js renameFile) ---- */
+  async function renameRow(form) {
+    const row = form.closest('.cf-row'); if (!row) return;
+    const p = row.dataset.path, inp = form.querySelector('input');
+    const want = String((inp && inp.value) || '').replace(/\s+/g, ' ').trim();
+    const f = findFile(p);
+    if (!want || (f && want === (f.title || friendlyName(f.name)))) return closeSure();
+    row.classList.add('busy');
+    try {
+      const r = await fetch('/api/rename', { method: 'POST', headers: Object.assign({ 'content-type': 'application/json' }, authHeaders()), body: JSON.stringify({ path: p, title: want }) });
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok || !out.ok) throw new Error(out.error || 'The name could not be changed.');
+      if (f) f.title = out.title || want;
+      const b = row.querySelector('.cf-tx b'); if (b) b.textContent = out.title || want;
+      closeSure();
+    } catch (e) {
+      window.__toast ? window.__toast('⚠️ ' + e.message, 'error') : alert(e.message);
+    } finally { row.classList.remove('busy'); }
+  }
   function setSelecting(on) {
     filesUi.selecting = !!on;
     filesUi.chosen.clear();
@@ -1997,6 +2020,14 @@ let _hideTimer = null;
     if (act === 'view') return viewFile(p);
     if (act === 'save') return offerDownload(p, (findFile(p) || {}).size);
     if (act === 'delete') { closeSure(); row.classList.add('sure'); return; }
+    if (act === 'rename') {
+      closeSure(); row.classList.add('renaming');
+      const inp = row.querySelector('.cf-ren input');
+      // (focused while it is still sliding in, the row would scroll sideways to it and show the Delete strip)
+      if (inp) { inp.focus({ preventScroll: true }); inp.select(); }
+      row.scrollLeft = 0; requestAnimationFrame(() => { row.scrollLeft = 0; });
+      return;
+    }
     if (act === 'cancel') return closeSure();
     if (act === 'confirm') return deletePaths([p]);
   }
@@ -6009,6 +6040,7 @@ let _hideTimer = null;
     on('#cloudFilesClose', 'click', closeFilesModal);
     on('#cloudFilesRefresh', 'click', () => refreshFiles());
     on('#cloudFilesList', 'click', onFilesClick);
+    on('#cloudFilesList', 'submit', (e) => { const f = e.target.closest('form.cf-ren'); if (f) { e.preventDefault(); renameRow(f); } });
     on('#cloudFilesSelect', 'click', () => setSelecting(!filesUi.selecting));
     on('#cloudFilesSelDelete', 'click', onSelDelete);
     // the chosen videos, all to Photos (Save all — a few to each tap of the share sheet)
