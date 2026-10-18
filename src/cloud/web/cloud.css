@@ -1050,8 +1050,6 @@ body.mw-cloud #cloudPass:focus { border-color: #1f6fe0; box-shadow: 0 0 0 3px rg
   body.mw-cloud #view-video.ve-pro .ve-clip-name { font-size: 14.5px; font-weight: 800; }
   body.mw-cloud #view-video.ve-pro .ve-clip-btns { gap: 6px; }
   body.mw-cloud #view-video.ve-pro .ve-clip-btns .icon-btn { height: 40px; border-radius: 10px; background: #26272e; border: 0; color: var(--ph-text); }
-  /* no 👤 on a short's card: who is followed is set in one place, the dock's Follow */
-  body.mw-cloud #view-video.ve-pro .ve-clip-btns [data-who] { display: none; }
 
   /* The settings column, in the sheet: its tabs become a segmented control. */
   body.mw-cloud #view-video.ve-pro .ve-side .ve-insp-tabs {

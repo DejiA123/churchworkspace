@@ -1276,9 +1276,6 @@
           <button class="icon-btn${s.thumbPick ? ' on' : ''}" data-thumb="${s.id}" title="${s.thumbPick
             ? 'This short has a thumbnail chosen — click to change it'
             : 'Choose the frame people see before they press play'}">🖼️</button>
-          <button class="icon-btn${s.subject ? ' on' : ''}" data-who="${s.id}" title="${s.subject
-            ? 'This short follows a person you picked — click to change or clear it'
-            : 'Pick the person THIS short should keep in the middle of the frame'}">👤</button>
           <button class="icon-btn" data-exp="${s.id}" title="Export 9:16">⬇️</button>
           <button class="icon-btn danger" data-del="${s.id}" title="Delete">🗑</button>
         </div>
@@ -1289,7 +1286,6 @@
     $$('[data-play]', el).forEach((b) => b.addEventListener('click', () => holdClipListScroll(el, () => previewSegment(b.dataset.play))));
     $$('[data-cap]', el).forEach((b) => b.addEventListener('click', () => captionShort(b.dataset.cap)));
     $$('[data-thumb]', el).forEach((b) => b.addEventListener('click', () => openThumbPicker(b.dataset.thumb)));
-    $$('[data-who]', el).forEach((b) => b.addEventListener('click', () => openFollowPicker(b.dataset.who, true)));
     $$('[data-exp]', el).forEach((b) => b.addEventListener('click', () => exportSegment(b.dataset.exp)));
     $$('[data-del]', el).forEach((b) => b.addEventListener('click', () => { removeSeg(b.dataset.del); }));
     $$('.ve-clip', el).forEach((c) => c.addEventListener('click', (e) => {

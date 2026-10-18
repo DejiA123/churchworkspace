@@ -149,7 +149,9 @@ app.whenReady().then(async () => {
     log(perClip.fromClip === true && perClip.any === true,
       'a single short can overrule the panel-wide pick');
     const buttons = await js(win, 'return window.VideoEditor.__test.clipFollowButtons();');
-    log(buttons >= 1, 'every short in the panel has its own 👤 button', buttons + ' buttons');
+    // the 👤 on each short's card was taken away (asked for): who is followed is
+    // set in one place, Follow / Reframe — the per-short pick above still works
+    log(buttons === 0, 'no short card carries a 👤 button of its own', buttons + ' buttons');
   } else {
     log(false, 'a short exists to test the per-clip override on', 'no segment ids exposed');
   }
