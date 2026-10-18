@@ -45,7 +45,7 @@
     title: 'Make a video', emoji: '🎬', before: open('video'),
     steps: [
       { target: '#veOpen', emoji: '📂', title: 'Open a video', body: 'Start here. Pick a sermon or any video.' },
-      { target: '#veFindHighlights', emoji: '✨', title: 'Make Shorts', body: 'The AI finds the best short clips for you.' },
+      { target: '#veFindHighlights', emoji: '✨', title: 'Generate Shorts', body: 'The AI finds the best short clips for you.' },
       { target: '#veAutoCaptions || #veInspTabCaptions', emoji: '💬', title: 'Captions', body: 'Add words on the video automatically.' },
       { target: '#veTimeline', emoji: '✂️', title: 'Timeline', body: 'Your video, from start to end. Drag to trim.' },
       { target: '#veExportEdited || #veExportAll', emoji: '💾', title: 'Save it', body: 'Save your finished video to the computer.' },

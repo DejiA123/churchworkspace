@@ -1068,7 +1068,8 @@
       ? 'Searches the WHOLE video for its best moments.\nTip: drag the clip’s edge on the timeline and only the part you keep is searched.'
       : `Searches only what you left on the timeline: ${rs.map(([a, c]) => fmt(a) + '–' + fmt(c)).join(', ')}.\nDrag the clip’s edges to change it.`;
     b.classList.toggle('ve-trimmed', !whole);
-    putText(b, whole ? '✨ Make Shorts' : `✂️ Shorts from ${fmt(rs[0][0])}–${fmt(rs[rs.length - 1][1])}`);
+    // one plain name whatever is searched (which part, the tip above says)
+    putText(b, '✨ Generate Shorts');
   }
 
   /**
@@ -1411,7 +1412,7 @@
     for (let n = el; n && n !== document.documentElement; n = n.parentElement) if (n.scrollTop) scrollers.push([n, n.scrollTop]);
     const keepScroll = () => scrollers.forEach(([n, y]) => { if (n.scrollTop !== y) n.scrollTop = y; });
     if (!shorts.length) {
-      el.innerHTML = `<p class="muted small">No shorts yet. Tap <b>✨ Make Shorts</b>.</p>`;
+      el.innerHTML = `<p class="muted small">No shorts yet. Tap <b>✨ Generate Shorts</b>.</p>`;
       return;
     }
     const best = shorts.reduce((m, s) => (s.ai && s.score != null && (m == null || s.score > m.score) ? s : m), null);

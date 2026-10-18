@@ -323,7 +323,7 @@ app.whenReady().then(async () => {
   log(loaded.segs && loaded.segs.length === 1, 'the video lands on the timeline as one clip', JSON.stringify(loaded.segs && loaded.segs[0]));
   log(loaded.ranges.length === 1 && loaded.ranges[0][0] < 1 && loaded.ranges[0][1] > TOTAL - 2,
     'untouched, the whole recording is what will be searched', JSON.stringify(loaded.ranges));
-  log(!loaded.label.trimmed && /Make Shorts/.test(loaded.label.text), 'and the button says so', loaded.label.text);
+  log(!loaded.label.trimmed && /Generate Shorts/.test(loaded.label.text), 'and the button says so', loaded.label.text);
 
   // The actual gesture: grab the left trim handle and drag it right to 145s.
   const dragged = await js(win, `
@@ -338,8 +338,8 @@ app.whenReady().then(async () => {
     dragged.after ? `${dragged.after.start.toFixed(1)}s → ${dragged.after.end.toFixed(1)}s` : 'no drag');
   log(dragged.ranges.length === 1 && near(dragged.ranges[0][0], TRIM, 3) && dragged.ranges[0][1] > TOTAL - 2,
     'so the search range follows the trim', JSON.stringify(dragged.ranges));
-  log(dragged.label.trimmed && /Shorts from/.test(dragged.label.text),
-    'and the button now tells the operator exactly what it will search', dragged.label.text);
+  log(dragged.label.trimmed && /Generate Shorts/.test(dragged.label.text) && /Searches only what you left/.test(dragged.label.title),
+    'the button still says Generate Shorts, and its tip says exactly what it will search', dragged.label.text + ' | ' + dragged.label.title);
 
   const run = await js(win, `
     const T = window.VideoEditor.__test;
