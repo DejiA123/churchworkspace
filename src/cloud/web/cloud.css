@@ -2207,6 +2207,12 @@ body.mw-cloud .cloud-home .mwg-invite .mwg-x { color: #6b7280; opacity: 1; }
 .pv-cont b { grid-column: 1; font-size: 16px; font-weight: 750; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pv-cont-go { grid-column: 2; grid-row: 1 / 3; align-self: center; display: inline-flex; align-items: center; gap: 4px; padding: 8px 12px; border-radius: 12px; background: rgba(31,111,224,.3); font-size: 14px; font-weight: 750; }
 .pv-cont-go .mi { width: 15px; height: 15px; margin: 0; }
+.pv-cur-acts { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 0 4px; }
+.pv-cur-acts .pv-cur-del { margin: 0; }
+.pv-cur-dup { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 0; border-radius: 10px; background: transparent; color: #8ec0ff; font-size: 13px; font-weight: 650; }
+.pv-cur-dup .mi { width: 14px; height: 14px; margin: 0; }
+.pv-cur-dup:active { background: rgba(31,111,224,.14); }
+.pj-more:disabled { opacity: .35; }
 .pv-cur-del { display: inline-flex; align-items: center; gap: 6px; margin: 8px 0 0 4px; padding: 6px 10px; border: 0; border-radius: 10px; background: transparent; color: #f87171; font-size: 13px; font-weight: 650; }
 .pv-cur-del .mi { width: 14px; height: 14px; margin: 0; }
 .pv-cur-del:active { background: rgba(248,113,113,.12); }
@@ -3908,6 +3914,7 @@ body.mw-cloud.mw-projects .cloud-proj { background: #fff !important; color: #0f1
 .cloud-proj .pv-cont-k { color: #1f6fe0; }
 .cloud-proj .pv-cont-go { background: #0f1115; color: #fff; }
 .cloud-proj .pv-cur-del { color: #d92d20; }
+.cloud-proj .pv-cur-dup { color: #1f6fe0; }
 
 /* ⭐ Presets on a phone: the studio's dark sheet, its blue buttons */
 body.mw-cloud #vePresetModal .ve-pre-box { background: #15161b; border: 0; }

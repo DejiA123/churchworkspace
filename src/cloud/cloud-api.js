@@ -289,6 +289,7 @@ const ALLOWED = {
   'session:load': true,
   'session:remove': true,
   'session:rename': true,
+  'session:duplicate': true,
   'session:autosave': true,
   'session:autosaveGet': true,
   'session:autosaveClear': true,

@@ -762,6 +762,7 @@
       + `<small>${openNow ? '<i class="pj-now">Open now</i> · ' : ''}${r.videoMissing ? 'Its video was deleted' : esc(`Edited ${agoWords(r.savedAt)}`) + (bits ? ' · ' + esc(bits) : '')}</small></span>`
       + (o.manage ? '' : `<span class="pj-go">${mi('chev-right')}</span>`) + '</button>'
       + (o.manage ? `<button type="button" class="pj-more" data-pjren="${escAttr(r.id)}" aria-label="Rename">${mi('pen')}</button>`
+        + `<button type="button" class="pj-more" data-pjdup="${escAttr(r.id)}" aria-label="Duplicate"${r.videoMissing ? ' disabled' : ''}>${mi('copy')}</button>`
         + `<button type="button" class="pj-more pj-del" data-pjdel="${escAttr(r.id)}" aria-label="Delete">${mi('trash')}</button>` : '')
       + '</div>';
   }
@@ -841,8 +842,8 @@
     document.body.appendChild(el);
     el.querySelector('.cs-chip-slot').appendChild(C.jobChip());
     el.addEventListener('click', async (e) => {
-      const b = e.target.closest('[data-go],[data-pv],[data-proj],[data-pjren],[data-pjdel]');
-      if (!b) return;
+      const b = e.target.closest('[data-go],[data-pv],[data-proj],[data-pjren],[data-pjdup],[data-pjdel]');
+      if (!b || b.disabled) return;
       if (b.dataset.go) return go(b.dataset.go);
       if (b.dataset.pv === 'new') {
         // the picker first, straight from the tap (a phone only opens one from a tap); the open project is saved meanwhile
@@ -855,6 +856,15 @@
       }
       if (b.dataset.pv === 'continue') return go('studio');
       if (b.dataset.pv === 'delete') return deleteOpenProject();
+      if (b.dataset.pv === 'duplicate') {
+        // the open edit as it is this moment: saved first, then copied
+        const ed = window.VideoEditor;
+        try { if (ed && ed.flushProject) await ed.flushProject(); } catch (er) {}
+        const id = ed && ed.projectId ? ed.projectId() : null;
+        if (!id) { C.island({ kind: 'warn', title: 'Nothing to copy yet', sub: 'Open a video in the editor first', ms: 3500 }); return; }
+        return duplicateProject(id);
+      }
+      if (b.dataset.pjdup) return duplicateProject(b.dataset.pjdup);
       if (b.dataset.proj) return openProject(b.dataset.proj);
       if (b.dataset.pjren) {
         const row = (S.projects || []).find((r) => r.id === b.dataset.pjren);
@@ -875,6 +885,16 @@
     });
     return el;
   }
+  /* ⧉ Duplicate: the same video and every edit, as a project of its own
+     ("… (copy)"), first in the list, to try something without losing this. */
+  async function duplicateProject(id) {
+    let row = null;
+    try { row = await window.api.sessions.duplicate(id); } catch (e) { row = null; }
+    if (!row || !row.id) { C.island({ kind: 'warn', title: 'That project could not be copied', sub: 'Try again in a moment', ms: 4000 }); return null; }
+    C.island({ title: 'Project duplicated', sub: `“${projName(row.name)}”: the same video and edits, to change as you like`, ms: 3800 });
+    await renderProjectsView();
+    return row;
+  }
   async function renderProjectsView() {
     const el = $('#cloudProjView') || buildProjectsView();
     const list = $('#pvList', el);
@@ -892,7 +912,8 @@
     if (hasVid) {
       const nm = curRow ? curRow.name : String((ed.sourcePath && ed.sourcePath()) || '').split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
       cur.innerHTML = `<button type="button" class="pv-cont" data-pv="continue"><span class="pv-cont-k">Open in the editor</span><b>${esc(nm || 'Your video')}</b><span class="pv-cont-go">Continue ${mi('chev-right')}</span></button>`
-        + `<button type="button" class="pv-cur-del" data-pv="delete">${mi('trash')}Delete this project</button>`;
+        + `<div class="pv-cur-acts"><button type="button" class="pv-cur-dup" data-pv="duplicate">${mi('copy')}Duplicate</button>`
+        + `<button type="button" class="pv-cur-del" data-pv="delete">${mi('trash')}Delete this project</button></div>`;
     }
     const others = rows.filter((r) => r.id !== openId);
     $('#pvCount', el).textContent = rows.length ? String(rows.length) : '';

@@ -648,6 +648,7 @@ ipcMain.handle('session:save', wrap(async (e, { id, name, data }) => sessions.sa
 ipcMain.handle('session:load', wrap(async (e, { id }) => sessions.load(id)));
 ipcMain.handle('session:remove', wrap(async (e, { id }) => sessions.remove(id)));
 ipcMain.handle('session:rename', wrap(async (e, { id, name }) => sessions.rename(id, name)));
+ipcMain.handle('session:duplicate', wrap(async (e, { id, name }) => sessions.duplicate(id, name)));
 // The rolling slot: written continuously while editing, read once on the way in.
 ipcMain.handle('session:autosave', wrap(async (e, { data }) => sessions.autosave(data)));
 ipcMain.handle('session:autosaveGet', wrap(async () => sessions.readAutosave()));

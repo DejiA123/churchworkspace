@@ -596,6 +596,7 @@ let _hideTimer = null;
       load: (id) => call('session:load', { id }),
       remove: (id) => call('session:remove', { id }),
       rename: (id, name) => call('session:rename', { id, name }),
+      duplicate: (id, name) => call('session:duplicate', { id, name }),
       autosave: (data) => call('session:autosave', { data }),
       autosaveGet: () => call('session:autosaveGet'),
       autosaveClear: () => call('session:autosaveClear'),

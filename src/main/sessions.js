@@ -152,6 +152,29 @@ function rename(id, name) {
   return save({ id, name, data });
 }
 
+/**
+ * A copy of a project to take somewhere else: the same video and every edit
+ * (clips, shorts, captions, text, music), under a name of its own: "Gospel
+ * Jamz 2026 Day 2 (copy)", then "(copy 2)". The recording is shared, not
+ * copied: a project is only its edit.
+ */
+function duplicate(id, name) {
+  if (!id || id === AUTOSAVE) throw new Error('That project cannot be copied.');
+  const data = load(id);
+  if (!data) throw new Error('That project is not there any more.');
+  const copy = Object.assign({}, data);
+  delete copy.id; delete copy.videoMissing; delete copy.summary; delete copy.projectId; delete copy.fromAutosave;
+  copy.auto = false;   // named by a person now: the studio does not rename it after its video
+  const base = String(data.name || 'Untitled session').replace(/\s*\(copy(?: \d+)?\)$/i, '').trim() || 'Untitled session';
+  let nm = String(name || '').trim().slice(0, 80);
+  if (!nm) {
+    const taken = new Set(listRaw().map((r) => r.name));
+    nm = `${base} (copy)`;
+    for (let n = 2; taken.has(nm) && n < 1000; n++) nm = `${base} (copy ${n})`;
+  }
+  return save({ name: nm, data: copy });
+}
+
 /** The rolling "what was on screen a moment ago" slot. */
 function autosave(data) {
   const dest = fileOf(AUTOSAVE);
@@ -188,4 +211,4 @@ function importFrom(src) {
   return save({ name: data.name || path.basename(src).replace(/\.[^.]+$/, ''), data });
 }
 
-module.exports = { init, list, save, load, remove, rename, autosave, readAutosave, clearAutosave, exportTo, importFrom, AUTOSAVE };
+module.exports = { init, list, save, load, remove, rename, duplicate, autosave, readAutosave, clearAutosave, exportTo, importFrom, AUTOSAVE };
