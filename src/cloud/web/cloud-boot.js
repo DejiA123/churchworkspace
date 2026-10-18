@@ -405,7 +405,7 @@ let _hideTimer = null;
     if (inBox()) {
       setJobBatch(null);
       const m = $('#overlayMsg'); if (m) m.textContent = 'Getting the shorts onto your phone';
-      setStage(`${b.done} made — bringing them down so you can save them.`);
+      setStage(`${b.done} short${b.done === 1 ? '' : 's'} ready. Downloading ${b.done === 1 ? 'it' : 'them'} to your phone…`);
       setProgress(100 - SAVE_SHARE);
     }
     try {
