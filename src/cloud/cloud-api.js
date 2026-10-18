@@ -1007,6 +1007,7 @@ function sweepPartsIn(dir) {
 }
 let sweepTimer = null;
 
+const batchTitle = (p) => { try { return require('../main/batch').titleFor(p); } catch (e) { return null; } };
 /** Everything a signed-in browser can open. */
 function browse(exts) {
   const seen = new Set();
@@ -1025,6 +1026,8 @@ function browse(exts) {
       seen.add(k);
       return true;
     }).sort((a, b) => b.mtime - a.mtime);
+    // a short made on the server: the title it was made under (batch.titleFor)
+    if (g.key === 'output') for (const f of items) { const t = batchTitle(f.path); if (t) f.title = t; }
     return { key: g.key, label: g.label, dir: g.dir, files: items };
   }).filter((g) => g.dir);
 }

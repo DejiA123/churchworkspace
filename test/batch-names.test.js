@@ -27,5 +27,10 @@ check(got.more.outName === 'short-Ignore_The_Multitude_To_Find_Your_Destiny-logo
 check(!/Church|Media|\//.test(got.outName), 'no trace of the folders in the name', got.outName);
 let threw = false; try { batch._fill({ outName: '@@step-5@@' }, outs); } catch (e) { threw = true; }
 check(threw, 'a name from a file never made is refused, as a path is', threw);
+// the title each short was made under is kept by its file (My Uploads shows it)
+batch._rememberTitle('/x/Church Work Space/Media_Church_Work_Space_media_short-Ign-20261018-053100.mp4', 'Ignore The Multitude To Find Your Destiny');
+batch._rememberTitle('/x/a.mp4', 'Short 3');
+check(batch.titleFor('/x/Church Work Space/Media_Church_Work_Space_media_short-Ign-20261018-053100.mp4') === 'Ignore The Multitude To Find Your Destiny', 'a finished short’s title is kept by its file, whatever the file is called', null);
+check(batch.titleFor('/x/a.mp4') === null, 'a placeholder ("Short 3") is not a title', batch.titleFor('/x/a.mp4'));
 console.log(`\n${pass} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

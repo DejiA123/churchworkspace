@@ -1806,7 +1806,7 @@ let _hideTimer = null;
       + (AUDIO_RE.test((/\.[^.]+$/.exec(String(f.name).toLowerCase()) || [''])[0])
         ? '<span class="cf-pic cf-pic-audio" aria-hidden="true">🎵</span>'   // a song has no picture to ask for
         : `<span class="cf-pic" data-thumb="${escAttr(f.path)}"></span>`)
-      + `<span class="cf-tx"><b title="${escAttr(f.name)}">${escHtml(friendlyName(f.name))}</b><small>${fmtSize(f.size)} · ${escHtml(niceWhen(f.mtime))}</small></span>`
+      + `<span class="cf-tx"><b title="${escAttr(f.name)}">${escHtml(f.title || friendlyName(f.name))}</b><small>${fmtSize(f.size)} · ${escHtml(niceWhen(f.mtime))}</small></span>`
       + '</button>'
       + (picking
         ? '<button type="button" class="cf-open" data-act="open">Open</button>'
@@ -2857,9 +2857,11 @@ let _hideTimer = null;
               c.code = 'COPY'; throw c;
             } finally { off(); }
           }
-          const stem = name.replace(/\.[^.]+$/, '');
+          // a short made on the server lands in Photos under its title too
+          const known = ((findFile(p) || {}).title || '').replace(/[\\/:*?"<>|]+/g, '').trim().slice(0, 80);
+          const stem = known || name.replace(/\.[^.]+$/, '');
           parts = list.map((x, i) => ({ path: x.path, size: x.size, file: null, saved: false,
-            name: list.length > 1 ? `${stem}-part${i + 1}of${list.length}.mp4` : (x.path === p ? name : stem + '.mp4') }));
+            name: list.length > 1 ? `${stem}-part${i + 1}of${list.length}.mp4` : (x.path === p && !known ? name : stem + '.mp4') }));
           rememberSave(p, { parts, make });
         } else make = cached.make || 0;
         const n = parts.length;
@@ -3616,7 +3618,7 @@ let _hideTimer = null;
     list.innerHTML = (vids.length > 1 ? `<button type="button" class="cv-act cv-save cv-ready sa-all" data-act="saveall">${mi('download')}<span>Save all ${vids.length} to Photos</span></button>` : '')
       + cloud.downloads.map((d) => `<div class="cf-row" data-path="${escAttr(d.path)}">`
       + `<button type="button" class="cf-main" data-act="view"><span class="cf-pic" data-thumb="${escAttr(d.path)}"></span>`
-      + `<span class="cf-tx"><b title="${escAttr(d.name)}">${escHtml(friendlyName(d.name))}</b><small>Finished ${escHtml(niceWhen(d.at))}</small></span></button>`
+      + `<span class="cf-tx"><b title="${escAttr(d.name)}">${escHtml((findFile(d.path) || {}).title || friendlyName(d.name))}</b><small>Finished ${escHtml(niceWhen(d.at))}</small></span></button>`
       + `<button type="button" class="cf-btn" data-act="save" aria-label="Save to this phone" title="Save to this phone">${mi('download')}</button></div>`).join('');
     watchThumbs(list);
   }

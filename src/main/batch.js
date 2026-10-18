@@ -78,14 +78,41 @@ function save() {
   if (saveTimer.unref) saveTimer.unref();
 }
 
+/*
+ * EACH SHORT'S TITLE, BY ITS FILE. A batch is forgotten a day after it ends,
+ * and a file's name can be cut short (or, before the outName fix above, be a
+ * squashed folder path), so the title each short was made under is kept here:
+ * My Uploads shows a short by it ("Ignore The Multitude To Find Your Destiny").
+ */
+const TITLES_MAX = 3000;
+const titles = new Map();
+function titlesFile() { return path.join(dir(), 'titles.json'); }
+let titlesTimer = null;
+function rememberTitle(file, label) {
+  const t = String(label || '').trim();
+  if (!file || !t || /^Short \d+$/.test(t)) return;
+  titles.delete(file); titles.set(file, t.slice(0, 120));
+  while (titles.size > TITLES_MAX) titles.delete(titles.keys().next().value);
+  clearTimeout(titlesTimer);
+  titlesTimer = setTimeout(() => {
+    try { fs.writeFileSync(titlesFile() + '.tmp', JSON.stringify(Array.from(titles))); fs.renameSync(titlesFile() + '.tmp', titlesFile()); } catch (e) { /* next time */ }
+  }, 300);
+  if (titlesTimer.unref) titlesTimer.unref();
+}
+/** The title a finished short was made under, or null. */
+function titleFor(file) { return titles.get(file) || null; }
+
 /** Called once at start-up with a folder on the persistent disk. */
 let onInterrupted = null;
 function init(folder, opts = {}) {
   DIR = folder;
   defaultSender = opts.sender || null;
   onInterrupted = opts.onInterrupted || null;
+  try { for (const [f, t] of JSON.parse(fs.readFileSync(titlesFile(), 'utf8')) || []) titles.set(f, t); } catch (e) { /* none yet */ }
   let saved = [];
   try { saved = JSON.parse(fs.readFileSync(stateFile(), 'utf8')) || []; } catch (e) { saved = []; }
+  // the shorts of batches still remembered (made before titles were kept)
+  for (const sb of saved) for (const it of (sb.items || [])) if (it.state === 'done' && it.output && !titles.has(it.output)) rememberTitle(it.output, it.label);
   for (const sb of saved) {
     const b = Object.assign({}, sb, { running: false, lanes: 0, sender: defaultSender, resumed: true });
     let again = 0;
@@ -312,6 +339,7 @@ async function runSteps(b, it, steps) {
   it.secs = Math.round((now() - t0) / 1000);
   it.state = 'done';
   it.pct = 100;
+  if (it.output) rememberTitle(it.output, it.label);
   try { fs.rmSync(it.file, { force: true }); } catch (e) {}
 }
 
@@ -367,4 +395,4 @@ function lane(b) {
   });
 }
 
-module.exports = { init, open, add, seal, list, cancel, PLACEHOLDER, STEPS, _batches: batches, _fill: fill };
+module.exports = { init, open, add, seal, list, cancel, PLACEHOLDER, STEPS, titleFor, _batches: batches, _fill: fill, _rememberTitle: rememberTitle };
