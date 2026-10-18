@@ -61,6 +61,10 @@ const TRACKS = [
   // soft pads with no beat, for under a prayer or an altar call
   [584, 'Rest Now', 'Eugenio Mininni', 'prayer'], [441, 'Meditation', 'Arulo', 'prayer'], [251, 'Ambient', 'Arulo', 'prayer'],
   [345, 'Nature Meditation', 'Arulo', 'prayer'], [324, 'Smooth Meditation', 'Arulo', 'prayer'], [616, 'What it Takes', 'Eugenio Mininni', 'prayer'],
+  [524, 'Song of Kindness', 'Diego Nava', 'prayer'], [993, 'Finding Myself', 'Michael Ramir C.', 'prayer'], [347, 'Transcending', 'Arulo', 'prayer'],
+  [253, 'Relaxation 2', 'Arulo', 'prayer'], [382, 'Meditation 05', 'Arulo', 'prayer'], [383, 'Pondering', 'Arulo', 'prayer'],
+  [577, 'Cristales', 'Eugenio Mininni', 'prayer'], [566, 'Daniel & Me', 'Eugenio Mininni', 'prayer'], [579, 'How', 'Eugenio Mininni', 'prayer'],
+  [585, 'Sonor 07', 'Eugenio Mininni', 'prayer'], [571, 'Voxscape', 'Eugenio Mininni', 'prayer'],
   [644, 'Upbeat Jazz', 'Francisco Alvear', 'upbeat'], [5, 'Feeling Happy', 'Ahjay Stelino', 'upbeat'], [801, 'Happy Home', 'Michael Ramir C.', 'upbeat'],
   [1076, 'Smile', 'Michael Ramir C.', 'upbeat'], [3, 'Dance with Me', 'Ahjay Stelino', 'upbeat'], [91, 'Summer’s Here', 'Ahjay Stelino', 'upbeat'],
   [288, 'One More Dance', 'Arulo', 'upbeat'], [250, 'Island Beat', 'Arulo', 'upbeat'], [1012, 'Take this Higher', 'Michael Ramir C.', 'upbeat'],
