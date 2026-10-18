@@ -127,6 +127,28 @@ async function waitUp() {
     const up = await page.evaluate(() => [...document.querySelectorAll('#libFreeList [data-freeid]')].map((r) => r.querySelector('b').textContent));
     check(up.includes('Upbeat Jazz') && !up.includes('Lo-Fi 01'), 'a mood chip switches the list (☀️ Upbeat: "Upbeat Jazz"…)', up);
     if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'studio-free-upbeat.png') });
+    // a NEW project starts with no music — the last one's song does not carry over…
+    const VID2 = path.join(MEDIA, 'second.webm');
+    execFileSync(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=s=360x640:r=15:d=8', '-f', 'lavfi', '-i', 'sine=f=330:d=8',
+      '-c:v', 'libvpx-vp9', '-b:v', '300k', '-deadline', 'realtime', '-cpu-used', '8', '-c:a', 'libopus', '-shortest', VID2]);
+    await page.evaluate(() => document.getElementById('libClose') && document.getElementById('libClose').click());
+    const first = await page.evaluate(() => window.VideoEditor.flushProject());
+    await page.evaluate((p) => window.VideoEditor.openPath(p), VID2);
+    await sleep(1500);
+    const fresh = await page.evaluate(() => ({ btn: document.getElementById('veMusic').textContent, lane: (document.getElementById('veMusicTrack') || {}).textContent || '' }));
+    check(/^🎵 Music$/.test(fresh.btn.trim()) && /No background music/.test(fresh.lane), 'a new project starts with NO background music (the last song does not carry over)', fresh);
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction(() => window.VideoEditor && window.VideoEditor.openPath, null, { timeout: 30000 });
+    await sleep(1500);
+    await page.evaluate((p) => window.VideoEditor.openPath(p), VID2);
+    await sleep(1500);
+    check(/^🎵 Music$/.test(await page.evaluate(() => document.getElementById('veMusic').textContent.trim())), '…not even after the app is opened again');
+    // …and the project it was chosen in still has it
+    check(!!first, 'the first project was saved', first);
+    await page.evaluate((id) => window.VideoEditor.openProject(id), first);
+    await sleep(2000);
+    const back = await page.evaluate(() => document.getElementById('veMusic').textContent.trim());
+    check(/Lo-Fi 01/.test(back), 'the first project, opened again, still has its song', back);
   } catch (e) {
     check(false, 'the run completes', e.message);
   } finally { await done(); }

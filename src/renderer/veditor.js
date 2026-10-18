@@ -231,6 +231,16 @@
       ve.audio = [{ id: uid(), start: 0, end: info.durationSec, color: '#2ea043' }];
       // sounds belong to the video they were placed on (a restored session brings its own)
       if (!ve._restoring) { ve.sounds = []; ve.soundSel = null; }
+      // …and so does the background music: a NEW project starts with none (it
+      // used to carry the last project's song over). A project re-opened brings
+      // its own back (applySession); the song stays in My music to pick again.
+      if (!ve._restoring && ve.music) {
+        ve.music = null; saveMusicPref();
+        try { stopAudition(); } catch (e) {}
+        const ma = ve.refs.musicAudio;
+        if (ma) { try { ma.pause(); ma.removeAttribute('src'); } catch (e) {} ma.dataset.file = ''; ma.dataset.src = ''; }
+        renderMusicLane(); updateMusicButton(); renderLibrary();
+      }
       ve.audioSel = null; ve.activeRow = 'video';
 
       // a different recording is a different piece of work: it gets its own
