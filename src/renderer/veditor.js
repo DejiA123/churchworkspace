@@ -15749,6 +15749,8 @@
     libRefresh();
   }
   function setLibTab(tab) {
+    // (the YouTube shelf was taken out: songs come from My music and Free music)
+    if (tab === 'youtube') tab = 'music';
     ve.libTab = tab;
     $$('.lib-tab').forEach((b) => b.classList.toggle('active', b.dataset.libtab === tab));
     $$('.lib-pane').forEach((p) => p.classList.toggle('hidden', p.dataset.libpane !== tab));
@@ -15884,7 +15886,7 @@
     const list = (ve.lib && ve.lib.music) || [];
     libSubtitle();
     if (!list.length) {
-      el.innerHTML = `<p class="muted small lib-empty">No music saved yet. Tap <b>Add music</b> above — or find a song in the <b>YouTube</b> tab.</p>`;
+      el.innerHTML = `<p class="muted small lib-empty">No music saved yet. Tap <b>Add music</b> above — or pick one from <b>Free music</b>.</p>`;
       return;
     }
     const a = ve.refs && ve.refs.musicAudio;

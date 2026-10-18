@@ -17,7 +17,7 @@
  *       song in use
  *   [5] Remove takes the music off the video; the bin takes a song out of the
  *       library
- *   [6] the YouTube and My clips shelves open, and back
+ *   [6] the Free music and My clips shelves open, and back (there is no YouTube shelf)
  *   [7] Add from phone and Sound from a video open the phone's file picker;
  *       Done closes the sheet
  *
@@ -172,8 +172,10 @@ async function waitUp() {
     console.log('\n=== [6] the shelves ===');
     const shelf = async (t) => { await page.tap(`#libModal .lib-tab[data-libtab="${t}"]`); await sleep(300);
       return T((t) => ({ pane: !document.querySelector(`.lib-pane[data-libpane="${t}"]`).classList.contains('hidden'), active: document.querySelector('.lib-tab.active').dataset.libtab, title: document.getElementById('libTitle').textContent }), t); };
-    const yt = await shelf('youtube'), cl = await shelf('clips'), mu = await shelf('music');
-    check(yt.pane && yt.active === 'youtube' && cl.pane && cl.active === 'clips' && cl.title === 'Clips' && mu.pane && mu.title === 'Music', 'YouTube, My clips and back to My music', { yt, cl, mu });
+    const tabs = await T(() => [...document.querySelectorAll('#libModal .lib-tab')].map((b) => b.dataset.libtab));
+    check(tabs.join() === 'music,free,clips', 'the shelves are My music, Free music and My clips — no YouTube', tabs);
+    const fr = await shelf('free'), cl = await shelf('clips'), mu = await shelf('music');
+    check(fr.pane && fr.active === 'free' && cl.pane && cl.active === 'clips' && cl.title === 'Clips' && mu.pane && mu.title === 'Music', 'Free music, My clips and back to My music', { fr, cl, mu });
 
     console.log('\n=== [7] adding, and Done ===');
     for (const [sel, what] of [['#libAddMusic', 'Add from phone'], ['#libAddMusicVideo', 'Sound from a video']]) {
