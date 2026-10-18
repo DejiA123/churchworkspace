@@ -4111,10 +4111,17 @@ let _hideTimer = null;
       busy = true;
       const at = v.currentTime, wasMuted = v.muted;
       v.muted = true; v._nudging = true;   // the editor ignores this play/pause (veditor.js)
+      // A seek asked for while this runs (a swipe on a slow connection) is the
+      // newest place to be: it must not be put back to where the nudge began —
+      // that was the timeline "jumping back to a previous time".
+      let movedOn = false;
+      const onSeek = () => { movedOn = true; };
+      v.addEventListener('seeking', onSeek);
       let p = null;
       try { p = v.play(); } catch (e) { p = null; }
       const done = () => {
-        try { v.pause(); if (Math.abs(v.currentTime - at) > 0.05) v.currentTime = at; } catch (e) {}
+        v.removeEventListener('seeking', onSeek);
+        try { v.pause(); if (!movedOn && Math.abs(v.currentTime - at) > 0.05) v.currentTime = at; } catch (e) {}
         v.muted = wasMuted; busy = false;
         setTimeout(() => { v._nudging = false; }, 400);   // after the pause/playing events have been seen
         // and the song is never left playing by itself

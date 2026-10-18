@@ -175,7 +175,77 @@
   const tailClips = () => ve.segments.filter(isTailClip).sort((a, b) => tlPos(a) - tlPos(b));
   const playEnd = () => ve.segments.reduce((m, x) => (x.src && (x.lane || 0) >= 1 ? Math.max(m, tlPos(x) + (x.end - x.start)) : m), dur());
   const timelineEnd = () => Math.max(dur() + outroDur(), playEnd());
-  const trackW = () => Math.max(300, timelineEnd() * ve.pxPerSec);
+  const trackW = () => Math.max(300, tv(timelineEnd()) * ve.pxPerSec);
+  /*
+   * ►► SNAP CLOSES THE GAPS (CapCut's main-track magnet). ◄◄
+   * "There is a black gap on the left — everything should move to the left and
+   *  close it, as CapCut does, when Snap is on." The main lane places every clip
+   * at its time IN THE RECORDING, so what was cut away stayed on the timeline as
+   * black: before the first clip, and between clips. It was never exported, but
+   * it looked as if it would be, and the line could sit in it on a black picture.
+   *
+   * With Snap on, the timeline is drawn on the EXPORT's clock instead: the kept
+   * pieces of the main lane side by side from 0:00, everything else on every
+   * lane (captions, text, sounds, the song, overlays) drawn where it falls in
+   * them, the clips after the video straight after. Nothing about the edit
+   * changes — only where it is drawn. tv() takes a recording time to the
+   * timeline, vt() a timeline time back; with Snap off (or nothing cut) both
+   * are the identity, and the timeline is exactly what it always was.
+   * While a clip is being dragged the drawing holds still (ve._packHeld), so
+   * the edge under the finger stays under it; it closes up when it is let go.
+   */
+  function computePack() {
+    if (!ve.snap || !ve.video) return null;
+    const pieces = [];
+    for (const s of mainClips()) for (const q of keptPieces(s)) if (q.end > q.start + 0.001) pieces.push({ start: q.start, end: q.end });
+    if (!pieces.length) return null;
+    pieces.sort((a, b) => a.start - b.start);
+    // AI shorts lying in what was cut keep the plain timeline: closed up, they would vanish
+    const inside = (x) => pieces.some((q) => x.start >= q.start - 0.05 && x.end <= q.end + 0.05);
+    if (ve.segments.some((x) => x.ai && (x.lane || 0) === 0 && !inside(x))) return null;
+    const D = dur();
+    let o = 0;
+    const P = pieces.map((q) => { const r = { a: q.start, b: q.end, o }; o += q.end - q.start; return r; });
+    const gapless = P[0].a < 0.01 && D - P[P.length - 1].b < 0.01 && P.every((q, i) => !i || q.a - P[i - 1].b < 0.01);
+    return gapless ? null : { P, kept: o, D };
+  }
+  function packMap() {
+    if (ve.drag && ve._packHeld) return ve._packHeld.m;
+    if (ve._packMemo !== undefined) return ve._packMemo;
+    ve._packMemo = computePack();
+    // one answer per run of code: a render asks thousands of times
+    Promise.resolve().then(() => { ve._packMemo = undefined; });
+    return ve._packMemo;
+  }
+  const packing = () => !!packMap();
+  /** A recording time → where it is drawn on the timeline (seconds). */
+  function tv(t) {
+    const m = packMap(); if (!m) return t;
+    if (t >= m.D) return m.kept + (t - m.D);   // the clips after the video
+    let v = 0;
+    for (const q of m.P) {
+      if (t <= q.a) return q.o;
+      if (t < q.b) return q.o + (t - q.a);
+      v = q.o + (q.b - q.a);
+    }
+    return v;
+  }
+  /** A place on the timeline (seconds) → the recording time drawn there. */
+  function vt(v) {
+    const m = packMap(); if (!m) return v;
+    const last = m.P[m.P.length - 1];
+    if (v >= m.kept - 1e-6) return v > m.kept + 1e-3 ? m.D + (v - m.kept) : last.b;
+    for (const q of m.P) if (v < q.o + (q.b - q.a)) return q.a + Math.max(0, v - q.o);
+    return last.b;
+  }
+  /** A recording span → its drawn width (seconds); what was cut from inside it takes no room. */
+  const tvLen = (a, b) => Math.max(0, tv(b) - tv(a));
+  /** Is t in footage the timeline shows (with Snap closing the gaps)? Where the next shown footage starts. */
+  function packHop(t) {
+    const m = packMap(); if (!m) return null;
+    for (const q of m.P) { if (t < q.a - 0.001) return { to: q.a }; if (t < q.b - 0.001) return null; }
+    return t < m.D - 0.001 ? { to: null, last: m.P[m.P.length - 1].b } : null;
+  }
   /* How wide the timeline may get before the filmstrip is dropped from the clip
    * blocks. 40,000px is roughly 1,700px per source frame — already far more
    * stretched than is any use — and it is the point past which rasterising the
@@ -503,8 +573,8 @@
     const viewW = (sc && tlViewW()) || 900;
     const left = sc ? tlScrollX() - tlPadL() : 0;
     return [
-      Math.max(0, (left - viewW * pad) / ve.pxPerSec),
-      (left + viewW * (1 + pad)) / ve.pxPerSec,
+      vt(Math.max(0, (left - viewW * pad) / ve.pxPerSec)),
+      vt((left + viewW * (1 + pad)) / ve.pxPerSec),
     ];
   }
 
@@ -535,7 +605,7 @@
     const caps = ve.capEvents || [];
     const audio = (ve.audio || []).length;
     return [
-      ve.video.path, w, tw, ve.pxPerSec.toFixed(3), ve.aspect,
+      ve.video.path, w, tw, ve.pxPerSec.toFixed(3), ve.aspect, ve.snap ? 'S' : '',
       segs, ve.textOverlays.length, audio,
       // the transcript, without reading all of it: a retype changes the text of
       // one block, and the block list is what gets drawn
@@ -546,7 +616,8 @@
 
   function renderRuler() {
     layout();
-    const D = dur(); if (!D) { ve.refs.ruler.innerHTML = ''; return; }
+    const D0 = dur(); if (!D0) { ve.refs.ruler.innerHTML = ''; return; }
+    const D = tv(D0);   // (with Snap closing gaps, the ruler counts what is kept)
     const sc = ve.refs.tlScroll;
     const viewW = (sc && tlViewW()) || 900;
     ve._laneDrawnAt = { left: sc ? tlScrollX() : 0, pps: ve.pxPerSec, D };
@@ -770,7 +841,10 @@
   function toggleSnap() {
     ve.snap = !ve.snap;
     const b = $('#veSnap'); if (b) b.classList.toggle('on', ve.snap);
-    window.__toast && window.__toast(ve.snap ? '🧲 Snapping ON' : 'Snapping off', 'good');
+    ve._packMemo = undefined;
+    // the timeline closes up (or opens out) around the moment under the line
+    renderRuler(); renderSegments(); updatePlayhead();
+    window.__toast && window.__toast(ve.snap ? '🧲 Snap ON — clips close up, no gaps' : 'Snap off — gaps show where footage was cut', 'good');
   }
 
   /* ---- zoom controls ---- */
@@ -798,8 +872,8 @@
      */
     layout();   // the new width first, or a scroll past the old end is cut short
     // the centred timeline zooms about the line, whatever asked (a pinch, the buttons)
-    if (centred()) setScrollLeft(sc, Math.max(0, tlPadL() + nowT() * ve.pxPerSec - centreGap()));
-    else if (anchor && sc) setScrollLeft(sc, Math.max(0, anchor.t * ve.pxPerSec - anchor.x));
+    if (centred()) setScrollLeft(sc, Math.max(0, tlPadL() + tv(nowT()) * ve.pxPerSec - centreGap()));
+    else if (anchor && sc) setScrollLeft(sc, Math.max(0, tv(anchor.t) * ve.pxPerSec - anchor.x));
     else if (centerT != null && sc) setScrollLeft(sc, Math.max(0, centerT * ve.pxPerSec - sc.clientWidth / 2));
     // Zooming rescales every lane — but only the lanes, and coalesced to one
     // render per frame, because the wheel and the slider both fire far faster
@@ -826,7 +900,7 @@
   function timeAtClientX(clientX) {
     const sc = ve.refs.tlScroll;
     if (!sc) return 0;
-    return Math.max(0, (sc.scrollLeft + clientX - sc.getBoundingClientRect().left - tlPadL()) / ve.pxPerSec);
+    return vt(Math.max(0, (sc.scrollLeft + clientX - sc.getBoundingClientRect().left - tlPadL()) / ve.pxPerSec));
   }
   function fitZoom() {
     if (!ve.video) return;
@@ -834,7 +908,7 @@
     const w = ((sc ? sc.clientWidth : ve.refs.timeline.clientWidth) || 900) - 28;
     // "Fit" means everything ON the timeline — including the outro parked after
     // the footage, which is otherwise just off the right-hand edge.
-    setZoom(clamp(w / Math.max(1, timelineEnd()), 0.15, 24), false);
+    setZoom(clamp(w / Math.max(1, tv(timelineEnd())), 0.15, 24), false);
     // (the centred timeline stays on its moment — setZoom keeps the line on it;
     // a scroll to 0 there would read as a swipe, pause and jump to 0:00)
     if (sc && !centred()) sc.scrollLeft = 0;
@@ -943,7 +1017,16 @@
 
   function renderSegments() {
     if (_renderHold) { _renderHeld = true; return; }
+    ve._packMemo = undefined;   // the clips may have changed: the drawing is worked out afresh
+    // with Snap closing the gaps the line never rests in cut footage: it goes to where the next kept part starts
+    if (!ve.drag && ve.video && ve.refs.player && !isPlaying() && ve.tailT == null) {
+      const p = ve.refs.player, h = packHop(p.currentTime || 0);
+      // (a hair inside: a video's clock reads a touch BEFORE where it was put, which is still the cut)
+      if (h) { try { p.currentTime = h.to != null ? h.to + 0.02 : Math.max(0, h.last - 0.05); } catch (e) {} }
+    }
     renderLanes();
+    // the clock's total is what is kept: an edit changes it
+    if (ve.video && ve.tailT == null) { const tm = $('#veTime'); if (tm) tm.textContent = `${fmt(tv(nowT()))} / ${fmt(tv(playEnd()))}`; }
     renderClipList();
     updateSearchHint();
     updateOverlayTools();
@@ -1016,6 +1099,7 @@
       };
     }
     if (!showFilm) return { backgroundImage: '', background: s.color };
+    if (packing()) total = dur() * ve.pxPerSec;   // the strip is the recording, drawn at its own scale
     const srcX = -(s.start * ve.pxPerSec);
     return {
       backgroundImage: `linear-gradient(180deg,rgba(0,0,0,.12),rgba(0,0,0,.5)),url('${ve.filmstripUrl}')`,
@@ -1070,8 +1154,8 @@
       if (isMedia(s) && !!n.querySelector('.ve-seg-snd')
           !== !!(s.kind === 'video' && s.srcInfo && s.srcInfo.hasAudio && !s.mute)) return false;
       n.classList.toggle('sel', ve.sel === s.id);
-      n.style.left = tlPos(s) * ve.pxPerSec + 'px';
-      n.style.width = Math.max(6, (s.end - s.start) * ve.pxPerSec) + 'px';
+      n.style.left = tv(tlPos(s)) * ve.pxPerSec + 'px';
+      n.style.width = Math.max(6, tvLen(tlPos(s), tlPos(s) + (s.end - s.start)) * ve.pxPerSec) + 'px';
       const bg = segBgCss(s, total, showFilm);
       n.style.background = bg.background || '';
       n.style.backgroundImage = bg.backgroundImage || '';
@@ -1083,8 +1167,8 @@
       if (marks.length !== cuts.length) return false;   // structure moved on — rebuild
       cuts.forEach((c, k) => {
         const a = Math.max(s.start, c.start), b = Math.min(s.end, c.end);
-        const w = Math.max(0, (b - a) * ve.pxPerSec);
-        marks[k].style.left = (a - s.start) * ve.pxPerSec + 'px';
+        const w = packing() ? 3 : Math.max(0, (b - a) * ve.pxPerSec);
+        marks[k].style.left = (tv(a) - tv(s.start)) * ve.pxPerSec + 'px';
         marks[k].style.width = w + 'px';
         const tick = marks[k].querySelector('span');
         if (tick) tick.style.display = w >= 18 ? '' : 'none';
@@ -1092,7 +1176,7 @@
     }
     const outro = seg.querySelector('.ve-seg-outro');
     if (outro && ve.outro) {
-      outro.style.left = playEnd() * ve.pxPerSec + 'px';
+      outro.style.left = tv(playEnd()) * ve.pxPerSec + 'px';
       outro.style.width = Math.max(28, (ve.outro.durationSec || 3) * ve.pxPerSec) + 'px';
     }
     return true;
@@ -1147,7 +1231,7 @@
     }
     laneHints += `<div class="ve-lane-hint" style="top:${laneTop(0) + 4}px">🎬 Main</div>`;
     seg.innerHTML = laneHints + ve.segments.map((s) => {
-      const left = tlPos(s) * ve.pxPerSec, width = Math.max(6, (s.end - s.start) * ve.pxPerSec);
+      const left = tv(tlPos(s)) * ve.pxPerSec, width = Math.max(6, tvLen(tlPos(s), tlPos(s) + (s.end - s.start)) * ve.pxPerSec);
       const seln = ve.sel === s.id ? ' sel' : '';
       // Paint this clip's own slice of the filmstrip so it looks like a real piece
       // of film. A dark gradient over the top keeps the label readable. When no
@@ -1162,8 +1246,9 @@
       const notches = cutsOf(s).map((c) => {
         const a = Math.max(s.start, c.start), b = Math.min(s.end, c.end);
         if (b <= a) return '';
-        const w = (b - a) * ve.pxPerSec;
-        return `<div class="ve-seg-cut" style="left:${(a - s.start) * ve.pxPerSec}px;width:${w}px;"`
+        // (with Snap closing gaps a removed pause takes no room: a thin seam marks it)
+        const w = packing() ? 3 : (b - a) * ve.pxPerSec;
+        return `<div class="ve-seg-cut" style="left:${(tv(a) - tv(s.start)) * ve.pxPerSec}px;width:${w}px;"`
           + ` title="Pause removed (${(b - a).toFixed(1)}s) — this won't be in the exported short. Undo with Ctrl+Z.">`
           + `${w >= 18 ? '<span>✂</span>' : ''}</div>`;
       }).join('');
@@ -1191,7 +1276,7 @@
   /** The chosen outro, drawn on the end of the main lane. */
   function outroBlockHtml() {
     const o = ve.outro; if (!o || !ve.video) return '';
-    const left = dur() * ve.pxPerSec;
+    const left = tv(dur()) * ve.pxPerSec;
     const width = Math.max(28, (o.durationSec || 3) * ve.pxPerSec);
     return `<div class="ve-seg ve-seg-outro" style="left:${left}px;width:${width}px;${laneStyle(0)}"
       title="Outro: ${attr2(o.name)} (${fmtDur(o.durationSec)}) — added to the end of every short you export${ve.outroAll === false ? ' (currently switched off)' : ''}. Click to change it.">
@@ -1430,7 +1515,7 @@
   };
   const centreGap = () => (ve.refs.tlScroll ? Math.round(tlViewW() / 2) : 0);
   /** The time under the centre line, from where the timeline is scrolled to. */
-  const timeAtCentre = () => Math.max(0, (ve.refs.tlScroll.scrollLeft + centreGap() - tlPadL()) / ve.pxPerSec);
+  const timeAtCentre = () => vt(Math.max(0, (ve.refs.tlScroll.scrollLeft + centreGap() - tlPadL()) / ve.pxPerSec));
   /** A finger is on the timeline, or it is still coasting from one. */
   const userScrolling = () => (!!ve._tlTouch && (!!ve.drag || performance.now() - (ve._tlTouchAt || 0) < 8000))
     || (performance.now() - (ve._userScrollAt || 0)) < 180;
@@ -1529,7 +1614,7 @@
    */
   function scrubTo(t) {
     const p = ve.refs.player; if (!p) return;
-    $('#veTime').textContent = `${fmt(t)} / ${fmt(playEnd())}`;
+    $('#veTime').textContent = `${fmt(tv(t))} / ${fmt(tv(playEnd()))}`;
     if (p.seeking && ve.tailT == null && !(hasTail() && t > dur() + 0.001)) { ve._scrubWant = t; ve._scrubWantAt = performance.now(); return; }
     ve._scrubWant = null;
     ve._scrubbing = true;
@@ -1577,21 +1662,22 @@
     }
     if (!quiet && ve.follow) {
       const sc = ve.refs.tlScroll;
-      if (sc) setScrollLeft(sc, Math.max(0, tlPadL() + (ve.refs.player.currentTime || 0) * ve.pxPerSec - sc.clientWidth / 2));
+      if (sc) setScrollLeft(sc, Math.max(0, tlPadL() + tv(ve.refs.player.currentTime || 0) * ve.pxPerSec - sc.clientWidth / 2));
     }
   }
   function updatePlayhead() {
     const t = nowT();
-    const x = tlPadL() + t * ve.pxPerSec;
+    const x = tlPadL() + tv(t) * ve.pxPerSec;
     if (!centred()) ve.refs.playhead.style.left = x + 'px';
-    $('#veTime').textContent = `${fmt(t)} / ${fmt(playEnd())}`;
+    $('#veTime').textContent = `${fmt(tv(t))} / ${fmt(tv(playEnd()))}`;
     // keep the playhead in view while playing — unless you've scrolled away yourself
     const sc = ve.refs.tlScroll;
     if (centred()) {
       // the clips move, not the line (and never under a finger that is moving them)
       // (nor under a flick still coasting from one: snapping it would stop it dead, a beat behind the finger)
       const coasting = !isPlaying() && performance.now() - (ve._userScrollAt || 0) < 250;
-      if (!userScrolling() && !coasting && Math.abs(sc.scrollLeft - (x - centreGap())) > 0.5) setScrollLeft(sc, Math.max(0, x - centreGap()));
+      // (nor while a swipe's last step is still waiting for its frame to be shown: ve._scrubRaf)
+      if (!userScrolling() && !coasting && ve._scrubRaf == null && Math.abs(sc.scrollLeft - (x - centreGap())) > 0.5) setScrollLeft(sc, Math.max(0, x - centreGap()));
     } else if (sc && isPlaying() && ve.follow !== false) {
       if (x < sc.scrollLeft + 20 || x > sc.scrollLeft + sc.clientWidth - 60) setScrollLeft(sc, Math.max(0, x - 80));
     }
@@ -1817,7 +1903,7 @@
   function frameTick(t) {
     // the centred timeline glides under its line every frame, not four times a second
     if (centred()) {
-      const x = tlPadL() + t * ve.pxPerSec;
+      const x = tlPadL() + tv(t) * ve.pxPerSec;
       if (!userScrolling()) setScrollLeft(ve.refs.tlScroll, Math.max(0, x - centreGap()));
     }
     try { updateKfPreview(t); } catch (e) {}
@@ -2729,7 +2815,7 @@
   function bladeAt(ev, row) {
     if (ve.tool !== 'blade' || !ve.video || ev.button !== 0) return;
     ev.preventDefault(); ev.stopPropagation();
-    const t = clamp(trackX(ev) / ve.pxPerSec, 0, dur());
+    const t = clamp(vt(trackX(ev) / ve.pxPerSec), 0, dur());
     if (row === 'audio') { ve.activeRow = 'audio'; splitAudioAt(t); return; }
     const segEl = ev.target.closest('.ve-seg');
     if (!segEl || !segEl.dataset.id) {
@@ -3284,11 +3370,11 @@
     const el = ve.refs.audioSegments; if (!el) return;
     const total = trackW();
     el.innerHTML = ve.audio.map((s) => {
-      const left = s.start * ve.pxPerSec, width = Math.max(6, (s.end - s.start) * ve.pxPerSec);
+      const left = tv(s.start) * ve.pxPerSec, width = Math.max(6, tvLen(s.start, s.end) * ve.pxPerSec);
       const sel = (ve.activeRow === 'audio' && ve.audioSel === s.id) ? ' sel' : '';
       // paint this clip's own slice of the waveform (opaque), so gaps read as EMPTY
       const wf = ve.waveformUrl
-        ? `background-image:url('${ve.waveformUrl}');background-size:${total}px 100%;background-position:${-(s.start * ve.pxPerSec)}px 0;background-repeat:no-repeat;background-color:var(--bg);`
+        ? `background-image:url('${ve.waveformUrl}');background-size:${packing() ? dur() * ve.pxPerSec : total}px 100%;background-position:${-(s.start * ve.pxPerSec)}px 0;background-repeat:no-repeat;background-color:var(--bg);`
         : '';
       return `<div class="ve-audio-seg${sel}" data-id="${s.id}" style="left:${left}px;width:${width}px;border-color:${s.color || '#2ea043'};${wf}">
         <div class="ve-audio-h l" data-aedge="l" title="Drag to trim where the sound starts"></div>
@@ -3304,7 +3390,7 @@
     const s = ve.audio.find((x) => x.id === id); if (!s) return;
     const edge = ev.target && ev.target.dataset ? ev.target.dataset.aedge : null;
     selectAudio(id); // clicking the audio row makes it the ACTIVE row (so Split acts on audio)
-    if (!edge) tapSeek(trackX(ev) / ve.pxPerSec);
+    if (!edge) tapSeek(vt(trackX(ev) / ve.pxPerSec));
     ev.preventDefault(); ev.stopPropagation();
     const preSnap = snapshotState();
     const x0 = trackX(ev), s0 = s.start, e0 = s.end, len = e0 - s0;
@@ -5854,7 +5940,7 @@
     // RIGHT edge to keep the text on screen longer (all the way to the end of the
     // sermon), the LEFT edge to start it earlier/later, or the middle to move it.
     track.innerHTML = ve.textOverlays.map((o) => {
-      const left = o.start * ve.pxPerSec, width = Math.max(6, (o.end - o.start) * ve.pxPerSec);
+      const left = tv(o.start) * ve.pxPerSec, width = Math.max(6, tvLen(o.start, o.end) * ve.pxPerSec);
       return `<div class="ve-text-clip${ve.textSel === o.id ? ' sel' : ''}" data-id="${o.id}" style="left:${left}px;width:${width}px;">`
         + `<div class="ve-tc-h l" data-tedge="l" title="Drag to change when the text starts"></div>`
         + `<span class="ve-tc-label">${escape2(o.text)}${isTitle(o) && titleRepeat(o).on ? ` · 🔁 every ${Math.round(titleRepeat(o).every)}s` : ''}</span>`
@@ -6075,8 +6161,8 @@
           }
           // Move just THIS node — a full re-render of a sermon's ~1500 caption
           // blocks on every mousemove would make the drag crawl.
-          el.style.left = Math.max(0, capAbs(c)) * ve.pxPerSec + 'px';
-          el.style.width = Math.max(6, (c.end - c.start) * ve.pxPerSec) + 'px';
+          el.style.left = tv(Math.max(0, capAbs(c))) * ve.pxPerSec + 'px';
+          el.style.width = Math.max(6, tvLen(capAbs(c), capAbsEnd(c)) * ve.pxPerSec) + 'px';
           updateCapOverlay(ve.refs.player.currentTime || 0);
         };
         const up = (e) => {
@@ -6137,8 +6223,8 @@
       else runs.push({ a, b, n: 1, i });
     }
     return runs.map((r) => {
-      const left = Math.max(0, r.a) * ve.pxPerSec;
-      const w = Math.max(2, (r.b - r.a) * ve.pxPerSec);
+      const left = tv(Math.max(0, r.a)) * ve.pxPerSec;
+      const w = Math.max(2, tvLen(r.a, r.b) * ve.pxPerSec);
       return `<div class="ve-cap-run" data-capzoom="${r.i}" style="left:${left}px;width:${w}px;"`
         + ` title="${r.n} caption line${r.n === 1 ? '' : 's'} here — click to zoom in and read them">`
         + (w > 120 ? `<span>💬 ${r.n} lines — click to zoom in</span>` : '') + `</div>`;
@@ -6158,7 +6244,7 @@
     $$('[data-capzoom]', track).forEach((el) => {
       el.addEventListener('click', (ev) => {
         const r = el.getBoundingClientRect();
-        const at = (el.offsetLeft + (ev.clientX - r.left)) / ve.pxPerSec;
+        const at = vt((el.offsetLeft + (ev.clientX - r.left)) / ve.pxPerSec);
         const evs = ve.capEvents || [];
         let best = +el.dataset.capzoom, bestD = Infinity;
         for (let i = 0; i < evs.length; i++) {
@@ -6172,8 +6258,8 @@
   }
 
   function capBlockHtml(c, i) {
-    const left = Math.max(0, capAbs(c)) * ve.pxPerSec;
-    const width = Math.max(6, (c.end - c.start) * ve.pxPerSec);
+    const left = tv(Math.max(0, capAbs(c))) * ve.pxPerSec;
+    const width = Math.max(6, tvLen(capAbs(c), capAbsEnd(c)) * ve.pxPerSec);
     const tiny = width < 44; // no room for grip handles — the words get the space
     // a line sitting inside a pause the user removed won't be in the export — show
     // it greyed out rather than letting them edit words that will never appear
@@ -6203,7 +6289,7 @@
   function scrollCapIntoView(i) {
     const c = (ve.capEvents || [])[i], sc = ve.refs.tlScroll;
     if (!c || !sc) return;
-    const x = capAbs(c) * ve.pxPerSec + tlPadL(), w = (c.end - c.start) * ve.pxPerSec;
+    const x = tv(capAbs(c)) * ve.pxPerSec + tlPadL(), w = tvLen(capAbs(c), capAbsEnd(c)) * ve.pxPerSec;
     const pad = 60;
     // On the centred timeline where it is scrolled IS where the video is: a line
     // out of sight is brought in by going to it (a bare scroll would read as a
@@ -7203,7 +7289,9 @@
    */
   function nowT() {
     if (ve.tailT != null) return ve.tailT;
-    if (ve._scrubWant != null && performance.now() - (ve._scrubWantAt || 0) < 4000) return ve._scrubWant;
+    // (for as long as the picture is still fetching — on a slow connection that can be many seconds)
+    const pl = ve.refs && ve.refs.player;
+    if (ve._scrubWant != null && ((pl && pl.seeking) || performance.now() - (ve._scrubWantAt || 0) < 4000)) return ve._scrubWant;
     return (ve.refs && ve.refs.player && ve.refs.player.currentTime) || 0;
   }
   function isPlaying() { return !!ve.tailRun || !!(ve.refs && ve.refs.player && !ve.refs.player.paused); }
@@ -10631,7 +10719,7 @@
     layer.innerHTML = mainJoins().map(({ seg }) => {
       const t = seg.trans && seg.trans.type ? seg.trans : null;
       const tip = t ? `${TRANSITION_NAME[t.type] || 'Transition'} (${(+t.dur).toFixed(1)}s) — tap to change` : 'Add a transition between these two clips';
-      return `<button type="button" class="ve-join${t ? ' on' : ''}" data-join="${seg.id}" style="left:${seg.start * ve.pxPerSec}px;top:${top}px" title="${tip}" aria-label="${tip}">${t ? '<span class="ve-join-ic on"></span>' : '<span class="ve-join-ic"></span>'}</button>`;
+      return `<button type="button" class="ve-join${t ? ' on' : ''}" data-join="${seg.id}" style="left:${tv(seg.start) * ve.pxPerSec}px;top:${top}px" title="${tip}" aria-label="${tip}">${t ? '<span class="ve-join-ic on"></span>' : '<span class="ve-join-ic"></span>'}</button>`;
     }).join('');
   }
 
@@ -11319,7 +11407,9 @@
       selectSeg(s.id);
       // CapCut behaviour: the playhead follows your click (so Split "just works") —
       // on the desk; on the phone's centred timeline a tap selects and nothing moves
-      if (!edge) tapSeek(trackX(ev) / ve.pxPerSec);
+      if (!edge) tapSeek(vt(trackX(ev) / ve.pxPerSec));
+      // the drawing holds still while a clip is dragged (packMap): it closes up when let go
+      ve._packHeld = { m: computePack() };
       // Snapshot BEFORE the drag, but only commit it to history if something actually moved (avoid cluttering undo with plain clicks).
       const preSnap = snapshotState();
       if (edge) ve.drag = { mode: edge === 'l' ? 'trimL' : 'trimR', id: s.id, x0: trackX(ev), s0: s.start, e0: s.end, p0: tlPos(s), lane0: s.lane || 0, preSnap };
@@ -11333,14 +11423,15 @@
     // mousedown) still draws a clip, as it always has — just without moving the line.
     if (centred()) { if (ve.sel) selectSeg(null); if (ev.isTrusted) return; }
     // empty area: seek immediately; may become a drag-to-create-selection
-    else seekTo(trackX(ev) / ve.pxPerSec);
-    ve.drag = { mode: 'maybe', x0: trackX(ev), t0: trackX(ev) / ve.pxPerSec, moved: false, noSeek: centred() };
+    else seekTo(vt(trackX(ev) / ve.pxPerSec));
+    ve._packHeld = { m: computePack() };
+    ve.drag = { mode: 'maybe', x0: trackX(ev), t0: vt(trackX(ev) / ve.pxPerSec), moved: false, noSeek: centred() };
     bind(); ev.preventDefault();
   }
 
   function onMove(ev) {
     const d = ve.drag; if (!d) return;
-    const x = trackX(ev), t = clamp(x / ve.pxPerSec, 0, dur());
+    const x = trackX(ev), t = clamp(vt(x / ve.pxPerSec), 0, dur());
     if (d.mode === 'maybe') {
       if (Math.abs(x - d.x0) > 4) { d.mode = 'select'; d.selStart = d.t0; }
       else return;
@@ -11348,8 +11439,8 @@
     if (d.mode === 'select') {
       const a = Math.min(d.selStart, t), b = Math.max(d.selStart, t);
       ve.refs.selbox.style.display = 'block';
-      ve.refs.selbox.style.left = (a * ve.pxPerSec) + 'px';
-      ve.refs.selbox.style.width = ((b - a) * ve.pxPerSec) + 'px';
+      ve.refs.selbox.style.left = (tv(a) * ve.pxPerSec) + 'px';
+      ve.refs.selbox.style.width = (tvLen(a, b) * ve.pxPerSec) + 'px';
       d.a = a; d.b = b;
     } else if (d.mode === 'move') {
       const len = d.e0 - d.s0;
@@ -11406,7 +11497,7 @@
   }
 
   function onUp() {
-    const d = ve.drag; ve.drag = null;
+    const d = ve.drag; ve.drag = null; ve._packHeld = null; ve._packMemo = undefined;
     document.removeEventListener('mousemove', onMove);
     if (!d) return;
     // the drag only repainted the clip blocks — bring every other lane back in step
@@ -16106,7 +16197,7 @@
       return;
     }
     const { start, len } = musicSpan(m);
-    const left = start * ve.pxPerSec, width = Math.max(24, len * ve.pxPerSec);
+    const left = tv(start) * ve.pxPerSec, width = Math.max(24, tvLen(start, start + len) * ve.pxPerSec);
     track.innerHTML = `<div class="ve-music-seg${m.bed ? ' bed' : ''}${ve.musicSel ? ' sel' : ''}" data-musicseg="1" style="left:${left}px;width:${width}px;"
         title="${attr2(m.name)} — ${Math.round(m.volume * 100)}% volume.${m.bed ? ' Starts at the top of every short. Drag it to place it on the timeline instead.' : ' Drag to move it; drag its ends to trim it.'}">
         <div class="ve-music-h l" data-medge="l" title="Drag to trim where the song starts"></div>
@@ -16522,9 +16613,9 @@
     }
     tr.innerHTML = list.map((x) => {
       const sel = ve.soundSel === x.id;
-      const w = Math.max(20, (x.dur || 1) * ve.pxPerSec);
+      const w = Math.max(20, tvLen(x.start, x.start + (x.dur || 1)) * ve.pxPerSec);
       const vol = Math.round((x.volume == null ? 1 : x.volume) * 100);
-      return `<div class="ve-sfx-clip ${x.kind === 'voice' ? 'voice' : 'fx'}${sel ? ' sel' : ''}" data-sid="${x.id}" style="left:${x.start * ve.pxPerSec}px;width:${w}px"
+      return `<div class="ve-sfx-clip ${x.kind === 'voice' ? 'voice' : 'fx'}${sel ? ' sel' : ''}" data-sid="${x.id}" style="left:${tv(x.start) * ve.pxPerSec}px;width:${w}px"
         title="${attr2(x.label)} at ${fmt(x.start)} — ${vol}% volume. Drag to move it.${sel ? ' ✕ removes it.' : ''}">
         <span class="ve-sfx-name">${x.kind === 'voice' ? '🎙' : '🔊'} ${escape2(x.label)}</span>${sel ? `<button type="button" class="ve-sfx-vol" data-svol="${x.id}" title="Volume — tap to change">${vol}%</button><button type="button" class="ve-sfx-x" data-sdel="${x.id}" title="Remove this sound">✕</button>` : ''}
       </div>`;
@@ -16650,7 +16741,7 @@
         moved = true;
         x.start = Math.max(0, Math.min(dur(), s0 + dt));
         const c = document.querySelector(`#veSfxTrack .ve-sfx-clip[data-sid="${x.id}"]`);
-        if (c) c.style.left = (x.start * ve.pxPerSec) + 'px';
+        if (c) c.style.left = (tv(x.start) * ve.pxPerSec) + 'px';
       };
       const up = () => {
         document.removeEventListener('mousemove', mv);
@@ -17755,10 +17846,10 @@
     libRefresh();
 
     ve.refs.track.addEventListener('mousedown', onTrackDown);
-    ve.refs.ruler.addEventListener('mousedown', (e) => { if (ve.video) tapSeek(trackX(e) / ve.pxPerSec); });
+    ve.refs.ruler.addEventListener('mousedown', (e) => { if (ve.video) tapSeek(vt(trackX(e) / ve.pxPerSec)); });
     ve.refs.audioTrack.addEventListener('mousedown', (e) => {
       if (!ve.video || e.target.closest('.ve-audio-seg')) return; // empty audio area -> just move the playhead
-      tapSeek(trackX(e) / ve.pxPerSec);
+      tapSeek(vt(trackX(e) / ve.pxPerSec));
     });
     // The ruler and the caption lane only build what is near the viewport (a
     // zoomed-in sermon would otherwise be thousands of nodes), so panning has to
@@ -17776,7 +17867,7 @@
         // Play, Back 5s, Split — is not a swipe: it would pause and scrub straight
         // back. It is stopped where the playhead is instead.
         const overruled = !mine && !ve._tlTouch && ve._liftAt && (ve._actionAt || 0) > ve._liftAt && performance.now() - ve._liftAt < 3000;
-        if (overruled) { setScrollLeft(ve.refs.tlScroll, Math.max(0, tlPadL() + nowT() * ve.pxPerSec - centreGap())); return; }
+        if (overruled) { setScrollLeft(ve.refs.tlScroll, Math.max(0, tlPadL() + tv(nowT()) * ve.pxPerSec - centreGap())); return; }
         // Only a HAND stops playback: a finger on the timeline, a flick still
         // coasting, a wheel. A scroll nobody made — the window over the timeline
         // (Captions) re-laying it, the screen growing as Safari's bar folds, a
@@ -17785,7 +17876,7 @@
         const byHand = ve._tlTouch || nowMs - (ve._tlTouchAt || 0) < 1500 || nowMs - (ve._liftAt || 0) < 3000
           || nowMs - (ve._tlHandAt || 0) < 1500;
         if (!mine && ve.video && !byHand && isPlaying()) {
-          if (ve._scrubRaf == null) setScrollLeft(ve.refs.tlScroll, Math.max(0, tlPadL() + nowT() * ve.pxPerSec - centreGap()));
+          if (ve._scrubRaf == null) setScrollLeft(ve.refs.tlScroll, Math.max(0, tlPadL() + tv(nowT()) * ve.pxPerSec - centreGap()));
         } else if (!mine && ve.video) {
           ve._userScrollAt = performance.now();
           if (isPlaying()) { const p = ve.refs.player; if (ve.tailRun) stopTailRun(); else if (p) p.pause(); }
@@ -17858,7 +17949,7 @@
         if (!ve.video || !files.length) return;
         e.preventDefault(); e.stopPropagation();
         const r = ve.refs.track.getBoundingClientRect();
-        addMediaOverlays(files, clamp((e.clientX - r.left) / ve.pxPerSec, 0, Math.max(0, dur() - 0.2)));
+        addMediaOverlays(files, clamp(vt((e.clientX - r.left) / ve.pxPerSec), 0, Math.max(0, dur() - 0.2)));
       });
     }
 
@@ -17868,6 +17959,15 @@
       // hop over any pause the user removed, so what plays IS what exports
       const jump = skipRemovedAt(p.currentTime || 0);
       if (jump != null) { p.currentTime = jump; updatePlayhead(); return; }
+      // …and, with Snap closing the gaps, over what was cut between clips (and before the first)
+      if (!p.paused) {
+        const h = packHop(p.currentTime || 0);
+        if (h && h.to != null) { p.currentTime = h.to + 0.02; updatePlayhead(); return; }
+        if (h && h.to == null) {
+          if (hasTail()) { enterTail(dur(), true); return; }
+          p.pause(); p.currentTime = h.last; updatePlayhead(); return;
+        }
+      }
       // the main video has run out and clips follow it: play on into them
       if (!p.paused && hasTail() && (p.currentTime || 0) >= dur() - 0.06) { enterTail(dur(), true); return; }
       updatePlayhead();
@@ -18439,7 +18539,7 @@
       },
       segmentDomCount() { return $$('#veSegments .ve-seg').length; },
       rulerTickCount() { return $$('#veRuler .ve-tick').length; },
-      segments() { return ve.segments.map((s) => ({ id: s.id, lane: s.lane || 0, start: s.start, end: s.end, left: s.start * ve.pxPerSec, width: (s.end - s.start) * ve.pxPerSec })); },
+      segments() { return ve.segments.map((s) => ({ id: s.id, lane: s.lane || 0, start: s.start, end: s.end, left: tv(s.start) * ve.pxPerSec, width: tvLen(s.start, s.end) * ve.pxPerSec })); },
       addManual(a, b) { return addSegment(a, b, 'Manual', false); },
       addShort(a, b) { pushHistory(); const s = addSegment(a, b, 'Short', true); renderClipList(); return s; },
       // --- what Long-to-shorts is allowed to search (the timeline decides) ---
@@ -18909,7 +19009,7 @@
         const fromSec = edge === 'r' ? tlPos(s2) + (s2.end - s2.start) : tlPos(s2);
         const y = r.top + (laneY != null ? laneY : (s2.lane === 1 ? 20 : 75));
         const ev = (type, sec, node) => node.dispatchEvent(new MouseEvent(type, {
-          bubbles: true, cancelable: true, clientX: r.left + sec * ve.pxPerSec, clientY: y,
+          bubbles: true, cancelable: true, clientX: r.left + tv(sec) * ve.pxPerSec, clientY: y,
         }));
         ev('mousedown', fromSec, target);
         ev('mousemove', toSec, document);
@@ -19517,7 +19617,7 @@
           return true;
         }
         const c = (ve.capEvents || [])[i]; if (!c) return false;
-        const x = ((capAbs(c) + capAbsEnd(c)) / 2) * ve.pxPerSec;
+        const x = tv((capAbs(c) + capAbsEnd(c)) / 2) * ve.pxPerSec;
         const bar = [...document.querySelectorAll('#veCapTrack .ve-cap-run')]
           .find((b) => x >= b.offsetLeft - 1 && x <= b.offsetLeft + b.offsetWidth + 1);
         if (!bar) return false;
