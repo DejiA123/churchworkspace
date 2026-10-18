@@ -648,6 +648,19 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .ve-clip-name:focus { outline: none; border-bottom: 1px solid var(--primary); box-shadow: none; }
 .ve-clip-time { margin-top: 3px; }
 .ve-clip-btns { display: flex; gap: 6px; }
+/* Select / Delete all over the shorts list */
+.ve-clip-bar { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; flex-wrap: wrap; }
+.ve-clip-bar .ghost-btn { width: auto; margin: 0; }
+.ve-clip-bar .danger { color: #ff7b71; }
+.ve-clip-bar .danger:disabled { opacity: .45; }
+.ve-clip-bar-n { flex: 1; font-size: 12.5px; color: var(--muted); }
+.ve-clip { position: relative; }
+.ve-clip.picking .ve-clip-btns, .ve-clip.picking .ve-clip-name { pointer-events: none; }
+.ve-clip.picking .ve-clip-btns { opacity: .35; }
+.ve-clip.picked { box-shadow: inset 0 0 0 2px #4d95ef; }
+.ve-clip-tick { position: absolute; top: 8px; left: 8px; z-index: 2; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+  border: 2px solid rgba(255,255,255,.6); background: rgba(0,0,0,.35); color: #fff; font-size: 14px; font-weight: 900; }
+.ve-clip.picked .ve-clip-tick { background: #1f6fe0; border-color: #1f6fe0; }
 .ve-clip-btns .icon-btn { flex: 1; width: auto; height: 28px; }
 .ve-tools { margin-top: 18px; border-top: 1px solid var(--border-soft); padding-top: 14px; }
 .ve-tools h4 { margin: 0 0 10px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }

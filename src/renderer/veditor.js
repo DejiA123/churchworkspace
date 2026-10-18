@@ -1220,7 +1220,8 @@
     // caption set at all is a good enough reason to redraw the panel.
     const caps = ve.capEvents || [];
     const capFp = caps.length + ':' + (caps.length ? caps[0].start + '-' + caps[caps.length - 1].end : '');
-    const sig = capFp + '|' + JSON.stringify(shorts.map((s) => [
+    // (and what is ticked, while picking shorts to delete)
+    const sig = capFp + '|' + (ve.clipPick instanceof Set ? 'pick:' + Array.from(ve.clipPick).sort().join(',') : '') + '|' + JSON.stringify(shorts.map((s) => [
       s.id, s.label, s.start, s.end, s.thumb ? 1 : 0, s.color, s.virality, s.score,
       s.reasons, cutsOf(s).length, removedDur(s).toFixed(2), s.subject ? 1 : 0,
       s.thumbPick ? (s.thumbPick.file || s.thumbPick.at) : 0,
@@ -1256,8 +1257,19 @@
     };
     // Two-row card so the clip NAME gets the full panel width (never squashed):
     // row 1 = thumbnail + name/time + score badge, row 2 = reasons, row 3 = actions.
-    el.innerHTML = shorts.slice().sort((a, b) => a.start - b.start).map((s) => `
-      <div class="ve-clip${ve.sel === s.id ? ' sel' : ''}" data-id="${s.id}">
+    // 🗑 Select some (or all) and delete them at once — Undo puts them back
+    const picking = ve.clipPick instanceof Set;
+    if (picking) for (const id of Array.from(ve.clipPick)) if (!shorts.some((x) => x.id === id)) ve.clipPick.delete(id);
+    const nPick = picking ? ve.clipPick.size : 0;
+    const bar = !shorts.length ? '' : `<div class="ve-clip-bar">${picking
+      ? `<button type="button" class="ghost-btn small" data-cb="all">${nPick === shorts.length ? 'Select none' : 'Select all'}</button>`
+        + `<span class="ve-clip-bar-n">${nPick} selected</span>`
+        + `<button type="button" class="ghost-btn small danger" data-cb="del"${nPick ? '' : ' disabled'}>Delete${nPick ? ' ' + nPick : ''}</button>`
+        + `<button type="button" class="ghost-btn small" data-cb="done">Cancel</button>`
+      : `<button type="button" class="ghost-btn small" data-cb="sel">Select</button>`
+        + `<button type="button" class="ghost-btn small danger" data-cb="delall">Delete all ${shorts.length}</button>`}</div>`;
+    el.innerHTML = bar + shorts.slice().sort((a, b) => a.start - b.start).map((s) => `
+      <div class="ve-clip${ve.sel === s.id ? ' sel' : ''}${picking ? ' picking' : ''}${picking && ve.clipPick.has(s.id) ? ' picked' : ''}" data-id="${s.id}">${picking ? `<span class="ve-clip-tick" aria-hidden="true">${ve.clipPick.has(s.id) ? '✓' : ''}</span>` : ''}
         <div class="ve-clip-row">
           ${s.thumbPick && s.thumbPick.img ? `<img class="ve-clip-thumb picked" src="${s.thumbPick.img}" alt="" title="This short's thumbnail" />`
             : s.thumb ? `<img class="ve-clip-thumb" src="${s.thumb}" alt="" />` : `<span class="ve-clip-dot" style="background:${s.color}"></span>`}
@@ -1288,7 +1300,33 @@
     $$('[data-thumb]', el).forEach((b) => b.addEventListener('click', () => openThumbPicker(b.dataset.thumb)));
     $$('[data-exp]', el).forEach((b) => b.addEventListener('click', () => exportSegment(b.dataset.exp)));
     $$('[data-del]', el).forEach((b) => b.addEventListener('click', () => { removeSeg(b.dataset.del); }));
+    const delShorts = (ids) => {
+      if (!ids.length) return;
+      if (!window.confirm(`Delete ${ids.length === 1 ? 'this short' : ids.length + ' shorts'}?\n\nUndo (↶) puts ${ids.length === 1 ? 'it' : 'them'} back.`)) return;
+      pushHistory();
+      const gone = new Set(ids);
+      ve.segments = ve.segments.filter((x) => !gone.has(x.id));
+      if (gone.has(ve.sel)) ve.sel = null;
+      ve.clipPick = null;
+      renderSegments(); renderClipList();
+      window.__toast && window.__toast(`${ids.length === 1 ? 'Short' : ids.length + ' shorts'} deleted. Undo (↶) puts ${ids.length === 1 ? 'it' : 'them'} back.`, 'good');
+    };
+    $$('[data-cb]', el).forEach((b) => b.addEventListener('click', () => {
+      const k = b.dataset.cb;
+      if (k === 'sel') { ve.clipPick = new Set(); return renderClipList(); }
+      if (k === 'done') { ve.clipPick = null; return renderClipList(); }
+      if (k === 'all') { ve.clipPick = ve.clipPick && ve.clipPick.size === shorts.length ? new Set() : new Set(shorts.map((x) => x.id)); return renderClipList(); }
+      if (k === 'del') return delShorts(Array.from(ve.clipPick || []));
+      if (k === 'delall') return delShorts(shorts.map((x) => x.id));
+    }));
     $$('.ve-clip', el).forEach((c) => c.addEventListener('click', (e) => {
+      if (ve.clipPick instanceof Set) {
+        // picking: a tap ticks or unticks the short, nothing else
+        e.preventDefault();
+        const id = c.dataset.id;
+        if (ve.clipPick.has(id)) ve.clipPick.delete(id); else ve.clipPick.add(id);
+        return renderClipList();
+      }
       if (e.target.closest('button') || e.target.closest('input')) return;
       selectSeg(c.dataset.id); seekTo(ve.segments.find((x) => x.id === c.dataset.id).start);
     }));
