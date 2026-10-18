@@ -3305,15 +3305,19 @@ async function songGainDb(ctx, file) {
   return g;
 }
 
-async function mixMusic(ctx, { input, output, musicPath, musicVolume = 0.25, musicStartSec = 0, fadeIn = 0.6, fadeOut = 1.2, duck = true, voiceVolume = 1, onProgress }) {
+async function mixMusic(ctx, { input, output, musicPath, musicVolume = 0.25, musicStartSec = 0, musicDelaySec = 0, musicDurSec = null, fadeIn = 0.6, fadeOut = 1.2, duck = true, voiceVolume = 1, onProgress }) {
   if (!musicPath || !fs.existsSync(musicPath)) throw new Error('That music file could not be found.');
   const info = await getInfo(ctx, input);
   const dur = info.durationSec || 0;
   // up to 1000% (a boost for a song mastered quiet); the limiter on the mix keeps a boosted song from clipping
   const vol = Math.max(0, Math.min(10, Number(musicVolume)));
-  const fi = Math.max(0, Math.min(dur / 2, Number(fadeIn) || 0));
-  const fo = Math.max(0, Math.min(dur / 2, Number(fadeOut) || 0));
   const start = Math.max(0, Number(musicStartSec) || 0);
+  // A song placed on the timeline (dragged, trimmed) can come in after the clip
+  // starts and stop before it ends: it plays for `play` seconds from `delay`.
+  const delay = Math.max(0, Math.min(Math.max(0, dur - 0.1), Number(musicDelaySec) || 0));
+  const play = Math.max(0.1, Math.min(dur - delay, Number(musicDurSec) > 0 ? Number(musicDurSec) : Infinity));
+  const fi = Math.max(0, Math.min(play / 2, Number(fadeIn) || 0));
+  const fo = Math.max(0, Math.min(play / 2, Number(fadeOut) || 0));
 
   /*
    * ►► A SONG THAT LOOPS MUST LOOP WITHOUT A HICCUP. ◄◄
@@ -3330,7 +3334,7 @@ async function mixMusic(ctx, { input, output, musicPath, musicVolume = 0.25, mus
    */
   let song = musicPath, tmpSong = null;
   const songInfo = await getInfo(ctx, musicPath).catch(() => null);
-  if (songInfo && songInfo.durationSec > 0 && songInfo.durationSec - start < dur + 0.05) {
+  if (songInfo && songInfo.durationSec > 0 && songInfo.durationSec - start < play + 0.05) {
     tmpSong = path.join(os.tmpdir(), `mw-bed-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}.wav`);
     song = tmpSong;
   }
@@ -3338,12 +3342,15 @@ async function mixMusic(ctx, { input, output, musicPath, musicVolume = 0.25, mus
   const args = ['-i', input, '-ss', String(start), '-stream_loop', '-1', '-i', song];
   // Trim the (looped) music to the clip, level it, and fade both ends.
   const mus = [
-    `atrim=0:${dur.toFixed(3)}`, 'asetpts=PTS-STARTPTS',
+    `atrim=0:${play.toFixed(3)}`, 'asetpts=PTS-STARTPTS',
     'aresample=48000', 'aformat=sample_fmts=fltp:channel_layouts=stereo',
     `volume=${level.toFixed(2)}dB`, `volume=${vol.toFixed(3)}`,
   ];
   if (fi > 0) mus.push(`afade=t=in:st=0:d=${fi.toFixed(2)}`);
-  if (fo > 0) mus.push(`afade=t=out:st=${Math.max(0, dur - fo).toFixed(2)}:d=${fo.toFixed(2)}`);
+  if (fo > 0) mus.push(`afade=t=out:st=${Math.max(0, play - fo).toFixed(2)}:d=${fo.toFixed(2)}`);
+  // …then silence before it and after it, so the music still runs the clip's length
+  if (delay > 0.005) mus.push(`adelay=${Math.round(delay * 1000)}:all=1`);
+  if (delay > 0.005 || play < dur - 0.005) mus.push(`apad=whole_dur=${dur.toFixed(3)}`);
 
   let fc, amap;
   if (info.hasAudio) {

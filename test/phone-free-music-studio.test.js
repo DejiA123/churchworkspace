@@ -122,6 +122,57 @@ async function waitUp() {
     check(/In use/.test(u.use) && /Lo-Fi 01/.test(u.bar), 'Use puts it under the video', u);
     check(u.lib.length === 1 && /^Lo-Fi 01.*Lily J\|free:mk763$/.test(u.lib[0]), 'it is fetched ONCE into My music (listening and using share it)', u.lib);
     if (!LIVE) check(hits.filter((h) => /^GET /.test(h)).length === 1, 'the stand-in Mixkit was asked for the file once', hits.filter((h) => /^GET /.test(h)));
+    // ── the song on the timeline is a clip too: tap it, trim its ends, move it (a finger, as on an iPhone)
+    await page.evaluate(() => document.getElementById('libClose') && document.getElementById('libClose').click());
+    await sleep(500);
+    const cdp = await ctx.newCDPSession(page);
+    const finger = async (x0, y, dx, hold) => {
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x0, y }] });
+      if (hold) await sleep(hold);
+      for (let k = 1; k <= 12; k++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x0 + (dx * k) / 12, y }] }); await sleep(16); }
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await sleep(400);
+    };
+    const T = () => page.evaluate(() => window.VideoEditor.__test.music());
+    const box = (sel) => page.evaluate((q) => { const n = document.querySelector(q); if (!n) return null; const r = n.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height, d: getComputedStyle(n).display }; }, sel);
+    await page.evaluate(() => { document.getElementById('veTlScroll').scrollLeft = 0; });
+    await sleep(400);
+    let mb = await box('.ve-music-seg');
+    await page.touchscreen.tap(mb.x + 60, mb.y + mb.h / 2);
+    await sleep(400);
+    let st = await T(), lh = await box('.ve-music-seg .ve-music-h.l');
+    check(st && st.sel && lh && lh.d !== 'none', 'a tap on the song picks it: white handles at its ends', { st, lh });
+    // the left handle 2 s later: it comes in at 2 s, and from 2 s into the song
+    const pps = await page.evaluate(() => window.VideoEditor.zoomLevel());
+    await finger(lh.x + lh.w / 2, lh.y + lh.h / 2, 2 * pps);
+    st = await T();
+    check(!st.bed && Math.abs(st.tlStart - 2) < 0.3 && Math.abs(st.srcStart - st.tlStart) < 0.01 && Math.abs(st.tlStart + st.len - 12) < 0.3,
+      'dragging its start in: the song comes in at 2 s (and the rest stays where it was)', { st, pps });
+    // the right handle 3 s earlier: it now stops at about 9 s
+    await page.evaluate(() => { document.getElementById('veTlScroll').scrollLeft = 1e6; });
+    await sleep(400);
+    const rh = await box('.ve-music-seg .ve-music-h.r');
+    await finger(rh.x + rh.w / 2, rh.y + rh.h / 2, -3 * pps);
+    st = await T();
+    check(Math.abs(st.tlStart + st.len - 9) < 0.3 && Math.abs(st.tlStart - 2) < 0.3, 'dragging its end in: it stops at 9 s', st);
+    // the preview hears what the export will: nothing before 2 s or after 9 s
+    const hear = await page.evaluate(() => [1, 3, 8.5, 10].map((t) => window.VideoEditor.__test.musicPosAt(t)));
+    check(hear[0] == null && hear[1] != null && Math.abs(hear[1] - 3) < 0.3 && hear[2] != null && hear[3] == null, 'the preview plays it only from 2 s to 9 s', hear);
+    const ex = await page.evaluate(() => window.VideoEditor.__test.musicExportFor(0, 12));
+    check(ex && Math.abs(ex.delaySec - 2) < 0.3 && Math.abs(ex.durSec - 7) < 0.3 && Math.abs(ex.startSec - 2) < 0.3, '…and the export brings it in at 2 s for 7 s', ex);
+    // hold it and slide it: the whole song moves 1 s later
+    await page.evaluate(() => { document.getElementById('veTlScroll').scrollLeft = 0; });
+    await sleep(400);
+    mb = await box('.ve-music-seg');
+    const before = await T();
+    await finger(mb.x + Math.min(mb.w / 2, 80), mb.y + mb.h / 2, 1 * pps, 600);
+    st = await T();
+    check(Math.abs(st.tlStart - before.tlStart - 1) < 0.3 && Math.abs(st.len - before.len) < 0.01, 'held and slid, the whole song moves along (its length kept)', { before, st });
+    if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'studio-music-trim.png') });
+    await page.evaluate(() => document.getElementById('veMusic').click());
+    await sleep(500);
+    await page.locator('#libModal [data-libtab="free"]').tap();
+    await sleep(300);
     await page.locator('#libFreeMoods [data-freemood="upbeat"]').tap();
     await sleep(300);
     const up = await page.evaluate(() => [...document.querySelectorAll('#libFreeList [data-freeid]')].map((r) => r.querySelector('b').textContent));

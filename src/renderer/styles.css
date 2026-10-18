@@ -815,6 +815,10 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
   cursor: grab; overflow: hidden; user-select: none; }
 .ve-music-seg:hover { filter: brightness(1.2); }
 .ve-music-seg:active { cursor: grabbing; }
+.ve-music-seg.sel { box-shadow: 0 0 0 2px #fff inset; }
+.ve-music-seg .ve-music-h { position: absolute; top: 0; width: 10px; height: 100%; cursor: ew-resize; z-index: 1; }
+.ve-music-seg .ve-music-h.l { left: 0; } .ve-music-seg .ve-music-h.r { right: 0; }
+.ve-music-seg .ve-music-h::after { content: ''; position: absolute; top: 50%; transform: translateY(-50%); width: 3px; height: 14px; border-radius: 2px; background: rgba(255,255,255,.8); left: 3.5px; }
 /* A bed isn't "placed" anywhere — it plays under every short — so it reads as a repeat, not a block. */
 .ve-music-seg.bed { border-style: dashed;
   background: repeating-linear-gradient(90deg, rgba(163,113,247,.28) 0 14px, rgba(163,113,247,.14) 14px 28px); }

@@ -16105,43 +16105,81 @@
       track.innerHTML = `<span class="muted small ve-lane-empty">🎵 No background music — click <b>Music</b> up top to add some.</span>`;
       return;
     }
-    const start = m.bed ? 0 : (m.tlStart || 0);
-    const len = m.bed ? dur() : Math.min(m.len || m.durationSec || 0, Math.max(1, dur() - start));
+    const { start, len } = musicSpan(m);
     const left = start * ve.pxPerSec, width = Math.max(24, len * ve.pxPerSec);
-    track.innerHTML = `<div class="ve-music-seg${m.bed ? ' bed' : ''}" data-musicseg="1" style="left:${left}px;width:${width}px;"
-        title="${attr2(m.name)} — ${Math.round(m.volume * 100)}% volume.${m.bed ? ' Starts at the top of every short. Drag it to place it on the timeline instead.' : ' Drag to move it.'}">
+    track.innerHTML = `<div class="ve-music-seg${m.bed ? ' bed' : ''}${ve.musicSel ? ' sel' : ''}" data-musicseg="1" style="left:${left}px;width:${width}px;"
+        title="${attr2(m.name)} — ${Math.round(m.volume * 100)}% volume.${m.bed ? ' Starts at the top of every short. Drag it to place it on the timeline instead.' : ' Drag to move it; drag its ends to trim it.'}">
+        <div class="ve-music-h l" data-medge="l" title="Drag to trim where the song starts"></div>
         <span class="ve-music-label">🎵 ${escape2(m.name)}</span>
         <span class="ve-music-vol">${Math.round(m.volume * 100)}%</span>
+        <div class="ve-music-h r" data-medge="r" title="Drag to trim where the song ends"></div>
       </div>`;
     const box = track.querySelector('.ve-music-seg');
     if (box) {
       box.addEventListener('mousedown', onMusicSegDown);
       box.addEventListener('dblclick', () => openLibrary('music'));
     }
+    // a tap anywhere else lets go of it (as a clip is let go of)
+    if (!ve._musicDeselect) {
+      ve._musicDeselect = true;
+      document.addEventListener('mousedown', (e) => {
+        if (ve.musicSel && !(e.target && e.target.closest && e.target.closest('.ve-music-seg'))) { ve.musicSel = false; renderMusicLane(); }
+      }, true);
+    }
   }
+  /** Where the song sits on the timeline, as drawn: a bed spans the whole video. */
+  function musicSpan(m) {
+    const start = m.bed ? 0 : (m.tlStart || 0);
+    const len = m.bed ? dur() : Math.min(m.len || m.durationSec || 0, Math.max(1, dur() - start));
+    return { start, len };
+  }
+  /*
+   * ►► THE SONG IS A CLIP TOO. ◄◄ Tap it to pick it (white handles, as a clip
+   * has), drag its ends to trim where it comes in and goes out, hold it and
+   * drag to move it. A tap on the picked song opens 🎵 Music. A bed ("start the
+   * song at the top of every short") that is dragged or trimmed becomes a song
+   * placed on the timeline, as it always has when dragged.
+   */
   function onMusicSegDown(ev) {
     const m = ve.music; if (!m) return;
     ev.preventDefault(); ev.stopPropagation();
-    const x0 = trackX(ev);
-    const wasBed = m.bed, t0 = m.bed ? 0 : (m.tlStart || 0);
+    const h = ev.target && ev.target.closest ? ev.target.closest('[data-medge]') : null;
+    const edge = h ? h.dataset.medge : null;
+    const wasSel = !!ve.musicSel, wasBed = m.bed;
+    if (!wasSel) { ve.musicSel = true; renderMusicLane(); }
+    const pre = snapshotState();
+    const x0 = trackX(ev), songD = m.durationSec || 0;
+    const span = musicSpan(m), t0 = span.start, src0 = m.bed ? 0 : (m.srcStart || 0);
+    const len0 = songD > 0 ? Math.min(span.len, songD - src0) : span.len;
+    const MIN = 1;
     let moved = false;
     const move = (e) => {
       const dt = (trackX(e) - x0) / ve.pxPerSec;
       if (Math.abs(dt) < 0.05 && !moved) return;
       moved = true;
-      // Dragging the music is an explicit "put it HERE", so it stops being a
-      // per-short bed and starts following the timeline.
+      // dragged or trimmed, it is put HERE: it stops being a per-short bed
       m.bed = false;
-      m.len = m.len || m.durationSec || dur();
-      m.tlStart = clamp(snapT(t0 + dt).t, 0, Math.max(0, dur() - 0.5));
+      if (edge === 'l') {
+        // the start comes later (or earlier, back to the song's own start)
+        const nt = clamp(snapT(t0 + dt).t, Math.max(0, t0 - src0), t0 + len0 - MIN);
+        m.tlStart = nt; m.srcStart = src0 + (nt - t0); m.len = len0 - (nt - t0);
+      } else if (edge === 'r') {
+        const most = Math.min(dur(), songD > 0 ? t0 + (songD - src0) : dur());
+        const ne = clamp(snapT(t0 + len0 + dt).t, t0 + MIN, Math.max(t0 + MIN, most));
+        m.tlStart = t0; m.srcStart = src0; m.len = ne - t0;
+      } else {
+        m.srcStart = src0; m.len = len0;
+        m.tlStart = clamp(snapT(t0 + dt).t, 0, Math.max(0, dur() - 0.5));
+      }
       renderMusicLane();
     };
     const up = () => {
       document.removeEventListener('mousemove', move);
       if (moved) {
         saveMusicPref(); renderMusicBar(); syncMusicPreview(true);
-        if (wasBed) window.__toast && window.__toast('🎵 Music now follows the timeline — each short uses the part of the song sitting under it. Tick “Start the song at the top of every short” in the Music panel to go back.', 'good', 7000);
-      } else { openLibrary('music'); }
+        try { commitDragHistory(pre); } catch (e) {}
+        if (wasBed) window.__toast && window.__toast('🎵 Music now follows the timeline — each short uses the part of the song sitting under it. Tick “Start the song at the top of every short” in the Music panel to go back.', 'info');
+      } else if (wasSel) { openLibrary('music'); }
     };
     document.addEventListener('mousemove', move);
     document.addEventListener('mouseup', up, { once: true });
@@ -16178,8 +16216,11 @@
     const m = ve.music; if (!m) return null;
     const c = musicClockAt(t); if (!c) return null;
     // the export's own rule — asked of the bare range, never of a running export's snapshot
-    const pick = musicFor({ id: c.s.id, start: c.s.start, end: c.s.end }); if (!pick) return null;
-    const md = m.durationSec || 0, pos = pick.startSec + c.o;
+    const pick = musicFor({ id: c.s.id, start: c.s.start, end: c.s.end, cuts: c.s.cuts, xfades: c.s.xfades }); if (!pick) return null;
+    // before the song comes in, or after it was trimmed to stop: silence, as in the export
+    if (c.o < (pick.delaySec || 0) - 0.02) return null;
+    if (pick.durSec != null && c.o > (pick.delaySec || 0) + pick.durSec) return null;
+    const md = m.durationSec || 0, pos = pick.startSec + (c.o - (pick.delaySec || 0));
     return md > 0.1 ? pos % md : pos;
   }
   /*
@@ -16424,10 +16465,20 @@
     // 🎵 Music panel by the time a background export reaches this step.
     const m = F(s) ? F(s).music : ve.music;
     if (!m || !m.file) return null;
-    if (m.bed || !s) return { m, startSec: 0 };
+    if (m.bed || !s) return { m, startSec: 0, delaySec: 0, durSec: null };
     const tl = m.tlStart || 0, len = m.len || m.durationSec || 0;
     if (tl + len <= s.start || tl >= s.end) return null;   // the song doesn't reach this clip
-    return { m, startSec: Math.max(0, s.start - tl) + (m.srcStart || 0) };
+    // where the song comes in and goes out, on THIS export's clock (a song dragged
+    // or trimmed on the timeline can start after the clip does, and stop before)
+    const a = Math.max(s.start, tl), b = Math.min(s.end, tl + len);
+    const delaySec = a > s.start + 0.01 ? outAtOrAfter(s, a) : 0;
+    const durSec = b < s.end - 0.01 ? Math.max(0.1, outAtOrAfter(s, b) - delaySec) : null;
+    return { m, startSec: (a - tl) + (m.srcStart || 0), delaySec, durSec };
+  }
+  /** A source moment on the export's clock — or the next kept moment, inside a removed pause. */
+  function outAtOrAfter(s, t) {
+    for (let u = t; u <= s.end + 0.001; u += 0.05) { const o = srcToOut(s, Math.min(u, s.end)); if (o != null) return o; }
+    const e = srcToOut(s, s.end); return e != null ? e : 0;
   }
   /** The outro that will go on the end of THIS clip, or null. Same rule. */
   function outroFor(s) {
@@ -16445,6 +16496,7 @@
     return window.__runJob(`🎵 Adding background music to "${(s && s.label) || 'your video'}"…`, jid,
       () => window.api.video.mixMusic({
         input: filePath, musicPath: m.file, musicVolume: m.volume, musicStartSec: startSec,
+        musicDelaySec: pick.delaySec || 0, musicDurSec: pick.durSec,
         // no ducking: the bed sits where the slider puts it, as the preview plays it
         fadeIn: m.fadeIn, fadeOut: m.fadeOut, duck: false,
         jobId: jid, deleteInput: true, outName: outNameFor(filePath),
@@ -18316,6 +18368,9 @@
     textAnimation() { openTextAnimPicker(); },
     // test hooks (no real ffmpeg/player needed)
     __test: {
+      music: () => (ve.music ? { bed: !!ve.music.bed, tlStart: ve.music.tlStart || 0, srcStart: ve.music.srcStart || 0, len: ve.music.len || 0, sel: !!ve.musicSel } : null),
+      musicPosAt: (t) => musicPosFor(t),
+      musicExportFor: (a, b) => { const r = musicFor({ id: 'x', start: a, end: b }); return r && { startSec: r.startSec, delaySec: r.delaySec, durSec: r.durSec }; },
       // The batch pipeline, on its own: "Export all" hands it real tracking, a
       // test hands it a stopwatch. See shorts-speed.test.js.
       makeLookAhead,

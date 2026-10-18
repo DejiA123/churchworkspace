@@ -3688,7 +3688,7 @@ let _hideTimer = null;
    * the timeline's own centre line is the scrubber now (setCentredPlayhead).
    */
   const DRAG_SEL = [
-    '.ve-seg.sel .ve-seg-h', '.ve-audio-seg.sel .ve-audio-h', '.ve-cap-clip.sel .ve-cc-h', '.ve-text-clip.sel .ve-tc-h',
+    '.ve-seg.sel .ve-seg-h', '.ve-audio-seg.sel .ve-audio-h', '.ve-music-seg.sel .ve-music-h', '.ve-cap-clip.sel .ve-cc-h', '.ve-text-clip.sel .ve-tc-h',
     '.ve-cap-edge', '[data-capedge]', '[data-capscale]', '.ve-cap-block',
     '.ve-text-box', '.ve-text-resize',
     '#veCropFrame', '#veOverlayGuide', '.ve-ovg-resize', '[data-ovresize]',
@@ -3697,7 +3697,7 @@ let _hideTimer = null;
    * timeline: every handle visible and draggable, the ruler a scrubber. Only the
    * phone layout is CapCut's (cloud.css hides unselected handles there alone). */
   const DRAG_SEL_WIDE = [
-    '.ve-seg-h', '.ve-audio-h', '.ve-cc-h', '.ve-tc-h', '[data-tedge]', '[data-cedge]',
+    '.ve-seg-h', '.ve-audio-h', '.ve-music-h', '.ve-cc-h', '.ve-tc-h', '[data-tedge]', '[data-cedge]',
     '.ve-cap-edge', '[data-capedge]', '[data-capscale]', '.ve-cap-block', '.ve-text-box', '.ve-text-resize',
     '#veRuler', '#veCropFrame', '#veOverlayGuide', '.ve-ovg-resize', '[data-ovresize]',
   ].join(',');

@@ -1010,10 +1010,10 @@ ipcMain.handle('video:speechPauses', wrap(async (e, { input, startSec, endSec, m
 }));
 
 // Lay background music under a finished clip (video stream is copied, not re-encoded).
-ipcMain.handle('video:mixMusic', wrap(async (e, { input, musicPath, musicVolume, musicStartSec, fadeIn, fadeOut, duck, voiceVolume, jobId, outName, deleteInput }) => {
+ipcMain.handle('video:mixMusic', wrap(async (e, { input, musicPath, musicVolume, musicStartSec, musicDelaySec, musicDurSec, fadeIn, fadeOut, duck, voiceVolume, jobId, outName, deleteInput }) => {
   const output = outPath(`${(outName || 'music').replace(/[^\w.-]+/g, '_').slice(0, 60)}-${stamp()}.mp4`);
   await video.mixMusic(getCtx(), {
-    input, output, musicPath, musicVolume, musicStartSec, fadeIn, fadeOut, duck, voiceVolume,
+    input, output, musicPath, musicVolume, musicStartSec, musicDelaySec, musicDurSec, fadeIn, fadeOut, duck, voiceVolume,
     onProgress: onProgress(e, jobId),
   });
   if (deleteInput) removeIntermediate(input, output);
