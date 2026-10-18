@@ -3652,7 +3652,41 @@ async function appendClips(ctx, { input, output, clips = [], position = 'end', f
 // shape is never handed back (see media-cache.json and the video:info handler).
 const INFO_SHAPE = require('crypto').createHash('sha1').update(probeInfo.toString()).digest('hex').slice(0, 8);
 
-module.exports = { cssStep, LOOK_STEPS,
+/*
+ * ⚡ AN EDIT THAT ONLY CUTS, COPIED. Nothing is drawn on the picture, so
+ * nothing needs making again: each kept stretch is copied out of the
+ * recording as it is (no re-encode) and the stretches are joined. Seconds,
+ * not most of an hour. A copy can only start on a keyframe, so each stretch
+ * starts at the one just BEFORE its cut (at most a second or two early):
+ * never a word lost, at worst a moment of what was cut kept at a join.
+ */
+async function copyPieces(ctx, { input, pieces, output, onProgress }) {
+  const list = (pieces || []).filter((p) => p && p.end - p.start > 0.05);
+  if (!list.length) throw new Error('Nothing to save.');
+  const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'mw-copy-'));
+  try {
+    const total = list.reduce((a, p) => a + (p.end - p.start), 0) || 1;
+    let done = 0;
+    const parts = [];
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i], part = path.join(dir, `p${i}.mp4`);
+      await ff.runFfmpeg(ctx.ffmpeg, ['-y', '-ss', p.start.toFixed(3), '-t', (p.end - p.start).toFixed(3), '-i', input,
+        '-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', '-avoid_negative_ts', 'make_zero', part]);
+      parts.push(part);
+      done += p.end - p.start;
+      if (onProgress) onProgress(Math.min(95, (done / total) * 95));
+    }
+    const txt = path.join(dir, 'list.txt');
+    fs.writeFileSync(txt, parts.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join('\n'));
+    await ff.runFfmpeg(ctx.ffmpeg, ['-y', '-f', 'concat', '-safe', '0', '-i', txt, '-c', 'copy', '-movflags', '+faststart', output]);
+    if (onProgress) onProgress(100);
+    return output;
+  } finally {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {}
+  }
+}
+
+module.exports = { copyPieces, cssStep, LOOK_STEPS,
   putTrackFrames, dropTrackFrames,
   PRESETS, QUALITY, DEFAULT_QUALITY, VOICE_SHARE, qualityDef, presetSize, sourceSize, upscaleFactor, outputFps,
   setExportPrefs, getExportPrefs, allExportPrefs, loadExportPrefs, RATE_CRF, FPS_CHOICES, TRANSITIONS, transitionOf,

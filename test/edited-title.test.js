@@ -118,12 +118,13 @@ async function waitUp() {
     check(t3 === 'Once God Starts To Use You', 'the edited video is called by the AI short’s title', { t3, segs: await T('segments') });
     // …and that is the name the export is given
     const label = await page.evaluate(async () => {
-      const api = window.api.sermon, real = api.exportShort;
+      // a cut-only edit is copied (copyPieces), anything else made again (exportShort): the name is the same either way
+      const api = window.api.sermon, real = api.exportShort, realCopy = api.copyPieces;
       let got = null;
-      api.exportShort = async (a) => { got = a.label; throw new Error('stop here'); };
+      api.exportShort = api.copyPieces = async (a) => { got = a.label; throw new Error('stop here'); };
       try { document.getElementById('veExportEdited').click(); } catch (e) {}
       for (let i = 0; i < 60 && got == null; i++) await new Promise((r) => setTimeout(r, 100));
-      api.exportShort = real;
+      api.exportShort = real; api.copyPieces = realCopy;
       return got;
     });
     check(label === 'Once God Starts To Use You', 'Export video names the file by that title (My Uploads shows it)', label);

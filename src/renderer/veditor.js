@@ -10762,7 +10762,19 @@
       const label = removed > 1
         ? `💾 Saving your edited video (${fmt(span.kept)}, ${fmt(removed)} removed)…`
         : `💾 Saving your edited video (${fmt(span.kept)})…`;
-      let out = await window.__runJob(label, jobId, () => window.api.sermon.exportShort({
+      /*
+       * ⚡ ONLY CUT? Nothing drawn on the picture (no text, captions, overlays,
+       * looks, speed, transitions, zoom, noise removal, fades), so the kept
+       * stretches are copied out of the recording instead of made again.
+       */
+      const onlyCut = !planCaps && !overlays.length && !motion && !(span.xfades && span.xfades.length)
+        && !span.pieces.some((p) => p.fx || p.trans) && !textOverlaysFor(whole).length
+        && !overlayPayloadFor(whole, 'source', 'out').length && !denoiseCfg() && !fadeInCfg() && !fadeOutCfg()
+        && !tailClips().length && window.api.sermon.copyPieces;
+      let out = onlyCut
+        ? await window.__runJob(`⚡ Saving your edited video (${fmt(span.kept)}): only cuts, so it is copied, not re-made…`, jobId,
+          () => window.api.sermon.copyPieces({ input: ve.video.path, pieces: span.pieces.map((p) => ({ start: p.start, end: p.end })), label: title || 'edited', jobId }), J(whole, 'encode'))
+        : await window.__runJob(label, jobId, () => window.api.sermon.exportShort({
         input, startSec: ss, endSec: ee,
         // the recording's own shape — never a social crop
         preset: 'source', quality: qualityCfg(), pieces,

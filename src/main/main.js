@@ -1677,6 +1677,12 @@ ipcMain.handle('sermon:titleFor', wrap(async (e, { words } = {}) => {
   return /^Key moment \d+$/.test(title) ? '' : title;
 }));
 
+// ⚡ an edit that only cuts: the kept stretches copied, not made again (video.copyPieces)
+ipcMain.handle('video:copyPieces', wrap(async (e, { input, pieces, label, jobId }) => {
+  const output = outPath(`short-${fileSafeTitle(label || 'edited')}-${stamp()}.mp4`);
+  return video.copyPieces(getCtx(), { input, pieces, output, onProgress: onProgress(e, jobId) });
+}));
+
 ipcMain.handle('sermon:exportShort', wrap(async (e, { input, startSec, endSec, preset, quality, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, label, jobId, draft }) => {
   const safe = fileSafeTitle(label || 'short');
   const output = outPath(`short-${safe}-${stamp()}.mp4`);

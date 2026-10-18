@@ -238,6 +238,7 @@ const ALLOWED = {
   'flyer:inspoAdd': true,
   'flyer:inspoRemove': true,
   'sermon:exportShort': true,
+  'video:copyPieces': true,
   'sermon:exportReframed': true,
   'sermon:exportFramed': true,
 

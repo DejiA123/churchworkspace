@@ -651,6 +651,7 @@ let _hideTimer = null;
     sermon: {
       analyze: (a) => call('sermon:analyze', a),
       exportShort: (a) => call('sermon:exportShort', a),
+      copyPieces: (a) => call('video:copyPieces', a),
       titleFor: (a) => call('sermon:titleFor', a),
       exportReframed: (a) => call('sermon:exportReframed', a),
       exportFramed: (a) => call('sermon:exportFramed', a),
