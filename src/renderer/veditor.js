@@ -15776,6 +15776,19 @@
     try { ve.free = await window.api.freeMusic.list(false); } catch (e) { ve.free = null; }
     renderFreeList();
   }
+  /* ♥ FAVOURITES: the free songs someone has hearted, kept on this device and
+     offered first, as a mood of their own (the AI Montage's music offers them too) */
+  const FREE_FAVS = 'mw-free-favs';
+  function freeFavs() { try { return new Set(JSON.parse(localStorage.getItem(FREE_FAVS) || '[]') || []); } catch (e) { return new Set(); } }
+  function toggleFreeFav(id) {
+    const f = freeFavs();
+    const on = !f.has(id);
+    if (on) f.add(id); else f.delete(id);
+    try { localStorage.setItem(FREE_FAVS, JSON.stringify([...f])); } catch (e) {}
+    renderFreeList();
+    window.__toast && window.__toast(on ? '♥ Added to your favourites' : 'Taken out of your favourites', 'good', 1800);
+  }
+  const HEART = (on) => `<svg viewBox="0 0 24 24" fill="${on ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 20.5s-7.5-4.6-9.3-9.2C1.4 7.9 3.6 4.5 7 4.5c2.1 0 3.6 1.1 5 2.9 1.4-1.8 2.9-2.9 5-2.9 3.4 0 5.6 3.4 4.3 6.8-1.8 4.6-9.3 9.2-9.3 9.2z"/></svg>`;
   function renderFreeList() {
     const el = $('#libFreeList'), moods = $('#libFreeMoods'); if (!el || !moods) return;
     const F = ve.free;
@@ -15784,11 +15797,16 @@
       el.innerHTML = `<p class="muted small lib-empty">${F ? 'The free music could not be reached just now — try again in a moment.' : 'Loading free music…'}</p>`;
       return;
     }
-    const mood = F.moods.some((m) => m.id === ve.freeMood) ? ve.freeMood : F.moods[0].id;
-    moods.innerHTML = F.moods.filter((m) => F.tracks.some((t) => t.mood === m.id))
-      .map((m) => `<button class="lib-chip${m.id === mood ? ' on' : ''}" data-freemood="${attr2(m.id)}">${escape2(m.name)}</button>`).join('');
+    const favs = freeFavs(), anyFav = F.tracks.some((t) => favs.has(t.id));
+    const all = [{ id: '__fav', name: '♥ Favourites' }].concat(F.moods);
+    // the hearted ones first, once there are some (until another mood is picked)
+    const mood = ve.freeMood && all.some((m) => m.id === ve.freeMood) ? ve.freeMood : (anyFav ? '__fav' : F.moods[0].id);
+    moods.innerHTML = all.filter((m) => (m.id === '__fav' ? anyFav || mood === '__fav' : F.tracks.some((t) => t.mood === m.id)))
+      .map((m) => `<button class="lib-chip${m.id === mood ? ' on' : ''}${m.id === '__fav' ? ' fav' : ''}" data-freemood="${attr2(m.id)}">${escape2(m.name)}</button>`).join('');
     const a = ve.refs && ve.refs.musicAudio;
-    el.innerHTML = F.tracks.filter((t) => t.mood === mood).map((t) => {
+    const list = F.tracks.filter((t) => (mood === '__fav' ? favs.has(t.id) : t.mood === mood));
+    if (!list.length) { el.innerHTML = `<p class="muted small lib-empty">Tap the ♡ on any song to keep it here.</p>`; }
+    else el.innerHTML = list.map((t) => {
       const lib = t.inLibrary, on = !!(lib && ve.music && ve.music.id === lib);
       const playing = !!(lib && a && !a.paused && ve._auditionId === lib), busy = ve._freeBusy === t.id;
       return `
@@ -15798,12 +15816,14 @@
           <b>${escape2(t.title)}</b>
           <span class="muted small">${t.artist ? 'by ' + escape2(t.artist) : ''}${lib ? ' · in My music' : ''}</span>
         </span>
+        <button class="lib-fav${favs.has(t.id) ? ' on' : ''}" data-freefav="${attr2(t.id)}" aria-label="${favs.has(t.id) ? 'Take out of favourites' : 'Add to favourites'}" title="${favs.has(t.id) ? 'Take out of favourites' : 'Add to favourites'}">${HEART(favs.has(t.id))}</button>
         <button class="primary-btn small lib-use${on ? ' on' : ''}" data-freeuse="${attr2(t.id)}"${busy ? ' disabled' : ''}>${on ? LIB_ICON.check + '<span>In use</span>' : busy ? 'Getting…' : 'Use'}</button>
       </div>`;
     }).join('');
     $$('[data-freemood]', moods).forEach((b) => b.addEventListener('click', () => { ve.freeMood = b.dataset.freemood; renderFreeList(); }));
     $$('[data-freeplay]', el).forEach((b) => b.addEventListener('click', () => freePlay(b.dataset.freeplay)));
     $$('[data-freeuse]', el).forEach((b) => b.addEventListener('click', () => freeUse(b.dataset.freeuse)));
+    $$('[data-freefav]', el).forEach((b) => b.addEventListener('click', () => toggleFreeFav(b.dataset.freefav)));
   }
   /** The song into My music (once): its library entry. */
   async function freeFetch(id) {

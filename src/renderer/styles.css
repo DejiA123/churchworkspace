@@ -1233,6 +1233,10 @@ button.cap-model-pick .cap-model-name { align-items: flex-start; text-align: lef
   border: 1px solid var(--border); border-radius: 999px; cursor: pointer; }
 .lib-chip:hover { border-color: var(--primary); background: rgba(79,124,255,.12); }
 .lib-chip.on { border-color: var(--primary); background: var(--primary); color: #fff; }
+.lib-fav { flex: 0 0 auto; width: 36px; height: 36px; margin: 0; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; background: transparent; color: var(--muted); cursor: pointer; }
+.lib-fav svg { width: 20px; height: 20px; }
+.lib-fav.on { color: #ff453a; }
+.lib-fav:active { transform: scale(.88); }
 .lib-moods { margin-bottom: 12px; }
 .lib-free-badge { color: #3fb950; font-weight: 700; }
 .lib-empty { padding: 26px 8px; text-align: center; }

@@ -30,6 +30,7 @@ const lib = (url) => (/^http:/i.test(url) ? require('http') : https);
 const MOODS = [
   ['lofi', '🎧 Lo-fi & chill'],
   ['sermon', '🎹 Sermon · piano & pad'],
+  ['prayer', '🕯 Prayer · soft pads'],
   ['upbeat', '☀️ Upbeat & happy'],
   ['uplift', '🙏 Worship & uplifting'],
   ['hype', '🔥 Hype & energy'],
@@ -46,11 +47,20 @@ const TRACKS = [
   [685, 'R&B Vibes', 'Grigoriy Nuzhny', 'lofi'], [750, 'Relaxation 04', 'Lily J', 'lofi'], [427, 'New York', 'Arulo', 'lofi'],
   // under a sermon or a prayer: ambient piano over a soft pad, most with a gentle beat
   [22, 'Piano Reflections', 'Ahjay Stelino', 'sermon'], [184, 'Vastness', 'Andrew Ev', 'sermon'], [593, 'Opalescent', 'Eugenio Mininni', 'sermon'],
-  [758, 'Romantic 04', 'Lily J', 'sermon'], [726, 'Uplifting Bass', 'Lily J', 'sermon'], [419, 'Pilates and Yoga', 'Arulo', 'sermon'],
+  [758, 'Romantic 04', 'Lily J', 'sermon'], [726, 'Uplifting Bass', 'Lily J', 'sermon'],
   [148, 'Forest Mist Whispers', 'Alejandro Magaña', 'sermon'], [440, 'Infinity', 'Arulo', 'sermon'], [525, 'Spiritual Moment', 'Diego Nava', 'sermon'],
   [749, 'Relaxation 05', 'Lily J', 'sermon'], [760, 'Relaxation 07', 'Lily J', 'sermon'], [586, 'Charlotte', 'Eugenio Mininni', 'sermon'],
   [551, 'Home', 'Eugenio Mininni', 'sermon'], [156, 'Fhloston Paradise Arrival', 'Alejandro Magaña', 'sermon'], [955, 'I Believe 2', 'Michael Ramir C.', 'sermon'],
-  [598, 'We Will Get It', 'Eugenio Mininni', 'sermon'], [584, 'Rest Now', 'Eugenio Mininni', 'sermon'],
+  [598, 'We Will Get It', 'Eugenio Mininni', 'sermon'],
+  // more piano for under the preaching: reflective and hopeful, mostly with strings
+  [587, 'Discover', 'Eugenio Mininni', 'sermon'], [683, 'Classical Vibes 3', 'Grigoriy Nuzhny', 'sermon'], [684, 'Classical Vibes 4', 'Grigoriy Nuzhny', 'sermon'],
+  [599, 'Possible Dreams', 'Eugenio Mininni', 'sermon'], [601, 'Skyline', 'Eugenio Mininni', 'sermon'], [713, 'Classical 6', 'Jonny S.', 'sermon'],
+  [709, 'Classical 2', 'Jonny S.', 'sermon'], [710, 'Classical 3', 'Jonny S.', 'sermon'], [717, 'Classical 10', 'Jonny S.', 'sermon'],
+  [711, 'Classical 4', 'Jonny S.', 'sermon'], [708, 'Classical 1', 'Jonny S.', 'sermon'], [614, 'Silent Descent', 'Eugenio Mininni', 'sermon'],
+  [310, 'Alignment', 'Arulo', 'sermon'], [322, 'Life’s a Movie', 'Arulo', 'sermon'], [178, 'Ixta', 'Alejandro Magaña', 'sermon'],
+  // soft pads with no beat, for under a prayer or an altar call
+  [584, 'Rest Now', 'Eugenio Mininni', 'prayer'], [441, 'Meditation', 'Arulo', 'prayer'], [251, 'Ambient', 'Arulo', 'prayer'],
+  [345, 'Nature Meditation', 'Arulo', 'prayer'], [324, 'Smooth Meditation', 'Arulo', 'prayer'], [616, 'What it Takes', 'Eugenio Mininni', 'prayer'],
   [644, 'Upbeat Jazz', 'Francisco Alvear', 'upbeat'], [5, 'Feeling Happy', 'Ahjay Stelino', 'upbeat'], [801, 'Happy Home', 'Michael Ramir C.', 'upbeat'],
   [1076, 'Smile', 'Michael Ramir C.', 'upbeat'], [3, 'Dance with Me', 'Ahjay Stelino', 'upbeat'], [91, 'Summer’s Here', 'Ahjay Stelino', 'upbeat'],
   [288, 'One More Dance', 'Arulo', 'upbeat'], [250, 'Island Beat', 'Arulo', 'upbeat'], [1012, 'Take this Higher', 'Michael Ramir C.', 'upbeat'],

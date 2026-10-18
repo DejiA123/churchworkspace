@@ -2742,6 +2742,16 @@
    * the next instead of to no music.
    */
   const FREE_RECENT = 'mw-free-recent';
+  /* ♥ the free songs someone has hearted in the Video Studio's Free music (veditor.js
+     freeFavs): offered first here too, as a "Favourites" mood of their own */
+  const FREE_FAVS = 'mw-free-favs';
+  const freeFavs = () => { try { return new Set(JSON.parse(localStorage.getItem(FREE_FAVS) || '[]') || []); } catch (e) { return new Set(); } };
+  const inMood = (t, mood) => (mood === '__fav' ? freeFavs().has(t.id) : t.mood === mood);
+  const moodsWithFavs = (F) => {
+    const favs = freeFavs();
+    const any = favs.size && ((F && F.tracks) || []).some((t) => favs.has(t.id));
+    return (any ? [{ id: '__fav', name: '♥ Favourites' }] : []).concat((F && F.moods) || []);
+  };
   // a twentieth of a second of silence: what an iPhone is given to play inside the tap, so the song may play after
   const SILENCE = 'data:audio/wav;base64,UklGRrQBAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YZABAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA';
   /* each app its own trending hashtags — what the server puts on as it posts (social-copy.js forPlatform) */
@@ -2768,7 +2778,7 @@
   }
   function freeDeal(tracks, mood) {
     const all = tracks || [];
-    const pool = all.filter((t) => t.mood === mood);
+    const pool = all.filter((t) => inMood(t, mood));
     const list = pool.length ? pool : all.slice();
     let recent = [];
     try { recent = JSON.parse(localStorage.getItem(FREE_RECENT) || '[]') || []; } catch (e) { recent = []; }
@@ -2920,7 +2930,7 @@
     let music = 'No music';
     if (MT.songFile) music = MT.songFile.name.replace(/\.[^.]+$/, '');
     else if (MT.free && F && F.tracks) {
-      if (MT.free === 'auto') music = 'Pick for me · ' + mtWord((F.moods.find((m) => m.id === mtFreeMood()) || {}).name || mtFreeMood());
+      if (MT.free === 'auto') music = 'Pick for me · ' + mtWord((moodsWithFavs(F).find((m) => m.id === mtFreeMood()) || {}).name || mtFreeMood());
       else music = (F.tracks.find((t) => t.id === MT.free) || {}).title || 'A free song';
     } else if (MT.song) music = String(MT.song.name || 'Your song');
     const voices = (who.voiceover && who.voiceover.voices) || [];
@@ -3046,16 +3056,17 @@
         <span class="mt-song-t"><b>${esc(title)}</b><small data-mt-sub="${attr(key)}" data-orig="${attr(sub)}">${esc(sub)}</small></span><span class="mt-radio"></span></div>`;
     if (tab === 'free' && hasFree) {
       const mood = MT.freeMood || (F.tracks.find((t) => t.id === MT.free) || {}).mood || mtFreeMood();
-      const mName = (F.moods.find((m) => m.id === mood) || {}).name || '';
-      const songs = F.tracks.filter((t) => t.mood === mood);
+      const moods = moodsWithFavs(F);
+      const mName = (moods.find((m) => m.id === mood) || {}).name || '';
+      const songs = F.tracks.filter((t) => inMood(t, mood));
       const selAt = songs.findIndex((t) => t.id === MT.free);
       const all = MT.showAll === mood || selAt >= MT_LIST_SHOW;
       const shown = all ? songs : songs.slice(0, MT_LIST_SHOW);
       return `${tabs}
-        <div class="mt-row mt-moods">${F.moods.map((m) => `<button type="button" class="mt-chip${mood === m.id ? ' on' : ''}" data-mt-mood="${attr(m.id)}">${esc(mtWord(m.name))}</button>`).join('')}</div>
+        <div class="mt-row mt-moods">${moods.map((m) => `<button type="button" class="mt-chip${mood === m.id ? ' on' : ''}" data-mt-mood="${attr(m.id)}">${esc(mtWord(m.name))}</button>`).join('')}</div>
         <div class="mt-list">
           ${row({ key: 'auto', sel: MT.free === 'auto', title: 'Pick for me', sub: `a different ${mtWord(mName)} song each time`, pick: 'data-mt-free="auto"' })}
-          ${shown.map((t) => row({ key: 'free:' + t.id, sel: MT.free === t.id, title: t.title, sub: t.artist ? 'by ' + t.artist : mName.replace(/^\S+\s/, ''), pick: `data-mt-free="${attr(t.id)}"`, play: true })).join('')}
+          ${shown.map((t) => row({ key: 'free:' + t.id, sel: MT.free === t.id, title: t.title, sub: (freeFavs().has(t.id) ? '♥ ' : '') + (t.artist ? 'by ' + t.artist : mName.replace(/^\S+\s/, '')), pick: `data-mt-free="${attr(t.id)}"`, play: true })).join('')}
           ${!all && songs.length > MT_LIST_SHOW ? `<button type="button" class="mt-more" data-mt-all="${attr(mood)}">Show all ${songs.length} ${esc(mtWord(mName))} songs</button>` : ''}
         </div>
         <small class="mt-hint">Free and safe to post — no copyright flags, no credit needed (Mixkit).</small>`;

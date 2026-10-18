@@ -119,7 +119,7 @@ async function waitUp() {
       songs: document.querySelectorAll('#cloudMontage [data-mt-free]:not([data-mt-free="auto"])').length,
     }));
     check(extra.narrator, 'the Viral Montage offers a narrator', extra);
-    check(extra.moods.length === 7 && extra.pick && extra.songs >= 3, 'free, safe-to-post music is on the page by mood — and "✨ Pick for me" is on by default', extra);
+    check(extra.moods.length === 8 && extra.pick && extra.songs >= 3, 'free, safe-to-post music is on the page by mood — and "✨ Pick for me" is on by default', extra);
     // ✨ Pick for me deals the mood's songs like cards: ten picks in a row, ten different songs
     const dealt = await page.evaluate(() => {
       const D = window.MWCloud._freeDeal;

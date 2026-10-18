@@ -96,8 +96,27 @@ async function waitUp() {
       }));
       if (s.rows.length) break;
     }
-    check(s.moods.length === 7 && s.moods.some((m) => /Sermon/.test(m)) && /Lo-fi/.test(s.on) && s.rows.includes('Lo-Fi 01'), 'the Free music tab opens on 🎧 Lo-fi, with its songs (and seven moods, 🎹 Sermon among them)', s);
+    check(s.moods.length === 8 && s.moods.some((m) => /Sermon/.test(m)) && s.moods.some((m) => /Prayer/.test(m)) && /Lo-fi/.test(s.on) && s.rows.includes('Lo-Fi 01'), 'the Free music tab opens on 🎧 Lo-fi, with its songs (and eight moods, 🎹 Sermon and 🕯 Prayer among them)', s);
     if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'studio-free-music.png') });
+    // ♥ a favourite: hearted, it gets a Favourites chip of its own (first), and is kept on the device
+    await page.locator('#libFreeList [data-freefav="mk764"]').tap();
+    await sleep(400);
+    let fv = await page.evaluate(() => ({ chips: [...document.querySelectorAll('#libFreeMoods [data-freemood]')].map((b) => b.dataset.freemood),
+      on: !!document.querySelector('#libFreeList [data-freefav="mk764"].on'), saved: localStorage.getItem('mw-free-favs') }));
+    check(fv.on && fv.chips[0] === '__fav' && /mk764/.test(fv.saved || ''), '♡ on a song hearts it: a ♥ Favourites chip comes first', fv);
+    await page.locator('#libFreeMoods [data-freemood="__fav"]').tap();
+    await sleep(300);
+    fv = await page.evaluate(() => [...document.querySelectorAll('#libFreeList [data-freeid]')].map((r) => r.querySelector('b').textContent));
+    check(fv.length === 1 && fv[0] === 'Lo-Fi 02', '♥ Favourites lists the hearted songs', fv);
+    if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'studio-favs.png') });
+    await page.locator('#libFreeList [data-freefav="mk764"]').tap();
+    await sleep(300);
+    fv = await page.evaluate(() => ({ empty: (document.querySelector('#libFreeList .lib-empty') || {}).textContent || '', saved: localStorage.getItem('mw-free-favs') }));
+    check(/Tap the ♡/.test(fv.empty) && !/mk764/.test(fv.saved || ''), '♥ again takes it out (and says how to add one)', fv);
+    await page.locator('#libFreeMoods [data-freemood="lofi"]').tap();
+    await sleep(300);
+    const sermon = await page.evaluate(async () => { const F = await window.api.freeMusic.list(false); return F.tracks.filter((t) => t.mood === 'sermon').map((t) => t.title); });
+    check(sermon.length >= 25 && !sermon.includes('Pilates and Yoga') && sermon.includes('Silent Descent'), 'the sermon shelf is bigger — and Pilates and Yoga is gone', sermon.length);
     // ▶ fetches it once and plays it
     await page.locator('#libFreeList [data-freeplay="mk763"]').tap();
     let p = null;
