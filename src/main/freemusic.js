@@ -30,7 +30,7 @@ const lib = (url) => (/^http:/i.test(url) ? require('http') : https);
 const MOODS = [
   ['lofi', '🎧 Lo-fi & chill'],
   ['sermon', '🎹 Sermon · piano & pad'],
-  ['prayer', '🕯 Prayer · soft pads'],
+  ['prayer', '🕯 Prayer · worship pads'],
   ['upbeat', '☀️ Upbeat & happy'],
   ['uplift', '🙏 Worship & uplifting'],
   ['hype', '🔥 Hype & energy'],
@@ -58,13 +58,13 @@ const TRACKS = [
   [709, 'Classical 2', 'Jonny S.', 'sermon'], [710, 'Classical 3', 'Jonny S.', 'sermon'], [717, 'Classical 10', 'Jonny S.', 'sermon'],
   [711, 'Classical 4', 'Jonny S.', 'sermon'], [708, 'Classical 1', 'Jonny S.', 'sermon'], [614, 'Silent Descent', 'Eugenio Mininni', 'sermon'],
   [310, 'Alignment', 'Arulo', 'sermon'], [322, 'Life’s a Movie', 'Arulo', 'sermon'], [178, 'Ixta', 'Alejandro Magaña', 'sermon'],
-  // soft pads with no beat, for under a prayer or an altar call
-  [584, 'Rest Now', 'Eugenio Mininni', 'prayer'], [441, 'Meditation', 'Arulo', 'prayer'], [251, 'Ambient', 'Arulo', 'prayer'],
-  [345, 'Nature Meditation', 'Arulo', 'prayer'], [324, 'Smooth Meditation', 'Arulo', 'prayer'], [616, 'What it Takes', 'Eugenio Mininni', 'prayer'],
-  [524, 'Song of Kindness', 'Diego Nava', 'prayer'], [993, 'Finding Myself', 'Michael Ramir C.', 'prayer'], [347, 'Transcending', 'Arulo', 'prayer'],
-  [253, 'Relaxation 2', 'Arulo', 'prayer'], [382, 'Meditation 05', 'Arulo', 'prayer'], [383, 'Pondering', 'Arulo', 'prayer'],
-  [577, 'Cristales', 'Eugenio Mininni', 'prayer'], [566, 'Daniel & Me', 'Eugenio Mininni', 'prayer'], [579, 'How', 'Eugenio Mininni', 'prayer'],
-  [585, 'Sonor 07', 'Eugenio Mininni', 'prayer'], [571, 'Voxscape', 'Eugenio Mininni', 'prayer'],
+  // soft pads with no beat (on Calm & reflective; the prayer shelf is the worship pads below)
+  [584, 'Rest Now', 'Eugenio Mininni', 'calm'], [441, 'Meditation', 'Arulo', 'calm'], [251, 'Ambient', 'Arulo', 'calm'],
+  [345, 'Nature Meditation', 'Arulo', 'calm'], [324, 'Smooth Meditation', 'Arulo', 'calm'], [616, 'What it Takes', 'Eugenio Mininni', 'calm'],
+  [524, 'Song of Kindness', 'Diego Nava', 'prayer'], [993, 'Finding Myself', 'Michael Ramir C.', 'calm'], [347, 'Transcending', 'Arulo', 'calm'],
+  [253, 'Relaxation 2', 'Arulo', 'calm'], [382, 'Meditation 05', 'Arulo', 'calm'], [383, 'Pondering', 'Arulo', 'calm'],
+  [577, 'Cristales', 'Eugenio Mininni', 'calm'], [566, 'Daniel & Me', 'Eugenio Mininni', 'calm'], [579, 'How', 'Eugenio Mininni', 'prayer'],
+  [585, 'Sonor 07', 'Eugenio Mininni', 'calm'], [571, 'Voxscape', 'Eugenio Mininni', 'calm'],
   [644, 'Upbeat Jazz', 'Francisco Alvear', 'upbeat'], [5, 'Feeling Happy', 'Ahjay Stelino', 'upbeat'], [801, 'Happy Home', 'Michael Ramir C.', 'upbeat'],
   [1076, 'Smile', 'Michael Ramir C.', 'upbeat'], [3, 'Dance with Me', 'Ahjay Stelino', 'upbeat'], [91, 'Summer’s Here', 'Ahjay Stelino', 'upbeat'],
   [288, 'One More Dance', 'Arulo', 'upbeat'], [250, 'Island Beat', 'Arulo', 'upbeat'], [1012, 'Take this Higher', 'Michael Ramir C.', 'upbeat'],
@@ -84,7 +84,18 @@ const TRACKS = [
   [109, 'Deep Meditation', 'Alejandro Magaña', 'calm'], [27, 'Serene Moments', 'Ahjay Stelino', 'calm'], [439, 'Tides Turning', 'Arulo', 'calm'],
   [150, 'A Blue Day', 'Alejandro Magaña', 'calm'], [1023, 'Crying Sea', 'Michael Ramir C.', 'calm'], [187, 'Mountains', 'Andrew Ev', 'calm'],
   [594, 'River Flow', 'Eugenio Mininni', 'calm'],
-].map(([n, title, artist, mood]) => ({ id: 'mk' + n, title, artist, mood, url: BASE + n + '/' + n + '.mp3' }));
+].map(([n, title, artist, mood]) => ({ id: 'mk' + n, title, artist, mood, url: BASE + n + '/' + n + '.mp3' }))
+  /*
+   * 🕯 WORSHIP PADS, made by the studio itself (padgen.js): the long soft chord a
+   * church holds under a prayer or an altar call, in every key, Warm or
+   * Shimmer. Nobody else's recording — nothing to credit, nothing to be flagged.
+   * Made on the server the first time one is chosen (a few seconds), then kept
+   * in the music library like any other song.
+   */
+  .concat(['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'].flatMap((key) => ['warm', 'shimmer'].map((colour) => ({
+    id: `pad-${key.toLowerCase().replace('#', 's')}-${colour}`, title: `${colour === 'warm' ? 'Warm' : 'Shimmer'} Worship Pad in ${key}`,
+    artist: 'Church Space', mood: 'prayer', gen: { key, colour },
+  }))));
 
 // Mixkit's licence asks for no credit — the caption stays the church's own
 const credit = () => '';
@@ -111,7 +122,7 @@ function check() {
   if (Date.now() - probe.at < 12 * 3600 * 1000 && probe.ok.size) return Promise.resolve();
   probe.running = (async () => {
     const ok = new Map();
-    await Promise.all(TRACKS.map(async (t) => ok.set(t.id, await head(t.url))));
+    await Promise.all(TRACKS.filter((t) => t.url).map(async (t) => ok.set(t.id, await head(t.url))));
     // nothing answered at all = the server is offline, not every song gone: try again next time
     if ([...ok.values()].some((v) => v !== null)) { probe.ok = ok; probe.at = Date.now(); }
   })().finally(() => { probe.running = null; });
@@ -127,7 +138,7 @@ async function list(library, { wait = false } = {}) {
     moods: MOODS.map(([id, name]) => ({ id, name })),
     tracks: TRACKS.filter((t) => probe.ok.get(t.id) !== false).map((t) => ({
       id: t.id, title: t.title, artist: t.artist, mood: t.mood, credit: credit(t),
-      url: t.url,   // the file at Mixkit (the phone previews it through the server)
+      url: t.url || null,   // the file at Mixkit (the phone previews it through the server); a pad is made, not fetched
       inLibrary: have.has(t.id) ? have.get(t.id).id : null,
     })),
     checked: !!probe.at,
@@ -154,12 +165,24 @@ function download(url, dest, redirects = 0) {
 /**
  * A track into the music library (once) — the library entry, with its credit.
  */
-async function get(ctx, video, library, id) {
+// one fetch (or one making) per song at a time: a ▶ and a Use tapped together share it
+const getting = new Map();
+function get(ctx, video, library, id) {
+  if (!getting.has(id)) getting.set(id, getNow(ctx, video, library, id).finally(() => getting.delete(id)));
+  return getting.get(id);
+}
+async function getNow(ctx, video, library, id) {
   const t = TRACKS.find((x) => x.id === id);
   if (!t) throw new Error('That song is not on the free music shelf.');
   const have = ((library.list().music) || []).find((m) => m.source === 'free:' + t.id && m.file && fs.existsSync(m.file));
   if (have) return Object.assign({}, have, { credit: credit(t) });
   const tmp = path.join(os.tmpdir(), `mw-free-${t.id}-${Date.now()}.mp3`);
+  if (t.gen) {
+    try { await require('./padgen').makePad(ctx.ffmpeg, t.gen.key, t.gen.colour, tmp); }
+    catch (e) { try { fs.rmSync(tmp, { force: true }); } catch (er) {} throw new Error(`“${t.title}” could not be made right now (${e.message}).`); }
+    const made = await library.add(ctx, video, { kind: 'music', path: tmp, name: t.title, source: 'free:' + t.id, move: true });
+    return Object.assign({}, made, { credit: credit(t) });
+  }
   try {
     await download(t.url, tmp);
     if (!(fs.statSync(tmp).size > 20000)) throw new Error('the file came back empty');
