@@ -3847,31 +3847,36 @@ body.mw-cloud .mwg-sheet h2 .mwg-close { background: #f1f3f6; color: #3b4250; }
 body.mw-cloud .mwg-tile, body.mw-cloud .mwg-tile:nth-child(n) { background: #f6f7f9; color: #0f1115; box-shadow: none; }
 body.mw-cloud .mwg-reset { color: #1f6fe0; }
 .cj-server:empty { display: none; }
-/* Background jobs: its cards in the sheet's own light look. They kept the
-   dark editor's near-black boxes on the white sheet — the odd black-and-white. */
-.cp-jobs .cj-card { background: #f6f7f9; border-color: transparent; color: #0f1115; }
-.cp-jobs .cj-card.run { background: linear-gradient(180deg, rgba(31,111,224,.08), rgba(31,111,224,.02) 70%), #f6f7f9; border-color: rgba(31,111,224,.22); }
-.cp-jobs .cj-ring-lg .rt { stroke: rgba(15,23,42,.1); }
-.cp-jobs .cj-ring-lg .rf { stroke: #1f6fe0; filter: none; }
-.cp-jobs .cj-pc, .cp-jobs .cj-title { color: #0f1115; }
-.cp-jobs .cj-step { color: #5d6470; }
-.cp-jobs .cj-meta { color: #8b909b; }
-.cp-jobs .cj-bar { background: rgba(15,23,42,.08); }
+/* Background jobs ("Running now"): the export box's own dark navy, so the two
+   read as one thing — the box an export runs in and the sheet it carries on in. */
+.cp-panel.cp-jobs { background: #13161f; color: #f5f6f8; box-shadow: 0 -20px 60px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.06); }
+.cp-jobs .cp-grab { background: #3a3f4d; }
+.cp-jobs .cp-title { color: #f5f6f8; }
+.cp-jobs .cp-x { background: #242a38; color: #c9cdd8; }
+.cp-jobs .cp-link { color: #8ec0ff; }
+.cp-jobs .cj-card { background: #1a1f2b; border-color: #242a38; color: #f5f6f8; }
+.cp-jobs .cj-card.run { background: linear-gradient(180deg, rgba(31,111,224,.16), rgba(31,111,224,.04) 70%), #1a1f2b; border-color: rgba(77,149,239,.38); }
+.cp-jobs .cj-ring-lg .rt { stroke: rgba(255,255,255,.1); }
+.cp-jobs .cj-ring-lg .rf { stroke: #4d95ef; }
+.cp-jobs .cj-pc, .cp-jobs .cj-title { color: #f5f6f8; }
+.cp-jobs .cj-step { color: #b5bccb; }
+.cp-jobs .cj-meta { color: #8a92a3; }
+.cp-jobs .cj-bar { background: rgba(255,255,255,.08); }
 .cp-jobs .cj-bar i { background: linear-gradient(90deg, #1f6fe0, #4d95ef, #1f6fe0); background-size: 200% 100%; }
-.cp-jobs .cj-btn { background: #eceef2; color: #0f1115; }
-.cp-jobs .cj-btn.danger { background: #fff1f0; color: #d92d20; }
-.cp-jobs .cj-btn.accent { background: #0f1115; color: #fff; box-shadow: none; }
-.cp-jobs .cj-card.done .cj-badge { background: #e8f8ee; color: #16a34a; }
-.cp-jobs .cj-card.fail .cj-badge { background: #fff1f0; color: #d92d20; }
-.cp-jobs .cj-card.stopped .cj-badge { background: #eceef2; color: #5d6470; }
-.cp-jobs .cj-x { color: #8b909b; }
-.cp-jobs .cj-files li { background: #fff; }
-.cp-jobs .cj-mini { background: #eceef2; color: #0f1115; }
-.cp-jobs .cj-mini.accent { background: #0f1115; color: #fff; }
-.cp-jobs .cj-empty { color: #5d6470; }
-.cp-jobs .cj-empty b { color: #0f1115; }
-.cp-jobs .cj-empty-art { background: #f1f3f6; color: #0f1115; }
-.cp-jobs .cj-server { color: #8b909b; }
+.cp-jobs .cj-btn { background: #242a38; color: #f5f6f8; }
+.cp-jobs .cj-btn.danger { background: rgba(255,69,58,.14); color: #ff7b71; }
+.cp-jobs .cj-btn.accent { background: #1f6fe0; color: #fff; box-shadow: 0 4px 16px rgba(31,111,224,.35); }
+.cp-jobs .cj-card.done .cj-badge { background: rgba(48,209,88,.16); color: #4ade80; }
+.cp-jobs .cj-card.fail .cj-badge { background: rgba(255,69,58,.16); color: #ff6b61; }
+.cp-jobs .cj-card.stopped .cj-badge { background: rgba(255,255,255,.08); color: #b5b7bf; }
+.cp-jobs .cj-x { color: #8a92a3; }
+.cp-jobs .cj-files li { background: rgba(255,255,255,.05); }
+.cp-jobs .cj-mini { background: #242a38; color: #f5f6f8; }
+.cp-jobs .cj-mini.accent { background: rgba(31,111,224,.28); color: #dde3ff; }
+.cp-jobs .cj-empty { color: #9ba3b4; }
+.cp-jobs .cj-empty b { color: #f5f6f8; }
+.cp-jobs .cj-empty-art { background: #1a1f2b; color: #f5f6f8; }
+.cp-jobs .cj-server { color: #8a92a3; }
 .cp-panel .pf-btn { background: #0f1115; color: #fff; box-shadow: none; }
 .cp-panel .pf-sec { border-top-color: rgba(15, 23, 42, .08); }
 .cp-panel .pf-tx small, .cp-panel .pf-sec > b { color: #6b7280; }
