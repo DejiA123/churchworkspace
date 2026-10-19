@@ -77,13 +77,13 @@ const freq = (midi) => 440 * Math.pow(2, (midi - 69) / 12);
  */
 function voiceProgression(prog, tonic) {
   const out = [];
-  let centre = 64;     // E4 to start
+  let centre = 61;     // around C#4: a warm middle, nothing high and thin
   for (const [deg, shape, beats] of prog.chords) {
     const root = (tonic + deg) % 12;
     const pcs = SHAPE[shape].map((x) => (root + x) % 12);
     let best = null;
     for (let r = 0; r < pcs.length; r++) {
-      for (let base = 52; base <= 70; base++) {
+      for (let base = 50; base <= 66; base++) {
         if (base % 12 !== pcs[r]) continue;
         const notes = [base];
         for (let k = 1; k < pcs.length; k++) {
@@ -91,7 +91,7 @@ function voiceProgression(prog, tonic) {
           while (n % 12 !== pcs[(r + k) % pcs.length]) n++;
           notes.push(n);
         }
-        if (notes[notes.length - 1] > 81) continue;
+        if (notes[notes.length - 1] > 76) continue;      // never above E5: soft, not sharp
         const mean = notes.reduce((a, b) => a + b, 0) / notes.length;
         const cost = Math.abs(mean - centre) + 0.15 * (notes[notes.length - 1] - notes[0]);
         if (!best || cost < best.cost) best = { notes, cost, mean };
@@ -100,7 +100,7 @@ function voiceProgression(prog, tonic) {
     let bass = 36 + ((root - 36 % 12 + 12) % 12);   // the root, C2–B2
     if (bass > 45) bass -= 12;                        // never above A2: the bass stays a bass
     out.push({ bass, upper: best.notes, beats });
-    centre = best.mean * 0.7 + 64 * 0.3;              // drift back toward the middle
+    centre = best.mean * 0.7 + 61 * 0.3;              // drift back toward the middle
   }
   return out;
 }
@@ -111,7 +111,7 @@ function padWav(progId, key) {
   const chords = voiceProgression(prog, NOTE[key]);
   const pass = chords.reduce((a, c) => a + c.beats * BEAT, 0);
   const whole = (f) => Math.max(1, Math.round(f * pass)) / pass;   // whole cycles in a pass: no seam
-  const FADE = 2.4;                                                   // how long one chord swells into the next
+  const FADE = 3.6;                                                   // how long one chord swells into the next (slow: soft)
   /*
    * THE SOUND: a soft string pad — the Area 51 / Nord soft pad kind, not an organ.
    * Every note is an ENSEMBLE: three voices a few cents apart on each side (as a
@@ -140,14 +140,15 @@ function padWav(progId, key) {
     tables.set(k, t);
     return t;
   };
-  const ENSEMBLE = [[-8, -1, 6], [-6, 2, 8]];          // cents, left / right
+  const ENSEMBLE = [[-5, -1, 4], [-4, 1, 5]];          // cents, left / right (close: a gentle shimmer, not a wobble)
   const voices = [];
   let at = 0;
   chords.forEach((c) => {
     const len = c.beats * BEAT;
-    const parts = [{ m: c.bass, lv: 0.11, fc: 260, ens: false }]
-      .concat(c.upper.map((m, i) => ({ m, lv: 0.12 - i * 0.006, fc: 1100, ens: true })))
-      .concat(c.upper.slice(-2).map((m) => ({ m: m + 12, lv: 0.022, fc: 1, ens: false, air: true })));
+    // SOFT: the overtones roll off from ~400 Hz (a muted, velvety tone — no edge at all)
+    const parts = [{ m: c.bass, lv: 0.1, fc: 200, ens: false }]
+      .concat(c.upper.map((m, i, all) => ({ m, lv: (i === all.length - 1 ? 0.085 : 0.12 - i * 0.008), fc: 380, ens: true })))   // the top note a little under the rest
+      .concat(c.upper.slice(-1).map((m) => ({ m: m + 12, lv: 0.007, fc: 1, ens: false, air: true })));   // a breath of air, no more
     parts.forEach((pt, j) => {
       for (let ch = 0; ch < 2; ch++) {
         const det = pt.ens ? ENSEMBLE[ch] : [pt.air ? (ch ? 3 : -3) : 0];
@@ -208,12 +209,12 @@ function makePad(ffmpeg, progId, key, out) {
   const passes = Math.max(1, Math.round(TARGET / pass));
   const length = passes * pass;
   const fc = [
-    '[0:a]lowpass=f=5000,highpass=f=50,equalizer=f=320:t=q:w=1:g=-2.5[dry]',
+    '[0:a]lowpass=f=2600,lowpass=f=4000,highpass=f=50,equalizer=f=320:t=q:w=1:g=-2.5,equalizer=f=2500:t=q:w=1.2:g=-4[dry]',
     '[dry]asplit[a][b]',
     // the room: a long soft tail (a pink-noise impulse fading over 4.5 s; no rumble in it)
     '[a][1:a]afir=dry=2:wet=10[w]',
     `[b][w]amix=inputs=2:weights=0.5 1:normalize=0,atrim=${pass}:${pass + length},asetpts=PTS-STARTPTS,`
-      + 'volume=2dB,alimiter=limit=0.8:level=false[out]',
+      + 'volume=-1dB,alimiter=limit=0.7:level=false[out]',
   ].join(';');
   const args = ['-v', 'error', '-y', '-stream_loop', String(passes), '-i', dry,
     '-f', 'lavfi', '-i', `anoisesrc=d=4.5:c=pink:r=${SR}:a=0.5:seed=7,highpass=f=220,lowpass=f=7000,afade=t=out:st=0:d=4.5:curve=exp,aformat=channel_layouts=stereo`,
