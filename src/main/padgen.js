@@ -21,6 +21,9 @@
  *
  * Nobody else's recording — nothing to credit, nothing for a platform to flag.
  *
+ * The sound is a soft string pad (an ensemble of slightly drifting voices,
+ * warm and rounded, with an airy octave on top — see padWav), not an organ.
+ *
  * Made as one pass of the progression that loops without a seam (every
  * frequency completes whole cycles in it, and the last chord swells back into
  * the first), then looped to about three minutes and given its room by ffmpeg:
@@ -109,23 +112,51 @@ function padWav(progId, key) {
   const pass = chords.reduce((a, c) => a + c.beats * BEAT, 0);
   const whole = (f) => Math.max(1, Math.round(f * pass)) / pass;   // whole cycles in a pass: no seam
   const FADE = 2.4;                                                   // how long one chord swells into the next
-  // every note of every chord, with when it sounds
+  /*
+   * THE SOUND: a soft string pad — the Area 51 / Nord soft pad kind, not an organ.
+   * Every note is an ENSEMBLE: three voices a few cents apart on each side (as a
+   * section of strings is never perfectly together — that drift is what makes
+   * it lush and alive), each a warm, rounded wave: all of a saw's harmonics, but
+   * rolled off softly from ~1 kHz, so it is full without any edge. The bass is
+   * one soft, round voice (several low voices would throb). Over the top, an
+   * "air" layer — the top notes an octave up, pure and quiet — the heavenly bit.
+   * Each wave is drawn once (a wavetable) and read round, so it is quick.
+   */
+  const TABLE = 2048;
+  const tables = new Map();
+  const tableFor = (f, fc) => {
+    const k = f.toFixed(3) + '|' + fc;
+    if (tables.has(k)) return tables.get(k);
+    const t = new Float64Array(TABLE + 1);
+    let peak = 0;
+    for (let h = 1; h * f < 9000 && h <= 60; h++) {
+      const a = Math.exp(-(h * f) / fc) / h;
+      if (a < 1e-4) break;
+      for (let i = 0; i < TABLE; i++) t[i] += a * Math.sin((2 * Math.PI * h * i) / TABLE);
+    }
+    for (let i = 0; i < TABLE; i++) peak = Math.max(peak, Math.abs(t[i]));
+    for (let i = 0; i < TABLE; i++) t[i] /= peak || 1;
+    t[TABLE] = t[0];
+    tables.set(k, t);
+    return t;
+  };
+  const ENSEMBLE = [[-8, -1, 6], [-6, 2, 8]];          // cents, left / right
   const voices = [];
   let at = 0;
   chords.forEach((c) => {
     const len = c.beats * BEAT;
-    // (the CHORD is what is heard: the bass under it is felt more than heard)
-    const notes = [{ m: c.bass, lv: 0.075, cents: 0 }, { m: c.bass + 12, lv: 0.03, cents: 0 }]
-      .concat(c.upper.map((m, i) => ({ m, lv: 0.16 - i * 0.01, cents: 1.5 })))
-      .concat([{ m: c.upper[c.upper.length - 1] + 12, lv: 0.025, cents: 2.5 }]);   // a soft shimmer an octave up
-    for (const n of notes) {
+    const parts = [{ m: c.bass, lv: 0.11, fc: 260, ens: false }]
+      .concat(c.upper.map((m, i) => ({ m, lv: 0.12 - i * 0.006, fc: 1100, ens: true })))
+      .concat(c.upper.slice(-2).map((m) => ({ m: m + 12, lv: 0.022, fc: 1, ens: false, air: true })));
+    parts.forEach((pt, j) => {
       for (let ch = 0; ch < 2; ch++) {
-        // one true voice, the same left and right (so no note ever fades away), and a much
-        // quieter one a hair off — sharp on one side, flat on the other — for warmth and width
-        voices.push({ f: whole(freq(n.m)), lv: n.lv, ch, start: at, len });
-        if (n.cents) voices.push({ f: whole(freq(n.m) * Math.pow(2, (ch ? n.cents : -n.cents) / 1200)), lv: n.lv * 0.3, ch, start: at, len });
+        const det = pt.ens ? ENSEMBLE[ch] : [pt.air ? (ch ? 3 : -3) : 0];
+        det.forEach((cents, k) => {
+          const f = whole(freq(pt.m) * Math.pow(2, cents / 1200));
+          voices.push({ f, table: tableFor(f, pt.fc), lv: pt.lv / Math.sqrt(det.length), ch, start: at, len, ph: ((j * 7 + k * 13 + ch * 5) % 17) / 17 });
+        });
       }
-    }
+    });
     at += len;
   });
   // a chord's loudness through the pass: up over FADE before its start, held, down over FADE after its end (wrapping round)
@@ -141,14 +172,16 @@ function padWav(progId, key) {
   const TAU = 2 * Math.PI;
   const buf = [new Float64Array(n), new Float64Array(n)];
   for (const v of voices) {
-    const out = buf[v.ch];
+    const out = buf[v.ch], tb = v.table;
     for (let s = 0; s < n; s++) {
       const t = s / SR;
       const e = env(v, t);
       if (!e) continue;
-      const a = TAU * v.f * t;
-      // a warm tone: the note, a little of its octave and its twelfth
-      out[s] += v.lv * e * (Math.sin(a) + 0.18 * Math.sin(2 * a) + 0.05 * Math.sin(3 * a));
+      // where in its wave this voice is (whole cycles in a pass, so the end meets the start)
+      let x = (v.f * t + v.ph) % 1;
+      x *= TABLE;
+      const i = x | 0;
+      out[s] += v.lv * e * (tb[i] + (tb[i + 1] - tb[i]) * (x - i));
     }
   }
   for (let s = 0; s < n; s++) {
@@ -175,12 +208,12 @@ function makePad(ffmpeg, progId, key, out) {
   const passes = Math.max(1, Math.round(TARGET / pass));
   const length = passes * pass;
   const fc = [
-    '[0:a]lowpass=f=3600,highpass=f=50[dry]',
+    '[0:a]lowpass=f=5000,highpass=f=50,equalizer=f=320:t=q:w=1:g=-2.5[dry]',
     '[dry]asplit[a][b]',
     // the room: a long soft tail (a pink-noise impulse fading over 4.5 s; no rumble in it)
-    '[a][1:a]afir=dry=2:wet=8[w]',
+    '[a][1:a]afir=dry=2:wet=10[w]',
     `[b][w]amix=inputs=2:weights=0.5 1:normalize=0,atrim=${pass}:${pass + length},asetpts=PTS-STARTPTS,`
-      + 'volume=0dB,alimiter=limit=0.8:level=false[out]',
+      + 'volume=2dB,alimiter=limit=0.8:level=false[out]',
   ].join(';');
   const args = ['-v', 'error', '-y', '-stream_loop', String(passes), '-i', dry,
     '-f', 'lavfi', '-i', `anoisesrc=d=4.5:c=pink:r=${SR}:a=0.5:seed=7,highpass=f=220,lowpass=f=7000,afade=t=out:st=0:d=4.5:curve=exp,aformat=channel_layouts=stereo`,
