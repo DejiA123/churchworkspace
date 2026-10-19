@@ -48,7 +48,7 @@ const SHAPE = {
   m7: [3, 7, 10], m9: [3, 7, 10, 14], m6: [3, 7, 9],
   dom9: [4, 10, 14], dom13: [4, 10, 14, 21], sus9: [5, 10, 14], sus7: [5, 7, 10],
 };
-/* [degree in semitones above the key's tonic, chord shape, length in beats] — one beat = 1.5 s */
+/* [degree in semitones above the key's tonic, chord shape, length in beats] — one beat = 0.8 s */
 const PROGRESSIONS = {
   w1564: { name: 'Worship 1-5-6-4', minor: false, chords: [[0, 'add9', 4], [7, 'add9', 4], [9, 'm7', 4], [5, 'maj9', 4]] },
   g251: { name: 'Gospel 2-5-1', minor: false, chords: [[2, 'm9', 4], [7, 'dom13', 4], [0, 'maj9', 4], [0, 'maj9', 4]] },
@@ -65,7 +65,7 @@ const SHELF = [
   ['minor', ['A', 'E', 'D']], ['soak41', ['D', 'E', 'A']], ['plagal', ['Bb', 'C', 'F']],
   ['hymn', ['G', 'D', 'F']], ['e6415', ['C', 'E', 'G']],
 ];
-const BEAT = 1.5;
+const BEAT = 0.8;
 
 const freq = (midi) => 440 * Math.pow(2, (midi - 69) / 12);
 
@@ -111,7 +111,7 @@ function padWav(progId, key) {
   const chords = voiceProgression(prog, NOTE[key]);
   const pass = chords.reduce((a, c) => a + c.beats * BEAT, 0);
   const whole = (f) => Math.max(1, Math.round(f * pass)) / pass;   // whole cycles in a pass: no seam
-  const FADE = 4.5;                                                   // how long one chord swells into the next (slow: soft)
+  const FADE = 1.6;                                                   // how long one chord swells into the next (under a chord)
   /*
    * THE SOUND: a soft string pad — the Area 51 / Nord soft pad kind, not an organ.
    * Every note is an ENSEMBLE: three voices a few cents apart on each side (as a
