@@ -1641,6 +1641,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     });
   }
   let PAINTED = false;   // buildScene: the preacher is painted into the picture itself — no cut-out on top
+  let PAGE_W = 1080;     // buildScene: how wide the page being built is (a flyer 1080, a YouTube thumbnail 1280)
   function hero(sp, o) {
     if (PAINTED) return null;
     const im = imgOf(sp.img); if (!im) return null;
@@ -1656,7 +1657,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     if (o.minL != null) X = Math.max(X, o.minL + w / 2);
     // never the face off the page: whatever the layout asked, the head stays inside it
     { const hb = headBox(m, fr, k, X - w / 2, o.t, im), pad = 24;
-      if (hb.r > W - pad) X -= hb.r - (W - pad); else if (hb.l < pad) X += pad - hb.l; }
+      if (hb.r > PAGE_W - pad) X -= hb.r - (PAGE_W - pad); else if (hb.l < pad) X += pad - hb.l; }
     return IM(Object.assign({
       img: sp.img, name: sp.name || 'Speaker', speaker: sp.id || '', photo: sp.photo || '',
       src: { x: 0, y: fr.t / m.h, w: 1, h: (vb - fr.t) / m.h },
@@ -2634,7 +2635,150 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       return L;
     },
   };
-  const LOOK_NAMES = { glory: 'Glory', fire: 'Fire', encounter: 'Encounter', miracle: 'Spotlight', bible: 'Golden classic', prophetic: 'Gold', sunday: 'Giant words', lineup: 'Line-up', script: 'Script', scenic: 'Scenic', light: 'Light', joinus: 'Join us', didone: 'Elegant', upper: 'Upper Room', theme: 'Theme picture', mountain: 'Sky letters', breaking: 'Breaking', spirit: 'Gold line-up',
+  /* ════════ YOUTUBE THUMBNAILS (Home → Thumbnails) — 1280×720, the way church channels make them ════════
+   *
+   * A thumbnail is read at the size of a stamp, in a feed, in half a second:
+   * the preacher big (a face is what people tap), three to five HUGE words,
+   * the one that carries it in the accent colour, everything else dark enough
+   * that the words are read first. Six looks, each one a thumbnail you see on
+   * the big church channels: bold words beside the preacher; a coloured panel
+   * with the key word in a box; the frame itself, cinematic; light rays and a
+   * glowing cut-out; the classic thick-outlined YouTube words; one giant word
+   * behind the preacher. D.frame is the video's own frame, D.sp[0] the
+   * preacher cut out of it, D.bg the painted picture (or the frame again).
+   */
+  // the words broken the way thumbnail designers break them: the word that carries it on a line of its own
+  function thumbLines(text, key) {
+    const words = String(text || '').toUpperCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return [];
+    const bare = (w) => w.replace(/[^\w’']/g, '');
+    const chunk = (ws, max) => {
+      const out = []; let cur = [];
+      ws.forEach((w) => { if (cur.length && cur.concat(w).join(' ').length > max) { out.push(cur.join(' ')); cur = [w]; } else cur.push(w); });
+      if (cur.length) out.push(cur.join(' '));
+      return out;
+    };
+    const k = key ? words.findIndex((w) => bare(w) === bare(String(key).toUpperCase())) : -1;
+    const build = (max) => {
+      if (k < 0) return chunk(words, max).map((t) => ({ text: t, key: false }));
+      const L = chunk(words.slice(0, k), max).map((t) => ({ text: t, key: false }))
+        .concat({ text: words[k], key: true }, chunk(words.slice(k + 1), max).map((t) => ({ text: t, key: false })));
+      // a lone little word ("IS", "TO") does not get a line of its own: it joins the line next to it
+      for (let i = 0; i < L.length; i++) {
+        if (L[i].key || L[i].text.length > 3 || L.length < 2) continue;
+        const j = L[i + 1] && !L[i + 1].key ? i + 1 : L[i - 1] && !L[i - 1].key ? i - 1 : -1;
+        if (j < 0) continue;
+        const a = Math.min(i, j); L.splice(a, 2, { text: L[a].text + ' ' + L[a + 1].text, key: false }); i = -1;
+      }
+      return L;
+    };
+    let lines = build(11);
+    if (lines.length > 4) lines = build(16);
+    if (lines.length > 4) lines = build(24);
+    return lines;
+  }
+  /* the words as a stacked block: every line as wide as the block, the key line taller, in the accent */
+  function titleBlock(D, o) {
+    const lines = thumbLines(D.f.title || 'Your words here', D.f.key);
+    const H = D.h, n = Math.max(1, lines.length), hasKey = lines.some((l) => l.key);
+    const total = o.maxH || H * 0.8, gap = o.gap == null ? Math.round(H * 0.014) : o.gap;
+    const unit = (total - gap * (n - 1)) / (n - 1 + (hasKey ? 1.45 : 1));
+    const base = Object.assign({ font: 'Anton', upper: true, fill: '#ffffff', shadow: true, align: o.align || 'left' }, o.style || {});
+    const list = lines.map((l, i) => T(Object.assign({}, base, l.key ? Object.assign({ fill: D.pal.accent }, o.keyStyle || {}) : {},
+      { name: n > 1 ? 'Title ' + (i + 1) : 'Title', text: l.text, fit: o.w, maxH: unit * (l.key ? 1.45 : 1), size: 200, key: l.key || undefined })));
+    const q = { gap }; if (o.l != null) q.l = o.l; else if (o.r != null) q.r = o.r; else q.cx = o.cx;
+    if (o.t != null) q.t = o.t; else if (o.b != null) q.b = o.b; else q.cy = o.cy == null ? H / 2 : o.cy;
+    return col(list, q);
+  }
+  /* the preacher, cut out, standing at the edge with the head near the top: as big as a thumbnail wants a face */
+  function preacher(D, o) {
+    const sp = sp0(D); if (!sp) return null;
+    return hero(sp, Object.assign({ t: D.h * 0.05, b: D.h + 12, mode: 'chest', fade: 0.12 }, o));
+  }
+  /* which side the words go: away from the face (in the frame, when nobody was cut out) */
+  const wordsLeft = (D) => (sp0(D) ? true : !(D.face && D.face.x < 0.45));
+  const THUMBS = {
+    /* ── BOLD: the frame blurred dark behind, the preacher big on the right, huge words on the left ── */
+    ytbold(D) {
+      const W2 = D.w, H = D.h, p = D.pal, L = [], sp = sp0(D), left = wordsLeft(D);
+      // (blurred right out where the preacher is cut out of it: the same person twice, sharp and ghosted, looks wrong)
+      L.push(BG({ img: D.frame || D.bg, blur: sp ? 42 : 2, bright: sp ? -46 : -18, sat: -15, contrast: 8, vignette: 0.6, grain: 0.4,
+        colorWash: [{ stops: left ? [rgba(p.deep, 0.92), rgba(p.deep, 0.5), rgba(p.deep, 0)] : [rgba(p.deep, 0), rgba(p.deep, 0.5), rgba(p.deep, 0.92)], angle: 0, mode: 'source-over', a: 1 }] }));
+      if (sp) {
+        L.push(FX({ kind: 'glow', x: W2 * 0.73, y: H * 0.42, w: 980, h: 900, color: p.accent, opacity: 0.32 }));
+        L.push(preacher(D, { cx: W2 * 0.73, minL: W2 * 0.46, extra: { rim: rgba('#ffffff', 0.85), rimW: 1.4, glow: rgba(p.accent, 0.3) } }));
+      }
+      L.push(...titleBlock(D, left ? { l: 54, w: W2 * (sp ? 0.5 : 0.56), cy: H * 0.5 } : { r: W2 - 54, w: W2 * 0.56, cy: H * 0.5, align: 'right' }));
+      return L;
+    },
+    /* ── PANEL: a painted picture, a deep panel on the left, the key word in a coloured box ── */
+    ytpanel(D) {
+      const W2 = D.w, H = D.h, p = D.pal, L = [], sp = sp0(D);
+      L.push(BG({ img: D.bg || D.frame, blur: 3, contrast: 12, sat: 10, vignette: 0.35, grain: 0.3 }));
+      L.push(SH({ name: 'Panel', shape: 'rect', x: W2 * 0.3, y: H / 2, w: W2 * 0.64, h: H + 4, fill: { stops: [rgba(p.deep, 0.97), rgba(p.deep, 0.9), rgba(p.deep, 0)], angle: 0 } }));
+      if (sp) L.push(preacher(D, { cx: W2 * 0.74, minL: W2 * 0.48, extra: { glow: rgba('#000000', 0.45), rim: rgba(mix(p.accent, '#ffffff', 0.4), 0.6), rimW: 1.1 } }));
+      const tb = titleBlock(D, { l: 58, w: W2 * 0.47, cy: H * 0.5, keyStyle: { fill: p.deep, shadow: false } });
+      const kl = tb.find((l) => l.key);
+      if (kl) {
+        const b = box(kl);
+        L.push(...turn([SH({ name: 'Word box', shape: 'rect', x: b.l + b.w / 2, y: (b.t + b.b) / 2, w: b.w + 34, h: b.h + 26, fill: p.accent, shadow: true })], -2, b.l + b.w / 2, (b.t + b.b) / 2));
+        turn([kl], -2, b.l + b.w / 2, (b.t + b.b) / 2);
+      }
+      L.push(...tb);
+      L.push(SH({ name: 'Line', shape: 'rect', x: 58 + 60, y: tb.top - 26, w: 120, h: 9, fill: p.accent }));
+      return L;
+    },
+    /* ── CINEMATIC: the frame itself, graded like a film, the words low on the side away from the face ── */
+    ytcinema(D) {
+      const W2 = D.w, H = D.h, p = D.pal, L = [], left = !(D.face && D.face.x < 0.45);
+      L.push(BG({ img: D.frame || D.bg, blur: 0, contrast: 14, sat: -8, vignette: 0.6, bottomShade: 0.9, bottomFrom: 0.4, grain: 0.5,
+        colorWash: [{ stops: ['#0b4f6c', '#e07a2e'], angle: 0, mode: 'soft-light', a: 0.35 }, { stops: left ? [rgba('#000000', 0.75), rgba('#000000', 0)] : [rgba('#000000', 0), rgba('#000000', 0.75)], angle: 0, mode: 'source-over', a: 1 }] }));
+      const tb = titleBlock(D, left ? { l: 60, w: W2 * 0.44, b: H - 60, maxH: H * 0.62 } : { r: W2 - 60, w: W2 * 0.44, b: H - 60, maxH: H * 0.62, align: 'right' });
+      L.push(...tb);
+      L.push(SH({ name: 'Line', shape: 'rect', x: left ? 60 + 45 : W2 - 60 - 45, y: tb.top - 24, w: 90, h: 7, fill: p.accent }));
+      return L;
+    },
+    /* ── GLORY: rays of light, the preacher cut out and glowing, the key word in gold leaf ── */
+    ytglow(D) {
+      const W2 = D.w, H = D.h, p = D.pal, L = [], sp = sp0(D);
+      L.push(BG({ img: D.bg || D.frame, blur: D.bg ? 2 : 16, bright: -12, contrast: 10, vignette: 0.5, grain: 0.3, colorWash: [{ stops: [rgba(p.deep, 0.85), rgba(p.deep, 0.15)], angle: 0, mode: 'source-over', a: 1 }] }));
+      L.push(FX({ kind: 'rays', x: W2 * 0.7, y: -60, w: 1400, h: 1000, color: p.accent, color2: '#ffffff', opacity: 0.5, seed: 7, n: 18 }));
+      L.push(FX({ kind: 'glow', x: W2 * 0.7, y: H * 0.38, w: 900, h: 760, color: mix(p.accent, '#ffffff', 0.3), opacity: 0.42 }));
+      if (sp) L.push(preacher(D, { cx: W2 * 0.71, minL: W2 * 0.47, extra: { outline: '#ffffff', glow: rgba(p.accent, 0.55) } }));
+      L.push(...titleBlock(D, { l: 54, w: W2 * 0.5, cy: H * 0.52, style: { extrude: 3, extrudeColor: rgba(mix(p.deep, '#000000', 0.5), 0.9) },
+        keyStyle: { fill: '#ffffff', imgFill: 'tex:gold', imgFillA: 1, bevel: 0.9, extrudeColor: ['#6b3a04', '#1e0f01'] } }));
+      return L;
+    },
+    /* ── OUTLINE: the classic — the preacher on the left with a white edge, tilted words with a thick black outline ── */
+    ytoutline(D) {
+      const W2 = D.w, H = D.h, p = D.pal, L = [], sp = sp0(D);
+      L.push(BG({ img: sp ? D.bg || D.frame : D.frame || D.bg, blur: sp ? (D.bg ? 3 : 42) : 1, sat: 25, bright: sp ? -24 : -8, contrast: 10, vignette: 0.45,
+        colorWash: [{ radial: true, x: 0.72, y: 0.45, r: 0.7, stops: [rgba(p.accent, 0.45), rgba(p.accent, 0)], mode: 'screen', a: 0.7 }] }));
+      if (sp) L.push(preacher(D, { cx: W2 * 0.27, maxR: W2 * 0.54, extra: { outline: '#ffffff', glow: rgba('#000000', 0.5) } }));
+      const right = !!sp || wordsLeft(D) === false;
+      const tb = titleBlock(D, right ? { r: W2 - 46, w: W2 * 0.52, cy: H * 0.5, align: 'right', style: { edge: 5, edgeColor: '#000000', shadow: true }, keyStyle: { edge: 5, edgeColor: '#000000' } }
+        : { l: 46, w: W2 * 0.52, cy: H * 0.5, style: { edge: 5, edgeColor: '#000000', shadow: true }, keyStyle: { edge: 5, edgeColor: '#000000' } });
+      turn(tb, -4, right ? W2 * 0.72 : W2 * 0.28, H * 0.5);
+      L.push(...tb);
+      return L;
+    },
+    /* ── ONE WORD: the word that carries it, giant, behind the preacher; the rest of the line along the foot ── */
+    ytword(D) {
+      const W2 = D.w, H = D.h, p = D.pal, L = [], sp = sp0(D);
+      const lines = thumbLines(D.f.title || 'Your words here', D.f.key);
+      const kw = (lines.find((l) => l.key) || lines.slice().sort((a, b) => b.text.length - a.text.length)[0] || { text: 'FAITH' }).text;
+      const all = String(D.f.title || '').toUpperCase().split(/\s+/).filter(Boolean), at = all.indexOf(kw);
+      const before = at > 0 ? all.slice(0, at).join(' ') : '', after = at >= 0 ? all.slice(at + 1).join(' ') : all.filter((w) => w !== kw).join(' ');
+      L.push(BG({ img: D.bg || D.frame, blur: 8, bright: -42, sat: -20, vignette: 0.5, bottomShade: 0.95, bottomFrom: 0.62, grain: 0.4 }));
+      L.push(put(T({ name: 'Word', text: kw, font: 'Anton', upper: true, fit: W2 * 0.94, maxH: H * (before ? 0.54 : sp ? 0.66 : 0.5), size: 300, fill: { stops: [mix(p.accent, '#ffffff', 0.35), p.accent], angle: 90 }, shadow: true, key: true }), { cx: W2 / 2, cy: H * (before ? 0.5 : sp ? 0.42 : 0.4) }));
+      if (sp) L.push(preacher(D, { cx: W2 * 0.5, t: H * 0.1, extra: { glow: rgba('#000000', 0.55), rim: rgba('#ffffff', 0.5), rimW: 1 } }));
+      if (before) L.push(put(T({ name: 'Title 1', text: before, font: 'Montserrat Black', upper: true, size: 58, maxW: W2 * 0.86, fill: '#ffffff', shadow: true, letter: 0.03 }), { cx: W2 / 2, t: 26 }));
+      if (after) L.push(put(T({ name: 'Title 2', text: after, font: 'Montserrat Black', upper: true, size: 64, maxW: W2 * 0.9, fill: '#ffffff', shadow: true, letter: 0.02 }), { cx: W2 / 2, b: H - 34 }));
+      return L;
+    },
+  };
+  const THUMB_LOOKS = Object.keys(THUMBS);
+  const LOOK_NAMES = { ytbold: 'Bold', ytpanel: 'Panel', ytcinema: 'Cinematic', ytglow: 'Glory light', ytoutline: 'Outline', ytword: 'One word', glory: 'Glory', fire: 'Fire', encounter: 'Encounter', miracle: 'Spotlight', bible: 'Golden classic', prophetic: 'Gold', sunday: 'Giant words', lineup: 'Line-up', script: 'Script', scenic: 'Scenic', light: 'Light', joinus: 'Join us', didone: 'Elegant', upper: 'Upper Room', theme: 'Theme picture', mountain: 'Sky letters', breaking: 'Breaking', spirit: 'Gold line-up',
     ailetter: 'AI lettering', jericho: 'Bright hour', unique: 'Bright duo', thanks: 'Bright sky', mantle: 'Cream & gold', urgency: 'Line-up stage', harvest: 'Rows' };
   /* each look's own colours (the AI's colours go on the first few designs; these on the rest, for variety) */
   const SIGNATURE = {
@@ -2681,7 +2825,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const dir = o.dir || {};
     const pal = o.pal || { deep: '#1a0638', mid: '#5b21b6', accent: '#f5c542', hi: '#ffffff' };
     return {
-      w: o.w || 1080, h: o.h || 1350, pal, dir, f, bg: o.bg, logo: o.logo,
+      w: o.w || 1080, h: o.h || 1350, pal, dir, f, bg: o.bg, logo: o.logo, frame: o.frame || null, face: o.face || null,
       sp: (o.speakers || []).map((s) => ({ name: s.name, img: s.img, id: s.id, photo: s.photo })),
       script: scriptWordFor(dir.scriptWord, f.title, dp),
       d: dp ? { day3: dp.day.slice(0, 3), day: dp.day, dayName: dp.dayName, ddn: dp.dd.replace(/\D+$/, ''), ddth: dp.dd, month: dp.month, mon3: dp.month.slice(0, 3), year: dp.year } : null,
@@ -2691,11 +2835,14 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   /** A whole flyer: { w, h, pal, look, layers } */
   function buildScene(o) {
     const D = dataFor(o);
-    const look = LAYOUTS[o.look] ? o.look : 'glory';
+    // a YouTube thumbnail's looks (THUMBS) or a flyer's
+    const book = THUMBS[o.look] ? THUMBS : LAYOUTS;
+    const look = book[o.look] ? o.look : 'glory';
     PAINTED = !!o.painted;
     VAR = o.variant || null;
+    PAGE_W = D.w;
     let layers;
-    try { layers = LAYOUTS[look](D).filter(Boolean); } finally { PAINTED = false; VAR = null; }
+    try { layers = book[look](D).filter(Boolean); } finally { PAINTED = false; VAR = null; PAGE_W = W; }
     keepTitleClear(layers, D.h);
     if (o.variant) {
       if (o.variant.mirror) mirrorLayers(layers, D.w);
@@ -2711,7 +2858,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     // every soft shadow in the flyer's own darkest colour (a black one is a sticker's)
     const tint = rgba(mix(D.pal.deep, '#000000', 0.5), 0.62);
     layers.forEach((l) => { if (l.type === 'text' && l.shadow && !l.shadowColor) l.shadowColor = tint; });
-    return { w: D.w, h: D.h, pal: D.pal, look, painted: !!o.painted, variant: o.variant || null, layers };
+    return { w: D.w, h: D.h, pal: D.pal, look, painted: !!o.painted, variant: o.variant || null, frame: D.frame, face: D.face, layers };
   }
 
   /* A cut-out, tidied — the upload path keeps a data URL (see tidyCanvas). */
@@ -2804,6 +2951,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     designs: [],           // scenes offered
     scene: null, sel: null, undo: [], redo: [],
     painting: 0, tries: 0,
+    mode: 'flyer',         // 'flyer' | 'thumb' (a YouTube thumbnail: the same studio, made from a video)
+    th: { video: null, photo: null, frames: [], pick: 0, custom: null, dur: 0, ideas: null, line: '', key: '', ask: 0, bgs: [], person: '', frameKey: '' },
   };
   const sizeOf = () => SIZES.find((s) => s.id === F.size) || SIZES[0];
 
@@ -2879,6 +3028,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
 
   async function open(opts) {
     opts = opts || {};
+    F.mode = 'flyer';
     F.panel = C.openPanel({ id: 'cloudFlyer', title: 'Flyers', cls: 'cp-flyer', full: true, onClose: () => { F.panel = null; } });
     F.panel.body.innerHTML = '<div class="fs-loading">Opening the flyer studio…</div>';
     loadFonts();
@@ -2915,6 +3065,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
 
   function draw() {
     if (!F.panel) return;
+    if (F.step === 'tmake') return drawThumbMake();
     if (F.step === 'make') return drawMake();
     if (F.step === 'pick') return drawPick();
     return drawEdit();
@@ -3412,15 +3563,15 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const P = F.panel; if (!P) return;
     P.setTitle('Pick one');
     P.el.classList.remove('fs-editing');
-    const busy = !F.designs.length;
-    P.body.innerHTML = `<div class="fs-pick">
-      <p class="fs-status">${busy ? 'The AI is reading your event…' : F.painting > 0 ? `<i class="fs-spin"></i> Painting ${F.painting} picture${F.painting > 1 ? 's' : ''} with AI — they appear as they’re ready` : 'Tap one to edit every part of it'}</p>
+    const busy = !F.designs.length, thumb = F.mode === 'thumb';
+    P.body.innerHTML = `<div class="fs-pick${thumb ? ' th-pick' : ''}">
+      <p class="fs-status">${busy ? (thumb ? '<i class="fs-spin"></i> Getting the moment ready…' : 'The AI is reading your event…') : thumb && F.th.cutting ? '<i class="fs-spin"></i> Cutting the preacher out of the picture…' : F.painting > 0 ? `<i class="fs-spin"></i> Painting ${F.painting} picture${F.painting > 1 ? 's' : ''} with AI — they appear as they’re ready` : 'Tap one to edit every part of it'}</p>
       ${!busy && F.status && F.status.note ? `<p class="fs-allow">${esc(F.status.note)}</p>` : ''}
       <div class="fs-grid">${busy ? '<div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div>' : F.designs.map((d, i) => `<button type="button" class="fs-card" data-i="${i}"><canvas></canvas><small>${esc(d.label || LOOK_NAMES[d.look] || d.look)}</small>${madeByTag(d.madeBy)}</button>`).join('')}</div>
-      ${!busy && F.board && F.board.shown < F.board.order.length ? `<button type="button" class="fs-ghost fs-more" data-act="more">${ic('layout')}<span>${BOARD_N} more designs</span></button>` : ''}
+      ${!busy && !thumb && F.board && F.board.shown < F.board.order.length ? `<button type="button" class="fs-ghost fs-more" data-act="more">${ic('layout')}<span>${BOARD_N} more designs</span></button>` : ''}
     </div>`;
     // one board at a time: "New pictures" waits until this one is painted (each tap used to start five more paintings)
-    P.foot.innerHTML = `<button type="button" class="fs-ghost" data-act="back">${ic('back')}<span>Details</span></button><button type="button" class="fs-ghost" data-act="again"${F.painting > 0 || busy ? ' disabled' : ''}>${ic('refresh')}<span>New pictures</span></button>`;
+    P.foot.innerHTML = `<button type="button" class="fs-ghost" data-act="back">${ic('back')}<span>${thumb ? 'Back' : 'Details'}</span></button><button type="button" class="fs-ghost" data-act="again"${F.painting > 0 || busy ? ' disabled' : ''}>${ic('refresh')}<span>New pictures</span></button>`;
     paintThumbs();
     P.body.onclick = (e) => {
       if (e.target.closest('[data-act="more"]')) {
@@ -3429,12 +3580,12 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         morePictures(F.board.shown - from);
         return;
       }
-      const c = e.target.closest('.fs-card'); if (c) { const d = F.designs[+c.dataset.i]; markLiked(d && d.look, 1); openEditor(d); }
+      const c = e.target.closest('.fs-card'); if (c) { const d = F.designs[+c.dataset.i]; if (!thumb) markLiked(d && d.look, 1); openEditor(d); }
     };
     P.foot.onclick = (e) => {
       const b = e.target.closest('[data-act]'); if (!b) return;
-      if (b.dataset.act === 'back') { F.step = 'make'; F.tries++; drawMake(); }
-      if (b.dataset.act === 'again' && !(F.painting > 0) && !b.disabled) makeFlyers();
+      if (b.dataset.act === 'back') { F.tries++; if (thumb) { F.step = 'tmake'; drawThumbMake(); } else { F.step = 'make'; drawMake(); } }
+      if (b.dataset.act === 'again' && !(F.painting > 0) && !b.disabled) { if (thumb) makeThumbs(); else makeFlyers(); }
     };
   }
   function paintThumbs() {
@@ -3446,6 +3597,295 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const px = Math.max(240, Math.round((cv.clientWidth || 170) * (window.devicePixelRatio || 1)));
       render(S, cv, px / S.w);
     });
+  }
+
+  /* ============================================================ THUMBNAILS */
+  /*
+   * ►► THE YOUTUBE THUMBNAIL STUDIO (Home → Thumbnails, or "Thumbnail" on any
+   * video in My Uploads). ◄◄ The same studio as the flyers — the board of
+   * designs, then every layer to tap, drag and change — made from a VIDEO:
+   *
+   *   1. the video: the server looks through it and offers its best moments of
+   *      the preacher (thumbmaker.frames), or any moment scrubbed to, or a photo;
+   *   2. the words: the server listens to the sermon and an AI writes the lines
+   *      a church channel would put on it (thumbmaker.ideas) — or type your own,
+   *      and tap the word that should be in colour;
+   *   3. Make: the preacher is cut out of that moment on this phone, the free AI
+   *      paints backgrounds while the board is already up (the frame itself
+   *      stands in), six YouTube looks. Save gives a 1920×1080 JPEG under 2 MB
+   *      — what YouTube Studio takes for a custom thumbnail.
+   */
+  const TH = { w: 1280, h: 720 };
+  const TH_PALS = [
+    { deep: '#0b1020', mid: '#1d3a8a', accent: '#ffd60a', hi: '#ffffff' },
+    { deep: '#0c0905', mid: '#3d2a0e', accent: '#f5c542', hi: '#ffffff' },
+    { deep: '#14040a', mid: '#7a0f1f', accent: '#ff3b30', hi: '#ffffff' },
+    { deep: '#03161a', mid: '#0e5c66', accent: '#2ee6d6', hi: '#ffffff' },
+    { deep: '#12061f', mid: '#4c1d95', accent: '#ffb020', hi: '#ffffff' },
+    { deep: '#08130a', mid: '#14532d', accent: '#a3ff47', hi: '#ffffff' },
+  ];
+  const fieldsNow = () => (F.mode === 'thumb' ? { title: F.th.line, key: F.th.key } : F.fields);
+  const fmtT = (s) => { s = Math.max(0, Math.round(+s || 0)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
+  const baseName = (p) => String(p || '').split(/[\\/]/).pop().replace(/\.[a-z0-9]+$/i, '');
+
+  async function openThumb(opts) {
+    opts = opts || {};
+    F.mode = 'thumb';
+    F.panel = C.openPanel({ id: 'cloudFlyer', title: 'Thumbnails', cls: 'cp-flyer cp-thumb', full: true, onClose: () => { F.panel = null; F.mode = 'flyer'; } });
+    loadFonts();
+    if (!F.status) window.api.flyer.status().then((st) => { F.status = st; }).catch(() => {});
+    F.step = 'tmake';
+    if (opts.video && opts.video !== F.th.video) setThumbVideo(opts.video);
+    draw();
+  }
+
+  /* a video chosen: its best moments and the words for it, both asked for at once */
+  function setThumbVideo(p) {
+    const t = F.th;
+    Object.assign(t, { video: p, photo: null, frames: [], pick: 0, custom: null, dur: 0, err: '', ideas: null, scrub: false, line: '', key: '', typed: false });
+    const ask = ++t.ask;
+    t.loadingFrames = true; t.loadingIdeas = true;
+    window.api.thumb.frames(p, 6).then((r) => {
+      if (ask !== t.ask) return;
+      t.frames = (r && r.frames) || []; t.dur = (r && r.dur) || 0; t.by = (r && r.by) || '';
+    }).catch((e) => { if (ask === t.ask) t.err = (e && e.message) || 'Could not read that video.'; })
+      .finally(() => { if (ask === t.ask) { t.loadingFrames = false; if (F.step === 'tmake') drawThumbMake(); } });
+    window.api.thumb.ideas(p, '').then((r) => {
+      if (ask !== t.ask || !r) return;
+      t.ideas = r;
+      // the AI's first line is on it already (the operator only changes it if they want)
+      if (!t.typed && r.lines && r.lines[0]) { t.line = r.lines[0].text; t.key = r.lines[0].key; }
+    }).catch(() => {}).finally(() => { if (ask === t.ask) { t.loadingIdeas = false; if (F.step === 'tmake') drawThumbMake(); } });
+  }
+
+  function thumbPickSrc() {
+    const t = F.th;
+    if (t.photo) return { url: t.photo, photo: true };
+    if (t.custom) return t.custom;
+    return t.frames[t.pick] || t.frames[0] || null;
+  }
+
+  function drawThumbMake() {
+    const P = F.panel; if (!P) return;
+    if (typingIn(P.body)) {
+      if (!F._redraw) { F._redraw = true; P.body.addEventListener('focusout', () => setTimeout(() => { F._redraw = false; if (F.step === 'tmake' && !typingIn(F.panel && F.panel.body)) drawThumbMake(); }, 60), { once: true }); }
+      return;
+    }
+    const t = F.th, src = thumbPickSrc();
+    P.setTitle('Thumbnails');
+    P.el.classList.remove('fs-editing');
+    const tiles = t.loadingFrames ? '<div class="th-fr th-ph"><i class="fs-spin"></i></div>'.repeat(4)
+      : t.frames.map((f, i) => `<button type="button" class="th-fr${!t.photo && !t.custom && t.pick === i ? ' on' : ''}" data-fr="${i}"><img src="${escAttr(f.url)}" alt=""><small>${esc(fmtT(f.t))}</small>${i === 0 && t.by === 'ai' ? '<em>AI pick</em>' : ''}</button>`).join('');
+    const custom = t.custom ? `<button type="button" class="th-fr on" data-act="scrub"><img src="${escAttr(t.custom.url)}" alt=""><small>${esc(fmtT(t.custom.t))}</small></button>` : '';
+    const photo = t.photo ? `<button type="button" class="th-fr on" data-act="photo"><img src="${escAttr(t.photo)}" alt=""><small>Your photo</small></button>` : '';
+    const words = String(t.line || '').toUpperCase().split(/\s+/).filter(Boolean);
+    const lines = (t.ideas && t.ideas.lines) || [];
+    P.body.innerHTML = `
+      <div class="fs-make th-make">
+        <section class="fs-sec">
+          <h3>Video</h3>
+          ${t.video ? `<button type="button" class="th-vid" data-act="vid">${src && !t.photo ? `<img src="${escAttr(src.url)}" alt="">` : `<span class="th-vid-ph">${ic('photo')}</span>`}<span><b>${esc(baseName(t.video))}</b><small>${t.dur ? esc(fmtT(t.dur)) + ' · ' : ''}tap to choose another</small></span>${ic('back').replace('fs-ic', 'fs-ic fs-chev')}</button>`
+            : `<button type="button" class="th-choose" data-act="vid">${ic('photo')}<span><b>Choose a video</b><small>a sermon, a short — anything you made or uploaded</small></span></button>`}
+        </section>
+        ${t.video || t.photo ? `<section class="fs-sec">
+          <h3>The moment <small>${t.loadingFrames ? 'looking through the video…' : 'the best shots of the preacher, best first'}</small></h3>
+          ${t.err ? `<p class="fs-note th-err">${esc(t.err)}</p>` : ''}
+          <div class="th-frames">${photo}${custom}${tiles}
+            ${t.video ? `<button type="button" class="th-fr th-tool" data-act="scrub">${ic('layout')}<small>Pick a moment</small></button>` : ''}
+            <button type="button" class="th-fr th-tool" data-act="photo">${ic('photo')}<small>Use a photo</small></button>
+          </div>
+          ${t.scrub && t.video ? `<div class="th-scrub"><div class="th-scrub-pic">${t.scrubUrl ? `<img src="${escAttr(t.scrubUrl)}" alt="">` : '<i class="fs-spin"></i>'}</div>
+            <input type="range" min="0" max="${Math.max(1, Math.floor(t.dur || 1))}" step="0.5" value="${t.scrubT || 0}" data-th="scrub" aria-label="Moment in the video">
+            <div class="th-scrub-row"><span data-th="scrubT">${esc(fmtT(t.scrubT || 0))}</span><button type="button" class="fs-go th-use" data-act="usemoment">Use this moment</button></div></div>` : ''}
+        </section>` : ''}
+        <section class="fs-sec fs-form">
+          <h3>Words on it <small>3 to 5 big words work best</small></h3>
+          <label class="fs-f fs-wide"><input data-th="line" value="${escAttr(t.line)}" maxlength="40" placeholder="GOD IS NOT DONE WITH YOU" ${TXT('characters')}></label>
+          ${words.length > 1 ? `<div class="th-keys"><small>The word in colour:</small>${words.map((w) => `<button type="button" class="th-key${w.replace(/[^\w’']/g, '') === String(t.key || '').toUpperCase().replace(/[^\w’']/g, '') ? ' on' : ''}" data-key="${escAttr(w)}">${esc(w)}</button>`).join('')}</div>` : ''}
+          <div class="th-ideas">${t.loadingIdeas && t.video ? '<p class="th-listening"><i class="fs-spin"></i> Listening to the sermon for ideas…</p>'
+            : lines.map((l) => `<button type="button" class="th-idea${l.text === String(t.line || '').toUpperCase() ? ' on' : ''}" data-idea="${escAttr(l.text)}" data-ikey="${escAttr(l.key)}">${esc(l.text)}</button>`).join('')}</div>
+          ${t.ideas && !t.loadingIdeas ? `<p class="fs-note">${t.ideas.by === 'rules' ? (t.ideas.heard ? 'Ideas from what was said in the sermon.' : 'A few strong lines to start from — or type your own.') : 'Written by AI from what was preached' + (t.ideas.heard ? '' : ' (no speech could be heard, so these are general)') + '.'}</p>` : ''}
+        </section>
+      </div>`;
+    P.foot.innerHTML = `<button type="button" class="fs-go" data-act="tmake"${src && String(t.line || '').trim() ? '' : ' disabled'}>${ic('spark')}<span>Make thumbnails</span></button>`;
+    wireThumbMake();
+  }
+
+  let scrubTimer = 0;
+  function wireThumbMake() {
+    const P = F.panel, t = F.th;
+    const line = $('[data-th="line"]', P.body);
+    if (line) {
+      line.addEventListener('input', () => {
+        t.line = line.value; t.typed = true;
+        const ws = line.value.toUpperCase().split(/\s+/).filter(Boolean);
+        if (!ws.some((w) => w.replace(/[^\w’']/g, '') === String(t.key || '').toUpperCase().replace(/[^\w’']/g, ''))) t.key = ws.slice().sort((a, b) => b.length - a.length)[0] || '';
+        const go = $('[data-act="tmake"]', P.foot); if (go) go.disabled = !(thumbPickSrc() && line.value.trim());
+      });
+      line.addEventListener('change', () => drawThumbMake());
+      line.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); line.blur(); } });
+    }
+    const sl = $('[data-th="scrub"]', P.body);
+    if (sl) {
+      sl.addEventListener('input', () => {
+        t.scrubT = +sl.value;
+        const lab = $('[data-th="scrubT"]', P.body); if (lab) lab.textContent = fmtT(t.scrubT);
+        clearTimeout(scrubTimer);
+        scrubTimer = setTimeout(async () => {
+          const at = t.scrubT;
+          try {
+            const r = await window.api.thumb.frameAt(t.video, at, 640);
+            if (at !== t.scrubT || !F.panel) return;
+            t.scrubUrl = r.url;
+            const box = $('.th-scrub-pic', F.panel.body); if (box) box.innerHTML = `<img src="${escAttr(r.url)}" alt="">`;
+          } catch (e) { /* the last picture stays */ }
+        }, 220);
+      });
+    }
+    P.body.onclick = async (e) => {
+      const b = e.target.closest('[data-act],[data-fr],[data-key],[data-idea]'); if (!b) return;
+      if (b.dataset.fr != null) { t.pick = +b.dataset.fr; t.custom = null; t.photo = null; return drawThumbMake(); }
+      if (b.dataset.key) { t.key = b.dataset.key; return drawThumbMake(); }
+      if (b.dataset.idea) { t.line = b.dataset.idea; t.key = b.dataset.ikey || ''; t.typed = true; return drawThumbMake(); }
+      const a = b.dataset.act;
+      if (a === 'vid') {
+        let p = null;
+        try { p = await window.api.dialog.openFile([{ name: 'Videos', extensions: ['mp4', 'mov', 'm4v', 'webm', 'mkv'] }]); } catch (er) { p = null; }
+        if (Array.isArray(p)) p = p[0];
+        if (p && typeof p === 'string') { setThumbVideo(p); drawThumbMake(); }
+        return;
+      }
+      if (a === 'photo') return pickImage((url) => { t.photo = url; t.custom = null; drawThumbMake(); }, { max: 1920 });
+      if (a === 'scrub') {
+        t.scrub = !t.scrub;
+        if (t.scrub && t.scrubT == null) t.scrubT = Math.round((t.frames[t.pick] && t.frames[t.pick].t) || (t.dur || 0) / 2);
+        drawThumbMake();
+        if (t.scrub) { const s2 = $('[data-th="scrub"]', F.panel.body); if (s2) s2.dispatchEvent(new Event('input')); }
+        return;
+      }
+      if (a === 'usemoment') {
+        try {
+          const r = await window.api.thumb.frameAt(t.video, t.scrubT || 0, 1280);
+          t.custom = { t: r.t, url: r.url, face: null }; t.photo = null; t.scrub = false;
+        } catch (er) { toast('That moment could not be read: ' + (er.message || er), 'error'); }
+        return drawThumbMake();
+      }
+    };
+    P.foot.onclick = (e) => { const b = e.target.closest('[data-act="tmake"]'); if (b && !b.disabled) makeThumbs(); };
+  }
+
+  /* the preacher cut out of the picture, on this phone (the flyers' cut-out): a key into IMGS, or '' when nobody is in it */
+  async function cutPreacher(src, tryNo) {
+    if (!root.FlyerAI || !root.FlyerAI.removePerson) return '';
+    try {
+      const r = await root.FlyerAI.removePerson(src);
+      if (!r || !(r.coverage > 0.015)) return '';
+      const png = await tidyCut(r.src).catch(() => r.src);
+      const pr = await preparePerson(await loadImg(png));
+      const key = 'thp:' + tryNo;
+      IMGS.set(key, pr.img); if (pr.meta) META.set(key, pr.meta);
+      return key;
+    } catch (e) { return ''; }
+  }
+
+  async function makeThumbs() {
+    const t = F.th, src = thumbPickSrc();
+    if (!src || !String(t.line || '').trim()) return;
+    F.tries++;
+    const tryNo = F.tries;
+    Object.assign(t, { bgs: [], person: '', frameKey: '', face: src.face || null, painting: 0, cutting: true });
+    F.step = 'pick'; F.designs = []; F.painting = 0;
+    drawPick();
+    await loadFonts();
+    // the moment, sharp (the board showed a smaller copy)
+    let full = src.url;
+    if (!src.photo && t.video && src.t != null) { try { full = (await window.api.thumb.frameAt(t.video, src.t, 1920)).url; } catch (e) { full = src.url; } }
+    if (tryNo !== F.tries) return;
+    const fk = 'thf:' + tryNo;
+    try { IMGS.set(fk, await loadImg(full)); } catch (e) { toast('That picture could not be opened.', 'error'); F.step = 'tmake'; return drawThumbMake(); }
+    t.frameKey = fk;
+    // the words decide the pictures and the colours (the flyers' art director), the sermon's own ideas first
+    const ideaScenes = (t.ideas && t.ideas.scenes) || [];
+    let dir = null;
+    try { dir = await window.api.flyer.direct({ title: t.line, theme: (t.ideas && t.ideas.title) || '', kind: 'sermon', notes: ideaScenes.join('; ') }); } catch (e) { dir = null; }
+    if (tryNo !== F.tries) return;
+    const pp = (dir && dir.palette) || [];
+    t.pal = pp.length === 4 ? { deep: pp[0], mid: pp[1], accent: pp[2], hi: pp[3] } : TH_PALS[0];
+    // a thumbnail's accent must shout: a dull one from the director is swapped for yellow
+    if (lum(t.pal.accent) < 0.45) t.pal = Object.assign({}, t.pal, { accent: '#ffd60a' });
+    t.palOrder = shuffled(TH_PALS);
+    F.dir = Object.assign({}, dir || {}, { scenes: ideaScenes.concat((dir && dir.scenes) || []).slice(0, 6) });
+    if (!F.dir.scenes.length) F.dir.scenes = ['golden light rays breaking through dark storm clouds, photograph'];
+    // the app's own photographs stand in until the AI's paintings come
+    const stock = await Promise.all(((dir && dir.photos) || []).slice(0, 2).map(async (n) => {
+      try { const key = 'stock:' + n; if (!IMGS.has(key)) IMGS.set(key, await loadImg('/flyerphotos/' + encodeURIComponent(n))); return { key, by: 'photo', proc: true }; } catch (e) { return null; }
+    }));
+    t.bgs = stock.filter(Boolean);
+    // the board goes up straight away with the frame; the cut-out joins it a moment later
+    rebuildThumbs();
+    t.person = await cutPreacher(full, tryNo);
+    t.cutting = false;
+    if (tryNo !== F.tries) return;
+    rebuildThumbs();
+    // three AI pictures behind the preacher, each swapped in as it lands
+    const scenes = F.dir.scenes.slice(0, 3);
+    F.painting = scenes.length;
+    if (F.step === 'pick') drawPick();
+    await Promise.all(scenes.map(async (scene, i) => {
+      try {
+        const out = await window.api.flyer.paint({ scene, w: TH.w, h: TH.h, seed: Math.floor(Math.random() * 1e9), people: true, slot: i, tone: 'own', event: { title: String(t.line).slice(0, 80), theme: '', kind: 'sermon' } });
+        if (tryNo !== F.tries) return;
+        let im = await loadImg(picSrc(out));
+        if (/pollinations/i.test(out.by || '')) im = cropBottom(im, 0.06);
+        const key = 'tha:' + tryNo + ':' + i;
+        IMGS.set(key, im);
+        t.bgs = t.bgs.filter((b) => !b.proc).concat({ key, by: out.by || '' }, t.bgs.filter((b) => b.proc)).slice(0, 4);
+        rebuildThumbs();
+      } catch (e) { /* the frame and the photographs stand in */ }
+      finally { if (tryNo === F.tries) { F.painting--; if (F.step === 'pick') drawPick(); } }
+    }));
+  }
+
+  /* the board: six YouTube looks, the preacher and the words on each, the painted pictures shared out */
+  function rebuildThumbs() {
+    const t = F.th;
+    const order = t.person ? ['ytbold', 'ytglow', 'ytpanel', 'ytword', 'ytoutline', 'ytcinema'] : ['ytcinema', 'ytbold', 'ytoutline', 'ytpanel', 'ytglow', 'ytword'];
+    const painted = new Set(['ytglow', 'ytpanel', 'ytword']);
+    let n = 0;
+    F.designs = order.map((look, i) => {
+      const bg = painted.has(look) && t.bgs.length ? t.bgs[n++ % t.bgs.length] : null;
+      const pal = i === 0 ? t.pal : t.palOrder[i % t.palOrder.length];
+      return Object.assign(buildScene({ look, w: TH.w, h: TH.h, pal, dir: F.dir || {}, fields: fieldsNow(), speakers: t.person ? [{ id: 'thumb', name: '', img: t.person }] : [],
+        bg: bg ? bg.key : null, frame: t.frameKey, face: t.face }), { madeBy: (bg && bg.by) || '' });
+    });
+    if (F.step === 'pick') drawPick();
+  }
+
+  /* the thumbnail as YouTube takes it: 1920×1080 JPEG, under 2 MB */
+  async function thumbBlob() {
+    const S = F.scene, k = 1920 / S.w;
+    const cv = render(S, canvas(1, 1), k);
+    try {
+      for (const q of [0.92, 0.86, 0.8, 0.72, 0.62]) {
+        const b = await new Promise((res) => cv.toBlob(res, 'image/jpeg', q));
+        if (b && b.size < 1.95 * 1048576) return b;
+      }
+      const small = canvas(1280, 720); small.getContext('2d').drawImage(cv, 0, 0, 1280, 720);
+      return await new Promise((res) => small.toBlob(res, 'image/jpeg', 0.85));
+    } finally { cv.width = cv.height = 1; }
+  }
+  const thumbName = () => `${(String(F.th.line || '').replace(/[^\w' ]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Thumbnail').slice(0, 60)} thumbnail.jpg`;
+  /* "Keep": the thumbnail in My Uploads, beside the video (for the scheduler, or another phone) */
+  async function keepThumb(btn) {
+    btn.disabled = true;
+    const label = btn.querySelector('span'); const was = label.textContent; label.textContent = 'Keeping…';
+    try {
+      const blob = await thumbBlob();
+      const p = await C.uploadFile(new File([blob], thumbName(), { type: 'image/jpeg' }));
+      if (!p || typeof p !== 'string') throw new Error('it did not reach the studio');
+      toast('Kept in My Uploads.', 'good');
+    } catch (e) { toast('Could not keep it: ' + (e.message || e), 'error'); }
+    finally { btn.disabled = false; label.textContent = was; }
   }
 
   /* ============================================================ THE EDITOR */
@@ -3476,7 +3916,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         <button type="button" class="fs-tb" data-ed="undo" aria-label="Undo" disabled>${ic('undo')}</button>
         <button type="button" class="fs-tb" data-ed="redo" aria-label="Redo" disabled>${ic('redo')}</button>
         <button type="button" class="fs-tb fs-save" data-ed="save">${ic('save')}<span>Save</span></button>
-        <button type="button" class="fs-tb fs-post" data-ed="post">${ic('send')}<span>Post</span></button>
+        <button type="button" class="fs-tb fs-post" data-ed="post">${F.mode === 'thumb' ? ic('photo') + '<span>Keep</span>' : ic('send') + '<span>Post</span>'}</button>
       </div>
       <div class="fs-stage" id="fsStage"><canvas id="fsCanvas"></canvas><div class="fs-selbox hidden" id="fsSel"><i class="fs-h fs-h-rot"></i><i class="fs-h fs-h-br"></i></div></div>
       <div class="fs-tools" id="fsTools"></div>
@@ -3494,7 +3934,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       if (a === 'undo' && F.undo.length) { F.redo.push(clone(F.scene)); F.scene = F.undo.pop(); fixSel(); paint(); tools(); syncUndo(); }
       if (a === 'redo' && F.redo.length) { F.undo.push(clone(F.scene)); F.scene = F.redo.pop(); fixSel(); paint(); tools(); syncUndo(); }
       if (a === 'save') saveFlyer(b);
-      if (a === 'post') postFlyer(b);
+      if (a === 'post') { if (F.mode === 'thumb') keepThumb(b); else postFlyer(b); }
     };
   }
   function fixSel() { if (F.sel && !layerById(F.sel)) F.sel = null; }
@@ -3634,7 +4074,10 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const btn = (act, icon, label) => `<button type="button" class="fs-tool" data-t="${act}">${ic(icon)}<span>${label}</span></button>`;
     let html;
     if (!L || L.type === 'bg') {
-      html = btn('addtext', 'text', 'Text') + btn('addphoto', 'photo', 'Photo') + btn('bgnew', 'spark', 'New picture') + btn('bgphone', 'bg', 'Background')
+      html = F.mode === 'thumb'
+        ? btn('words', 'words', 'Words') + btn('looks', 'layout', 'Layouts') + btn('colours', 'palette', 'Colours') + btn('bgnew', 'spark', 'New picture') + btn('bgframe', 'photo', 'Video frame')
+          + btn('bgphone', 'bg', 'Background') + btn('bgadjust', 'sun', 'Adjust') + btn('addtext', 'text', 'Text') + btn('addphoto', 'photo', 'Photo')
+        : btn('addtext', 'text', 'Text') + btn('addphoto', 'photo', 'Photo') + btn('bgnew', 'spark', 'New picture') + btn('bgphone', 'bg', 'Background')
         + btn('bgadjust', 'sun', 'Adjust') + btn('colours', 'palette', 'Colours') + btn('looks', 'layout', 'Layouts') + btn('words', 'words', 'Details') + btn('size', 'size', 'Size');
     } else if (L.type === 'text') {
       html = btn('edit', 'words', 'Edit') + btn('font', 'font', 'Font') + btn('colour', 'palette', 'Colour') + btn('effects', 'fx', 'Effects')
@@ -3674,7 +4117,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       case 'bgadjust': return sliders([['Brightness', 'bright', -60, 60], ['Contrast', 'contrast', -50, 80], ['Colour', 'sat', -100, 100], ['Blur', 'blur', 0, 25], ['Tint', 'tint', 0, 1, 0.05], ['Edges', 'vignette', 0, 1, 0.05]], ls.find((l) => l.type === 'bg'));
       case 'colours': return sheetPalettes();
       case 'looks': return sheetLooks();
-      case 'words': F.step = 'make'; return drawMake();
+      case 'words': if (F.mode === 'thumb') { F.step = 'tmake'; return drawThumbMake(); } F.step = 'make'; return drawMake();
+      case 'bgframe': if (F.scene.frame && IMGS.has(F.scene.frame)) change(() => { const b = ls.find((l) => l.type === 'bg'); if (b) { b.img = F.scene.frame; b.blur = 2; } }); return;
       case 'size': return sheetSizes();
       case 'edit': return editText();
       case 'font': return sheetFonts();
@@ -3832,13 +4276,14 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const bg = F.scene.layers.find((l) => l.type === 'bg');
     const sz = { w: F.scene.w, h: F.scene.h };
     const sp = sceneSpeakers();
-    const S = buildScene(Object.assign({ look: F.scene.look, w: sz.w, h: sz.h, pal: F.scene.pal, dir: F.dir, fields: F.fields, speakers: sp, logo: IMGS.has('logo') ? 'logo' : null, bg: bg && bg.img }, o));
+    const S = buildScene(Object.assign({ look: F.scene.look, w: sz.w, h: sz.h, pal: F.scene.pal, dir: F.dir, fields: fieldsNow(), speakers: sp, logo: IMGS.has('logo') ? 'logo' : null, bg: bg && bg.img, frame: F.scene.frame, face: F.scene.face }, o));
     snapshot();
     F.scene = S; F.sel = null; paint(); tools();
   }
   /* the speakers as this flyer has them now (a photo swapped in the editor stays swapped) */
   function sceneSpeakers() {
-    return speakersFor(0).map((s) => {
+    const base = F.mode === 'thumb' ? (F.th.person ? [{ id: 'thumb', name: '', img: F.th.person }] : []) : speakersFor(0);
+    return base.map((s) => {
       const L = F.scene && F.scene.layers.find((l) => l.speaker === s.id && l.photo);
       return L ? Object.assign(s, { photo: L.photo, img: L.img }) : s;
     });
@@ -3853,11 +4298,12 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     });
   }
   function sheetLooks() {
-    openSheet(`<div class="fs-looks">${Object.keys(LAYOUTS).map((k) => `<button type="button" class="fs-look${F.scene.look === k ? ' on' : ''}" data-look="${k}"><canvas></canvas><small>${esc(LOOK_NAMES[k])}</small></button>`).join('')}</div>`, (sh) => {
+    const looks = F.mode === 'thumb' ? THUMB_LOOKS : Object.keys(LAYOUTS);
+    openSheet(`<div class="fs-looks${F.mode === 'thumb' ? ' th-looks' : ''}">${looks.map((k) => `<button type="button" class="fs-look${F.scene.look === k ? ' on' : ''}" data-look="${k}"><canvas></canvas><small>${esc(LOOK_NAMES[k])}</small></button>`).join('')}</div>`, (sh) => {
       const bg = F.scene.layers.find((l) => l.type === 'bg');
       const sp = sceneSpeakers();
       $$('.fs-look', sh).forEach((b) => {
-        const S = buildScene({ look: b.dataset.look, w: F.scene.w, h: F.scene.h, pal: F.scene.pal, dir: F.dir, fields: F.fields, speakers: sp, logo: IMGS.has('logo') ? 'logo' : null, bg: bg && bg.img });
+        const S = buildScene({ look: b.dataset.look, w: F.scene.w, h: F.scene.h, pal: F.scene.pal, dir: F.dir, fields: fieldsNow(), speakers: sp, logo: IMGS.has('logo') ? 'logo' : null, bg: bg && bg.img, frame: F.scene.frame, face: F.scene.face });
         const big = render(S, canvas(1, 1), 0.34), cv = $('canvas', b);
         cv.width = 150; cv.height = Math.round(150 * S.h / S.w); cv.getContext('2d').drawImage(big, 0, 0, cv.width, cv.height);
       });
@@ -3962,8 +4408,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const scenes = (F.dir && F.dir.scenes) || ['heavenly golden light rays through dramatic clouds'];
     toast('Painting a new picture with AI…', '', 4000);
     try {
-      const out = await window.api.flyer.paint({ scene: scenes[Math.floor(Math.random() * scenes.length)], w: F.scene.w, h: F.scene.h, seed: Math.floor(Math.random() * 1e9), people: chosenSpeakers().some((s) => (s.photos || []).length) });
-      const im = await loadImg(out.dataUrl); const key = 'ai:' + uid(); IMGS.set(key, im);
+      const out = await window.api.flyer.paint({ scene: scenes[Math.floor(Math.random() * scenes.length)], w: F.scene.w, h: F.scene.h, seed: Math.floor(Math.random() * 1e9), people: F.mode === 'thumb' || chosenSpeakers().some((s) => (s.photos || []).length) });
+      const im = await loadImg(picSrc(out)); const key = 'ai:' + uid(); IMGS.set(key, im);
       change(() => { bg.img = key; });
     } catch (e) { toast('The AI could not paint just now: ' + (e.message || e), 'error', 8000); }
   }
@@ -4031,12 +4477,12 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     }
   }
   async function saveFlyer(btn) {
-    noteUsed();
-    markLiked(F.scene && F.scene.look, 3);
+    const thumb = F.mode === 'thumb';
+    if (!thumb) { noteUsed(); markLiked(F.scene && F.scene.look, 3); }
     btn.disabled = true;
     try {
-      const blob = await flyerBlob();
-      const file = new File([blob], fileName(), { type: 'image/jpeg' });
+      const blob = thumb ? await thumbBlob() : await flyerBlob();
+      const file = new File([blob], thumb ? thumbName() : fileName(), { type: 'image/jpeg' });
       // an iPhone saves a picture to Photos from the share sheet
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         try { await navigator.share({ files: [file] }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
@@ -4264,5 +4710,5 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
 
   /* "My church" straight from Home (This week → Edit) */
   async function openKitAlone(onSaved) { await loadKit(); openKit(onSaved); }
-  root.MWFlyerStudio = { open, openKit: openKitAlone, _state: F, _rebuild: () => rebuildDesigns() };
+  root.MWFlyerStudio = { open, openThumb, openKit: openKitAlone, _state: F, _rebuild: () => rebuildDesigns() };
 })();

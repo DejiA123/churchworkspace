@@ -775,6 +775,11 @@ ipcMain.handle('machine:info', wrap(async () => {
 
 /* Flyers (Home → Flyers): the AI paints the picture, the phone sets the words — see flyerart.js. */
 const flyerart = require('./flyerart');
+/* YouTube thumbnails (Home → Thumbnails): the best frames, any moment, and the words to set — see thumbmaker.js. */
+const thumbmaker = require('./thumbmaker');
+ipcMain.handle('thumb:frames', wrap(async (e, a) => thumbmaker.frames(getCtx(), a || {})));
+ipcMain.handle('thumb:frameAt', wrap(async (e, a) => thumbmaker.frameAt(getCtx(), a || {})));
+ipcMain.handle('thumb:ideas', wrap(async (e, a) => thumbmaker.ideas(getCtx(), a || {})));
 ipcMain.handle('flyer:status', wrap(async () => flyerart.status()));
 ipcMain.handle('flyer:direct', wrap(async (e, a) => flyerart.direct((a && a.fields) || {})));
 ipcMain.handle('flyer:paint', wrap(async (e, a) => flyerart.paint(a || {})));

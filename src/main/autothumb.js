@@ -63,7 +63,6 @@ function mainFace(people) {
  * Returns { atSec, by: 'ai' | 'detector' | 'detail', why }.
  */
 async function pickMoment(ctx, { input, searchEnd, outroSec = 0, n = 14, info }) {
-  const pd = require('./persondetect');
   // never the ending card: the file's length less the outro (plus a second), whatever the pieces were thought to add up to
   const fileEnd = info && info.durationSec ? info.durationSec - (outroSec > 0 ? outroSec + 1 : 0) : Infinity;
   const dur = Math.max(0.2, Math.min(searchEnd > 0 ? searchEnd : Infinity, fileEnd > 0.5 ? fileEnd : Infinity, (info && info.durationSec) || searchEnd || 0));
@@ -71,6 +70,36 @@ async function pickMoment(ctx, { input, searchEnd, outroSec = 0, n = 14, info })
   const a = Math.min(1.0, dur * 0.1), b = Math.max(a + 0.1, dur - Math.min(1.0, dur * 0.1));
   const times = [];
   for (let i = 0; i < n; i++) times.push(+(a + ((i + 0.5) / n) * (b - a)).toFixed(3));
+  const cands = await rankFrames(ctx, input, times);
+  if (!cands.length) return { atSec: +(dur * 0.3).toFixed(3), by: 'none', why: 'no frames could be read' };
+  const lead = cands[0];
+  if (!lead.face) return { atSec: lead.t, by: 'detail', why: 'nobody could be found in shot: the clearest frame' };
+  // the finalists: the best few, not two from the same second
+  const fin = [];
+  for (const c of cands) {
+    if (!c.face || c.score - 1 < (lead.score - 1) * 0.72) continue;   // (1 is the bonus for a face at all)
+    if (fin.some((x) => Math.abs(x.t - c.t) < 1.2)) continue;
+    fin.push(c);
+    if (fin.length === 4) break;
+  }
+  if (fin.length < 2) return { atSec: lead.t, by: 'detector', why: 'the speaker, sharpest and best framed' };
+  try {
+    const cs = require('./cloudsee');
+    if (!cs.ready()) return { atSec: lead.t, by: 'detector', why: 'the speaker, sharpest and best framed' };
+    const image = await strip(ctx, input, fin.map((c) => c.t));
+    const r = image ? await cs.pickThumb({ image, count: fin.length }) : { ok: false };
+    if (r.ok) return { atSec: fin[r.best].t, by: 'ai', why: r.why || '' };
+  } catch (e) { /* the detector's own pick stands */ }
+  return { atSec: lead.t, by: 'detector', why: 'the speaker, sharpest and best framed' };
+}
+
+/**
+ * Each of `times` (seconds into `input`) looked at and scored as a thumbnail,
+ * best first: { t, score, whole, face, people }. A score over 1 has the
+ * speaker in it (the YouTube thumbnail maker, thumbmaker.js, asks for many).
+ */
+async function rankFrames(ctx, input, times) {
+  const pd = require('./persondetect');
   const canSee = pd.available();
   const cands = [];
   for (const t of times) {
@@ -94,7 +123,6 @@ async function pickMoment(ctx, { input, searchEnd, outroSec = 0, n = 14, info })
     }
     cands.push(c);
   }
-  if (!cands.length) return { atSec: +(dur * 0.3).toFixed(3), by: 'none', why: 'no frames could be read' };
   const maxWhole = Math.max(1e-6, ...cands.map((c) => c.whole.sharp));
   const maxFace = Math.max(1e-6, ...cands.filter((c) => c.face).map((c) => c.face.sharp));
   for (const c of cands) {
@@ -113,25 +141,7 @@ async function pickMoment(ctx, { input, searchEnd, outroSec = 0, n = 14, info })
     c.score = 1 + size * height * (0.6 + 0.4 * centre) * (0.35 + 0.65 * sharp) * (0.3 + 0.7 * expo) * (0.85 + 0.15 * (f.score || 0)) * crowd;
   }
   cands.sort((x, y) => y.score - x.score);
-  const lead = cands[0];
-  if (!lead.face) return { atSec: lead.t, by: 'detail', why: 'nobody could be found in shot: the clearest frame' };
-  // the finalists: the best few, not two from the same second
-  const fin = [];
-  for (const c of cands) {
-    if (!c.face || c.score - 1 < (lead.score - 1) * 0.72) continue;   // (1 is the bonus for a face at all)
-    if (fin.some((x) => Math.abs(x.t - c.t) < 1.2)) continue;
-    fin.push(c);
-    if (fin.length === 4) break;
-  }
-  if (fin.length < 2) return { atSec: lead.t, by: 'detector', why: 'the speaker, sharpest and best framed' };
-  try {
-    const cs = require('./cloudsee');
-    if (!cs.ready()) return { atSec: lead.t, by: 'detector', why: 'the speaker, sharpest and best framed' };
-    const image = await strip(ctx, input, fin.map((c) => c.t));
-    const r = image ? await cs.pickThumb({ image, count: fin.length }) : { ok: false };
-    if (r.ok) return { atSec: fin[r.best].t, by: 'ai', why: r.why || '' };
-  } catch (e) { /* the detector's own pick stands */ }
-  return { atSec: lead.t, by: 'detector', why: 'the speaker, sharpest and best framed' };
+  return cands;
 }
 
 /** The finalists side by side, as one small JPEG data URL (one picture costs the free AI far less than four). */
@@ -153,4 +163,4 @@ async function strip(ctx, input, times) {
   } finally { try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {} }
 }
 
-module.exports = { pickMoment, detail, mainFace, strip };
+module.exports = { pickMoment, rankFrames, detail, mainFace, strip };

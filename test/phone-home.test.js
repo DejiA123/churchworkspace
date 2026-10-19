@@ -45,7 +45,7 @@ const up = async () => { for (let k = 0; k < 80; k++) { try { await new Promise(
     await page.waitForFunction(() => window.MWSocial && window.MWSocial.openMontage && document.getElementById('cloudHome'), null, { timeout: 30000 });
     await sleep(1200);
     if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'home.png') });
-    // Church Space's own home (design D): the New project card, the six app icons, this week's services, a bottom bar
+    // Church Space's own home (design D): the New project card, the seven app icons (Thumbnails the seventh), this week's services, a bottom bar
     const lay = await page.evaluate(() => ({
       name: (document.querySelector('#cloudHome .ch-name') || {}).textContent,
       newCard: !!document.querySelector('#cloudHome .ch-new'),
@@ -54,8 +54,8 @@ const up = async () => { for (let k = 0; k < 80; k++) { try { await new Promise(
       bar: document.querySelectorAll('#cloudHome .ch-bar button').length,
       wheel: !!document.querySelector('#cloudHome .ch-wheel'),
     }));
-    check(lay.name === 'Church Space' && lay.newCard && lay.icons === 6 && lay.week && lay.bar === 4 && !lay.wheel,
-      'the home is Church Space\'s own: New project, six app icons, This week, the bottom bar (no rolling banner)', lay);
+    check(lay.name === 'Church Space' && lay.newCard && lay.icons === 7 && lay.week && lay.bar === 4 && !lay.wheel,
+      'the home is Church Space\'s own: New project, seven app icons, This week, the bottom bar (no rolling banner)', lay);
     // tap the lit name's line: it goes to that thing
     const hello = await page.evaluate(() => document.getElementById('chHello').textContent);
     check(/^Good (morning|afternoon|evening), Deji$/.test(hello), 'the greeting is under the name', hello);

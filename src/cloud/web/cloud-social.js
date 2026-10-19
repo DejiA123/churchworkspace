@@ -315,6 +315,7 @@
           <button type="button" class="ch-tool" data-tool="shorts">${TI('t-shorts', mi('scissors'))}<span class="ch-tool-tx">AI Shorts</span></button>
           <button type="button" class="ch-tool" data-tool="captions">${TI('t-caps', mi('captions'))}<span class="ch-tool-tx">Captions</span></button>
           <button type="button" class="ch-tool ch-flyer" data-home="flyers">${TI('t-flyer', mi('image'))}<span class="ch-tool-tx">Flyers</span></button>
+          <button type="button" class="ch-tool ch-thumb" data-home="thumbs">${TI('t-thumb', mi('thumbnail'))}<span class="ch-tool-tx">Thumbnails</span></button>
           <button type="button" class="ch-tool ch-montage" data-home="montage">${TI('t-montage', mi('sparkles'))}<span class="ch-tool-tx">AI Montage</span></button>
           <button type="button" class="ch-tool ch-social" data-go="scheduler" id="chSocialCard">${TI('t-post', mi('send') + '<i class="ch-badge hidden" id="chSocialBadge"></i>')}<span class="ch-tool-tx">Post</span>
             <small id="chSocialFoot"></small><span class="ch-marks" id="chMarks"></span></button>
@@ -356,6 +357,7 @@
       if (b.dataset.home === 'files') return $('#cloudFiles') && $('#cloudFiles').click();
       if (b.dataset.home === 'me') return C.openProfile && C.openProfile();
       if (b.dataset.home === 'montage') return openMontage();
+      if (b.dataset.home === 'thumbs') return openThumbs();
       if (b.dataset.home === 'flyers') return openFlyers(b.dataset.occ ? { occasion: b.dataset.occ } : undefined);
       if (b.dataset.home === 'kit') return window.MWFlyerStudio && window.MWFlyerStudio.openKit ? window.MWFlyerStudio.openKit(() => renderWeek()) : openFlyers();
       if (b.dataset.post) return compose({ files: [b.dataset.post] });
@@ -392,6 +394,12 @@
   function openFlyers(opts) {
     if (window.MWFlyerStudio) return window.MWFlyerStudio.open(opts);
     C.toast('The flyer studio is still loading — try again in a moment.');
+  }
+
+  /* the YouTube thumbnail studio (cloud-flyer.js, Thumbnail mode) */
+  function openThumbs(opts) {
+    if (window.MWFlyerStudio && window.MWFlyerStudio.openThumb) return window.MWFlyerStudio.openThumb(opts);
+    C.toast('The thumbnail studio is still loading — try again in a moment.');
   }
 
   /* AI Shorts or Captions from the front page: straight to the tool — a video first when none is open */

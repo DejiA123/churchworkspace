@@ -713,6 +713,11 @@ let _hideTimer = null;
       exportTo: (id, dest) => call('session:export', { id, dest }),
       importFrom: (src) => call('session:import', { src }),
     },
+    thumb: {
+      frames: (input, n) => call('thumb:frames', { input, n }),
+      frameAt: (input, t, width) => call('thumb:frameAt', { input, t, width }),
+      ideas: (input, hint) => call('thumb:ideas', { input, hint }),
+    },
     flyer: {
       status: () => call('flyer:status'),
       direct: (fields) => call('flyer:direct', { fields }),
@@ -3312,6 +3317,7 @@ let _hideTimer = null;
       + `<button type="button" class="cv-act cv-save" data-cv="save"><i class="cv-fill"></i>${mi('download')}<span>Save</span></button>`
       + (isVideo ? `<button type="button" class="cv-act" data-cv="studio">${mi('film')}<span>Edit</span></button>` : '')
       + (isVideo && /^montage-.*\.mp4$/i.test(name) && window.MWSocial && window.MWSocial.editMontage ? `<button type="button" class="cv-act" data-cv="shots">${mi('layers')}<span>Shots</span></button>` : '')
+      + (isVideo && window.MWFlyerStudio && window.MWFlyerStudio.openThumb ? `<button type="button" class="cv-act" data-cv="thumb">${mi('thumbnail')}<span>Thumbnail</span></button>` : '')
       + (isVideo && social ? `<button type="button" class="cv-act cv-primary" data-cv="post">${mi('send')}<span>Post</span></button>` : '')
       + '</div>';
     document.body.appendChild(v);
@@ -3328,6 +3334,7 @@ let _hideTimer = null;
       const act = b.dataset.cv;
       if (act === 'close') return close();
       if (act === 'save') return viewerSave(v, p);
+      if (act === 'thumb') { close(); const fm = $('#cloudFilesModal'); if (fm) fm.classList.add('hidden'); return window.MWFlyerStudio.openThumb({ video: p }); }
       if (act === 'shots') { close(); const fm = $('#cloudFilesModal'); if (fm) fm.classList.add('hidden'); return window.MWSocial.editMontage(p); }
       if (act === 'studio') {
         close();
@@ -4450,6 +4457,8 @@ let _hideTimer = null;
     'key': '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.8-9.8"/><path d="m17 6 3 3"/><path d="m14.5 8.5 2 2"/>',
     'external': '<path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/>',
     'list': '<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><circle cx="4" cy="6" r=".6"/><circle cx="4" cy="12" r=".6"/><circle cx="4" cy="18" r=".6"/>',
+    // a YouTube thumbnail: a 16:9 frame with the play mark
+    'thumbnail': '<rect width="20" height="13" x="2" y="5.5" rx="2.5"/><path d="m10 9.4 4.6 2.6-4.6 2.6z"/>',
     'wand-sparkle': '<path d="m15 4 5 5L8 21l-5-5z"/><path d="M13 6l5 5"/><path d="M5 2.5v3M3.5 4h3"/><path d="M19.5 15.5v3M18 17h3"/>',
   };
   /*
@@ -4481,7 +4490,7 @@ let _hideTimer = null;
     st.id = 'cloudPhoneIcons';
     const all = Object.assign({}, window.MWIcons.ICONS || {}, PHONE_ICONS, PHONE_SHAPES);
     const scope = (k) => ['.cloud-dock', '.cloud-bar', '.cloud-sheet-head', '.cloud-tl-add', '#view-video .ve-transport', '.cloud-export-sheet',
-      '.cloud-home', '.cloud-sched', '.cp-panel']
+      '.cloud-home', '.cloud-sched', '.cp-panel', '.cloud-viewer']
       .map((r) => `${r} .mi[data-i="${k}"]`).join(',');
     st.textContent = Object.keys(PHONE_ICONS)
       .map((k) => `.mi[data-i="${k}"]{--mi:${window.MWIcons.svgUri(PHONE_ICONS[k])}}`).join('\n')

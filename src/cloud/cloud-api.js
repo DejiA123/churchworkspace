@@ -221,6 +221,10 @@ const ALLOWED = {
   'montage:create': true,
   'montage:project': true,
   'montage:remake': true,
+  // 🖼 YouTube thumbnails: the best frames of a video, a frame at any moment, the words to set (thumbmaker.js)
+  'thumb:frames': true,
+  'thumb:frameAt': true,
+  'thumb:ideas': true,
   // 🎨 flyers: the AI paints a background, the kit keeps the church's details (flyerart.js)
   'flyer:status': true,
   'flyer:direct': true,
