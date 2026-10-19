@@ -232,7 +232,7 @@ async function waitUp() {
     for (let i = 0; i < 120; i++) {
       await sleep(500);
       pad = await page.evaluate(async () => ({ use: (document.querySelector('#libFreeList [data-freeuse="pad-g251-eb"]') || {}).textContent || '',
-        lib: (await window.api.library.list()).music.filter((m) => m.source === 'free:pad-g251-eb').map((m) => ({ name: m.name, d: m.durationSec })) }));
+        lib: (await window.api.library.list()).music.filter((m) => /^free:pad-g251-eb~/.test(m.source)).map((m) => ({ name: m.name, d: m.durationSec })) }));
       if (/In use/.test(pad.use)) break;
     }
     check(/In use/.test(pad.use) && pad.lib.length === 1 && pad.lib[0].name === 'Gospel 2-5-1 in Eb' && pad.lib[0].d > 170 && pad.lib[0].d < 200,

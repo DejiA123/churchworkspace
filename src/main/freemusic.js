@@ -94,6 +94,15 @@ const TRACKS = [
    * one is chosen (a few seconds), then kept in the music library like any song.
    */
   .concat(require('./padgen').shelf().map((p) => ({ id: p.id, title: p.title, artist: 'Church Space', mood: 'prayer', gen: { prog: p.prog, key: p.key } })));
+/*
+ * What a track is filed under in the music library. A worship pad carries the
+ * version of the sound it was made with: when the sound is made better, a pad
+ * made before is not served again — the next ▶ or Use makes it afresh (the old
+ * file stays in the library underneath, unseen, for any project still using it).
+ */
+const PAD_SOUND = 2;
+const srcOf = (t) => 'free:' + t.id + (t.gen ? '~' + PAD_SOUND : '');
+const idOfSource = (src) => String(src || '').slice(5).split('~')[0];
 
 // Mixkit's licence asks for no credit — the caption stays the church's own
 const credit = () => '';
@@ -131,7 +140,10 @@ function check() {
 async function list(library, { wait = false } = {}) {
   const p = check();
   if (wait) await p;
-  const have = new Map(((library && library.list().music) || []).filter((m) => /^free:/.test(m.source || '')).map((m) => [m.source.slice(5), m]));
+  const byId = new Map(TRACKS.map((t) => [t.id, t]));
+  const have = new Map(((library && library.list().music) || [])
+    .filter((m) => /^free:/.test(m.source || '') && byId.has(idOfSource(m.source)) && m.source === srcOf(byId.get(idOfSource(m.source))))
+    .map((m) => [idOfSource(m.source), m]));
   return {
     moods: MOODS.map(([id, name]) => ({ id, name })),
     // (the worship pads first on their shelf: they are what it is for)
@@ -173,13 +185,13 @@ function get(ctx, video, library, id) {
 async function getNow(ctx, video, library, id) {
   const t = TRACKS.find((x) => x.id === id);
   if (!t) throw new Error('That song is not on the free music shelf.');
-  const have = ((library.list().music) || []).find((m) => m.source === 'free:' + t.id && m.file && fs.existsSync(m.file));
+  const have = ((library.list().music) || []).find((m) => m.source === srcOf(t) && m.file && fs.existsSync(m.file));
   if (have) return Object.assign({}, have, { credit: credit(t) });
   const tmp = path.join(os.tmpdir(), `mw-free-${t.id}-${Date.now()}.mp3`);
   if (t.gen) {
     try { await require('./padgen').makePad(ctx.ffmpeg, t.gen.prog, t.gen.key, tmp); }
     catch (e) { try { fs.rmSync(tmp, { force: true }); } catch (er) {} throw new Error(`“${t.title}” could not be made right now (${e.message}).`); }
-    const made = await library.add(ctx, video, { kind: 'music', path: tmp, name: t.title, source: 'free:' + t.id, move: true });
+    const made = await library.add(ctx, video, { kind: 'music', path: tmp, name: t.title, source: srcOf(t), move: true });
     return Object.assign({}, made, { credit: credit(t) });
   }
   try {
@@ -190,7 +202,7 @@ async function getNow(ctx, video, library, id) {
     probe.ok.set(t.id, false);
     throw new Error(`“${t.title}” could not be fetched right now (${e.message}). Try another song.`);
   }
-  const entry = await library.add(ctx, video, { kind: 'music', path: tmp, name: t.title + ' by ' + t.artist, source: 'free:' + t.id, move: true });
+  const entry = await library.add(ctx, video, { kind: 'music', path: tmp, name: t.title + ' by ' + t.artist, source: srcOf(t), move: true });
   return Object.assign({}, entry, { credit: credit(t) });
 }
 
@@ -206,7 +218,7 @@ const RETIRED = ['Cipher', 'Inspired', 'Wholesome', 'Heartwarming', 'Ascending t
 ].map((title) => ({ id: title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), title }));
 const macLeod = (t) => `Music: “${t.title}” by Kevin MacLeod (incompetech.com) — licensed under Creative Commons: By Attribution 4.0`;
 function creditFor(entry) {
-  const id = entry && /^free:/.test(entry.source || '') ? entry.source.slice(5) : null;
+  const id = entry && /^free:/.test(entry.source || '') ? idOfSource(entry.source) : null;
   if (!id) return null;
   if (TRACKS.some((x) => x.id === id)) return credit() || null;
   const old = RETIRED.find((x) => x.id === id);
