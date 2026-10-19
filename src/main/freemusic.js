@@ -100,7 +100,7 @@ const TRACKS = [
  * made before is not served again — the next ▶ or Use makes it afresh (the old
  * file stays in the library underneath, unseen, for any project still using it).
  */
-const PAD_SOUND = 3;
+const PAD_SOUND = 4;
 const srcOf = (t) => 'free:' + t.id + (t.gen ? '~' + PAD_SOUND : '');
 const idOfSource = (src) => String(src || '').slice(5).split('~')[0];
 

@@ -111,7 +111,7 @@ function padWav(progId, key) {
   const chords = voiceProgression(prog, NOTE[key]);
   const pass = chords.reduce((a, c) => a + c.beats * BEAT, 0);
   const whole = (f) => Math.max(1, Math.round(f * pass)) / pass;   // whole cycles in a pass: no seam
-  const FADE = 3.6;                                                   // how long one chord swells into the next (slow: soft)
+  const FADE = 4.5;                                                   // how long one chord swells into the next (slow: soft)
   /*
    * THE SOUND: a soft string pad — the Area 51 / Nord soft pad kind, not an organ.
    * Every note is an ENSEMBLE: three voices a few cents apart on each side (as a
@@ -119,7 +119,7 @@ function padWav(progId, key) {
    * it lush and alive), each a warm, rounded wave: all of a saw's harmonics, but
    * rolled off softly from ~1 kHz, so it is full without any edge. The bass is
    * one soft, round voice (several low voices would throb). Over the top, an
-   * "air" layer — the top notes an octave up, pure and quiet — the heavenly bit.
+   * (no bright "air" layer on top any more: asked for soft, then softer).
    * Each wave is drawn once (a wavetable) and read round, so it is quick.
    */
   const TABLE = 2048;
@@ -140,15 +140,14 @@ function padWav(progId, key) {
     tables.set(k, t);
     return t;
   };
-  const ENSEMBLE = [[-5, -1, 4], [-4, 1, 5]];          // cents, left / right (close: a gentle shimmer, not a wobble)
+  const ENSEMBLE = [[-3, 0, 3], [-2, 1, 3]];           // cents, left / right (close: a gentle shimmer, not a wobble)
   const voices = [];
   let at = 0;
   chords.forEach((c) => {
     const len = c.beats * BEAT;
-    // SOFT: the overtones roll off from ~400 Hz (a muted, velvety tone — no edge at all)
-    const parts = [{ m: c.bass, lv: 0.1, fc: 200, ens: false }]
-      .concat(c.upper.map((m, i, all) => ({ m, lv: (i === all.length - 1 ? 0.085 : 0.12 - i * 0.008), fc: 380, ens: true })))   // the top note a little under the rest
-      .concat(c.upper.slice(-1).map((m) => ({ m: m + 12, lv: 0.007, fc: 1, ens: false, air: true })));   // a breath of air, no more
+    // SOFT: the overtones roll off from ~250 Hz (almost pure and round — a hint of warmth, no edge at all)
+    const parts = [{ m: c.bass, lv: 0.09, fc: 150, ens: false }]
+      .concat(c.upper.map((m, i, all) => ({ m, lv: (i === all.length - 1 ? 0.085 : 0.12 - i * 0.008), fc: 250, ens: true })))   // the top note a little under the rest
     parts.forEach((pt, j) => {
       for (let ch = 0; ch < 2; ch++) {
         const det = pt.ens ? ENSEMBLE[ch] : [pt.air ? (ch ? 3 : -3) : 0];
@@ -209,12 +208,12 @@ function makePad(ffmpeg, progId, key, out) {
   const passes = Math.max(1, Math.round(TARGET / pass));
   const length = passes * pass;
   const fc = [
-    '[0:a]lowpass=f=2600,lowpass=f=4000,highpass=f=50,equalizer=f=320:t=q:w=1:g=-2.5,equalizer=f=2500:t=q:w=1.2:g=-4[dry]',
+    '[0:a]lowpass=f=1800,lowpass=f=3000,highpass=f=50,equalizer=f=320:t=q:w=1:g=-2.5,equalizer=f=2200:t=q:w=1.2:g=-5[dry]',
     '[dry]asplit[a][b]',
     // the room: a long soft tail (a pink-noise impulse fading over 4.5 s; no rumble in it)
     '[a][1:a]afir=dry=2:wet=10[w]',
     `[b][w]amix=inputs=2:weights=0.5 1:normalize=0,atrim=${pass}:${pass + length},asetpts=PTS-STARTPTS,`
-      + 'volume=-1dB,alimiter=limit=0.7:level=false[out]',
+      + 'volume=-4dB,alimiter=limit=0.6:level=false[out]',
   ].join(';');
   const args = ['-v', 'error', '-y', '-stream_loop', String(passes), '-i', dry,
     '-f', 'lavfi', '-i', `anoisesrc=d=4.5:c=pink:r=${SR}:a=0.5:seed=7,highpass=f=220,lowpass=f=7000,afade=t=out:st=0:d=4.5:curve=exp,aformat=channel_layouts=stereo`,
