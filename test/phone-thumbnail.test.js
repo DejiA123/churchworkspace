@@ -88,14 +88,12 @@ async function until(page, fn, arg, ms = 30000) {
     // the painter stood in for: a gradient, at once (the real one is on the internet)
     await page.evaluate(() => {
       window.__painted = 0;
-      window.api.flyer.paint = async (a) => {
-        window.__painted++;
-        const c = document.createElement('canvas'); c.width = 1024; c.height = 576;
-        const x = c.getContext('2d'), g = x.createLinearGradient(0, 0, 1024, 576);
-        g.addColorStop(0, '#1b2a6b'); g.addColorStop(1, '#f5a623'); x.fillStyle = g; x.fillRect(0, 0, 1024, 576);
-        return { dataUrl: c.toDataURL('image/jpeg', 0.9), by: 'test painter', w: a.w, h: a.h };
-      };
+      // (the studio's own photographs stand in for the paintings: light, fire, a stage)
+      const pics = ['concert-fire-glow.jpg', 'sky-rays-dark.jpg', 'worship-blue.jpg'];
+      window.api.flyer.paint = async (a) => ({ dataUrl: '/flyerphotos/' + pics[window.__painted++ % pics.length], by: 'test painter', w: a.w, h: a.h });
     });
+    // the church's own name (the flyers' kit): the thumbnails are signed with it
+    await page.evaluate(async () => { const k = await window.api.flyer.kitGet(); await window.api.flyer.kitSave(Object.assign({}, k, { church: 'Grace Life Chapel' })); });
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'thumb-0-home.png') });
 
     // ── Home → Thumbnails
@@ -149,18 +147,28 @@ async function until(page, fn, arg, ms = 30000) {
     // back to the AI's best moment for the board
     await page.locator('.cp-thumb .th-fr[data-fr="0"]').tap();
     await sleep(200);
+    // ── also on it: the preacher, a small line, the date
+    await page.locator('.cp-thumb [data-th="preacher"]').fill('Pastor Mike Adeyemi');
+    await page.locator('.cp-thumb [data-th="when"]').fill('Sun 19 Oct · 10AM');
+    await page.locator('.cp-thumb .th-chip[data-kicker="Part 2"]').tap();
+    await sleep(200);
+    const ex = await page.evaluate(() => { const t = window.MWFlyerStudio._state.th; return { preacher: t.preacher, kicker: t.kicker, when: t.when, church: t.showChurch, kept: localStorage.getItem('mw-thumb-extra') }; });
+    check(ex.preacher === 'Pastor Mike Adeyemi' && ex.kicker === 'Part 2' && /10AM/.test(ex.when) && ex.church && /Mike Adeyemi/.test(ex.kept || ''), 'the preacher, a small line and the date go on it (the preacher is remembered for next time)', ex);
 
     // ── Make
     await page.locator('.cp-thumb [data-act="tmake"]').tap();
     s = await until(page, () => {
       const cards = [...document.querySelectorAll('.cp-thumb .fs-card')];
       const st = window.MWFlyerStudio._state;
-      return { ok: cards.length === 6 && !st.th.cutting && cards.every((c) => c.querySelector('canvas').width > 100), n: cards.length,
+      return { ok: cards.length === 12 && !st.th.cutting && cards.every((c) => c.querySelector('canvas').width > 100), n: cards.length,
         looks: st.designs.map((d) => d.look), sizes: st.designs.map((d) => d.w + 'x' + d.h), names: cards.map((c) => c.querySelector('small').textContent),
         person: !!st.th.person, words: st.designs.map((d) => d.layers.filter((l) => l.type === 'text').map((l) => l.text).join(' ')) };
     }, null, 90000);
-    check(s && s.ok && s.sizes.every((z) => z === '1280x720') && new Set(s.looks).size === 6, 'Make: a board of six different YouTube looks, each 1280×720', s);
+    check(s && s.ok && s.sizes.every((z) => z === '1280x720') && new Set(s.looks).size === 12, 'Make: a board of twelve different YouTube looks, each 1280×720', s);
     check(s && s.words.every((w) => /DONE/.test(w.toUpperCase())), 'every design has the words on it', s && s.words);
+    check(s && s.words.filter((w) => /ADEYEMI/i.test(w)).length >= 10 && s.words.filter((w) => /PART 2/i.test(w)).length >= 8 && s.words.filter((w) => /10AM/i.test(w)).length >= 8,
+      'the preacher’s name, the small line and the date are on the designs', s && s.words);
+    check(s && s.words.filter((w) => /Grace Life Chapel/i.test(w)).length >= 10, 'the church’s name signs the designs', s && s.words);
     if (process.env.MW_THUMB_VIDEO) check(s && s.person, 'the preacher is cut out of the moment (a real recording)', s && s.person);
     s = await until(page, () => ({ ok: window.__painted >= 3 && window.MWFlyerStudio._state.th.bgs.some((b) => /^tha:/.test(b.key)), painted: window.__painted }), null, 20000);
     check(s && s.ok, 'the AI paints backgrounds for the board (three)', s);
@@ -178,8 +186,8 @@ async function until(page, fn, arg, ms = 30000) {
     const tools = await page.evaluate(() => [...document.querySelectorAll('.cp-thumb .fs-tool span')].map((x) => x.textContent));
     check(tools.includes('Words') && tools.includes('Layouts') && tools.includes('Video frame') && !tools.includes('Size'), 'the editor has the thumbnail tools (Words, Layouts, Video frame)', tools);
     await page.locator('.cp-thumb .fs-tool[data-t="looks"]').tap();
-    s = await until(page, () => { const l = [...document.querySelectorAll('.cp-thumb .fs-look small')].map((x) => x.textContent); return { ok: l.length === 6, l }; }, null, 10000);
-    check(s && s.ok && s.l.includes('One word') && s.l.includes('Cinematic'), 'Layouts offers the six thumbnail looks', s);
+    s = await until(page, () => { const l = [...document.querySelectorAll('.cp-thumb .fs-look small')].map((x) => x.textContent); return { ok: l.length === 12, l }; }, null, 10000);
+    check(s && s.ok && s.l.includes('One word') && s.l.includes('Light page') && s.l.includes('Gold serif'), 'Layouts offers the twelve thumbnail looks', s);
     await page.locator('.cp-thumb .fs-look', { hasText: 'One word' }).tap();
     await sleep(500);
     const lk = await page.evaluate(() => window.MWFlyerStudio._state.scene.look);

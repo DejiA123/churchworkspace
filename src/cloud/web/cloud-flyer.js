@@ -2697,8 +2697,64 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   }
   /* which side the words go: away from the face (in the frame, when nobody was cut out) */
   const wordsLeft = (D) => (sp0(D) ? true : !(D.face && D.face.x < 0.45));
+  /* the church at the top — its logo and name, small, the way every one of those thumbnails is signed */
+  function thHead(D, o) {
+    const out = [], cy = o.cy || 50, ink = o.ink || '#ffffff';
+    const logo = D.logo && imgOf(D.logo) ? logoLayers(D, 0, cy, o.size || 64) : [];
+    const lw = logo.length ? Math.max(...logo.map((l) => l.w)) : 0;
+    const name = D.f.church ? T({ name: 'Church', text: D.f.church, upper: true, font: 'Montserrat Black', size: 21, letter: 0.06, line: 1.1, fill: ink, shadow: !o.light, align: 'left', maxW: 380 }) : null;
+    if (!lw && !name) return out;
+    const nw = name ? box(name).w : 0, gap = lw && name ? 12 : 0, total = lw + gap + nw;
+    let x = o.align === 'center' ? (o.cx || D.w / 2) - total / 2 : o.align === 'right' ? (o.r || D.w - 40) - total : (o.l || 40);
+    logo.forEach((l) => { l.x = x + lw / 2; }); out.push(...logo); x += lw + gap;
+    if (name) out.push(put(name, { l: x, cy }));
+    return out;
+  }
+  /* "with Pastor / VICTOR ORJI" by the preacher */
+  function thName(D, o) {
+    if (!D.f.preacher) return [];
+    return nameTag({ name: D.f.preacher }, Object.assign({ p: D.pal, script: o.script === false ? '' : 'with', scriptSize: 46, titleSize: 20, size: 48, maxW: 420, gap: 0 }, o));
+  }
+  /* the kicker (SUNDAY SERVICE · PART 2), the words, the date in a pill — one column, centred on cy */
+  function wordsColumn(D, o) {
+    const H = D.h, align = o.align || 'left', out = [];
+    const kick = D.f.kicker ? T(Object.assign({ name: 'Kicker', text: D.f.kicker, upper: true, font: 'Montserrat Black', size: 26, letter: 0.16, fill: o.kickFill || D.pal.accent, shadow: !o.light, align, maxW: o.w }, o.kickStyle || {})) : null;
+    const pl = D.f.when ? pill([{ text: D.f.when, upper: true, font: 'Montserrat Black', size: 24, letter: 0.04 }], Object.assign({ fill: D.pal.accent, ink: mix(D.pal.deep, '#000000', 0.3), radius: 40, padX: 22, padY: 11, name: 'When' }, o.pillStyle || {})) : null;
+    const kh = kick ? box(kick).h + 14 : 0, ph = pl ? pl.h + 22 : 0;
+    const tb = titleBlock(D, Object.assign({}, o, { maxH: (o.maxH || H * 0.66) - kh - ph, t: 0, cy: undefined, b: undefined }));
+    const th = tb.bottom - tb.top;
+    let y = (o.cy == null ? H / 2 : o.cy) - (kh + th + ph) / 2;
+    const at = (t) => (align === 'left' ? { l: o.l, t } : align === 'right' ? { r: o.r, t } : { cx: o.cx, t });
+    out.top = y;
+    if (kick) { out.push(put(kick, at(y))); y += kh; }
+    const dy = y - tb.top; tb.forEach((l) => { l.y += dy; }); out.push(...tb); y += th;
+    if (pl) { const w2 = pl.w / 2; out.push(...pl.place(align === 'left' ? o.l + w2 : align === 'right' ? o.r - w2 : o.cx, y + 22 + pl.h / 2)); y += ph; }
+    out.bottom = y; out.tb = tb;
+    return out;
+  }
+  /* a word huge and faint across the back (the SUNDAY behind "Sunday Service") */
+  function watermark(D, text, o) {
+    return put(T(Object.assign({ name: 'Watermark', text: String(text || '').toUpperCase(), font: 'Anton', upper: true, fit: D.w * 1.04, maxH: D.h * 0.86, size: 300, fill: 'none', stroke: 2.2, strokeColor: rgba('#ffffff', 0.16), shadow: false }, o || {})), { cx: D.w / 2, cy: D.h * 0.5 });
+  }
+  const keyWordOf = (D) => { const ls = thumbLines(D.f.title || '', D.f.key); return (ls.find((l) => l.key) || ls.slice().sort((a, b) => b.text.length - a.text.length)[0] || { text: '' }).text; };
+  const bgOf = (D, o) => BG(Object.assign({ img: D.bg || D.frame, grade: D.bg ? 'normal' : null, keep: 0.6 }, o));
+  /* each look's own colours (the board uses them; the first design wears the AI's) */
+  const THUMB_PAL = {
+    ytbold: { deep: '#0b1020', mid: '#1d3a8a', accent: '#ffd60a', hi: '#ffffff' },
+    ytglow: { deep: '#14052e', mid: '#5b21b6', accent: '#f5c542', hi: '#ffffff' },
+    ytlight: { deep: '#0e1d3d', mid: '#1f3c88', accent: '#e11d2a', hi: '#fdf8ef' },
+    ytfire: { deep: '#2b0700', mid: '#c2410c', accent: '#ffd60a', hi: '#ffffff' },
+    ytserif: { deep: '#2a0508', mid: '#7a1414', accent: '#f2c14e', hi: '#ffffff' },
+    ytscript: { deep: '#071633', mid: '#1d4ed8', accent: '#f5c542', hi: '#ffffff' },
+    ytpanel: { deep: '#0c0c10', mid: '#2a2a33', accent: '#ffd60a', hi: '#ffffff' },
+    ytword: { deep: '#0b0b14', mid: '#3b1a5c', accent: '#ffb020', hi: '#ffffff' },
+    ytmono: { deep: '#7c2d12', mid: '#f59e0b', accent: '#111111', hi: '#ffffff' },
+    ytstage: { deep: '#0a1240', mid: '#2541b2', accent: '#38bdf8', hi: '#ffffff' },
+    ytoutline: { deep: '#04263a', mid: '#0b6e99', accent: '#ffd60a', hi: '#ffffff' },
+    ytcinema: { deep: '#0a0a0a', mid: '#333333', accent: '#ff3b30', hi: '#ffffff' },
+  };
   const THUMBS = {
-    /* ── BOLD: the frame blurred dark behind, the preacher big on the right, huge words on the left ── */
+    /* ── BOLD (Build Expectations, Hope in Troubling Times): the frame dark behind, huge words left, the preacher big on the right ── */
     ytbold(D) {
       const W2 = D.w, H = D.h, p = D.pal, L = [], sp = sp0(D), left = wordsLeft(D);
       // (blurred right out where the preacher is cut out of it: the same person twice, sharp and ghosted, looks wrong)
@@ -2708,24 +2764,172 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         L.push(FX({ kind: 'glow', x: W2 * 0.73, y: H * 0.42, w: 980, h: 900, color: p.accent, opacity: 0.32 }));
         L.push(preacher(D, { cx: W2 * 0.73, minL: W2 * 0.46, extra: { rim: rgba('#ffffff', 0.85), rimW: 1.4, glow: rgba(p.accent, 0.3) } }));
       }
-      L.push(...titleBlock(D, left ? { l: 54, w: W2 * (sp ? 0.5 : 0.56), cy: H * 0.5 } : { r: W2 - 54, w: W2 * 0.56, cy: H * 0.5, align: 'right' }));
+      L.push(...thHead(D, left ? { l: 44 } : { align: 'right', r: W2 - 44 }));
+      L.push(...wordsColumn(D, left ? { l: 54, w: W2 * (sp ? 0.5 : 0.56), cy: H * 0.54 } : { r: W2 - 54, w: W2 * 0.56, cy: H * 0.54, align: 'right' }));
+      if (sp) L.push(...thName(D, { align: 'right', r: W2 - 34, b: H - 30 }));
       return L;
     },
-    /* ── PANEL: a painted picture, a deep panel on the left, the key word in a coloured box ── */
+    /* ── GLORY (Commanding Your Day): rays of light, the preacher glowing, the key word in gold leaf ── */
+    ytglow(D) {
+      const W2 = D.w, H = D.h, p = D.pal, L = [], sp = sp0(D);
+      L.push(bgOf(D, { blur: D.bg ? 2 : 16, bright: -12, contrast: 10, vignette: 0.5, grain: 0.3, colorWash: [{ stops: [rgba(p.deep, 0.88), rgba(p.deep, 0.15)], angle: 0, mode: 'source-over', a: 1 }] }));
+      L.push(FX({ kind: 'rays', x: W2 * 0.7, y: -60, w: 1400, h: 1000, color: p.accent, color2: '#ffffff', opacity: 0.5, seed: 7, n: 18 }));
+      L.push(FX({ kind: 'glow', x: W2 * 0.7, y: H * 0.38, w: 900, h: 760, color: mix(p.accent, '#ffffff', 0.3), opacity: 0.42 }));
+      L.push(FX({ kind: 'sparks', x: W2 * 0.5, y: H * 0.5, w: W2, h: H, color: p.accent, opacity: 0.6, seed: 3, n: 40 }));
+      if (sp) L.push(preacher(D, { cx: W2 * 0.71, minL: W2 * 0.47, extra: { outline: '#ffffff', glow: rgba(p.accent, 0.55) } }));
+      L.push(...thHead(D, { l: 44 }));
+      L.push(...wordsColumn(D, { l: 54, w: W2 * 0.5, cy: H * 0.55, style: { extrude: 3, extrudeColor: rgba(mix(p.deep, '#000000', 0.5), 0.9) },
+        keyStyle: { fill: '#ffffff', imgFill: 'tex:gold', imgFillA: 1, bevel: 0.9, extrudeColor: ['#6b3a04', '#1e0f01'] } }));
+      if (sp) L.push(...thName(D, { align: 'right', r: W2 - 34, b: H - 28 }));
+      return L;
+    },
+    /* ── LIGHT (The Journey to Maturity, The God of Glory): a cream page, navy words, the key word in red, the preacher on the right ── */
+    ytlight(D) {
+      const W2 = D.w, H = D.h, p = D.pal, L = [], sp = sp0(D), ink = mix(p.deep, '#000000', 0.15);
+      L.push(BG({ img: D.bg || null, sat: -40, bright: 42, contrast: -12, blur: 6, wash: 'rgba(253,249,240,.78)', grain: 0.25,
+        colorWash: [{ radial: true, x: 0.72, y: 0.4, r: 0.65, stops: [rgba(p.accent, 0.18), rgba(p.accent, 0)], mode: 'multiply', a: 1 }] }));
+      L.push(SH({ name: 'Band', shape: 'rect', x: W2 / 2, y: H - 10, w: W2, h: 20, fill: { stops: [p.mid, p.accent], angle: 0 } }));
+      if (sp) L.push(preacher(D, { cx: W2 * 0.74, minL: W2 * 0.5, extra: { shade: 'rgba(30,25,20,.28)', fadeLight: true } }));
+      L.push(...thHead(D, { l: 44, ink, light: true }));
+      L.push(...wordsColumn(D, { l: 58, w: W2 * (sp ? 0.5 : 0.62), cy: H * 0.54, light: true, kickFill: p.accent,
+        style: { fill: { stops: [mix(ink, '#ffffff', 0.15), ink], angle: 90 }, shadow: false, extrude: 2, extrudeColor: rgba('#000000', 0.12) }, keyStyle: { fill: { stops: [mix(p.accent, '#ffffff', 0.12), mix(p.accent, '#000000', 0.15)], angle: 90 } },
+        pillStyle: { fill: ink, ink: '#ffffff' } }));
+      if (sp) L.push(...thName(D, { align: 'right', r: W2 - 34, b: H - 34, ink: '#ffffff', scriptFill: p.accent }));
+      return L;
+    },
+    /* ── FIRE (Operating in the Spirit of Faith, Now Ministering): orange heat, sparks, white words, the preacher on the right ── */
+    ytfire(D) {
+      const W2 = D.w, H = D.h, p = D.pal, L = [], sp = sp0(D);
+      L.push(bgOf(D, { grade: 'vivid', keep: 0.35, blur: 4, contrast: 14, vignette: 0.45, grain: 0.35,
+        colorWash: [{ stops: ['#ff7a00', '#c81e1e'], angle: 30, mode: 'overlay', a: 0.55 }, { stops: [rgba(p.deep, 0.75), rgba(p.deep, 0)], angle: 0, mode: 'source-over', a: 1 }] }));
+      L.push(FX({ kind: 'glow', x: W2 * 0.72, y: H * 0.45, w: 1000, h: 900, color: '#ffb020', opacity: 0.45 }));
+      L.push(FX({ kind: 'sparks', x: W2 * 0.55, y: H * 0.6, w: W2 * 1.1, h: H, color: '#ffd60a', color2: '#ff5a00', opacity: 0.85, seed: 9, n: 70 }));
+      if (sp) L.push(preacher(D, { cx: W2 * 0.72, minL: W2 * 0.47, extra: { glow: rgba('#ff7a00', 0.55), rim: rgba('#ffe7a3', 0.75), rimW: 1.4 } }));
+      L.push(...thHead(D, { l: 44 }));
+      L.push(...wordsColumn(D, { l: 54, w: W2 * 0.5, cy: H * 0.55, kickFill: '#ffe08a', style: { shadow: true, shadowColor: 'rgba(80,10,0,.7)' }, keyStyle: { fill: { stops: ['#fff6c7', '#ffd60a', '#f59e0b'], angle: 90 } } }));
+      if (sp) L.push(...thName(D, { align: 'right', r: W2 - 34, b: H - 28, scriptFill: '#ffe08a' }));
+      return L;
+    },
+    /* ── GOLD SERIF (The End of All Spiritual Journeys, David): deep red, the words in a gold serif, a fine rule ── */
+    ytserif(D) {
+      const W2 = D.w, H = D.h, p = D.pal, L = [], sp = sp0(D), left = !sp || true;
+      L.push(bgOf(D, { grade: 'dark', keep: 0.5, blur: 3, contrast: 12, vignette: 0.6, grain: 0.4,
+        colorWash: [{ stops: [rgba(p.deep, 0), rgba(p.deep, 0.7), rgba(p.deep, 0.95)], angle: 0, mode: 'source-over', a: sp ? 1 : 0.6 }] }));
+      L.push(FX({ kind: 'glow', x: W2 * 0.68, y: H * 0.45, w: 900, h: 700, color: p.accent, opacity: 0.22 }));
+      if (sp) L.push(preacher(D, { cx: W2 * 0.25, maxR: W2 * 0.48, extra: { glow: rgba('#000000', 0.5), rim: rgba(p.accent, 0.5), rimW: 1 } }));
+      const gold = { stops: ['#fff3c4', '#f2c14e', '#b7791f', '#f6d57a'], angle: 90 };
+      void left;
+      const col2 = wordsColumn(D, Object.assign(sp ? { w: W2 * 0.5, cy: H * 0.5, align: 'center', cx: W2 * 0.72, maxH: H * 0.6 } : { cx: W2 / 2, w: W2 * 0.78, cy: H * 0.5, align: 'center', maxH: H * 0.6 },
+        { style: { font: 'Playfair Black', fill: gold, shadow: true }, keyStyle: { font: 'Cinzel', fill: '#ffffff', imgFill: 'tex:gold', imgFillA: 1, bevel: 0.8, shadow: true } }));
+      L.push(...col2);
+      const cx2 = sp ? W2 * 0.72 : W2 / 2;
+      L.push(SH({ name: 'Rule', shape: 'rect', x: cx2, y: col2.bottom + 18, w: 260, h: 3, fill: p.accent }));
+      if (D.f.preacher) L.push(put(T({ name: 'Speaker', text: D.f.preacher, upper: true, font: 'Montserrat', size: 26, letter: 0.28, fill: '#f6e7c1', shadow: true, maxW: 580 }), { cx: cx2, t: col2.bottom + 34 }));
+      L.push(...thHead(D, { align: 'center', cx: cx2 }));
+      return L;
+    },
+    /* ── SCRIPT (Sunday Service, Thanksgiving, Freedom for Service): the key word in a flowing script across bold capitals ── */
+    ytscript(D) {
+      const W2 = D.w, H = D.h, p = D.pal, L = [], sp = sp0(D);
+      const kw = keyWordOf(D) || 'Glory', rest = String(D.f.title || '').toUpperCase().split(/\s+/).filter((w) => w && w !== kw).join(' ') || kw;
+      L.push(bgOf(D, { grade: 'normal', keep: 0.55, blur: 3, bright: -10, contrast: 10, vignette: 0.5, grain: 0.3, colorWash: [{ stops: [rgba(p.deep, 0.9), rgba(p.deep, 0.2)], angle: 0, mode: 'source-over', a: 1 }] }));
+      L.push(watermark(D, rest.split(' ').sort((a, b) => b.length - a.length)[0], { strokeColor: rgba('#ffffff', 0.1) }));
+      if (sp) L.push(preacher(D, { cx: W2 * 0.73, minL: W2 * 0.48, extra: { glow: rgba(p.accent, 0.35), rim: rgba('#ffffff', 0.6), rimW: 1.2 } }));
+      L.push(...thHead(D, { l: 44 }));
+      // the line around the script word in bold capitals, above and below it ("Sunday / SERVICE", "Freedom / FOR SERVICE")
+      const cx = sp ? W2 * 0.31 : W2 / 2, w = sp ? W2 * 0.52 : W2 * 0.78;
+      const all = String(D.f.title || '').toUpperCase().split(/\s+/).filter(Boolean), at = all.indexOf(kw);
+      const before = at > 0 ? all.slice(0, at).join(' ') : '', after = at >= 0 ? all.slice(at + 1).join(' ') : '';
+      const capsStyle = { font: 'Anton', upper: true, size: 200, fill: { stops: ['#ffffff', '#dfe6f5'], angle: 90 }, shadow: true };
+      const sc = T({ name: 'Script title', text: kw.charAt(0) + kw.slice(1).toLowerCase(), font: 'Great Vibes', fit: w * 0.9, maxH: H * 0.34, size: 160, fill: p.accent, shadow: true, rot: -5, edge: 1.6, edgeColor: rgba(p.deep, 0.9), key: true });
+      const parts = [before && T(Object.assign({ name: 'Title 1', text: before, fit: w, maxH: H * 0.17 }, capsStyle)), sc, after && T(Object.assign({ name: 'Title 2', text: after, fit: w, maxH: H * 0.2 }, capsStyle))].filter(Boolean);
+      const stack2 = col(parts, { cx, cy: H * 0.53, gap: -Math.round(H * 0.035) });
+      // the script laid over the capitals, not hidden behind them
+      L.push(...stack2.filter((l) => l !== sc), sc);
+      const bot = stack2.bottom;
+      if (D.f.kicker) L.push(put(T({ name: 'Kicker', text: D.f.kicker, upper: true, font: 'Montserrat Black', size: 24, letter: 0.3, fill: p.accent, shadow: true, maxW: w }), { cx, b: stack2.top - 14 }));
+      if (D.f.when) { const g = pill([{ text: D.f.when, upper: true, font: 'Montserrat Black', size: 22, letter: 0.04 }], { fill: p.accent, ink: p.deep, radius: 40, padX: 20, padY: 10, name: 'When' }); L.push(...g.place(cx, bot + 24 + g.h / 2)); }
+      if (sp) L.push(...thName(D, { align: 'right', r: W2 - 34, b: H - 28 }));
+      return L;
+    },
+    /* ── PANEL (Apostolic Prayer, Spiritual Warfare): a deep panel, the key word in a coloured box, a ribbon with the name ── */
     ytpanel(D) {
       const W2 = D.w, H = D.h, p = D.pal, L = [], sp = sp0(D);
-      L.push(BG({ img: D.bg || D.frame, blur: 3, contrast: 12, sat: 10, vignette: 0.35, grain: 0.3 }));
+      L.push(bgOf(D, { blur: 3, contrast: 12, sat: 10, vignette: 0.35, grain: 0.3 }));
       L.push(SH({ name: 'Panel', shape: 'rect', x: W2 * 0.3, y: H / 2, w: W2 * 0.64, h: H + 4, fill: { stops: [rgba(p.deep, 0.97), rgba(p.deep, 0.9), rgba(p.deep, 0)], angle: 0 } }));
       if (sp) L.push(preacher(D, { cx: W2 * 0.74, minL: W2 * 0.48, extra: { glow: rgba('#000000', 0.45), rim: rgba(mix(p.accent, '#ffffff', 0.4), 0.6), rimW: 1.1 } }));
-      const tb = titleBlock(D, { l: 58, w: W2 * 0.47, cy: H * 0.5, keyStyle: { fill: p.deep, shadow: false } });
-      const kl = tb.find((l) => l.key);
+      L.push(...thHead(D, { l: 44 }));
+      const col2 = wordsColumn(D, { l: 58, w: W2 * 0.47, cy: H * 0.52, keyStyle: { fill: p.deep, shadow: false }, pillStyle: { fill: '#ffffff', ink: p.deep } });
+      const kl = col2.tb.find((l) => l.key);
       if (kl) {
         const b = box(kl);
-        L.push(...turn([SH({ name: 'Word box', shape: 'rect', x: b.l + b.w / 2, y: (b.t + b.b) / 2, w: b.w + 34, h: b.h + 26, fill: p.accent, shadow: true })], -2, b.l + b.w / 2, (b.t + b.b) / 2));
+        L.push(...turn([SH({ name: 'Word box', shape: 'rect', x: b.l + b.w / 2, y: (b.t + b.b) / 2, w: b.w + 30, h: b.h + 14, fill: p.accent, shadow: true })], -2, b.l + b.w / 2, (b.t + b.b) / 2));
         turn([kl], -2, b.l + b.w / 2, (b.t + b.b) / 2);
       }
-      L.push(...tb);
-      L.push(SH({ name: 'Line', shape: 'rect', x: 58 + 60, y: tb.top - 26, w: 120, h: 9, fill: p.accent }));
+      L.push(...col2);
+      if (D.f.preacher) {
+        const r = T({ name: 'Speaker', text: D.f.preacher, upper: true, font: 'Montserrat Black', size: 24, letter: 0.06, fill: '#ffffff', maxW: 480 });
+        const rb = box(r);
+        L.push(SH({ name: 'Name ribbon', shape: 'rect', x: 58 + (rb.w + 36) / 2, y: col2.bottom + 30, w: rb.w + 36, h: rb.h + 18, fill: '#d61f26', shadow: true }), put(r, { l: 76, cy: col2.bottom + 30 }));
+      }
+      return L;
+    },
+    /* ── ONE WORD (Elevation): the word that carries it, giant, behind the preacher; the rest of the line above and below ── */
+    ytword(D) {
+      const W2 = D.w, H = D.h, p = D.pal, L = [], sp = sp0(D);
+      const kw = keyWordOf(D) || 'FAITH';
+      const all = String(D.f.title || '').toUpperCase().split(/\s+/).filter(Boolean), at = all.indexOf(kw);
+      const before = at > 0 ? all.slice(0, at).join(' ') : '', after = at >= 0 ? all.slice(at + 1).join(' ') : all.filter((w) => w !== kw).join(' ');
+      L.push(bgOf(D, { blur: 8, bright: -42, sat: -20, vignette: 0.5, bottomShade: 0.95, bottomFrom: 0.62, grain: 0.4 }));
+      L.push(put(T({ name: 'Word', text: kw, font: 'Anton', upper: true, fit: W2 * 0.94, maxH: H * (before ? 0.54 : sp ? 0.66 : 0.5), size: 300, fill: { stops: [mix(p.accent, '#ffffff', 0.35), p.accent], angle: 90 }, shadow: true, key: true }), { cx: W2 / 2, cy: H * (before ? 0.5 : sp ? 0.42 : 0.4) }));
+      if (sp) L.push(preacher(D, { cx: W2 * 0.5, t: H * 0.1, extra: { glow: rgba('#000000', 0.55), rim: rgba('#ffffff', 0.5), rimW: 1 } }));
+      if (before) L.push(put(T({ name: 'Title 1', text: before, font: 'Montserrat Black', upper: true, size: 58, maxW: W2 * 0.86, fill: '#ffffff', shadow: true, letter: 0.03 }), { cx: W2 / 2, t: 26 }));
+      if (after) L.push(put(T({ name: 'Title 2', text: after, font: 'Montserrat Black', upper: true, size: 64, maxW: W2 * 0.9, fill: '#ffffff', shadow: true, letter: 0.02 }), { cx: W2 / 2, b: H - 34 }));
+      if (D.f.preacher) L.push(put(T({ name: 'Speaker', text: D.f.preacher, upper: true, font: 'Montserrat Black', size: 22, letter: 0.12, fill: rgba('#ffffff', 0.9), shadow: true, align: 'right', maxW: 340 }), { r: W2 - 34, b: H - (after ? 116 : 34) }));
+      return L;
+    },
+    /* ── B&W ON COLOUR (The Comforter): the preacher in black and white on bold colour, the words dark on a white card ── */
+    ytmono(D) {
+      const W2 = D.w, H = D.h, p = D.pal, L = [], sp = sp0(D), ink = '#111111';
+      L.push(BG({ img: null, grain: 0.5, colorWash: [{ radial: true, x: 0.25, y: 0.45, r: 0.7, stops: [rgba('#ffffff', 0.35), rgba('#ffffff', 0)], mode: 'soft-light', a: 1 }] }));
+      L.push(watermark(D, keyWordOf(D), { strokeColor: rgba('#ffffff', 0.28), stroke: 2.6 }));
+      if (sp) L.push(preacher(D, { cx: W2 * 0.27, maxR: W2 * 0.5, extra: { gray: true, contrast: 18, shade: 'rgba(0,0,0,.35)' } }));
+      const cl = sp ? W2 * 0.5 : W2 * 0.14, cw = sp ? W2 * 0.46 : W2 * 0.72;
+      L.push(SH({ name: 'Card', shape: 'round', radius: 26, fill: '#ffffff', shadow: true, x: cl + cw / 2, y: H * 0.53, w: cw, h: H * 0.6 }));
+      const col2 = wordsColumn(D, { cx: cl + cw / 2, w: cw - 70, cy: H * 0.53, maxH: H * 0.5, align: 'center', light: true, kickFill: mix(p.mid, '#000000', 0.25),
+        style: { fill: ink, shadow: false }, keyStyle: { fill: mix(p.mid, '#000000', 0.2) }, pillStyle: { fill: ink, ink: '#ffffff' } });
+      L.push(...col2);
+      L.push(...thHead(D, { align: 'center', cx: cl + cw / 2, cy: H * 0.53 - H * 0.3 - 30 }));
+      if (sp) L.push(...thName(D, { align: 'left', l: 34, b: H - 26, script: false, ink: '#ffffff' }));
+      return L;
+    },
+    /* ── STAGE (Welcome to our Sunday Service, Apostolic Visitation): stage light, a giant faint word, metallic words in the middle ── */
+    ytstage(D) {
+      const W2 = D.w, H = D.h, p = D.pal, L = [], sp = sp0(D);
+      L.push(bgOf(D, { grade: 'dark', keep: 0.45, blur: 6, contrast: 12, vignette: 0.55, grain: 0.35 }));
+      L.push(FX({ kind: 'beams', x: W2 / 2, y: -40, w: W2 * 1.3, h: H * 1.2, color: p.accent, opacity: 0.4, seed: 5 }));
+      L.push(watermark(D, keyWordOf(D), { strokeColor: rgba(p.accent, 0.22) }));
+      if (sp) L.push(preacher(D, { cx: W2 * 0.8, minL: W2 * 0.6, t: H * 0.12, extra: { glow: rgba(p.accent, 0.35), rim: rgba('#ffffff', 0.55), rimW: 1 } }));
+      L.push(...thHead(D, { align: 'center', cx: sp ? W2 * 0.4 : W2 / 2 }));
+      L.push(...wordsColumn(D, { cx: sp ? W2 * 0.4 : W2 / 2, w: sp ? W2 * 0.62 : W2 * 0.8, cy: H * 0.54, align: 'center',
+        style: { fill: { stops: ['#ffffff', '#cfd8e6', '#ffffff'], angle: 90 }, extrude: 2, extrudeColor: rgba('#000000', 0.5) }, keyStyle: { fill: { stops: [mix(p.accent, '#ffffff', 0.5), p.accent], angle: 90 } } }));
+      if (sp) L.push(...thName(D, { align: 'right', r: W2 - 30, b: H - 26 }));
+      return L;
+    },
+    /* ── OUTLINE (the classic): the preacher on the left with a white edge, tilted words with a thick black outline ── */
+    ytoutline(D) {
+      const W2 = D.w, H = D.h, p = D.pal, L = [], sp = sp0(D);
+      L.push(BG({ img: sp ? D.bg || D.frame : D.frame || D.bg, blur: sp ? (D.bg ? 3 : 42) : 1, sat: 25, bright: sp ? -24 : -8, contrast: 10, vignette: 0.45,
+        colorWash: [{ radial: true, x: 0.72, y: 0.45, r: 0.7, stops: [rgba(p.accent, 0.45), rgba(p.accent, 0)], mode: 'screen', a: 0.7 }] }));
+      if (sp) L.push(preacher(D, { cx: W2 * 0.27, maxR: W2 * 0.54, extra: { outline: '#ffffff', glow: rgba('#000000', 0.5) } }));
+      const right = !!sp || wordsLeft(D) === false;
+      const ol = { edge: 5, edgeColor: '#000000' };
+      const col2 = wordsColumn(D, right ? { r: W2 - 46, w: W2 * 0.52, cy: H * 0.52, align: 'right', style: Object.assign({ shadow: true }, ol), keyStyle: ol, kickStyle: ol }
+        : { l: 46, w: W2 * 0.52, cy: H * 0.52, style: Object.assign({ shadow: true }, ol), keyStyle: ol, kickStyle: ol });
+      turn(col2, -4, right ? W2 * 0.72 : W2 * 0.28, H * 0.5);
+      L.push(...col2);
+      L.push(...thHead(D, right ? { align: 'right', r: W2 - 40 } : { l: 40 }));
+      if (sp) L.push(...thName(D, { align: 'left', l: 30, b: H - 24, script: false }));
       return L;
     },
     /* ── CINEMATIC: the frame itself, graded like a film, the words low on the side away from the face ── */
@@ -2733,52 +2937,16 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const W2 = D.w, H = D.h, p = D.pal, L = [], left = !(D.face && D.face.x < 0.45);
       L.push(BG({ img: D.frame || D.bg, blur: 0, contrast: 14, sat: -8, vignette: 0.6, bottomShade: 0.9, bottomFrom: 0.4, grain: 0.5,
         colorWash: [{ stops: ['#0b4f6c', '#e07a2e'], angle: 0, mode: 'soft-light', a: 0.35 }, { stops: left ? [rgba('#000000', 0.75), rgba('#000000', 0)] : [rgba('#000000', 0), rgba('#000000', 0.75)], angle: 0, mode: 'source-over', a: 1 }] }));
-      const tb = titleBlock(D, left ? { l: 60, w: W2 * 0.44, b: H - 60, maxH: H * 0.62 } : { r: W2 - 60, w: W2 * 0.44, b: H - 60, maxH: H * 0.62, align: 'right' });
-      L.push(...tb);
-      L.push(SH({ name: 'Line', shape: 'rect', x: left ? 60 + 45 : W2 - 60 - 45, y: tb.top - 24, w: 90, h: 7, fill: p.accent }));
-      return L;
-    },
-    /* ── GLORY: rays of light, the preacher cut out and glowing, the key word in gold leaf ── */
-    ytglow(D) {
-      const W2 = D.w, H = D.h, p = D.pal, L = [], sp = sp0(D);
-      L.push(BG({ img: D.bg || D.frame, blur: D.bg ? 2 : 16, bright: -12, contrast: 10, vignette: 0.5, grain: 0.3, colorWash: [{ stops: [rgba(p.deep, 0.85), rgba(p.deep, 0.15)], angle: 0, mode: 'source-over', a: 1 }] }));
-      L.push(FX({ kind: 'rays', x: W2 * 0.7, y: -60, w: 1400, h: 1000, color: p.accent, color2: '#ffffff', opacity: 0.5, seed: 7, n: 18 }));
-      L.push(FX({ kind: 'glow', x: W2 * 0.7, y: H * 0.38, w: 900, h: 760, color: mix(p.accent, '#ffffff', 0.3), opacity: 0.42 }));
-      if (sp) L.push(preacher(D, { cx: W2 * 0.71, minL: W2 * 0.47, extra: { outline: '#ffffff', glow: rgba(p.accent, 0.55) } }));
-      L.push(...titleBlock(D, { l: 54, w: W2 * 0.5, cy: H * 0.52, style: { extrude: 3, extrudeColor: rgba(mix(p.deep, '#000000', 0.5), 0.9) },
-        keyStyle: { fill: '#ffffff', imgFill: 'tex:gold', imgFillA: 1, bevel: 0.9, extrudeColor: ['#6b3a04', '#1e0f01'] } }));
-      return L;
-    },
-    /* ── OUTLINE: the classic — the preacher on the left with a white edge, tilted words with a thick black outline ── */
-    ytoutline(D) {
-      const W2 = D.w, H = D.h, p = D.pal, L = [], sp = sp0(D);
-      L.push(BG({ img: sp ? D.bg || D.frame : D.frame || D.bg, blur: sp ? (D.bg ? 3 : 42) : 1, sat: 25, bright: sp ? -24 : -8, contrast: 10, vignette: 0.45,
-        colorWash: [{ radial: true, x: 0.72, y: 0.45, r: 0.7, stops: [rgba(p.accent, 0.45), rgba(p.accent, 0)], mode: 'screen', a: 0.7 }] }));
-      if (sp) L.push(preacher(D, { cx: W2 * 0.27, maxR: W2 * 0.54, extra: { outline: '#ffffff', glow: rgba('#000000', 0.5) } }));
-      const right = !!sp || wordsLeft(D) === false;
-      const tb = titleBlock(D, right ? { r: W2 - 46, w: W2 * 0.52, cy: H * 0.5, align: 'right', style: { edge: 5, edgeColor: '#000000', shadow: true }, keyStyle: { edge: 5, edgeColor: '#000000' } }
-        : { l: 46, w: W2 * 0.52, cy: H * 0.5, style: { edge: 5, edgeColor: '#000000', shadow: true }, keyStyle: { edge: 5, edgeColor: '#000000' } });
-      turn(tb, -4, right ? W2 * 0.72 : W2 * 0.28, H * 0.5);
-      L.push(...tb);
-      return L;
-    },
-    /* ── ONE WORD: the word that carries it, giant, behind the preacher; the rest of the line along the foot ── */
-    ytword(D) {
-      const W2 = D.w, H = D.h, p = D.pal, L = [], sp = sp0(D);
-      const lines = thumbLines(D.f.title || 'Your words here', D.f.key);
-      const kw = (lines.find((l) => l.key) || lines.slice().sort((a, b) => b.text.length - a.text.length)[0] || { text: 'FAITH' }).text;
-      const all = String(D.f.title || '').toUpperCase().split(/\s+/).filter(Boolean), at = all.indexOf(kw);
-      const before = at > 0 ? all.slice(0, at).join(' ') : '', after = at >= 0 ? all.slice(at + 1).join(' ') : all.filter((w) => w !== kw).join(' ');
-      L.push(BG({ img: D.bg || D.frame, blur: 8, bright: -42, sat: -20, vignette: 0.5, bottomShade: 0.95, bottomFrom: 0.62, grain: 0.4 }));
-      L.push(put(T({ name: 'Word', text: kw, font: 'Anton', upper: true, fit: W2 * 0.94, maxH: H * (before ? 0.54 : sp ? 0.66 : 0.5), size: 300, fill: { stops: [mix(p.accent, '#ffffff', 0.35), p.accent], angle: 90 }, shadow: true, key: true }), { cx: W2 / 2, cy: H * (before ? 0.5 : sp ? 0.42 : 0.4) }));
-      if (sp) L.push(preacher(D, { cx: W2 * 0.5, t: H * 0.1, extra: { glow: rgba('#000000', 0.55), rim: rgba('#ffffff', 0.5), rimW: 1 } }));
-      if (before) L.push(put(T({ name: 'Title 1', text: before, font: 'Montserrat Black', upper: true, size: 58, maxW: W2 * 0.86, fill: '#ffffff', shadow: true, letter: 0.03 }), { cx: W2 / 2, t: 26 }));
-      if (after) L.push(put(T({ name: 'Title 2', text: after, font: 'Montserrat Black', upper: true, size: 64, maxW: W2 * 0.9, fill: '#ffffff', shadow: true, letter: 0.02 }), { cx: W2 / 2, b: H - 34 }));
+      const col2 = wordsColumn(D, left ? { l: 60, w: W2 * 0.44, cy: H * 0.6, maxH: H * 0.62 } : { r: W2 - 60, w: W2 * 0.44, cy: H * 0.6, maxH: H * 0.62, align: 'right' });
+      L.push(...col2);
+      L.push(SH({ name: 'Line', shape: 'rect', x: left ? 60 + 45 : W2 - 60 - 45, y: col2.top - 22, w: 90, h: 7, fill: p.accent }));
+      L.push(...thHead(D, left ? { l: 44 } : { align: 'right', r: W2 - 44 }));
+      if (D.f.preacher) L.push(put(T({ name: 'Speaker', text: D.f.preacher, upper: true, font: 'Montserrat Black', size: 22, letter: 0.16, fill: rgba('#ffffff', 0.92), shadow: true, align: left ? 'right' : 'left', maxW: 400 }), left ? { r: W2 - 40, b: H - 30 } : { l: 40, b: H - 30 }));
       return L;
     },
   };
   const THUMB_LOOKS = Object.keys(THUMBS);
-  const LOOK_NAMES = { ytbold: 'Bold', ytpanel: 'Panel', ytcinema: 'Cinematic', ytglow: 'Glory light', ytoutline: 'Outline', ytword: 'One word', glory: 'Glory', fire: 'Fire', encounter: 'Encounter', miracle: 'Spotlight', bible: 'Golden classic', prophetic: 'Gold', sunday: 'Giant words', lineup: 'Line-up', script: 'Script', scenic: 'Scenic', light: 'Light', joinus: 'Join us', didone: 'Elegant', upper: 'Upper Room', theme: 'Theme picture', mountain: 'Sky letters', breaking: 'Breaking', spirit: 'Gold line-up',
+  const LOOK_NAMES = { ytbold: 'Bold', ytglow: 'Glory light', ytlight: 'Light page', ytfire: 'Fire', ytserif: 'Gold serif', ytscript: 'Script', ytpanel: 'Panel', ytword: 'One word', ytmono: 'B&W on colour', ytstage: 'Stage', ytoutline: 'Outline', ytcinema: 'Cinematic', glory: 'Glory', fire: 'Fire', encounter: 'Encounter', miracle: 'Spotlight', bible: 'Golden classic', prophetic: 'Gold', sunday: 'Giant words', lineup: 'Line-up', script: 'Script', scenic: 'Scenic', light: 'Light', joinus: 'Join us', didone: 'Elegant', upper: 'Upper Room', theme: 'Theme picture', mountain: 'Sky letters', breaking: 'Breaking', spirit: 'Gold line-up',
     ailetter: 'AI lettering', jericho: 'Bright hour', unique: 'Bright duo', thanks: 'Bright sky', mantle: 'Cream & gold', urgency: 'Line-up stage', harvest: 'Rows' };
   /* each look's own colours (the AI's colours go on the first few designs; these on the rest, for variety) */
   const SIGNATURE = {
@@ -3624,7 +3792,13 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     { deep: '#12061f', mid: '#4c1d95', accent: '#ffb020', hi: '#ffffff' },
     { deep: '#08130a', mid: '#14532d', accent: '#a3ff47', hi: '#ffffff' },
   ];
-  const fieldsNow = () => (F.mode === 'thumb' ? { title: F.th.line, key: F.th.key } : F.fields);
+  const fieldsNow = () => (F.mode === 'thumb' ? { title: F.th.line, key: F.th.key, preacher: String(F.th.preacher || '').trim(), kicker: String(F.th.kicker || '').trim(),
+    when: String(F.th.when || '').trim(), church: F.th.showChurch && F.kit ? F.kit.church || '' : '' } : F.fields);
+  const logoNow = () => (F.mode === 'thumb' && !F.th.showChurch ? null : IMGS.has('logo') ? 'logo' : null);
+  /* the preacher and whether the church signs it come back next time (the same on most of a church's videos) */
+  const TH_KEEP = 'mw-thumb-extra';
+  function keepExtras() { try { localStorage.setItem(TH_KEEP, JSON.stringify({ preacher: F.th.preacher || '', showChurch: !!F.th.showChurch })); } catch (e) { /* private window */ } }
+  function loadExtras() { try { return JSON.parse(localStorage.getItem(TH_KEEP) || 'null'); } catch (e) { return null; } }
   const fmtT = (s) => { s = Math.max(0, Math.round(+s || 0)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
   const baseName = (p) => String(p || '').split(/[\\/]/).pop().replace(/\.[a-z0-9]+$/i, '');
 
@@ -3635,6 +3809,13 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     loadFonts();
     if (!F.status) window.api.flyer.status().then((st) => { F.status = st; }).catch(() => {});
     F.step = 'tmake';
+    if (!F.th.extrasRead) {
+      F.th.extrasRead = true;
+      const ex = loadExtras();
+      if (ex) { F.th.preacher = ex.preacher || ''; F.th.showChurch = ex.showChurch !== false; } else F.th.showChurch = true;
+    }
+    // the church's name, logo and preachers (the flyers' kit): the thumbnail is signed with them
+    if (!F.kit) loadKit().then(() => { if (F.step === 'tmake' && F.mode === 'thumb') drawThumbMake(); }).catch(() => {});
     if (opts.video && opts.video !== F.th.video) setThumbVideo(opts.video);
     draw();
   }
@@ -3680,6 +3861,10 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const photo = t.photo ? `<button type="button" class="th-fr on" data-act="photo"><img src="${escAttr(t.photo)}" alt=""><small>Your photo</small></button>` : '';
     const words = String(t.line || '').toUpperCase().split(/\s+/).filter(Boolean);
     const lines = (t.ideas && t.ideas.lines) || [];
+    const k = F.kit || {};
+    const kitNames = (k.speakers || []).map((x) => String(x.name || '').trim()).filter(Boolean).slice(0, 8);
+    const kickers = Array.from(new Set(['Sunday Service'].concat((k.services || []).map((x) => x.name).filter(Boolean), ['Part 2', 'Live', 'Full Sermon']))).slice(0, 8);
+    const churchLine = k.church ? k.church + (IMGS.has('logo') ? ' · with the logo' : '') : 'Set your church’s name and logo once in Flyers → My church';
     P.body.innerHTML = `
       <div class="fs-make th-make">
         <section class="fs-sec">
@@ -3706,6 +3891,15 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
             : lines.map((l) => `<button type="button" class="th-idea${l.text === String(t.line || '').toUpperCase() ? ' on' : ''}" data-idea="${escAttr(l.text)}" data-ikey="${escAttr(l.key)}">${esc(l.text)}</button>`).join('')}</div>
           ${t.ideas && !t.loadingIdeas ? `<p class="fs-note">${t.ideas.by === 'rules' ? (t.ideas.heard ? 'Ideas from what was said in the sermon.' : 'A few strong lines to start from — or type your own.') : 'Written by AI from what was preached' + (t.ideas.heard ? '' : ' (no speech could be heard, so these are general)') + '.'}</p>` : ''}
         </section>
+        <section class="fs-sec fs-form th-extra">
+          <h3>Also on it <small>all optional</small></h3>
+          <label class="fs-f fs-wide"><span>Preacher</span><input data-th="preacher" value="${escAttr(t.preacher || '')}" placeholder="Pastor John Doe" ${TXT('words')}></label>
+          ${kitNames.length ? `<div class="th-chips">${kitNames.map((n) => `<button type="button" class="th-chip${n === t.preacher ? ' on' : ''}" data-preacher="${escAttr(n)}">${esc(n)}</button>`).join('')}</div>` : ''}
+          <label class="fs-f fs-wide"><span>Small line <i>(series, service, part)</i></span><input data-th="kicker" value="${escAttr(t.kicker || '')}" placeholder="SUNDAY SERVICE · PART 2" ${TXT('characters')}></label>
+          <div class="th-chips">${kickers.map((n) => `<button type="button" class="th-chip${n === t.kicker ? ' on' : ''}" data-kicker="${escAttr(n)}">${esc(n)}</button>`).join('')}</div>
+          <label class="fs-f fs-wide"><span>Date or time <i>(in a pill)</i></span><input data-th="when" value="${escAttr(t.when || '')}" placeholder="SUN 19 OCT · 10AM" ${TXT('characters')}></label>
+          <label class="th-switch"><input type="checkbox" data-th="church"${t.showChurch ? ' checked' : ''}><span><b>Church name & logo</b><small>${esc(churchLine)}</small></span></label>
+        </section>
       </div>`;
     P.foot.innerHTML = `<button type="button" class="fs-go" data-act="tmake"${src && String(t.line || '').trim() ? '' : ' disabled'}>${ic('spark')}<span>Make thumbnails</span></button>`;
     wireThumbMake();
@@ -3725,6 +3919,13 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       line.addEventListener('change', () => drawThumbMake());
       line.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); line.blur(); } });
     }
+    [['preacher', 'preacher'], ['kicker', 'kicker'], ['when', 'when']].forEach(([f, k]) => {
+      const el = $(`[data-th="${f}"]`, P.body); if (!el) return;
+      el.addEventListener('input', () => { t[k] = el.value; if (k === 'preacher') keepExtras(); });
+      el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); } });
+    });
+    const ch = $('[data-th="church"]', P.body);
+    if (ch) ch.addEventListener('change', () => { t.showChurch = ch.checked; keepExtras(); });
     const sl = $('[data-th="scrub"]', P.body);
     if (sl) {
       sl.addEventListener('input', () => {
@@ -3743,7 +3944,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       });
     }
     P.body.onclick = async (e) => {
-      const b = e.target.closest('[data-act],[data-fr],[data-key],[data-idea]'); if (!b) return;
+      const b = e.target.closest('[data-act],[data-fr],[data-key],[data-idea],[data-preacher],[data-kicker]'); if (!b) return;
+      if (b.dataset.preacher != null) { t.preacher = t.preacher === b.dataset.preacher ? '' : b.dataset.preacher; keepExtras(); return drawThumbMake(); }
+      if (b.dataset.kicker != null) { t.kicker = t.kicker === b.dataset.kicker ? '' : b.dataset.kicker; return drawThumbMake(); }
       if (b.dataset.fr != null) { t.pick = +b.dataset.fr; t.custom = null; t.photo = null; return drawThumbMake(); }
       if (b.dataset.key) { t.key = b.dataset.key; return drawThumbMake(); }
       if (b.dataset.idea) { t.line = b.dataset.idea; t.key = b.dataset.ikey || ''; t.typed = true; return drawThumbMake(); }
@@ -3846,17 +4049,26 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     }));
   }
 
-  /* the board: six YouTube looks, the preacher and the words on each, the painted pictures shared out */
+  /* the board: twelve YouTube looks, the preacher and the words on each, the painted pictures shared out */
   function rebuildThumbs() {
     const t = F.th;
-    const order = t.person ? ['ytbold', 'ytglow', 'ytpanel', 'ytword', 'ytoutline', 'ytcinema'] : ['ytcinema', 'ytbold', 'ytoutline', 'ytpanel', 'ytglow', 'ytword'];
-    const painted = new Set(['ytglow', 'ytpanel', 'ytword']);
+    const order = t.person
+      ? ['ytbold', 'ytglow', 'ytlight', 'ytfire', 'ytserif', 'ytscript', 'ytpanel', 'ytword', 'ytmono', 'ytstage', 'ytoutline', 'ytcinema']
+      : ['ytcinema', 'ytstage', 'ytserif', 'ytscript', 'ytlight', 'ytbold', 'ytword', 'ytpanel', 'ytfire', 'ytglow', 'ytoutline', 'ytmono'];
+    const painted = new Set(['ytglow', 'ytlight', 'ytfire', 'ytserif', 'ytscript', 'ytpanel', 'ytword', 'ytstage']);
+    const ai = t.bgs.filter((b) => !b.proc), stock = t.bgs.filter((b) => b.proc);
     let n = 0;
     F.designs = order.map((look, i) => {
-      const bg = painted.has(look) && t.bgs.length ? t.bgs[n++ % t.bgs.length] : null;
-      const pal = i === 0 ? t.pal : t.palOrder[i % t.palOrder.length];
+      const pal = i === 0 && t.pal ? t.pal : THUMB_PAL[look] || t.pal;
+      let bg = null;
+      if (painted.has(look)) {
+        bg = ai.length ? ai[n % ai.length] : stock.length && n < stock.length ? stock[n] : null;
+        n++;
+        // nothing painted yet: a picture of light in this look's own colours, made here
+        if (!bg) { const key = 'thpr:' + look + ':' + F.tries; if (!IMGS.has(key)) IMGS.set(key, proceduralBg(TH.w, TH.h, pal, F.tries * 31 + i * 7)); bg = { key, by: '' }; }
+      }
       return Object.assign(buildScene({ look, w: TH.w, h: TH.h, pal, dir: F.dir || {}, fields: fieldsNow(), speakers: t.person ? [{ id: 'thumb', name: '', img: t.person }] : [],
-        bg: bg ? bg.key : null, frame: t.frameKey, face: t.face }), { madeBy: (bg && bg.by) || '' });
+        logo: logoNow(), bg: bg ? bg.key : null, frame: t.frameKey, face: t.face }), { madeBy: (bg && bg.by) || '' });
     });
     if (F.step === 'pick') drawPick();
   }
@@ -4276,7 +4488,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const bg = F.scene.layers.find((l) => l.type === 'bg');
     const sz = { w: F.scene.w, h: F.scene.h };
     const sp = sceneSpeakers();
-    const S = buildScene(Object.assign({ look: F.scene.look, w: sz.w, h: sz.h, pal: F.scene.pal, dir: F.dir, fields: fieldsNow(), speakers: sp, logo: IMGS.has('logo') ? 'logo' : null, bg: bg && bg.img, frame: F.scene.frame, face: F.scene.face }, o));
+    const S = buildScene(Object.assign({ look: F.scene.look, w: sz.w, h: sz.h, pal: F.scene.pal, dir: F.dir, fields: fieldsNow(), speakers: sp, logo: logoNow(), bg: bg && bg.img, frame: F.scene.frame, face: F.scene.face }, o));
     snapshot();
     F.scene = S; F.sel = null; paint(); tools();
   }
@@ -4303,7 +4515,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const bg = F.scene.layers.find((l) => l.type === 'bg');
       const sp = sceneSpeakers();
       $$('.fs-look', sh).forEach((b) => {
-        const S = buildScene({ look: b.dataset.look, w: F.scene.w, h: F.scene.h, pal: F.scene.pal, dir: F.dir, fields: fieldsNow(), speakers: sp, logo: IMGS.has('logo') ? 'logo' : null, bg: bg && bg.img, frame: F.scene.frame, face: F.scene.face });
+        const S = buildScene({ look: b.dataset.look, w: F.scene.w, h: F.scene.h, pal: F.scene.pal, dir: F.dir, fields: fieldsNow(), speakers: sp, logo: logoNow(), bg: bg && bg.img, frame: F.scene.frame, face: F.scene.face });
         const big = render(S, canvas(1, 1), 0.34), cv = $('canvas', b);
         cv.width = 150; cv.height = Math.round(150 * S.h / S.w); cv.getContext('2d').drawImage(big, 0, 0, cv.width, cv.height);
       });
