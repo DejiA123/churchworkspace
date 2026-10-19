@@ -4396,3 +4396,11 @@ body.mw-cloud.mw-home .cloud-home { background: #eaf5fd; color: #0d1b2c; }
 .cloud-home .ch-tools { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .cloud-home .ch-ti { width: 58px; height: 58px; border-radius: 19px; }
 .cloud-home .ch-tool-tx { font-size: 12.5px; }
+/* the photo bank on the Thumbnails page (the flyers' banks: cut-out portraits) */
+.th-bank .th-bp { width: 92px; aspect-ratio: 3 / 4; background: linear-gradient(160deg, #3b2a6b, #120a26); }
+.th-bank .th-bp img { object-fit: contain; object-position: center bottom; }
+.th-bank .th-bp.th-tool { background: #f3f4f7; }
+.th-chip i { font-style: normal; opacity: .55; margin-left: 2px; }
+.th-chip-add { color: #6d28d9; background: #f3efff; }
+.th-fr.th-behind { box-shadow: 0 0 0 2px #a78bfa; }
+.th-fr.th-behind::after { content: 'behind'; position: absolute; top: 6px; right: 6px; padding: 2px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 800; color: #fff; background: rgba(124, 58, 237, .9); }

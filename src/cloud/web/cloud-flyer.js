@@ -2758,7 +2758,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     ytbold(D) {
       const W2 = D.w, H = D.h, p = D.pal, L = [], sp = sp0(D), left = wordsLeft(D);
       // (blurred right out where the preacher is cut out of it: the same person twice, sharp and ghosted, looks wrong)
-      L.push(BG({ img: D.frame || D.bg, blur: sp ? 42 : 2, bright: sp ? -46 : -18, sat: -15, contrast: 8, vignette: 0.6, grain: 0.4,
+      L.push(BG({ img: D.frame || D.bg, blur: sp && D.frame ? 42 : sp ? 5 : 2, bright: sp && D.frame ? -46 : sp ? -28 : -18, sat: -15, contrast: 8, vignette: 0.6, grain: 0.4,
         colorWash: [{ stops: left ? [rgba(p.deep, 0.92), rgba(p.deep, 0.5), rgba(p.deep, 0)] : [rgba(p.deep, 0), rgba(p.deep, 0.5), rgba(p.deep, 0.92)], angle: 0, mode: 'source-over', a: 1 }] }));
       if (sp) {
         L.push(FX({ kind: 'glow', x: W2 * 0.73, y: H * 0.42, w: 980, h: 900, color: p.accent, opacity: 0.32 }));
@@ -3794,6 +3794,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   ];
   const fieldsNow = () => (F.mode === 'thumb' ? { title: F.th.line, key: F.th.key, preacher: String(F.th.preacher || '').trim(), kicker: String(F.th.kicker || '').trim(),
     when: String(F.th.when || '').trim(), church: F.th.showChurch && F.kit ? F.kit.church || '' : '' } : F.fields);
+  /* the preacher on the thumbnail: a bank photo keeps its speaker (so "Their photos" in the editor swaps it), a cut-out from the video is nobody's */
+  const thumbSpeakers = () => (F.th.person ? [{ id: F.th.bank ? F.th.bankSp || '' : '', name: '', img: F.th.person, photo: F.th.bank || '' }] : []);
   const logoNow = () => (F.mode === 'thumb' && !F.th.showChurch ? null : IMGS.has('logo') ? 'logo' : null);
   /* the preacher and whether the church signs it come back next time (the same on most of a church's videos) */
   const TH_KEEP = 'mw-thumb-extra';
@@ -3841,6 +3843,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
 
   function thumbPickSrc() {
     const t = F.th;
+    // a photo from the bank: the preacher already cut out; the video's moment (if there is one) goes behind them
+    if (t.bank) return { bank: t.bank, bgFrom: t.custom || t.frames[t.pick] || null };
     if (t.photo) return { url: t.photo, photo: true };
     if (t.custom) return t.custom;
     return t.frames[t.pick] || t.frames[0] || null;
@@ -3856,12 +3860,15 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     P.setTitle('Thumbnails');
     P.el.classList.remove('fs-editing');
     const tiles = t.loadingFrames ? '<div class="th-fr th-ph"><i class="fs-spin"></i></div>'.repeat(4)
-      : t.frames.map((f, i) => `<button type="button" class="th-fr${!t.photo && !t.custom && t.pick === i ? ' on' : ''}" data-fr="${i}"><img src="${escAttr(f.url)}" alt=""><small>${esc(fmtT(f.t))}</small>${i === 0 && t.by === 'ai' ? '<em>AI pick</em>' : ''}</button>`).join('');
-    const custom = t.custom ? `<button type="button" class="th-fr on" data-act="scrub"><img src="${escAttr(t.custom.url)}" alt=""><small>${esc(fmtT(t.custom.t))}</small></button>` : '';
+      : t.frames.map((f, i) => `<button type="button" class="th-fr${!t.bank && !t.photo && !t.custom && t.pick === i ? ' on' : ''}${t.bank && t.pick === i && !t.custom ? ' th-behind' : ''}" data-fr="${i}"><img src="${escAttr(f.url)}" alt=""><small>${esc(fmtT(f.t))}</small>${i === 0 && t.by === 'ai' ? '<em>AI pick</em>' : ''}</button>`).join('');
+    const custom = t.custom ? `<button type="button" class="th-fr ${t.bank ? 'th-behind' : 'on'}" data-act="scrub"><img src="${escAttr(t.custom.url)}" alt=""><small>${esc(fmtT(t.custom.t))}</small></button>` : '';
     const photo = t.photo ? `<button type="button" class="th-fr on" data-act="photo"><img src="${escAttr(t.photo)}" alt=""><small>Your photo</small></button>` : '';
     const words = String(t.line || '').toUpperCase().split(/\s+/).filter(Boolean);
     const lines = (t.ideas && t.ideas.lines) || [];
     const k = F.kit || {};
+    const vidPic = (t.custom || t.frames[t.pick] || t.frames[0] || {}).url || '';
+    const sps = k.speakers || [];
+    const bsp = sps.find((x) => x.id === t.bankSp) || sps.find((x) => x.name && x.name === t.preacher) || sps[0] || null;
     const kitNames = (k.speakers || []).map((x) => String(x.name || '').trim()).filter(Boolean).slice(0, 8);
     const kickers = Array.from(new Set(['Sunday Service'].concat((k.services || []).map((x) => x.name).filter(Boolean), ['Part 2', 'Live', 'Full Sermon']))).slice(0, 8);
     const churchLine = k.church ? k.church + (IMGS.has('logo') ? ' · with the logo' : '') : 'Set your church’s name and logo once in Flyers → My church';
@@ -3869,7 +3876,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       <div class="fs-make th-make">
         <section class="fs-sec">
           <h3>Video</h3>
-          ${t.video ? `<button type="button" class="th-vid" data-act="vid">${src && !t.photo ? `<img src="${escAttr(src.url)}" alt="">` : `<span class="th-vid-ph">${ic('photo')}</span>`}<span><b>${esc(baseName(t.video))}</b><small>${t.dur ? esc(fmtT(t.dur)) + ' · ' : ''}tap to choose another</small></span>${ic('back').replace('fs-ic', 'fs-ic fs-chev')}</button>`
+          ${t.video ? `<button type="button" class="th-vid" data-act="vid">${vidPic ? `<img src="${escAttr(vidPic)}" alt="">` : `<span class="th-vid-ph">${ic('photo')}</span>`}<span><b>${esc(baseName(t.video))}</b><small>${t.dur ? esc(fmtT(t.dur)) + ' · ' : ''}tap to choose another</small></span>${ic('back').replace('fs-ic', 'fs-ic fs-chev')}</button>`
             : `<button type="button" class="th-choose" data-act="vid">${ic('photo')}<span><b>Choose a video</b><small>a sermon, a short — anything you made or uploaded</small></span></button>`}
         </section>
         ${t.video || t.photo ? `<section class="fs-sec">
@@ -3883,6 +3890,13 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
             <input type="range" min="0" max="${Math.max(1, Math.floor(t.dur || 1))}" step="0.5" value="${t.scrubT || 0}" data-th="scrub" aria-label="Moment in the video">
             <div class="th-scrub-row"><span data-th="scrubT">${esc(fmtT(t.scrubT || 0))}</span><button type="button" class="fs-go th-use" data-act="usemoment">Use this moment</button></div></div>` : ''}
         </section>` : ''}
+        <section class="fs-sec th-banksec">
+          <h3>Photo bank <small>your preachers’ photos, already cut out</small></h3>
+          <div class="th-chips">${sps.map((x) => `<button type="button" class="th-chip${bsp && x.id === bsp.id ? ' on' : ''}" data-banksp="${escAttr(x.id)}">${esc(x.name || 'Speaker')} <i>${(x.photos || []).length}</i></button>`).join('')}<button type="button" class="th-chip th-chip-add" data-act="banknew">＋ New preacher</button></div>
+          ${bsp ? `<div class="th-frames th-bank">${(bsp.photos || []).map((ph) => `<button type="button" class="th-fr th-bp${t.bank === ph ? ' on' : ''}" data-bank="${escAttr(ph)}">${picTag(ph)}</button>`).join('')}<button type="button" class="th-fr th-bp th-tool" data-act="bankadd">${ic('plus')}<small>Add photos</small></button></div>
+            ${t.bank ? `<p class="fs-note">${t.video ? 'Their photo goes on it, the video’s moment behind them (marked).' : 'Their photo goes on it, with a picture behind them.'} Tap a moment above to use the video instead.</p>` : ''}`
+            : '<p class="fs-note">Add your preachers once — each photo is cut out and kept for every flyer and thumbnail.</p>'}
+        </section>
         <section class="fs-sec fs-form">
           <h3>Words on it <small>3 to 5 big words work best</small></h3>
           <label class="fs-f fs-wide"><input data-th="line" value="${escAttr(t.line)}" maxlength="40" placeholder="GOD IS NOT DONE WITH YOU" ${TXT('characters')}></label>
@@ -3902,6 +3916,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         </section>
       </div>`;
     P.foot.innerHTML = `<button type="button" class="fs-go" data-act="tmake"${src && String(t.line || '').trim() ? '' : ' disabled'}>${ic('spark')}<span>Make thumbnails</span></button>`;
+    fillPics(P.body);
     wireThumbMake();
   }
 
@@ -3944,10 +3959,17 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       });
     }
     P.body.onclick = async (e) => {
-      const b = e.target.closest('[data-act],[data-fr],[data-key],[data-idea],[data-preacher],[data-kicker]'); if (!b) return;
+      const b = e.target.closest('[data-act],[data-fr],[data-key],[data-idea],[data-preacher],[data-kicker],[data-banksp],[data-bank]'); if (!b) return;
+      if (b.dataset.banksp) { t.bankSp = b.dataset.banksp; return drawThumbMake(); }
+      if (b.dataset.bank) {
+        const sp = ((F.kit && F.kit.speakers) || []).find((x) => (x.photos || []).includes(b.dataset.bank));
+        t.bank = t.bank === b.dataset.bank ? null : b.dataset.bank;
+        if (t.bank && sp) { t.bankSp = sp.id; if (!t.preacher) { t.preacher = sp.name || ''; keepExtras(); } }
+        return drawThumbMake();
+      }
       if (b.dataset.preacher != null) { t.preacher = t.preacher === b.dataset.preacher ? '' : b.dataset.preacher; keepExtras(); return drawThumbMake(); }
       if (b.dataset.kicker != null) { t.kicker = t.kicker === b.dataset.kicker ? '' : b.dataset.kicker; return drawThumbMake(); }
-      if (b.dataset.fr != null) { t.pick = +b.dataset.fr; t.custom = null; t.photo = null; return drawThumbMake(); }
+      if (b.dataset.fr != null) { t.pick = +b.dataset.fr; t.custom = null; t.photo = null; t.bank = null; return drawThumbMake(); }
       if (b.dataset.key) { t.key = b.dataset.key; return drawThumbMake(); }
       if (b.dataset.idea) { t.line = b.dataset.idea; t.key = b.dataset.ikey || ''; t.typed = true; return drawThumbMake(); }
       const a = b.dataset.act;
@@ -3958,7 +3980,26 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         if (p && typeof p === 'string') { setThumbVideo(p); drawThumbMake(); }
         return;
       }
-      if (a === 'photo') return pickImage((url) => { t.photo = url; t.custom = null; drawThumbMake(); }, { max: 1920 });
+      if (a === 'photo') return pickImage((url) => { t.photo = url; t.custom = null; t.bank = null; drawThumbMake(); }, { max: 1920 });
+      // the photo banks are the flyers' own (My church): added here, they are there too
+      if (a === 'bankadd') {
+        const sp = ((F.kit && F.kit.speakers) || []).find((x) => x.id === t.bankSp) || ((F.kit && F.kit.speakers) || [])[0];
+        if (sp) addPhotos(sp, async () => { await saveKit(true); t.bankSp = sp.id; drawThumbMake(); });
+        return;
+      }
+      if (a === 'banknew') {
+        if (!F.kit) await loadKit();
+        const name = (window.prompt('The preacher’s name, as it should be on thumbnails (e.g. Pastor John Doe):') || '').trim();
+        if (!name) return;
+        const sp = { id: 'sp' + Date.now().toString(36), name, photos: [] };
+        addPhotos(sp, async () => {
+          F.kit.speakers = (F.kit.speakers || []).concat(sp);
+          await saveKit(true); await loadKit();
+          t.bankSp = sp.id; if (!t.preacher) { t.preacher = name; keepExtras(); }
+          drawThumbMake();
+        });
+        return;
+      }
       if (a === 'scrub') {
         t.scrub = !t.scrub;
         if (t.scrub && t.scrubT == null) t.scrubT = Math.round((t.frames[t.pick] && t.frames[t.pick].t) || (t.dur || 0) / 2);
@@ -3969,7 +4010,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       if (a === 'usemoment') {
         try {
           const r = await window.api.thumb.frameAt(t.video, t.scrubT || 0, 1280);
-          t.custom = { t: r.t, url: r.url, face: null }; t.photo = null; t.scrub = false;
+          t.custom = { t: r.t, url: r.url, face: null }; t.photo = null; t.scrub = false; t.bank = null;
         } catch (er) { toast('That moment could not be read: ' + (er.message || er), 'error'); }
         return drawThumbMake();
       }
@@ -3996,17 +4037,20 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     if (!src || !String(t.line || '').trim()) return;
     F.tries++;
     const tryNo = F.tries;
-    Object.assign(t, { bgs: [], person: '', frameKey: '', face: src.face || null, painting: 0, cutting: true });
+    // a bank photo: the preacher already cut out, the video's moment (when there is one) only behind them
+    const fr = src.bank ? src.bgFrom : src;
+    Object.assign(t, { bgs: [], person: '', frameKey: '', face: (!src.bank && fr && fr.face) || null, painting: 0, cutting: true });
     F.step = 'pick'; F.designs = []; F.painting = 0;
     drawPick();
     await loadFonts();
     // the moment, sharp (the board showed a smaller copy)
-    let full = src.url;
-    if (!src.photo && t.video && src.t != null) { try { full = (await window.api.thumb.frameAt(t.video, src.t, 1920)).url; } catch (e) { full = src.url; } }
+    let full = fr ? fr.url : null;
+    if (fr && !fr.photo && t.video && fr.t != null) { try { full = (await window.api.thumb.frameAt(t.video, fr.t, 1920)).url; } catch (e) { full = fr.url; } }
     if (tryNo !== F.tries) return;
     const fk = 'thf:' + tryNo;
-    try { IMGS.set(fk, await loadImg(full)); } catch (e) { toast('That picture could not be opened.', 'error'); F.step = 'tmake'; return drawThumbMake(); }
-    t.frameKey = fk;
+    if (full) {
+      try { IMGS.set(fk, await loadImg(full)); t.frameKey = fk; } catch (e) { if (!src.bank) { toast('That picture could not be opened.', 'error'); F.step = 'tmake'; return drawThumbMake(); } }
+    }
     // the words decide the pictures and the colours (the flyers' art director), the sermon's own ideas first
     const ideaScenes = (t.ideas && t.ideas.scenes) || [];
     let dir = null;
@@ -4026,7 +4070,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     t.bgs = stock.filter(Boolean);
     // the board goes up straight away with the frame; the cut-out joins it a moment later
     rebuildThumbs();
-    t.person = await cutPreacher(full, tryNo);
+    t.person = src.bank ? ((await bankPic(src.bank)) ? picKey(src.bank) : '') : await cutPreacher(full, tryNo);
     t.cutting = false;
     if (tryNo !== F.tries) return;
     rebuildThumbs();
@@ -4055,7 +4099,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const order = t.person
       ? ['ytbold', 'ytglow', 'ytlight', 'ytfire', 'ytserif', 'ytscript', 'ytpanel', 'ytword', 'ytmono', 'ytstage', 'ytoutline', 'ytcinema']
       : ['ytcinema', 'ytstage', 'ytserif', 'ytscript', 'ytlight', 'ytbold', 'ytword', 'ytpanel', 'ytfire', 'ytglow', 'ytoutline', 'ytmono'];
-    const painted = new Set(['ytglow', 'ytlight', 'ytfire', 'ytserif', 'ytscript', 'ytpanel', 'ytword', 'ytstage']);
+    // no video frame (a bank photo, no video): every look gets a picture, and the frame-only Cinematic is left out
+    const painted = new Set(t.frameKey ? ['ytglow', 'ytlight', 'ytfire', 'ytserif', 'ytscript', 'ytpanel', 'ytword', 'ytstage'] : THUMB_LOOKS);
+    if (!t.frameKey) order.splice(order.indexOf('ytcinema'), 1);
     const ai = t.bgs.filter((b) => !b.proc), stock = t.bgs.filter((b) => b.proc);
     let n = 0;
     F.designs = order.map((look, i) => {
@@ -4067,7 +4113,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         // nothing painted yet: a picture of light in this look's own colours, made here
         if (!bg) { const key = 'thpr:' + look + ':' + F.tries; if (!IMGS.has(key)) IMGS.set(key, proceduralBg(TH.w, TH.h, pal, F.tries * 31 + i * 7)); bg = { key, by: '' }; }
       }
-      return Object.assign(buildScene({ look, w: TH.w, h: TH.h, pal, dir: F.dir || {}, fields: fieldsNow(), speakers: t.person ? [{ id: 'thumb', name: '', img: t.person }] : [],
+      return Object.assign(buildScene({ look, w: TH.w, h: TH.h, pal, dir: F.dir || {}, fields: fieldsNow(), speakers: thumbSpeakers(),
         logo: logoNow(), bg: bg ? bg.key : null, frame: t.frameKey, face: t.face }), { madeBy: (bg && bg.by) || '' });
     });
     if (F.step === 'pick') drawPick();
@@ -4494,7 +4540,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   }
   /* the speakers as this flyer has them now (a photo swapped in the editor stays swapped) */
   function sceneSpeakers() {
-    const base = F.mode === 'thumb' ? (F.th.person ? [{ id: 'thumb', name: '', img: F.th.person }] : []) : speakersFor(0);
+    const base = F.mode === 'thumb' ? thumbSpeakers() : speakersFor(0);
     return base.map((s) => {
       const L = F.scene && F.scene.layers.find((l) => l.speaker === s.id && l.photo);
       return L ? Object.assign(s, { photo: L.photo, img: L.img }) : s;

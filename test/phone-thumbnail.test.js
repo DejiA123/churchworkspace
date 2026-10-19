@@ -93,7 +93,16 @@ async function until(page, fn, arg, ms = 30000) {
       window.api.flyer.paint = async (a) => ({ dataUrl: '/flyerphotos/' + pics[window.__painted++ % pics.length], by: 'test painter', w: a.w, h: a.h });
     });
     // the church's own name (the flyers' kit): the thumbnails are signed with it
-    await page.evaluate(async () => { const k = await window.api.flyer.kitGet(); await window.api.flyer.kitSave(Object.assign({}, k, { church: 'Grace Life Chapel' })); });
+    // …and a preacher with a photo in the bank (the flyers' own banks: cut-out portraits)
+    await page.evaluate(async () => {
+      const c = document.createElement('canvas'); c.width = 600; c.height = 800;
+      const x = c.getContext('2d');
+      x.fillStyle = '#8d5524'; x.beginPath(); x.ellipse(300, 230, 110, 140, 0, 0, Math.PI * 2); x.fill();
+      x.fillStyle = '#1e3a8a'; x.beginPath(); x.moveTo(60, 800); x.quadraticCurveTo(80, 420, 300, 400); x.quadraticCurveTo(520, 420, 540, 800); x.fill();
+      const k = await window.api.flyer.kitGet();
+      await window.api.flyer.kitSave(Object.assign({}, k, { church: 'Grace Life Chapel', speakers: [{ id: 'spmike', name: 'Pastor Mike Adeyemi', photos: [] }] }));
+      await window.api.flyer.kitAddPhoto('spmike', c.toDataURL('image/png'), 'Pastor Mike Adeyemi');
+    });
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'thumb-0-home.png') });
 
     // ── Home → Thumbnails
@@ -210,6 +219,32 @@ async function until(page, fn, arg, ms = 30000) {
     // (an upload goes to the person's own space)
     const kept = fs.readdirSync(WORK, { recursive: true }).filter((n) => /thumbnail\.jpg$/i.test(String(n)) && !/\.part-/.test(String(n)));
     check(s && s.ok && kept.length === 1, 'Keep puts it in My Uploads', { s, kept });
+
+    // ── the photo bank: the preacher's own photo instead of the video's cut-out
+    await page.locator('.cp-thumb [data-ed="back"]').tap();
+    await sleep(300);
+    await page.locator('.cp-thumb .cp-foot [data-act="back"]').tap();
+    s = await until(page, () => {
+      const b = [...document.querySelectorAll('.cp-thumb .th-bank [data-bank] img')];
+      return { ok: b.length === 1 && b[0].naturalWidth > 0, chips: [...document.querySelectorAll('.cp-thumb [data-banksp]')].map((x) => x.textContent.trim()),
+        add: !!document.querySelector('.cp-thumb [data-act="bankadd"]'), newp: !!document.querySelector('.cp-thumb [data-act="banknew"]') };
+    }, null, 20000);
+    check(s && s.ok && s.chips[0] && /Mike Adeyemi/.test(s.chips[0]) && s.add && s.newp, 'the Thumbnails page has the photo bank: the church’s preachers, their cut-out photos, Add photos and New preacher', s);
+    await page.locator('.cp-thumb .th-bank [data-bank]').first().tap();
+    await sleep(300);
+    s = await page.evaluate(() => ({ on: !!document.querySelector('.cp-thumb .th-bank .th-bp.on'), behind: !!document.querySelector('.cp-thumb .th-fr.th-behind'), bank: !!window.MWFlyerStudio._state.th.bank }));
+    check(s.on && s.behind && s.bank, 'tapping a bank photo chooses it, the video’s moment marked as going behind it', s);
+    await page.locator('.cp-thumb [data-act="tmake"]').tap();
+    s = await until(page, () => {
+      const st = window.MWFlyerStudio._state;
+      const ims = st.designs.map((d) => d.layers.filter((l) => l.type === 'image' && l.speaker === 'spmike').length);
+      return { ok: st.designs.length >= 11 && !st.th.cutting && /^kp:/.test(st.th.person) && ims.filter((n) => n > 0).length >= 10, person: st.th.person, n: st.designs.length, ims };
+    }, null, 60000);
+    check(s && s.ok, 'Make puts the bank photo on the designs (the preacher’s own, so “Their photos” swaps it in the editor)', s);
+    if (SHOTS) {
+      const u = await page.evaluate(() => window.MWFlyer.render(window.MWFlyerStudio._state.designs[0], document.createElement('canvas'), 1).toDataURL('image/jpeg', 0.9));
+      fs.writeFileSync(path.join(SHOTS, 'thumb-bank.jpg'), Buffer.from(u.split(',')[1], 'base64'));
+    }
   } catch (e) {
     check(false, 'the run finished', e.stack || e.message);
   } finally {
