@@ -121,6 +121,28 @@ async function waitUp() {
     const inCut = seen.filter((t) => t > 20.4 && t < 24.9);
     check(seen[seen.length - 1] > 25 && inCut.length <= 6, 'playing skips the cut footage (20-25 s) and carries on after it', { last: seen[seen.length - 1], inCut: inCut.length });
 
+    console.log('\n=== [3b] playing stays light, and Pause still answers ===');
+    // (the lanes were redrawn on EVERY frame of playback while Snap closed a gap:
+    //  the phone had no time left for a tap — "I cannot stop the play")
+    const load = await page.evaluate(async () => {
+      const T = window.VideoEditor.__test, p = document.getElementById('vePlayer');
+      p.currentTime = 12; await new Promise((r) => setTimeout(r, 400));
+      T.zoomStep(4);   // zoomed in, as on the phone (the ruler drawn again on the closed-up clock)
+      await new Promise((r) => setTimeout(r, 400));
+      const sc = document.getElementById('veTlScroll'), s0 = sc.scrollLeft;
+      const r0 = T.renderCountNow(), u0 = T.rulerDrawsNow();
+      p.muted = true; await p.play().catch(() => {});
+      await new Promise((r) => setTimeout(r, 2500));
+      const out = { renders: T.renderCountNow() - r0, ruler: T.rulerDrawsNow() - u0, playing: !p.paused, scrolled: Math.round(sc.scrollLeft - s0), t: p.currentTime };
+      return out;
+    });
+    check(load.playing && load.renders <= 12 && load.ruler <= 12, 'two and a half seconds of playing redraws the lanes only now and then (not every frame)', load);
+    await page.locator('#vePlay').tap();
+    await sleep(400);
+    check(await page.evaluate(() => document.getElementById('vePlayer').paused), 'a tap on Pause stops it');
+    await page.evaluate((px) => window.VideoEditor.__test.setZoomPx(px), s.pps);   // back to the zoom the rest is measured at
+    await sleep(300);
+
     console.log('\n=== [4] a swipe lands on the right moment ===');
     await page.evaluate((pps) => { const sc = document.getElementById('veTlScroll');
       const gap = sc.clientWidth / 2; const pad = parseFloat(sc.style.paddingLeft) || 0;

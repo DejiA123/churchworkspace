@@ -636,11 +636,15 @@
 
   function renderRuler() {
     layout();
+    ve._rulerDraws = (ve._rulerDraws || 0) + 1;
     const D0 = dur(); if (!D0) { ve.refs.ruler.innerHTML = ''; return; }
     const D = tv(D0);   // (with Snap closing gaps, the ruler counts what is kept)
     const sc = ve.refs.tlScroll;
     const viewW = (sc && tlViewW()) || 900;
-    ve._laneDrawnAt = { left: sc ? tlScrollX() : 0, pps: ve.pxPerSec, D };
+    // (D0, the recording's length, is what the scroll handler compares with dur(): written as the
+    //  closed-up length, it never matched, and with Snap closing a gap the ruler and the caption lane
+    //  were drawn again on EVERY frame of playback — the phone had no time left for a tap)
+    ve._laneDrawnAt = { left: sc ? tlScrollX() : 0, pps: ve.pxPerSec, D: D0 };
     // Pick the tick step from what's actually ON SCREEN, not from the whole
     // duration: zoomed in (e.g. while editing captions) an hour-long sermon would
     // otherwise show a single "0:00" tick and you'd lose all sense of time.
@@ -19302,6 +19306,11 @@
         document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: x, clientY: y }));
         return { down: c1 - c0, moves: c2 - c1, up: n() - c2, steps };
       },
+      /** Every lane redraw so far (a running count). */
+      renderCountNow() { return ve._renderCount || 0; },
+      rulerDrawsNow() { return ve._rulerDraws || 0; },
+      laneDrawnAt() { return ve._laneDrawnAt || null; },
+      packingNow() { const m = computePack(); return m ? { kept: m.kept, D: m.D, pieces: m.P.length } : null; },
       /** How many DOM rebuilds a burst of N zoom steps actually costs. */
       countRenders(fn) {
         const before = ve._renderCount || 0;
