@@ -86,16 +86,14 @@ const TRACKS = [
   [594, 'River Flow', 'Eugenio Mininni', 'calm'],
 ].map(([n, title, artist, mood]) => ({ id: 'mk' + n, title, artist, mood, url: BASE + n + '/' + n + '.mp3' }))
   /*
-   * 🕯 WORSHIP PADS, made by the studio itself (padgen.js): the long soft chord a
-   * church holds under a prayer or an altar call, in every key, Warm or
-   * Shimmer. Nobody else's recording — nothing to credit, nothing to be flagged.
-   * Made on the server the first time one is chosen (a few seconds), then kept
-   * in the music library like any other song.
+   * 🕯 WORSHIP PADS, made by the studio itself (padgen.js): real church chord
+   * progressions — Worship 1-5-6-4, Gospel 2-5-1, Church 1-6-2-5, Minor Prayer,
+   * Soaking 4-1, Gospel Plagal, Hymn 1-4-1-5, Emotional 6-4-1-5 — each in the
+   * keys churches play it in, voiced the gospel way. Nobody else's recording —
+   * nothing to credit, nothing to be flagged. Made on the server the first time
+   * one is chosen (a few seconds), then kept in the music library like any song.
    */
-  .concat(['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'].flatMap((key) => ['warm', 'shimmer'].map((colour) => ({
-    id: `pad-${key.toLowerCase().replace('#', 's')}-${colour}`, title: `${colour === 'warm' ? 'Warm' : 'Shimmer'} Worship Pad in ${key}`,
-    artist: 'Church Space', mood: 'prayer', gen: { key, colour },
-  }))));
+  .concat(require('./padgen').shelf().map((p) => ({ id: p.id, title: p.title, artist: 'Church Space', mood: 'prayer', gen: { prog: p.prog, key: p.key } })));
 
 // Mixkit's licence asks for no credit — the caption stays the church's own
 const credit = () => '';
@@ -136,7 +134,8 @@ async function list(library, { wait = false } = {}) {
   const have = new Map(((library && library.list().music) || []).filter((m) => /^free:/.test(m.source || '')).map((m) => [m.source.slice(5), m]));
   return {
     moods: MOODS.map(([id, name]) => ({ id, name })),
-    tracks: TRACKS.filter((t) => probe.ok.get(t.id) !== false).map((t) => ({
+    // (the worship pads first on their shelf: they are what it is for)
+    tracks: TRACKS.filter((t) => probe.ok.get(t.id) !== false).sort((a, b) => (b.gen ? 1 : 0) - (a.gen ? 1 : 0)).map((t) => ({
       id: t.id, title: t.title, artist: t.artist, mood: t.mood, credit: credit(t),
       url: t.url || null,   // the file at Mixkit (the phone previews it through the server); a pad is made, not fetched
       inLibrary: have.has(t.id) ? have.get(t.id).id : null,
@@ -178,7 +177,7 @@ async function getNow(ctx, video, library, id) {
   if (have) return Object.assign({}, have, { credit: credit(t) });
   const tmp = path.join(os.tmpdir(), `mw-free-${t.id}-${Date.now()}.mp3`);
   if (t.gen) {
-    try { await require('./padgen').makePad(ctx.ffmpeg, t.gen.key, t.gen.colour, tmp); }
+    try { await require('./padgen').makePad(ctx.ffmpeg, t.gen.prog, t.gen.key, tmp); }
     catch (e) { try { fs.rmSync(tmp, { force: true }); } catch (er) {} throw new Error(`“${t.title}” could not be made right now (${e.message}).`); }
     const made = await library.add(ctx, video, { kind: 'music', path: tmp, name: t.title, source: 'free:' + t.id, move: true });
     return Object.assign({}, made, { credit: credit(t) });

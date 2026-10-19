@@ -219,24 +219,24 @@ async function waitUp() {
     await sleep(2000);
     const back = await page.evaluate(() => document.getElementById('veMusic').textContent.trim());
     check(/Lo-Fi 01/.test(back), 'the first project, opened again, still has its song', back);
-    // 🕯 Prayer: worship pads the studio makes itself, in every key
+    // 🕯 Prayer: worship pads the studio makes itself — real church chord progressions
     await page.evaluate(() => document.getElementById('veMusic').click());
     await sleep(600);
     await page.locator('#libFreeMoods [data-freemood="prayer"]').tap();
     await sleep(300);
     const pads = await page.evaluate(() => [...document.querySelectorAll('#libFreeList [data-freeid]')].map((r) => r.querySelector('b').textContent));
-    check(pads.filter((t) => / Worship Pad in /.test(t)).length === 24 && pads.includes('Warm Worship Pad in C') && pads.includes('Shimmer Worship Pad in F#'),
-      'Prayer has worship pads in every key, Warm and Shimmer', pads.length);
-    await page.locator('#libFreeList [data-freeuse="pad-c-warm"]').tap();
+    check(pads.length === 26 && pads[0] === 'Worship 1-5-6-4 in C' && pads.includes('Gospel 2-5-1 in Eb') && pads.includes('Minor Prayer in A minor') && pads.includes('Gospel Plagal in Bb'),
+      'Prayer has worship progressions first (1-5-6-4, gospel 2-5-1, minor, plagal…) in church keys', pads.slice(0, 6));
+    await page.locator('#libFreeList [data-freeuse="pad-g251-eb"]').tap();
     let pad = null;
     for (let i = 0; i < 120; i++) {
       await sleep(500);
-      pad = await page.evaluate(async () => ({ use: (document.querySelector('#libFreeList [data-freeuse="pad-c-warm"]') || {}).textContent || '',
-        lib: (await window.api.library.list()).music.filter((m) => m.source === 'free:pad-c-warm').map((m) => ({ name: m.name, d: m.durationSec })) }));
+      pad = await page.evaluate(async () => ({ use: (document.querySelector('#libFreeList [data-freeuse="pad-g251-eb"]') || {}).textContent || '',
+        lib: (await window.api.library.list()).music.filter((m) => m.source === 'free:pad-g251-eb').map((m) => ({ name: m.name, d: m.durationSec })) }));
       if (/In use/.test(pad.use)) break;
     }
-    check(/In use/.test(pad.use) && pad.lib.length === 1 && pad.lib[0].name === 'Warm Worship Pad in C' && Math.abs(pad.lib[0].d - 180) < 3,
-      'Use makes the pad on the server (3 minutes) and puts it under the video', pad);
+    check(/In use/.test(pad.use) && pad.lib.length === 1 && pad.lib[0].name === 'Gospel 2-5-1 in Eb' && pad.lib[0].d > 170 && pad.lib[0].d < 200,
+      'Use makes the progression on the server (about 3 minutes) and puts it under the video', pad);
   } catch (e) {
     check(false, 'the run completes', e.message);
   } finally { await done(); }
