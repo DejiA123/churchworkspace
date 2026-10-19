@@ -77,30 +77,34 @@ const freq = (midi) => 440 * Math.pow(2, (midi - 69) / 12);
  */
 function voiceProgression(prog, tonic) {
   const out = [];
-  let centre = 61;     // around C#4: a warm middle, nothing high and thin
+  let centre = 63;     // around D#4: a warm middle, nothing high and thin
   for (const [deg, shape, beats] of prog.chords) {
     const root = (tonic + deg) % 12;
     const pcs = SHAPE[shape].map((x) => (root + x) % 12);
     let best = null;
-    for (let r = 0; r < pcs.length; r++) {
-      for (let base = 50; base <= 66; base++) {
-        if (base % 12 !== pcs[r]) continue;
-        const notes = [base];
-        for (let k = 1; k < pcs.length; k++) {
-          let n = notes[k - 1] + 1;
-          while (n % 12 !== pcs[(r + k) % pcs.length]) n++;
-          notes.push(n);
-        }
-        if (notes[notes.length - 1] > 76) continue;      // never above E5: soft, not sharp
-        const mean = notes.reduce((a, b) => a + b, 0) / notes.length;
-        const cost = Math.abs(mean - centre) + 0.15 * (notes[notes.length - 1] - notes[0]);
-        if (!best || cost < best.cost) best = { notes, cost, mean };
+    // every way to place each note in an octave between F3 and G5 …
+    const tryAll = (k, notes) => {
+      if (k === pcs.length) {
+        const s = notes.slice().sort((a, b) => a - b);
+        // … but no two notes closer than a minor third: a half or whole step this low rubs
+        // into a rough, buzzing beat (it sounds like distortion once the tone is soft)
+        for (let i = 1; i < s.length; i++) if (s[i] - s[i - 1] < 3) return;
+        const span = s[s.length - 1] - s[0];
+        if (span > 20) return;
+        const mean = s.reduce((a, b) => a + b, 0) / s.length;
+        const cost = Math.abs(mean - centre) + 0.15 * span;
+        if (!best || cost < best.cost) best = { notes: s, cost, mean };
+        return;
       }
-    }
-    let bass = 36 + ((root - 36 % 12 + 12) % 12);   // the root, C2–B2
-    if (bass > 45) bass -= 12;                        // never above A2: the bass stays a bass
+      for (let n = 53; n <= 79; n++) if (n % 12 === pcs[k]) tryAll(k + 1, notes.concat(n));
+    };
+    tryAll(0, []);
+    // the root, low — at least a fifth under the chord (closer, it muddies), never above B2
+    let bass = best.notes[0] - 7;
+    while ((bass % 12) !== root) bass--;
+    if (bass > 47) bass -= 12;
     out.push({ bass, upper: best.notes, beats });
-    centre = best.mean * 0.7 + 61 * 0.3;              // drift back toward the middle
+    centre = best.mean * 0.7 + 63 * 0.3;              // drift back toward the middle
   }
   return out;
 }
@@ -208,7 +212,7 @@ function makePad(ffmpeg, progId, key, out) {
   const passes = Math.max(1, Math.round(TARGET / pass));
   const length = passes * pass;
   const fc = [
-    '[0:a]lowpass=f=1800,lowpass=f=3000,highpass=f=50,equalizer=f=320:t=q:w=1:g=-2.5,equalizer=f=2200:t=q:w=1.2:g=-5[dry]',
+    '[0:a]lowpass=f=1800,lowpass=f=3000,highpass=f=60,equalizer=f=320:t=q:w=1:g=-2.5,equalizer=f=2200:t=q:w=1.2:g=-5[dry]',
     '[dry]asplit[a][b]',
     // the room: a long soft tail (a pink-noise impulse fading over 4.5 s; no rumble in it)
     '[a][1:a]afir=dry=2:wet=10[w]',
