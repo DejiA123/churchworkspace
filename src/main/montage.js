@@ -1741,6 +1741,47 @@ function spreadList(phrases, max = 420) {
   if (chosen.size < max) for (const p of phrases.slice().sort((a, b) => b.score - a.score)) { if (chosen.size >= max) break; chosen.add(p); }
   return Array.from(chosen).sort((a, b) => b.score - a.score).slice(0, max).sort((a, b) => a.vid - b.vid || a.start - b.start);
 }
+/*
+ * A COMPLETE THOUGHT. A line that starts mid-sentence ("and they…", "of the…")
+ * or stops on a word that needs another ("…so you give them your card, and
+ * they") cannot stand on its own in a clip. Nor can the same question asked
+ * three times in a row: only the best of near-identical lines is kept.
+ */
+// (words a thought cannot stop on — "…give them your card, and they" — but never "you", "it", "is": "He started it in you." is whole)
+const DANGLING_END = /\b(and|or|but|the|a|an|to|of|my|your|our|their|because|if|when|then|than)[,]?$/i;
+// (a thought joined on to one left out — "And then…", "Because…" — not "The joy of the Lord…", "That is the truth.")
+const MIDDLE_START = /^(and|or|but|of|to|which|because|then|anyway|anyways)\b/i;
+function wholeThought(p) {
+  const t = String(p.text || '').trim();
+  if (!t || /[—–-]\s*$/.test(t) || DANGLING_END.test(t.replace(/[.!?…]+$/, ''))) return false;
+  if (MIDDLE_START.test(t) || /^[a-z]/.test(t) && !/^(i|i'm|i've|god|jesus)\b/i.test(t)) return false;
+  // a sentence that ends (a comma, or no stop at all, is a thought cut off)
+  if (!/[.!?…]["”’']?$/.test(t)) return false;
+  // a line that says the same sentence twice ("Make some noise for Jesus? Make some noise for Jesus?") is one sentence too many
+  const sents = t.split(/(?<=[.!?…])\s+/).map((x) => x.toLowerCase().replace(/[^a-z ]/g, '').trim()).filter(Boolean);
+  if (sents.length > 1 && new Set(sents).size < sents.length) return false;
+  // a stammer ("to to to every creature") reads badly as a caption
+  if (/(?:^|\s)([\w']+)(?:\s+\1(?=\s|$|[,.!?])){2,}/i.test(t)) return false;
+  // an introduction or a shout-out is not a moment ("I am Daiji, also known as…", "follow us on…")
+  if (/\b(my name is|also known as|i am \w+ from|shout ?outs?|follow (us|me)|subscribe|link in (the )?bio)\b/i.test(t)) return false;
+  return true;
+}
+const wordsOfLine = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9' ]+/g, ' ').split(/\s+/).filter((w) => w.length > 2);
+function sameLine(a, b) {
+  const A = new Set(wordsOfLine(a.text)), B = wordsOfLine(b.text);
+  if (!A.size || !B.length) return false;
+  const both = B.filter((w) => A.has(w)).length;
+  return both / Math.min(A.size, B.length) >= 0.7;
+}
+/* the candidates an editor is shown: whole thoughts, each said once (the best of near-identical lines kept) */
+function goodLines(list) {
+  const whole = list.filter(wholeThought);
+  const base = whole.length >= Math.min(12, list.length) ? whole : list;
+  const keep = [];
+  for (const p of base.slice().sort((a, b) => b.score - a.score)) if (!keep.some((q) => sameLine(p, q))) keep.push(p);
+  return keep.sort((a, b) => a.vid - b.vid || a.start - b.start);
+}
+
 /* the picks, in play order, grouped into moments (one after another in the same video) */
 function momentsOf(picks) {
   const out = [];
@@ -1805,6 +1846,8 @@ function phraseScore(p, loud) {
   s -= Math.min(0.9, ((p.text.match(FILLER_ANY) || []).length) * 0.45);
   if (HOUSEKEEPING.test(p.text)) s -= 1;
   if (p.words.length < 3) s -= 0.4;
+  // a word said twice over ("you you're", "to to") is a stumble
+  s -= Math.min(0.6, ((p.text.match(/\b(\w+)\s+\1\b/gi) || []).length) * 0.3);
   return round2(s);
 }
 
@@ -1838,7 +1881,8 @@ hook_text: a 3–7 word on-screen headline that makes people stop scrolling (not
 post_caption: the caption for the post, 1–3 short sentences, with a question or a call to share. hashtags: 5–8, no # sign.
 vo_intro / vo_outro: ONLY when a narrator is asked for (otherwise leave both empty). vo_intro is spoken by a narrator over B-roll BEFORE the first line: 6–14 words that create curiosity and make people stay ("He was about to give up — then he heard this."). Never a summary, never "in this video". vo_outro is spoken after the last line: 5–12 words, a warm call to follow or share. Plain words a person would say aloud — no emojis, no hashtags.`;
 
-function talkBrief(opts, list) {
+const clock = (s) => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
+function talkBrief(opts, list, how = {}) {
   const used = list.some((p) => p.usedBefore), hl = list.some((p) => p.hl > 0);
   return `Style: ${opts.style} — ${STYLES[opts.style] || ''}\nTarget length: ${opts.lengthSec} seconds of speech — choose lines that add up to it.`
     + `\nNarrator: ${opts.voice ? 'YES — write vo_intro and vo_outro.' : 'no — leave vo_intro and vo_outro empty.'}`
@@ -1848,7 +1892,10 @@ function talkBrief(opts, list) {
     + (opts.angle ? `\nANGLE FOR THIS EDIT: build it around "${opts.angle}" — the hook and the payoff should serve that idea.` : '')
     + (hl ? '\nLines marked ★ hold the key phrases of the whole message (ranked by AssemblyAI): strong candidates.' : '')
     + (used ? '\nLines marked (used before) were in earlier edits of this video. The operator wants a FRESH edit: choose DIFFERENT lines — use one of those only if nothing else comes close.' : '')
-    + `\n\nPhrases (${list.length}):\n` + list.map((p) => `${p.id} | video ${p.vid} | ${p.start.toFixed(1)}-${p.end.toFixed(1)}s | loud ${p.score}${p.hl > 0 ? ' | ★' + p.hl.toFixed(2) : ''}${p.usedBefore ? ' | (used before)' : ''} | ${p.text}`).join('\n');
+    + (how.compact
+      // short form: id | when | words (★ a key phrase, ✗ used before)
+      ? `\n\nPhrases (${list.length}) — id | time | words:\n` + list.map((p) => `${p.id} | ${p.vid > 1 ? 'v' + p.vid + ' ' : ''}${clock(p.start)}${p.hl > 0 ? ' ★' + p.hl.toFixed(2) : ''}${p.usedBefore ? ' (used before)' : ''} | ${p.text}`).join('\n')
+      : `\n\nPhrases (${list.length}):\n` + list.map((p) => `${p.id} | video ${p.vid} | ${p.start.toFixed(1)}-${p.end.toFixed(1)}s | loud ${p.score}${p.hl > 0 ? ' | ★' + p.hl.toFixed(2) : ''}${p.usedBefore ? ' | (used before)' : ''} | ${p.text}`).join('\n'));
 }
 
 async function talkWithClaude(list, opts) {
@@ -1874,24 +1921,59 @@ async function talkWithClaude(list, opts) {
   return plan && Array.isArray(plan.picks) ? { plan, director: 'claude', model: res.model || model } : null;
 }
 
+/* AssemblyAI's LLM Gateway (aaillm.js): the church's AssemblyAI key, a big model, room for the whole event */
+async function talkWithAai(list, opts) {
+  let ai;
+  try { ai = require('./aaillm'); } catch (e) { return null; }
+  if (!ai.ready()) return null;
+  const prompt = talkBrief(opts, list, { compact: true })
+    + '\n\nReply with JSON only, exactly this shape: {"concept":"","title":"","hook_text":"","post_caption":"","hashtags":[""],"picks":[{"id":"p1"}],"vo_intro":"","vo_outro":""}';
+  const text = await ai.chat({ system: TALK_SYSTEM, prompt, json: true, maxTokens: 4000, temperature: 0.9 });
+  let plan = null;
+  try { const t = String(text || ''); const a = t.indexOf('{'), b = t.lastIndexOf('}'); plan = a >= 0 && b > a ? JSON.parse(t.slice(a, b + 1)) : null; } catch (e) { plan = null; }
+  const st = ai.state();
+  return plan && Array.isArray(plan.picks) ? { plan, director: 'assemblyai', model: (st.last && st.last.model) || '' } : null;
+}
+
 async function talkWithGroq(list, opts) {
   let cw;
   try { cw = require('./cloudwrite'); } catch (e) { return null; }
   if (!cw.access || !cw.access().key) return null;
-  const prompt = talkBrief(opts, list)
-    + '\n\nReply with JSON only, exactly this shape: {"concept":"","title":"","hook_text":"","post_caption":"","hashtags":[""],"picks":[{"id":"p1"}],"vo_intro":"","vo_outro":""}';
-  const text = await cw.chat({ system: TALK_SYSTEM, prompt, json: true, maxTokens: 2500, temperature: 0.9, timeoutMs: 90000, evenIfOff: true });   // (warm: a different edit each time)
-  const plan = text ? cw.parseJson(text) : null;
-  return plan && Array.isArray(plan.picks) ? { plan, director: 'groq', model: (cw.state && cw.state().model) || 'groq' } : null;
+  /*
+   * A free Groq account reads only so much at once ("Please reduce the length
+   * of the messages" — 420 lines of a three-hour service was far over it, and
+   * the montage fell back to rules). It is shown the best lines from across the
+   * event in a short form, fewer if it still says too long.
+   */
+  for (const n of [140, 80]) {
+    const few = spreadList(list, n);
+    const prompt = talkBrief(opts, few, { compact: true })
+      + '\n\nReply with JSON only, exactly this shape: {"concept":"","title":"","hook_text":"","post_caption":"","hashtags":[""],"picks":[{"id":"p1"}],"vo_intro":"","vo_outro":""}';
+    const text = await cw.chat({ system: TALK_SYSTEM, prompt, json: true, maxTokens: 1800, temperature: 0.9, timeoutMs: 90000, evenIfOff: true });   // (warm: a different edit each time)
+    const plan = text ? cw.parseJson(text) : null;
+    if (plan && Array.isArray(plan.picks)) return { plan, director: 'groq', model: (cw.state && cw.state().model) || 'groq' };
+  }
+  return null;
 }
 
 /** Without an AI: the strongest short line first, then the best lines in the order they were said. */
+/* what carries the MESSAGE (a rules edit is built from these), and the crowd work around it (not a clip's line) */
+const MESSAGE = /\b(god|jesus|christ|lord|holy spirit|spirit|faith|pray|prayers?|gospel|believe|love|grace|mercy|heaven|salvation|saved|sins?|cross|kingdom|bible|scripture|purpose|power|fire|glory|worship|testimony|hope|fear|nothing|everything|destiny|calling|anointing|freedom|truth)\b/gi;
+const CROWD = /\b(are you (guys )?ready|make some noise|come on|give it up|clap|hands up|give a shout|can somebody|say amen|turn to your neighbou?r|let'?s go|round of applause|one more time|do you want to|go again)\b/i;
+const messageOf = (p) => Math.min(3, (String(p.text).match(MESSAGE) || []).length) * 0.25 - (CROWD.test(p.text) ? 0.6 : 0);
 function talkByRules(list, opts) {
   // without an AI to judge them, a line with an "um" in it or the business of the service is never used
   const clean = list.filter((p) => !HOUSEKEEPING.test(p.text) && !(p.text.match(FILLER_ANY) || []).length);
   if (clean.length >= 2) list = clean;
+  const secs = (l) => l.reduce((n, p) => n + (p.end - p.start), 0);
+  // another take of the same video: only lines no earlier take used, when there are enough of them to fill it
+  const fresh = list.filter((p) => !p.usedBefore);
+  if (fresh.length >= 4 && secs(fresh) >= (opts.lengthSec || 30)) list = fresh;
+  // lines that carry the message, when there are enough of them (a rules edit cannot tell banter from a word)
+  const said = list.filter((p) => messageOf(p) > 0);
+  if (said.length >= 8 && secs(said) >= (opts.lengthSec || 30)) list = said;
   // a line used in an earlier edit of this video counts for less, and near-equal lines are taken in a new order each time
-  const base = new Map(list.map((p) => [p, p.score - (p.usedBefore ? 0.5 : 0)]));
+  const base = new Map(list.map((p) => [p, p.score + messageOf(p) - (p.usedBefore ? 0.5 : 0)]));
   const val = new Map(list.map((p) => [p, base.get(p) + Math.random() * 0.12]));
   // the hook: the strongest line not used before (the variety is in the rest, and in what earlier edits used)
   const hook = list.filter((p) => p.end - p.start >= 1.6 && p.end - p.start <= 6.5).sort((a, b) => base.get(b) - base.get(a))[0] || list[0];
@@ -1899,7 +1981,8 @@ function talkByRules(list, opts) {
   const picked = [hook];
   let total = hook.end - hook.start;
   // a long event: no more than two lines from any one stretch of a few minutes, so the edit is made of different moments
-  const long = (opts.eventSec || 0) >= LONG_EVENT_SEC, win = 180;
+  // (the event in about twelve parts: the edit is built from several of them, not one stretch)
+  const long = (opts.eventSec || 0) >= LONG_EVENT_SEC, win = Math.max(180, (opts.eventSec || 0) / 12);
   const zone = (p) => p.vid + ':' + Math.floor(p.start / win);
   const inZone = new Map([[zone(hook), 1]]);
   for (const p of rest) {
@@ -1969,6 +2052,32 @@ async function findSpeakers(ctx, reqs, tmp, log, frame = null) {
  * asked or no answer). `people:false` asks only for the speaker's column.
  */
 let lookRun = 0;
+/*
+ * A SLIDE OR A DARK STAGE. The person detector sees a face on a "Connect with
+ * Bishop…" slide (the speaker's photo on it) and says someone is there; a
+ * livestream that cut to a graphic while someone prayed put four seconds of
+ * social handles in a montage. A graphic does not move: two small grey frames
+ * of the line, near its start and its end, are all but identical. A speaker
+ * always moves (the mouth, the hands, the camera's own grain). A stage too dark
+ * to see is measured the same way. { still, dark, diff, luma }.
+ */
+async function stillOrDark(ctx, p) {
+  const dur = p.end - p.start;
+  if (!(dur > 1.2) || !p.cand || !p.cand.file) return null;
+  const grab = async (t) => {
+    const buf = await collect(ctx.ffmpeg, ['-hide_banner', '-loglevel', 'error', '-ss', String(Math.max(0, t)), '-i', p.cand.file, '-frames:v', '1',
+      '-vf', 'scale=96:54,format=gray', '-f', 'rawvideo', '-'], { stdout: true, maxBytes: 1 << 20 });
+    return (buf && buf.stdout) || Buffer.alloc(0);
+  };
+  const a = await grab(p.start + 0.4), b = await grab(p.end - 0.4);
+  if (a.length < 96 * 54 || b.length < 96 * 54) return null;
+  let diff = 0, luma = 0;
+  for (let i = 0; i < 96 * 54; i++) { diff += Math.abs(a[i] - b[i]); luma += (a[i] + b[i]) / 2; }
+  diff /= 96 * 54; luma /= 96 * 54;
+  // (measured on Gospel Jamz: a slide 0.0–0.1, a speaker sitting still 1.1+; a dark stage 38, a lit one 55+)
+  return { still: diff < 0.5, dark: luma < 45, diff: round2(diff), luma: round2(luma) };
+}
+
 async function lookAt(ctx, reqs, tmp, log, { people = true, max = Infinity, frame = null } = {}) {
   const out = reqs.map(() => ({ fx: null, people: null }));
   let see = null;
@@ -2150,16 +2259,22 @@ async function writeTalkPost(picks, opts, P, hook) {
   const notes = cleanBrief(opts.brief).toLowerCase();
   const directors = String(P.post_caption || '').trim();
   const realOne = directors.length >= 60 && !(notes && directors.toLowerCase().includes(notes.slice(0, 40)));
+  // the big editor (Claude, or a model on AssemblyAI's gateway) wrote the post with the edit: it stands
+  if (realOne && (opts.directorBy === 'claude' || opts.directorBy === 'assemblyai')) return { caption: directors, hashtags: tags(P.hashtags) };
   try {
     const cw = require('./cloudwrite');
-    if (cw.access && cw.access().key) {
+    let ai = null; try { ai = require('./aaillm'); } catch (e) { ai = null; }
+    const viaAai = !!(ai && ai.ready());
+    if (viaAai || (cw.access && cw.access().key)) {
       const prompt = `The words spoken in the video, in order:\n${said.map((t, i) => `${i + 1}. ${t}`).join('\n')}`
         + (hook ? `\n\nOn-screen headline: ${hook}` : '')
         + (a.speaker ? `\nSpeaker: ${a.speaker}` : '') + (a.church ? `\nChurch: ${a.church}` : '') + (a.occasion ? `\nOccasion: ${a.occasion}` : '')
         + (a.cta ? `\nCall to action to end with: ${a.cta}` : '')
         + (opts.brief ? `\nThe church's own notes (background only — do not copy them): ${cleanBrief(opts.brief)}` : '')
         + `\nStyle of the video: ${opts.style}.`;
-      const text = await cw.chat({ system: POST_SYSTEM, prompt, json: true, maxTokens: 700, temperature: 0.8, timeoutMs: 45000, evenIfOff: true });
+      // the post too: AssemblyAI's model when it is set up (Groq is not used for montages then)
+      const text = viaAai ? await ai.chat({ system: POST_SYSTEM, prompt, json: true, maxTokens: 900, temperature: 0.8, timeoutMs: 60000 })
+        : await cw.chat({ system: POST_SYSTEM, prompt, json: true, maxTokens: 700, temperature: 0.8, timeoutMs: 45000, evenIfOff: true });
       const j = text ? cw.parseJson(text) : null;
       const cap = j && String(j.caption || '').trim();
       if (cap && cap.length >= 40) return { caption: cap, hashtags: tags(j.hashtags).length ? tags(j.hashtags) : tags(P.hashtags) };
@@ -2318,20 +2433,25 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     for (const b of broll) { if (b.kind === 'image' && !b.thumb) { try { b.thumb = await thumb(ctx, b.file, 0, path.join(tmp, b.id + '.jpg'), true); } catch (e) { b.thumb = null; } } }
     if (onProgress) onProgress(42);
     // 2) CHOOSE
-    const list = spreadList(phrases, 420);
+    const list = spreadList(goodLines(phrases), 420);
     // how long the heard event is (a whole service asks for moments from across it)
     opts.eventSec = cands.reduce((n, c) => n + Math.max(0, (c.end || 0) - (c.start || 0)), 0);
     if (stage) stage(process.env.ANTHROPIC_API_KEY ? '🎬 Claude is picking the lines that will stop the scroll…' : '🎬 The AI is picking the lines that will stop the scroll…');
     let d = null;
     try { d = await talkWithClaude(list, opts); } catch (e) { if (log) log('claude: ' + e.message); }
-    if (!d) { try { d = await talkWithGroq(list, opts); } catch (e) { if (log) log('groq: ' + e.message); } }
+    if (!d) { try { d = await talkWithAai(list, opts); } catch (e) { if (log) log('assemblyai: ' + e.message); } }
+    // (with AssemblyAI set up, Groq is not asked: the church's choice — AssemblyAI's model, else the rules)
+    const aaiOn = (() => { try { return require('./aaillm').ready(); } catch (e) { return false; } })();
+    if (!d && !aaiOn) { try { d = await talkWithGroq(list, opts); } catch (e) { if (log) log('groq: ' + e.message); } }
     if (!d) d = talkByRules(list, opts);
+    if (log) log(`talk: lines chosen by ${d.director}${d.model ? ' (' + d.model + ')' : ''}`);
+    opts.directorBy = d.director;
     const byId = new Map(phrases.map((p) => [p.id, p]));
     let picks = [];
     for (const x of (d.plan.picks || [])) { const p = byId.get(String(x && x.id || '').trim()); if (p && !picks.includes(p)) picks.push(p); }
     if (picks.length < 1) picks = talkByRules(list, opts).plan.picks.map((x) => byId.get(x.id)).filter(Boolean);
-    // no moment runs on (whatever the editor chose)
-    picks = shortMoments(picks);
+    // a long event: no moment runs on (whatever the editor chose). A short clip is one stretch by nature, and keeps it.
+    if ((opts.eventSec || 0) >= LONG_EVENT_SEC) picks = shortMoments(picks);
     // the length asked for, give or take a line (the hook always stays)
     let total = picks.reduce((n, p) => n + (p.end - p.start), 0);
     while (picks.length > 2 && total - (picks[picks.length - 2].end - picks[picks.length - 2].start) >= opts.lengthSec * 1.15) {
@@ -2364,10 +2484,15 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       if (!reqs.length) return;
       const got = await lookAt(ctx, reqs, tmp, log, { people: true, frame: ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 } });
       got.forEach((g, i) => who[i].looks.push({ t: reqs[i].t, fx: g.fx, people: g.people }));
+      // a slide or a dark stage is not a moment, even with a face in it (a speaker's photo on a "connect with" slide)
+      for (const p of ps) { if (!p.vis) { try { p.vis = await stillOrDark(ctx, p); } catch (e) { if (e instanceof jobs.CancelledError) throw e; p.vis = null; } } }
     };
     // a line where HALF or more of its looks show nobody is not used; one with only a moment of nobody
     // (a cut to the screen mid-sentence) is kept, and that beat is covered with a moment that shows someone
-    const nobody = (p) => !!(p.looks && p.looks.length && p.looks.filter((l) => l.people === 0).length * 2 >= p.looks.length);
+    // (a still moment is a slide only where the video around it moves: a sermon heard over one still picture is all still,
+    //  and then stillness says nothing)
+    const stillVideo = () => { const v = picks.filter((p) => p.vis); return v.length >= 2 && v.filter((p) => p.vis.still).length >= v.length * 0.6; };
+    const nobody = (p) => !!(p.vis && ((p.vis.still && !stillVideo()) || p.vis.dark)) || !!(p.looks && p.looks.length && p.looks.filter((l) => l.people === 0).length * 2 >= p.looks.length);
     if (stage) stage('👀 Making sure someone can be seen in every line…');
     await lookLines(picks);
     const seen = picks.some((p) => p.looks.some((l) => l.people != null));
@@ -2381,7 +2506,8 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         let tot = picks.reduce((n, p) => n + (p.end - p.start), 0);
         const tried = new Set(picks.concat(empty));
         // the strongest lines that were not chosen — short ones too when nothing chosen survived (someone on screen beats a longer line)
-        const pool = list.filter((p) => !tried.has(p) && p.end - p.start >= (picks.length ? 1.4 : 0.8)).sort((a, b) => b.score - a.score);
+        // (lines no earlier take used come first: a replacement must not bring the last take back)
+        const pool = list.filter((p) => !tried.has(p) && p.end - p.start >= (picks.length ? 1.4 : 0.8)).sort((a, b) => (a.usedBefore - b.usedBefore) || (b.score - a.score));
         let added = 0;
         for (let round = 0; round < 3 && tot < opts.lengthSec * 0.9 && pool.length; round++) {
           const batch = pool.splice(0, 6);
@@ -2535,6 +2661,9 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     }
     // spare moments are only used when there are not enough photos and silent clips for every slot
     const slotsFor = Math.max(0, Math.ceil(picks.reduce((n, p) => n + (p.end - p.start), 0) / 5.2) - broll.length) + (opts.voice && !broll.length ? 6 : 0);
+    // a long event: no moments from elsewhere in it laid over a line (a slide, a faded frame, a stranger — they looked
+    // random); the speakers, framed tight with the jump zooms, carry it. Photos and clips the operator added still go on.
+    if ((opts.eventSec || 0) >= LONG_EVENT_SEC) spare.length = 0;
     if (seen && spare.length && slotsFor > 0) {
       const top = spare.slice(0, Math.min(24, slotsFor + 4));
       const got = await lookAt(ctx, top.map((sp) => ({ file: sp.cand.file, t: snapAt(sp), w: sp.cand.w, h: sp.cand.h })), tmp, log, { people: true, frame: ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 } });
@@ -2789,9 +2918,13 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 /** Which director the montage would use right now (for the phone to say so). */
 function directorStatus() {
   if (process.env.ANTHROPIC_API_KEY) return { director: 'claude', model: process.env.MW_MONTAGE_MODEL || 'claude-opus-5-5' };
+  try {
+    if (require('./aaillm').ready()) { let vision = false; try { const cw = require('./cloudwrite'); vision = !!(cw.access && cw.access().key); } catch (e) {} return { director: 'assemblyai', model: '', vision }; }
+  } catch (e) {}
   try { const cw = require('./cloudwrite'); if (cw.access && cw.access().key) return { director: 'groq', model: '', vision: true }; } catch (e) {}
   return { director: 'rules', model: '' };
 }
 
 module.exports = {
+  stillOrDark, goodLines, wholeThought, sameLine, talkBrief,
   spreadList, momentsOf, shortMoments, HOUSEKEEPING, cleanAbout, withAbout, aboutLines, phrasesOf, phraseScore, talkByRules, fromBrief, cleanBrief, make, remake, loadProject, sidecarOf, baseOf, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };

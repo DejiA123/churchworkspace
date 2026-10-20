@@ -332,7 +332,11 @@ const SCRIPT = {
     const bank = ['God is faithful to every promise he made', 'Your season of harvest has come', 'Do not give up in the middle of the storm', 'He will finish the work he started in you', 'Lift your eyes to the hills where your help comes from',
       'The joy of the Lord is your strength today', 'You are not forgotten you are chosen', 'Faith is the substance of things hoped for', 'Every chain is broken in his name', 'Walk by faith and not by sight',
       'Your latter shall be greater than your former', 'Weeping may endure for a night but joy comes', 'Be still and know that he is God', 'He makes a way where there seems to be no way', 'Greater is he that is in you'];
-    for (let r = 0; r < 4; r++) bank.forEach((b, i) => lines.push(b + (r ? ' ' + ['indeed', 'my friend', 'church'][r - 1] : '') + '.'));
+    // the bank, then forty-five more different sentences (lines that say the same thing are kept once, as a sermon has few)
+    bank.forEach((b) => lines.push(b + '.'));
+    const WHO = ['The Lord', 'His mercy', 'Your faith', 'The cross', 'His love', 'Prayer', 'The Spirit', 'His word', 'Grace'];
+    const DOES = ['rebuilds broken homes', 'lifts every weary heart', 'opens doors nobody can shut', 'carries you through storms', 'turns mourning into dancing'];
+    for (let i = 0; i < 45; i++) lines.push(`${WHO[i % 9]} ${DOES[Math.floor(i / 9) % 5]} ${['this morning', 'right now', 'in this house', 'for your family', 'across this city'][i % 5]}.`);
     const talk = say(lines, 0.5).filter((w) => w.end < 129);
     // AssemblyAI's key phrases, on two of the lines
     talk.highlights = [{ text: 'harvest has come', rank: 0.9, at: [[talk.find((w) => w.text === 'harvest').start, talk.find((w) => w.text === 'harvest').end]] }];
@@ -361,7 +365,10 @@ const SCRIPT = {
     // long sentences (about 6 s each) and a narrator: still the length asked for
     {
       const longLines = [];
-      for (let i = 0; i < 18; i++) longLines.push(`This is sentence number ${i} and it carries the whole message of hope for every one of you tonight.`);
+      // (eighteen different sentences, as a sermon has: lines that say the same thing are kept once)
+      const SUBJ = ['God', 'His mercy', 'Your faith', 'The cross', 'His love', 'Prayer', 'The Spirit', 'His word', 'Grace', 'Hope', 'Your calling', 'His promise', 'Worship', 'The church', 'Your story', 'Heaven', 'His peace', 'Jesus'];
+      const VERB = ['rebuilds broken homes', 'lifts every weary heart', 'opens doors nobody can shut', 'carries you through storms', 'speaks into silent nights', 'turns mourning into dancing'];
+      for (let i = 0; i < 18; i++) longLines.push(`${SUBJ[i]} ${VERB[i % 6]} and ${['makes', 'brings', 'gives'][i % 3]} something new in ${['every family', 'this city', 'your life'][i % 3]} tonight, number ${i}.`);
       const longTalk = say(longLines, 0.5).filter((w) => w.end < 129);
       const vox = require(path.join(ROOT, 'src/main/voiceover'));
       vox._setEngine({ generate: async () => ({ save: async (out) => make(['-f', 'lavfi', '-i', 'sine=f=900:d=3.5'], out) }) });
