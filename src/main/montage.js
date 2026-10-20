@@ -1872,7 +1872,7 @@ You are given every phrase spoken in one or more videos (id, which video, when, 
 - THE HOOK FIRST: open with the single most arresting line — a bold claim, a question, a striking promise, an emotional peak. It may come from anywhere. It must make sense with no context.
 - THEN THE STORY: lines that follow on from each other so the whole thing reads as one clear message that rises. Every line must make sense after the one before it. Never use a line that starts mid-thought or depends on something left out. Lines from different videos may be mixed and matched when they continue the same thought.
 - THE PAYOFF LAST: end on the most quotable, memorable line — the one people will put in the comments.
-- No filler, no "um", no housekeeping (announcements, greetings, "turn to page"), no repeated points. Never the giving or offering, bank details, a QR code, sponsors, tickets or logistics. Spoken words only, never the lyrics of a song being sung.
+- No filler, no "um", no housekeeping (announcements, greetings, "turn to page"), no repeated points, no crowd work from the stage ("how many of you are enjoying…", "make some noise", "I am ready", "are you ready"). Never the giving or offering, bank details, a QR code, sponsors, tickets or logistics. Spoken words only, never the lyrics of a song being sung.
 - SHORT MOMENTS: a moment is lines that follow each other in the video. Keep each moment short: one to three lines, never more than about 12 seconds of one stretch. When it is a long event, take moments from several different parts of it (different speakers, different times) and let them build one message.
 - SHORT AND SNAPPY: every line a punch of about 2–6 seconds. More short lines beat fewer long ones — a line that runs on loses the scroll. Skip a long line unless it is the best thing said.
 - Fit the length asked for. Shorter and tighter beats longer.
@@ -1959,7 +1959,7 @@ async function talkWithGroq(list, opts) {
 /** Without an AI: the strongest short line first, then the best lines in the order they were said. */
 /* what carries the MESSAGE (a rules edit is built from these), and the crowd work around it (not a clip's line) */
 const MESSAGE = /\b(god|jesus|christ|lord|holy spirit|spirit|faith|pray|prayers?|gospel|believe|love|grace|mercy|heaven|salvation|saved|sins?|cross|kingdom|bible|scripture|purpose|power|fire|glory|worship|testimony|hope|fear|nothing|everything|destiny|calling|anointing|freedom|truth)\b/gi;
-const CROWD = /\b(are you (guys )?ready|make some noise|come on|give it up|clap|hands up|give a shout|can somebody|say amen|turn to your neighbou?r|let'?s go|round of applause|one more time|do you want to|go again)\b/i;
+const CROWD = /\b(are you (guys )?ready|make some noise|come on|give it up|clap|hands up|give a shout|can somebody|say amen|how many of you|are you (guys |all )?(enjoying|having|ready)|(have|has) been enjoying|i'?m ready|i am ready|who is ready|where are my|put your hands|shout (it|out|with)|turn to your neighbou?r|let'?s go|round of applause|one more time|do you want to|go again)\b/i;
 const messageOf = (p) => Math.min(3, (String(p.text).match(MESSAGE) || []).length) * 0.25 - (CROWD.test(p.text) ? 0.6 : 0);
 function talkByRules(list, opts) {
   // without an AI to judge them, a line with an "um" in it or the business of the service is never used
@@ -2197,6 +2197,9 @@ async function detectorLook(ctx, reqs, out, frame, log) {
     const head = clamp(pick.face.x, 0, 1);
     o.head = head; o.fx = head; o.seen = 'detector';
     o.people = Math.max(o.people || 0, ppl.length);
+    // a poor sighting: only the backs of heads in the audience, or a speaker hidden behind them
+    // (a faint find low in the picture; a speaker on a stage is found clearly, in the upper half)
+    o.weak = !ppl.some((q) => q.score >= 0.88 || q.face.y <= 0.4);
     // the head and both shoulders: about a face's width and a bit either side of the face
     const L = clamp(head - pick.face.w * 1.25, 0, 1), R = clamp(head + pick.face.w * 1.25, 0, 1);
     o.span = [L, R];
@@ -2483,7 +2486,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       ps.forEach((p) => { p.looks = []; looksAt(p).forEach((t) => { reqs.push({ file: p.cand.file, t: round2(clamp(t, 0, Math.max(0, p.cand.fileDur - 0.1))), w: p.cand.w, h: p.cand.h }); who.push(p); }); });
       if (!reqs.length) return;
       const got = await lookAt(ctx, reqs, tmp, log, { people: true, frame: ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 } });
-      got.forEach((g, i) => who[i].looks.push({ t: reqs[i].t, fx: g.fx, people: g.people }));
+      got.forEach((g, i) => who[i].looks.push({ t: reqs[i].t, fx: g.fx, people: g.people, weak: !!g.weak }));
       // a slide or a dark stage is not a moment, even with a face in it (a speaker's photo on a "connect with" slide)
       for (const p of ps) { if (!p.vis) { try { p.vis = await stillOrDark(ctx, p); } catch (e) { if (e instanceof jobs.CancelledError) throw e; p.vis = null; } } }
     };
@@ -2492,7 +2495,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     // (a still moment is a slide only where the video around it moves: a sermon heard over one still picture is all still,
     //  and then stillness says nothing)
     const stillVideo = () => { const v = picks.filter((p) => p.vis); return v.length >= 2 && v.filter((p) => p.vis.still).length >= v.length * 0.6; };
-    const nobody = (p) => !!(p.vis && ((p.vis.still && !stillVideo()) || p.vis.dark)) || !!(p.looks && p.looks.length && p.looks.filter((l) => l.people === 0).length * 2 >= p.looks.length);
+    const nobody = (p) => !!(p.vis && ((p.vis.still && !stillVideo()) || p.vis.dark)) || !!(p.looks && p.looks.length && p.looks.filter((l) => l.people === 0 || l.weak).length * 2 >= p.looks.length);
     if (stage) stage('👀 Making sure someone can be seen in every line…');
     await lookLines(picks);
     const seen = picks.some((p) => p.looks.some((l) => l.people != null));
