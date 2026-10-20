@@ -18583,8 +18583,9 @@
         ve.capOffset = 0; ve.capTarget = null; ve.capScope = null;
         ve._capSource = ve.video.path; ve._capMode = 'full';
         if (talk) {
-          const LOOK = { hype: 'boxword', fun: 'popword', cinematic: 'spoken', worship: 'karaoke', emotional: 'karaoke' };
-          ve.capStyleId = capStyleDef(LOOK[style] || 'boxword').id;
+          // (Outline for the Viral montage by default — the church asked for it over Box word)
+          const LOOK = { hype: 'outline', fun: 'popword', cinematic: 'spoken', worship: 'karaoke', emotional: 'karaoke' };
+          ve.capStyleId = capStyleDef(LOOK[style] || 'outline').id;
           const sel = $('#capStyleSel'); if (sel) sel.value = ve.capStyleId;
           syncCapWordColor();
           const hl = $('#capWordHl'); if (hl) hl.checked = true;

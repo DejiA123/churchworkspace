@@ -273,7 +273,7 @@ async function waitUp() {
       return { lines: T.capLines().map((l) => l.text), show: document.getElementById('veCapShow').checked, look: document.getElementById('capStyleSel').value, hl: document.getElementById('capWordHl').checked };
     }, VID);
     check(st2.lines.length >= 3 && /NEVER GIVE UP|never give up/i.test(st2.lines[0]) && st2.show, 'the talk edit opens with its captions already on — no second listen', st2);
-    check(st2.look === 'boxword' && st2.hl, 'in a look that lights each word up as it is said', st2);
+    check(st2.look === 'outline', 'in the Outline look (white letters, a black edge — the Viral montage default)', st2);
     // THE SCHEDULER: music under a post, laid on by the server before it goes
     const sched = await page.evaluate(async (vid) => {
       window.MWSocial.compose({ files: [vid] });
