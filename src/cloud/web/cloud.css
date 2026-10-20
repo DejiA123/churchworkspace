@@ -2981,7 +2981,7 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .mt-toggle { display: flex; align-items: center; gap: 10px; margin-top: 12px; font-size: 14px; color: var(--ph-text, #fff); }
 .mt-toggle input { width: 20px; height: 20px; margin: 0; accent-color: #4d95ef; }
 /* (an attribute-hidden row or toggle — the Viral Montage hides "keep the clips’ sound" and Order — must stay hidden) */
-#cloudMontage [hidden] { display: none !important; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) [hidden] { display: none !important; }
 .mt-brief { width: 100%; box-sizing: border-box; margin: 0; padding: 11px 12px; font-size: 16px; line-height: 1.4; border-radius: 12px; resize: none;
   color: var(--mt-tx, #fff); background: rgba(255, 255, 255, .06); border: 1px solid transparent; transition: border-color .2s ease, box-shadow .2s ease; }
 .mt-brief:focus { outline: none; border-color: rgba(77,149,239, .7); box-shadow: 0 0 0 3px rgba(77,149,239, .2); }
@@ -3013,76 +3013,76 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
  * on black. White cards, black line icons, one black button for the thing to
  * do and grey ones for the rest — grey too while there is nothing to make yet.
  */
-#cloudMontage {
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) {
   --mt-card: #fff; --mt-line: rgba(15, 23, 42, .09); --mt-tx: #111318; --mt-tx2: #5f6470; --mt-tx3: #8b909b;
   --mt-grad: #111318;
   background: #f6f7f9; color: #111318;
 }
-#cloudMontage .cp-grab { background: #d5d8de; }
-#cloudMontage .cp-title { color: #111318; }
-#cloudMontage .cp-x { color: #3b404c; background: #e9ebef; }
-#cloudMontage .cp-foot { background: #f6f7f9; }
-#cloudMontage .mt-h i { color: #111318; background: #e9ebef; }
-#cloudMontage .mt-kind { background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .05), inset 0 0 0 1px var(--mt-line); }
-#cloudMontage .mt-kind.on { outline: 2px solid #111318; outline-offset: 2px; box-shadow: 0 8px 22px rgba(15, 23, 42, .1), inset 0 0 0 1px var(--mt-line); }
-#cloudMontage .mt-kind:not(.on) .mt-art { filter: saturate(.55) brightness(1.02); }
-#cloudMontage .mt-kind.on .mt-tick { background: #111318; box-shadow: none; }
-#cloudMontage .mt-kind.on .mt-tick .mi { color: #fff; }
-#cloudMontage .mt-empty, #cloudMontage .mt-group { background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .05), inset 0 0 0 1px var(--mt-line); }
-#cloudMontage .mt-empty-ic { color: #111318; background: #eef0f3; box-shadow: none; }
-#cloudMontage .mt-btn { height: 46px; border-radius: 12px; font-size: 15px; font-weight: 600; color: #111318; background: #eef0f3; }
-#cloudMontage .mt-btn:active { background: #e3e6ea; }
-#cloudMontage .mt-btn-hi { color: #fff; background: #111318; }
-#cloudMontage .mt-btn-hi:active { background: #2b2f37; }
-#cloudMontage .mt-tile { background: #e9ebef; box-shadow: none; }
-#cloudMontage .mt-addt { color: #5f6470; background: #fff; box-shadow: inset 0 0 0 1px var(--mt-line); }
-#cloudMontage .mt-addt-ic { color: #111318; background: #eef0f3; }
-#cloudMontage .mt-addt[data-mt="add"] .mt-addt-ic { color: #fff; background: #111318; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .cp-grab { background: #d5d8de; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .cp-title { color: #111318; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .cp-x { color: #3b404c; background: #e9ebef; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .cp-foot { background: #f6f7f9; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-h i { color: #111318; background: #e9ebef; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-kind { background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .05), inset 0 0 0 1px var(--mt-line); }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-kind.on { outline: 2px solid #111318; outline-offset: 2px; box-shadow: 0 8px 22px rgba(15, 23, 42, .1), inset 0 0 0 1px var(--mt-line); }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-kind:not(.on) .mt-art { filter: saturate(.55) brightness(1.02); }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-kind.on .mt-tick { background: #111318; box-shadow: none; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-kind.on .mt-tick .mi { color: #fff; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-empty, :is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-group { background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .05), inset 0 0 0 1px var(--mt-line); }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-empty-ic { color: #111318; background: #eef0f3; box-shadow: none; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-btn { height: 46px; border-radius: 12px; font-size: 15px; font-weight: 600; color: #111318; background: #eef0f3; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-btn:active { background: #e3e6ea; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-btn-hi { color: #fff; background: #111318; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-btn-hi:active { background: #2b2f37; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-tile { background: #e9ebef; box-shadow: none; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-addt { color: #5f6470; background: #fff; box-shadow: inset 0 0 0 1px var(--mt-line); }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-addt-ic { color: #111318; background: #eef0f3; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-addt[data-mt="add"] .mt-addt-ic { color: #fff; background: #111318; }
 /* the list: black line icons, no coloured squares */
-#cloudMontage .mt-ic { width: 26px; height: 26px; color: #111318; background: none; box-shadow: none; }
-#cloudMontage .mt-ic .mi { width: 22px; height: 22px; }
-#cloudMontage .mt-group > * + * > summary, #cloudMontage .mt-group > * + .mt-swrow { background-position: 52px 0; background-size: calc(100% - 52px) 1px; }
-#cloudMontage .mt-acc > summary:active { background-color: #f3f4f6; }
-#cloudMontage .mt-chev { border-color: #b8bcc6; }
-#cloudMontage .mt-seg, #cloudMontage .mt-sc { background: #eef0f3; }
-#cloudMontage .mt-seg button, #cloudMontage .mt-sc button { color: #111318; }
-#cloudMontage .mt-seg button.on, #cloudMontage .mt-sc button.on { background: #fff; box-shadow: 0 1px 3px rgba(15, 23, 42, .14), 0 0 0 .5px rgba(15, 23, 42, .06); }
-#cloudMontage .mt-chip { color: #111318; background: #eef0f3; }
-#cloudMontage .mt-chip.on { color: #fff; background: #111318; }
-#cloudMontage .mt-dot { box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .15); }
-#cloudMontage .mt-list { background: #fff; box-shadow: inset 0 0 0 1px var(--mt-line); }
-#cloudMontage .mt-song.on { background: #f3f6ff; }
-#cloudMontage .mt-play { color: #111318; background: #eef0f3; }
-#cloudMontage .mt-play::before { border-color: transparent transparent transparent #111318; }
-#cloudMontage .mt-play.on { background: #111318; animation: none; box-shadow: 0 0 0 3px rgba(17, 19, 24, .12); }
-#cloudMontage .mt-play.on::before { background: linear-gradient(90deg, #fff 0 3px, transparent 3px 7px, #fff 7px 10px); }
-#cloudMontage .mt-play-x { color: #fff; background: #111318; }
-#cloudMontage .mt-play-off { color: #5f6470; background: #eef0f3; }
-#cloudMontage .mt-radio { border-color: #c5c9d2; }
-#cloudMontage .mt-more { color: #0b57d0; }
-#cloudMontage .mt-sw { background: #e2e5ea; }
-#cloudMontage .mt-sw:checked { background: #34c759; }
-#cloudMontage .mt-shape { background: #fff; box-shadow: inset 0 0 0 1px var(--mt-line); }
-#cloudMontage .mt-shape-pic i { border-color: #8b909b; }
-#cloudMontage .mt-shape.on { background: #f3f6ff; box-shadow: inset 0 0 0 2px #111318; }
-#cloudMontage .mt-shape.on .mt-shape-pic i { border-color: #111318; background: rgba(17, 19, 24, .08); }
-#cloudMontage .mt-custom label { background: #eef0f3; }
-#cloudMontage .mt-brief { color: #111318; background: #eef0f3; }
-#cloudMontage .mt-brief:focus { border-color: #111318; box-shadow: 0 0 0 3px rgba(17, 19, 24, .1); }
-#cloudMontage .me-banner { color: #111318; background: #fff; box-shadow: inset 0 0 0 1px var(--mt-line); }
-#cloudMontage .me-banner-ic { background: #111318; }
-#cloudMontage .me-banner small { color: #6b7280; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-ic { width: 26px; height: 26px; color: #111318; background: none; box-shadow: none; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-ic .mi { width: 22px; height: 22px; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-group > * + * > summary, :is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-group > * + .mt-swrow { background-position: 52px 0; background-size: calc(100% - 52px) 1px; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-acc > summary:active { background-color: #f3f4f6; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-chev { border-color: #b8bcc6; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-seg, :is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-sc { background: #eef0f3; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-seg button, :is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-sc button { color: #111318; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-seg button.on, :is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-sc button.on { background: #fff; box-shadow: 0 1px 3px rgba(15, 23, 42, .14), 0 0 0 .5px rgba(15, 23, 42, .06); }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-chip { color: #111318; background: #eef0f3; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-chip.on { color: #fff; background: #111318; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-dot { box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .15); }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-list { background: #fff; box-shadow: inset 0 0 0 1px var(--mt-line); }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-song.on { background: #f3f6ff; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-play { color: #111318; background: #eef0f3; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-play::before { border-color: transparent transparent transparent #111318; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-play.on { background: #111318; animation: none; box-shadow: 0 0 0 3px rgba(17, 19, 24, .12); }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-play.on::before { background: linear-gradient(90deg, #fff 0 3px, transparent 3px 7px, #fff 7px 10px); }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-play-x { color: #fff; background: #111318; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-play-off { color: #5f6470; background: #eef0f3; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-radio { border-color: #c5c9d2; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-more { color: #0b57d0; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-sw { background: #e2e5ea; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-sw:checked { background: #34c759; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-shape { background: #fff; box-shadow: inset 0 0 0 1px var(--mt-line); }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-shape-pic i { border-color: #8b909b; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-shape.on { background: #f3f6ff; box-shadow: inset 0 0 0 2px #111318; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-shape.on .mt-shape-pic i { border-color: #111318; background: rgba(17, 19, 24, .08); }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-custom label { background: #eef0f3; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-brief { color: #111318; background: #eef0f3; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-brief:focus { border-color: #111318; box-shadow: 0 0 0 3px rgba(17, 19, 24, .1); }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .me-banner { color: #111318; background: #fff; box-shadow: inset 0 0 0 1px var(--mt-line); }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .me-banner-ic { background: #111318; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .me-banner small { color: #6b7280; }
 /* the one button: black and flat */
-#cloudMontage .mt-go { border-radius: 14px; font-size: 16.5px; font-weight: 650; letter-spacing: -.1px; color: #fff; background: #111318; box-shadow: none; }
-#cloudMontage .mt-go::after { display: none; }
-#cloudMontage .mt-go:active { background: #2b2f37; }
-#cloudMontage .mt-go:disabled { color: #9aa0aa; background: #e9ebef; box-shadow: none; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-go { border-radius: 14px; font-size: 16.5px; font-weight: 650; letter-spacing: -.1px; color: #fff; background: #111318; box-shadow: none; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-go::after { display: none; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-go:active { background: #2b2f37; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-go:disabled { color: #9aa0aa; background: #e9ebef; box-shadow: none; }
 /* making it: the same screen on white */
-#cloudMontage .mt-stage, #cloudMontage .mt-pct { color: #111318; }
-#cloudMontage .mt-note { color: #6b7280; }
-#cloudMontage .mt-bar { background: #e5e7eb; }
-#cloudMontage .mt-bar i { background: #111318; }
-#cloudMontage .mt-orb { background: #111318; box-shadow: none; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-stage, :is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-pct { color: #111318; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-note { color: #6b7280; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-bar { background: #e5e7eb; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-bar i { background: #111318; }
+:is(#cloudMontage, #cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-orb { background: #111318; box-shadow: none; }
 .mt-run { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 14px; padding: 34px 6px 26px; }
 .mt-orb { width: 84px; height: 84px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 34px; font-weight: 800; line-height: 1;
   background: conic-gradient(from 0deg, #3b82f6, #4d95ef, #4338ca, #3b82f6); animation: mt-spin 2.4s linear infinite;
@@ -4412,3 +4412,51 @@ body.mw-cloud.mw-home .cloud-home { background: #eaf5fd; color: #0d1b2c; }
 .csb-cover-where { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
 .csb-cover-where li { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; line-height: 1.4; color: #5d6470; }
 .csb-cover-where li b { color: #0f1115; }
+
+/* the montage's own sheets (Your montage, Choose the part, Edit the montage): light like the AI Montage page —
+   white sheets, dark words (they kept the old dark theme's white text on a white sheet) */
+:is(#cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-lead { color: #111318; }
+:is(#cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-lead small { color: #6b7280; }
+:is(#cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-lead .mi { color: #16a34a; }
+:is(#cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-concept { color: #111318; }
+:is(#cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-tip { color: #4b5160; }
+:is(#cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-sec h3 { color: #6b7280; }
+:is(#cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-edit { color: #111318; background: #eef0f3; }
+:is(#cloudMontageDone, #cloudMontagePart, #cloudMontageEdit) .mt-edit:active { background: #e3e6ea; }
+#cloudMontageDone .cp-body { padding-bottom: 22px; }
+
+/* "Choose the part to use" (cloudMontagePart): its styles were lost in the AI Montage redesign — back, in the light style */
+.mp-wrap { position: relative; border-radius: 14px; overflow: hidden; background: #000; }
+.mp-video { display: block; width: 100%; max-height: 36vh; object-fit: contain; background: #000; }
+.mp-play { position: absolute; left: 50%; top: 50%; width: 58px; height: 58px; margin: -29px 0 0 -29px; padding: 0; border: 0; border-radius: 50%;
+  background: rgba(0, 0, 0, .55); cursor: pointer; transition: opacity .2s ease; }
+.mp-play::before { content: ''; position: absolute; left: 22px; top: 17px; border-style: solid; border-width: 12px 0 12px 19px; border-color: transparent transparent transparent #fff; }
+.mp-play.on { opacity: 0; }
+.mp-play.on::before { left: 20px; top: 18px; width: 6px; height: 22px; border: 0; border-left: 6px solid #fff; border-right: 6px solid #fff; box-sizing: content-box; }
+.mp-times { display: flex; justify-content: space-between; margin: 14px 2px 6px; }
+.mp-times span { display: flex; flex-direction: column; gap: 2px; }
+.mp-times span:last-child { text-align: right; }
+.mp-times .mp-len { text-align: center; }
+.mp-times small { font-size: 11px; font-weight: 650; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; }
+.mp-times b { font-size: 18px; font-variant-numeric: tabular-nums; color: #111318; }
+.mp-track { position: relative; height: 44px; margin: 0 2px; }
+.mp-track::before { content: ''; position: absolute; left: 0; right: 0; top: 19px; height: 6px; border-radius: 3px; background: #e2e5ea; }
+.mp-sel { position: absolute; top: 19px; height: 6px; border-radius: 3px; background: #111318; }
+.mp-r { position: absolute; left: 0; top: 0; width: 100%; height: 44px; margin: 0; padding: 0; background: transparent; pointer-events: none;
+  -webkit-appearance: none; appearance: none; border: 0; outline: 0; box-shadow: none; border-radius: 0; }
+.mp-r::-webkit-slider-runnable-track { background: transparent; height: 44px; }
+.mp-r::-webkit-slider-thumb { -webkit-appearance: none; pointer-events: auto; width: 30px; height: 30px; margin-top: 7px; border-radius: 50%;
+  background: #fff; border: 3px solid #111318; box-shadow: 0 2px 8px rgba(15, 23, 42, .25); cursor: grab; }
+.mp-r::-moz-range-thumb { pointer-events: auto; width: 26px; height: 26px; border-radius: 50%; background: #fff; border: 3px solid #111318; }
+.mp-r::-moz-range-track { background: transparent; }
+.mp-btns { display: flex; gap: 8px; justify-content: space-between; margin-top: 8px; }
+.mp-btns .mt-chip { flex: 1; justify-content: center; text-align: center; padding-left: 6px; padding-right: 6px; }
+
+/* "Edit the montage" (cloudMontageEdit): the clip cards light too */
+#cloudMontageEdit .me-shot { border-color: rgba(15, 23, 42, .09); background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .05); }
+#cloudMontageEdit .me-shot.sel { border-color: #111318; box-shadow: 0 0 0 1px #111318 inset; }
+#cloudMontageEdit .me-n { background: #111318; }
+#cloudMontageEdit .me-info b { color: #111318; }
+#cloudMontageEdit .me-info small, #cloudMontageEdit .me-none { color: #6b7280; }
+#cloudMontageEdit .me-btns button, #cloudMontageEdit .me-ovtools button { color: #111318; background: #eef0f3; border-color: transparent; }
+#cloudMontageEdit .me-ov.on { border-color: #111318; }

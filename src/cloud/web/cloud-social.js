@@ -4048,5 +4048,5 @@
     }
   }
 
-  window.MWSocial = { _rhythmOf: (t) => rhythmOf(t), _freeSlot: () => freeSlot(), busy: () => !!MT.busy, start, go, compose, openConnect, openMontage, editMontage, openProjects, openProject, deleteOpenProject, openPost, view: () => S.view, _state: S, _planTimes: planTimes, _titleFromFile: titleFromFile };
+  window.MWSocial = { _mtResult: (r) => mtResult(r), _rhythmOf: (t) => rhythmOf(t), _freeSlot: () => freeSlot(), busy: () => !!MT.busy, start, go, compose, openConnect, openMontage, editMontage, openProjects, openProject, deleteOpenProject, openPost, view: () => S.view, _state: S, _planTimes: planTimes, _titleFromFile: titleFromFile };
 })();
