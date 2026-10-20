@@ -4404,3 +4404,11 @@ body.mw-cloud.mw-home .cloud-home { background: #eaf5fd; color: #0d1b2c; }
 .th-chip-add { color: #6d28d9; background: #f3efff; }
 .th-fr.th-behind { box-shadow: 0 0 0 2px #a78bfa; }
 .th-fr.th-behind::after { content: 'behind'; position: absolute; top: 6px; right: 6px; padding: 2px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 800; color: #fff; background: rgba(124, 58, 237, .9); }
+/* 🖼 a video post's thumbnail (New post → Thumbnail) */
+.csb-cover { display: flex; gap: 12px; align-items: flex-start; margin-top: 10px; }
+.csb-cover img { width: 46%; max-width: 220px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 10px; background: #111; box-shadow: 0 6px 16px rgba(15, 23, 42, .18); }
+.csb-cover-acts { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.csb-act-x { color: #b91c1c; }
+.csb-cover-where { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.csb-cover-where li { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; line-height: 1.4; color: #5d6470; }
+.csb-cover-where li b { color: #0f1115; }

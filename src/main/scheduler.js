@@ -106,6 +106,8 @@ class Scheduler {
       platforms: Array.isArray(post.platforms) ? post.platforms : [],
       accountIds: Array.isArray(post.accountIds) ? post.accountIds : [], // linked accounts to auto-post to
       mediaPaths: Array.isArray(post.mediaPaths) ? post.mediaPaths : [],
+      // a video's thumbnail (cover) picture, chosen in New post — sent where the platform takes one (publisher.js coverFor)
+      coverPath: typeof post.coverPath === 'string' && post.coverPath ? post.coverPath : null,
       // a flyer's music, per platform (main.js withFlyerMusic / publisher.js flyerPlan)
       music: post.music || null,
       scheduledAt: post.scheduledAt || now,
@@ -171,7 +173,10 @@ class Scheduler {
   }
   // what a booking is made from: a change to any of it makes a booking out of date
   _contentOf(p) {
-    return JSON.stringify([new Date(p.scheduledAt).getTime(), p.caption || '', p.title || '', p.mediaPaths || [], p.music || null]);
+    const of = [new Date(p.scheduledAt).getTime(), p.caption || '', p.title || '', p.mediaPaths || [], p.music || null];
+    // (only when there is one: a post booked before covers existed keeps the same fingerprint, so it is not booked again)
+    if (p.coverPath) of.push(p.coverPath);
+    return JSON.stringify(of);
   }
 
   /*

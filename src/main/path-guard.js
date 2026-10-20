@@ -19,7 +19,7 @@
 const path = require('path');
 
 /** Which argument names carry a filesystem path. */
-const PATH_KEYS = new Set(['input', 'base', 'path', 'musicPath', 'src', 'dir', 'file', 'dest', 'imagePath', 'mediaPath']);
+const PATH_KEYS = new Set(['input', 'base', 'path', 'musicPath', 'src', 'dir', 'file', 'dest', 'imagePath', 'mediaPath', 'coverPath']);
 
 /** Arrays whose ENTRIES may themselves be bare path strings. */
 const PATH_ARRAYS = new Set(['inputs', 'clips', 'mediaPaths']);

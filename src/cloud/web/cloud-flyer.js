@@ -3807,7 +3807,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   async function openThumb(opts) {
     opts = opts || {};
     F.mode = 'thumb';
-    F.panel = C.openPanel({ id: 'cloudFlyer', title: 'Thumbnails', cls: 'cp-flyer cp-thumb', full: true, onClose: () => { F.panel = null; F.mode = 'flyer'; } });
+    // opened from New post: the editor's "Use" hands the finished thumbnail back to that post
+    F.th.onUse = typeof opts.onUse === 'function' ? opts.onUse : null;
+    F.panel = C.openPanel({ id: 'cloudFlyer', title: 'Thumbnails', cls: 'cp-flyer cp-thumb', full: true, onClose: () => { F.panel = null; F.mode = 'flyer'; F.th.onUse = null; } });
     loadFonts();
     if (!F.status) window.api.flyer.status().then((st) => { F.status = st; }).catch(() => {});
     F.step = 'tmake';
@@ -4136,11 +4138,14 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   /* "Keep": the thumbnail in My Uploads, beside the video (for the scheduler, or another phone) */
   async function keepThumb(btn) {
     btn.disabled = true;
-    const label = btn.querySelector('span'); const was = label.textContent; label.textContent = 'Keeping…';
+    const use = F.th.onUse;
+    const label = btn.querySelector('span'); const was = label.textContent; label.textContent = use ? 'Adding…' : 'Keeping…';
     try {
       const blob = await thumbBlob();
       const p = await C.uploadFile(new File([blob], thumbName(), { type: 'image/jpeg' }));
       if (!p || typeof p !== 'string') throw new Error('it did not reach the studio');
+      // from New post: the thumbnail goes on the post, and the studio closes back to it
+      if (use) { F.th.onUse = null; use(p); if (F.panel) F.panel.close(); toast('Thumbnail added to the post.', 'good'); return; }
       toast('Kept in My Uploads.', 'good');
     } catch (e) { toast('Could not keep it: ' + (e.message || e), 'error'); }
     finally { btn.disabled = false; label.textContent = was; }
@@ -4174,7 +4179,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         <button type="button" class="fs-tb" data-ed="undo" aria-label="Undo" disabled>${ic('undo')}</button>
         <button type="button" class="fs-tb" data-ed="redo" aria-label="Redo" disabled>${ic('redo')}</button>
         <button type="button" class="fs-tb fs-save" data-ed="save">${ic('save')}<span>Save</span></button>
-        <button type="button" class="fs-tb fs-post" data-ed="post">${F.mode === 'thumb' ? ic('photo') + '<span>Keep</span>' : ic('send') + '<span>Post</span>'}</button>
+        <button type="button" class="fs-tb fs-post" data-ed="post">${F.mode === 'thumb' ? (F.th.onUse ? ic('send') + '<span>Use</span>' : ic('photo') + '<span>Keep</span>') : ic('send') + '<span>Post</span>'}</button>
       </div>
       <div class="fs-stage" id="fsStage"><canvas id="fsCanvas"></canvas><div class="fs-selbox hidden" id="fsSel"><i class="fs-h fs-h-rot"></i><i class="fs-h fs-h-br"></i></div></div>
       <div class="fs-tools" id="fsTools"></div>

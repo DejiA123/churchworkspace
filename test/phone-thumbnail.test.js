@@ -245,6 +245,31 @@ async function until(page, fn, arg, ms = 30000) {
       const u = await page.evaluate(() => window.MWFlyer.render(window.MWFlyerStudio._state.designs[0], document.createElement('canvas'), 1).toDataURL('image/jpeg', 0.9));
       fs.writeFileSync(path.join(SHOTS, 'thumb-bank.jpg'), Buffer.from(u.split(',')[1], 'base64'));
     }
+
+    // ── New post → Thumbnail: made from the post's own video, and "Use" puts it on the post
+    await page.evaluate(() => { const x = window.MWFlyerStudio._state.panel; if (x) x.close(); });
+    await sleep(400);
+    await page.evaluate((p) => window.MWSocial.compose({ files: [p] }), VID);
+    s = await until(page, () => { const c = document.querySelector('#csbCover'); return { ok: !!(c && c.querySelector('[data-c="covermake"]') && c.querySelector('[data-c="coverpick"]')), t: c && c.textContent }; }, null, 15000);
+    check(s && s.ok, 'New post has a Thumbnail section for a video: Make a thumbnail, or a picture', s);
+    await page.locator('#csbCover [data-c="covermake"]').tap();
+    s = await until(page, () => { const st = window.MWFlyerStudio._state; return { ok: !!(st.panel && st.mode === 'thumb' && st.th.onUse && st.th.video), vid: st.th.video }; }, null, 15000);
+    check(s && s.ok && s.vid === VID, 'it opens the thumbnail studio with the post’s own video', s);
+    await page.waitForSelector('.cp-thumb [data-act="tmake"]:not([disabled])', { timeout: 60000 });
+    await page.locator('.cp-thumb [data-act="tmake"]').tap();
+    await page.waitForFunction(() => document.querySelectorAll('.cp-thumb .fs-card').length >= 11 && !window.MWFlyerStudio._state.th.cutting, null, { timeout: 60000 });
+    await page.locator('.cp-thumb .fs-card').first().tap();
+    await page.waitForSelector('.cp-thumb [data-ed="post"]', { timeout: 10000 });
+    const useLabel = await page.evaluate(() => document.querySelector('.cp-thumb [data-ed="post"]').textContent.trim());
+    check(useLabel === 'Use', 'from New post the editor says Use (not Keep)', useLabel);
+    await page.locator('.cp-thumb [data-ed="post"]').tap();
+    s = await until(page, () => { const i = document.querySelector('#csbCover .csb-cover img'); return { ok: !!(i && i.naturalWidth > 0) && !document.querySelector('.cp-thumb'), src: i && i.getAttribute('src'), w: i && i.naturalWidth, h: i && i.naturalHeight }; }, null, 30000);
+    check(s && s.ok && /thumbnail\.jpg/.test(decodeURIComponent(s.src || '')) && s.w === 1920 && s.h === 1080, 'Use brings the thumbnail back onto the post (1920×1080), the studio closed', s);
+    if (SHOTS) { await page.evaluate(() => { const c = document.querySelector('#csbCover'); if (c) c.scrollIntoView(); }); await sleep(300); await page.screenshot({ path: path.join(SHOTS, 'thumb-post.png') }); }
+    await page.locator('#csbCover [data-c="coverdel"]').tap();
+    await sleep(300);
+    s = await page.evaluate(() => ({ img: !!document.querySelector('#csbCover .csb-cover img'), make: !!document.querySelector('#csbCover [data-c="covermake"]') }));
+    check(!s.img && s.make, 'Remove takes it off again', s);
   } catch (e) {
     check(false, 'the run finished', e.stack || e.message);
   } finally {

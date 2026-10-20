@@ -1274,6 +1274,7 @@
     const edit = o.post || null;
     const st = {
       files: edit ? (edit.mediaPaths || []).slice() : (o.files || []).slice(),
+      cover: edit ? edit.coverPath || null : (o.cover || null),   // 🖼 the video's thumbnail (a picture on the studio)
       title: edit ? edit.title || '' : '',
       caption: edit ? edit.caption || '' : '',
       accountIds: edit ? (edit.accountIds || []).slice() : (S.loadedAt ? linked().map((a) => a.id) : null),
@@ -1816,6 +1817,35 @@
     }
     function shortWhenLabel(d) { const day = dayName(d); return (/^(Today|Tomorrow)$/.test(day) ? day : new Date(d).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })) + ' ' + timeOf(d); }
 
+    /*
+     * 🖼 THE VIDEO'S THUMBNAIL. Optional: made in the Thumbnails studio from this
+     * very video, or a picture from the phone. publisher.js coverFor sends it
+     * where each place takes one; this says where, for the accounts ticked.
+     */
+    const oneVideo = () => st.files.length === 1 && isVideo(st.files[0]);
+    function coverBlock() {
+      if (!oneVideo()) return '';
+      const accs = linked().filter((a) => picked().includes(a.id));
+      const where = accs.map((a) => {
+        const name = (PLAT[a.platform] || {}).name || a.platform;
+        if (a.platform === 'youtube') return `<li>${platMark('youtube', 'sm')}<span><b>${esc(name)}</b> — the video’s thumbnail (a full video; a Short keeps the frame YouTube picks; your channel must be verified)</span></li>`;
+        if (a.via !== 'zernio') return `<li>${platMark(a.platform, 'sm')}<span><b>${esc(name)}</b> — this connection can’t send a thumbnail; ${esc(name)} picks one from the video</span></li>`;
+        if (a.platform === 'facebook') return `<li>${platMark('facebook', 'sm')}<span><b>${esc(name)}</b> — the video’s thumbnail</span></li>`;
+        if (a.platform === 'instagram') return `<li>${platMark('instagram', 'sm')}<span><b>${esc(name)}</b> — the Reel’s cover (when it is the video’s shape)</span></li>`;
+        if (a.platform === 'tiktok') return `<li>${platMark('tiktok', 'sm')}<span><b>${esc(name)}</b> — the cover, shown as the first moment (when it is the video’s shape)</span></li>`;
+        return '';
+      }).filter(Boolean);
+      const uniq = Array.from(new Set(where));
+      return `<div class="csb-h3"><b>Thumbnail</b><small>${st.cover ? 'goes with the video' : 'optional'}</small></div>`
+        + (st.cover
+          ? `<div class="csb-cover"><img src="${escAttr(C.fileUrl(st.cover))}" alt="The thumbnail"><div class="csb-cover-acts">`
+            + `<button type="button" class="csb-act" data-c="covermake">${mi('sparkles')}Make another</button><button type="button" class="csb-act" data-c="coverpick">${mi('image')}From ${phone() ? 'photos' : 'files'}</button>`
+            + `<button type="button" class="csb-act csb-act-x" data-c="coverdel">${mi('x')}Remove</button></div></div>`
+            + (uniq.length ? `<ul class="csb-cover-where">${uniq.join('')}</ul>` : '')
+          : `<div class="csb-acts"><button type="button" class="csb-act" data-c="covermake">${mi('sparkles')}Make a thumbnail</button><button type="button" class="csb-act" data-c="coverpick">${mi('image')}From ${phone() ? 'photos' : 'files'}</button></div>`
+            + '<p class="cs-hint">Without one, each app picks a frame from the video itself.</p>');
+    }
+
     function draw() {
       const fa = document.activeElement;
       const keepIg = fa && fa.classList && fa.classList.contains('csb-igsearch') && panel.body.contains(fa) ? { value: fa.value, a: fa.selectionStart, b: fa.selectionEnd } : null;
@@ -1834,6 +1864,7 @@
       panel.body.innerHTML = '<div class="csb-form">'
         + mediaBlock()
         + (st.files.length ? textBlock() : '')
+        + (oneVideo() ? `<section class="csb-sec" id="csbCover">${coverBlock()}</section>` : '')
         + `<section class="csb-sec">${accountsBlock()}</section>`
         + (flyers().length ? `<section class="csb-sec csb-fm" id="csbFlyerMusic">${flyerBlock()}</section>` : '')
         + (mus ? `<details class="csb-more"${st.music ? ' open' : ''}><summary>${mi('music')}<span>Music</span><small>${esc(musName)}</small>${mi('chev-right')}</summary><div class="csb-more-in">${mus}</div></details>` : '')
@@ -2067,10 +2098,38 @@
           st.aiText = null;
         }
         if (!edit && st.files.length === 1 && st.title === titleFromFile(st.files[0])) st.title = '';
-        st.files = []; st.ai = null; st.autoFor = ''; st.options = null; st.prev = null; st.batchCaps = {}; st.booked = {};
+        st.files = []; st.ai = null; st.autoFor = ''; st.options = null; st.prev = null; st.batchCaps = {}; st.booked = {}; st.cover = null;
         return draw();          // one file: offer both places again
       }
       if (c === 'device') return pickDevice();
+      // 🖼 the thumbnail: made from this video in the Thumbnails studio ("Use" there brings it back here), or a picture
+      if (c === 'covermake') {
+        if (!(window.MWFlyerStudio && window.MWFlyerStudio.openThumb)) return C.toast('The thumbnail studio is still loading — try again in a moment.');
+        return window.MWFlyerStudio.openThumb({ video: st.files[0], onUse: (p) => { st.cover = p; if (panel.el.isConnected) draw(); } });
+      }
+      if (c === 'coverpick') {
+        const inp = document.createElement('input');
+        inp.type = 'file'; inp.accept = 'image/*';
+        inp.onchange = async () => {
+          const file = inp.files && inp.files[0]; if (!file) return;
+          b.disabled = true;
+          try {
+            // a phone photo is 12 megapixels: the platforms want 1920 at most, under 2 MB
+            const im = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); });
+            const k = Math.min(1, 1920 / Math.max(im.naturalWidth, im.naturalHeight));
+            const cv = document.createElement('canvas'); cv.width = Math.round(im.naturalWidth * k); cv.height = Math.round(im.naturalHeight * k);
+            cv.getContext('2d').drawImage(im, 0, 0, cv.width, cv.height);
+            URL.revokeObjectURL(im.src);
+            const blob = await new Promise((res) => cv.toBlob(res, 'image/jpeg', 0.88));
+            const p = await C.uploadFile(new File([blob], (file.name || 'thumbnail').replace(/\.[^.]+$/, '') + ' thumbnail.jpg', { type: 'image/jpeg' }));
+            if (!p || typeof p !== 'string') throw new Error('it did not reach the studio');
+            st.cover = p; draw();
+          } catch (er) { C.toast('That picture could not be used: ' + ((er && er.message) || er), 'error'); b.disabled = false; }
+        };
+        if (C.openPicker) C.openPicker(inp); else inp.click();
+        return;
+      }
+      if (c === 'coverdel') { st.cover = null; return draw(); }
       if (c === 'stopsend') { if (st.sending && st.sending.stop) st.sending.stop(); return; }
       if (c === 'drop') {
         st.files.splice(+b.dataset.i, 1);
@@ -2309,7 +2368,7 @@
           await window.api.scheduler.update(edit.id, {
             title: st.title.trim() || titleFromFile(st.files[0]), caption: st.caption,
             mediaPaths: st.files.slice(0, 1), accountIds: accs.map((a) => a.id), platforms,
-            scheduledAt: chosenWhen().toISOString(),
+            scheduledAt: chosenWhen().toISOString(), coverPath: oneVideo() ? st.cover || null : null,
           });
           C.island({ kind: 'good', title: 'Post updated', sub: whenLabel(chosenWhen()) });
         } else if (many()) {
@@ -2342,6 +2401,7 @@
             mediaPaths: [fileAt(0)], accountIds: booked.map((a) => a.id), platforms: platsFor(booked),
             scheduledAt: when.toISOString(),
           };
+          if (oneVideo() && st.cover) one.coverPath = st.cover;
           if (fbHand.length && !isVideo(st.files[0])) hand.push({ file: st.files[0], when: st.quick === 'now' ? null : when.toISOString(), title: one.title, caption: st.caption });
           // dropped down to one after a bulk half-booked: that one is booked already — it gets what is chosen now
           const had = st.booked[st.files[0]];

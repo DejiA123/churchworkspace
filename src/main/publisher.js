@@ -606,6 +606,31 @@ function probeMedia(file) {
   } catch (e) { return null; }
 }
 
+/*
+ * ►► A VIDEO'S THUMBNAIL (its cover), chosen in New post. ◄◄ What each place
+ * does with it: YouTube sets it as the video's custom thumbnail (a regular
+ * video — a Short keeps the frame YouTube picks; the channel must be
+ * phone-verified), Facebook as the video's thumbnail, Instagram as the
+ * Reel's cover, TikTok as the cover (through Zernio: stitched in as the
+ * first frame). A cover the wrong shape for the video (a 16:9 YouTube
+ * thumbnail on a 9:16 Reel) is only sent where the shape does not matter.
+ */
+function coverFor(post, media) {
+  const c = post && post.coverPath;
+  if (!c || !media || !isVideoFile(media) || !fs.existsSync(c)) return null;
+  const dims = (f) => {
+    const j = probeMedia(f);
+    const v = j && (j.streams || []).find((x) => x.codec_type === 'video');
+    if (!v || !(+v.width > 0)) return null;
+    // a phone recording stored sideways with a rotation flag is the other shape on screen
+    const rot = Math.abs(+((v.tags && v.tags.rotate) || ((v.side_data_list || []).find((d) => d.rotation != null) || {}).rotation || 0)) % 180;
+    return rot === 90 ? { w: +v.height, h: +v.width } : { w: +v.width, h: +v.height };
+  };
+  const vi = dims(media), ci = dims(c);
+  const tall = (d) => d.h > d.w * 1.05;
+  return { path: c, type: /\.png$/i.test(c) ? 'image/png' : 'image/jpeg', sameShape: !vi || !ci || tall(vi) === tall(ci) };
+}
+
 /** Try every route to a FINISHED Reels container; report what each one said. */
 async function igVideoContainer({ base, igUserId, pageId, token, media, caption }, opts = {}) {
   const attempts = [];
@@ -778,7 +803,18 @@ async function publishToYouTube({ token, clientId, clientSecret }, post, opts = 
   const res = await postBinary(uploadUrl, media,
     { authorization: 'Bearer ' + access, 'content-type': 'video/*' }, { method: 'PUT' });
   if (!res || !res.id) throw new Error('YouTube accepted the upload but returned no video id.');
-  return { id: res.id, url: 'https://www.youtube.com/watch?v=' + res.id, scheduled: !!opts.scheduleAt };
+  // 3. Its thumbnail, when one was chosen (YouTube takes it for a regular video, on a phone-verified channel).
+  //    The video is up either way: a refused thumbnail is noted, never a failed post.
+  let cover = null;
+  const cv = coverFor(post, media);
+  if (cv) {
+    try {
+      await postBinary(`${apiBase}/upload/youtube/v3/thumbnails/set?videoId=${encodeURIComponent(res.id)}`, cv.path,
+        { authorization: 'Bearer ' + access, 'content-type': cv.type }, { timeoutMs: 120000 });
+      cover = 'set';
+    } catch (e) { cover = 'refused: ' + (e.message || e); }
+  }
+  return { id: res.id, url: 'https://www.youtube.com/watch?v=' + res.id, scheduled: !!opts.scheduleAt, cover };
 }
 
 /** TikTok's v2 API wraps errors as { error: { code, message } } — code "ok" means success. */
@@ -1454,6 +1490,16 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
     if (!uploadUrl || !publicUrl) throw new Error('Zernio did not return an upload URL — try again.');
     await postBinary(uploadUrl, media, { 'content-type': kind.contentType }, { method: 'PUT' });
   }
+  // the video's thumbnail (coverFor), hosted the same way — the video goes without it rather than not at all
+  let coverUrl = null;
+  const cover = kind && kind.type === 'video' ? coverFor(post, media) : null;
+  if (cover && (platform === 'youtube' || platform === 'facebook' || cover.sameShape)) {
+    try {
+      const pre = (await postJson(`${base}/media/presign`, { filename: path.basename(cover.path).replace(/[^\w.\-]+/g, '_'), contentType: cover.type }, bearer)).json;
+      const up = pre && (pre.uploadUrl || pre.upload_url), pub = pre && (pre.publicUrl || pre.public_url || pre.url);
+      if (up && pub) { await postBinary(up, cover.path, { 'content-type': cover.type }, { method: 'PUT' }); coverUrl = pub; }
+    } catch (e) { coverUrl = null; }
+  }
 
   // 3. Create the post: PUBLIC, with the platform's own settings block.
   const platformEntry = { platform, accountId };
@@ -1478,6 +1524,11 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
     ? { content, platforms: [platformEntry], scheduledFor: new Date(opts.scheduleAt).toISOString(), timezone: 'UTC' }
     : { content, platforms: [platformEntry], publishNow: true };
   if (publicUrl) body.mediaItems = [{ type: kind.type, url: publicUrl }];
+  // the thumbnail where each place takes it: Instagram's Reel cover, YouTube's and Facebook's thumbnail (TikTok's below)
+  if (coverUrl && body.mediaItems) {
+    if (platform === 'instagram') body.mediaItems[0].instagramThumbnail = coverUrl;
+    else if (platform !== 'tiktok') body.mediaItems[0].thumbnail = coverUrl;
+  }
   if (platform === 'youtube') {
     body.youtubeSettings = {
       title: (post.title || content.split('\n')[0] || 'Untitled video').slice(0, 100),
@@ -1507,6 +1558,14 @@ async function publishViaZernio({ apiKey, accountId, username, platform }, post,
       draft: !!(flyer && tkMode === 'draft'),
       ...(kind && kind.type === 'image' ? { mediaType: 'photo', autoAddMusic: tkMode === 'trending' } : {}),
     };
+    // a video's own thumbnail (Zernio stitches it in as the first frame; a TikTok Business account takes it as the cover)
+    if (coverUrl && !flyer) {
+      platformEntry.platformSpecificData = {
+        privacyLevel: 'PUBLIC_TO_EVERYONE', allowComment: true, allowDuet: true, allowStitch: true,
+        contentPreviewConfirmed: true, expressConsentGiven: true, draft: false, videoCoverImageUrl: coverUrl,
+      };
+      body.tiktokSettings.videoCoverImageUrl = coverUrl;
+    }
   } else if (platform === 'facebook') {
     body.facebookSettings = { draft: false };
   } // instagram: platformSpecificData is optional for a plain feed post — omit.
@@ -1803,6 +1862,7 @@ async function testFacebook({ pageId, token, apiBase }) {
 }
 
 module.exports = {
+  coverFor,
   del, flyerAsJpeg, flyerAsShort, flyerAsStill, flyerPlan, songHookSec, zernioFind, withAppTags,
   publishToFacebook, publishToInstagram, publishToYouTube, publishToTikTok,
   publishViaUploadPost, publishViaZernio, publishTo, testFacebook,
