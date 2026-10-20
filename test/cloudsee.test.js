@@ -150,6 +150,11 @@ const ok = (answer) => reply(200, { choices: [{ message: { content: typeof answe
   const p0 = await cloudsee.whereArePeople({ image: IMG, frames: FRAMES });
   check('nobody there wins over a column given anyway', p0.ok && p0.answers.A.people === 0 && p0.answers.A.column === 0, JSON.stringify(p0.answers));
 
+  calls = [];
+  script = [ok({ frames: [{ frame: 'A', people: 5, column: 4, facing: false }, { frame: 'B', people: 1, column: 2, facing: true }] })];
+  const pf = await cloudsee.whereArePeople({ image: IMG, frames: FRAMES });
+  check('the backs of the audience are people, but no one facing: a talk montage does not use them', pf.ok && pf.answers.A.facing === false && pf.answers.B.facing === true && /from behind/.test(calls[0].system), JSON.stringify(pf.answers));
+
   console.log('\n[9] Bad input');
   const bad = await cloudsee.whoIsSpeaking({ image: 'C:/not-a-data-url.jpg', frames: FRAMES });
   check('a picture that is not a data URL is refused before any call', !bad.ok, bad.why);

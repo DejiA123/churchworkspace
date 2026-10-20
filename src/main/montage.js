@@ -2131,6 +2131,7 @@ async function lookAt(ctx, reqs, tmp, log, { people = true, max = Infinity, fram
       const a = ans.answers[LETTERS[k]];
       if (!a) return;
       if (typeof a.people === 'number') out[r.i].people = a.people;
+      if (typeof a.facing === 'boolean') out[r.i].facing = a.facing;
       if (!(a.column > 0)) return;
       // the column's middle on the ruled tile → across the clip's own picture (a tile pads a clip of another shape)
       const ar = (r.w && r.h) ? r.w / r.h : 16 / 9;
@@ -2486,7 +2487,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       ps.forEach((p) => { p.looks = []; looksAt(p).forEach((t) => { reqs.push({ file: p.cand.file, t: round2(clamp(t, 0, Math.max(0, p.cand.fileDur - 0.1))), w: p.cand.w, h: p.cand.h }); who.push(p); }); });
       if (!reqs.length) return;
       const got = await lookAt(ctx, reqs, tmp, log, { people: true, frame: ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 } });
-      got.forEach((g, i) => who[i].looks.push({ t: reqs[i].t, fx: g.fx, people: g.people, weak: !!g.weak }));
+      got.forEach((g, i) => who[i].looks.push({ t: reqs[i].t, fx: g.fx, people: g.people, weak: !!g.weak || g.facing === false }));
       // a slide or a dark stage is not a moment, even with a face in it (a speaker's photo on a "connect with" slide)
       for (const p of ps) { if (!p.vis) { try { p.vis = await stillOrDark(ctx, p); } catch (e) { if (e instanceof jobs.CancelledError) throw e; p.vis = null; } } }
     };

@@ -801,7 +801,7 @@ ipcMain.handle('flyer:inspoRemove', wrap(async (e, a) => flyerart.inspoRemove(a 
    events, so the phone can say what is happening, not just how far. */
 const montage = require('./montage');
 const phonecopy = require('./phonecopy');
-ipcMain.handle('montage:status', wrap(async () => Object.assign({}, montage.directorStatus(), { voiceover: require('./voiceover').status() })));
+ipcMain.handle('montage:status', wrap(async () => Object.assign({}, montage.directorStatus(), { voiceover: require('./voiceover').status(), detector: (() => { try { const pd = require('./persondetect'); return pd.available() ? 'ready' : pd.why(); } catch (e) { return 'missing'; } })() })));
 /* The talk edit's ears: every word of a video, from the cloud (Groq's Whisper)
  * or, without it, this server's own speech model — through the Word Book. */
 /*
