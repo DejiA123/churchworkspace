@@ -1718,7 +1718,47 @@ const PUNCH = /\b(never|always|god|jesus|lord|christ|holy|spirit|love|power|beli
 const FILLER_START = /^(and|so|um+|uh+|er+|like|but|okay|ok|you know)\b/i;
 const FILLER_ANY = /\b(um+|uh+|er+|erm)\b/gi;
 /* the business of a service — not what anyone shares */
-const HOUSEKEEPING = /\b(turn to|page \w+|announcement|announcements|please be seated|be seated|good morning|good evening|welcome everyone|offering|tithes?|car park|parking|microphone|can you hear me|next slide)\b/i;
+const HOUSEKEEPING = /\b(turn to|page \w+|announcement|announcements|please be seated|be seated|good morning|good evening|welcome everyone|offering|tithes?|car park|parking|microphone|can you hear me|next slide|iban|bank details|account (number|name)|sort code|qr code|scan (the|this)|donat\w*|give online|sponsor\w*|tickets?|merch\w*|toilets?|restrooms?|fire exits?|wi-?fi|raffle)\b/i;
+/* A MOMENT: lines that follow each other in the same video (within a few seconds). "Each moment must not be too long." */
+const MOMENT_GAP = 8, MOMENT_MAX = 14;
+/* a long event (a whole service, a concert): its lines are taken from several moments, never one stretch */
+const LONG_EVENT_SEC = 15 * 60;
+/*
+ * WHAT THE EDITOR IS SHOWN, FROM A LONG EVENT. A three-hour service has
+ * thousands of lines; the editor sees 420. Taking the 420 loudest bunched them
+ * in the loudest half hour. Now the event is cut into windows of a few minutes
+ * and the best lines of EACH come, so every part of it can be chosen from.
+ */
+function spreadList(phrases, max = 420) {
+  if (phrases.length <= max) return phrases;
+  const span = phrases.reduce((m, p) => Math.max(m, p.end), 0);
+  const win = Math.max(90, span / 60);
+  const buckets = new Map();
+  for (const p of phrases) { const k = p.vid + ':' + Math.floor(p.start / win); if (!buckets.has(k)) buckets.set(k, []); buckets.get(k).push(p); }
+  const quota = Math.max(2, Math.floor(max / buckets.size));
+  const chosen = new Set();
+  for (const list of buckets.values()) list.slice().sort((a, b) => b.score - a.score).slice(0, quota).forEach((p) => chosen.add(p));
+  if (chosen.size < max) for (const p of phrases.slice().sort((a, b) => b.score - a.score)) { if (chosen.size >= max) break; chosen.add(p); }
+  return Array.from(chosen).sort((a, b) => b.score - a.score).slice(0, max).sort((a, b) => a.vid - b.vid || a.start - b.start);
+}
+/* the picks, in play order, grouped into moments (one after another in the same video) */
+function momentsOf(picks) {
+  const out = [];
+  for (const p of picks) {
+    const m = out[out.length - 1], last = m && m[m.length - 1];
+    if (last && last.vid === p.vid && p.start >= last.start && p.start - last.end <= MOMENT_GAP) m.push(p); else out.push([p]);
+  }
+  return out;
+}
+/* no moment longer than MOMENT_MAX seconds: a run that goes on keeps its first lines (the thought as it starts) */
+function shortMoments(picks) {
+  const keep = [];
+  for (const m of momentsOf(picks)) {
+    let t = 0;
+    m.forEach((p, i) => { const d = p.end - p.start; if (i === 0 || t + d <= MOMENT_MAX) { keep.push(p); t += d; } });
+  }
+  return keep;
+}
 
 /** Heard words → phrases: a pause, a full stop or nine seconds ends one. */
 function phrasesOf(words, maxSec = 9) {
@@ -1789,7 +1829,8 @@ You are given every phrase spoken in one or more videos (id, which video, when, 
 - THE HOOK FIRST: open with the single most arresting line — a bold claim, a question, a striking promise, an emotional peak. It may come from anywhere. It must make sense with no context.
 - THEN THE STORY: lines that follow on from each other so the whole thing reads as one clear message that rises. Every line must make sense after the one before it. Never use a line that starts mid-thought or depends on something left out. Lines from different videos may be mixed and matched when they continue the same thought.
 - THE PAYOFF LAST: end on the most quotable, memorable line — the one people will put in the comments.
-- No filler, no "um", no housekeeping (announcements, greetings, "turn to page"), no repeated points.
+- No filler, no "um", no housekeeping (announcements, greetings, "turn to page"), no repeated points. Never the giving or offering, bank details, a QR code, sponsors, tickets or logistics. Spoken words only, never the lyrics of a song being sung.
+- SHORT MOMENTS: a moment is lines that follow each other in the video. Keep each moment short: one to three lines, never more than about 12 seconds of one stretch. When it is a long event, take moments from several different parts of it (different speakers, different times) and let them build one message.
 - SHORT AND SNAPPY: every line a punch of about 2–6 seconds. More short lines beat fewer long ones — a line that runs on loses the scroll. Skip a long line unless it is the best thing said.
 - Fit the length asked for. Shorter and tighter beats longer.
 Use only ids that are given, each at most once, in the order they should play.
@@ -1803,6 +1844,7 @@ function talkBrief(opts, list) {
     + `\nNarrator: ${opts.voice ? 'YES — write vo_intro and vo_outro.' : 'no — leave vo_intro and vo_outro empty.'}`
     + (aboutLines(opts).length ? '\n' + aboutLines(opts).join('\n') : '')
     + (opts.brief ? `\nWhat the operator says it is about: ${opts.brief}` : '')
+    + (opts.eventSec >= LONG_EVENT_SEC ? `\nThis is a long event (${Math.round(opts.eventSec / 60)} minutes: a whole service or concert). Use at least ${Math.min(6, Math.max(3, Math.round(opts.lengthSec / 9)))} different moments from across it (lines more than 2 minutes apart are different moments), each moment 1–3 lines.` : '')
     + (opts.angle ? `\nANGLE FOR THIS EDIT: build it around "${opts.angle}" — the hook and the payoff should serve that idea.` : '')
     + (hl ? '\nLines marked ★ hold the key phrases of the whole message (ranked by AssemblyAI): strong candidates.' : '')
     + (used ? '\nLines marked (used before) were in earlier edits of this video. The operator wants a FRESH edit: choose DIFFERENT lines — use one of those only if nothing else comes close.' : '')
@@ -1856,10 +1898,16 @@ function talkByRules(list, opts) {
   const rest = list.filter((p) => p !== hook).sort((a, b) => val.get(b) - val.get(a));
   const picked = [hook];
   let total = hook.end - hook.start;
+  // a long event: no more than two lines from any one stretch of a few minutes, so the edit is made of different moments
+  const long = (opts.eventSec || 0) >= LONG_EVENT_SEC, win = 180;
+  const zone = (p) => p.vid + ':' + Math.floor(p.start / win);
+  const inZone = new Map([[zone(hook), 1]]);
   for (const p of rest) {
     if (total >= opts.lengthSec) break;
     if (p.score < 0.45) break;      // a weak line is not added just to reach the length
+    if (long && (inZone.get(zone(p)) || 0) >= 2) continue;
     picked.push(p); total += p.end - p.start;
+    inZone.set(zone(p), (inZone.get(zone(p)) || 0) + 1);
   }
   const body = picked.slice(1).sort((a, b) => a.vid - b.vid || a.start - b.start);
   return { plan: { concept: '', title: '', hook_text: '', post_caption: '', hashtags: [], picks: [hook].concat(body).map((p) => ({ id: p.id })) }, director: 'rules', model: '' };
@@ -2140,7 +2188,7 @@ const historyFile = (output) => path.join(path.dirname(output), '.viral-history.
 const videoKey = (f) => { try { return path.basename(f) + '|' + fs.statSync(f).size; } catch (e) { return path.basename(f); } };
 function loadHistory(output) { try { return JSON.parse(fs.readFileSync(historyFile(output), 'utf8')) || {}; } catch (e) { return {}; } }
 /** The spans of this video used by its last three edits. */
-function usedSpans(h, file) { return (h[videoKey(file)] || []).slice(-3).flat(); }
+function usedSpans(h, file) { return (h[videoKey(file)] || []).slice(-5).flat(); }   // (five takes: each fresh against the four before it)
 function saveHistory(output, h0, picks) {
   try {
     // read again now (another montage may have finished while this one was made), and write it whole or not at all
@@ -2270,7 +2318,9 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     for (const b of broll) { if (b.kind === 'image' && !b.thumb) { try { b.thumb = await thumb(ctx, b.file, 0, path.join(tmp, b.id + '.jpg'), true); } catch (e) { b.thumb = null; } } }
     if (onProgress) onProgress(42);
     // 2) CHOOSE
-    const list = phrases.length > 420 ? phrases.slice().sort((a, b) => b.score - a.score).slice(0, 420).sort((a, b) => a.vid - b.vid || a.start - b.start) : phrases;
+    const list = spreadList(phrases, 420);
+    // how long the heard event is (a whole service asks for moments from across it)
+    opts.eventSec = cands.reduce((n, c) => n + Math.max(0, (c.end || 0) - (c.start || 0)), 0);
     if (stage) stage(process.env.ANTHROPIC_API_KEY ? '🎬 Claude is picking the lines that will stop the scroll…' : '🎬 The AI is picking the lines that will stop the scroll…');
     let d = null;
     try { d = await talkWithClaude(list, opts); } catch (e) { if (log) log('claude: ' + e.message); }
@@ -2280,6 +2330,8 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     let picks = [];
     for (const x of (d.plan.picks || [])) { const p = byId.get(String(x && x.id || '').trim()); if (p && !picks.includes(p)) picks.push(p); }
     if (picks.length < 1) picks = talkByRules(list, opts).plan.picks.map((x) => byId.get(x.id)).filter(Boolean);
+    // no moment runs on (whatever the editor chose)
+    picks = shortMoments(picks);
     // the length asked for, give or take a line (the hook always stays)
     let total = picks.reduce((n, p) => n + (p.end - p.start), 0);
     while (picks.length > 2 && total - (picks[picks.length - 2].end - picks[picks.length - 2].start) >= opts.lengthSec * 1.15) {
@@ -2741,4 +2793,5 @@ function directorStatus() {
   return { director: 'rules', model: '' };
 }
 
-module.exports = { cleanAbout, withAbout, aboutLines, phrasesOf, phraseScore, talkByRules, fromBrief, cleanBrief, make, remake, loadProject, sidecarOf, baseOf, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };
+module.exports = {
+  spreadList, momentsOf, shortMoments, HOUSEKEEPING, cleanAbout, withAbout, aboutLines, phrasesOf, phraseScore, talkByRules, fromBrief, cleanBrief, make, remake, loadProject, sidecarOf, baseOf, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };

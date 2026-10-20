@@ -3814,13 +3814,15 @@
   }
 
   /*
-   * ►► THREE TAKES FROM ONE VIDEO. ◄◄ After a Viral montage opens, two more
+   * ►► FIVE TAKES FROM ONE VIDEO. ◄◄ After a Viral montage opens, four more
    * are made from the same video, each built around a different idea, with
    * different lines (the server marks the lines already used). Hearing the
    * video is not done again. Each lands on the sheet, and in My Uploads, to
    * watch, edit, save or post.
    */
-  const TAKE_ANGLES = ['the most hopeful promise in the message', 'the strongest challenge or call to action in the message'];
+  // five takes in all: the first, then four more, each built around its own idea (and its own lines)
+  const TAKE_ANGLES = ['the most hopeful promise in the message', 'the strongest challenge or call to action in the message',
+    'a personal story or testimony, told in the speaker’s own words', 'the most joyful, energetic moment of praise and celebration'];
   const TAKES = { list: [], running: false };
   function mtTakesPaint() {
     const box = document.getElementById('mtTakes'); if (!box) return;
