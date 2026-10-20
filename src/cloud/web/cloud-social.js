@@ -1027,7 +1027,8 @@
       if (b.dataset.go) return go(b.dataset.go);
       if (b.dataset.handtodo) { const t = handTodos().find((x) => x.id === b.dataset.handtodo); return t ? openHandOff(t) : renderSched(); }
       if (b.dataset.sched === 'new') return compose({});
-      if (b.dataset.sched === 'slot') return compose({ when: new Date(+b.dataset.at) });
+      // (several videos from here carry on the plan's own spacing)
+      if (b.dataset.sched === 'slot') return compose({ when: new Date(+b.dataset.at), spacing: +b.dataset.gap || undefined });
       if (b.dataset.sched === 'connect') return openConnect();
       if (b.dataset.tab) { S.tab = b.dataset.tab; return renderSched(); }
       if (b.dataset.openPost) return openPost(b.dataset.openPost);
@@ -1047,14 +1048,32 @@
       : near ? t.toLocaleDateString(undefined, { weekday: 'short' }) : t.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })) + ' ' + compactTime(t);
   };
   // the next best time with nothing booked near it (two hours either side), within a fortnight
+  /*
+   * ►► THE + TILE: THE NEXT TIME IN THE PLAN. ◄◄ "The furthest post is 31 Oct
+   * 00:00 — the best time is obviously after it." The plan goes on where it
+   * stops, in its own rhythm (posts every 6 hours → 31 Oct 06:00), not in a
+   * gap earlier on. Nothing booked: the next hour people look.
+   */
+  const gapHours = (ms) => { const h = ms / 3600e3; return h % 24 === 0 ? (h === 24 ? 'day' : h / 24 + ' days') : (Math.round(h * 4) / 4) + ' h'; };
+  function rhythmOf(times) {
+    // the usual gap between the last few booked posts (the median), when it is a steady one
+    const gaps = [];
+    for (let i = Math.max(1, times.length - 10); i < times.length; i++) { const g = times[i] - times[i - 1]; if (g >= 30 * 60000) gaps.push(g); }
+    if (!gaps.length) return null;
+    gaps.sort((a, b) => a - b);
+    const mid = gaps[Math.floor(gaps.length / 2)];
+    // (a plan booked "every 6 hours" is exactly that: gaps within a few minutes of each other, most of them)
+    const steady = gaps.length >= 2 && gaps.filter((g) => Math.abs(g - mid) <= 5 * 60000).length >= Math.max(2, Math.ceil(gaps.length * 0.6));
+    return steady && mid >= 3600e3 && mid <= 7 * 864e5 ? Math.round(mid / 900000) * 900000 : null;
+  }
   function freeSlot() {
-    const taken = upcoming().map((p) => new Date(p.scheduledAt).getTime());
-    let t = nextWindow(new Date(Date.now() + 30 * 60000));
-    for (let i = 0; i < 40 && t; i++) {
-      if (!taken.some((x) => Math.abs(x - t.getTime()) < 2 * 3600e3)) return t;
-      t = nextWindow(new Date(t.getTime() + 60 * 60000));
-    }
-    return null;
+    const soon = Date.now() + 30 * 60000;
+    const taken = upcoming().map((p) => new Date(p.scheduledAt).getTime()).filter(Number.isFinite).sort((a, b) => a - b);
+    if (!taken.length) return { at: nextWindow(new Date(soon)), gap: null };
+    const last = taken[taken.length - 1], gap = rhythmOf(taken);
+    if (gap) return { at: new Date(Math.max(last + gap, soon)), gap };
+    // one post, or no steady rhythm: the next hour people look, at least two hours after the last one
+    return { at: nextWindow(new Date(Math.max(last + 2 * 3600e3, soon))), gap: null };
   }
 
   function renderSched() {
@@ -1085,12 +1104,12 @@
     if (S.tab === 'upcoming') {
       const [first, ...rest] = list;
       html += '<div class="csb-h2"><h2>Up next</h2></div>' + heroCard(first);
-      const free = freeSlot();
+      const slot = freeSlot(), free = slot && slot.at;
       if (rest.length || free) {
         html += `<div class="csb-h2"><h2>Coming up</h2><span class="csb-dim">${rest.length ? `${rest.length} more` : ''}</span></div><div class="csb-grid">`
           + rest.map((p) => tile(p, p.scheduledAt)).join('')
-          + (free ? `<button type="button" class="csb-tile free" data-sched="slot" data-at="${free.getTime()}"><span class="csb-free-plus">${mi('plus')}</span>`
-            + `<b>${esc(dayName(free))} is free</b><small>Best time ${esc(timeOf(free))}</small></button>` : '')
+          + (free ? `<button type="button" class="csb-tile free" data-sched="slot" data-at="${free.getTime()}"${slot.gap ? ` data-gap="${slot.gap / 3600e3}"` : ''}><span class="csb-free-plus">${mi('plus')}</span>`
+            + `<b>${esc(dayName(free))} ${esc(timeOf(free))}</b><small>${slot.gap ? 'Next in your plan · every ' + esc(gapHours(slot.gap)) : 'Best time ' + esc(timeOf(free))}</small></button>` : '')
           + '</div>';
       }
     } else {
@@ -1303,6 +1322,7 @@
       namesOpen: false,
     };
     if (o.when && !edit) { st.quick = 'pick'; st.when = new Date(o.when); }
+    if (o.spacing >= 1 && o.spacing <= 336 && !edit) st.spacing = o.spacing;
     // the free shelf and the operator's own songs, for the Music section
     (async () => {
       try { st.shelf = await window.api.freeMusic.list(false); } catch (e) { st.shelf = null; }
@@ -4028,5 +4048,5 @@
     }
   }
 
-  window.MWSocial = { busy: () => !!MT.busy, start, go, compose, openConnect, openMontage, editMontage, openProjects, openProject, deleteOpenProject, openPost, view: () => S.view, _state: S, _planTimes: planTimes, _titleFromFile: titleFromFile };
+  window.MWSocial = { _rhythmOf: (t) => rhythmOf(t), _freeSlot: () => freeSlot(), busy: () => !!MT.busy, start, go, compose, openConnect, openMontage, editMontage, openProjects, openProject, deleteOpenProject, openPost, view: () => S.view, _state: S, _planTimes: planTimes, _titleFromFile: titleFromFile };
 })();

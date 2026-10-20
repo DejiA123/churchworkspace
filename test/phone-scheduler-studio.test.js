@@ -130,10 +130,18 @@ function aiServer() {
       hero: (document.querySelector('.csb-hero .csb-hero-title') || {}).textContent,
       tiles: document.querySelectorAll('.csb-grid .csb-tile:not(.free)').length,
       free: (document.querySelector('.csb-tile.free b') || {}).textContent || '',
+      freeSub: (document.querySelector('.csb-tile.free small') || {}).textContent || '',
+      freeAt: +((document.querySelector('.csb-tile.free') || { dataset: {} }).dataset.at || 0),
     }));
     check(home.accts.includes('Bishop David Richman') && home.accts.length === 5, 'accounts show as cards with their real names', home.accts);
     check(home.hero === 'God is not finished with you yet', 'the next post is the Up next card', home.hero);
-    check(home.tiles === 2 && / is free$/.test(home.free), 'the rest are 9:16 tiles, with the next free best time as a tile', home);
+    // the + tile carries the plan on AFTER the furthest post (the last at 2 days), in its own rhythm — not in a gap before it
+    const lastAt = new Date(at(2 * day)).getTime();
+    check(home.tiles === 2 && /\d{1,2}:\d\d( ?[AP]M)?$/i.test(home.free) && home.freeAt > lastAt && new Date(home.freeAt).getMinutes() === 0 && /^Best time/.test(home.freeSub),
+      'the rest are 9:16 tiles, and the + tile is the next good hour after the furthest post (these are not evenly spaced)', home);
+    const rh = await page.evaluate(() => { const H = 3600e3, t0 = Date.parse('2026-10-29T18:00:00Z'); const r = window.MWSocial._rhythmOf;
+      return { six: r([0, 1, 2, 3, 4, 5].map((i) => t0 + i * 6 * H)) / H, day: r([t0, t0 + 24 * H, t0 + 48 * H]) / H, uneven: r([t0, t0 + 22 * H, t0 + 44.7 * H]), one: r([t0]) }; });
+    check(rh.six === 6 && rh.day === 24 && rh.uneven === null && rh.one === null, 'a plan booked every 6 hours (or every day) is carried on at that rhythm; an uneven one or a single post is not', rh);
 
     // [2] a flyer, from the free-time tile: it is read and written by itself
     await page.tap('.csb-tile.free');
