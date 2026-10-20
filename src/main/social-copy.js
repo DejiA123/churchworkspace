@@ -253,6 +253,33 @@ const MAX_EMOJI = 5;
  * House-style clean-up, applied to EVERYTHING — the rules' own output and the
  * model's alike, so the standard does not depend on which one answered.
  */
+/*
+ * ►► GRAMMAR A TRANSCRIPT DOES NOT HAVE. ◄◄ A caption that quotes the
+ * preacher word for word quotes the speech-to-text, and that writes "you know
+ * i went to class" and "something god wants you to do". On a church's page
+ * that reads as careless: "I" is a capital, God and Jesus are names, and a
+ * quotation starts with a capital. Hashtags, handles and links are left alone
+ * (#god is a tag, not a sentence).
+ */
+const SACRED = [
+  [/god(?=['’]s\b|\b)/g, 'God'], [/jesus/g, 'Jesus'], [/christ(?=['’]s\b|\b)/g, 'Christ'],
+  [/holy (spirit|ghost)/g, (m, w) => 'Holy ' + w.charAt(0).toUpperCase() + w.slice(1)],
+  [/bible/g, 'Bible'], [/the lord\b/g, 'the Lord'], [/is lord/g, 'is Lord'], [/lord jesus/g, 'Lord Jesus'], [/lord god/g, 'Lord God'],
+];
+function properCase(text) {
+  // the line, word by word, never inside a hashtag, a handle or a link
+  return String(text || '')
+    .replace(/(^|[^#@\/\w’'])(i)(?=(?:['’](?:m|ve|ll|d))?(?![\w'’.]))/g, (m, pre) => pre + 'I')
+    .replace(/(^|[^#@\/\w])((?:god|jesus|christ|holy spirit|holy ghost|bible|the lord|lord jesus|lord god|is lord)(?:['’]s)?)(?![\w])/gi, (m, pre, w) => {
+      if (/^[A-Z]/.test(w) && w !== w.toLowerCase()) return m;   // already written by someone who meant it
+      let out = w.toLowerCase();
+      for (const [rx, to] of SACRED) out = out.replace(rx, to);
+      return pre + out;
+    })
+    // a quotation starts with a capital: “you know… → “You know…
+    .replace(/(^|[\s(\[:—–-])([“"‘])([a-z])/g, (m, pre, q, c) => pre + q + c.toUpperCase());
+}
+
 function houseStyle(text, opts) {
   const o = opts || {};
   let t = String(text == null ? '' : text);
@@ -283,6 +310,7 @@ function houseStyle(text, opts) {
   // Taking a phrase out can leave a lower-case sentence opening or a stranded
   // space before punctuation. Tidy both, or the cure looks worse than the tell.
   t = t.replace(/\s+([,.!?;:])/g, '$1');
+  t = properCase(t);
   t = t.replace(/(^|[.!?]\s+|\n)([a-z])/g, (m, pre, c) => pre + c.toUpperCase());
   t = t.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ');
   return t.trim();
@@ -653,7 +681,8 @@ function buildPrompt({ hook, kind, churchName, eventName, speaker, durationSec, 
         + 'name, no "the speaker", no "the preacher", no "the pastor", no "he" or "she". '
         + 'Quote their words without saying who said them, or put the idea in your own '
         + 'words. You MAY name anyone the words above actually name, spelled exactly as '
-        + 'they are spelled there, and you must never change a name inside a quote.',
+        + 'they are spelled there, and you must never change a name inside a quote. '
+        + 'The transcript is machine-written: in a quote keep the words but write them properly (I, God, Jesus, a capital to start).',
     churchName ? '' : 'NOBODY HAS TOLD YOU THE CHURCH\'S NAME. Do not name a church, and never write "our church" or "at church" as a place.',
     'NEVER use an em dash or en dash (— or –). Use a colon or a comma instead.',
     'NEVER use the hashtag #SermonClip, #fyp, #viral or #trending.',
@@ -982,6 +1011,7 @@ async function revise({ title = '', caption = '', action = 'rewrite', instructio
 }
 
 module.exports = {
+  properCase,
   suggest, revise, dropFaceless, realChurch, withPopularTags, withoutTags, POPULAR_CORE, forPlatform, APP_TAGS, ruleCopy, ruleOption, hookFromFilename, readTranscript, sentencesOf, hookScore,
   buildPrompt, buildPolishPrompt, tidy, houseStyle, tagOf, tagLine, whoIsSpeaking, asSentence,
   stripInventedNames, STYLES, TELLS,

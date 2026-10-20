@@ -115,6 +115,16 @@ const EM_DASH = /[—–]/;
   check('and it invents neither an event nor a speaker',
     !/undefined|null|\[object/.test(bare.options.map((o) => o.title + o.caption).join(' ')));
 
+  console.log('\n[9] Grammar a transcript does not have');
+  const quoted = c.houseStyle('You ever misplace something crucial? “you know i went to class with it and then i quickly rushed in there” echoes the scramble. #god #jesus');
+  check('a quote of the transcript: "I" a capital, the quote starts with a capital', /“You know I went to class with it and then I quickly rushed/.test(quoted), quoted);
+  check('hashtags are left as they are', /#god #jesus$/.test(quoted), quoted);
+  const names = c.houseStyle("there may be something god wants you to do. i'm sure, i've seen it. jesus christ is lord. the holy spirit moves. read the bible. god's grace.");
+  check('God, Jesus, Christ, the Holy Spirit, the Bible and the Lord are names; I\'m and I\'ve too',
+    names === "There may be something God wants you to do. I'm sure, I've seen it. Jesus Christ is Lord. The Holy Spirit moves. Read the Bible. God's grace.", names);
+  const safe = c.houseStyle('See https://church.org/god or @godlovers (i.e., this). The gods of Egypt fell.');
+  check('links, handles, "i.e." and "gods" are not touched', safe === 'See https://church.org/god or @godlovers (i.e., this). The gods of Egypt fell.', safe);
+
   console.log(`\n==================  ${pass} passed, ${fail} failed  ==================`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });
