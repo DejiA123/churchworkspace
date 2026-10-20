@@ -816,7 +816,17 @@ ipcMain.handle('montage:status', wrap(async () => Object.assign({}, montage.dire
  * part") — only that part is heard (nothing is spent on the rest), and the
  * words come back on the video's own clock.
  */
+/* what a video says, kept a while: the montage's other takes of the same video are not listened to (or paid for) again */
+const HEARD_MT = new Map();
 async function montageHear(file, durationSec, onProgress, fromSec = 0) {
+  let key = '';
+  try { const st = fs.statSync(file); key = [file, st.size, st.mtimeMs, (+durationSec || 0).toFixed(1), (+fromSec || 0).toFixed(1)].join('|'); } catch (e) { key = ''; }
+  if (key && HEARD_MT.has(key)) { if (onProgress) onProgress(100); return HEARD_MT.get(key); }
+  const ws = await montageHearOnce(file, durationSec, onProgress, fromSec);
+  if (key && ws && ws.length) { HEARD_MT.set(key, ws); if (HEARD_MT.size > 12) HEARD_MT.delete(HEARD_MT.keys().next().value); }
+  return ws;
+}
+async function montageHearOnce(file, durationSec, onProgress, fromSec = 0) {
   const from = Math.max(0, Math.min(+fromSec || 0, Math.max(0, durationSec - 0.5)));
   const span = Math.max(0.5, durationSec - from);
   const shift = (ws) => {
@@ -864,12 +874,13 @@ async function montageHear(file, durationSec, onProgress, fromSec = 0) {
   }
   return [];
 }
-ipcMain.handle('montage:create', wrap(async (e, { mediaPaths, ranges, musicPath, style, lengthSec, full, aspect, brief, about, keepAudio, keepOrder, mode, voice, jobId }) => {
+ipcMain.handle('montage:create', wrap(async (e, { mediaPaths, ranges, musicPath, style, lengthSec, full, aspect, brief, about, keepAudio, keepOrder, mode, voice, angle, jobId }) => {
   const output = outPath(`montage-${stamp()}.mp4`);
   let pct = 0, stageName = '';
   const tell = () => { if (jobId && e && !e.sender.isDestroyed()) e.sender.send('job:progress', { jobId, percent: pct, stage: stageName }); };
   const made = await montage.make(getCtx(), video.getInfo, {
     mediaPaths, ranges, musicPath, style, lengthSec, full, aspect, brief, about, keepAudio, keepOrder, output,
+    angle: angle ? String(angle).slice(0, 200) : undefined,
     mode: mode === 'talk' ? 'talk' : undefined, hear: montageHear, voice: mode === 'talk' && voice ? String(voice) : null,
     onProgress: (p) => { pct = p; tell(); },
     stage: (name) => { stageName = name; tell(); },

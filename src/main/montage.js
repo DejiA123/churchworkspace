@@ -2257,7 +2257,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       for (const p of phrases) if (p.hl > 0) keys.push([p.hl, p.text]);
       keys.sort((a, b) => b[0] - a[0]);
       const top = keys.slice(0, 8).map((x) => x[1]).filter((t, i, a) => a.indexOf(t) === i);
-      if (top.length) opts.angle = String(top[Math.floor(Math.random() * top.length)]).slice(0, 140);
+      if (top.length && !opts.angle) opts.angle = String(top[Math.floor(Math.random() * top.length)]).slice(0, 140);
     }
     if (phrases.length < 2) {
       const e = new Error('No one could be heard speaking in these videos. A Viral montage is cut from what is said — choose “Standard” for clips without speech.');
@@ -2673,7 +2673,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
  * The whole job. `stage(name)` says what is happening (for the phone), and
  * `onProgress(pct)` how far through the whole thing it is.
  */
-async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, lengthSec, full, aspect, brief, about, keepAudio, keepOrder, output, onProgress, stage, log, mode, hear, voice }) {
+async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, lengthSec, full, aspect, brief, about, keepAudio, keepOrder, output, onProgress, stage, log, mode, hear, voice, angle }) {
   const files = (mediaPaths || []).filter((p) => p && fs.existsSync(p)).slice(0, 60);
   // the part of each video to use ("from which part to which part"), by file
   const partOf = new Map();
@@ -2687,6 +2687,8 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
       aspect: ASPECTS[aspect] ? aspect : '9:16',
       brief: cleanBrief(brief),
       about: cleanAbout(about),
+      // a take of several: the idea this one is built around (the others' lines are already marked "used before")
+      angle: typeof angle === 'string' && angle.trim() ? angle.trim().slice(0, 200) : undefined,
     };
     return makeTalk(ctx, getInfo, { files, parts: partOf, opts: topts, hear, musicPath, output, onProgress, stage, log, keepAudio });
   }

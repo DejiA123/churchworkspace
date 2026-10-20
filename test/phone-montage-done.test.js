@@ -83,6 +83,15 @@ async function waitUp() {
       check(!r.missing && r.ratio >= need, `${r.q}: readable on the sheet (${r.ratio}:1, needs ${need}:1)`, r);
     }
     const sheet = await page.evaluate(() => getComputedStyle(document.getElementById('cloudMontageDone')).backgroundColor);
+    // three takes from one video: the two others are made after it, each around its own idea, and listed to watch
+    const takes = await page.evaluate(async () => {
+      const asked = [];
+      window.api.montage.create = async (a) => { asked.push(a); await new Promise((r) => setTimeout(r, 150)); return { output: '/media/montage-take' + asked.length + '.mp4', title: 'Take ' + (asked.length + 1), duration: 30 }; };
+      window.MWSocial._mtResult({ title: 'Recap', duration: 29, mode: 'talk', lines: 6, shots: [], postCaption: 'x', moreArgs: { mediaPaths: ['/media/sermon.mp4'], mode: 'talk', style: 'hype' } });
+      for (let i = 0; i < 40 && document.querySelectorAll('#mtTakes [data-mt-take]').length < 2; i++) await new Promise((r) => setTimeout(r, 100));
+      return { n: document.querySelectorAll('#mtTakes [data-mt-take]').length, angles: asked.map((a) => a.angle), same: asked.every((a) => a.mediaPaths[0] === '/media/sermon.mp4' && a.mode === 'talk') };
+    });
+    check(takes.n === 2 && takes.same && takes.angles.length === 2 && takes.angles[0] !== takes.angles[1], 'a Viral montage makes two more takes of the same video, each around its own idea, ready to watch', takes);
     check(/255, 255, 255|246, 247, 249/.test(sheet), 'the sheet is light, like the AI Montage page', sheet);
   } catch (e) {
     check(false, 'the run finished', e.stack || e.message);

@@ -3773,14 +3773,17 @@
         if (!d || d.jobId !== jobId) return;
         mtProgress(d.stage || 'Working…', 32 + (d.percent || 0) * 0.68);
       });
-      const res = await window.api.montage.create({
+      const args = {
         mediaPaths: paths, musicPath: song ? song.file : null, style: MT.style,
         // the part of each video to use (null: all of it)
         ranges: talk ? MT.items.map((it) => (it.kind === 'video' && mtHasPart(it) ? { from: it.from || 0, to: it.to || 0 } : null)) : undefined,
         lengthSec: MT.len === 'all' ? 0 : MT.len === 'custom' ? MT.custom : MT.len, full: MT.len === 'all',
         aspect: MT.aspect, brief: MT.brief, about: mtAboutOf(MT.brief), keepAudio: talk ? true : MT.keep, keepOrder: !talk && MT.order === 'mine', jobId,
         mode: talk ? 'talk' : undefined, voice: talk && MT.voice ? MT.voice : undefined,
-      });
+      };
+      const res = await window.api.montage.create(Object.assign({}, args, { jobId }));
+      // a Viral montage: two more takes of the same video, made after it (the listening is not done again)
+      if (talk) res.moreArgs = args;
       if (credit) res.postCaption = [res.postCaption, credit].filter(Boolean).join('\n\n');
       if (off) off();
       MT.busy = false;
@@ -3810,6 +3813,38 @@
     }
   }
 
+  /*
+   * ►► THREE TAKES FROM ONE VIDEO. ◄◄ After a Viral montage opens, two more
+   * are made from the same video, each built around a different idea, with
+   * different lines (the server marks the lines already used). Hearing the
+   * video is not done again. Each lands on the sheet, and in My Uploads, to
+   * watch, edit, save or post.
+   */
+  const TAKE_ANGLES = ['the most hopeful promise in the message', 'the strongest challenge or call to action in the message'];
+  const TAKES = { list: [], running: false };
+  function mtTakesPaint() {
+    const box = document.getElementById('mtTakes'); if (!box) return;
+    box.innerHTML = TAKES.list.map((t, i) => t.output
+      ? `<button type="button" class="mt-take" data-mt-take="${C.escAttr(t.output)}"><b>Take ${i + 2}</b><small>${C.esc(t.title || 'Ready')} · ${Math.round(t.duration || 0)}s</small><span>Watch</span></button>`
+      : `<div class="mt-take${t.err ? ' bad' : ''}"><b>Take ${i + 2}</b><small>${t.err ? C.esc(t.err) : t.started ? 'Being made…' : 'Waiting…'}</small></div>`).join('');
+  }
+  async function mtMoreTakes(args) {
+    if (TAKES.running) return;
+    TAKES.running = true;
+    TAKES.list = TAKE_ANGLES.map(() => ({}));
+    mtTakesPaint();
+    for (let i = 0; i < TAKE_ANGLES.length; i++) {
+      TAKES.list[i].started = true; mtTakesPaint();
+      try {
+        const r = await window.api.montage.create(Object.assign({}, args, { angle: TAKE_ANGLES[i], jobId: 'mttake' + Date.now().toString(36) + i }));
+        Object.assign(TAKES.list[i], { output: r.output, title: r.title, duration: r.duration });
+      } catch (e) { TAKES.list[i].err = 'Could not be made' + (e && e.message ? ': ' + e.message : ''); }
+      mtTakesPaint();
+    }
+    TAKES.running = false;
+    C.island({ kind: 'good', title: 'Your other takes are ready', sub: 'Find them in My Uploads too', ms: 5000 });
+  }
+
   function mtResult(res) {
     const tags = (res.hashtags || []).map((h) => '#' + h).join(' ');
     const caption = [res.postCaption, tags].filter(Boolean).join('\n\n');
@@ -3820,11 +3855,15 @@
       ${res.narratorWhy ? `<p class="mt-tip">🎙 The narrator was left out this time (${C.esc(res.narratorWhy)}) — the edit is complete without it.</p>` : ''}
       <p class="mt-tip">It’s open in the studio now${res.texts && res.texts.length ? ' — the words on screen are text boxes, tap one to change it' : ''}. ${res.autoCaps === 'talk' ? 'The captions are on, every word lit up as it’s said, and go into the export — tap 💬 Captions to change their look.' : res.autoCaps ? 'Captions of what’s said are being added by themselves — they go into the export.' : 'Add captions from the 💬 Captions tool.'} Change the music volume in Audio, then export as usual.</p>
       ${caption ? `<section class="mt-sec"><h3>Post caption</h3><textarea class="mt-brief" rows="4" readonly>${C.esc(caption)}</textarea>
-        <button type="button" class="mt-chip on" data-mt-copy>Copy caption</button></section>` : ''}`;
+        <button type="button" class="mt-chip on" data-mt-copy>Copy caption</button></section>` : ''}
+      ${res.moreArgs ? `<section class="mt-sec"><h3>More versions <small>from the same video</small></h3><div class="mt-takes" id="mtTakes"></div></section>` : ''}`;
+    if (res.moreArgs) { if (!TAKES.running) mtMoreTakes(res.moreArgs); else mtTakesPaint(); }
     p.foot.innerHTML = `<div class="mt-foot2">${res.project ? '<button type="button" class="mt-edit" data-mt-shots>✏️ Rearrange shots &amp; photos</button>' : ''}<button type="button" class="mt-go" data-mt-ok>Start editing</button></div>`;
     p.el.addEventListener('click', (e) => {
       if (e.target.closest('[data-mt-ok]')) C.closePanel(p);
       if (e.target.closest('[data-mt-shots]')) { C.closePanel(p, true); editMontage(res.output, res.song || null); }
+      const tk = e.target.closest('[data-mt-take]');
+      if (tk && tk.dataset.mtTake) { C.closePanel(p, true); return C.viewFile && C.viewFile(tk.dataset.mtTake); }
       if (e.target.closest('[data-mt-copy]')) {
         try { navigator.clipboard.writeText(caption); C.island({ kind: 'good', title: 'Caption copied' }); } catch (er) {}
       }
