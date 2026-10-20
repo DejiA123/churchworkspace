@@ -20,6 +20,8 @@ const ready = () => !!key() && String(process.env.MW_AAI_LLM || '').toLowerCase(
 
 // best first: a strong reader of long text that follows a brief to the letter
 const PREFER = [/claude.*opus/i, /claude.*sonnet/i, /gpt-5(?!.*(mini|nano))/i, /gemini.*pro/i, /claude/i, /gpt-5/i, /gemini/i, /gpt/i];
+// the gateway's documented models, for when it will not list its own (no models endpoint is documented)
+const KNOWN = ['claude-sonnet-4-6', 'claude-sonnet-4.6', 'claude-sonnet-4-5-20250929', 'gpt-5', 'gemini-2.5-pro'];
 let listed = null, listedAt = 0, benched = new Map();
 
 async function req(path, body, timeoutMs) {
@@ -46,6 +48,7 @@ async function models() {
   const rank = (id) => { const i = PREFER.findIndex((rx) => rx.test(id)); return i < 0 ? 99 : i; };
   // newest first within a family (a higher version number in the id)
   const ver = (id) => { const m = String(id).match(/(\d+(?:[.-]\d+)?)/g); return m ? parseFloat(String(m[m.length - 1]).replace('-', '.')) : 0; };
+  if (!ids.length) return KNOWN.slice();                             // not cached: asked again next time
   listed = ids.sort((a, b) => rank(a) - rank(b) || ver(b) - ver(a));
   listedAt = Date.now();
   return listed;
@@ -57,7 +60,7 @@ async function models() {
  */
 async function chat({ system, prompt, maxTokens = 4000, temperature = 0.8, json = false, timeoutMs = 150000 } = {}) {
   if (!ready()) return '';
-  const want = process.env.MW_AAI_LLM_MODEL ? [process.env.MW_AAI_LLM_MODEL] : (await models()).filter((m) => !(benched.get(m) > Date.now())).slice(0, 3);
+  const want = process.env.MW_AAI_LLM_MODEL ? [process.env.MW_AAI_LLM_MODEL] : (await models()).filter((m) => !(benched.get(m) > Date.now())).slice(0, 5);
   for (const model of want) {
     try {
       const body = { model, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }], max_tokens: maxTokens, temperature };
@@ -79,4 +82,4 @@ async function chat({ system, prompt, maxTokens = 4000, temperature = 0.8, json 
 let last = null;
 const state = () => ({ ready: ready(), last });
 
-module.exports = { ready, chat, models, state, PREFER, _reset: () => { listed = null; benched = new Map(); } };
+module.exports = { ready, chat, models, state, PREFER, KNOWN, _reset: () => { listed = null; benched = new Map(); } };

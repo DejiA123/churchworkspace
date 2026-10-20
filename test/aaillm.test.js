@@ -11,12 +11,12 @@ let pass = 0, fail = 0;
 const check = (ok, name, d) => { console.log((ok ? '  PASS ' : '  FAIL ') + name + (d !== undefined && !ok ? '  -> ' + JSON.stringify(d) : '')); ok ? pass++ : fail++; };
 (async () => {
   const seen = [];
-  let broken = new Set();
+  let broken = new Set(), noList = false;
   const srv = http.createServer((req, res) => {
     let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => {
       seen.push({ url: req.url, auth: req.headers.authorization, body: b ? JSON.parse(b) : null });
       const json = (o, code = 200) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
-      if (req.url === '/v1/models') return json({ data: [{ id: 'gpt-4.1-mini' }, { id: 'claude-sonnet-4-5' }, { id: 'claude-3-haiku' }, { id: 'claude-sonnet-4-20250514' }, { id: 'gemini-2.5-flash' }] });
+      if (req.url === '/v1/models') return noList ? json({ error: 'Not Found' }, 404) : json({ data: [{ id: 'gpt-4.1-mini' }, { id: 'claude-sonnet-4-5' }, { id: 'claude-3-haiku' }, { id: 'claude-sonnet-4-20250514' }, { id: 'gemini-2.5-flash' }] });
       if (req.url === '/v1/chat/completions') {
         const m = JSON.parse(b).model;
         if (broken.has(m)) return json({ error: { message: 'model overloaded' } }, 503);
@@ -44,6 +44,11 @@ const check = (ok, name, d) => { console.log((ok ? '  PASS ' : '  FAIL ') + name
   check(st.ready && st.last && st.last.ok && st.last.model === 'claude-sonnet-4-20250514', 'its state says which model answered', st);
   const m = require('../src/main/montage');
   check(m.directorStatus().director === 'assemblyai', 'the montage says AssemblyAI is its editor (no Claude key here)', m.directorStatus());
+  // a gateway that will not list its models: the documented ones are tried, best first, past one it does not have
+  ai._reset(); noList = true; broken = new Set(['claude-sonnet-4-6']);
+  const out3 = await ai.chat({ system: 'sys', prompt: 'no list' });
+  const tried = seen.filter((x) => x.body && x.body.messages && x.body.messages[1].content === 'no list').map((x) => x.body.model);
+  check(/"picks"/.test(out3) && tried[0] === 'claude-sonnet-4-6' && tried[1] === ai.KNOWN[1], 'no list of models: the documented ones are tried in turn', tried);
   srv.close();
   console.log(`\n${pass} PASS / ${fail} FAIL`);
   process.exit(fail ? 1 : 0);
