@@ -1838,10 +1838,12 @@ function acrossEvent(picks, list, opts) {
   picks.forEach((p, i) => { const k = part(p); if (!taken.has(k) && (short(p) || i === 0)) taken.set(k, p); });
   // the parts the editor left empty: their own strongest line (one no earlier take used counts for more)
   const val = lineVal;
+  // (about MOMENT_EACH seconds a moment: a longer line counts for a little less)
+  const quick = (p) => val(p) - Math.max(0, p.end - p.start - MOMENT_EACH - 0.6) * 0.12;
   for (let k = 0; k < n; k++) {
     if (taken.has(k)) continue;
     const best = list.filter((p) => part(p) === k && short(p) && p.end - p.start >= MOMENT_LINE_MIN && !HOUSEKEEPING.test(p.text) && !CROWD.test(p.text))
-      .sort((a, b) => val(b) - val(a))[0];
+      .sort((a, b) => quick(b) - quick(a))[0];
     if (best && val(best) >= 0.4) taken.set(k, best);
   }
   const chosen = [...taken.values()];
@@ -2580,7 +2582,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         // (lines no earlier take used come first: a replacement must not bring the last take back)
         const pool = list.filter((p) => !tried.has(p) && p.end - p.start >= (picks.length ? 1.4 : 0.8) && fitsEvent(p) && newPart(p)).sort((a, b) => (a.usedBefore - b.usedBefore) || (b.score - a.score));
         let added = 0;
-        for (let round = 0; round < 3 && tot < opts.lengthSec * 0.9 && pool.length; round++) {
+        for (let round = 0; round < (ev ? 6 : 3) && tot < opts.lengthSec * 0.9 && pool.length; round++) {
           const batch = pool.splice(0, 6);
           await lookLines(batch);
           for (const p of batch) {
@@ -2758,8 +2760,14 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       const good = top.filter((sp) => longEv
         ? !!(sp.snapLook && sp.snapLook.people > 0 && !sp.snapLook.weak && sp.snapLook.facing !== false && sp.vis && !sp.vis.still && !sp.vis.dark)
         : !(sp.snapLook && sp.snapLook.people === 0));
-      // (in the order they happened: the cutaways walk through the event with the lines)
-      if (longEv) good.sort((a, b) => a.vid - b.vid || a.start - b.start);
+      // (the few used are spread over the WHOLE event — not the first hour's — and play in the order they happened)
+      if (longEv) {
+        good.sort((a, b) => a.vid - b.vid || a.start - b.start);
+        const k = Math.min(good.length, Math.max(2, picks.length + 1));
+        const even = k < 2 ? good.slice() : Array.from({ length: k }, (_, j) => good[Math.round(j * (good.length - 1) / (k - 1))]);
+        const restOf = good.filter((p) => !even.includes(p));
+        good.length = 0; good.push(...new Set(even), ...restOf);
+      }
       if (log && good.length < top.length) log(`people: ${top.length - good.length} B-roll moment(s) showed nobody and were left out`);
       spare.length = 0; spare.push(...good);
     }
