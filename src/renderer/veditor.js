@@ -13074,6 +13074,9 @@
   }
   function renderCapList() {
     const all = ve.capEvents || [];
+    // the lines have just arrived (generated with the window open on its settings): on a phone, show them
+    const had = !!ve._capHadLines; ve._capHadLines = all.length > 0;
+    if (!had && all.length && capNarrow()) { const m = document.getElementById('capModal'); if (m && !m.classList.contains('hidden')) setCapFolded(true, false); }
     const scope = ve.capScope;
     const inScope = all
       .map((c, i) => ({ c, i }))
@@ -13665,8 +13668,11 @@
     const hasLines = capScopedIndexes().length > 0;
     let pref = null;
     try { pref = localStorage.getItem(CAP_FOLD_KEY); } catch (e) {}
-    setCapFolded(hasLines && pref !== '0', false);
+    // (on a phone the settings fill the whole sheet, and 1,745 generated lines sat out of sight below them —
+    //  "I generated captions, I don't see them in the caption editor": there, the lines always come first)
+    setCapFolded(hasLines && (pref !== '0' || capNarrow()), false);
   }
+  const capNarrow = () => { try { return window.matchMedia('(max-width: 760px)').matches; } catch (e) { return false; } };
 
   /* ======================= ✍ THE PROOF-READER =======================
    *
