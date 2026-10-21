@@ -1766,6 +1766,8 @@ function wholeThought(p) {
   if (/(?:^|\s)([\w']+)(?:,?\s+\1(?=\s|$|[,.!?])){2,}/i.test(t)) return false;
   // a word said twice over, twice in one line ("Stop, stop praying. Ceasing, ceasing.")
   if ((t.match(/\b([\w']+)[,.!]?\s+\1\b/gi) || []).length >= 2) return false;
+  // two thoughts run together where one was cut off ("…once and for So the testimony of Jesus…")
+  if (/\b(and|or|but|the|a|an|to|of|for|my|your|our|their|because|if|when|then|than|is|are|was)\s+(So|And|But|Then|Because|Now|The|We|They|It)\b/.test(t)) return false;
   // a few words on their own ("Answer.", "Over your life.") are not a moment
   if (t.split(/\s+/).length < 4) return false;
   // an introduction or a shout-out is not a moment ("I am Daiji, also known as…", "follow us on…")
@@ -1837,8 +1839,8 @@ async function vetParts(picks, list, opts, log) {
   }
   if (!parts.length) return null;
   const system = 'You choose the lines for a short viral video of a church event, heard one after another. You only judge the words.';
-  const prompt = 'For each part of the event below, keep ONLY the lines that, heard on their own by a stranger scrolling, carry a clear and powerful message about God, faith, hope or life — a line people would quote or share. ' +
-    'Drop banter and jokes, crowd work, stage chat, questions to the audience, announcements, a line that only makes sense with what came before, and anything unclear. Order the kept ones best first. A part may keep none.\n\n' +
+  const prompt = 'For each part of the event below, keep ONLY the lines that, heard on their own by a stranger scrolling, carry a clear and powerful message about God, faith, hope or life — a line people would quote or share. Be strict: at most 3 per part, and when in doubt, drop it. ' +
+    'Drop banter and jokes, crowd work, stage chat, questions to the audience ("You know what I mean?"), announcements, a line that only makes sense with what came before, a line cut off mid-thought, slang or wordplay a stranger would not follow, and anything unclear. Order the kept ones best first. A part may keep none.\n\n' +
     parts.map((pt) => `PART ${pt.k + 1}\n` + pt.c.map((p) => `${p.id}: ${p.text}`).join('\n')).join('\n\n') +
     '\n\nReply with JSON only: {"parts":{"1":["id","id"],"2":[]}} — every part listed, the ids it keeps, best first.';
   let text = '';
