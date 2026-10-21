@@ -1805,14 +1805,14 @@ function shortMoments(picks) {
 
 /*
  * A LONG EVENT IN 30 SECONDS: the whole of it, not one stretch. The event is cut
- * into equal parts — about one for every three and a half seconds asked — and
+ * into equal parts — about one for every five seconds asked — and
  * each part gives at most ONE short line: the editor's choice where it made one
  * there, else the strongest whole thought said in it. The hook first, then the
  * rest in the order they happened (the event, start to finish). On Gospel Jamz
  * Day 1 (3 h 44) the editor's lines all came from one half-hour panel.
  */
-const MOMENT_EACH = 3.6, MOMENT_LINE_MAX = 6.5;
-const partsFor = (opts) => clamp(Math.round((opts.lengthSec || 30) / MOMENT_EACH), 6, 16);
+const MOMENT_EACH = 5, MOMENT_LINE_MIN = 2.8, MOMENT_LINE_MAX = 7;
+const partsFor = (opts) => clamp(Math.round((opts.lengthSec || 30) / MOMENT_EACH), 5, 14);
 function acrossEvent(picks, list, opts) {
   const all = list.concat(picks);
   const vids = [...new Set(all.map((p) => p.vid))].sort((a, b) => a - b);
@@ -1828,7 +1828,7 @@ function acrossEvent(picks, list, opts) {
   const val = (p) => p.score + messageOf(p) - (p.usedBefore ? 0.5 : 0);
   for (let k = 0; k < n; k++) {
     if (taken.has(k)) continue;
-    const best = list.filter((p) => part(p) === k && short(p) && p.end - p.start >= 1.4 && !HOUSEKEEPING.test(p.text) && !CROWD.test(p.text))
+    const best = list.filter((p) => part(p) === k && short(p) && p.end - p.start >= MOMENT_LINE_MIN && !HOUSEKEEPING.test(p.text) && !CROWD.test(p.text))
       .sort((a, b) => val(b) - val(a))[0];
     if (best && val(best) >= 0.4) taken.set(k, best);
   }
@@ -1928,7 +1928,7 @@ function talkBrief(opts, list, how = {}) {
     + (opts.eventSec >= LONG_EVENT_SEC ? (() => {
       // the whole event in the edit: one short line from each part of it, start to finish
       const n = partsFor(opts), w = opts.eventSec / n, hm = (x) => `${Math.floor(x / 3600)}:${String(Math.floor(x / 60) % 60).padStart(2, '0')}`;
-      return `\nThis is a long event (${Math.round(opts.eventSec / 60)} minutes: a whole service or concert). The edit must capture ALL of it, not one stretch: take ONE short line (under 6 seconds) from EACH of these ${n} parts — ${Array.from({ length: n }, (_, k) => hm(k * w) + '–' + hm((k + 1) * w)).join(', ')} — different people, different moments, building one message. Never two lines from the same part.`;
+      return `\nThis is a long event (${Math.round(opts.eventSec / 60)} minutes: a whole service or concert). The edit must capture ALL of it, not one stretch: take ONE line of about 3 to 7 seconds from EACH of these ${n} parts — ${Array.from({ length: n }, (_, k) => hm(k * w) + '–' + hm((k + 1) * w)).join(', ')} — different people, different moments, building one message. Never two lines from the same part.`;
     })() : '')
     + (opts.angle ? `\nANGLE FOR THIS EDIT: build it around "${opts.angle}" — the hook and the payoff should serve that idea.` : '')
     + (hl ? '\nLines marked ★ hold the key phrases of the whole message (ranked by AssemblyAI): strong candidates.' : '')
