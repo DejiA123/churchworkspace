@@ -2124,10 +2124,12 @@ async function someoneEverywhere(ctx, file, shots, log, fix = true) {
   const samples = [];
   for (let t = 0.3; t < dur - 0.15; t += 0.5) if (!cuts.some((c) => Math.abs(c - t) < 0.3)) samples.push(round2(t));
   const good = [], bad = [];
+  let failed = 0;
   for (const t of samples) {
     jobs.throwIfCancelled();
     let ppl = null;
-    try { ppl = await pd.people(ctx.ffmpeg, file, t); } catch (e) { if (log) log('check: the person detector could not look — ' + ((e && e.message) || e)); return 0; }
+    // (a frame that will not read is passed over; the check gives up only if the detector keeps failing)
+    try { ppl = await pd.people(ctx.ffmpeg, file, t); } catch (e) { if (++failed > 3) { if (log) log('check: the person detector could not look — ' + ((e && e.message) || e)); return 0; } continue; }
     // anyone found at all (on the tall finished frame the detector is less sure of people than on the wide source:
     // 0.5–0.95 for a speaker on Gospel Jamz; a title card or an empty stage gives nothing)
     (ppl && ppl.some((q) => q.score >= 0.5) ? good : bad).push(t);
