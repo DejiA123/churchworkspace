@@ -1815,6 +1815,53 @@ function shortMoments(picks) {
  */
 const MOMENT_EACH = 3.6, MOMENT_LINE_MIN = 2, MOMENT_LINE_MAX = 5.5;
 const partsFor = (opts) => clamp(Math.round((opts.lengthSec || 30) / MOMENT_EACH), 6, 16);
+/*
+ * ►► A SECOND READ OF THE LINES, PART BY PART. ◄◄ The editor read 400 lines at
+ * once and still took "Oh, winner man! Oh, winner money!". Here the AI reads
+ * each part of the event on its own — the line chosen there and the best few
+ * others — and keeps only the lines a stranger would feel, best first. Only
+ * what it keeps is used, there and as any later replacement. Returns null when
+ * no AI answered (the edit stays as it was).
+ */
+async function vetParts(picks, list, opts, log) {
+  const ev = eventParts(list.concat(picks), opts);
+  const ok = (p) => p.end - p.start >= MOMENT_LINE_MIN && p.end - p.start <= MOMENT_LINE_MAX && !CROWD.test(p.text) && !HOUSEKEEPING.test(p.text) && wholeThought(p);
+  const parts = [];
+  for (let k = 0; k < ev.n; k++) {
+    const mine = picks.filter((p) => ev.part(p) === k);
+    const more = list.filter((p) => ev.part(p) === k && !mine.includes(p) && ok(p)).sort((a, b) => lineVal(b) - lineVal(a)).slice(0, 6 - Math.min(2, mine.length));
+    const c = mine.concat(more);
+    if (c.length) parts.push({ k, c });
+  }
+  if (!parts.length) return null;
+  const system = 'You choose the lines for a short viral video of a church event, heard one after another. You only judge the words.';
+  const prompt = 'For each part of the event below, keep ONLY the lines that, heard on their own by a stranger scrolling, carry a clear and powerful message about God, faith, hope or life — a line people would quote or share. ' +
+    'Drop banter and jokes, crowd work, stage chat, questions to the audience, announcements, a line that only makes sense with what came before, and anything unclear. Order the kept ones best first. A part may keep none.\n\n' +
+    parts.map((pt) => `PART ${pt.k + 1}\n` + pt.c.map((p) => `${p.id}: ${p.text}`).join('\n')).join('\n\n') +
+    '\n\nReply with JSON only: {"parts":{"1":["id","id"],"2":[]}} — every part listed, the ids it keeps, best first.';
+  let text = '';
+  try { const ai = require('./aaillm'); if (ai.ready()) text = await ai.chat({ system, prompt, json: true, maxTokens: 1500, temperature: 0.2 }); } catch (e) { text = ''; }
+  if (!text) { try { const cw = require('./cloudwrite'); if (cw.access && cw.access().key) text = await cw.chat({ system, prompt, json: true, maxTokens: 1500, temperature: 0.2, timeoutMs: 60000, evenIfOff: true }); } catch (e) { text = ''; } }
+  let j = null;
+  try { const t = String(text || ''); const a = t.indexOf('{'), b = t.lastIndexOf('}'); j = a >= 0 && b > a ? JSON.parse(t.slice(a, b + 1)) : null; } catch (e) { j = null; }
+  if (!j || !j.parts || typeof j.parts !== 'object') { if (log) log('vet: no AI read the lines again — kept as chosen'); return null; }
+  const byId = new Map(parts.flatMap((pt) => pt.c).map((p) => [p.id, p]));
+  const ranked = new Map(), approved = new Set();
+  for (const pt of parts) {
+    const ids = Array.isArray(j.parts[String(pt.k + 1)]) ? j.parts[String(pt.k + 1)] : [];
+    const r = ids.map((id) => byId.get(String(id).trim())).filter((p) => p && pt.c.includes(p));
+    ranked.set(pt.k, r); r.forEach((p) => approved.add(p));
+  }
+  if (!approved.size) { if (log) log('vet: the AI kept no line at all — kept as chosen'); return null; }
+  // the hook stays if it was kept; else the best kept line of its part (or of any part)
+  const hookPart = picks[0] ? ev.part(picks[0]) : -1;
+  const hook = picks[0] && approved.has(picks[0]) ? picks[0] : ((ranked.get(hookPart) || [])[0] || [...approved][0]);
+  const out = [hook];
+  for (const [k, r] of ranked) { const best = r.find((p) => p !== hook); if (best && k !== ev.part(hook)) out.push(best); }
+  if (log) log(`vet: the AI read every part again — kept ${approved.size} line(s); the edit has ${out.length}`);
+  return { picks: out, approved };
+}
+
 /* where a line falls in the whole event (its videos end to end), and which of its equal parts that is */
 function eventParts(all, opts) {
   const vids = [...new Set(all.map((p) => p.vid))].sort((a, b) => a - b);
@@ -2260,6 +2307,8 @@ async function lookAt(ctx, reqs, tmp, log, { people = true, max = Infinity, fram
       if (typeof a.people === 'number') out[r.i].people = a.people;
       if (typeof a.facing === 'boolean') out[r.i].facing = a.facing;
       if (a.giving) out[r.i].giving = true;
+      if (a.screen) out[r.i].screen = true;
+      if (a.away) out[r.i].away = true;
       if (!(a.column > 0)) return;
       // the column's middle on the ruled tile → across the clip's own picture (a tile pads a clip of another shape)
       const ar = (r.w && r.h) ? r.w / r.h : 16 / 9;
@@ -2594,10 +2643,16 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       picks = acrossEvent(shortMoments(picks), list, opts);
       if (log) log(`talk: the whole event — one short line from each of ${partsFor(opts)} parts (${before} chosen → ${picks.length})`);
     }
+    // a second read, part by part: only lines the AI keeps are used (here and as replacements)
+    let approved = null;
+    if (longEvent && d.director !== 'rules') {
+      if (stage) stage('🎬 Reading every part of the event again for its strongest line…');
+      try { const v = await vetParts(picks, list, opts, log); if (v) { picks = v.picks; approved = v.approved; } } catch (e) { if (e instanceof jobs.CancelledError) throw e; if (log) log('vet: ' + e.message); }
+    }
     // (a line brought in later — someone not seen, the length not met — comes from a part of the event the edit has not got yet)
     const ev = longEvent ? eventParts(list.concat(picks), opts) : null;
     const newPart = (p, but) => !ev || !picks.some((q) => q !== but && ev.part(q) === ev.part(p));
-    const fitsEvent = (p) => !ev || (p.end - p.start <= MOMENT_LINE_MAX && p.end - p.start >= MOMENT_LINE_MIN && !CROWD.test(p.text) && lineVal(p) >= 0.4);
+    const fitsEvent = (p) => !ev || (approved ? approved.has(p) : (p.end - p.start <= MOMENT_LINE_MAX && p.end - p.start >= MOMENT_LINE_MIN && !CROWD.test(p.text) && lineVal(p) >= 0.4));
     // the length asked for, give or take a line (the hook always stays)
     let total = picks.reduce((n, p) => n + (p.end - p.start), 0);
     // (a long event drops its weakest line, not its latest: every part of the event keeps its place if it can)
@@ -2631,7 +2686,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       ps.forEach((p) => { p.looks = []; looksAt(p).forEach((t) => { reqs.push({ file: p.cand.file, t: round2(clamp(t, 0, Math.max(0, p.cand.fileDur - 0.1))), w: p.cand.w, h: p.cand.h }); who.push(p); }); });
       if (!reqs.length) return;
       const got = await lookAt(ctx, reqs, tmp, log, { people: true, frame: ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 } });
-      got.forEach((g, i) => who[i].looks.push({ t: reqs[i].t, fx: g.fx, people: g.people, weak: !!g.weak || g.facing === false, giving: !!g.giving }));
+      got.forEach((g, i) => who[i].looks.push({ t: reqs[i].t, fx: g.fx, people: g.people, weak: !!g.weak || g.facing === false || !!g.screen || !!g.away, giving: !!g.giving }));
       // a slide or a dark stage is not a moment, even with a face in it (a speaker's photo on a "connect with" slide)
       for (const p of ps) { if (!p.vis) { try { p.vis = await stillOrDark(ctx, p); } catch (e) { if (e instanceof jobs.CancelledError) throw e; p.vis = null; } } }
     };
@@ -2833,7 +2888,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       top.forEach((sp, i) => { sp.snapLook = got[i]; });
       if (longEv) for (const sp of top) { if (!(sp.snapLook && sp.snapLook.people > 0) || sp.snapLook.weak || sp.snapLook.facing === false) continue; try { sp.vis = sp.vis || await stillOrDark(ctx, sp); } catch (e) { if (e instanceof jobs.CancelledError) throw e; } }
       const good = top.filter((sp) => longEv
-        ? !!(sp.snapLook && sp.snapLook.people > 0 && !sp.snapLook.weak && sp.snapLook.facing !== false && !sp.snapLook.giving && sp.vis && !sp.vis.still && !sp.vis.dark && !sp.vis.crowd)
+        ? !!(sp.snapLook && sp.snapLook.people > 0 && !sp.snapLook.weak && sp.snapLook.facing !== false && !sp.snapLook.giving && !sp.snapLook.screen && !sp.snapLook.away && sp.vis && !sp.vis.still && !sp.vis.dark && !sp.vis.crowd)
         : !(sp.snapLook && (sp.snapLook.people === 0 || sp.snapLook.giving)));
       // (the few used are spread over the WHOLE event — not the first hour's — and play in the order they happened)
       if (longEv) {
@@ -3109,5 +3164,5 @@ function directorStatus() {
 }
 
 module.exports = {
-  stillOrDark, goodLines, wholeThought, sameLine, talkBrief,
+  stillOrDark, goodLines, wholeThought, sameLine, talkBrief, vetParts, eventParts,
   spreadList, momentsOf, shortMoments, HOUSEKEEPING, cleanAbout, withAbout, aboutLines, phrasesOf, phraseScore, talkByRules, fromBrief, cleanBrief, make, remake, loadProject, sidecarOf, baseOf, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };

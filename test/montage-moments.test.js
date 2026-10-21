@@ -45,6 +45,28 @@ const P = (text, start, end, extra) => Object.assign({ text, start, end, vid: 1,
   for (const [k, f] of [['slide', slide], ['live', live], ['dark', dark]]) v[k] = await m.stillOrDark(ctx, { start: 0.5, end: 5, cand: { file: f } });
   ok(v.slide.still && !v.live.still && !v.live.dark && v.dark.dark, 'a slide is still, a moving picture is not, a dark stage is dark', v);
   fs.rmSync(dir, { recursive: true, force: true });
+  // the second read, part by part: only the lines the AI keeps are used — banter it drops is replaced from the same part
+  {
+    const ai = require('../src/main/aaillm');
+    const was = { ready: ai.ready, chat: ai.chat };
+    let asked = '';
+    const ev = (id, text, start) => Object.assign(P(text, start, start + 3.5, { score: 0.8 }), { id, vid: 0 });
+    const L = [ev('a1', 'God is not finished with your story yet.', 100), ev('a2', 'Oh, winner man! Oh, winner money!', 2000), ev('a3', 'His grace is enough for every season of your life.', 2100),
+      ev('a4', 'Hold fast to what you have, so no one takes your crown.', 4000), ev('a5', 'Jesus is the light that never goes out.', 6000)];
+    ai.ready = () => true;
+    ai.chat = async ({ prompt }) => {
+      asked = prompt;
+      // keeps every line it is shown but the banter (a3 first in its part)
+      const parts = {};
+      for (const blk of prompt.split('PART ').slice(1)) { const k = blk.split('\n')[0].trim(); parts[k] = (blk.match(/\ba\d\b/g) || []).filter((id) => id !== 'a2').sort((x, y) => (y === 'a3') - (x === 'a3')); }
+      return JSON.stringify({ parts });
+    };
+    try {
+      const v = await m.vetParts([L[0], L[1], L[3]], L, { lengthSec: 30, eventSec: 7000 }, null);
+      ok(v && v.picks[0] === L[0] && v.picks.includes(L[2]) && !v.picks.includes(L[1]) && v.approved.has(L[4]) && !v.approved.has(L[1]) && /winner money/.test(asked),
+        'a second read part by part: banter the editor took is replaced by the kept line of that part', v && v.picks.map((p) => p.id));
+    } finally { ai.ready = was.ready; ai.chat = was.chat; }
+  }
   console.log(`\n${pass} PASS / ${fail} FAIL`);
   process.exit(fail ? 1 : 0);
 })();
