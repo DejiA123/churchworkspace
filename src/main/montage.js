@@ -1760,6 +1760,8 @@ function wholeThought(p) {
   // a line that says the same sentence twice ("Make some noise for Jesus? Make some noise for Jesus?") is one sentence too many
   const sents = t.split(/(?<=[.!?…])\s+/).map((x) => x.toLowerCase().replace(/[^a-z ]/g, '').trim()).filter(Boolean);
   if (sents.length > 1 && new Set(sents).size < sents.length) return false;
+  // (or says it again inside another: "Pray, pray without ceasing. Pray without ceasing.")
+  if (sents.some((a, i) => a.split(' ').length >= 2 && sents.some((b, j) => j !== i && b.includes(a)))) return false;
   // a stammer ("to to to every creature") reads badly as a caption
   if (/(?:^|\s)([\w']+)(?:,?\s+\1(?=\s|$|[,.!?])){2,}/i.test(t)) return false;
   // a word or two on its own ("Answer.", "Anybody else?") is not a moment
@@ -2502,9 +2504,9 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     let d = null;
     try { d = await talkWithClaude(list, opts); } catch (e) { if (log) log('claude: ' + e.message); }
     if (!d) { try { d = await talkWithAai(list, opts); } catch (e) { if (log) log('assemblyai: ' + e.message); } }
-    // (with AssemblyAI set up, Groq is not asked: the church's choice — AssemblyAI's model, else the rules)
-    const aaiOn = (() => { try { return require('./aaillm').ready(); } catch (e) { return false; } })();
-    if (!d && !aaiOn) { try { d = await talkWithGroq(list, opts); } catch (e) { if (log) log('groq: ' + e.message); } }
+    // (AssemblyAI first; Groq only when AssemblyAI's models could not answer — an account without the LLM Gateway —
+    //  as an AI's judgement still beats the rules)
+    if (!d) { try { d = await talkWithGroq(list, opts); } catch (e) { if (log) log('groq: ' + e.message); } }
     if (!d) d = talkByRules(list, opts);
     if (log) log(`talk: lines chosen by ${d.director}${d.model ? ' (' + d.model + ')' : ''}`);
     opts.directorBy = d.director;

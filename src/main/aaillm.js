@@ -66,7 +66,7 @@ async function models() {
 async function chat({ system, prompt, maxTokens = 4000, temperature = 0.8, json = false, timeoutMs = 150000 } = {}) {
   if (!ready()) return '';
   tries = [];
-  const want = process.env.MW_AAI_LLM_MODEL ? [process.env.MW_AAI_LLM_MODEL] : (await models()).filter((m) => !(benched.get(m) > Date.now())).slice(0, 5);
+  const want = process.env.MW_AAI_LLM_MODEL ? [process.env.MW_AAI_LLM_MODEL] : (await models()).filter((m) => !(benched.get(m) > Date.now())).slice(0, 8);
   for (const model of want) {
     try {
       const body = { model, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }], max_tokens: maxTokens, temperature };
@@ -77,7 +77,12 @@ async function chat({ system, prompt, maxTokens = 4000, temperature = 0.8, json 
       let j = null;
       for (let k = 0; ; k++) {
         try { j = await req('/v1/chat/completions', body, timeoutMs); break; }
-        catch (e) { tries.push({ model, why: e.message, at: Date.now() }); if (e.status !== 400 || k >= plainer.length) throw e; plainer[k](body); }
+        catch (e) {
+          tries.push({ model, why: e.message, at: Date.now() });
+          // a model the account cannot use is not asked again plainer: the next one is tried (and this one rests six hours)
+          if (/not have access|no access|not allowed for|upgrade/i.test(e.message)) { e.noAccess = true; throw e; }
+          if (e.status !== 400 || k >= plainer.length) throw e; plainer[k](body);
+        }
       }
       const c = j && j.choices && j.choices[0] && j.choices[0].message;
       const text = c ? (typeof c.content === 'string' ? c.content : (c.content || []).map((x) => x.text || '').join('')) : '';
@@ -85,7 +90,7 @@ async function chat({ system, prompt, maxTokens = 4000, temperature = 0.8, json 
     } catch (e) {
       last = { ok: false, model, why: e.message, at: Date.now() };
       if (e.status === 401 || e.status === 403) return '';           // the key cannot use the gateway: nothing else will work
-      benched.set(model, Date.now() + 3600e3);
+      benched.set(model, Date.now() + (e.noAccess ? 6 : 1) * 3600e3);
     }
   }
   return '';
