@@ -11,7 +11,7 @@ let pass = 0, fail = 0;
 const check = (ok, name, d) => { console.log((ok ? '  PASS ' : '  FAIL ') + name + (d !== undefined && !ok ? '  -> ' + JSON.stringify(d) : '')); ok ? pass++ : fail++; };
 (async () => {
   const seen = [];
-  let broken = new Set(), noList = false;
+  let broken = new Set(), noList = false, picky = false;
   const srv = http.createServer((req, res) => {
     let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => {
       seen.push({ url: req.url, auth: req.headers.authorization, body: b ? JSON.parse(b) : null });
@@ -20,6 +20,8 @@ const check = (ok, name, d) => { console.log((ok ? '  PASS ' : '  FAIL ') + name
       if (req.url === '/v1/chat/completions') {
         const m = JSON.parse(b).model;
         if (broken.has(m)) return json({ error: { message: 'model overloaded' } }, 503);
+        const q = JSON.parse(b);
+        if (picky && (q.response_format || q.temperature != null)) return json({ error: { message: 'invalid request body' }, metadata: { errors: ['temperature: not allowed'] } }, 400);
         return json({ request_id: 'r', choices: [{ index: 0, message: { role: 'assistant', content: '{"picks":[{"id":"p3"}],"post_caption":"x"}' } }], usage: {} });
       }
       json({ error: 'no' }, 404);
@@ -49,6 +51,12 @@ const check = (ok, name, d) => { console.log((ok ? '  PASS ' : '  FAIL ') + name
   const out3 = await ai.chat({ system: 'sys', prompt: 'no list' });
   const tried = seen.filter((x) => x.body && x.body.messages && x.body.messages[1].content === 'no list').map((x) => x.body.model);
   check(/"picks"/.test(out3) && tried[0] === 'claude-sonnet-4-6' && tried[1] === ai.KNOWN[1], 'no list of models: the documented ones are tried in turn', tried);
+  // a model that will not take JSON mode or a temperature: asked again plainer, and it answers
+  ai._reset(); picky = true; broken = new Set();
+  const out4 = await ai.chat({ system: 'sys', prompt: 'picky', json: true });
+  const asked = seen.filter((x) => x.body && x.body.messages && x.body.messages[1].content === 'picky');
+  check(/"picks"/.test(out4) && asked.length === 3 && new Set(asked.map((x) => x.body.model)).size === 1 && /temperature: not allowed/.test(ai.state().tries[0].why),
+    'a model that refuses the request body is asked again plainer (and why is kept)', { n: asked.length, tries: ai.state().tries });
   srv.close();
   console.log(`\n${pass} PASS / ${fail} FAIL`);
   process.exit(fail ? 1 : 0);

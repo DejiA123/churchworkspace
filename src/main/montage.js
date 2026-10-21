@@ -1761,7 +1761,9 @@ function wholeThought(p) {
   const sents = t.split(/(?<=[.!?…])\s+/).map((x) => x.toLowerCase().replace(/[^a-z ]/g, '').trim()).filter(Boolean);
   if (sents.length > 1 && new Set(sents).size < sents.length) return false;
   // a stammer ("to to to every creature") reads badly as a caption
-  if (/(?:^|\s)([\w']+)(?:\s+\1(?=\s|$|[,.!?])){2,}/i.test(t)) return false;
+  if (/(?:^|\s)([\w']+)(?:,?\s+\1(?=\s|$|[,.!?])){2,}/i.test(t)) return false;
+  // a word or two on its own ("Answer.", "Anybody else?") is not a moment
+  if (t.split(/\s+/).length < 3) return false;
   // an introduction or a shout-out is not a moment ("I am Daiji, also known as…", "follow us on…")
   if (/\b(my name is|also known as|i am \w+ from|shout ?outs?|follow (us|me)|subscribe|link in (the )?bio)\b/i.test(t)) return false;
   return true;
@@ -1959,13 +1961,16 @@ async function talkWithGroq(list, opts) {
 /** Without an AI: the strongest short line first, then the best lines in the order they were said. */
 /* what carries the MESSAGE (a rules edit is built from these), and the crowd work around it (not a clip's line) */
 const MESSAGE = /\b(god|jesus|christ|lord|holy spirit|spirit|faith|pray|prayers?|gospel|believe|love|grace|mercy|heaven|salvation|saved|sins?|cross|kingdom|bible|scripture|purpose|power|fire|glory|worship|testimony|hope|fear|nothing|everything|destiny|calling|anointing|freedom|truth)\b/gi;
-const CROWD = /\b(are you (guys )?ready|make some noise|come on|give it up|clap|hands up|give a shout|can somebody|say amen|how many of you|are you (guys |all )?(enjoying|having|ready)|(have|has) been enjoying|i'?m ready|i am ready|who is ready|where are my|put your hands|shout (it|out|with)|turn to your neighbou?r|let'?s go|round of applause|one more time|do you want to|go again)\b/i;
+const CROWD = /\b(are you (guys )?ready|make some noise|come on|give it up|clap|hands up|give a shout|can somebody|say amen|how many of you|are you (guys |all )?(enjoying|having|ready)|(have|has) been enjoying|i'?m ready|i am ready|who is ready|my team|you guys|anybody else|where are my|put your hands|shout (it|out|with)|turn to your neighbou?r|let'?s go|round of applause|one more time|do you want to|go again)\b/i;
 const messageOf = (p) => Math.min(3, (String(p.text).match(MESSAGE) || []).length) * 0.25 - (CROWD.test(p.text) ? 0.6 : 0);
 function talkByRules(list, opts) {
   // without an AI to judge them, a line with an "um" in it or the business of the service is never used
   const clean = list.filter((p) => !HOUSEKEEPING.test(p.text) && !(p.text.match(FILLER_ANY) || []).length);
   if (clean.length >= 2) list = clean;
   const secs = (l) => l.reduce((n, p) => n + (p.end - p.start), 0);
+  // nor crowd work from the stage ("how many of you are enjoying…"), when there is enough without it
+  const calm = list.filter((p) => !CROWD.test(p.text));
+  if (calm.length >= 4 && secs(calm) >= (opts.lengthSec || 30)) list = calm;
   // another take of the same video: only lines no earlier take used, when there are enough of them to fill it
   const fresh = list.filter((p) => !p.usedBefore);
   if (fresh.length >= 4 && secs(fresh) >= (opts.lengthSec || 30)) list = fresh;
@@ -2923,7 +2928,7 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 function directorStatus() {
   if (process.env.ANTHROPIC_API_KEY) return { director: 'claude', model: process.env.MW_MONTAGE_MODEL || 'claude-opus-5-5' };
   try {
-    if (require('./aaillm').ready()) { let vision = false; try { const cw = require('./cloudwrite'); vision = !!(cw.access && cw.access().key); } catch (e) {} return { director: 'assemblyai', model: '', vision, last: require('./aaillm').state().last }; }
+    if (require('./aaillm').ready()) { let vision = false; try { const cw = require('./cloudwrite'); vision = !!(cw.access && cw.access().key); } catch (e) {} return { director: 'assemblyai', model: '', vision, last: require('./aaillm').state().last, tries: require('./aaillm').state().tries }; }
   } catch (e) {}
   try { const cw = require('./cloudwrite'); if (cw.access && cw.access().key) return { director: 'groq', model: '', vision: true }; } catch (e) {}
   return { director: 'rules', model: '' };

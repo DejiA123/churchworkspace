@@ -35,7 +35,12 @@ async function req(path, body, timeoutMs) {
     });
     const text = await res.text();
     let json = null; try { json = JSON.parse(text); } catch (e) { json = null; }
-    if (!res.ok) { const e = new Error(`AssemblyAI LLM Gateway ${res.status}: ${(json && (json.error && (json.error.message || json.error) || json.message)) || text.slice(0, 200)}`); e.status = res.status; throw e; }
+    if (!res.ok) {
+      // a 400 says which fields it did not like (metadata.errors): keep them, so the status shows what to change
+      const why = (json && (json.error && (json.error.message || json.error) || json.message)) || text.slice(0, 200);
+      const errs = json && ((json.metadata && json.metadata.errors) || (json.error && json.error.metadata && json.error.metadata.errors));
+      const e = new Error(`AssemblyAI LLM Gateway ${res.status}: ${typeof why === 'string' ? why : JSON.stringify(why)}${errs ? ' ' + JSON.stringify(errs).slice(0, 300) : ''}`); e.status = res.status; throw e;
+    }
     return json;
   } finally { clearTimeout(t); }
 }
@@ -60,14 +65,20 @@ async function models() {
  */
 async function chat({ system, prompt, maxTokens = 4000, temperature = 0.8, json = false, timeoutMs = 150000 } = {}) {
   if (!ready()) return '';
+  tries = [];
   const want = process.env.MW_AAI_LLM_MODEL ? [process.env.MW_AAI_LLM_MODEL] : (await models()).filter((m) => !(benched.get(m) > Date.now())).slice(0, 5);
   for (const model of want) {
     try {
       const body = { model, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }], max_tokens: maxTokens, temperature };
       if (json) body.response_format = { type: 'json_object' };
-      let j;
-      try { j = await req('/v1/chat/completions', body, timeoutMs); }
-      catch (e) { if (json && e.status === 400) { delete body.response_format; j = await req('/v1/chat/completions', body, timeoutMs); } else throw e; }
+      // a body a model will not take ("invalid request body"): asked again plainer — no JSON mode, no
+      // temperature, then a smaller answer — before the next model is tried
+      const plainer = [(b) => { delete b.response_format; }, (b) => { delete b.temperature; }, (b) => { b.max_tokens = Math.min(b.max_tokens, 2000); }];
+      let j = null;
+      for (let k = 0; ; k++) {
+        try { j = await req('/v1/chat/completions', body, timeoutMs); break; }
+        catch (e) { tries.push({ model, why: e.message, at: Date.now() }); if (e.status !== 400 || k >= plainer.length) throw e; plainer[k](body); }
+      }
       const c = j && j.choices && j.choices[0] && j.choices[0].message;
       const text = c ? (typeof c.content === 'string' ? c.content : (c.content || []).map((x) => x.text || '').join('')) : '';
       if (text.trim()) { last = { ok: true, model, at: Date.now() }; return text; }
@@ -79,7 +90,7 @@ async function chat({ system, prompt, maxTokens = 4000, temperature = 0.8, json 
   }
   return '';
 }
-let last = null;
-const state = () => ({ ready: ready(), last });
+let last = null, tries = [];
+const state = () => ({ ready: ready(), last, tries: tries.slice(-6) });
 
 module.exports = { ready, chat, models, state, PREFER, KNOWN, _reset: () => { listed = null; benched = new Map(); } };
