@@ -2056,6 +2056,64 @@ function talkByRules(list, opts) {
   return { plan: { concept: '', title: '', hook_text: '', post_caption: '', hashtags: [], picks: [hook].concat(body).map((p) => ({ id: p.id })) }, director: 'rules', model: '' };
 }
 
+/*
+ * ►► SOMEONE IN EVERY SECOND — CHECKED ON THE FINISHED VIDEO. ◄◄ "Ensure there
+ * is always someone in the video." Every look before the cut is at the source;
+ * this looks at what was actually made, every half second (not on a cut, where
+ * a flash or a turn is meant to be brief). A moment where the person detector
+ * does not clearly find a person — a title card, an empty stage, the backs of
+ * the audience — is fixed: a B-roll moment there is taken off; a beat of a line
+ * is covered, whole, by a moment of the edit that WAS seen to show someone (the
+ * words carry on underneath). Returns the number of fixes (0: nothing to do).
+ */
+async function someoneEverywhere(ctx, file, shots, log, fix = true) {
+  let pd = null;
+  try { pd = require('./persondetect'); } catch (e) { pd = null; }
+  if (!pd || !pd.available()) return 0;
+  const dur = shots.reduce((n, sh) => Math.max(n, (sh.at || 0) + sh.seconds), 0);
+  const cuts = shots.map((sh) => sh.at || 0);
+  const samples = [];
+  for (let t = 0.3; t < dur - 0.15; t += 0.5) if (!cuts.some((c) => Math.abs(c - t) < 0.3)) samples.push(round2(t));
+  const good = [], bad = [];
+  for (const t of samples) {
+    jobs.throwIfCancelled();
+    let ppl = null;
+    try { ppl = await pd.people(ctx.ffmpeg, file, t); } catch (e) { if (log) log('check: the person detector could not look — ' + ((e && e.message) || e)); return 0; }
+    // a clear find, its face in the upper part of the picture (the backs of heads sit low and are found faintly)
+    (ppl && ppl.some((q) => q.score >= 0.85 && q.face.y <= 0.55) ? good : bad).push(t);
+    // (no one in most of the first looks: the detector does not see this video's people — stop early)
+    if (good.length + bad.length === 10 && bad.length >= 7) break;
+  }
+  if (!bad.length) { if (log) log(`check: someone is seen in all ${samples.length} looks at the finished video`); return 0; }
+  if (!fix) { if (log) log(`check: after the fixes, ${bad.length} of ${good.length + bad.length} looks still found no one clearly`); return 0; }
+  if (bad.length > (good.length + bad.length) * 0.4) { if (log) log(`check: ${bad.length} of ${good.length + bad.length} looks found no one — the detector is not trusted on this video; left as made`); return 0; }
+  const shotAt = (t) => shots.find((sh) => t >= (sh.at || 0) && t < (sh.at || 0) + sh.seconds);
+  const overAt = (sh, t) => (sh.overlays || []).find((o) => t >= (sh.at || 0) + (o.start || 0) && t < (sh.at || 0) + (o.start || 0) + o.len);
+  // where the finished video was seen to show someone, back in its own clip (a moment to cover with)
+  const seen = [];
+  for (const t of good) {
+    const sh = shotAt(t);
+    if (!sh || overAt(sh, t) || sh.cand.kind !== 'video' || sh.from == null) continue;
+    seen.push({ cand: sh.cand, t: sh.from + (t - sh.at), fx: sh.fx, sh });
+  }
+  let fixed = 0, cm = 0;
+  for (const t of bad) {
+    const sh = shotAt(t);
+    if (!sh) continue;
+    const o = overAt(sh, t);
+    if (o && !o.cover) { sh.overlays.splice(sh.overlays.indexOf(o), 1); fixed++; continue; }
+    if (o && o.cover) continue;   // (already covered on an earlier look)
+    const pool = seen.filter((m) => m.sh !== sh);
+    const m = pool.length ? pool[cm++ % pool.length] : null;
+    if (!m) continue;
+    sh.overlays = [{ cand: m.cand, style: 'cutaway', start: 0, len: sh.seconds, pos: 'right', cover: true,
+      from: round2(clamp(m.t - sh.seconds / 2, 0, Math.max(0, (m.cand.fileDur || 0) - sh.seconds - 0.05))), fx: m.fx == null ? null : round2(m.fx) }];
+    fixed++;
+  }
+  if (log) log(`check: ${bad.length} of ${samples.length} looks at the finished video found no one clearly — ${fixed} fix(es)`);
+  return fixed;
+}
+
 /** The narrator's lines laid on a finished file, each at its moment (the picture is copied, not re-encoded). */
 async function laySpeech(ctx, file, parts, tmp) {
   const out = path.join(tmp, 'vo-mix-' + path.basename(file));
@@ -2930,7 +2988,16 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     await aimShots(ctx, shots, opts.aspect, { picks, tmp, log, stage });
     // 4) RENDER
     if (stage) stage(`✂️ Cutting ${picks.length} lines into ${shots.length} beats — zooms, grade and B-roll…`);
-    await render(ctx, plan, { aspect: opts.aspect, keepAudio: true, output, base: baseOf(output), tmp, onProgress: say(50, 97) });
+    await render(ctx, plan, { aspect: opts.aspect, keepAudio: true, output, base: baseOf(output), tmp, onProgress: say(50, 90) });
+    // someone in every second: the finished video is looked at, and cut again once where it showed no one
+    if (stage) stage('👀 Checking someone is seen in every second…');
+    let fixes = 0;
+    try { fixes = await someoneEverywhere(ctx, output, shots, log); } catch (e) { if (e instanceof jobs.CancelledError) throw e; if (log) log('check: ' + e.message); }
+    if (fixes) {
+      if (stage) stage('✂️ Cutting again, with someone in every second…');
+      await render(ctx, plan, { aspect: opts.aspect, keepAudio: true, output, base: baseOf(output), tmp, onProgress: say(90, 97) });
+      try { await someoneEverywhere(ctx, output, shots, log, false); } catch (e) { if (e instanceof jobs.CancelledError) throw e; }
+    }
     const voices = [vo.intro, vo.outro].filter(Boolean);
     if (voices.length) {
       if (stage) stage('🎙 Laying the narrator on…');
