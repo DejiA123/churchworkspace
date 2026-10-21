@@ -2061,10 +2061,10 @@ function talkByRules(list, opts) {
  * is always someone in the video." Every look before the cut is at the source;
  * this looks at what was actually made, every half second (not on a cut, where
  * a flash or a turn is meant to be brief). A moment where the person detector
- * does not clearly find a person — a title card, an empty stage, the backs of
- * the audience — is fixed: a B-roll moment there is taken off; a beat of a line
- * is covered, whole, by a moment of the edit that WAS seen to show someone (the
- * words carry on underneath). Returns the number of fixes (0: nothing to do).
+ * does not find a person — a title card, an empty stage, a slide — is fixed:
+ * a B-roll moment there is taken off; a beat of a line is covered, whole, by
+ * a moment of the edit that WAS seen to show someone (the words carry on
+ * underneath). Returns the number of fixes (0: nothing to do).
  */
 async function someoneEverywhere(ctx, file, shots, log, fix = true) {
   let pd = null;
@@ -2079,8 +2079,9 @@ async function someoneEverywhere(ctx, file, shots, log, fix = true) {
     jobs.throwIfCancelled();
     let ppl = null;
     try { ppl = await pd.people(ctx.ffmpeg, file, t); } catch (e) { if (log) log('check: the person detector could not look — ' + ((e && e.message) || e)); return 0; }
-    // a clear find, its face in the upper part of the picture (the backs of heads sit low and are found faintly)
-    (ppl && ppl.some((q) => q.score >= 0.85 && q.face.y <= 0.55) ? good : bad).push(t);
+    // anyone found at all (on the tall finished frame the detector is less sure of people than on the wide source:
+    // 0.5–0.95 for a speaker on Gospel Jamz; a title card or an empty stage gives nothing)
+    (ppl && ppl.some((q) => q.score >= 0.5) ? good : bad).push(t);
     // (no one in most of the first looks: the detector does not see this video's people — stop early)
     if (good.length + bad.length === 10 && bad.length >= 7) break;
   }
