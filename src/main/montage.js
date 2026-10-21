@@ -1764,6 +1764,8 @@ function wholeThought(p) {
   if (sents.some((a, i) => a.split(' ').length >= 2 && sents.some((b, j) => j !== i && b.includes(a)))) return false;
   // a stammer ("to to to every creature") reads badly as a caption
   if (/(?:^|\s)([\w']+)(?:,?\s+\1(?=\s|$|[,.!?])){2,}/i.test(t)) return false;
+  // a word said twice over, twice in one line ("Stop, stop praying. Ceasing, ceasing.")
+  if ((t.match(/\b([\w']+)[,.!]?\s+\1\b/gi) || []).length >= 2) return false;
   // a few words on their own ("Answer.", "Over your life.") are not a moment
   if (t.split(/\s+/).length < 4) return false;
   // an introduction or a shout-out is not a moment ("I am Daiji, also known as…", "follow us on…")
@@ -2248,8 +2250,33 @@ async function stillOrDark(ctx, p) {
     for (let i = 0; i < 18 * 96; i++) top += f[i];
     return black / (18 * 96) >= 0.6 && top / (18 * 96) >= 60;
   };
+  // a video shown INSIDE the stream — in a box on a slide, or a phone video with black bars either side: columns black
+  // right through the middle of the picture (measured on Gospel Jamz: 20–64 such columns of 96 there, 0 on a live shot;
+  // a dark stage can have a few, so a bright top or bars wider than half the picture are asked for too)
+  // (a box has the slide's bright border above it and either side of it — a black stripe from the top, or one at the
+  //  edge of the picture, a pole or a curtain, is not one)
+  const framed = (f) => {
+    const black = [];
+    for (let x = 0; x < 96; x++) {
+      let k = 0; for (let y = 14; y < 41; y++) if (f[y * 96 + x] < 22) k++;
+      let top = 0; for (let y = 0; y < 5; y++) top += f[y * 96 + x];
+      black.push(k >= 0.9 * 27 ? (top / 5 >= 90 ? 2 : 1) : 0);
+    }
+    let boxed = 0;
+    for (let x = 0; x < 96;) {
+      if (black[x] !== 2) { x++; continue; }
+      let e = x; while (e < 96 && black[e] === 2) e++;
+      if (x > 2 && e < 94 && e - x >= 4) boxed += e - x;
+      x = e;
+    }
+    // (a phone video between black bars has a picture between them: a black frame, a cut to black, is not one)
+    const n = black.filter(Boolean).length;
+    let mid = 0, m = 0;
+    for (let x = 0; x < 96; x++) if (!black[x]) for (let y = 14; y < 41; y++) { mid += f[y * 96 + x]; m++; }
+    return boxed >= 8 || (n >= 50 && m > 0 && mid / m >= 50);
+  };
   // (measured on Gospel Jamz: a slide 0.0–0.1, a speaker sitting still 1.1+; a dark stage 38, a lit one 55+)
-  return { still: diff < 0.5, dark: luma < 45, crowd: backs(a) || backs(b), diff: round2(diff), luma: round2(luma) };
+  return { still: diff < 0.5, dark: luma < 45, crowd: backs(a) || backs(b), framed: framed(a) || framed(b), diff: round2(diff), luma: round2(luma) };
 }
 
 async function lookAt(ctx, reqs, tmp, log, { people = true, max = Infinity, frame = null } = {}) {
@@ -2371,7 +2398,10 @@ async function detectorLook(ctx, reqs, out, frame, log) {
     // the one to keep: nearest where the AI looked (it saw who is singing); else the clearest and biggest
     const pick = ai != null
       ? ppl.reduce((a, b) => (Math.abs(b.face.x - ai) < Math.abs(a.face.x - ai) ? b : a))
-      : ppl.reduce((a, b) => (b.score * Math.sqrt(b.face.w) > a.score * Math.sqrt(a.face.w) ? b : a));
+      // (the surest find, not the biggest: a singer stood beside a giant poster of her own face, and the crop took the poster;
+      //  a find whose body spans the whole picture is a printed face, passed over while there is anyone else)
+      : (() => { const real = ppl.filter((q) => !q.body || q.body.x1 - q.body.x0 < 0.85); const c = real.length ? real : ppl;
+        return c.reduce((a, b) => (b.score > a.score + 0.05 || (Math.abs(b.score - a.score) <= 0.05 && b.face.w > a.face.w) ? b : a)); })();
     const head = clamp(pick.face.x, 0, 1);
     o.head = head; o.fx = head; o.seen = 'detector';
     o.people = Math.max(o.people || 0, ppl.length);
@@ -2695,7 +2725,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     // (a still moment is a slide only where the video around it moves: a sermon heard over one still picture is all still,
     //  and then stillness says nothing)
     const stillVideo = () => { const v = picks.filter((p) => p.vis); return v.length >= 2 && v.filter((p) => p.vis.still).length >= v.length * 0.6; };
-    const nobody = (p) => !!(p.looks && p.looks.some((l) => l.giving)) || !!(p.vis && ((p.vis.still && !stillVideo()) || p.vis.dark || p.vis.crowd)) || !!(p.looks && p.looks.length && p.looks.filter((l) => l.people === 0 || l.weak).length * 2 >= p.looks.length);
+    const nobody = (p) => !!(p.looks && p.looks.some((l) => l.giving)) || !!(p.vis && ((p.vis.still && !stillVideo()) || p.vis.dark || p.vis.crowd || p.vis.framed)) || !!(p.looks && p.looks.length && p.looks.filter((l) => l.people === 0 || l.weak).length * 2 >= p.looks.length);
     if (stage) stage('👀 Making sure someone can be seen in every line…');
     await lookLines(picks);
     const seen = picks.some((p) => p.looks.some((l) => l.people != null));
@@ -2814,17 +2844,31 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         return cands.filter((p) => !seen || (!nobody(p) && (p.looks || []).some((l) => l.people > 0)));
       };
       // 2) too short: the strongest unused lines that show someone, before the payoff
-      for (let round = 0; round < 3 && tot < want - 1 && pool.length; round++) {
-        const batch = pool.filter((p) => lenOf(p) <= want + 1 - tot + 0.3).slice(0, 6);
-        if (!batch.length) break;
-        batch.forEach((p) => pool.splice(pool.indexOf(p), 1));
-        for (const p of await showsSomeone(batch)) {
-          if (tot >= want - 1) break;
-          if (lenOf(p) > want + 1 - tot + 0.3 || !newPart(p)) continue;
-          if (picks.length < 2) picks.push(p); else picks.splice(picks.length - 1, 0, p);
-          tot += lenOf(p);
+      //    (a long event: the lines the AI kept, in parts not yet in the edit; then any good line there; then a
+      //     second line from a part — the length asked for is met, "30 seconds" is 30 seconds)
+      const fill = async (from, onePart) => {
+        for (let round = 0; round < (ev ? 6 : 3) && tot < want - 1 && from.length; round++) {
+          const batch = from.filter((p) => lenOf(p) <= want + 1 - tot + 0.3).slice(0, 6);
+          if (!batch.length) break;
+          batch.forEach((p) => { from.splice(from.indexOf(p), 1); if (pool.includes(p)) pool.splice(pool.indexOf(p), 1); });
+          for (const p of await showsSomeone(batch)) {
+            if (tot >= want - 1) break;
+            if (lenOf(p) > want + 1 - tot + 0.3 || (onePart && !newPart(p))) continue;
+            if (picks.length < 2) picks.push(p); else picks.splice(picks.length - 1, 0, p);
+            tot += lenOf(p);
+          }
+          batch.forEach((p) => { if (!picks.includes(p)) rejected.add(p); });
         }
-        batch.forEach((p) => { if (!picks.includes(p)) rejected.add(p); });
+      };
+      await fill(pool, true);
+      if (ev && tot < want - 1) {
+        const good = (p) => !inEdit().has(p) && !rejected.has(p) && p.end - p.start >= MOMENT_LINE_MIN && p.end - p.start <= MOMENT_LINE_MAX + 1.5
+          && !CROWD.test(p.text) && !HOUSEKEEPING.test(p.text) && !(p.text.match(FILLER_ANY) || []).length && wholeThought(p);
+        const loose = () => list.filter(good).sort((x, y) => (x.usedBefore - y.usedBefore) || (lineVal(y) - lineVal(x)));
+        const before = tot;
+        await fill(loose().filter((p) => newPart(p)), true);
+        if (tot < want - 1) await fill(loose(), false);
+        if (log && tot > before) log(`length: ${(tot - before).toFixed(1)} s more from good lines beyond the ones the AI kept`);
       }
       // 3) still off: swap a line (any — the hook and payoff too, when needed) for an unused one that shows
       //    someone and lands nearer; up to three swaps
@@ -2888,7 +2932,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       top.forEach((sp, i) => { sp.snapLook = got[i]; });
       if (longEv) for (const sp of top) { if (!(sp.snapLook && sp.snapLook.people > 0) || sp.snapLook.weak || sp.snapLook.facing === false) continue; try { sp.vis = sp.vis || await stillOrDark(ctx, sp); } catch (e) { if (e instanceof jobs.CancelledError) throw e; } }
       const good = top.filter((sp) => longEv
-        ? !!(sp.snapLook && sp.snapLook.people > 0 && !sp.snapLook.weak && sp.snapLook.facing !== false && !sp.snapLook.giving && !sp.snapLook.screen && !sp.snapLook.away && sp.vis && !sp.vis.still && !sp.vis.dark && !sp.vis.crowd)
+        ? !!(sp.snapLook && sp.snapLook.people > 0 && !sp.snapLook.weak && sp.snapLook.facing !== false && !sp.snapLook.giving && !sp.snapLook.screen && !sp.snapLook.away && sp.vis && !sp.vis.still && !sp.vis.dark && !sp.vis.crowd && !sp.vis.framed)
         : !(sp.snapLook && (sp.snapLook.people === 0 || sp.snapLook.giving)));
       // (the few used are spread over the WHOLE event — not the first hour's — and play in the order they happened)
       if (longEv) {

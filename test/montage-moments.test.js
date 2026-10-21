@@ -44,6 +44,11 @@ const P = (text, start, end, extra) => Object.assign({ text, start, end, vid: 1,
   const v = {};
   for (const [k, f] of [['slide', slide], ['live', live], ['dark', dark]]) v[k] = await m.stillOrDark(ctx, { start: 0.5, end: 5, cand: { file: f } });
   ok(v.slide.still && !v.live.still && !v.live.dark && v.dark.dark, 'a slide is still, a moving picture is not, a dark stage is dark', v);
+  // a video shown inside the stream (a box on a bright slide) is not the live room
+  const boxed = path.join(dir, 'boxed.mp4');
+  execFileSync(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=0xdde8f5:s=320x180:d=6', '-vf', 'drawbox=x=100:y=20:w=120:h=150:color=black:t=fill', '-pix_fmt', 'yuv420p', boxed]);
+  const vb = await m.stillOrDark(ctx, { start: 0.5, end: 5, cand: { file: boxed } });
+  ok(vb.framed && !v.live.framed && !v.dark.framed, 'a video in a box on a slide is seen for what it is; a live picture is not', { vb, live: v.live });
   fs.rmSync(dir, { recursive: true, force: true });
   // the second read, part by part: only the lines the AI keeps are used — banter it drops is replaced from the same part
   {
