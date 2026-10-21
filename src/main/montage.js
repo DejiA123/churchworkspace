@@ -1766,6 +1766,8 @@ function wholeThought(p) {
   if (/(?:^|\s)([\w']+)(?:,?\s+\1(?=\s|$|[,.!?])){2,}/i.test(t)) return false;
   // a word said twice over, twice in one line ("Stop, stop praying. Ceasing, ceasing.")
   if ((t.match(/\b([\w']+)[,.!]?\s+\1\b/gi) || []).length >= 2) return false;
+  // a stutter on a small word ("the the character of God")
+  if (/\b(the|a|an|to|of|and|in|is|it|my|we|you)\s+\1\b/i.test(t)) return false;
   // two thoughts run together where one was cut off ("…once and for So the testimony of Jesus…")
   if (/\b(and|or|but|the|a|an|to|of|for|my|your|our|their|because|if|when|then|than|is|are|was)\s+(So|And|But|Then|Because|Now|The|We|They|It)\b/.test(t)) return false;
   // a few words on their own ("Answer.", "Over your life.") are not a moment
@@ -1829,7 +1831,7 @@ const partsFor = (opts) => clamp(Math.round((opts.lengthSec || 30) / MOMENT_EACH
  */
 async function vetParts(picks, list, opts, log) {
   const ev = eventParts(list.concat(picks), opts);
-  const ok = (p) => p.end - p.start >= MOMENT_LINE_MIN && p.end - p.start <= MOMENT_LINE_MAX && !CROWD.test(p.text) && !HOUSEKEEPING.test(p.text) && wholeThought(p);
+  const ok = (p) => p.end - p.start >= MOMENT_LINE_MIN && p.end - p.start <= MOMENT_LINE_MAX && !CROWD.test(p.text) && !HOUSEKEEPING.test(p.text) && !asks(p) && wholeThought(p);
   const parts = [];
   for (let k = 0; k < ev.n; k++) {
     const mine = picks.filter((p) => ev.part(p) === k);
@@ -1840,7 +1842,7 @@ async function vetParts(picks, list, opts, log) {
   if (!parts.length) return null;
   const system = 'You choose the lines for a short viral video of a church event, heard one after another. You only judge the words.';
   const prompt = 'For each part of the event below, keep ONLY the lines that, heard on their own by a stranger scrolling, carry a clear and powerful message about God, faith, hope or life — a line people would quote or share. Be strict: at most 3 per part, and when in doubt, drop it. ' +
-    'Drop banter and jokes, crowd work, stage chat, questions to the audience ("You know what I mean?"), announcements, a line that only makes sense with what came before, a line cut off mid-thought, slang or wordplay a stranger would not follow, and anything unclear. Order the kept ones best first. A part may keep none.\n\n' +
+    'Drop banter and jokes, crowd work, stage chat, any question (a line that asks is not a line to share), announcements, a line that only makes sense with what came before, a line cut off mid-thought, slang or wordplay a stranger would not follow, and anything unclear. Order the kept ones best first. A part may keep none.\n\n' +
     parts.map((pt) => `PART ${pt.k + 1}\n` + pt.c.map((p) => `${p.id}: ${p.text}`).join('\n')).join('\n\n') +
     '\n\nReply with JSON only: {"parts":{"1":["id","id"],"2":[]}} — every part listed, the ids it keeps, best first.';
   let text = '';
@@ -1875,6 +1877,7 @@ function eventParts(all, opts) {
   const n = partsFor(opts);
   return { n, at, part: (p) => Math.min(n - 1, Math.floor(at(p) / (t / n))) };
 }
+const asks = (p) => /\?["”’']?$/.test(String(p.text || '').trim());   // a question to the room, not a line to share
 const lineVal = (p) => p.score + messageOf(p) - (p.usedBefore ? 0.5 : 0);
 /* the order of a long event's edit: the hook, the event start to finish, and the strongest statement last (the payoff) */
 function eventOrder(picks, ev) {
@@ -1895,7 +1898,7 @@ function acrossEvent(picks, list, opts) {
   const quick = (p) => val(p) - Math.max(0, p.end - p.start - MOMENT_EACH - 0.6) * 0.12;
   for (let k = 0; k < n; k++) {
     if (taken.has(k)) continue;
-    const best = list.filter((p) => part(p) === k && short(p) && p.end - p.start >= MOMENT_LINE_MIN && !HOUSEKEEPING.test(p.text) && !CROWD.test(p.text))
+    const best = list.filter((p) => part(p) === k && short(p) && p.end - p.start >= MOMENT_LINE_MIN && !HOUSEKEEPING.test(p.text) && !CROWD.test(p.text) && !asks(p))
       .sort((a, b) => quick(b) - quick(a))[0];
     if (best && val(best) >= 0.4) taken.set(k, best);
   }
@@ -2252,7 +2255,8 @@ async function stillOrDark(ctx, p) {
     let black = 0, top = 0;
     for (let i = 36 * 96; i < 54 * 96; i++) if (f[i] < 25) black++;
     for (let i = 0; i < 18 * 96; i++) top += f[i];
-    return black / (18 * 96) >= 0.6 && top / (18 * 96) >= 60;
+    // (or people standing in front of a projected slide, the slide blazing white above them: 226–233 there, a panel 173)
+    return (black / (18 * 96) >= 0.6 && top / (18 * 96) >= 60) || (black / (18 * 96) >= 0.25 && top / (18 * 96) >= 200);
   };
   // a video shown INSIDE the stream — in a box on a slide, or a phone video with black bars either side: columns black
   // right through the middle of the picture (measured on Gospel Jamz: 20–64 such columns of 96 there, 0 on a live shot;
@@ -2668,7 +2672,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     for (const x of (d.plan.picks || [])) { const p = byId.get(String(x && x.id || '').trim()); if (p && !picks.includes(p)) picks.push(p); }
     // what the editor chose is held to the rules it was given: no crowd work, no housekeeping, a whole thought
     // (a line it should not have taken is dropped, and the whole-event step below fills its place)
-    { const ok = picks.filter((p) => !CROWD.test(p.text) && !HOUSEKEEPING.test(p.text) && ((opts.eventSec || 0) < LONG_EVENT_SEC || wholeThought(p))); if (ok.length && ok.length < picks.length) { if (log) log(`talk: ${picks.length - ok.length} line(s) the editor chose broke its brief and were left out`); picks = ok; } }
+    { const ok = picks.filter((p) => !CROWD.test(p.text) && !HOUSEKEEPING.test(p.text) && ((opts.eventSec || 0) < LONG_EVENT_SEC || (wholeThought(p) && !asks(p)))); if (ok.length && ok.length < picks.length) { if (log) log(`talk: ${picks.length - ok.length} line(s) the editor chose broke its brief and were left out`); picks = ok; } }
     if (picks.length < 1) picks = talkByRules(list, opts).plan.picks.map((x) => byId.get(x.id)).filter(Boolean);
     // a long event: no moment runs on (whatever the editor chose). A short clip is one stretch by nature, and keeps it.
     const longEvent = (opts.eventSec || 0) >= LONG_EVENT_SEC;
@@ -2686,7 +2690,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     // (a line brought in later — someone not seen, the length not met — comes from a part of the event the edit has not got yet)
     const ev = longEvent ? eventParts(list.concat(picks), opts) : null;
     const newPart = (p, but) => !ev || !picks.some((q) => q !== but && ev.part(q) === ev.part(p));
-    const fitsEvent = (p) => !ev || (approved ? approved.has(p) : (p.end - p.start <= MOMENT_LINE_MAX && p.end - p.start >= MOMENT_LINE_MIN && !CROWD.test(p.text) && lineVal(p) >= 0.4));
+    const fitsEvent = (p) => !ev || (!asks(p) && (approved ? approved.has(p) : (p.end - p.start <= MOMENT_LINE_MAX && p.end - p.start >= MOMENT_LINE_MIN && !CROWD.test(p.text) && lineVal(p) >= 0.4)));
     // the length asked for, give or take a line (the hook always stays)
     let total = picks.reduce((n, p) => n + (p.end - p.start), 0);
     // (a long event drops its weakest line, not its latest: every part of the event keeps its place if it can)
@@ -2867,7 +2871,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       await fill(pool, true);
       if (ev && tot < want - 1) {
         const good = (p) => !inEdit().has(p) && !rejected.has(p) && p.end - p.start >= MOMENT_LINE_MIN && p.end - p.start <= MOMENT_LINE_MAX + 1.5
-          && !CROWD.test(p.text) && !HOUSEKEEPING.test(p.text) && !(p.text.match(FILLER_ANY) || []).length && wholeThought(p);
+          && !CROWD.test(p.text) && !HOUSEKEEPING.test(p.text) && !(p.text.match(FILLER_ANY) || []).length && wholeThought(p) && !asks(p);
         const loose = () => list.filter(good).sort((x, y) => (x.usedBefore - y.usedBefore) || (lineVal(y) - lineVal(x)));
         const before = tot;
         await fill(loose().filter((p) => newPart(p)), true);
