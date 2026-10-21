@@ -1803,6 +1803,41 @@ function shortMoments(picks) {
   return keep;
 }
 
+/*
+ * A LONG EVENT IN 30 SECONDS: the whole of it, not one stretch. The event is cut
+ * into equal parts — about one for every three and a half seconds asked — and
+ * each part gives at most ONE short line: the editor's choice where it made one
+ * there, else the strongest whole thought said in it. The hook first, then the
+ * rest in the order they happened (the event, start to finish). On Gospel Jamz
+ * Day 1 (3 h 44) the editor's lines all came from one half-hour panel.
+ */
+const MOMENT_EACH = 3.6, MOMENT_LINE_MAX = 6.5;
+const partsFor = (opts) => clamp(Math.round((opts.lengthSec || 30) / MOMENT_EACH), 6, 16);
+function acrossEvent(picks, list, opts) {
+  const all = list.concat(picks);
+  const vids = [...new Set(all.map((p) => p.vid))].sort((a, b) => a - b);
+  const off = new Map(); let t = 0;
+  for (const v of vids) { off.set(v, t); t += Math.max(...all.filter((p) => p.vid === v).map((p) => Math.max(p.end, (p.cand && p.cand.fileDur) || 0))); }
+  const at = (p) => off.get(p.vid) + p.start;
+  const n = partsFor(opts);
+  const part = (p) => Math.min(n - 1, Math.floor(at(p) / (t / n)));
+  const short = (p) => p.end - p.start <= MOMENT_LINE_MAX;
+  const taken = new Map();
+  picks.forEach((p, i) => { const k = part(p); if (!taken.has(k) && (short(p) || i === 0)) taken.set(k, p); });
+  // the parts the editor left empty: their own strongest line (one no earlier take used counts for more)
+  const val = (p) => p.score + messageOf(p) - (p.usedBefore ? 0.5 : 0);
+  for (let k = 0; k < n; k++) {
+    if (taken.has(k)) continue;
+    const best = list.filter((p) => part(p) === k && short(p) && p.end - p.start >= 1.4 && !HOUSEKEEPING.test(p.text) && !CROWD.test(p.text))
+      .sort((a, b) => val(b) - val(a))[0];
+    if (best && val(best) >= 0.4) taken.set(k, best);
+  }
+  const chosen = [...taken.values()];
+  const hook = picks[0] && chosen.includes(picks[0]) ? picks[0] : null;
+  const rest = chosen.filter((p) => p !== hook).sort((a, b) => at(a) - at(b));
+  return hook ? [hook].concat(rest) : rest;
+}
+
 /** Heard words → phrases: a pause, a full stop or nine seconds ends one. */
 function phrasesOf(words, maxSec = 9) {
   const out = [];
@@ -1890,7 +1925,11 @@ function talkBrief(opts, list, how = {}) {
     + `\nNarrator: ${opts.voice ? 'YES — write vo_intro and vo_outro.' : 'no — leave vo_intro and vo_outro empty.'}`
     + (aboutLines(opts).length ? '\n' + aboutLines(opts).join('\n') : '')
     + (opts.brief ? `\nWhat the operator says it is about: ${opts.brief}` : '')
-    + (opts.eventSec >= LONG_EVENT_SEC ? `\nThis is a long event (${Math.round(opts.eventSec / 60)} minutes: a whole service or concert). Use at least ${Math.min(6, Math.max(3, Math.round(opts.lengthSec / 9)))} different moments from across it (lines more than 2 minutes apart are different moments), each moment 1–3 lines.` : '')
+    + (opts.eventSec >= LONG_EVENT_SEC ? (() => {
+      // the whole event in the edit: one short line from each part of it, start to finish
+      const n = partsFor(opts), w = opts.eventSec / n, hm = (x) => `${Math.floor(x / 3600)}:${String(Math.floor(x / 60) % 60).padStart(2, '0')}`;
+      return `\nThis is a long event (${Math.round(opts.eventSec / 60)} minutes: a whole service or concert). The edit must capture ALL of it, not one stretch: take ONE short line (under 6 seconds) from EACH of these ${n} parts — ${Array.from({ length: n }, (_, k) => hm(k * w) + '–' + hm((k + 1) * w)).join(', ')} — different people, different moments, building one message. Never two lines from the same part.`;
+    })() : '')
     + (opts.angle ? `\nANGLE FOR THIS EDIT: build it around "${opts.angle}" — the hook and the payoff should serve that idea.` : '')
     + (hl ? '\nLines marked ★ hold the key phrases of the whole message (ranked by AssemblyAI): strong candidates.' : '')
     + (used ? '\nLines marked (used before) were in earlier edits of this video. The operator wants a FRESH edit: choose DIFFERENT lines — use one of those only if nothing else comes close.' : '')
@@ -2460,11 +2499,18 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     for (const x of (d.plan.picks || [])) { const p = byId.get(String(x && x.id || '').trim()); if (p && !picks.includes(p)) picks.push(p); }
     if (picks.length < 1) picks = talkByRules(list, opts).plan.picks.map((x) => byId.get(x.id)).filter(Boolean);
     // a long event: no moment runs on (whatever the editor chose). A short clip is one stretch by nature, and keeps it.
-    if ((opts.eventSec || 0) >= LONG_EVENT_SEC) picks = shortMoments(picks);
+    const longEvent = (opts.eventSec || 0) >= LONG_EVENT_SEC;
+    if (longEvent) {
+      const before = picks.length;
+      picks = acrossEvent(shortMoments(picks), list, opts);
+      if (log) log(`talk: the whole event — one short line from each of ${partsFor(opts)} parts (${before} chosen → ${picks.length})`);
+    }
     // the length asked for, give or take a line (the hook always stays)
     let total = picks.reduce((n, p) => n + (p.end - p.start), 0);
-    while (picks.length > 2 && total - (picks[picks.length - 2].end - picks[picks.length - 2].start) >= opts.lengthSec * 1.15) {
-      const cut = picks.splice(picks.length - 2, 1)[0];   // the last line is the payoff: take the one before it
+    // (a long event drops its weakest line, not its latest: every part of the event keeps its place if it can)
+    const cutAt = () => { if (!longEvent) return picks.length - 2; let w = 1; for (let i = 1; i < picks.length - 1; i++) if (picks[i].score < picks[w].score) w = i; return w; };
+    while (picks.length > 2 && total - (picks[cutAt()].end - picks[cutAt()].start) >= opts.lengthSec * 1.15) {
+      const cut = picks.splice(cutAt(), 1)[0];   // the last line is the payoff: take the one before it
       total -= cut.end - cut.start;
     }
     /*
@@ -2670,14 +2716,33 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     }
     // spare moments are only used when there are not enough photos and silent clips for every slot
     const slotsFor = Math.max(0, Math.ceil(picks.reduce((n, p) => n + (p.end - p.start), 0) / 5.2) - broll.length) + (opts.voice && !broll.length ? 6 : 0);
-    // a long event: no moments from elsewhere in it laid over a line (a slide, a faded frame, a stranger — they looked
-    // random); the speakers, framed tight with the jump zooms, carry it. Photos and clips the operator added still go on.
-    if ((opts.eventSec || 0) >= LONG_EVENT_SEC) spare.length = 0;
-    if (seen && spare.length && slotsFor > 0) {
-      const top = spare.slice(0, Math.min(24, slotsFor + 4));
+    /*
+     * A long event: the B-roll is the REST of the event — a moment from every
+     * part of it (the worship, the dance, another speaker), so 30 seconds show
+     * the whole night. Each is looked at first and kept only where a face can
+     * be seen in a lit, moving picture: never a slide, a dark stage or the
+     * backs of the audience (they looked random before they were checked).
+     */
+    const longEv = (opts.eventSec || 0) >= LONG_EVENT_SEC;
+    if (longEv) {
+      const parts = partsFor(opts) * 2, far = (p) => !picks.some((q) => q.vid === p.vid && Math.abs(q.start - p.start) < 30);
+      const span = Math.max(1, ...phrases.map((p) => p.end)), across = [];
+      for (let k = 0; k < parts; k++) {
+        const best = spare.filter((p) => far(p) && p.start >= k * span / parts && p.start < (k + 1) * span / parts)[0];   // (spare is in score order)
+        if (best) across.push(best);
+      }
+      spare.length = 0; spare.push(...across);
+    }
+    if (seen && spare.length && (slotsFor > 0 || longEv)) {
+      const top = longEv ? spare.slice() : spare.slice(0, Math.min(24, slotsFor + 4));
       const got = await lookAt(ctx, top.map((sp) => ({ file: sp.cand.file, t: snapAt(sp), w: sp.cand.w, h: sp.cand.h })), tmp, log, { people: true, frame: ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 } });
       top.forEach((sp, i) => { sp.snapLook = got[i]; });
-      const good = top.filter((sp) => !(sp.snapLook && sp.snapLook.people === 0));
+      if (longEv) for (const sp of top) { if (!(sp.snapLook && sp.snapLook.people > 0) || sp.snapLook.weak || sp.snapLook.facing === false) continue; try { sp.vis = sp.vis || await stillOrDark(ctx, sp); } catch (e) { if (e instanceof jobs.CancelledError) throw e; } }
+      const good = top.filter((sp) => longEv
+        ? !!(sp.snapLook && sp.snapLook.people > 0 && !sp.snapLook.weak && sp.snapLook.facing !== false && sp.vis && !sp.vis.still && !sp.vis.dark)
+        : !(sp.snapLook && sp.snapLook.people === 0));
+      // (in the order they happened: the cutaways walk through the event with the lines)
+      if (longEv) good.sort((a, b) => a.vid - b.vid || a.start - b.start);
       if (log && good.length < top.length) log(`people: ${top.length - good.length} B-roll moment(s) showed nobody and were left out`);
       spare.length = 0; spare.push(...good);
     }
@@ -2811,9 +2876,9 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
          */
         const sp = nextSpare(sh.cand.file);
         if (!sp) continue;
-        const snap = sb++ % 3 !== 2;
+        const snap = !longEv && sb++ % 3 !== 2;   // (a long event: cutaways that play, no camera-flash stills)
         const ol = snap ? round2(Math.min(1.5, sh.seconds - 0.5)) : len;
-        const at0 = snap ? sp.start + Math.min(1.2, (sp.end - sp.start) / 2) : sp.start + 0.2;
+        const at0 = snap ? sp.start + Math.min(1.2, (sp.end - sp.start) / 2) : longEv ? snapAt(sp) - ol / 2 : sp.start + 0.2;   // (round the frame that was checked)
         const ov = { cand: sp.cand, style: snap ? 'snapshot' : 'cutaway', start: snap ? 0.35 : 0.3, len: ol, pos: sb % 2 ? 'left' : 'right',
           from: round2(clamp(at0, 0, Math.max(0, sp.cand.fileDur - ol - 0.05))) };
         if (!snap && sp.snapLook && sp.snapLook.fx != null) ov.fx = round2(sp.snapLook.fx);   // already looked at: cut round its person
