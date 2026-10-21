@@ -2404,12 +2404,14 @@ async function detectorLook(ctx, reqs, out, frame, log) {
     const o = out[r.i != null ? r.i : reqs.indexOf(r)];
     const ai = o.head != null ? o.head : null;
     // the one to keep: nearest where the AI looked (it saw who is singing); else the clearest and biggest
+    // a printed face — a giant poster of the speaker stood beside them — is found faintly, its body the whole picture
+    // wide (0.55–0.67 on Gospel Jamz; the speaker beside it 0.94): passed over, wherever the AI looked, while anyone else is found
+    const printed = (q) => q.body && q.body.x1 - q.body.x0 >= 0.85 && q.score < 0.8;
+    const real = ppl.filter((q) => !printed(q)), cands = real.length ? real : ppl;
     const pick = ai != null
-      ? ppl.reduce((a, b) => (Math.abs(b.face.x - ai) < Math.abs(a.face.x - ai) ? b : a))
-      // (the surest find, not the biggest: a singer stood beside a giant poster of her own face, and the crop took the poster;
-      //  a find whose body spans the whole picture is a printed face, passed over while there is anyone else)
-      : (() => { const real = ppl.filter((q) => !q.body || q.body.x1 - q.body.x0 < 0.85); const c = real.length ? real : ppl;
-        return c.reduce((a, b) => (b.score > a.score + 0.05 || (Math.abs(b.score - a.score) <= 0.05 && b.face.w > a.face.w) ? b : a)); })();
+      ? cands.reduce((a, b) => (Math.abs(b.face.x - ai) < Math.abs(a.face.x - ai) ? b : a))
+      // (the surest find, not the biggest: a singer stood beside a giant poster of her own face, and the crop took the poster)
+      : cands.reduce((a, b) => (b.score > a.score + 0.05 || (Math.abs(b.score - a.score) <= 0.05 && b.face.w > a.face.w) ? b : a));
     const head = clamp(pick.face.x, 0, 1);
     o.head = head; o.fx = head; o.seen = 'detector';
     o.people = Math.max(o.people || 0, ppl.length);
