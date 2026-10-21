@@ -1750,7 +1750,7 @@ function spreadList(phrases, max = 420) {
 // (words a thought cannot stop on — "…give them your card, and they" — but never "you", "it", "is": "He started it in you." is whole)
 const DANGLING_END = /\b(and|or|but|the|a|an|to|of|my|your|our|their|because|if|when|then|than)[,]?$/i;
 // (a thought joined on to one left out — "And then…", "Because…" — not "The joy of the Lord…", "That is the truth.")
-const MIDDLE_START = /^(and|or|but|of|to|which|because|then|anyway|anyways|no[.,!]|yeah\b|okay\b|ok[.,]|um\b|uh\b)/i;
+const MIDDLE_START = /^(and|or|but|of|to|which|because|then|anyway|anyways|no[.,!]|yeah\b|okay\b|ok[.,]|um\b|uh\b|like,|so like\b)/i;
 function wholeThought(p) {
   const t = String(p.text || '').trim();
   if (!t || /[—–-]\s*$/.test(t) || DANGLING_END.test(t.replace(/[.!?…]+$/, ''))) return false;
@@ -1764,8 +1764,8 @@ function wholeThought(p) {
   if (sents.some((a, i) => a.split(' ').length >= 2 && sents.some((b, j) => j !== i && b.includes(a)))) return false;
   // a stammer ("to to to every creature") reads badly as a caption
   if (/(?:^|\s)([\w']+)(?:,?\s+\1(?=\s|$|[,.!?])){2,}/i.test(t)) return false;
-  // a word or two on its own ("Answer.", "Anybody else?") is not a moment
-  if (t.split(/\s+/).length < 3) return false;
+  // a few words on their own ("Answer.", "Over your life.") are not a moment
+  if (t.split(/\s+/).length < 4) return false;
   // an introduction or a shout-out is not a moment ("I am Daiji, also known as…", "follow us on…")
   if (/\b(my name is|also known as|i am \w+ from|shout ?outs?|follow (us|me)|subscribe|link in (the )?bio)\b/i.test(t)) return false;
   return true;
@@ -2016,7 +2016,7 @@ async function talkWithGroq(list, opts) {
 /** Without an AI: the strongest short line first, then the best lines in the order they were said. */
 /* what carries the MESSAGE (a rules edit is built from these), and the crowd work around it (not a clip's line) */
 const MESSAGE = /\b(god|jesus|christ|lord|holy spirit|spirit|faith|pray|prayers?|gospel|believe|love|grace|mercy|heaven|salvation|saved|sins?|cross|kingdom|bible|scripture|purpose|power|fire|glory|worship|testimony|hope|fear|nothing|everything|destiny|calling|anointing|freedom|truth)\b/gi;
-const CROWD = /\b(are you (guys )?ready|make some noise|come on|give it up|clap|hands up|give a shout|can somebody|say amen|how many of you|are you (guys |all )?(enjoying|having|ready)|(have|has) been enjoying|i'?m ready|i am ready|who is ready|where is everybody|how have you (all |guys )?been|haven'?t seen you|since last year|fast forward|oh my (goodness|days|god)|we pray|let us pray|let'?s pray|my team|you guys|anybody else|where are my|put your hands|shout (it|out|with)|turn to your neighbou?r|let'?s go|round of applause|one more time|do you want to|go again)\b/i;
+const CROWD = /\b(are you (guys )?ready|make some noise|come on|give it up|clap|hands up|give a shout|can somebody|say amen|how many of you|are you (guys |all )?(enjoying|having|ready)|(have|has) been enjoying|i'?m ready|i am ready|who is ready|(this|that|my|your|our) team|money'?s on|my money|where is everybody|how have you (all |guys )?been|haven'?t seen you|since last year|fast forward|oh my (goodness|days|god)|we pray|let us pray|let'?s pray|my team|you guys|anybody else|where are my|put your hands|shout (it|out|with)|turn to your neighbou?r|let'?s go|round of applause|one more time|do you want to|go again)\b/i;
 const messageOf = (p) => Math.min(3, (String(p.text).match(MESSAGE) || []).length) * 0.25 - (CROWD.test(p.text) ? 0.6 : 0);
 function talkByRules(list, opts) {
   // without an AI to judge them, a line with an "um" in it or the business of the service is never used
@@ -2193,8 +2193,16 @@ async function stillOrDark(ctx, p) {
   let diff = 0, luma = 0;
   for (let i = 0; i < 96 * 54; i++) { diff += Math.abs(a[i] - b[i]); luma += (a[i] + b[i]) / 2; }
   diff /= 96 * 54; luma /= 96 * 54;
+  // the backs of the audience in front of a lit stage: the bottom third black with silhouettes, the top bright
+  // (measured on Gospel Jamz: 87–89% of the bottom third near black under a top of 111; a speaker's shot 9–33%)
+  const backs = (f) => {
+    let black = 0, top = 0;
+    for (let i = 36 * 96; i < 54 * 96; i++) if (f[i] < 25) black++;
+    for (let i = 0; i < 18 * 96; i++) top += f[i];
+    return black / (18 * 96) >= 0.6 && top / (18 * 96) >= 60;
+  };
   // (measured on Gospel Jamz: a slide 0.0–0.1, a speaker sitting still 1.1+; a dark stage 38, a lit one 55+)
-  return { still: diff < 0.5, dark: luma < 45, diff: round2(diff), luma: round2(luma) };
+  return { still: diff < 0.5, dark: luma < 45, crowd: backs(a) || backs(b), diff: round2(diff), luma: round2(luma) };
 }
 
 async function lookAt(ctx, reqs, tmp, log, { people = true, max = Infinity, frame = null } = {}) {
@@ -2632,7 +2640,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     // (a still moment is a slide only where the video around it moves: a sermon heard over one still picture is all still,
     //  and then stillness says nothing)
     const stillVideo = () => { const v = picks.filter((p) => p.vis); return v.length >= 2 && v.filter((p) => p.vis.still).length >= v.length * 0.6; };
-    const nobody = (p) => !!(p.looks && p.looks.some((l) => l.giving)) || !!(p.vis && ((p.vis.still && !stillVideo()) || p.vis.dark)) || !!(p.looks && p.looks.length && p.looks.filter((l) => l.people === 0 || l.weak).length * 2 >= p.looks.length);
+    const nobody = (p) => !!(p.looks && p.looks.some((l) => l.giving)) || !!(p.vis && ((p.vis.still && !stillVideo()) || p.vis.dark || p.vis.crowd)) || !!(p.looks && p.looks.length && p.looks.filter((l) => l.people === 0 || l.weak).length * 2 >= p.looks.length);
     if (stage) stage('👀 Making sure someone can be seen in every line…');
     await lookLines(picks);
     const seen = picks.some((p) => p.looks.some((l) => l.people != null));
@@ -2825,7 +2833,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       top.forEach((sp, i) => { sp.snapLook = got[i]; });
       if (longEv) for (const sp of top) { if (!(sp.snapLook && sp.snapLook.people > 0) || sp.snapLook.weak || sp.snapLook.facing === false) continue; try { sp.vis = sp.vis || await stillOrDark(ctx, sp); } catch (e) { if (e instanceof jobs.CancelledError) throw e; } }
       const good = top.filter((sp) => longEv
-        ? !!(sp.snapLook && sp.snapLook.people > 0 && !sp.snapLook.weak && sp.snapLook.facing !== false && !sp.snapLook.giving && sp.vis && !sp.vis.still && !sp.vis.dark)
+        ? !!(sp.snapLook && sp.snapLook.people > 0 && !sp.snapLook.weak && sp.snapLook.facing !== false && !sp.snapLook.giving && sp.vis && !sp.vis.still && !sp.vis.dark && !sp.vis.crowd)
         : !(sp.snapLook && (sp.snapLook.people === 0 || sp.snapLook.giving)));
       // (the few used are spread over the WHOLE event — not the first hour's — and play in the order they happened)
       if (longEv) {
