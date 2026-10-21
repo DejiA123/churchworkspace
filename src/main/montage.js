@@ -1750,7 +1750,7 @@ function spreadList(phrases, max = 420) {
 // (words a thought cannot stop on — "…give them your card, and they" — but never "you", "it", "is": "He started it in you." is whole)
 const DANGLING_END = /\b(and|or|but|the|a|an|to|of|my|your|our|their|because|if|when|then|than)[,]?$/i;
 // (a thought joined on to one left out — "And then…", "Because…" — not "The joy of the Lord…", "That is the truth.")
-const MIDDLE_START = /^(and|or|but|of|to|which|because|then|anyway|anyways)\b/i;
+const MIDDLE_START = /^(and|or|but|of|to|which|because|then|anyway|anyways|no[.,!]|yeah\b|okay\b|ok[.,]|um\b|uh\b)/i;
 function wholeThought(p) {
   const t = String(p.text || '').trim();
   if (!t || /[—–-]\s*$/.test(t) || DANGLING_END.test(t.replace(/[.!?…]+$/, ''))) return false;
@@ -1813,19 +1813,31 @@ function shortMoments(picks) {
  */
 const MOMENT_EACH = 3.6, MOMENT_LINE_MIN = 2, MOMENT_LINE_MAX = 5.5;
 const partsFor = (opts) => clamp(Math.round((opts.lengthSec || 30) / MOMENT_EACH), 6, 16);
-function acrossEvent(picks, list, opts) {
-  const all = list.concat(picks);
+/* where a line falls in the whole event (its videos end to end), and which of its equal parts that is */
+function eventParts(all, opts) {
   const vids = [...new Set(all.map((p) => p.vid))].sort((a, b) => a - b);
   const off = new Map(); let t = 0;
   for (const v of vids) { off.set(v, t); t += Math.max(...all.filter((p) => p.vid === v).map((p) => Math.max(p.end, (p.cand && p.cand.fileDur) || 0))); }
-  const at = (p) => off.get(p.vid) + p.start;
+  const at = (p) => (off.has(p.vid) ? off.get(p.vid) : 0) + p.start;
   const n = partsFor(opts);
-  const part = (p) => Math.min(n - 1, Math.floor(at(p) / (t / n)));
+  return { n, at, part: (p) => Math.min(n - 1, Math.floor(at(p) / (t / n))) };
+}
+const lineVal = (p) => p.score + messageOf(p) - (p.usedBefore ? 0.5 : 0);
+/* the order of a long event's edit: the hook, the event start to finish, and the strongest statement last (the payoff) */
+function eventOrder(picks, ev) {
+  if (picks.length < 3) return picks;
+  const rest = picks.slice(1);
+  const ends = rest.filter((p) => /[.!]["”’']?$/.test(p.text.trim()) && !CROWD.test(p.text));
+  const pay = (ends.length ? ends : rest).reduce((a, b) => (lineVal(b) > lineVal(a) ? b : a));
+  return [picks[0]].concat(rest.filter((p) => p !== pay).sort((a, b) => ev.at(a) - ev.at(b)), [pay]);
+}
+function acrossEvent(picks, list, opts) {
+  const { n, at, part } = eventParts(list.concat(picks), opts);
   const short = (p) => p.end - p.start <= MOMENT_LINE_MAX;
   const taken = new Map();
   picks.forEach((p, i) => { const k = part(p); if (!taken.has(k) && (short(p) || i === 0)) taken.set(k, p); });
   // the parts the editor left empty: their own strongest line (one no earlier take used counts for more)
-  const val = (p) => p.score + messageOf(p) - (p.usedBefore ? 0.5 : 0);
+  const val = lineVal;
   for (let k = 0; k < n; k++) {
     if (taken.has(k)) continue;
     const best = list.filter((p) => part(p) === k && short(p) && p.end - p.start >= MOMENT_LINE_MIN && !HOUSEKEEPING.test(p.text) && !CROWD.test(p.text))
@@ -2000,7 +2012,7 @@ async function talkWithGroq(list, opts) {
 /** Without an AI: the strongest short line first, then the best lines in the order they were said. */
 /* what carries the MESSAGE (a rules edit is built from these), and the crowd work around it (not a clip's line) */
 const MESSAGE = /\b(god|jesus|christ|lord|holy spirit|spirit|faith|pray|prayers?|gospel|believe|love|grace|mercy|heaven|salvation|saved|sins?|cross|kingdom|bible|scripture|purpose|power|fire|glory|worship|testimony|hope|fear|nothing|everything|destiny|calling|anointing|freedom|truth)\b/gi;
-const CROWD = /\b(are you (guys )?ready|make some noise|come on|give it up|clap|hands up|give a shout|can somebody|say amen|how many of you|are you (guys |all )?(enjoying|having|ready)|(have|has) been enjoying|i'?m ready|i am ready|who is ready|my team|you guys|anybody else|where are my|put your hands|shout (it|out|with)|turn to your neighbou?r|let'?s go|round of applause|one more time|do you want to|go again)\b/i;
+const CROWD = /\b(are you (guys )?ready|make some noise|come on|give it up|clap|hands up|give a shout|can somebody|say amen|how many of you|are you (guys |all )?(enjoying|having|ready)|(have|has) been enjoying|i'?m ready|i am ready|who is ready|we pray|let us pray|let'?s pray|my team|you guys|anybody else|where are my|put your hands|shout (it|out|with)|turn to your neighbou?r|let'?s go|round of applause|one more time|do you want to|go again)\b/i;
 const messageOf = (p) => Math.min(3, (String(p.text).match(MESSAGE) || []).length) * 0.25 - (CROWD.test(p.text) ? 0.6 : 0);
 function talkByRules(list, opts) {
   // without an AI to judge them, a line with an "um" in it or the business of the service is never used
@@ -2505,6 +2517,10 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       picks = acrossEvent(shortMoments(picks), list, opts);
       if (log) log(`talk: the whole event — one short line from each of ${partsFor(opts)} parts (${before} chosen → ${picks.length})`);
     }
+    // (a line brought in later — someone not seen, the length not met — comes from a part of the event the edit has not got yet)
+    const ev = longEvent ? eventParts(list.concat(picks), opts) : null;
+    const newPart = (p, but) => !ev || !picks.some((q) => q !== but && ev.part(q) === ev.part(p));
+    const fitsEvent = (p) => !ev || (p.end - p.start <= MOMENT_LINE_MAX && p.end - p.start >= MOMENT_LINE_MIN && !CROWD.test(p.text) && lineVal(p) >= 0.4);
     // the length asked for, give or take a line (the hook always stays)
     let total = picks.reduce((n, p) => n + (p.end - p.start), 0);
     // (a long event drops its weakest line, not its latest: every part of the event keeps its place if it can)
@@ -2562,7 +2578,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         const tried = new Set(picks.concat(empty));
         // the strongest lines that were not chosen — short ones too when nothing chosen survived (someone on screen beats a longer line)
         // (lines no earlier take used come first: a replacement must not bring the last take back)
-        const pool = list.filter((p) => !tried.has(p) && p.end - p.start >= (picks.length ? 1.4 : 0.8)).sort((a, b) => (a.usedBefore - b.usedBefore) || (b.score - a.score));
+        const pool = list.filter((p) => !tried.has(p) && p.end - p.start >= (picks.length ? 1.4 : 0.8) && fitsEvent(p) && newPart(p)).sort((a, b) => (a.usedBefore - b.usedBefore) || (b.score - a.score));
         let added = 0;
         for (let round = 0; round < 3 && tot < opts.lengthSec * 0.9 && pool.length; round++) {
           const batch = pool.splice(0, 6);
@@ -2570,7 +2586,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           for (const p of batch) {
             if (nobody(p)) rejected.add(p);
             if (tot >= opts.lengthSec * 0.9) break;
-            if (nobody(p) || !p.looks.some((l) => l.people > 0)) continue;
+            if (nobody(p) || !p.looks.some((l) => l.people > 0) || !newPart(p)) continue;
             if (picks.length < 2) picks.push(p); else picks.splice(picks.length - 1, 0, p);   // before the payoff, which stays last
             tot += p.end - p.start; added++;
           }
@@ -2658,7 +2674,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         picks.splice(picks.indexOf(m2.p), 1); tot = sum(picks);
       }
       const inEdit = () => new Set(picks);
-      const pool = list.filter((p) => !inEdit().has(p) && !rejected.has(p) && p.end - p.start >= 1.2 && !HOUSEKEEPING.test(p.text) && !(p.text.match(FILLER_ANY) || []).length)
+      const pool = list.filter((p) => !inEdit().has(p) && !rejected.has(p) && p.end - p.start >= 1.2 && !HOUSEKEEPING.test(p.text) && !(p.text.match(FILLER_ANY) || []).length && fitsEvent(p))
         .sort((x, y) => (x.usedBefore - y.usedBefore) || (y.score - x.score));
       const showsSomeone = async (cands) => {
         const need = cands.filter((p) => !p.looks);
@@ -2672,7 +2688,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         batch.forEach((p) => pool.splice(pool.indexOf(p), 1));
         for (const p of await showsSomeone(batch)) {
           if (tot >= want - 1) break;
-          if (lenOf(p) > want + 1 - tot + 0.3) continue;
+          if (lenOf(p) > want + 1 - tot + 0.3 || !newPart(p)) continue;
           if (picks.length < 2) picks.push(p); else picks.splice(picks.length - 1, 0, p);
           tot += lenOf(p);
         }
@@ -2684,7 +2700,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         const opts2 = [];
         for (const p of picks) for (const q of pool) {
           const t2 = tot - lenOf(p) + lenOf(q);
-          if (Math.abs(t2 - want) < Math.abs(tot - want) - 0.3) opts2.push({ p, q, miss: Math.abs(t2 - want), keep: (p === picks[0] || p === picks[picks.length - 1]) ? 1 : 0 });
+          if (Math.abs(t2 - want) < Math.abs(tot - want) - 0.3 && newPart(q, p)) opts2.push({ p, q, miss: Math.abs(t2 - want), keep: (p === picks[0] || p === picks[picks.length - 1]) ? 1 : 0 });
         }
         opts2.sort((x, y) => (x.miss - y.miss) || (x.keep - y.keep) || (y.q.score - x.q.score));
         const tryQ = [...new Set(opts2.slice(0, 12).map((x) => x.q))].slice(0, 6);
@@ -2697,6 +2713,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         pool.splice(pool.indexOf(pick.q), 1);
         tot = sum(picks);
       }
+      if (ev) picks = eventOrder(picks, ev);
       if (log) log(`length: ${tot.toFixed(1)} s of lines${voLen ? ` + ${voLen.toFixed(1)} s narrator` : ''} for ${opts.lengthSec} s asked`);
     }
     // moments the edit did not use, from every speaking video — B-roll for the narrator and between lines
