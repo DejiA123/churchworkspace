@@ -2016,7 +2016,7 @@ async function talkWithGroq(list, opts) {
 /** Without an AI: the strongest short line first, then the best lines in the order they were said. */
 /* what carries the MESSAGE (a rules edit is built from these), and the crowd work around it (not a clip's line) */
 const MESSAGE = /\b(god|jesus|christ|lord|holy spirit|spirit|faith|pray|prayers?|gospel|believe|love|grace|mercy|heaven|salvation|saved|sins?|cross|kingdom|bible|scripture|purpose|power|fire|glory|worship|testimony|hope|fear|nothing|everything|destiny|calling|anointing|freedom|truth)\b/gi;
-const CROWD = /\b(are you (guys )?ready|make some noise|come on|give it up|clap|hands up|give a shout|can somebody|say amen|how many of you|are you (guys |all )?(enjoying|having|ready)|(have|has) been enjoying|i'?m ready|i am ready|who is ready|oh my (goodness|days|god)|we pray|let us pray|let'?s pray|my team|you guys|anybody else|where are my|put your hands|shout (it|out|with)|turn to your neighbou?r|let'?s go|round of applause|one more time|do you want to|go again)\b/i;
+const CROWD = /\b(are you (guys )?ready|make some noise|come on|give it up|clap|hands up|give a shout|can somebody|say amen|how many of you|are you (guys |all )?(enjoying|having|ready)|(have|has) been enjoying|i'?m ready|i am ready|who is ready|where is everybody|how have you (all |guys )?been|haven'?t seen you|since last year|fast forward|oh my (goodness|days|god)|we pray|let us pray|let'?s pray|my team|you guys|anybody else|where are my|put your hands|shout (it|out|with)|turn to your neighbou?r|let'?s go|round of applause|one more time|do you want to|go again)\b/i;
 const messageOf = (p) => Math.min(3, (String(p.text).match(MESSAGE) || []).length) * 0.25 - (CROWD.test(p.text) ? 0.6 : 0);
 function talkByRules(list, opts) {
   // without an AI to judge them, a line with an "um" in it or the business of the service is never used
@@ -2251,6 +2251,7 @@ async function lookAt(ctx, reqs, tmp, log, { people = true, max = Infinity, fram
       if (!a) return;
       if (typeof a.people === 'number') out[r.i].people = a.people;
       if (typeof a.facing === 'boolean') out[r.i].facing = a.facing;
+      if (a.giving) out[r.i].giving = true;
       if (!(a.column > 0)) return;
       // the column's middle on the ruled tile → across the clip's own picture (a tile pads a clip of another shape)
       const ar = (r.w && r.h) ? r.w / r.h : 16 / 9;
@@ -2556,7 +2557,9 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     for (const b of broll) { if (b.kind === 'image' && !b.thumb) { try { b.thumb = await thumb(ctx, b.file, 0, path.join(tmp, b.id + '.jpg'), true); } catch (e) { b.thumb = null; } } }
     if (onProgress) onProgress(42);
     // 2) CHOOSE
-    const list = spreadList(goodLines(phrases), 420);
+    // (crowd work from the stage never reaches the editor — an AI picked "Where is everybody?" as the hook)
+    const calmLines = goodLines(phrases).filter((p) => !CROWD.test(p.text) && !HOUSEKEEPING.test(p.text));
+    const list = spreadList(calmLines.length >= 12 ? calmLines : goodLines(phrases), 420);
     // how long the heard event is (a whole service asks for moments from across it)
     opts.eventSec = cands.reduce((n, c) => n + Math.max(0, (c.end || 0) - (c.start || 0)), 0);
     if (stage) stage(process.env.ANTHROPIC_API_KEY ? '🎬 Claude is picking the lines that will stop the scroll…' : '🎬 The AI is picking the lines that will stop the scroll…');
@@ -2572,6 +2575,9 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     const byId = new Map(phrases.map((p) => [p.id, p]));
     let picks = [];
     for (const x of (d.plan.picks || [])) { const p = byId.get(String(x && x.id || '').trim()); if (p && !picks.includes(p)) picks.push(p); }
+    // what the editor chose is held to the rules it was given: no crowd work, no housekeeping, a whole thought
+    // (a line it should not have taken is dropped, and the whole-event step below fills its place)
+    { const ok = picks.filter((p) => !CROWD.test(p.text) && !HOUSEKEEPING.test(p.text) && ((opts.eventSec || 0) < LONG_EVENT_SEC || wholeThought(p))); if (ok.length && ok.length < picks.length) { if (log) log(`talk: ${picks.length - ok.length} line(s) the editor chose broke its brief and were left out`); picks = ok; } }
     if (picks.length < 1) picks = talkByRules(list, opts).plan.picks.map((x) => byId.get(x.id)).filter(Boolean);
     // a long event: no moment runs on (whatever the editor chose). A short clip is one stretch by nature, and keeps it.
     const longEvent = (opts.eventSec || 0) >= LONG_EVENT_SEC;
@@ -2617,7 +2623,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       ps.forEach((p) => { p.looks = []; looksAt(p).forEach((t) => { reqs.push({ file: p.cand.file, t: round2(clamp(t, 0, Math.max(0, p.cand.fileDur - 0.1))), w: p.cand.w, h: p.cand.h }); who.push(p); }); });
       if (!reqs.length) return;
       const got = await lookAt(ctx, reqs, tmp, log, { people: true, frame: ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 } });
-      got.forEach((g, i) => who[i].looks.push({ t: reqs[i].t, fx: g.fx, people: g.people, weak: !!g.weak || g.facing === false }));
+      got.forEach((g, i) => who[i].looks.push({ t: reqs[i].t, fx: g.fx, people: g.people, weak: !!g.weak || g.facing === false, giving: !!g.giving }));
       // a slide or a dark stage is not a moment, even with a face in it (a speaker's photo on a "connect with" slide)
       for (const p of ps) { if (!p.vis) { try { p.vis = await stillOrDark(ctx, p); } catch (e) { if (e instanceof jobs.CancelledError) throw e; p.vis = null; } } }
     };
@@ -2626,7 +2632,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     // (a still moment is a slide only where the video around it moves: a sermon heard over one still picture is all still,
     //  and then stillness says nothing)
     const stillVideo = () => { const v = picks.filter((p) => p.vis); return v.length >= 2 && v.filter((p) => p.vis.still).length >= v.length * 0.6; };
-    const nobody = (p) => !!(p.vis && ((p.vis.still && !stillVideo()) || p.vis.dark)) || !!(p.looks && p.looks.length && p.looks.filter((l) => l.people === 0 || l.weak).length * 2 >= p.looks.length);
+    const nobody = (p) => !!(p.looks && p.looks.some((l) => l.giving)) || !!(p.vis && ((p.vis.still && !stillVideo()) || p.vis.dark)) || !!(p.looks && p.looks.length && p.looks.filter((l) => l.people === 0 || l.weak).length * 2 >= p.looks.length);
     if (stage) stage('👀 Making sure someone can be seen in every line…');
     await lookLines(picks);
     const seen = picks.some((p) => p.looks.some((l) => l.people != null));
@@ -2819,8 +2825,8 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       top.forEach((sp, i) => { sp.snapLook = got[i]; });
       if (longEv) for (const sp of top) { if (!(sp.snapLook && sp.snapLook.people > 0) || sp.snapLook.weak || sp.snapLook.facing === false) continue; try { sp.vis = sp.vis || await stillOrDark(ctx, sp); } catch (e) { if (e instanceof jobs.CancelledError) throw e; } }
       const good = top.filter((sp) => longEv
-        ? !!(sp.snapLook && sp.snapLook.people > 0 && !sp.snapLook.weak && sp.snapLook.facing !== false && sp.vis && !sp.vis.still && !sp.vis.dark)
-        : !(sp.snapLook && sp.snapLook.people === 0));
+        ? !!(sp.snapLook && sp.snapLook.people > 0 && !sp.snapLook.weak && sp.snapLook.facing !== false && !sp.snapLook.giving && sp.vis && !sp.vis.still && !sp.vis.dark)
+        : !(sp.snapLook && (sp.snapLook.people === 0 || sp.snapLook.giving)));
       // (the few used are spread over the WHOLE event — not the first hour's — and play in the order they happened)
       if (longEv) {
         good.sort((a, b) => a.vid - b.vid || a.start - b.start);

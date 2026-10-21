@@ -155,6 +155,11 @@ const ok = (answer) => reply(200, { choices: [{ message: { content: typeof answe
   const pf = await cloudsee.whereArePeople({ image: IMG, frames: FRAMES });
   check('the backs of the audience are people, but no one facing: a talk montage does not use them', pf.ok && pf.answers.A.facing === false && pf.answers.B.facing === true && /from behind/.test(calls[0].system), JSON.stringify(pf.answers));
 
+  calls = [];
+  script = [ok({ frames: [{ frame: 'A', people: 1, column: 4, facing: true, giving: true }, { frame: 'B', people: 1, column: 2, facing: true, giving: false }] })];
+  const pg = await cloudsee.whereArePeople({ image: IMG, frames: FRAMES });
+  check('a speaker in front of the bank details / QR code slide is marked, so the montage never shows it', pg.ok && pg.answers.A.giving === true && !pg.answers.B.giving && /IBAN/.test(calls[0].system), JSON.stringify(pg.answers));
+
   console.log('\n[9] Bad input');
   const bad = await cloudsee.whoIsSpeaking({ image: 'C:/not-a-data-url.jpg', frames: FRAMES });
   check('a picture that is not a data URL is refused before any call', !bad.ok, bad.why);
