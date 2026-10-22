@@ -235,6 +235,7 @@
     "test:phone-topbar": "node test/phone-topbar.test.js",
     "test:phone-disk-owner": "node test/phone-disk-owner.test.js",
     "test:phone-splash": "node test/phone-splash.test.js",
+    "test:phone-mute-video": "node test/phone-mute-video.test.js",
     "test:phone-project-delete": "node test/phone-project-delete.test.js",
     "test:phone-music-from-video": "node test/phone-music-from-video.test.js",
     "test:phone-social-setup": "node test/phone-social-setup.test.js",

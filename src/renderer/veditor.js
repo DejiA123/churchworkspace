@@ -1055,6 +1055,7 @@
     updateSearchHint();
     updateOverlayTools();
     updateGapMask(ve.refs.player.currentTime || 0); // deleting/dragging a clip blanks the preview instantly
+    paintVideoMute();
   }
 
   /**
@@ -1735,7 +1736,8 @@
     // past the main video the black is the BACKGROUND of the clips that follow it
     m.style.zIndex = t >= mainEnd() - 0.01 ? '1' : '';
     // silent while a voiceover records, so the sermon does not leak into the mic
-    ve.refs.player.muted = !!ve._voiceMute || !inClip || !inAudio;
+    // (and where the clip's Volume is 0 — Mute video: an iPhone ignores a video's volume, it obeys only `muted`)
+    ve.refs.player.muted = !!ve._voiceMute || !!ve._clipQuiet || !inClip || !inAudio;
   }
 
   /**
@@ -4449,7 +4451,7 @@
       if (n.tagName !== 'VIDEO') continue;
       const want = s.start + (t - a);
       if (Math.abs((n.currentTime || 0) - want) > 0.25) { try { n.currentTime = want; } catch (e) { /* not seekable yet */ } }
-      n.muted = !!s.mute;
+      n.muted = !!s.mute || (isTailClip(s) && fxOf(s).vol <= 0.001);   // (an iPhone obeys only `muted`)
       if (isTailClip(s)) n.volume = clamp(fxOf(s).vol, 0, 1);
       if (playing && n.paused) { const pr = n.play(); if (pr && pr.catch) pr.catch(() => {}); }
       else if (!playing && !n.paused) n.pause();
@@ -15115,6 +15117,54 @@
     // a browser plays at most 100%; louder than that is for the export
     const v = clamp(f.vol, 0, 1);
     if (Math.abs((p.volume == null ? 1 : p.volume) - v) > 0.001) p.volume = v;
+    // 0% is silence on every phone: an iPhone never changes a video's volume, so a muted clip is `muted`
+    const quiet = !!s && v <= 0.001;
+    if (ve._clipQuiet !== quiet) { ve._clipQuiet = quiet; updateGapMask(t); }
+  }
+
+  /*
+   * ►► MUTE VIDEO — THE VIDEO'S OWN SOUND OFF, THE MUSIC ON. ◄◄ "I am unable to
+   * mute the audio voice in the video studio … some viral videos I want the
+   * voices muted and just let the music play." Volume › Mute changed one clip,
+   * and a Viral montage is dozens of clips (one per shot); and on an iPhone the
+   * preview kept playing the voices, as Safari ignores a video's volume. One
+   * tap now sets every clip of the video to 0% — CapCut's "Mute clip audio" —
+   * kept on the clips like any Volume (so it splits, undoes, saves and goes
+   * into every export), while the music, voiceovers and sound effects play on.
+   * Tapped again, each clip gets back the volume it had.
+   */
+  const videoMuted = () => { const cs = mainClips(); return cs.length > 0 && cs.every((x) => fxOf(x).vol <= 0.001); };
+  function paintVideoMute() {
+    const on = !!ve.video && videoMuted();
+    const b = $('#veMuteVideo');
+    if (b) {
+      b.classList.toggle('on', on);
+      b.disabled = !ve.video;
+      b.textContent = on ? '🔇 Video muted' : '🔇 Mute video';
+      b.title = on ? 'The video\'s own sound is off — the music, voiceovers and sound effects still play. Click to turn it back on.'
+        : 'Mute video — turn off the video\'s own sound (the voices) on every clip, and keep the music playing';
+    }
+    const tl = $('#veTimeline'); if (tl) tl.classList.toggle('ve-video-muted', on);
+  }
+  function toggleVideoMute(force) {
+    if (!ve.video) { if (window.__toast) window.__toast('Open a video first.', 'error'); return false; }
+    const clips = mainClips();
+    if (!clips.length) return false;
+    const mute = typeof force === 'boolean' ? force : !videoMuted();
+    pushHistory();
+    for (const x of clips) {
+      const f = fxOf(x);
+      if (mute) { if (f.vol > 0.001) x.volBack = f.vol; f.vol = 0; } else { f.vol = x.volBack > 0.001 ? x.volBack : 1; delete x.volBack; }
+      const c = cleanFx(f);
+      if (c) x.fx = c; else delete x.fx;
+    }
+    syncClipLook(nowT());
+    updateGapMask(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
+    markFxBlocks();
+    paintVideoMute();
+    const m = document.getElementById('fxModal'); if (m && !m.classList.contains('hidden')) renderFxPanel();
+    if (window.__toast) window.__toast(mute ? '🔇 Video muted — the music still plays' : '🔊 The video\'s sound is back on');
+    return mute;
   }
 
   /* --- the panel --- */
@@ -17316,6 +17366,7 @@
     const studioBtn = $('#veStudioSound'); if (studioBtn) { studioBtn.addEventListener('click', toggleStudioSound); updateStudioSoundButton(); }
     const ovGuide = $('#veOverlayGuide'); if (ovGuide) ovGuide.addEventListener('mousedown', onOverlayGuideDown);
     const snapBtn = $('#veSnap'); if (snapBtn) snapBtn.addEventListener('click', toggleSnap);
+    const muteBtn = $('#veMuteVideo'); if (muteBtn) muteBtn.addEventListener('click', () => toggleVideoMute());
     // captions timeline: open the style modal, or export the video with the
     // on-timeline captions burned in
     const capStyleBtn = $('#veCapStyle'); if (capStyleBtn) capStyleBtn.addEventListener('click', () => {
@@ -18426,6 +18477,9 @@
     addCaptionHere() { return addCaptionHere(); },
     /** 🎙 AI voice: type a line, it is spoken and laid on the Sounds row. */
     aiVoice() { return openAiVoice(); },
+    /** Mute video: every clip of the video at 0% (true) or back as it was (false); no argument toggles. */
+    toggleVideoMute(force) { return toggleVideoMute(force); },
+    videoMuted() { return !!ve.video && videoMuted(); },
     /** Projects (every video worked on keeps its own — see saveProject). */
     projectId() { return ve.video ? ve.sessionId || null : null; },
     /** Whatever is on screen written to its project NOW (before switching to another). */

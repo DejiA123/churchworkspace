@@ -4538,6 +4538,8 @@ let _hideTimer = null;
       { icon: 'keyframe', label: 'Zoom & move', call: 'keyframes' },
       { icon: 'zap', label: 'Speed', fx: '#fxSpeed' },
       { icon: 'volume', label: 'Volume', fx: '#fxVol' },
+      // the video's own sound off on every clip at once, the music on (a Viral montage is dozens of clips)
+      { icon: 'volume-x', label: 'Mute video', press: '#veMuteVideo', on: true },
       { icon: 'trash', label: 'Delete', press: '#veDelClip' },
       { icon: 'copy', label: 'Duplicate', press: '#veDupClip' },
       { icon: 'rotate', label: 'Rotate', fx: '#fxRot' },
@@ -4558,6 +4560,7 @@ let _hideTimer = null;
       // Follow — the one place following the SPEAKER is set.
     ],
     audio: [
+      { icon: 'volume-x', label: 'Mute video', press: '#veMuteVideo', on: true },
       { icon: 'music', label: 'Music', press: '#veMusic' },
       { icon: 'mic', label: 'Voiceover', press: '#veVoiceover' },
       { icon: 'sparkles', label: 'AI voice', call: 'aiVoice' },

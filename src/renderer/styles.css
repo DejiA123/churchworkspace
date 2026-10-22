@@ -2873,3 +2873,12 @@ body.ve-pfull .ve-preview .ve-fs-exit {
 /* the grade layer over a clip added after the video (gradePicture in veditor.js): its box, transform and grade are copied from the clip */
 .ve-grade-cv { position: absolute; display: none; pointer-events: none; border-radius: 2px; }
 .ve-grade-cv.on { display: block; }
+
+/* Mute video: the video's own sound row is greyed out and says so (the music row plays on) */
+#veMuteVideo.on { background: #1f6fe0; color: #fff; border-color: #1f6fe0; }
+.ve-video-muted .ve-audio-track { opacity: .38; filter: grayscale(1); }
+.ve-video-muted .ve-audio-track::after {
+  content: '🔇 Video muted'; position: absolute; left: 8px; top: 50%; transform: translateY(-50%);
+  padding: 2px 8px; border-radius: 6px; background: rgba(15, 17, 21, .78); color: #fff;
+  font-size: 11px; font-weight: 700; pointer-events: none; z-index: 2;
+}
