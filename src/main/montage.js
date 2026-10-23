@@ -1837,7 +1837,7 @@ function shortMoments(picks) {
  * its speaker, and every beat after its first covered whole by a checked
  * moment from another part of the night while the voice carries on.
  */
-const MOMENT_EACH = 2.5, LINE_EACH = 3.8, MOMENT_LINE_MIN = 2, MOMENT_LINE_MAX = 5.5;
+const MOMENT_EACH = 2.5, LINE_EACH = 3.8, MOMENT_LINE_MIN = 2, MOMENT_LINE_MAX = 5.5, LINE_APART = 480;
 const partsFor = (opts) => clamp(Math.round((opts.lengthSec || 30) / LINE_EACH), 4, 16);
 /*
  * ►► A SECOND READ OF THE LINES, PART BY PART. ◄◄ The editor read 400 lines at
@@ -1881,7 +1881,11 @@ async function vetParts(picks, list, opts, log) {
   const hookPart = picks[0] ? ev.part(picks[0]) : -1;
   const hook = picks[0] && approved.has(picks[0]) ? picks[0] : ((ranked.get(hookPart) || [])[0] || [...approved][0]);
   const out = [hook];
-  for (const [k, r] of ranked) { const best = r.find((p) => p !== hook); if (best && k !== ev.part(hook)) out.push(best); }
+  for (const [k, r] of ranked) {
+    if (k === ev.part(hook)) continue;
+    const best = r.find((p) => p !== hook && !out.some((q) => q.vid === p.vid && Math.abs(q.start - p.start) < LINE_APART));
+    if (best) out.push(best);
+  }
   if (log) log(`vet: the AI read every part again — kept ${approved.size} line(s); the edit has ${out.length}`);
   return { picks: out, approved };
 }
@@ -1913,15 +1917,17 @@ function acrossEvent(picks, list, opts) {
   const { n, at, part } = eventParts(list.concat(picks), opts);
   const short = (p) => p.end - p.start <= MOMENT_LINE_MAX;
   const taken = new Map();
+  // (lines 8 minutes apart at least: one long talk across two parts gave the same speaker three times in a row)
+  const apartFrom = (p) => ![...taken.values()].some((q) => q.vid === p.vid && Math.abs(q.start - p.start) < LINE_APART);
   // (the hook too: a line longer than LINE_MAX gives way to its part's best line)
-  picks.forEach((p) => { const k = part(p); if (!taken.has(k) && short(p) && p.end - p.start >= MOMENT_LINE_MIN) taken.set(k, p); });
+  picks.forEach((p) => { const k = part(p); if (!taken.has(k) && short(p) && p.end - p.start >= MOMENT_LINE_MIN && apartFrom(p)) taken.set(k, p); });
   // the parts the editor left empty: their own strongest line (one no earlier take used counts for more)
   const val = lineVal;
   // (about LINE_EACH seconds a line: a much longer one counts for a little less)
   const quick = (p) => val(p) - Math.max(0, p.end - p.start - LINE_EACH - 0.6) * 0.12;
   for (let k = 0; k < n; k++) {
     if (taken.has(k)) continue;
-    const best = list.filter((p) => part(p) === k && short(p) && p.end - p.start >= MOMENT_LINE_MIN && !HOUSEKEEPING.test(p.text) && !CROWD.test(p.text) && !asks(p))
+    const best = list.filter((p) => part(p) === k && short(p) && p.end - p.start >= MOMENT_LINE_MIN && !HOUSEKEEPING.test(p.text) && !CROWD.test(p.text) && !asks(p) && apartFrom(p))
       .sort((a, b) => quick(b) - quick(a))[0];
     if (best && val(best) >= 0.4) taken.set(k, best);
   }
@@ -2750,7 +2756,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     }
     // (a line brought in later — someone not seen, the length not met — comes from a part of the event the edit has not got yet)
     const ev = longEvent ? eventParts(list.concat(picks), opts) : null;
-    const newPart = (p, but) => !ev || !picks.some((q) => q !== but && ev.part(q) === ev.part(p));
+    const newPart = (p, but) => !ev || !picks.some((q) => q !== but && (ev.part(q) === ev.part(p) || (q.vid === p.vid && Math.abs(q.start - p.start) < LINE_APART)));
     const fitsEvent = (p) => !ev || (!asks(p) && (approved ? approved.has(p) : (p.end - p.start <= MOMENT_LINE_MAX && p.end - p.start >= MOMENT_LINE_MIN && !CROWD.test(p.text) && lineVal(p) >= 0.4)));
     // the length asked for, give or take a line (the hook always stays)
     let total = picks.reduce((n, p) => n + (p.end - p.start), 0);
@@ -3358,7 +3364,7 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 
 /** Which director the montage would use right now (for the phone to say so). */
 /* which montage the server runs (montage:status says it: a quiet way to tell an update has landed) */
-const MONTAGE_REV = '2026-10-23.distinct';
+const MONTAGE_REV = '2026-10-23.apart';
 function directorStatus() {
   const st = directorStatusOf();
   st.rev = MONTAGE_REV;
