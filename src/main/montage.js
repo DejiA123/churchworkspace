@@ -1819,14 +1819,18 @@ function shortMoments(picks) {
  * rest in the order they happened (the event, start to finish). On Gospel Jamz
  * Day 1 (3 h 44) the editor's lines all came from one half-hour panel.
  *
- * ►► 2.5 SECONDS A MOMENT. ◄◄ "Every clip moment from one video that is 3 hours,
- * let each clip be 2.5 seconds instead of 3.6." A moment is one short sentence
- * said whole (1.7–2.9 s of words), and a line that ends sooner holds on its
- * speaker into the silence after it (or before it) up to 2.5 s — never into the
- * next words — so the edit moves on an even beat, voices on or muted under music.
+ * ►► A CLIP EVERY 2.5 SECONDS — THE WORDS WHOLE. ◄◄ "Let each clip be 2.5 seconds
+ * instead of 3.6." That was first done with the WORDS: one sentence of 1.7–2.9 s
+ * from each of 12 parts. Only 185 of a 3 h 44 event's lines are that short and
+ * whole, and most are stage chat ("Can we clap for him?", "Just a little bit
+ * more volume") — both edits were "terrible". Now the PICTURE moves every
+ * MOMENT_EACH seconds and the words stay whole: one strong line of 2–5.5
+ * seconds from each part (as in the 30 s the church liked), opening on
+ * its speaker, and every beat after its first covered whole by a checked
+ * moment from another part of the night while the voice carries on.
  */
-const MOMENT_EACH = 2.5, MOMENT_LINE_MIN = 1.7, MOMENT_LINE_MAX = 2.9;
-const partsFor = (opts) => clamp(Math.round((opts.lengthSec || 30) / MOMENT_EACH), 6, 24);
+const MOMENT_EACH = 2.5, LINE_EACH = 3.8, MOMENT_LINE_MIN = 2, MOMENT_LINE_MAX = 5.5;
+const partsFor = (opts) => clamp(Math.round((opts.lengthSec || 30) / LINE_EACH), 4, 16);
 /*
  * ►► A SECOND READ OF THE LINES, PART BY PART. ◄◄ The editor read 400 lines at
  * once and still took "Oh, winner man! Oh, winner money!". Here the AI reads
@@ -1897,12 +1901,12 @@ function acrossEvent(picks, list, opts) {
   const { n, at, part } = eventParts(list.concat(picks), opts);
   const short = (p) => p.end - p.start <= MOMENT_LINE_MAX;
   const taken = new Map();
-  // (the hook too: every moment of a long event is about MOMENT_EACH seconds — a long hook gives way to its part's best short line)
+  // (the hook too: a line longer than LINE_MAX gives way to its part's best line)
   picks.forEach((p) => { const k = part(p); if (!taken.has(k) && short(p) && p.end - p.start >= MOMENT_LINE_MIN) taken.set(k, p); });
   // the parts the editor left empty: their own strongest line (one no earlier take used counts for more)
   const val = lineVal;
-  // (about MOMENT_EACH seconds a moment, the hold either side counted: the nearer, the better)
-  const quick = (p) => val(p) - Math.abs(p.end - p.start + 0.23 - MOMENT_EACH) * 0.15;
+  // (about LINE_EACH seconds a line: a much longer one counts for a little less)
+  const quick = (p) => val(p) - Math.max(0, p.end - p.start - LINE_EACH - 0.6) * 0.12;
   for (let k = 0; k < n; k++) {
     if (taken.has(k)) continue;
     const best = list.filter((p) => part(p) === k && short(p) && p.end - p.start >= MOMENT_LINE_MIN && !HOUSEKEEPING.test(p.text) && !CROWD.test(p.text) && !asks(p))
@@ -1910,7 +1914,7 @@ function acrossEvent(picks, list, opts) {
     if (best && val(best) >= 0.4) taken.set(k, best);
   }
   const chosen = [...taken.values()];
-  // (the editor's hook when it is a moment's length; else the strongest line taken opens the edit)
+  // (the editor's hook when it is a line's length; else the strongest line taken opens the edit)
   const hook = picks[0] && chosen.includes(picks[0]) ? picks[0] : chosen.slice().sort((a, b) => lineVal(b) - lineVal(a))[0] || null;
   const rest = chosen.filter((p) => p !== hook).sort((a, b) => at(a) - at(b));
   return hook ? [hook].concat(rest) : rest;
@@ -2006,7 +2010,7 @@ function talkBrief(opts, list, how = {}) {
     + (opts.eventSec >= LONG_EVENT_SEC ? (() => {
       // the whole event in the edit: one short line from each part of it, start to finish
       const n = partsFor(opts), w = opts.eventSec / n, hm = (x) => `${Math.floor(x / 3600)}:${String(Math.floor(x / 60) % 60).padStart(2, '0')}`;
-      return `\nThis is a long event (${Math.round(opts.eventSec / 60)} minutes: a whole service or concert). The edit must capture ALL of it, not one stretch: take ONE short, complete sentence of about 2 to 3 seconds (each moment is about ${MOMENT_EACH} seconds) from EACH of these ${n} parts — ${Array.from({ length: n }, (_, k) => hm(k * w) + '–' + hm((k + 1) * w)).join(', ')} — different people, different moments, building one message. Never two lines from the same part.`;
+      return `\nThis is a long event (${Math.round(opts.eventSec / 60)} minutes: a whole service or concert). The edit must capture ALL of it, not one stretch: take ONE complete, powerful sentence of about 2 to 5 seconds (the picture cuts to other moments of the night every ${MOMENT_EACH} seconds while the words carry on) from EACH of these ${n} parts — ${Array.from({ length: n }, (_, k) => hm(k * w) + '–' + hm((k + 1) * w)).join(', ')} — different people, different moments, building one message. Never two lines from the same part.`;
     })() : '')
     + (opts.angle ? `\nANGLE FOR THIS EDIT: build it around "${opts.angle}" — the hook and the payoff should serve that idea.` : '')
     + (hl ? '\nLines marked ★ hold the key phrases of the whole message (ranked by AssemblyAI): strong candidates.' : '')
@@ -2688,8 +2692,6 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     const list = spreadList(calmLines.length >= 12 ? calmLines : goodLines(phrases), 420);
     // how long the heard event is (a whole service asks for moments from across it)
     opts.eventSec = cands.reduce((n, c) => n + Math.max(0, (c.end || 0) - (c.start || 0)), 0);
-    // a long event: every moment about MOMENT_EACH seconds (beatSpans holds a shorter line to it)
-    if (opts.eventSec >= LONG_EVENT_SEC) for (const p of phrases) p.padTo = MOMENT_EACH;
     if (stage) stage(process.env.ANTHROPIC_API_KEY ? '🎬 Claude is picking the lines that will stop the scroll…' : '🎬 The AI is picking the lines that will stop the scroll…');
     let d = null;
     try { d = await talkWithClaude(list, opts); } catch (e) { if (log) log('claude: ' + e.message); }
@@ -3100,10 +3102,50 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     }
     if (covered && log) log(`people: ${covered} beat(s) that cut away to nobody are covered with a moment that shows someone`);
     let bi = 0, sb = 0;
-    for (let i = speechFrom + 1; i < speechTo; i += 2) {
+    /*
+     * A LONG EVENT: A NEW PICTURE EVERY BEAT (about MOMENT_EACH seconds). Each line opens on its speaker; every
+     * beat after that is covered whole by a moment from another part of the night — checked to show a face, lit,
+     * moving, not a slide, a screen or the backs of the audience — while the voice carries on. Each moment is used
+     * once; when they run out, the speaker is seen.
+     */
+    if (longEv) {
+      // (and it must LOOK new: a cut from the panel to the same panel half an hour later is no cut at all — a tiny
+      //  grey picture of each is compared: the same scene 2–7 apart on Gospel Jamz, a different one 28–81)
+      const sigs = new Map();
+      const sigAt = async (file, t) => {
+        const k = file + '@' + round2(t);
+        if (!sigs.has(k)) {
+          let b = null;
+          try { const r = await collect(ctx.ffmpeg, ['-hide_banner', '-loglevel', 'error', '-ss', String(Math.max(0, t)), '-i', file, '-frames:v', '1', '-vf', 'scale=24:14,format=gray', '-f', 'rawvideo', '-'], { stdout: true, maxBytes: 1 << 16 }); b = r && r.stdout && r.stdout.length >= 336 ? r.stdout : null; } catch (e) { if (e instanceof jobs.CancelledError) throw e; }
+          sigs.set(k, b);
+        }
+        return sigs.get(k);
+      };
+      const apart = (a, b) => { if (!a || !b) return 99; let d = 0; for (let j = 0; j < 336; j++) d += Math.abs(a[j] - b[j]); return d / 336; };
+      const used = new Set(), seenSigs = [];
+      for (let i = speechFrom + 1; i < speechTo; i++) {
+        const sh = shots[i];
+        if (sh.line == null || shots[i - 1].line !== sh.line || sh.cover || sh.seconds < 1 || (sh.overlays || []).length) continue;
+        const under = sh.cand && sh.cand.kind === 'video' && sh.from != null ? await sigAt(sh.cand.file, sh.from + sh.seconds / 2) : null;
+        let sp = null, spSig = null;
+        for (const x of spare) {
+          if (used.has(x) || picks.some((q) => q.vid === x.vid && Math.abs(q.start - x.start) < 30)) continue;
+          const xs = await sigAt(x.cand.file, snapAt(x));
+          if (seenSigs.some((g) => apart(xs, g) < 15)) { used.add(x); continue; }   // (a scene already cut to)
+          if (apart(xs, under) < 15) continue;                                         // (the scene already on screen)
+          sp = x; spSig = xs; break;
+        }
+        if (!sp) break;
+        used.add(sp); if (spSig) seenSigs.push(spSig);
+        const len = round2(sh.seconds);
+        const ov = { cand: sp.cand, style: 'cutaway', start: 0, len, pos: 'right', from: round2(clamp(snapAt(sp) - len / 2, 0, Math.max(0, sp.cand.fileDur - len - 0.05))) };
+        if (sp.snapLook && sp.snapLook.fx != null) ov.fx = round2(sp.snapLook.fx);
+        sh.overlays.push(ov);
+      }
+    }
+    for (let i = speechFrom + 1; i < speechTo && !longEv; i += 2) {
       const sh = shots[i];
-      // (a long event's moments are about 2.5 s, each already a cut to another part of the night: nothing laid inside one)
-      if (sh.seconds < (longEv ? 4 : 2) || sh.cover) continue;
+      if (sh.seconds < 2 || sh.cover) continue;
       const len = round2(Math.min(broll.length ? 2.2 : 1.6, sh.seconds - 0.5));
       if (broll.length && bi < broll.length) {
         const o = broll[bi++];

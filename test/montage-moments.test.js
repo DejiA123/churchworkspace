@@ -72,35 +72,27 @@ const P = (text, start, end, extra) => Object.assign({ text, start, end, vid: 1,
         'a second read part by part: banter the editor took is replaced by the kept line of that part', v && v.picks.map((p) => p.id));
     } finally { ai.ready = was.ready; ai.chat = was.chat; }
   }
-  // ►► 2.5 SECONDS A MOMENT on a long event: one part per 2.5 s asked, short whole sentences, held to 2.5 s in the silence around them
+  // ►► A CLIP EVERY 2.5 SECONDS, THE WORDS WHOLE: one strong line of 2–5.5 s from each part of a long event
   {
-    ok(m.MOMENT_EACH === 2.5 && m.partsFor({ lengthSec: 30 }) === 12 && m.partsFor({ lengthSec: 15 }) === 6 && m.partsFor({ lengthSec: 60 }) === 24,
-      'a long event: one part (one moment) for every 2.5 s asked — 12 in 30 s, 24 in 60 s', [m.partsFor({ lengthSec: 30 }), m.partsFor({ lengthSec: 60 })]);
+    ok(m.MOMENT_EACH === 2.5 && m.partsFor({ lengthSec: 30 }) === 8 && m.partsFor({ lengthSec: 45 }) === 12 && m.partsFor({ lengthSec: 15 }) === 4,
+      'a long event: one line for about every 3.8 s asked — 8 in 30 s, 12 in 45 s (the picture moves every 2.5 s)', [m.partsFor({ lengthSec: 30 }), m.partsFor({ lengthSec: 45 })]);
     const W = (text, t0, per) => text.split(' ').map((w, i) => ({ text: w, start: t0 + i * per, end: t0 + i * per + per * 0.8 }));
     const line = (text, t0, per, extra) => { const words = W(text, t0, per); return Object.assign({ text, words, start: words[0].start, end: words[words.length - 1].end, vid: 1, score: 1, cand: { fileDur: 13000 } }, extra || {}); };
-    // 1.8 s of words, a long silence after: held on to 2.5 s
+    // (a moment can still be held into the silence around it, never into the next words — beatSpans keeps that)
     const a = line('God is good all the time.', 100, 0.33, { padTo: 2.5, prevEnd: 98, nextStart: 106 });
-    ok(Math.abs(m.momentSec(a) - 2.5) < 0.02 && m.beatSpans(a)[0].from > 99.9, 'a short line holds on its speaker into the silence after it, to 2.5 s', { sec: m.momentSec(a), spans: m.beatSpans(a) });
-    // the next words come 0.3 s after: the hold stops before them, and takes the rest from the silence before
-    const b = line('God is good all the time.', 100, 0.33, { padTo: 2.5, prevEnd: 98.8, nextStart: a.end + 0.3 });
-    const bs = m.beatSpans(b);
-    ok(bs[bs.length - 1].to <= b.nextStart - 0.1 + 1e-6 && bs[0].from >= b.prevEnd + 0.1 - 1e-6 && Math.abs(m.momentSec(b) - 2.5) < 0.02,
-      'never into the next words (nor the ones before): the rest of the hold is taken from the silence before it', { spans: bs, prevEnd: b.prevEnd, nextStart: b.nextStart });
-    // words close on both sides: it stays as long as its own words
-    const c = line('God is good all the time.', 100, 0.33, { padTo: 2.5, prevEnd: 99.9, nextStart: a.end + 0.2 });
-    ok(m.momentSec(c) < 2.2 && Math.abs(m.beatSpans(c)[0].from - (c.start - 0.07)) < 1e-6, 'words said right before and after: no hold (a word is never cut into)', m.momentSec(c));
-    ok(Math.abs(m.momentSec(line('God is good all the time.', 100, 0.33)) - (a.end - a.start + 0.23)) < 0.01, 'a short video (no padTo): lines are as they were');
-    // one line from each part: a 4-second line (even the editor's hook) gives way to the part's short one
-    const span = 13200, n = 12, w = span / n;
+    ok(Math.abs(m.momentSec(a) - 2.5) < 0.02, 'a held line stays within the silence around it', m.momentSec(a));
+    ok(Math.abs(m.momentSec(line('God is good all the time.', 100, 0.33)) - (a.end - a.start + 0.23)) < 0.01, 'no hold asked: a line is as long as its words');
+    // a 4-second line beats a 2-second scrap: the words are whole and strong, one from each part
+    const span = 13200, n = 8, w = span / n;
     const list = [];
     for (let k = 0; k < n; k++) {
-      list.push(Object.assign(line('Jesus is the light that never goes out.', k * w + 60, 0.3), { id: 's' + k, vid: 1, score: k === 5 ? 3 : 1.2, cand: { fileDur: span } }));
-      list.push(Object.assign(line('His grace is enough for every season of your life and every single day you live.', k * w + 300, 0.3), { id: 'l' + k, vid: 1, score: 2, cand: { fileDur: span } }));
+      list.push(Object.assign(line('Can we clap for him?', k * w + 60, 0.3), { id: 's' + k, vid: 1, score: 1.2, cand: { fileDur: span } }));
+      list.push(Object.assign(line('His grace is enough for every season of your life and every day.', k * w + 300, 0.3), { id: 'l' + k, vid: 1, score: k === 3 ? 3 : 2, cand: { fileDur: span } }));
     }
-    const got = m.acrossEvent([list[1], list[3]], list, { lengthSec: 30 });
-    ok(got.length === 12 && got.every((p) => p.end - p.start <= 2.9 && p.end - p.start >= 1.7), 'a long event: one short line (1.7–2.9 s) from each of its 12 parts — not the 4-second hook the editor chose', got.map((p) => p.id + ':' + (p.end - p.start).toFixed(1)));
-    ok(got[0] && got[0].id === 's5', 'and the edit opens on the strongest short line when the editor\'s hook was too long for a moment', got[0] && got[0].id);
-        ok(/about 2 to 3 seconds/.test(m.talkBrief({ style: 'hype', lengthSec: 30, eventSec: 13200 }, list.slice(0, 2), { compact: true })), 'the editor is told: one short sentence of about 2 to 3 seconds from each part');
+    const got = m.acrossEvent([list[3], list[5]], list, { lengthSec: 30 });
+    ok(got.length === 8 && got.every((p) => p.id[0] === 'l' && p.end - p.start <= 5.5 && p.end - p.start >= 2), 'a long event: one whole, strong line (2–5.5 s) from each of its 8 parts — never the 1-second scraps', got.map((p) => p.id + ':' + (p.end - p.start).toFixed(1)));
+    ok(got[0] && got[0].id === 'l1', 'and the editor\'s hook opens it', got[0] && got[0].id);
+    ok(/about 2 to 5 seconds/.test(m.talkBrief({ style: 'hype', lengthSec: 30, eventSec: 13200 }, list.slice(0, 2), { compact: true })), 'the editor is told: one whole sentence of 2 to 5 seconds from each part, the picture moving every 2.5 s');
   }
   console.log(`\n${pass} PASS / ${fail} FAIL`);
   process.exit(fail ? 1 : 0);
