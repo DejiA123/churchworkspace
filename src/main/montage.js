@@ -1319,10 +1319,11 @@ async function renderPiece(ctx, s, W, H, keepAudio, out, next, { overlay = null,
       x = '(W-w)/2';
       y = `(H-h)/2-${Math.round(H * 0.04)}`;
     } else if (o.style === 'pip') {
-      const pw = Math.round((W * (W > H ? 0.34 : 0.5)) / 2) * 2, ph = Math.round((H * 0.34) / 2) * 2;
+      const pw = Math.round((W * (W > H ? 0.34 : (o.small ? 0.56 : 0.5))) / 2) * 2, ph = Math.round((H * (o.small ? 0.3 : 0.34)) / 2) * 2;
       fit = `scale=${pw}:${ph}:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,pad=iw+12:ih+12:6:6:white,setsar=1`;
       x = o.pos === 'left' ? '44' : `W-w-44`;
-      y = `${Math.round(H * 0.11)}`;
+      // (a picture laid over a speaker sits below the face and above the captions)
+      y = `${Math.round(H * (o.small ? 0.47 : 0.11))}`;
     } else if (oc.kind === 'image' && oc.w / oc.h > (W / H) * 1.25) {
       /*
        * A photo much wider than the frame (a landscape picture in a 9:16
@@ -1486,7 +1487,7 @@ function pieceKey(s, next, W, H, keepAudio) {
   return crypto.createHash('sha1').update(JSON.stringify({
     v: 4, f: c.file, sig: fileSig(c.file), k: c.kind, w: c.w, h: c.h, a: !!c.hasAudio,
     sec: s.seconds, from: s.from, need: s.need, e: s.effect, fo: s.focus, fx: s.fx == null ? null : s.fx, fx2: s.fx2 == null ? null : s.fx2, sl: !!s.slow, tr: s.transition, nt: next ? next.transition : null, gr: s.grade || null, mu: !!s.mute,
-    ov: (s.overlays || []).map((o) => [o.cand.file, fileSig(o.cand.file), o.cand.kind, o.cand.w, o.cand.h, o.style, o.start, o.len, o.pos, o.from, o.fx == null ? null : o.fx, !!o.cover]),
+    ov: (s.overlays || []).map((o) => [o.cand.file, fileSig(o.cand.file), o.cand.kind, o.cand.w, o.cand.h, o.style, o.start, o.len, o.pos, o.from, o.fx == null ? null : o.fx, !!o.cover, !!o.small]),
     W, H, keepAudio: !!keepAudio, enc: encodeOpts(),
   })).digest('hex');
 }
@@ -1546,7 +1547,7 @@ function projectOf(plan, cands, { aspect, keepAudio, style, full }, meta = {}) {
       cid: s.cand.id, seconds: s.seconds, from: s.from == null ? null : s.from, need: s.need == null ? null : s.need,
       at: typeof s.realAt === 'number' ? s.realAt : null,   // where it really starts in the made file (Edit-the-montage preview)
       effect: s.effect, focus: s.focus, fx: s.fx == null ? null : s.fx, fx2: s.fx2 == null ? null : s.fx2, slow: !!s.slow, transition: s.transition, grade: s.grade || null, mute: !!s.mute,
-      overlays: (s.overlays || []).map((o) => ({ cid: o.cand.id, style: o.style, start: o.start, len: o.len, pos: o.pos, from: o.from == null ? null : o.from, fx: o.fx == null ? null : o.fx, cover: !!o.cover })),
+      overlays: (s.overlays || []).map((o) => ({ cid: o.cand.id, style: o.style, start: o.start, len: o.len, pos: o.pos, from: o.from == null ? null : o.from, fx: o.fx == null ? null : o.fx, cover: !!o.cover, small: !!o.small })),
     })),
     texts: (plan.texts || []).map((t) => {
       const a = shotAt(t.start), b = shotAt(Math.max(t.start, t.end - 0.05));
@@ -1606,7 +1607,7 @@ async function remake(ctx, { project, edits, output, onProgress, stage }) {
       const list = asked.map((o, k) => {
         const was = same ? base.overlays[k] : null;
         return { cand: C[o.cid], style: OVERLAY_STYLES.includes(o.style) ? o.style : 'cutaway', start: was ? was.start : 0, len: was ? was.len : OV_LEN,
-          pos: (k % 2 ? 'left' : 'right'), from: was && was.from != null ? was.from : null, fx: was && typeof was.fx === 'number' ? was.fx : null, cover: !!(was && was.cover) };
+          pos: (k % 2 ? 'left' : 'right'), from: was && was.from != null ? was.from : null, fx: was && typeof was.fx === 'number' ? was.fx : null, cover: !!(was && was.cover), small: !!(was && was.small) };
       });
       const firstShot = shots.length === 0;
       sh.overlays = (same && !(firstShot && list.some((o) => o.start < 1.2))) ? list : spaceOverlays(list, sh.seconds, firstShot);
@@ -1668,6 +1669,7 @@ function resultOf(plan, output, opts, extra) {
       // where across a cutaway it is cut to fill the frame (round its person), for the studio
       fx: !o.still && typeof o.fx === 'number' ? o.fx : null,
       cover: !!o.cover,   // covers a whole beat: on and off with the cut, no fade
+      small: !!o.small,   // a picture laid over a speaker: beside them, below the face
     }))),
     shots: plan.shots.map((s) => ({ at: s.at, seconds: s.seconds, effect: s.effect, transition: s.transition, file: s.cand.file, kind: s.cand.kind, from: s.from == null ? null : s.from })),
   }, extra);
@@ -1901,7 +1903,11 @@ function eventOrder(picks, ev) {
   const rest = picks.slice(1);
   const ends = rest.filter((p) => /[.!]["”’']?$/.test(p.text.trim()) && !CROWD.test(p.text));
   const pay = (ends.length ? ends : rest).reduce((a, b) => (lineVal(b) > lineVal(a) ? b : a));
-  return [picks[0]].concat(rest.filter((p) => p !== pay).sort((a, b) => ev.at(a) - ev.at(b)), [pay]);
+  const mid = rest.filter((p) => p !== pay).sort((a, b) => ev.at(a) - ev.at(b));
+  // (not straight after a line from the same stretch of the night — the same speaker twice in a row: swap the two before it)
+  const L = mid.length;
+  if (L >= 2 && Math.abs(ev.at(mid[L - 1]) - ev.at(pay)) < 600 && Math.abs(ev.at(mid[L - 2]) - ev.at(pay)) >= 600) [mid[L - 2], mid[L - 1]] = [mid[L - 1], mid[L - 2]];
+  return [picks[0]].concat(mid, [pay]);
 }
 function acrossEvent(picks, list, opts) {
   const { n, at, part } = eventParts(list.concat(picks), opts);
@@ -2016,7 +2022,7 @@ function talkBrief(opts, list, how = {}) {
     + (opts.eventSec >= LONG_EVENT_SEC ? (() => {
       // the whole event in the edit: one short line from each part of it, start to finish
       const n = partsFor(opts), w = opts.eventSec / n, hm = (x) => `${Math.floor(x / 3600)}:${String(Math.floor(x / 60) % 60).padStart(2, '0')}`;
-      return `\nThis is a long event (${Math.round(opts.eventSec / 60)} minutes: a whole service or concert). The edit must capture ALL of it, not one stretch: take ONE complete, powerful sentence of about 2 to 5 seconds (the picture cuts to other moments of the night every ${MOMENT_EACH} seconds while the words carry on) from EACH of these ${n} parts — ${Array.from({ length: n }, (_, k) => hm(k * w) + '–' + hm((k + 1) * w)).join(', ')} — different people, different moments, building one message. Never two lines from the same part.`;
+      return `\nThis is a long event (${Math.round(opts.eventSec / 60)} minutes: a whole service or concert). The edit must capture ALL of it, not one stretch: take ONE complete, powerful sentence of about 2 to 5 seconds (the picture cuts to other moments of the night every ${opts.clipSec || MOMENT_EACH} seconds while the words carry on) from EACH of these ${n} parts — ${Array.from({ length: n }, (_, k) => hm(k * w) + '–' + hm((k + 1) * w)).join(', ')} — different people, different moments, building one message. Never two lines from the same part.`;
     })() : '')
     + (opts.angle ? `\nANGLE FOR THIS EDIT: build it around "${opts.angle}" — the hook and the payoff should serve that idea.` : '')
     + (hl ? '\nLines marked ★ hold the key phrases of the whole message (ranked by AssemblyAI): strong candidates.' : '')
@@ -2146,6 +2152,14 @@ async function someoneEverywhere(ctx, file, shots, log, fix = true) {
   const cuts = shots.map((sh) => sh.at || 0);
   const samples = [];
   for (let t = 0.3; t < dur - 0.15; t += 0.5) if (!cuts.some((c) => Math.abs(c - t) < 0.3)) samples.push(round2(t));
+  // (and the middle of EVERY picture — a shot, a cutaway laid over it: with 1-second clips the grid above, kept off
+  //  the cuts, missed most of them, and a promo graphic with no one in it got through)
+  for (const sh of shots) {
+    const a = sh.at || 0;
+    const mids = [a + sh.seconds / 2].concat((sh.overlays || []).filter((o) => o.style === 'cutaway').map((o) => a + (o.start || 0) + o.len / 2));
+    for (const m of mids) if (m > 0.1 && m < dur - 0.1 && !samples.some((t) => Math.abs(t - m) < 0.2)) samples.push(round2(m));
+  }
+  samples.sort((x, y) => x - y);
   const good = [], bad = [];
   let failed = 0;
   for (const t of samples) {
@@ -2177,11 +2191,12 @@ async function someoneEverywhere(ctx, file, shots, log, fix = true) {
     if (!sh) continue;
     const o = overAt(sh, t);
     if (o && !o.cover) { sh.overlays.splice(sh.overlays.indexOf(o), 1); fixed++; continue; }
-    if (o && o.cover) continue;   // (already covered on an earlier look)
+    if (o && o.cover && o.fixed) continue;   // (already covered on an earlier look)
     const pool = seen.filter((m) => m.sh !== sh);
     const m = pool.length ? pool[cm++ % pool.length] : null;
     if (!m) continue;
-    sh.overlays = [{ cand: m.cand, style: 'cutaway', start: 0, len: sh.seconds, pos: 'right', cover: true,
+    // (a cover that itself showed no one — a moment of the night that was a promo graphic — is replaced the same way)
+    sh.overlays = [{ cand: m.cand, style: 'cutaway', start: 0, len: sh.seconds, pos: 'right', cover: true, fixed: true,
       from: round2(clamp(m.t - sh.seconds / 2, 0, Math.max(0, (m.cand.fileDur || 0) - sh.seconds - 0.05))), fx: m.fx == null ? null : round2(m.fx) }];
     fixed++;
   }
@@ -2577,7 +2592,8 @@ function beatSpans(p) {
   for (let j = 1; j < ws.length; j++) {
     const lenSoFar = ws[j - 1].end - ws[b0].start;
     const left = ws[ws.length - 1].end - ws[j].start;
-    if (lenSoFar >= 2.2 && left >= 1.1) { beats.push([b0, j - 1]); b0 = j; }
+    // (about p.beatSec a beat — the clip length chosen, 2.5 s unless said — cut between words)
+    if (p.beatSec ? (lenSoFar >= p.beatSec - 0.3 && left >= Math.max(0.5, p.beatSec * 0.45)) : (lenSoFar >= 2.2 && left >= 1.1)) { beats.push([b0, j - 1]); b0 = j; }
   }
   beats.push([b0, ws.length - 1]);
   const fileDur = (p.cand && p.cand.fileDur) || Infinity;
@@ -2668,6 +2684,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         const prev = j0 > 0 ? words[j0 - 1] : null, next = j1 != null && j1 < words.length - 1 ? words[j1 + 1] : null;
         p.prevEnd = prev ? prev.end : A; p.nextStart = next ? next.start : B;
         p.id = 'p' + (++k); p.vid = i + 1; p.cand = c; p.score = phraseScore(p, loud);
+        if (opts.clipSec) p.beatSec = opts.clipSec;   // (beats of the clip length chosen)
         // AssemblyAI's key phrases: the line that holds one of the message's most important phrases rises
         p.hl = 0;
         for (const h of (words.highlights || [])) for (const [a, b] of h.at || []) if (a < p.end && b > p.start) p.hl = Math.max(p.hl, h.rank || 0);
@@ -2970,7 +2987,8 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
      */
     const longEv = (opts.eventSec || 0) >= LONG_EVENT_SEC;
     if (longEv) {
-      const parts = partsFor(opts) * 2, far = (p) => !picks.some((q) => q.vid === p.vid && Math.abs(q.start - p.start) < 30);
+      // (enough moments for a new picture every clip — and the pictures laid over the speakers)
+      const parts = Math.max(partsFor(opts) * 2, Math.ceil((opts.lengthSec / (opts.clipSec || MOMENT_EACH)) * 1.8)), far = (p) => !picks.some((q) => q.vid === p.vid && Math.abs(q.start - p.start) < 30);
       const span = Math.max(1, ...phrases.map((p) => p.end)), across = [];
       for (let k = 0; k < parts; k++) {
         const best = spare.filter((p) => far(p) && p.start >= k * span / parts && p.start < (k + 1) * span / parts)[0];   // (spare is in score order)
@@ -3132,29 +3150,70 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         return sigs.get(k);
       };
       const apart = (a, b) => { if (!a || !b) return 99; let d = 0; for (let j = 0; j < 336; j++) d += Math.abs(a[j] - b[j]); return d / 336; };
-      const used = new Set(), seenSigs = [];
+      /*
+       * ►► EVERY PICTURE DISTINCT. ◄◄ "Make sure no clips from the video are the same — variety!" Every picture
+       * shown — a speaker's own beat, a cutaway, a picture laid over — is compared with every one already shown:
+       * a speaker whose scene was already seen (the panel again, half an hour later) is covered by a new moment
+       * of the night, and no moment is ever cut to twice.
+       */
+      const used = new Set(), shown = [];
+      const near = (x) => picks.some((q) => q.vid === x.vid && Math.abs(q.start - x.start) < 30);
+      // the speakers' own scenes (as their first beats show them): a cutaway is never one of them
+      const lineSig = new Map();
       for (let i = speechFrom; i < speechTo; i++) {
         const sh = shots[i];
-        // a beat after a line's first — or any beat that showed no one (covered above with a moment of the edit's own,
-        // the same face again: the opening speaker filled 10 of the first 13 s): a moment from elsewhere in the night
-        const later = i > speechFrom && sh.line != null && shots[i - 1].line === sh.line;
-        if (!(later || sh.cover) || sh.seconds < 1 || ((sh.overlays || []).length && !sh.cover)) continue;
-        const under = sh.cand && sh.cand.kind === 'video' && sh.from != null ? await sigAt(sh.cand.file, sh.from + sh.seconds / 2) : null;
-        let sp = null, spSig = null;
-        for (const x of spare) {
-          if (used.has(x) || picks.some((q) => q.vid === x.vid && Math.abs(q.start - x.start) < 30)) continue;
-          const xs = await sigAt(x.cand.file, snapAt(x));
-          if (seenSigs.some((g) => apart(xs, g) < 15)) { used.add(x); continue; }   // (a scene already cut to)
-          if (apart(xs, under) < 15) continue;                                         // (the scene already on screen)
-          sp = x; spSig = xs; break;
-        }
-        if (!sp) { if (sh.cover) continue; break; }   // (none left: a covered beat keeps its cover)
-        used.add(sp); if (spSig) seenSigs.push(spSig);
-        const len = round2(sh.seconds);
-        const ov = { cand: sp.cand, style: 'cutaway', start: 0, len, pos: 'right', from: round2(clamp(snapAt(sp) - len / 2, 0, Math.max(0, sp.cand.fileDur - len - 0.05))) };
-        if (sp.snapLook && sp.snapLook.fx != null) ov.fx = round2(sp.snapLook.fx);
-        if (sh.cover) { ov.cover = true; sh.overlays = [ov]; } else sh.overlays.push(ov);
+        const first = i === speechFrom || sh.line == null || shots[i - 1].line !== sh.line;
+        if (first && !sh.cover && sh.cand && sh.cand.kind === 'video' && sh.from != null) lineSig.set(i, await sigAt(sh.cand.file, sh.from + sh.seconds / 2));
       }
+      const fresh = async () => {
+        for (const x of spare) {
+          if (used.has(x) || near(x)) continue;
+          const xs = await sigAt(x.cand.file, snapAt(x));
+          if (shown.some((g) => apart(xs, g) < 15) || [...lineSig.values()].some((g) => apart(xs, g) < 15)) { used.add(x); continue; }
+          used.add(x);
+          return { x, xs };
+        }
+        return null;
+      };
+      const firstOf = (i) => i === speechFrom || shots[i].line == null || shots[i - 1].line !== shots[i].line;
+      let cuts = 0, sameScene = 0;
+      for (let i = speechFrom; i < speechTo; i++) {
+        const sh = shots[i];
+        const first = firstOf(i);
+        let need = !first || !!sh.cover, repeat = false;
+        if (first && !sh.cover && lineSig.has(i)) {
+          const g = lineSig.get(i);
+          // (the opening line always shows its speaker)
+          if (i > speechFrom && shown.some((x) => apart(g, x) < 15)) { need = true; repeat = true; } else shown.push(g);
+        }
+        if (!need || sh.seconds < 0.6 || ((sh.overlays || []).length && !sh.cover)) continue;
+        const got = await fresh();
+        if (!got) continue;   // (none left: the speaker is seen, or a covered beat keeps its cover)
+        shown.push(got.xs);
+        const len = round2(sh.seconds);
+        const ov = { cand: got.x.cand, style: 'cutaway', start: 0, len, pos: 'right', from: round2(clamp(snapAt(got.x) - len / 2, 0, Math.max(0, got.x.cand.fileDur - len - 0.05))) };
+        if (got.x.snapLook && got.x.snapLook.fx != null) ov.fx = round2(got.x.snapLook.fx);
+        if (sh.cover || repeat) { ov.cover = true; sh.overlays = [ov]; } else sh.overlays.push(ov);
+        cuts++; if (repeat) sameScene++;
+      }
+      /*
+       * PICTURES OF THE NIGHT LAID OVER THE SPEAKERS. Where a speaker is seen (not the opening line, which carries
+       * the headline), a framed picture of another moment pops into a top corner for a second and a half — more
+       * of the event, the speaker still in view.
+       */
+      let pips = 0;
+      for (let i = speechFrom + 1; i < speechTo; i++) {
+        const sh = shots[i];
+        if (!firstOf(i) || sh.line === 0 || sh.cover || (sh.overlays || []).length || sh.seconds < 1.8) continue;
+        const got = await fresh();
+        if (!got) break;
+        shown.push(got.xs);
+        const len = round2(Math.min(1.6, sh.seconds - 0.7));
+        sh.overlays.push({ cand: got.x.cand, style: 'pip', small: true, start: 0.45, len, pos: pips % 2 ? 'left' : 'right',
+          from: round2(clamp(snapAt(got.x) - len / 2, 0, Math.max(0, got.x.cand.fileDur - len - 0.05))) });
+        pips++;
+      }
+      if (log) log(`pictures: ${cuts} cut(s) to other moments of the night${sameScene ? ` (${sameScene} for a speaker whose scene was already seen)` : ''}, ${pips} picture(s) laid over the speakers — every one distinct`);
     }
     for (let i = speechFrom + 1; i < speechTo && !longEv; i += 2) {
       const sh = shots[i];
@@ -3234,7 +3293,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
  * The whole job. `stage(name)` says what is happening (for the phone), and
  * `onProgress(pct)` how far through the whole thing it is.
  */
-async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, lengthSec, full, aspect, brief, about, keepAudio, keepOrder, output, onProgress, stage, log, mode, hear, voice, angle }) {
+async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, lengthSec, full, aspect, brief, about, keepAudio, keepOrder, output, onProgress, stage, log, mode, hear, voice, angle, clipSec }) {
   const files = (mediaPaths || []).filter((p) => p && fs.existsSync(p)).slice(0, 60);
   // the part of each video to use ("from which part to which part"), by file
   const partOf = new Map();
@@ -3250,6 +3309,8 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
       about: cleanAbout(about),
       // a take of several: the idea this one is built around (the others' lines are already marked "used before")
       angle: typeof angle === 'string' && angle.trim() ? angle.trim().slice(0, 200) : undefined,
+      // how long each picture is on screen (the AI Montage page's "Clip length": 1–3 s, 2.5 unless chosen)
+      clipSec: Number(clipSec) > 0 ? clamp(Number(clipSec), 1, 4) : undefined,
     };
     return makeTalk(ctx, getInfo, { files, parts: partOf, opts: topts, hear, musicPath, output, onProgress, stage, log, keepAudio });
   }
@@ -3297,7 +3358,7 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 
 /** Which director the montage would use right now (for the phone to say so). */
 /* which montage the server runs (montage:status says it: a quiet way to tell an update has landed) */
-const MONTAGE_REV = '2026-10-23.covers';
+const MONTAGE_REV = '2026-10-23.distinct';
 function directorStatus() {
   const st = directorStatusOf();
   st.rev = MONTAGE_REV;

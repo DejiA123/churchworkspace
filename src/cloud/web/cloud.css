@@ -2884,6 +2884,7 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .mt-ic-music { background: linear-gradient(180deg, #ff7a45, #ff3b30); }
 .mt-ic-len { background: linear-gradient(180deg, #ffb340, #ff9500); }
 .mt-ic-shape { background: linear-gradient(180deg, #4aa3ff, #0a7aff); }
+.mt-ic-clip { background: linear-gradient(180deg, #ff6b6b, #ff3b30); }
 .mt-ic-voice { background: linear-gradient(180deg, #d17bff, #af52de); }
 .mt-ic-about { background: linear-gradient(180deg, #4fd1e8, #17a2c0); }
 .mt-ic-look { background: linear-gradient(180deg, #8b88ff, #5856d6); }

@@ -256,11 +256,18 @@ async function waitUp() {
     await page.locator('#mtBrief').fill('Bishop David Richman at The Power House — faith over fear. Sunday service');
     await page.locator('#cloudMontage [data-mt-song=""]').tap();
     await sleep(200);
+    // the clip length: how long each picture stays — 2.5 s unless chosen; 1 s chosen here
+    const clip0 = await page.evaluate(() => ({ opts: [...document.querySelectorAll('#cloudMontage [data-mt-clip]')].map((b) => b.textContent), on: (document.querySelector('#cloudMontage [data-mt-clip].on') || {}).textContent,
+      label: ((document.querySelector('#cloudMontage [data-acc="clip"] .mt-val') || {}).textContent || '') }));
+    check(clip0.opts.join() === '1s,1.5s,2s,2.5s,3s' && clip0.on === '2.5s' && /2\.5s a clip/.test(clip0.label), 'a Viral montage asks how long each clip is: 1s to 3s, 2.5s unless chosen', clip0);
+    await page.evaluate(() => document.querySelector('#cloudMontage [data-mt-clip="1"]').click());
+    await sleep(150);
     await page.evaluate(() => { window.api.montage.create = async (a) => { window.__mtArgs = a; throw new Error('stopped by the test'); }; });
     if (process.env.MW_SHOTS) { await page.evaluate(() => document.getElementById('mtBrief').scrollIntoView({ block: 'center' })); await sleep(300); await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'montage-about.png'), fullPage: false }); }
     await page.locator('#cloudMontage .mt-go').tap();
     for (let i = 0; i < 60 && !(await page.evaluate(() => !!window.__mtArgs)); i++) await sleep(250);
-    const sent = await page.evaluate(() => window.__mtArgs && { brief: window.__mtArgs.brief, about: window.__mtArgs.about, ranges: window.__mtArgs.ranges });
+    const sent = await page.evaluate(() => window.__mtArgs && { brief: window.__mtArgs.brief, about: window.__mtArgs.about, ranges: window.__mtArgs.ranges, clipSec: window.__mtArgs.clipSec });
+    check(sent && sent.clipSec === 1, 'the clip length chosen goes to the server (1 s a clip)', sent && sent.clipSec);
     check(sent && JSON.stringify(sent.ranges) === JSON.stringify([{ from: 10, to: 25 }, null]), 'the part chosen goes to the server with its video (and the other video is used whole)', sent && sent.ranges);
     check(sent && /faith over fear/.test(sent.brief) && sent.about.speaker === 'Bishop David Richman' && sent.about.occasion === 'Sunday service',
       'the words go to the AI, with the speaker (spelt as written, for the captions too) and the occasion picked out', sent);

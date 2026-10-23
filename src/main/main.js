@@ -874,13 +874,14 @@ async function montageHearOnce(file, durationSec, onProgress, fromSec = 0) {
   }
   return [];
 }
-ipcMain.handle('montage:create', wrap(async (e, { mediaPaths, ranges, musicPath, style, lengthSec, full, aspect, brief, about, keepAudio, keepOrder, mode, voice, angle, jobId }) => {
+ipcMain.handle('montage:create', wrap(async (e, { mediaPaths, ranges, musicPath, style, lengthSec, full, aspect, brief, about, keepAudio, keepOrder, mode, voice, angle, clipSec, jobId }) => {
   const output = outPath(`montage-${stamp()}.mp4`);
   let pct = 0, stageName = '';
   const tell = () => { if (jobId && e && !e.sender.isDestroyed()) e.sender.send('job:progress', { jobId, percent: pct, stage: stageName }); };
   const made = await montage.make(getCtx(), video.getInfo, {
     mediaPaths, ranges, musicPath, style, lengthSec, full, aspect, brief, about, keepAudio, keepOrder, output,
     angle: angle ? String(angle).slice(0, 200) : undefined,
+    clipSec: Number(clipSec) > 0 ? Number(clipSec) : undefined,
     mode: mode === 'talk' ? 'talk' : undefined, hear: montageHear, voice: mode === 'talk' && voice ? String(voice) : null,
     onProgress: (p) => { pct = p; tell(); },
     stage: (name) => { stageName = name; tell(); },

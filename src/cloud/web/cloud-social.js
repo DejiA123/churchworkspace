@@ -2949,7 +2949,7 @@
     return `<textarea id="mtBrief" class="mt-brief" rows="2" maxlength="400" placeholder="e.g. Bishop David Richman at The Power House — faith over fear. Join us Sundays at 10am">${esc(MT.brief)}</textarea>
         <div class="mt-ideas mi-off">${ideas.map(([v, l]) => `<button type="button" class="mt-chip${mtHas(MT.brief, v) ? ' on' : ''}" data-mt-idea="${escAttr(v)}">${esc(l)}</button>`).join('')}</div>`;
   }
-  const MT = { items: [], song: null, songFile: null, style: 'hype', len: 30, custom: 120, aspect: '9:16', keep: true, brief: '', busy: false, order: 'ai', caps: true, mode: 'talk', free: null, freeMood: null, voice: '',
+  const MT = { items: [], song: null, songFile: null, style: 'hype', len: 30, clip: 2.5, custom: 120, aspect: '9:16', keep: true, brief: '', busy: false, order: 'ai', caps: true, mode: 'talk', free: null, freeMood: null, voice: '',
     acc: new Set() };   // the rows of "Fine-tune" that are open (kept across redraws)
   /* which free mood suits which style, for "✨ Pick for me" */
   const MT_MOOD_OF = { hype: 'hype', fun: 'upbeat', cinematic: 'epic', worship: 'uplift', emotional: 'calm' };
@@ -2968,6 +2968,8 @@
     music: { sub: 'Your clips and photos one after another, with music and words' },
   };
   const MT_TALK_LENS = [[15, '15s'], [30, '30s'], [45, '45s'], [60, '60s'], ['custom', 'Custom']];
+  /* a Viral montage: how long each picture is on screen before it cuts to the next (the words carry on) */
+  const MT_CLIPS = [[1, '1s'], [1.5, '1.5s'], [2, '2s'], [2.5, '2.5s'], [3, '3s']];
   const MT_ORDERS = [['ai', 'AI decides'], ['mine', 'My order']];
   const MT_STYLES = [['hype', 'Hype'], ['worship', 'Worship'], ['emotional', 'Emotional'], ['cinematic', 'Cinematic'], ['fun', 'Fun']];
   const MT_LENS = [['all', 'All'], [15, '15s'], [30, '30s'], [45, '45s'], [60, '60s'], ['custom', 'Custom']];
@@ -3025,6 +3027,7 @@
     return {
       music,
       len: MT.len === 'all' ? 'All of it' : MT.len === 'custom' ? mtClock(MT.custom) : MT.len + ' sec',
+      clip: MT.clip + 's a clip',
       shape: (MT_ASPECTS.find(([v]) => v === MT.aspect) || ['', MT.aspect])[1],
       voice: !MT.voice ? 'None' : ((voices.find((x) => x.id === MT.voice) || {}).label || 'On'),
       about: MT.brief ? MT.brief : 'Optional',
@@ -3079,6 +3082,8 @@
     const lenBody = `${seg(talk ? MT_TALK_LENS : MT_LENS, MT.len, 'len')}
         ${MT.len === 'custom' ? `<div class="mt-custom"><label><input type="number" id="mtMin" inputmode="numeric" min="0" max="10" value="${Math.floor(MT.custom / 60)}" /><span>min</span></label>
           <label><input type="number" id="mtSec" inputmode="numeric" min="0" max="59" step="5" value="${MT.custom % 60}" /><span>sec</span></label></div>` : ''}`;
+    const clipBody = `${seg(MT_CLIPS, MT.clip, 'clip')}
+        <small class="mt-hint">How long each picture stays before it cuts to another moment of the event — the words carry on.</small>`;
     const shapeBody = `<div class="mt-shapes">${MT_ASPECTS.map(([v, l]) => { const [w, h] = mtBox(v); return `<button type="button" class="mt-shape${MT.aspect === v ? ' on' : ''}" data-mt-aspect="${attr(v)}">
         <span class="mt-shape-pic"><i style="width:${w}px;height:${h}px"></i></span><b>${esc(l)}</b><small>${esc(v)}</small></button>`; }).join('')}</div>`;
     const voiceBody = who.voiceover && who.voiceover.installed ? mtVoiceHtml(who.voiceover.voices || [])
@@ -3101,6 +3106,7 @@
         <div class="mt-group">
           ${row('music', 'music', 'Music', V.music, mtMusicHtml() + keepRow)}
           ${row('len', 'hourglass', 'Length', V.len, lenBody)}
+          ${talk ? row('clip', 'scissors', 'Clip length', V.clip, clipBody) : ''}
           ${row('shape', 'crop', 'Shape', V.shape, shapeBody)}
           ${talk ? row('voice', 'mic', 'Narrator', V.voice, voiceBody) : ''}
           ${row('about', 'pen', 'What it’s about', V.about, mtAboutHtml())}
@@ -3254,7 +3260,7 @@
         C.closePanel(p, true);
         return editMontage(op);
       }
-      const b = e.target.closest('[data-mt],[data-mt-part],[data-mt-del],[data-mt-song],[data-mt-style],[data-mt-len],[data-mt-aspect],[data-mt-order],[data-mt-mode],[data-mt-voice],[data-mt-free],[data-mt-mood],[data-mt-idea],[data-mt-tab],[data-mt-play],[data-mt-all]');
+      const b = e.target.closest('[data-mt],[data-mt-part],[data-mt-del],[data-mt-song],[data-mt-style],[data-mt-len],[data-mt-clip],[data-mt-aspect],[data-mt-order],[data-mt-mode],[data-mt-voice],[data-mt-free],[data-mt-mood],[data-mt-idea],[data-mt-tab],[data-mt-play],[data-mt-all]');
       if (!b || MT.busy || mtDrag.just) return;
       const d = b.dataset;
       if (d.mtOrder) { MT.order = d.mtOrder; return mtPaint(); }
@@ -3293,6 +3299,7 @@
       }
       if (d.mtStyle) { MT.style = d.mtStyle; return mtPaint(); }
       if (d.mtLen) { MT.len = d.mtLen === 'all' || d.mtLen === 'custom' ? d.mtLen : +d.mtLen; return mtPaint(); }
+      if (d.mtClip) { MT.clip = +d.mtClip || 2.5; return mtPaint(); }
       if (d.mtAspect) { MT.aspect = d.mtAspect; return mtPaint(); }
       if (d.mt === 'add') {
         const pick = document.getElementById('mtPick');
@@ -3779,7 +3786,7 @@
         ranges: talk ? MT.items.map((it) => (it.kind === 'video' && mtHasPart(it) ? { from: it.from || 0, to: it.to || 0 } : null)) : undefined,
         lengthSec: MT.len === 'all' ? 0 : MT.len === 'custom' ? MT.custom : MT.len, full: MT.len === 'all',
         aspect: MT.aspect, brief: MT.brief, about: mtAboutOf(MT.brief), keepAudio: talk ? true : MT.keep, keepOrder: !talk && MT.order === 'mine', jobId,
-        mode: talk ? 'talk' : undefined, voice: talk && MT.voice ? MT.voice : undefined,
+        mode: talk ? 'talk' : undefined, voice: talk && MT.voice ? MT.voice : undefined, clipSec: talk ? MT.clip : undefined,
       };
       const res = await window.api.montage.create(Object.assign({}, args, { jobId }));
       // a Viral montage: two more takes of the same video, made after it (the listening is not done again)

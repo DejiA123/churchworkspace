@@ -4137,11 +4137,13 @@
         // the montage's box: up to half the width (a third on a wide frame) and a
         // third of the height, in a 6 px white frame whose outside edge is 44 px
         // in from its side and 11% down (montage.js renderPiece)
+        // (a picture laid over a Viral montage's speaker — "small" — is bigger and sits lower: below the face,
+        //  above the captions: 56% of the width, 30% of the height, 47% down)
         const ar = info.width / info.height;
-        const bw = Math.min(vw * (vw > vh ? 0.34 : 0.5), vh * 0.34 * ar);
+        const bw = Math.min(vw * (vw > vh ? 0.34 : (o.small ? 0.56 : 0.5)), vh * (o.small ? 0.3 : 0.34) * ar);
         s.pipW = bw / vw;
         s.pipX = o.pos === 'left' ? 50 / vw : 1 - s.pipW - 50 / vw;
-        s.pipY = (Math.round(vh * 0.11) + 6) / vh;
+        s.pipY = (Math.round(vh * (o.small ? 0.47 : 0.11)) + 6) / vh;
         s.frame = 6 / vw;
       } else if (o.style === 'snapshot') {
         // the montage's snapshot: a still in a white border, in the middle (montage.js
