@@ -2506,8 +2506,9 @@ async function writeTalkPost(picks, opts, P, hook) {
         + (opts.brief ? `\nThe church's own notes (background only — do not copy them): ${cleanBrief(opts.brief)}` : '')
         + `\nStyle of the video: ${opts.style}.`;
       // the post too: AssemblyAI's model when it is set up (Groq is not used for montages then)
-      const text = viaAai ? await ai.chat({ system: POST_SYSTEM, prompt, json: true, maxTokens: 900, temperature: 0.8, timeoutMs: 60000 })
-        : await cw.chat({ system: POST_SYSTEM, prompt, json: true, maxTokens: 700, temperature: 0.8, timeoutMs: 45000, evenIfOff: true });
+      let text = viaAai ? await ai.chat({ system: POST_SYSTEM, prompt, json: true, maxTokens: 900, temperature: 0.8, timeoutMs: 60000 }) : '';
+      // (AssemblyAI without a big model on the account: Groq writes it)
+      if (!text && cw.access && cw.access().key) text = await cw.chat({ system: POST_SYSTEM, prompt, json: true, maxTokens: 700, temperature: 0.8, timeoutMs: 45000, evenIfOff: true });
       const j = text ? cw.parseJson(text) : null;
       const cap = j && String(j.caption || '').trim();
       if (cap && cap.length >= 40) return { caption: cap, hashtags: tags(j.hashtags).length ? tags(j.hashtags) : tags(P.hashtags) };

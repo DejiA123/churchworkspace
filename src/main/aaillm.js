@@ -23,6 +23,8 @@ const PREFER = [/claude.*opus/i, /claude.*sonnet/i, /gpt-5(?!.*(mini|nano))/i, /
 // the gateway's documented models, for when it will not list its own (no models endpoint is documented)
 const KNOWN = ['claude-sonnet-4-6', 'claude-sonnet-4.6', 'claude-sonnet-4-5-20250929', 'gpt-5', 'gemini-2.5-pro'];
 let listed = null, listedAt = 0, benched = new Map();
+// (a part of the name, not letters inside one: "gemini" holds "mini")
+const strong = (id) => PREFER.some((rx) => rx.test(id)) && !/(?:^|[-_./:])(mini|nano|lite|haiku|tiny|small|fast)(?=$|[-_./:])|\b\d{1,2}(\.\d)?b\b/i.test(id);
 
 async function req(path, body, timeoutMs) {
   const ac = new AbortController();
@@ -51,6 +53,11 @@ async function models() {
   let ids = [];
   try { const j = await req('/v1/models', null, 30000); ids = ((j && j.data) || []).map((m) => m.id).filter(Boolean); } catch (e) { ids = []; }
   const rank = (id) => { const i = PREFER.findIndex((rx) => rx.test(id)); return i < 0 ? 99 : i; };
+  // only a big editor: a small fast model (on Gospel Jamz the account reached only "qwen3.5-4b-32k-fast") picked
+  // scraps — none at all is better, and Groq's larger model picks instead
+  const listedAny = ids.length > 0;
+  ids = ids.filter(strong);
+  if (listedAny && !ids.length) { listed = []; listedAt = Date.now(); return listed; }   // (a list of only small ones: none)
   // newest first within a family (a higher version number in the id)
   const ver = (id) => { const m = String(id).match(/(\d+(?:[.-]\d+)?)/g); return m ? parseFloat(String(m[m.length - 1]).replace('-', '.')) : 0; };
   if (!ids.length) return KNOWN.slice();                             // not cached: asked again next time
@@ -67,6 +74,7 @@ async function chat({ system, prompt, maxTokens = 4000, temperature = 0.8, json 
   if (!ready()) return '';
   tries = [];
   const want = process.env.MW_AAI_LLM_MODEL ? [process.env.MW_AAI_LLM_MODEL] : (await models()).filter((m) => !(benched.get(m) > Date.now())).slice(0, 8);
+  if (!want.length) { last = { ok: false, model: '', why: 'no big model on this AssemblyAI account (only small ones) — Groq picks instead', at: Date.now() }; return ''; }
   for (const model of want) {
     try {
       const body = { model, messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }], max_tokens: maxTokens, temperature };
@@ -98,4 +106,4 @@ async function chat({ system, prompt, maxTokens = 4000, temperature = 0.8, json 
 let last = null, tries = [];
 const state = () => ({ ready: ready(), last, tries: tries.slice(-6) });
 
-module.exports = { ready, chat, models, state, PREFER, KNOWN, _reset: () => { listed = null; benched = new Map(); } };
+module.exports = { ready, chat, models, state, PREFER, KNOWN, strong, _reset: () => { listed = null; benched = new Map(); } };

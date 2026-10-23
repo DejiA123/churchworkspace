@@ -11,11 +11,12 @@ let pass = 0, fail = 0;
 const check = (ok, name, d) => { console.log((ok ? '  PASS ' : '  FAIL ') + name + (d !== undefined && !ok ? '  -> ' + JSON.stringify(d) : '')); ok ? pass++ : fail++; };
 (async () => {
   const seen = [];
-  let broken = new Set(), noList = false, picky = false;
+  let broken = new Set(), noList = false, picky = false, onlySmall = false;
   const srv = http.createServer((req, res) => {
     let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => {
       seen.push({ url: req.url, auth: req.headers.authorization, body: b ? JSON.parse(b) : null });
       const json = (o, code = 200) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
+      if (req.url === '/v1/models' && onlySmall) return json({ data: [{ id: 'qwen3.5-4b-32k-fast' }, { id: 'gpt-5-mini' }, { id: 'claude-haiku-4-5' }] });
       if (req.url === '/v1/models') return noList ? json({ error: 'Not Found' }, 404) : json({ data: [{ id: 'gpt-4.1-mini' }, { id: 'claude-sonnet-4-5' }, { id: 'claude-3-haiku' }, { id: 'claude-sonnet-4-20250514' }, { id: 'gemini-2.5-flash' }] });
       if (req.url === '/v1/chat/completions') {
         const m = JSON.parse(b).model;
@@ -57,6 +58,12 @@ const check = (ok, name, d) => { console.log((ok ? '  PASS ' : '  FAIL ') + name
   const asked = seen.filter((x) => x.body && x.body.messages && x.body.messages[1].content === 'picky');
   check(/"picks"/.test(out4) && asked.length === 3 && new Set(asked.map((x) => x.body.model)).size === 1 && /temperature: not allowed/.test(ai.state().tries[0].why),
     'a model that refuses the request body is asked again plainer (and why is kept)', { n: asked.length, tries: ai.state().tries });
+  // an account that reaches only small fast models: none is asked — Groq's larger model picks instead
+  ai._reset(); picky = false; noList = false; onlySmall = true;
+  const n0 = seen.filter((x) => x.url === '/v1/chat/completions').length;
+  const out5 = await ai.chat({ system: 'sys', prompt: 'small only' });
+  check(out5 === '' && seen.filter((x) => x.url === '/v1/chat/completions').length === n0 && /no big model/.test(ai.state().last.why) && ai.strong('gemini-2.5-pro') && !ai.strong('qwen3.5-4b-32k-fast'),
+    'only small models on the account (a 4B "fast" one picked scraps): none is asked, and it says why', ai.state().last);
   srv.close();
   console.log(`\n${pass} PASS / ${fail} FAIL`);
   process.exit(fail ? 1 : 0);
