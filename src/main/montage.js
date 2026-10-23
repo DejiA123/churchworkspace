@@ -3296,7 +3296,14 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 }
 
 /** Which director the montage would use right now (for the phone to say so). */
+/* which montage the server runs (montage:status says it: a quiet way to tell an update has landed) */
+const MONTAGE_REV = '2026-10-23.covers';
 function directorStatus() {
+  const st = directorStatusOf();
+  st.rev = MONTAGE_REV;
+  return st;
+}
+function directorStatusOf() {
   if (process.env.ANTHROPIC_API_KEY) return { director: 'claude', model: process.env.MW_MONTAGE_MODEL || 'claude-opus-5-5' };
   try {
     if (require('./aaillm').ready()) { let vision = false; try { const cw = require('./cloudwrite'); vision = !!(cw.access && cw.access().key); } catch (e) {} return { director: 'assemblyai', model: '', vision, last: require('./aaillm').state().last, tries: require('./aaillm').state().tries }; }
