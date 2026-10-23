@@ -2203,6 +2203,9 @@ async function someoneEverywhere(ctx, file, shots, log, fix = true, alt = null) 
     // (a long event: another lively moment of the night that has not been seen yet takes its place — falling back to
     //  the speaker brought the opening speaker back twice)
     if (o && o.cover && o.fixed) continue;   // (already covered on an earlier look)
+    // (a moment of the night that passed every check on its own picture — a face, moving, lit, no slide — stands: the
+    //  detector on the tall finished frame missed a singer in black on a white backdrop, and took a good cut away)
+    if (o && o.checked) continue;
     const fresh = alt ? await alt(o ? o.len : sh.seconds) : null;
     if (o && !o.cover) {
       if (fresh) { sh.overlays[sh.overlays.indexOf(o)] = Object.assign(fresh, { start: o.start, len: o.len, pos: o.pos }); fixed++; continue; }
@@ -3020,7 +3023,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     const longEv = (opts.eventSec || 0) >= LONG_EVENT_SEC;
     if (longEv) {
       // (enough moments for a new picture every clip — and the pictures laid over the speakers)
-      const parts = Math.max(partsFor(opts) * 2, Math.ceil((opts.lengthSec / (opts.clipSec || MOMENT_EACH)) * 1.8)), far = (p) => !picks.some((q) => q.vid === p.vid && Math.abs(q.start - p.start) < 30);
+      const parts = Math.max(partsFor(opts) * 2, Math.ceil((opts.lengthSec / (opts.clipSec || MOMENT_EACH)) * 3)), far = (p) => !picks.some((q) => q.vid === p.vid && Math.abs(q.start - p.start) < 30);
       const span = Math.max(1, ...phrases.map((p) => p.end)), across = [];
       for (let k = 0; k < parts; k++) {
         const best = spare.filter((p) => far(p) && p.start >= k * span / parts && p.start < (k + 1) * span / parts)[0];   // (spare is in score order)
@@ -3232,7 +3235,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         if (!got) continue;   // (none left: the speaker is seen, or a covered beat keeps its cover)
         shown.push(got.xs);
         const len = round2(sh.seconds);
-        const ov = { cand: got.x.cand, style: 'cutaway', start: 0, len, pos: 'right', from: round2(clamp(snapAt(got.x) - len / 2, 0, Math.max(0, got.x.cand.fileDur - len - 0.05))) };
+        const ov = { cand: got.x.cand, style: 'cutaway', start: 0, len, pos: 'right', checked: true, from: round2(clamp(snapAt(got.x) - len / 2, 0, Math.max(0, got.x.cand.fileDur - len - 0.05))) };
         if (got.x.snapLook && got.x.snapLook.fx != null) ov.fx = round2(got.x.snapLook.fx);
         if (sh.cover || repeat) { ov.cover = true; sh.overlays = [ov]; } else sh.overlays.push(ov);
         cuts++; if (repeat) sameScene++;
@@ -3246,7 +3249,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         const got = await fresh();
         if (!got) return null;
         shown.push(got.xs);
-        const ov = { cand: got.x.cand, style: 'cutaway', start: 0, len: round2(len), pos: 'right', from: round2(clamp(snapAt(got.x) - len / 2, 0, Math.max(0, got.x.cand.fileDur - len - 0.05))) };
+        const ov = { cand: got.x.cand, style: 'cutaway', start: 0, len: round2(len), pos: 'right', checked: true, from: round2(clamp(snapAt(got.x) - len / 2, 0, Math.max(0, got.x.cand.fileDur - len - 0.05))) };
         if (got.x.snapLook && got.x.snapLook.fx != null) ov.fx = round2(got.x.snapLook.fx);
         return ov;
       };
@@ -3258,7 +3261,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         if (!got) break;
         shown.push(got.xs);
         const len = round2(Math.min(1.6, sh.seconds - 0.7));
-        sh.overlays.push({ cand: got.x.cand, style: 'pip', small: true, start: 0.45, len, pos: pips % 2 ? 'left' : 'right',
+        sh.overlays.push({ cand: got.x.cand, style: 'pip', small: true, checked: true, start: 0.45, len, pos: pips % 2 ? 'left' : 'right',
           from: round2(clamp(snapAt(got.x) - len / 2, 0, Math.max(0, got.x.cand.fileDur - len - 0.05))) });
         pips++;
       }
@@ -3409,7 +3412,7 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 
 /** Which director the montage would use right now (for the phone to say so). */
 /* which montage the server runs (montage:status says it: a quiet way to tell an update has landed) */
-const MONTAGE_REV = '2026-10-23.lively';
+const MONTAGE_REV = '2026-10-23.lively2';
 function directorStatus() {
   const st = directorStatusOf();
   st.rev = MONTAGE_REV;
