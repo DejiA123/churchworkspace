@@ -164,9 +164,10 @@ const peopleSystemFor = (n) => [
   'Faces on posters, screens, backdrops or photos on the wall are NOT people.',
   'screen: true when the picture is mostly a projected slide, a screen, or a video playing inside a frame or box on a slide — not the live room itself; otherwise false.',
   'away: true when the people seen are mostly turned away from the camera (their backs, or the back of their heads); otherwise false.',
+  'action: true when someone is clearly DOING something — preaching or speaking into a microphone, singing, dancing, playing an instrument, hands raised in worship, the crowd clapping or jumping; false when people only sit or stand still, listening or waiting.',
   'giving: true when the frame shows bank details, an IBAN or account number, a QR code, or a giving / donation / offering slide (on a screen behind the speaker too); otherwise false.',
   'facing: true when a real person\'s FACE can clearly be seen (the speaker, a singer, someone looking out). false when the only people are seen from behind (the backs of heads in the audience), hidden behind others, in silhouette, or only on a screen, slide or video playing on a wall.',
-  `Reply with compact JSON only, on one line: {"frames":[{"frame":"A","people":<0..9>,"column":<0..${n}>,"left":<0..${n}>,"right":<0..${n}>,"facing":<true|false>,"giving":<true|false>,"screen":<true|false>,"away":<true|false>,"sure":<true|false>}]}`,
+  `Reply with compact JSON only, on one line: {"frames":[{"frame":"A","people":<0..9>,"column":<0..${n}>,"left":<0..${n}>,"right":<0..${n}>,"facing":<true|false>,"action":<true|false>,"giving":<true|false>,"screen":<true|false>,"away":<true|false>,"sure":<true|false>}]}`,
 ].join('\n');
 
 /** The first balanced JSON object in a reply (models wrap JSON in fences and prose). */
@@ -221,7 +222,7 @@ async function ask({ image, frames, columns = 8, maxWaitMs = 45000, people = fal
     const model = list[k];
     const body = Object.assign({
       // (the people question answers more per frame — its span — so it gets more room, or a full grid is cut short)
-      model, temperature: 0, max_tokens: people ? 90 + 110 * frames.length : 60 + 40 * frames.length,
+      model, temperature: 0, max_tokens: people ? 90 + 125 * frames.length : 60 + 40 * frames.length,
       messages: [
         { role: 'system', content: people ? peopleSystemFor(columns) : systemFor(columns) },
         { role: 'user', content: [
@@ -268,6 +269,7 @@ async function ask({ image, frames, columns = 8, maxWaitMs = 45000, people = fal
           if (typeof r.facing === 'boolean') answers[L].facing = count === 0 ? false : r.facing;
           if (r.giving === true) answers[L].giving = true;
           if (r.screen === true) answers[L].screen = true;
+          if (typeof r.action === 'boolean') answers[L].action = count === 0 ? false : r.action;
           if (r.away === true) answers[L].away = true;
           // how far the person reaches across, when given sensibly round their head
           const lf = Math.round(Number(r.left)), rt = Math.round(Number(r.right));

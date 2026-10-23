@@ -1431,6 +1431,10 @@ async function render(ctx, plan, { aspect, keepAudio, output, base, tmp, onProgr
       const t0 = Date.now();
       const out = path.join(tmp, `shot-${String(i).padStart(3, '0')}${tag}.mp4`);
       const key = pieceKey(shot, plan.shots[i + 1], W, H, keepAudio);
+      // (a piece is a HARD LINK to the cache: cut again into the same name — a shot changed by the someone-in-every-second
+      //  check — it overwrote the cached copy of the shot as it WAS, and the next montage got a speaker where a cutaway was.
+      //  The old name is let go first, so a new piece is always a new file)
+      try { fs.unlinkSync(out); } catch (e) { /* not there yet */ }
       if (!fromCache(key, out)) {
         await renderShot(ctx, shot, W, H, keepAudio, out, plan.shots[i + 1]);
         toCache(key, out);
@@ -1485,7 +1489,7 @@ function fileSig(f) { try { const st = fs.statSync(f); return st.size + ':' + Ma
 function pieceKey(s, next, W, H, keepAudio) {
   const c = s.cand;
   return crypto.createHash('sha1').update(JSON.stringify({
-    v: 4, f: c.file, sig: fileSig(c.file), k: c.kind, w: c.w, h: c.h, a: !!c.hasAudio,
+    v: 5, f: c.file, sig: fileSig(c.file), k: c.kind, w: c.w, h: c.h, a: !!c.hasAudio,
     sec: s.seconds, from: s.from, need: s.need, e: s.effect, fo: s.focus, fx: s.fx == null ? null : s.fx, fx2: s.fx2 == null ? null : s.fx2, sl: !!s.slow, tr: s.transition, nt: next ? next.transition : null, gr: s.grade || null, mu: !!s.mute,
     ov: (s.overlays || []).map((o) => [o.cand.file, fileSig(o.cand.file), o.cand.kind, o.cand.w, o.cand.h, o.style, o.start, o.len, o.pos, o.from, o.fx == null ? null : o.fx, !!o.cover, !!o.small]),
     W, H, keepAudio: !!keepAudio, enc: encodeOpts(),
@@ -2150,7 +2154,7 @@ function talkByRules(list, opts) {
  * a moment of the edit that WAS seen to show someone (the words carry on
  * underneath). Returns the number of fixes (0: nothing to do).
  */
-async function someoneEverywhere(ctx, file, shots, log, fix = true) {
+async function someoneEverywhere(ctx, file, shots, log, fix = true, alt = null) {
   let pd = null;
   try { pd = require('./persondetect'); } catch (e) { pd = null; }
   if (!pd || !pd.available()) return 0;
@@ -2196,9 +2200,17 @@ async function someoneEverywhere(ctx, file, shots, log, fix = true) {
     const sh = shotAt(t);
     if (!sh) continue;
     const o = overAt(sh, t);
-    if (o && !o.cover) { sh.overlays.splice(sh.overlays.indexOf(o), 1); fixed++; continue; }
+    // (a long event: another lively moment of the night that has not been seen yet takes its place — falling back to
+    //  the speaker brought the opening speaker back twice)
     if (o && o.cover && o.fixed) continue;   // (already covered on an earlier look)
-    const pool = seen.filter((m) => m.sh !== sh);
+    const fresh = alt ? await alt(o ? o.len : sh.seconds) : null;
+    if (o && !o.cover) {
+      if (fresh) { sh.overlays[sh.overlays.indexOf(o)] = Object.assign(fresh, { start: o.start, len: o.len, pos: o.pos }); fixed++; continue; }
+      sh.overlays.splice(sh.overlays.indexOf(o), 1); fixed++; continue;
+    }
+    if (fresh) { sh.overlays = [Object.assign(fresh, { start: 0, len: sh.seconds, cover: true, fixed: true })]; fixed++; continue; }
+    // (else a moment of the edit that WAS seen — never from this beat or the ones either side of it)
+    const pool = seen.filter((m) => m.sh !== sh && Math.abs((m.sh.at || 0) - (sh.at || 0)) > 6);
     const m = pool.length ? pool[cm++ % pool.length] : null;
     if (!m) continue;
     // (a cover that itself showed no one — a moment of the night that was a promo graphic — is replaced the same way)
@@ -2275,6 +2287,19 @@ let lookRun = 0;
  * always moves (the mouth, the hands, the camera's own grain). A stage too dark
  * to see is measured the same way. { still, dark, diff, luma }.
  */
+/** How much the picture moves round source time `t` (mean grey change between frames 0.3 s apart, the calmer of two
+ *  pairs — a cut in one pair is not movement). Gospel Jamz: a panel sitting still 0.5–1.3, dancing 13.6. */
+async function motionAt(ctx, file, t) {
+  const grab = async (x) => {
+    const r = await collect(ctx.ffmpeg, ['-hide_banner', '-loglevel', 'error', '-ss', String(Math.max(0, x)), '-i', file, '-frames:v', '1', '-vf', 'scale=64:36,format=gray', '-f', 'rawvideo', '-'], { stdout: true, maxBytes: 1 << 16 });
+    return r && r.stdout && r.stdout.length >= 2304 ? r.stdout : null;
+  };
+  const d = (a, b) => { if (!a || !b) return null; let s = 0; for (let j = 0; j < 2304; j++) s += Math.abs(a[j] - b[j]); return s / 2304; };
+  const p1 = d(await grab(t - 0.5), await grab(t - 0.2)), p2 = d(await grab(t + 0.1), await grab(t + 0.4));
+  const v = [p1, p2].filter((x) => x != null);
+  return v.length ? round2(Math.min(...v)) : null;
+}
+
 async function stillOrDark(ctx, p) {
   const dur = p.end - p.start;
   if (!(dur > 1.2) || !p.cand || !p.cand.file) return null;
@@ -2382,6 +2407,7 @@ async function lookAt(ctx, reqs, tmp, log, { people = true, max = Infinity, fram
       if (typeof a.facing === 'boolean') out[r.i].facing = a.facing;
       if (a.giving) out[r.i].giving = true;
       if (a.screen) out[r.i].screen = true;
+      if (typeof a.action === 'boolean') out[r.i].action = a.action;
       if (a.away) out[r.i].away = true;
       if (!(a.column > 0)) return;
       // the column's middle on the ruled tile → across the clip's own picture (a tile pads a clip of another shape)
@@ -3008,16 +3034,22 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       top.forEach((sp, i) => { sp.snapLook = got[i]; });
       if (longEv) for (const sp of top) { if (!(sp.snapLook && sp.snapLook.people > 0) || sp.snapLook.weak || sp.snapLook.facing === false) continue; try { sp.vis = sp.vis || await stillOrDark(ctx, sp); } catch (e) { if (e instanceof jobs.CancelledError) throw e; } }
       const good = top.filter((sp) => longEv
-        ? !!(sp.snapLook && sp.snapLook.people > 0 && !sp.snapLook.weak && sp.snapLook.facing !== false && !sp.snapLook.giving && !sp.snapLook.screen && !sp.snapLook.away && sp.vis && !sp.vis.still && !sp.vis.dark && !sp.vis.crowd && !sp.vis.framed)
+        ? !!(sp.snapLook && sp.snapLook.people > 0 && !sp.snapLook.weak && sp.snapLook.facing !== false && !sp.snapLook.giving && !sp.snapLook.screen && !sp.snapLook.away && sp.snapLook.action !== false && sp.vis && !sp.vis.still && !sp.vis.dark && !sp.vis.crowd && !sp.vis.framed)
         : !(sp.snapLook && (sp.snapLook.people === 0 || sp.snapLook.giving)));
-      // (the few used are spread over the WHOLE event — not the first hour's — and play in the order they happened)
+      /*
+       * ►► NEVER SOMEONE JUST SITTING THERE. ◄◄ "Someone just sitting down not talking — that is boring." A moment
+       * of the night is only cut to when something is HAPPENING in it: how much the picture moves round the
+       * frame that was checked (measured on Gospel Jamz: a panel sitting still 0.5–1.3, speakers addressing the
+       * room 1.3–3, a singer 5.4, worship 7.2, dancing 13.6). Under 1.5 it is not used; the liveliest go first.
+       */
       if (longEv) {
-        good.sort((a, b) => a.vid - b.vid || a.start - b.start);
-        const k = Math.min(good.length, Math.max(2, picks.length + 1));
-        const even = k < 2 ? good.slice() : Array.from({ length: k }, (_, j) => good[Math.round(j * (good.length - 1) / (k - 1))]);
-        const restOf = good.filter((p) => !even.includes(p));
-        good.length = 0; good.push(...new Set(even), ...restOf);
+        for (const sp of good) { try { sp.motion = await motionAt(ctx, sp.cand.file, snapAt(sp)); } catch (e) { if (e instanceof jobs.CancelledError) throw e; sp.motion = null; } }
+        const lively = good.filter((sp) => sp.motion == null || sp.motion >= 1.5);
+        if (log && lively.length < good.length) log(`people: ${good.length - lively.length} moment(s) of people sitting still were left out`);
+        good.length = 0; good.push(...lively.sort((a, b) => (b.motion || 0) - (a.motion || 0)));
       }
+      // (the few used are spread over the WHOLE event — not the first hour's — and play in the order they happened)
+      // (a long event: the liveliest first — sorted above; every picture is still checked to be distinct below)
       if (log && good.length < top.length) log(`people: ${top.length - good.length} B-roll moment(s) showed nobody and were left out`);
       spare.length = 0; spare.push(...good);
     }
@@ -3135,7 +3167,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       }
     }
     if (covered && log) log(`people: ${covered} beat(s) that cut away to nobody are covered with a moment that shows someone`);
-    let bi = 0, sb = 0;
+    let bi = 0, sb = 0, altMoment = null;
     /*
      * A LONG EVENT: A NEW PICTURE EVERY BEAT (about MOMENT_EACH seconds). Each line opens on its speaker; every
      * beat after that is covered whole by a moment from another part of the night — checked to show a face, lit,
@@ -3182,7 +3214,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         return null;
       };
       const firstOf = (i) => i === speechFrom || shots[i].line == null || shots[i - 1].line !== shots[i].line;
-      let cuts = 0, sameScene = 0;
+      let cuts = 0, sameScene = 0, still = 0;
       for (let i = speechFrom; i < speechTo; i++) {
         const sh = shots[i];
         const first = firstOf(i);
@@ -3190,7 +3222,10 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         if (first && !sh.cover && lineSig.has(i)) {
           const g = lineSig.get(i);
           // (the opening line always shows its speaker)
-          if (i > speechFrom && shown.some((x) => apart(g, x) < 15)) { need = true; repeat = true; } else shown.push(g);
+          if (i > speechFrom && shown.some((x) => apart(g, x) < 15)) { need = true; repeat = true; }
+          // (a speaker's own picture that barely moves — a wide shot of a panel sitting still — is covered by a lively moment)
+          else if (i > speechFrom && sh.cand.kind === 'video' && ((m) => m != null && m < 0.8)(await motionAt(ctx, sh.cand.file, sh.from + sh.seconds / 2).catch(() => null))) { need = true; repeat = true; still++; }
+          else shown.push(g);
         }
         if (!need || sh.seconds < 0.6 || ((sh.overlays || []).length && !sh.cover)) continue;
         const got = await fresh();
@@ -3207,6 +3242,14 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
        * the headline), a framed picture of another moment pops into a top corner for a second and a half — more
        * of the event, the speaker still in view.
        */
+      altMoment = async (len) => {
+        const got = await fresh();
+        if (!got) return null;
+        shown.push(got.xs);
+        const ov = { cand: got.x.cand, style: 'cutaway', start: 0, len: round2(len), pos: 'right', from: round2(clamp(snapAt(got.x) - len / 2, 0, Math.max(0, got.x.cand.fileDur - len - 0.05))) };
+        if (got.x.snapLook && got.x.snapLook.fx != null) ov.fx = round2(got.x.snapLook.fx);
+        return ov;
+      };
       let pips = 0;
       for (let i = speechFrom + 1; i < speechTo; i++) {
         const sh = shots[i];
@@ -3219,7 +3262,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           from: round2(clamp(snapAt(got.x) - len / 2, 0, Math.max(0, got.x.cand.fileDur - len - 0.05))) });
         pips++;
       }
-      if (log) log(`pictures: ${cuts} cut(s) to other moments of the night${sameScene ? ` (${sameScene} for a speaker whose scene was already seen)` : ''}, ${pips} picture(s) laid over the speakers — every one distinct`);
+      if (log) log(`pictures: ${cuts} cut(s) to other moments of the night${sameScene ? ` (${sameScene} for a speaker whose scene was already seen or barely moved${still ? `, ${still} of them still` : ''})` : ''}, ${pips} picture(s) laid over the speakers — every one distinct`);
     }
     for (let i = speechFrom + 1; i < speechTo && !longEv; i += 2) {
       const sh = shots[i];
@@ -3269,11 +3312,13 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     // someone in every second: the finished video is looked at, and cut again once where it showed no one
     if (stage) stage('👀 Checking someone is seen in every second…');
     let fixes = 0;
-    try { fixes = await someoneEverywhere(ctx, output, shots, log); } catch (e) { if (e instanceof jobs.CancelledError) throw e; if (log) log('check: ' + e.message); }
-    if (fixes) {
+    try { fixes = await someoneEverywhere(ctx, output, shots, log, true, altMoment); } catch (e) { if (e instanceof jobs.CancelledError) throw e; if (log) log('check: ' + e.message); }
+    // (twice at most: a moment brought in can itself be one the detector cannot see anyone in)
+    for (let round = 0; fixes && round < 2; round++) {
       if (stage) stage('✂️ Cutting again, with someone in every second…');
       await render(ctx, plan, { aspect: opts.aspect, keepAudio: true, output, base: baseOf(output), tmp, onProgress: say(90, 97) });
-      try { await someoneEverywhere(ctx, output, shots, log, false); } catch (e) { if (e instanceof jobs.CancelledError) throw e; }
+      fixes = 0;
+      try { fixes = await someoneEverywhere(ctx, output, shots, log, round === 0, altMoment); } catch (e) { if (e instanceof jobs.CancelledError) throw e; }
     }
     const voices = [vo.intro, vo.outro].filter(Boolean);
     if (voices.length) {
@@ -3364,7 +3409,7 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 
 /** Which director the montage would use right now (for the phone to say so). */
 /* which montage the server runs (montage:status says it: a quiet way to tell an update has landed) */
-const MONTAGE_REV = '2026-10-23.apart';
+const MONTAGE_REV = '2026-10-23.lively';
 function directorStatus() {
   const st = directorStatusOf();
   st.rev = MONTAGE_REV;
@@ -3380,5 +3425,5 @@ function directorStatusOf() {
 }
 
 module.exports = {
-  stillOrDark, goodLines, wholeThought, sameLine, talkBrief, vetParts, eventParts, acrossEvent, beatSpans, momentSec, partsFor, MOMENT_EACH,
-  spreadList, momentsOf, shortMoments, HOUSEKEEPING, cleanAbout, withAbout, aboutLines, phrasesOf, phraseScore, talkByRules, fromBrief, cleanBrief, make, remake, loadProject, sidecarOf, baseOf, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };
+  stillOrDark, motionAt, goodLines, wholeThought, sameLine, talkBrief, vetParts, eventParts, acrossEvent, beatSpans, momentSec, partsFor, MOMENT_EACH,
+  _render: render, spreadList, momentsOf, shortMoments, HOUSEKEEPING, cleanAbout, withAbout, aboutLines, phrasesOf, phraseScore, talkByRules, fromBrief, cleanBrief, make, remake, loadProject, sidecarOf, baseOf, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };
