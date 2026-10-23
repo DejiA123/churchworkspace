@@ -1770,6 +1770,12 @@ function wholeThought(p) {
   if (/\b(the|a|an|to|of|and|in|is|it|my|we|you)\s+\1\b/i.test(t)) return false;
   // two thoughts run together where one was cut off ("…once and for So the testimony of Jesus…")
   if (/\b(and|or|but|the|a|an|to|of|for|my|your|our|their|because|if|when|then|than|is|are|was)\s+(So|And|But|Then|Because|Now|The|We|They|It)\b/.test(t)) return false;
+  // two sentences glued at a comma ("…said, but you see, There's a lot of prayer.")
+  if (/[a-z],\s+(There'?s?|So|And|But|Then|The|We|They|It|This|That|He|She)\b/.test(t)) return false;
+  // a phrase said over and over ("Bring it down, bring it down, bring it down.")
+  { const w = t.toLowerCase().replace(/[^a-z' ]+/g, ' ').split(/\s+/).filter(Boolean); const n = new Map();
+    for (let k = 2; k <= 4; k++) for (let j = 0; j + k <= w.length; j++) { const g = w.slice(j, j + k).join(' '); n.set(g, (n.get(g) || 0) + 1); }
+    if ([...n.values()].some((c) => c >= 3)) return false; }
   // a few words on their own ("Answer.", "Over your life.") are not a moment
   if (t.split(/\s+/).length < 4) return false;
   // an introduction or a shout-out is not a moment ("I am Daiji, also known as…", "follow us on…")
@@ -2429,7 +2435,9 @@ async function detectorLook(ctx, reqs, out, frame, log) {
     o.people = Math.max(o.people || 0, ppl.length);
     // a poor sighting: only the backs of heads in the audience, or a speaker hidden behind them
     // (a faint find low in the picture; a speaker on a stage is found clearly, in the upper half)
-    o.weak = !ppl.some((q) => q.score >= 0.88 || q.face.y <= 0.4);
+    o.weak = !ppl.some((q) => q.score >= 0.88 || q.face.y <= 0.4)
+      // (or only a giant printed face: a singer's own poster beside her, the singer herself not found — 0.76, 80% wide)
+      || ppl.every((q) => q.body && q.body.x1 - q.body.x0 >= 0.75 && q.score < 0.8);
     // the head and both shoulders: about a face's width and a bit either side of the face
     const L = clamp(head - pick.face.w * 1.25, 0, 1), R = clamp(head + pick.face.w * 1.25, 0, 1);
     o.span = [L, R];
@@ -3057,7 +3065,8 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         const fb = own.length > 1 ? own[own.length - 1].fx : null;
         if (fa != null) { sh.fx = round2(fa); if (fb != null && Math.abs(fb - fa) > 0.02) sh.fx2 = round2(fb); }
         // a beat whose own look saw nobody (the camera on the screen for a moment): covered below
-        if ((p.looks || []).some((l) => l.people === 0 && l.t >= from - 0.05 && l.t <= from + need + 0.05)) sh.cover = true;
+        // (a long event: a beat seen poorly — a poster's face, the backs of heads — is covered too, from elsewhere in the night)
+        if ((p.looks || []).some((l) => (l.people === 0 || ((opts.eventSec || 0) >= LONG_EVENT_SEC && l.weak)) && l.t >= from - 0.05 && l.t <= from + need + 0.05)) sh.cover = true;
         for (const w of ws.slice(a, b + 1)) {
           const s0 = at + (w.start - from), s1 = at + (w.end - from);
           capWords.push({ text: w.text, start: round2(Math.max(at, s0)), end: round2(Math.min(at + need, Math.max(s0 + 0.05, s1))) });
@@ -3124,9 +3133,12 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       };
       const apart = (a, b) => { if (!a || !b) return 99; let d = 0; for (let j = 0; j < 336; j++) d += Math.abs(a[j] - b[j]); return d / 336; };
       const used = new Set(), seenSigs = [];
-      for (let i = speechFrom + 1; i < speechTo; i++) {
+      for (let i = speechFrom; i < speechTo; i++) {
         const sh = shots[i];
-        if (sh.line == null || shots[i - 1].line !== sh.line || sh.cover || sh.seconds < 1 || (sh.overlays || []).length) continue;
+        // a beat after a line's first — or any beat that showed no one (covered above with a moment of the edit's own,
+        // the same face again: the opening speaker filled 10 of the first 13 s): a moment from elsewhere in the night
+        const later = i > speechFrom && sh.line != null && shots[i - 1].line === sh.line;
+        if (!(later || sh.cover) || sh.seconds < 1 || ((sh.overlays || []).length && !sh.cover)) continue;
         const under = sh.cand && sh.cand.kind === 'video' && sh.from != null ? await sigAt(sh.cand.file, sh.from + sh.seconds / 2) : null;
         let sp = null, spSig = null;
         for (const x of spare) {
@@ -3136,12 +3148,12 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           if (apart(xs, under) < 15) continue;                                         // (the scene already on screen)
           sp = x; spSig = xs; break;
         }
-        if (!sp) break;
+        if (!sp) { if (sh.cover) continue; break; }   // (none left: a covered beat keeps its cover)
         used.add(sp); if (spSig) seenSigs.push(spSig);
         const len = round2(sh.seconds);
         const ov = { cand: sp.cand, style: 'cutaway', start: 0, len, pos: 'right', from: round2(clamp(snapAt(sp) - len / 2, 0, Math.max(0, sp.cand.fileDur - len - 0.05))) };
         if (sp.snapLook && sp.snapLook.fx != null) ov.fx = round2(sp.snapLook.fx);
-        sh.overlays.push(ov);
+        if (sh.cover) { ov.cover = true; sh.overlays = [ov]; } else sh.overlays.push(ov);
       }
     }
     for (let i = speechFrom + 1; i < speechTo && !longEv; i += 2) {
