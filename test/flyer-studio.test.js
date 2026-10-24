@@ -100,6 +100,19 @@ async function t(name, fn) {
     assert.throws(() => fa.kitAddPhoto({ speaker: 'nobody', dataUrl: png(1) }));
     k = fa.kitGet();
   });
+  await t('the photo a cut-out was made from is kept beside it (a framed flyer shows it), and goes with it', () => {
+    const jpg = 'data:image/jpeg;base64,' + Buffer.from('ffd8ffe0 photo', 'latin1').toString('base64');
+    const c = fa.kitAddPhoto({ speaker: 'new1', dataUrl: png(9), original: jpg });
+    const sp = () => fa.kitGet().speakers.find((x) => x.id === 'new1');
+    assert.deepStrictEqual(sp().orig, { [c]: c.replace(/\.png$/, '-photo.jpg') }, 'only the one sent with its photo has one');
+    assert.ok(fa.kitPic(sp().orig[c]).startsWith('data:image/jpeg;base64,'));
+    const all = fa.kitGet();
+    fa.kitSave(all);   // saving the kit keeps it
+    assert.ok(sp().orig[c]);
+    fa.kitSave(Object.assign({}, all, { speakers: all.speakers.map((s) => (s.id === 'new1' ? Object.assign({}, s, { photos: s.photos.filter((p) => p !== c) }) : s)) }));
+    assert.ok(!fs.existsSync(path.join(dir, 'flyer-kit', c.replace(/\.png$/, '-photo.jpg'))), 'removed with its cut-out');
+    k = fa.kitGet();
+  });
   await t('a picture comes back by its name, and nothing outside the kit does', () => {
     assert.ok(fa.kitPic(k.speakers[0].photos[0]).startsWith('data:image/png;base64,'));
     assert.throws(() => fa.kitPic('../kit.json'));

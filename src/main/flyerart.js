@@ -924,6 +924,13 @@ const safeName = (n) => (typeof n === 'string' && /^[\w-]+\.(png|jpg|webp)$/i.te
 
 /* a speaker's picture bank: their file names (an older kit had one `photo`) */
 const photosOf = (s) => (Array.isArray(s.photos) ? s.photos : s.photo ? [s.photo] : []).map(safeName).filter(Boolean);
+/*
+ * THE PHOTO A CUT-OUT WAS MADE FROM, kept beside it ("speaker-x.png" →
+ * "speaker-x-photo.jpg"). The bright, framed flyers (an arch, a circle) show
+ * the photo itself — no cut-out edge, no lectern left in, nothing to go wrong.
+ */
+const origOf = (name) => (safeName(name) ? name.replace(/\.(png|jpg|webp)$/i, '-photo.jpg') : '');
+const origsOf = (s) => Object.fromEntries(photosOf(s).filter((p) => fs.existsSync(path.join(KIT_DIR, origOf(p)))).map((p) => [p, origOf(p)]));
 
 /*
  * The kit itself is small: names and file names. The pictures come one at a
@@ -934,7 +941,7 @@ function kitGet() {
   const k = readKit();
   return Object.assign({}, k, {
     logoUrl: picIn(k.logo),
-    speakers: (k.speakers || []).map((s) => ({ id: s.id, name: s.name || '', role: s.role || '', photos: photosOf(s), last: s.last || '' })),
+    speakers: (k.speakers || []).map((s) => ({ id: s.id, name: s.name || '', role: s.role || '', photos: photosOf(s), orig: origsOf(s), last: s.last || '' })),
     inspo: (k.inspo || []).map((i) => ({ id: i.id, thumb: i.thumb, palette: i.palette || [], notes: i.notes || '', look: i.look || '' })),
   });
 }
@@ -992,7 +999,7 @@ function kitSave(next = {}) {
   k.lastFor = {};
   for (const key of Object.keys(lastIn).slice(-30)) if (/^[\w:.-]{1,60}$/.test(key) && lastIn[key]) k.lastFor[key] = presetOf(lastIn[key]);
   // tidy: pictures no longer in the kit go
-  const keep = new Set([k.logo].concat(...k.speakers.map((s) => s.photos), k.inspo.map((i) => i.thumb)).filter(Boolean));
+  const keep = new Set([k.logo].concat(...k.speakers.map((s) => s.photos.concat(s.photos.map(origOf))), k.inspo.map((i) => i.thumb)).filter(Boolean));
   try { for (const n of fs.readdirSync(KIT_DIR)) if (n !== 'kit.json' && !keep.has(n)) fs.unlinkSync(path.join(KIT_DIR, n)); } catch (e) { /* none yet */ }
   fs.mkdirSync(KIT_DIR, { recursive: true });
   fs.writeFileSync(kitFile(), JSON.stringify(k, null, 1));
@@ -1070,7 +1077,7 @@ function writeKit(k) { fs.mkdirSync(KIT_DIR, { recursive: true }); fs.writeFileS
  * out — thirty cut-outs in a single save would be a request of 60 MB, and one
  * that fails would lose them all.
  */
-function kitAddPhoto({ speaker, dataUrl, name } = {}) {
+function kitAddPhoto({ speaker, dataUrl, name, original } = {}) {
   const k = readKit();
   let s = (k.speakers || []).find((x) => x.id === speaker);
   if (!s) {
@@ -1080,6 +1087,11 @@ function kitAddPhoto({ speaker, dataUrl, name } = {}) {
   }
   const file = picOut(dataUrl, 'speaker');
   if (!file) throw new Error('That is not a picture.');
+  const om = /^data:image\/(jpeg|png|webp);base64,(.+)$/i.exec(String(original || ''));
+  if (om) {
+    const buf = Buffer.from(om[2], 'base64');
+    if (buf.length <= 6 * 1024 * 1024) fs.writeFileSync(path.join(KIT_DIR, origOf(file)), buf);
+  }
   s.photos = photosOf(s).concat(file).slice(-40);
   delete s.photo;
   writeKit(k);

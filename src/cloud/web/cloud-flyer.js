@@ -424,6 +424,11 @@
     const r = Math.min(R, W / 2, H / 2);
     x.beginPath(); x.moveTo(X + r, Y); x.arcTo(X + W, Y, X + W, Y + H, r); x.arcTo(X + W, Y + H, X, Y + H, r); x.arcTo(X, Y + H, X, Y, r); x.arcTo(X, Y, X + W, Y, r); x.closePath();
   }
+  /* an arch: a round top on straight sides, the foot square (a doorway, a church window) */
+  function archPath(x, X, Y, W, H) {
+    const r = Math.min(W / 2, H);
+    x.beginPath(); x.moveTo(X, Y + H); x.lineTo(X, Y + r); x.arc(X + W / 2, Y + r, r, Math.PI, 0); x.lineTo(X + W, Y + H); x.closePath();
+  }
   /* a fill: a colour, or a gradient centred on (cx, cy) over w × h */
   function gradAt(ctx, f, cx, cy, w, h) {
     if (f && typeof f === 'object' && f.stops) {
@@ -515,6 +520,10 @@
     if (L.shadow) { x.shadowColor = 'rgba(0,0,0,.45)'; x.shadowBlur = 24 * Q; x.shadowOffsetY = 8 * Q; }
     switch (L.shape) {
       case 'pill': roundRect(x, -w / 2, -h / 2, w, h, h / 2); x.fill(); break;
+      case 'arch':
+        if (L.line) { x.lineWidth = L.line; x.strokeStyle = x.fillStyle; archPath(x, -w / 2 + L.line / 2, -h / 2 + L.line / 2, w - L.line, h - L.line); x.stroke(); }
+        else { archPath(x, -w / 2, -h / 2, w, h); x.fill(); }
+        break;
       case 'round': roundRect(x, -w / 2, -h / 2, w, h, L.radius == null ? 18 : L.radius); x.fill(); break;
       case 'band': { const k = L.skew == null ? 40 : L.skew; x.beginPath(); x.moveTo(-w / 2 + k, -h / 2); x.lineTo(w / 2, -h / 2); x.lineTo(w / 2 - k, h / 2); x.lineTo(-w / 2, h / 2); x.closePath(); x.fill(); break; }
       case 'slant': { const k = L.skew == null ? 60 : L.skew; x.beginPath(); x.moveTo(-w / 2, -h / 2 + k); x.lineTo(w / 2, -h / 2); x.lineTo(w / 2, h / 2); x.lineTo(-w / 2, h / 2); x.closePath(); x.fill(); break; }
@@ -942,7 +951,7 @@
   function imageCanvas(L, im) {
     const w = Math.max(1, Math.round(L.w * Q)), h = Math.max(1, Math.round(L.h * Q));
     const sr = srcOf(L);
-    const key = [IMGS_KEY(im), w, h, sr ? [sr.x, sr.y, sr.w, sr.h].map((v) => (+v).toFixed(4)).join(',') : '', L.gray ? 1 : 0, L.fade || 0, L.glow || '', L.rim || '', L.bright || 0, L.contrast || 0, L.sat || 0, L.radius || 0, L.round ? 1 : 0, L.outline || '', L.tint ? JSON.stringify(L.tint) : '', L.rimW || 0, L.shade || '', L.feather || 0, L.fadeLight ? 1 : 0, L.hard ? 1 : 0].join('|');
+    const key = [IMGS_KEY(im), w, h, sr ? [sr.x, sr.y, sr.w, sr.h].map((v) => (+v).toFixed(4)).join(',') : '', L.gray ? 1 : 0, L.fade || 0, L.glow || '', L.rim || '', L.bright || 0, L.contrast || 0, L.sat || 0, L.radius || 0, L.round ? 1 : 0, L.arch ? 1 : 0, L.outline || '', L.tint ? JSON.stringify(L.tint) : '', L.rimW || 0, L.shade || '', L.feather || 0, L.fadeLight ? 1 : 0, L.hard ? 1 : 0].join('|');
     if (picCache.has(key)) return picCache.get(key);
     const pad = Math.round((L.glow || L.shade ? Math.max(40, L.h * 0.08) : L.outline ? 14 : 0) * Q);
     const c = canvas(w + pad * 2, h + pad * 2), x = c.getContext('2d');
@@ -955,6 +964,7 @@
     const layer = canvas(w, h), lx = layer.getContext('2d');
     lx.imageSmoothingQuality = 'high';
     if (L.round) { lx.beginPath(); lx.ellipse(w / 2, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2); lx.clip(); }
+    else if (L.arch) { archPath(lx, 0, 0, w, h); lx.clip(); }
     else if (L.radius) { roundRect(lx, 0, 0, w, h, L.radius * Q); lx.clip(); }
     if (body) lx.drawImage(body, 0, 0); else lx.drawImage(pic, 0, 0, w, h);
     if (L.feather) {
@@ -982,7 +992,7 @@
       const keep = canvas(w, h), kx = keep.getContext('2d');
       kx.drawImage(layer, 0, 0); kx.globalCompositeOperation = 'destination-in'; kx.drawImage(mask, 0, 0); kx.drawImage(mask, 0, 0);
       lx.clearRect(0, 0, w, h); lx.drawImage(keep, 0, 0);
-      if (!L.round && !L.radius && !L.hard) {
+      if (!L.round && !L.radius && !L.arch && !L.hard) {
         // where the photo's own frame cut through them (an arm, a shoulder at its side): faded, never a straight line
         lx.globalCompositeOperation = 'destination-out';
         const side = (x0, x1) => { const sg = lx.createLinearGradient(x0, 0, x1, 0); sg.addColorStop(0, 'rgba(0,0,0,1)'); sg.addColorStop(1, 'rgba(0,0,0,0)'); lx.fillStyle = sg; lx.fillRect(Math.min(x0, x1), 0, Math.abs(x1 - x0), h); };
@@ -1072,6 +1082,8 @@
       const keep = Math.max(L.keep == null ? 0.16 : L.keep, L.keepFloor == null ? 0.55 : L.keepFloor);
       const a = { bright: L.bright, contrast: L.contrast, sat: L.sat, gray: L.gray, blur: L.blur == null ? 1.5 : L.blur, duo: L.grade ? gradeStops(pal, L.grade) : null, keep };
       x.drawImage(adjusted(im, a, Math.round(W * Q), Math.round(H * Q)), 0, 0, W, H);
+    } else if (L.plain) {   // a plain page (the bright and simple looks): one colour, nothing painted
+      x.fillStyle = gradAt(x, L.plain, W / 2, H / 2, W, H); x.fillRect(0, 0, W, H);
     } else {
       const g = x.createLinearGradient(0, 0, W * 0.3, H); g.addColorStop(0, pal.mid); g.addColorStop(1, pal.deep);
       x.fillStyle = g; x.fillRect(0, 0, W, H);
@@ -1424,6 +1436,34 @@
     })().catch(() => ({ img: im, meta: null }));
     PREP.set(im, job);
     return job;
+  }
+
+  /*
+   * THE PHOTO ITSELF, for a frame. The bank keeps the photo a cut-out was made
+   * from; a framed look (an arch, a circle) shows that instead — no edge to go
+   * wrong. Where the face and shoulders are comes from the pose, as for a
+   * cut-out; the top of the head (no outline to find it by) from the face.
+   */
+  function photoMeta(lm, W, H) {
+    const P = (i, v) => { const q = lm && lm[i]; return q && (q.visibility == null || q.visibility >= v) ? { x: q.x * W, y: q.y * H } : null; };
+    const ls = P(11, 0.3), rs = P(12, 0.3), nose = P(0, 0.3);
+    if (!ls || !rs || !nose) return null;
+    const sy = (ls.y + rs.y) / 2, sw = Math.max(8, Math.hypot(ls.x - rs.x, ls.y - rs.y));
+    if (sy <= nose.y) return null;
+    const top = Math.max(0, nose.y - Math.max(sw * 0.45, (sy - nose.y) * 0.9));
+    const lh = P(23, 0.45), rh = P(24, 0.45), hy = lh && rh ? (lh.y + rh.y) / 2 : null;
+    const ws = [P(15, 0.35), P(16, 0.35)].filter(Boolean).map((q) => q.y), wy = ws.length ? Math.max(...ws) : null;
+    return { w: W, h: H, top, cx: nose.x, sy: Math.max(sy, top + 10), sw, hy: hy && hy > sy + 10 ? hy : null, wy: wy && wy > sy ? wy : null, photo: true };
+  }
+  const RAWP = new WeakMap();
+  function prepareRaw(im) {
+    if (!RAWP.has(im)) {
+      RAWP.set(im, (async () => {
+        const lm = root.FlyerAI && root.FlyerAI.poseOf ? await root.FlyerAI.poseOf(im) : null;
+        return photoMeta(lm, iw(im), ih(im));
+      })().catch(() => null));
+    }
+    return RAWP.get(im);
   }
 
   /* ================================================================ LAYOUTS */
@@ -1779,6 +1819,95 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   function answer(p) { const [r, g, b] = hexRgb(p.mid); return r > b + 30 ? '#46d3cb' : '#ffcf3a'; }
 
   /*
+   * ►► BRIGHT AND SIMPLE. ◄◄ "They should be bright, simple — and the pictures
+   * cut out don't look good." A white or cream page, ONE colour, clean heavy
+   * type, and the minister in a FRAME — an arch, a circle, a panel of colour —
+   * chest up, cut off by the frame's own edge. No fade into a painting, no glow
+   * round them, and the frame stops above the hands, where a cut-out goes
+   * wrong (a lectern, a microphone stand).
+   */
+  const INK = '#15151a';
+  const SIMPLE = new Set(['arch', 'circle', 'split', 'arches', 'bigword']);
+  // the one colour: the palette's own when it reads on a white page, else a deeper one of it
+  function oneColour(p) { return [p.mid, p.deep, p.accent].find((h) => { const l = lum(h); return l > 0.1 && l < 0.55; }) || '#1d4ed8'; }
+  /* which part of the photo a frame shows: chest (or waist) up, the head near the top, the frame's foot cutting them off */
+  function framedSrc(key, w, h, o) {
+    const im = imgOf(key); if (!im) return null;
+    o = o || {};
+    const m = META.get(key) || quickMeta(im);
+    const fr = frameOf(m, o.mode || 'chest'), u = Math.max(12, m.sy - m.top);
+    // a cut-out stops above the hands: that is where a lectern or a microphone stand starts (a photo shows them as they are)
+    const nb = !m.photo && m.wy ? Math.min(fr.nb, Math.max(m.sy + u * 0.6, m.wy - u * 0.1)) : fr.nb;
+    const vb = Math.min(m.h, nb);
+    let k = (h * (1 - (o.head == null ? 0.1 : o.head))) / Math.max(1, vb - fr.t);
+    if (o.fitW && m.sw) k = Math.min(k, (w * o.fitW) / m.sw);   // the shoulders inside the frame, not cut by its sides
+    // the frame round the face (a turned pose moves the shoulders' middle off it)
+    const cx = m.photo ? m.cx : quickMeta(im).cx * 0.65 + fr.cx * 0.35;
+    if (m.photo) {
+      // the photo itself (prepareRaw): cropped, never shrunk inside the frame — the frame is always full of picture
+      k = Math.max(k, w / m.w, h / m.h);
+      const sw = w / k, sh = h / k;
+      return { x: clamp(cx - sw / 2, 0, m.w - sw) / m.w, y: clamp(vb - sh, 0, m.h - sh) / m.h, w: sw / m.w, h: sh / m.h };
+    }
+    const sw = w / k, sh = h / k;
+    return { x: (cx - sw / 2) / m.w, y: (vb - sh) / m.h, w: sw / m.w, h: sh / m.h };
+  }
+  /* a person in a frame: the frame in colour, the person on it, cut by its edge */
+  function framed(sp, o) {
+    if (PAINTED) return [];
+    // the photo itself when the bank kept it (nothing cut out, nothing to go wrong); else the cut-out on the frame's colour
+    const key = sp && sp.raw && imgOf(sp.raw) && META.has(sp.raw) ? sp.raw : sp && sp.img;
+    const im = imgOf(key); if (!im) return [];
+    const shape = o.shape || 'arch', cx = o.l + o.w / 2, cy = o.t + o.h / 2;
+    const clip = shape === 'circle' ? { round: true } : shape === 'arch' ? { arch: true } : o.radius ? { radius: o.radius } : {};
+    const inFrame = { mode: o.mode || 'chest', head: o.head, fitW: o.fitW == null ? 0.92 : o.fitW };
+    return [
+      SH({ name: 'Frame', shape: shape === 'rect' ? (o.radius ? 'round' : 'rect') : shape, radius: o.radius, fill: o.fill, x: cx, y: cy, w: o.w, h: o.h }),
+      IM(Object.assign({ img: key, name: sp.name || 'Speaker', speaker: sp.id || '', photo: sp.photo || '', src: framedSrc(key, o.w, o.h, inFrame), inFrame, x: cx, y: cy, w: o.w, h: o.h }, clip)),
+    ];
+  }
+  /* a title's lines all at one size — as wide as `w` allows, no taller than maxH — flush left or centred */
+  function titleLines(lines, o) {
+    lines = lines.filter(Boolean);
+    const face = o.font || (VAR && VAR.faces && VAR.faces[2]) || 'Montserrat Black';   // another heavy sans on another board
+    const mk = (ln, i, size) => T({ name: 'Title' + (lines.length > 1 ? ' ' + (i + 1) : ''), text: ln, font: face, size, upper: true,
+      fill: (o.fills || [])[i] || o.fill || INK, align: o.align || 'left', line: 1, letter: o.letter == null ? -0.01 : o.letter });
+    const probe = lines.map((ln, i) => box(mk(ln, i, 100)));
+    const size = Math.floor(Math.min(100 * o.w / Math.max(1, ...probe.map((b) => b.w)), 100 * o.maxH / Math.max(1, ...probe.map((b) => b.h)), o.max || 400));
+    const pos = { t: o.t, gap: o.gap == null ? Math.round(size * 0.08) : o.gap };
+    if (o.align === 'center') pos.cx = o.cx == null ? 540 : o.cx; else pos.l = o.l;
+    return col(lines.map((ln, i) => mk(ln, i, size)), pos);
+  }
+  /* things moved up or down together */
+  function shiftY(list, dy) { list.forEach((L) => { L.y += dy; }); return list; }
+  /* the details one under another: the day, the date, the time, then where */
+  function detailStack(D, o) {
+    const f = D.f, d = D.d, al = o.align || 'left', w = o.w || 420;
+    const items = [
+      d && T({ name: 'Day', text: d.day, upper: true, font: 'Montserrat', size: 20, letter: 0.32, fill: o.acc, align: al }),
+      d && T({ name: 'Date', text: `${d.ddth} ${d.month}\n${d.year}`, upper: true, font: 'Montserrat Black', size: o.big || 46, line: 1.02, fill: INK, align: al, maxW: w }),
+      f.time && T({ name: 'Time', text: f.time + (f.time2 ? ' & ' + f.time2 : ''), upper: true, font: 'Montserrat Black', size: o.big || 46, fill: o.acc, align: al, maxW: w }),
+      venueText(D) && SH({ name: 'Rule', shape: 'rect', fill: o.acc, w: 56, h: 5 }),
+      venueText(D) && T({ name: 'Venue', text: venueLines(D, 3), upper: true, font: 'Montserrat', size: 19, line: 1.3, letter: 0.03, fill: '#3a3a42', align: al, maxW: w }),
+      f.phone && T({ name: 'Phone', text: f.phone, font: 'Montserrat', size: 19, fill: '#3a3a42', align: al, maxW: w }),
+    ].filter(Boolean);
+    const pos = { gap: o.gap == null ? 16 : o.gap }; if (o.t != null) pos.t = o.t; else if (o.b != null) pos.b = o.b; else pos.cy = o.cy;
+    if (al === 'right') pos.r = o.r; else if (al === 'center') pos.cx = o.cx; else pos.l = o.l;
+    return col(items, pos);
+  }
+  /* MINISTERING over the name, in the page's own two inks */
+  function simpleName(sp, o) {
+    const n = String(sp && sp.name || '').trim(); if (!n) return [];
+    const al = o.align || 'left';
+    const items = [o.label !== '' && T({ name: 'Ministering', text: o.label || 'Ministering', upper: true, font: 'Montserrat', size: 16, letter: 0.32, fill: o.acc, align: al }),
+      T({ name: 'Speaker', text: n, upper: true, font: 'Montserrat Black', size: o.size || 30, line: 1.05, fill: INK, align: al, maxW: o.maxW || 440 })].filter(Boolean);
+    const pos = { gap: 8 }; if (o.t != null) pos.t = o.t; else if (o.b != null) pos.b = o.b; else pos.cy = o.cy;
+    if (al === 'right') pos.r = o.r; else if (al === 'center') pos.cx = o.cx; else pos.l = o.l;
+    return col(items, pos);
+  }
+  const inked = (list, ink) => { list.forEach((l) => { if (l.type === 'text') l.fill = ink; }); return list; };
+
+  /*
    * ►► NO TWO BOARDS THE SAME. ◄◄ Every design on a board is built with a
    * variant of its own (makeVariant): the title in another face of the same
    * family (a condensed title stays condensed, an italic one italic), in
@@ -1997,6 +2126,138 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       // the church's name once (the address may start with it)
       const foot = f.church && !nameWords(vt).startsWith(nameWords(f.church)) ? [f.church, vt].join(' - ') : vt;
       if (vt) L.push(put(T({ name: 'Venue', text: foot, upper: true, font: 'Montserrat', size: 18, letter: 0.08, fill: '#fff7e0', maxW: 980, shadow: true }), { cx: 540, b: H - 30 }));
+      return L;
+    },
+
+    /* ════════ BRIGHT AND SIMPLE — a light page, one colour, the minister in a frame (see SIMPLE) ════════ */
+
+    /* ── ARCH: the title big across the top, the minister in an arch of colour, the details beside it ── */
+    arch(D) {
+      const H = D.h, p = D.pal, f = D.f, L = [], sp = sp0(D), acc = oneColour(p);
+      L.push(BG({ plain: '#faf7f2', grain: 0 }));
+      L.push(...inked(header(D), INK));
+      const ts = titleLines(stack(f.title || 'Sunday Service', 2), { l: 64, t: H * 0.13, w: 952, maxH: H * 0.1, fills: [INK, acc] });
+      L.push(...ts);
+      let y = ts.bottom;
+      if (f.theme) { const th = put(T({ name: 'Theme', text: f.theme, upper: true, font: 'Montserrat', size: 22, letter: 0.14, fill: '#3a3a42', align: 'left', maxW: 952 }), { l: 64, t: y + 22 }); L.push(th); y = box(th).b; }
+      const aw = 476, al = 1016 - aw, ab = H - 56, ah = Math.min(ab - (y + 44), aw * 1.85), at = ab - ah;
+      if (sp) {
+        L.push(SH({ name: 'Arch line', shape: 'arch', line: 3, fill: acc, x: al + aw / 2 - 20, y: at + ah / 2 - 20, w: aw, h: ah }));
+        L.push(...framed(sp, { shape: 'arch', l: al, t: at, w: aw, h: ah, fill: acc }));
+      } else L.push(SH({ name: 'Frame', shape: 'arch', fill: acc, x: al + aw / 2, y: at + ah / 2, w: aw, h: ah }));
+      L.push(...detailStack(D, { l: 64, t: at + 6, w: al - 64 - 36, acc }));
+      if (sp) L.push(...simpleName(sp, { l: 64, b: ab, acc, maxW: al - 64 - 36, size: 28 }));
+      return L;
+    },
+
+    /* ── CIRCLE: a white page, the title over a circle of colour with the minister in it, the details on a band of the same colour ── */
+    circle(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], ps = spsOf(D).slice(0, 2), acc = oneColour(p);
+      L.push(BG({ plain: '#ffffff', grain: 0 }));
+      const hd = inked(header(D, { center: true, t: 34 }), INK); L.push(...hd);
+      let y = Math.max(hd.bottom || 0, 40) + 10;
+      const kick = f.theme || D.dir.kicker || '';
+      if (kick) { const k = put(T({ name: 'Kicker', text: kick, upper: true, font: 'Montserrat', size: 20, letter: 0.3, fill: acc, maxW: 900 }), { cx: 540, t: y }); L.push(k); y = box(k).b + 18; }
+      const ts = titleLines(stack(f.title || 'Sunday Service', 2), { align: 'center', t: y, w: 920, maxH: H * 0.082, fills: [INK, acc] });
+      L.push(...ts);
+      const bh = Math.round(H * 0.125), top = ts.bottom + 36, bot = H - bh - 70;
+      if (ps.length === 2) {
+        const dd = Math.min(470, bot - top), cy = top + (bot - top) / 2;
+        ps.forEach((s, i) => { const cx = 540 + (i ? 1 : -1) * dd * 0.47; L.push(...framed(s, { shape: 'circle', l: cx - dd / 2, t: cy - dd / 2, w: dd, h: dd, fill: i ? mix(acc, '#000000', 0.18) : acc, mode: 'bust', head: 0.14 })); });
+        ps.forEach((s, i) => { const cx = 540 + (i ? 1 : -1) * dd * 0.5; if (s.name) L.push(...pill([{ text: s.name, upper: true, font: 'Montserrat Black', size: 18, letter: 0.03, maxW: dd * 0.8 }], { fill: INK, ink: '#ffffff', radius: 30, padX: 18, padY: 10 }).place(cx, cy + dd / 2 + 8)); });
+      } else {
+        const dd = Math.min(H > 1500 ? 900 : 700, bot - top), cy = top + (bot - top) / 2;
+        L.push(SH({ name: 'Halo', shape: 'circle', fill: mix(acc, '#ffffff', 0.86), x: 540, y: cy, w: dd + 56, h: dd + 56 }));
+        if (ps[0]) L.push(...framed(ps[0], { shape: 'circle', l: 540 - dd / 2, t: cy - dd / 2, w: dd, h: dd, fill: acc, mode: 'bust', head: 0.12 }));
+        else L.push(SH({ name: 'Frame', shape: 'circle', fill: acc, x: 540, y: cy, w: dd, h: dd }));
+        if (ps[0] && ps[0].name) L.push(...pill([{ text: ps[0].name, upper: true, font: 'Montserrat Black', size: 22, letter: 0.04, maxW: 640 }], { fill: INK, ink: '#ffffff', radius: 40, padX: 26, padY: 12 }).place(540, cy + dd / 2));
+      }
+      L.push(SH({ name: 'Band', shape: 'rect', fill: acc, x: 540, y: H - bh / 2, w: W, h: bh }));
+      L.push(...infoRow(D, H - bh / 2, [d && { name: 'Date', big: `${d.ddth} ${d.mon3}`, small: `${d.day} ${d.year}`, font: 'Montserrat Black', size: 38 },
+        f.time && { name: 'Time', big: f.time, small: f.time2 ? 'and ' + f.time2 : '', font: 'Montserrat Black', size: 38 },
+        venueText(D) && { name: 'Venue', small: venueLines(D, 3), maxW: 330, smallSize: 15, pin: true }], { ink: '#ffffff', accent: '#ffffff', lineH: 60, gap: 26 }));
+      return L;
+    },
+
+    /* ── COLOUR PANEL: the page split — the words on white at the left, the minister on a panel of colour at the right ── */
+    split(D) {
+      const H = D.h, p = D.pal, f = D.f, L = [], sp = sp0(D), acc = oneColour(p), px = 556;
+      L.push(BG({ plain: '#ffffff', grain: 0 }));
+      if (sp) L.push(...framed(sp, { shape: 'rect', l: px, t: 0, w: W - px, h: H, fill: acc, mode: 'waist', head: 0.34, fitW: 0.78 }));
+      else L.push(SH({ name: 'Frame', shape: 'rect', fill: acc, x: (px + W) / 2, y: H / 2, w: W - px, h: H }));
+      L.push(...inked(header(D, { maxW: px - 150 }), INK));
+      const cw = px - 64 - 44;
+      const lines = stack(f.title || 'Sunday Service', 3);
+      const ts = titleLines(lines, { l: 64, t: H * 0.17, w: cw, maxH: H * 0.075, fills: lines.map((_, i) => (lines.length > 1 && i === lines.length - 1 ? acc : INK)) });
+      L.push(...ts);
+      let y = ts.bottom;
+      if (f.theme) { const th = put(T({ name: 'Theme', text: f.theme, upper: true, font: 'Montserrat', size: 20, letter: 0.12, line: 1.25, fill: '#3a3a42', align: 'left', maxW: cw }), { l: 64, t: y + 20 }); L.push(th); y = box(th).b; }
+      const nm = sp ? simpleName(sp, { l: 64, b: H - 64, acc, maxW: cw, size: 28 }) : [];
+      const ds = detailStack(D, { l: 64, t: 0, w: cw, acc, big: 42 });
+      // the details half-way between the title and the name
+      const room = (nm.length ? nm.top : H - 64) - y, dh = ds.bottom - ds.top;
+      shiftY(ds, y + Math.max(36, (room - dh) / 2) - ds.top);
+      L.push(...ds, ...nm);
+      return L;
+    },
+
+    /* ── ARCHES: the title over the top, one minister, two or three each in an arch, the day and time in one line, the address at the foot ── */
+    arches(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], ps = spsOf(D).slice(0, 3), acc = oneColour(p);
+      L.push(BG({ plain: '#f6f2ea', grain: 0 }));
+      const hd = inked(header(D, { center: true, t: 34 }), INK); L.push(...hd);
+      let y = Math.max(hd.bottom || 0, 40) + 14;
+      const ts = titleLines(stack(f.title || 'Sunday Service', 2), { align: 'center', t: y, w: 900, maxH: H * 0.085, fills: [INK, acc] });
+      L.push(...ts); y = ts.bottom + 22;
+      const when = [d && `${d.day} ${d.ddth} ${d.month}`, f.time && f.time + (f.time2 ? ' & ' + f.time2 : '')].filter(Boolean).join('   •   ');
+      if (when) { const w1 = put(T({ name: 'When', text: when, upper: true, font: 'Montserrat Black', size: 30, letter: 0.02, fill: acc, maxW: 960 }), { cx: 540, t: y }); L.push(w1); y = box(w1).b; }
+      if (f.theme) { const th = put(T({ name: 'Theme', text: f.theme, upper: true, font: 'Montserrat', size: 19, letter: 0.16, fill: '#3a3a42', maxW: 900 }), { cx: 540, t: y + 14 }); L.push(th); y = box(th).b; }
+      const vt = venueText(D), foot = H - 52, nameH = 58, bot = (vt ? foot - 44 : H - 40) - nameH, top = y + 40;
+      // (a story is taller: the arches grow with it, not the gap above them)
+      const n = Math.max(1, ps.length), tall = Math.max(1, H / 1350), gap = n === 3 ? 32 : 44;
+      const aw = n === 3 ? 300 : n === 2 ? Math.min(470, 420 * tall) : Math.min(720, 560 * tall), ah = Math.min(bot - top, aw * (n === 3 ? 1.75 : n === 2 ? 1.6 : 1.45));
+      for (let i = 0; i < n; i++) {
+        const s = ps[i], cx = 540 + (i - (n - 1) / 2) * (aw + gap);
+        if (s) L.push(...framed(s, { shape: 'arch', l: cx - aw / 2, t: bot - ah, w: aw, h: ah, fill: i % 2 ? mix(acc, '#000000', 0.18) : acc }));
+        else L.push(SH({ name: 'Frame', shape: 'arch', fill: acc, x: cx, y: bot - ah / 2, w: aw, h: ah }));
+        if (s && s.name) L.push(put(T({ name: 'Speaker', text: s.name, upper: true, font: 'Montserrat Black', size: n === 3 ? 20 : 24, letter: 0.03, fill: INK, maxW: aw }), { cx, t: bot + 18 }));
+      }
+      if (vt) { const g = venueGroup(vt, acc, 860, { size: 18, ink: '#3a3a42', shadow: false }); L.push(...g.place(540, foot)); }
+      return L;
+    },
+
+    /* ── BIG WORDS: the title huge on a page of the palest colour, the minister small in a circle, the details along the foot ── */
+    bigword(D) {
+      const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], ps = spsOf(D).slice(0, 3), acc = oneColour(p);
+      L.push(BG({ plain: mix(acc, '#ffffff', 0.9), grain: 0 }));
+      L.push(...inked(header(D), INK));
+      const three = ps.length === 3, rowY = H - 78, lineY = H - 150, pd = three ? 230 : ps.length === 2 ? 230 : 270, pt = lineY - 40 - pd - (three ? 50 : 0);
+      // who: one in a circle with the name beside them; two side by side, named beside them; three in a row, each named under
+      if (three) {
+        ps.forEach((s, i) => {
+          const cx = 540 + (i - 1) * (pd + 70);
+          L.push(...framed(s, { shape: 'circle', l: cx - pd / 2, t: pt, w: pd, h: pd, fill: i % 2 ? mix(acc, '#000000', 0.18) : acc, mode: 'bust', head: 0.14 }));
+          if (s.name) L.push(put(T({ name: 'Speaker', text: s.name, upper: true, font: 'Montserrat Black', size: 19, line: 1.05, fill: INK, maxW: pd + 60 }), { cx, t: pt + pd + 16 }));
+        });
+      } else if (ps.length === 2) {
+        ps.forEach((s, i) => { const l = 64 + i * (pd + 40); L.push(...framed(s, { shape: 'circle', l, t: pt, w: pd, h: pd, fill: i ? mix(acc, '#000000', 0.18) : acc, mode: 'bust', head: 0.14 })); });
+        L.push(...col(ps.map((s) => T({ name: 'Speaker', text: s.name || '', upper: true, font: 'Montserrat Black', size: 24, line: 1.05, fill: INK, align: 'left', maxW: 1016 - (64 + 2 * pd + 80) })), { l: 64 + 2 * pd + 80, cy: pt + pd / 2, gap: 14 }));
+      } else if (ps[0]) {
+        L.push(...framed(ps[0], { shape: 'circle', l: 64, t: pt, w: pd, h: pd, fill: acc, mode: 'bust', head: 0.12 }));
+        L.push(...simpleName(ps[0], { l: 64 + pd + 40, cy: pt + pd / 2, acc, size: 40, maxW: 1016 - (64 + pd + 40) }));
+      }
+      // the title, as big as it goes, in the room above them
+      const lines = stack(f.title || 'Sunday Service', 3);
+      const ts = titleLines(lines, { l: 64, t: 0, w: 952, maxH: H * 0.14, fills: lines.map((_, i) => (lines.length > 1 && i === lines.length - 1 ? acc : INK)) });
+      const th = f.theme ? T({ name: 'Theme', text: f.theme, upper: true, font: 'Montserrat', size: 22, letter: 0.14, fill: '#3a3a42', align: 'left', maxW: 952 }) : null;
+      const block = th ? ts.concat(put(th, { l: 64, t: ts.bottom + 26 })) : ts;
+      const bTop = ts.top, bBot = th ? box(th).b : ts.bottom, room0 = H * 0.13, room1 = (ps.length ? pt : lineY) - 40;
+      shiftY(block, room0 + Math.max(0, (room1 - room0 - (bBot - bTop)) / 2) - bTop);
+      L.push(...block);
+      L.push(SH({ name: 'Rule', shape: 'rect', fill: rgba(INK, 0.18), x: 540, y: lineY, w: 952, h: 2 }));
+      L.push(...infoRow(D, rowY, [d && { name: 'Date', big: `${d.ddth} ${d.mon3} ${d.year}`, font: 'Montserrat Black', size: 34 },
+        f.time && { name: 'Time', big: f.time + (f.time2 ? ' & ' + f.time2 : ''), font: 'Montserrat Black', size: 34, accent: true },
+        venueText(D) && { name: 'Venue', small: venueLines(D, 3), maxW: 330, smallSize: 15 }], { ink: INK, accent: acc, lineH: 52, gap: 24 }));
       return L;
     },
 
@@ -2947,9 +3208,15 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   };
   const THUMB_LOOKS = Object.keys(THUMBS);
   const LOOK_NAMES = { ytbold: 'Bold', ytglow: 'Glory light', ytlight: 'Light page', ytfire: 'Fire', ytserif: 'Gold serif', ytscript: 'Script', ytpanel: 'Panel', ytword: 'One word', ytmono: 'B&W on colour', ytstage: 'Stage', ytoutline: 'Outline', ytcinema: 'Cinematic', glory: 'Glory', fire: 'Fire', encounter: 'Encounter', miracle: 'Spotlight', bible: 'Golden classic', prophetic: 'Gold', sunday: 'Giant words', lineup: 'Line-up', script: 'Script', scenic: 'Scenic', light: 'Light', joinus: 'Join us', didone: 'Elegant', upper: 'Upper Room', theme: 'Theme picture', mountain: 'Sky letters', breaking: 'Breaking', spirit: 'Gold line-up',
+    arch: 'Arch', circle: 'Circle', split: 'Colour panel', arches: 'Arches', bigword: 'Big words',
     ailetter: 'AI lettering', jericho: 'Bright hour', unique: 'Bright duo', thanks: 'Bright sky', mantle: 'Cream & gold', urgency: 'Line-up stage', harvest: 'Rows' };
   /* each look's own colours (the AI's colours go on the first few designs; these on the rest, for variety) */
   const SIGNATURE = {
+    arch: { deep: '#0b1f4d', mid: '#1d4ed8', accent: '#f5c542', hi: '#ffffff' },
+    circle: { deep: '#2a0303', mid: '#b91c1c', accent: '#ffd166', hi: '#ffffff' },
+    split: { deep: '#012a30', mid: '#0e7c86', accent: '#f2c94c', hi: '#ffffff' },
+    arches: { deep: '#14052e', mid: '#5b21b6', accent: '#f5c542', hi: '#ffffff' },
+    bigword: { deep: '#3a0a00', mid: '#ea580c', accent: '#fde047', hi: '#ffffff' },
     glory: { deep: '#0b0b10', mid: '#2a2140', accent: '#f6c915', hi: '#ffffff' },
     fire: { deep: '#1a0300', mid: '#c2410c', accent: '#ffb300', hi: '#fff3c4' },
     encounter: { deep: '#3a1200', mid: '#d4560b', accent: '#ffc233', hi: '#fff4d6' },
@@ -2994,7 +3261,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const pal = o.pal || { deep: '#1a0638', mid: '#5b21b6', accent: '#f5c542', hi: '#ffffff' };
     return {
       w: o.w || 1080, h: o.h || 1350, pal, dir, f, bg: o.bg, logo: o.logo, frame: o.frame || null, face: o.face || null,
-      sp: (o.speakers || []).map((s) => ({ name: s.name, img: s.img, id: s.id, photo: s.photo })),
+      sp: (o.speakers || []).map((s) => ({ name: s.name, img: s.img, raw: s.raw, id: s.id, photo: s.photo })),
       script: scriptWordFor(dir.scriptWord, f.title, dp),
       d: dp ? { day3: dp.day.slice(0, 3), day: dp.day, dayName: dp.dayName, ddn: dp.dd.replace(/\D+$/, ''), ddth: dp.dd, month: dp.month, mon3: dp.month.slice(0, 3), year: dp.year } : null,
     };
@@ -3026,7 +3293,10 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     // every soft shadow in the flyer's own darkest colour (a black one is a sticker's)
     const tint = rgba(mix(D.pal.deep, '#000000', 0.5), 0.62);
     layers.forEach((l) => { if (l.type === 'text' && l.shadow && !l.shadowColor) l.shadowColor = tint; });
-    return { w: D.w, h: D.h, pal: D.pal, look, painted: !!o.painted, variant: o.variant || null, frame: D.frame, face: D.face, layers };
+    // a bright and simple page is clean print: no shadow under a word, no grain over the page
+    const plain = SIMPLE.has(look);
+    if (plain) layers.forEach((l) => { if (l.type === 'text' || l.type === 'shape') l.shadow = false; });
+    return { w: D.w, h: D.h, pal: D.pal, look, painted: !!o.painted, variant: o.variant || null, frame: D.frame, face: D.face, layers, finish: !plain };
   }
 
   /* A cut-out, tidied — the upload path keeps a data URL (see tidyCanvas). */
@@ -3037,7 +3307,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     return t.c === c && !t.x0 && !t.y0 ? src : t.c.toDataURL('image/png');
   }
 
-  root.MWFlyer = { tidyCut, preparePerson, hero, META, HD, render, buildScene, loadFonts, IMGS, loadImg, proceduralBg, LAYOUTS, LOOK_NAMES, SIGNATURE, FONTS, textCanvas, boxOf, Dates };
+  root.MWFlyer = { tidyCut, preparePerson, prepareRaw, photoMeta, hero, framedSrc, SIMPLE, META, HD, render, buildScene, loadFonts, IMGS, loadImg, proceduralBg, LAYOUTS, LOOK_NAMES, SIGNATURE, FONTS, textCanvas, boxOf, Dates };
 
   /* ================================================================== THE UI */
 
@@ -3129,7 +3399,10 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   async function loadKit() {
     try { F.kit = await window.api.flyer.kitGet(); } catch (e) { F.kit = null; }
     if (!F.kit) F.kit = { church: '', address: '', phone: '', handles: '', speakers: [], services: [] };
-    for (const s of F.kit.speakers || []) if (!Array.isArray(s.photos)) s.photos = [];
+    for (const s of F.kit.speakers || []) {
+      if (!Array.isArray(s.photos)) s.photos = [];
+      for (const [p, o] of Object.entries(s.orig || {})) if (!ORIG.has(p)) ORIG.set(p, o);
+    }
     if (F.kit.logoUrl) { try { IMGS.set('logo', await loadImg(F.kit.logoUrl)); } catch (e) {} }
     return F.kit;
   }
@@ -3141,6 +3414,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
    */
   const PICURL = new Map();   // file name or data URL -> data URL
   const PICLOAD = new Map();  // -> Promise<image>
+  const ORIG = new Map();     // a bank picture -> the photo it was cut from (its file name on the server, or its data URL)
+  const rawKey = (p) => 'kr:' + p;
   const dataKeys = new Map(); let dataN = 0;
   const picKey = (p) => { if (!/^data:/.test(p)) return 'kp:' + p; if (!dataKeys.has(p)) dataKeys.set(p, 'kd:' + (++dataN)); return dataKeys.get(p); };
   function bankPic(p) {
@@ -3154,6 +3429,15 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         const pr = await root.MWFlyer.preparePerson(raw);
         IMGS.set(picKey(p), pr.img);
         if (pr.meta) META.set(picKey(p), pr.meta); else META.delete(picKey(p));
+        // and the photo it was cut from, for the framed looks (an arch, a circle): shown as it is, nothing cut out
+        const o = ORIG.get(p);
+        if (o) {
+          try {
+            const ph = await loadImg(/^data:/.test(o) ? o : await window.api.flyer.kitPic(o));
+            const m = await root.MWFlyer.prepareRaw(ph);
+            if (m) { IMGS.set(rawKey(p), ph); META.set(rawKey(p), m); }
+          } catch (e) { /* the cut-out goes in the frame instead */ }
+        }
         return pr.img;
       })().catch(() => { PICLOAD.delete(p); return null; }));
     }
@@ -3182,7 +3466,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     return ph[(start + (i || 0)) % ph.length];
   }
   function speakersFor(i) {
-    return chosenSpeakers().map((s) => { const photo = photoFor(s, i); return { id: s.id, name: s.name, photo, img: photo ? picKey(photo) : '' }; });
+    return chosenSpeakers().map((s) => { const photo = photoFor(s, i); return { id: s.id, name: s.name, photo, img: photo ? picKey(photo) : '', raw: photo && IMGS.has(rawKey(photo)) ? rawKey(photo) : '' }; });
   }
   async function saveKit(quiet) {
     try {
@@ -3598,7 +3882,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   // how well each layout stands up on its own (from setting them beside the Pinterest flyers)
   const STRENGTH = { glory: 9, fire: 9, joinus: 9, spirit: 8, prophetic: 8, sunday: 8, upper: 8, miracle: 8, script: 7, encounter: 7, breaking: 7, didone: 7,
     lineup: 7, mountain: 6, bible: 6, scenic: 6, light: 6, theme: 6,
-    jericho: 8, unique: 8, thanks: 7, mantle: 8, urgency: 8, harvest: 8 };
+    jericho: 8, unique: 8, thanks: 7, mantle: 8, urgency: 8, harvest: 8,
+    arch: 9, circle: 9, split: 9, arches: 9, bigword: 8 };
   const SEEN_KEY = 'mw-flyer-seen', LIKED_KEY = 'mw-flyer-liked';
   const readLS = (k) => { try { return JSON.parse(localStorage.getItem(k) || '{}') || {}; } catch (e) { return {}; } };
   const seenLooks = () => readLS(SEEN_KEY);
@@ -3629,28 +3914,29 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     };
     // two ministers (a Sunday): only the designs that show — and name — both; the line-ups of many wait for three or more
     const nSp = chosenSpeakers().filter((s) => (s.photos || []).length || s.photo).length;
-    const fits = (l) => nSp < 2 || (nSp === 2 ? DUO.has(l) : DUO.has(l) || l === 'urgency' || l === 'harvest');
+    const fits = (l) => nSp < 2 || (nSp === 2 ? DUO.has(l) : (DUO.has(l) && l !== 'circle') || l === 'urgency' || l === 'harvest');
     const scored = Object.keys(LAYOUTS).filter((l) => l !== 'ailetter' && fits(l)).map((l) => [l, score(l)]).sort((a, b) => b[1] - a[1]).map((x) => x[0]);
-    // the board's four: at most two with the preacher in the middle, a bright page among them if one is in the top half
-    const board = [], centred = (l) => !SIDE.has(l) && !BRIGHT.has(l) && !GROUP.has(l);
-    for (const l of scored) {
+    /* ►► BRIGHT AND SIMPLE FIRST. ◄◄ "They should be bright, simple": the
+       board is the light, framed looks (SIMPLE); the older bright pages come
+       next, and the dark, dramatic ones only on "more designs". Within each,
+       the scores' order. At most two with the preacher in the middle. */
+    const tier = (l) => (SIMPLE.has(l) ? 0 : BRIGHT.has(l) ? 1 : 2);
+    const order = scored.slice().sort((a, b) => tier(a) - tier(b));
+    const board = [], centred = (l) => !SIMPLE.has(l) && !SIDE.has(l) && !BRIGHT.has(l) && !GROUP.has(l);
+    for (const l of order) {
       if (board.length >= BOARD_N) break;
       if (centred(l) && board.filter(centred).length >= 2) continue;
       board.push(l);
     }
-    if (!board.some((l) => BRIGHT.has(l))) {
-      const b = scored.slice(0, Math.ceil(scored.length / 2)).find((l) => BRIGHT.has(l));
-      if (b) board.splice(Math.min(board.length, BOARD_N - 1), board.length >= BOARD_N ? 1 : 0, b);
-    }
-    for (const l of scored) if (board.length < BOARD_N && !board.includes(l)) board.push(l);
-    return board.concat(scored.filter((l) => !board.includes(l)));
+    for (const l of order) if (board.length < BOARD_N && !board.includes(l)) board.push(l);
+    return board.concat(order.filter((l) => !board.includes(l)));
   }
   // how a layout places the preacher (for a board of different flyers)
   const SIDE = new Set(['jericho', 'sunday', 'script', 'joinus', 'breaking', 'didone']);
   const BRIGHT = new Set(['jericho', 'unique', 'thanks', 'mantle', 'light']);
   const GROUP = new Set(['urgency', 'harvest', 'unique', 'lineup']);
   // the designs that show two ministers side by side, both named
-  const DUO = new Set(['unique', 'lineup', 'spirit', 'thanks', 'encounter', 'miracle', 'joinus']);
+  const DUO = new Set(['unique', 'lineup', 'spirit', 'thanks', 'encounter', 'miracle', 'joinus', 'circle', 'arches', 'bigword']);
   const COOL_TONES = ['blue', 'purple', 'teal', 'emerald', 'night', 'royal'];
   function newBoard() {
     const order = rankLooks();
@@ -3676,7 +3962,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       // the title's own idea (key art) on the best-ranked designs first; then this look's own light; then the least used
       const unused = (b) => n(b) < 1;
       const want = F.bgs.filter((b) => b.theme && unused(b))[0] || F.bgs.filter((b) => b.tone && b.tone === LOOK_TONE[look] && unused(b))[0];
-      const bg = want || (F.bgs.some((b) => b.tone) ? F.bgs.slice().sort((a, b) => n(a) - n(b))[0] : F.bgs[i % F.bgs.length]);
+      // (a plain page takes no painting: it is left for the looks that show one)
+      const bg = SIMPLE.has(look) ? null : want || (F.bgs.some((b) => b.tone) ? F.bgs.slice().sort((a, b) => n(a) - n(b))[0] : F.bgs[i % F.bgs.length]);
       if (bg) used.set(bg.key, n(bg) + 1);
       // the AI's colours on the first designs, each look's own on the rest — a board of different flyers, not one flyer ten times
       // a picture painted in its own light takes colours that match it; the AI's own on the rest
@@ -3690,7 +3977,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     // the AI-lettered title first of all: the one most like the flyers people save
     const lt = F.lettered ? [Object.assign(buildScene({ look: 'ailetter', w: sz.w, h: sz.h, pal: F.pal, dir: F.dir, fields: F.fields, speakers: speakersFor(0), logo: IMGS.has('logo') ? 'logo' : null, bg: F.lettered.key }),
       { label: F.lettered.checked ? 'AI lettering' : 'AI lettering · check the spelling', madeBy: F.lettered.by || '' })] : [];
-    F.designs = lt.concat(pin, F.designs);
+    // the bright, simple designs first; the AI's painted extras after them
+    const nPlain = F.designs.filter((d) => SIMPLE.has(d.look)).length;
+    F.designs = F.designs.slice(0, nPlain).concat(lt, pin, F.designs.slice(nPlain));
     if (F.step === 'pick') paintThumbs();
   }
 
@@ -4389,7 +4678,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       case 'effects': return sheetEffects(L);
       case 'spacing': return sliders([['Letters', 'letter', -0.05, 0.8, 0.01], ['Lines', 'line', 0.7, 1.6, 0.02], ['Size', 's', 0.2, 3, 0.02], ['Turn', 'rot', -180, 180, 1]], L);
       case 'opacity': return sliders([['Opacity', 'opacity', 0.05, 1, 0.01]], L);
-      case 'imglook': return sliders([['Length', 'len', 0.4, 1.6, 0.01], ['Brightness', 'bright', -60, 60], ['Contrast', 'contrast', -50, 80], ['Colour', 'sat', -100, 100], ['Round corners', 'radius', 0, 300]], L);
+      case 'imglook': return sliders(L.inFrame
+        ? [['Zoom', 'zoom', 0.7, 2, 0.01], ['Brightness', 'bright', -60, 60], ['Contrast', 'contrast', -50, 80], ['Colour', 'sat', -100, 100]]   // in a frame: closer or further, the frame stays
+        : [['Length', 'len', 0.4, 1.6, 0.01], ['Brightness', 'bright', -60, 60], ['Contrast', 'contrast', -50, 80], ['Colour', 'sat', -100, 100], ['Round corners', 'radius', 0, 300]], L);
       case 'dup': { const N = Object.assign(clone(L), { id: uid(), x: L.x + 30, y: L.y + 30 }); change(() => { ls.splice(ls.indexOf(L) + 1, 0, N); F.sel = N.id; }); return; }
       case 'front': { const i = ls.indexOf(L); if (i < ls.length - 1) change(() => { ls.splice(i, 1); ls.splice(i + 1, 0, L); }); return; }
       case 'back': { const i = ls.indexOf(L); if (i > 1) change(() => { ls.splice(i, 1); ls.splice(i - 1, 0, L); }); return; }
@@ -4426,11 +4717,15 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     // "Length": how much of the person is shown, the head staying where it is
     if (L.type === 'image' && L.len == null) { L.len = 1; L._src0 = L.src ? Object.assign({}, L.src) : { x: 0, y: 0, w: 1, h: L.crop || 1 }; L._h0 = L.h; L._top0 = L.y - L.h / 2; }
     openSheet(list.map(([label, k, min, max, step]) => {
-      const v = L[k] == null ? (k === 'opacity' || k === 's' || k === 'crop' ? 1 : k === 'line' ? 1 : k === 'tint' ? 0.45 : k === 'vignette' ? 0.75 : 0) : L[k];
+      const v = L[k] == null ? (k === 'opacity' || k === 's' || k === 'crop' || k === 'zoom' ? 1 : k === 'line' ? 1 : k === 'tint' ? 0.45 : k === 'vignette' ? 0.75 : 0) : L[k];
       return `<label class="fs-slider"><span>${esc(label)}</span><input type="range" data-k="${k}" min="${min}" max="${max}" step="${step || 1}" value="${v}"><output>${Math.round(v * (step && step < 1 ? 100 : 1))}</output></label>`;
     }).join(''), (sh) => {
       $$('input[type=range]', sh).forEach((r) => r.addEventListener('input', () => {
         L[r.dataset.k] = +r.value;
+        if (r.dataset.k === 'zoom' && L._src0) {   // the face stays where it is in the frame
+          const s0 = L._src0, z = +r.value, w = s0.w / z, h = s0.h / z;
+          L.src = { x: s0.x + (s0.w - w) / 2, y: s0.y + (s0.h - h) * 0.3, w, h };
+        }
         if (r.dataset.k === 'len' && L._src0) {
           const im = imgOf(L.img), maxH = im ? 1 - L._src0.y : 1;
           L.src = Object.assign({}, L._src0, { h: Math.min(maxH, L._src0.h * L.len) });
@@ -4548,7 +4843,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const base = F.mode === 'thumb' ? thumbSpeakers() : speakersFor(0);
     return base.map((s) => {
       const L = F.scene && F.scene.layers.find((l) => l.speaker === s.id && l.photo);
-      return L ? Object.assign(s, { photo: L.photo, img: L.img }) : s;
+      // (a frame shows the photo itself: the cut-out of it for a look that cuts them out)
+      return L ? Object.assign(s, { photo: L.photo, img: /^kr:/.test(L.img) ? picKey(L.photo) : L.img, raw: IMGS.has(rawKey(L.photo)) ? rawKey(L.photo) : '' }) : s;
     });
   }
   function sheetPalettes() {
@@ -4581,6 +4877,12 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
 
   /* a person's layer given another photo: framed the same way (head where it was, same size) */
   function refit(L, o) {
+    if (L.inFrame) {   // in a frame (an arch, a circle): the frame stays, the new photo framed in it the same way
+      L.img = o.photo && IMGS.has(rawKey(o.photo)) && /^k[pd]:/.test(o.img) ? rawKey(o.photo) : o.img; if (o.photo) L.photo = o.photo; delete L.crop;
+      delete L.len; delete L._src0; delete L.zoom;
+      L.src = root.MWFlyer.framedSrc(L.img, L.w, L.h, L.inFrame);
+      return;
+    }
     if (L.frame) {
       const N = root.MWFlyer.hero({ img: o.img, name: L.name, id: L.speaker, photo: o.photo || L.photo }, L.frame);
       if (N) { ['img', 'photo', 'src', 'w', 'h', 'x', 'y', 'fade'].forEach((k) => { L[k] = N[k]; }); delete L.crop; delete L.len; return; }
@@ -4643,7 +4945,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         return cutOutUrl(url, async (png) => {
           png = await tidyCut(png).catch(() => png);
           let kept = png;
-          try { kept = await window.api.flyer.kitAddPhoto(s.id, png, s.name); PICURL.set(kept, png); } catch (e) { /* the next Save sends it */ }
+          try { kept = await window.api.flyer.kitAddPhoto(s.id, png, s.name, url); PICURL.set(kept, png); ORIG.set(kept, url); } catch (e) { /* the next Save sends it */ }
           s.photos = (s.photos || []).concat(kept); await then();
         });
       }
@@ -4656,7 +4958,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
           try { png = await tidyCut((await window.FlyerAI.removePerson(url)).src); } catch (e) { /* kept as it is */ }
           // each one kept on the server as soon as it is cut out (a speaker not yet saved is made as it goes)
           let kept = png;
-          try { kept = await window.api.flyer.kitAddPhoto(s.id, png, s.name); PICURL.set(kept, png); } catch (e) { /* the next Save sends it */ }
+          // (the photo it was cut from goes with it: the framed looks show that, nothing cut out)
+          try { kept = await window.api.flyer.kitAddPhoto(s.id, png, s.name, url); PICURL.set(kept, png); ORIG.set(kept, url); } catch (e) { /* the next Save sends it */ }
           s.photos = (s.photos || []).concat(kept);
         } catch (e) { /* skip that one */ }
       }
