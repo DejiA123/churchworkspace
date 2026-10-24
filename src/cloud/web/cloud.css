@@ -1176,6 +1176,21 @@ body.mw-cloud #cloudPass:focus { border-color: #1f6fe0; box-shadow: 0 0 0 3px rg
     padding-bottom: env(safe-area-inset-bottom);
   }
   body.mw-cloud .cut-box { height: var(--sheet-max); }
+  /* the cut-out editor on a phone: the picture big on top (to see the edge, and paint on it), the controls under it —
+     it was a laptop's picture-left, controls-right, the picture a thumbnail and "Soft edge" pushed off the side */
+  @media (max-width: 760px) {
+    body.mw-cloud .cut-body { flex-direction: column; }
+    body.mw-cloud .cut-stage { flex: 1 1 auto; min-height: 0; padding: 8px; }
+    body.mw-cloud .cut-side { width: auto; flex: 0 0 auto; max-height: 44%; border-left: 0; border-top: 1px solid var(--border);
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px 14px; }
+    body.mw-cloud .cut-side .cut-group:first-child { grid-column: 1 / -1; }
+    body.mw-cloud .cut-side .cut-group:last-child { grid-column: 1 / -1; }
+    body.mw-cloud .cut-foot { padding: 10px 14px; }
+    body.mw-cloud .cut-foot > .muted { display: none; }
+    body.mw-cloud .cut-foot-btns { flex: 1; justify-content: flex-end; }
+    body.mw-cloud .cut-foot-btns button { min-height: 46px; padding: 0 18px; }
+  }
+  body.mw-cloud .cut-check input { width: auto; height: auto; margin: 0; }
 
   /* ------------------------------------------- the captions window, on a phone
    *

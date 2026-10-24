@@ -5351,7 +5351,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
             <input data-spf="name" data-i="${i}" value="${escAttr(s.name || '')}" placeholder="Bishop David Richman"><button type="button" class="fs-x" data-k="sprm" data-i="${i}" aria-label="Remove">${ic('trash')}</button></div>
             <div class="fs-bank fs-bank-sm">${(s.photos || []).map((p, j) => `<div class="fs-bank-cell"><button type="button" class="fs-bank-pic" data-k="sppic" data-i="${i}" data-j="${j}" aria-label="Fix this photo’s cut-out">${picTag(p)}</button>
               <button type="button" class="fs-pic-x" data-k="sppicrm" data-i="${i}" data-j="${j}" aria-label="Remove this photo">${ic('close')}</button></div>`).join('')}
-            <button type="button" class="fs-bank-pic fs-bank-add" data-k="spadd-pic" data-i="${i}">${ic('plus')}<small>Photos</small></button></div></div>`).join('')}
+            <button type="button" class="fs-bank-pic fs-bank-add" data-k="spadd-pic" data-i="${i}">${ic('plus')}<small>Add photos<br>(several at once)</small></button></div></div>`).join('')}
           <button type="button" class="fs-ghost" data-k="spadd">${ic('plus')}<span>Add a speaker</span></button></div>
         </section>
         <section class="fs-sec"><h3>Inspiration <small>flyers you love — every new design leans their way</small></h3>
@@ -5393,9 +5393,18 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
           return drawKit();
         }
         case 'sppic': {   // one of the bank, tapped: fix its cut-out
-          const sp = k.speakers[i], j = +b.dataset.j, p = sp.photos[j];
+          // from the PHOTO it was cut from when the bank kept it — a fresh cut of the real picture, not a cut of the cut
+          const sp = k.speakers[i], j = +b.dataset.j, p = sp.photos[j], o = ORIG.get(p);
           await bankPic(p);
-          return cutOutUrl(PICURL.get(p) || p, async (png) => { sp.photos[j] = await tidyCut(png).catch(() => png); drawKit(); });
+          let from = PICURL.get(p) || p, orig = '';
+          if (o) { try { orig = /^data:/.test(o) ? o : await window.api.flyer.kitPic(o); from = orig; } catch (e) { orig = ''; } }
+          return cutOutUrl(from, async (png) => {
+            png = await tidyCut(png).catch(() => png);
+            let kept = png;
+            // kept on the server at once with its photo (so a later fix starts from the photo again); Save puts it in this place
+            if (orig && sp.id) { try { kept = await window.api.flyer.kitAddPhoto(sp.id, png, sp.name, orig); PICURL.set(kept, png); ORIG.set(kept, orig); } catch (e) { kept = png; } }
+            sp.photos[j] = kept; drawKit();
+          });
         }
         case 'sppicrm': {   // its ✕: out of the bank (kept until Save — closing without saving puts it back)
           k.speakers[i].photos.splice(+b.dataset.j, 1);

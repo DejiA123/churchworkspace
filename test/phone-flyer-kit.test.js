@@ -91,6 +91,23 @@ async function waitUp() {
     check(boxes.length >= 6 && boxes.every((b) => b.ratio >= 4.5), 'every box in My church is readable', boxes.filter((b) => b.ratio < 4.5));
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'kit-1.png') });
 
+    // ── tapping a photo opens its cut-out: on a phone the picture big on top, every control on the screen
+    await page.locator('.cp-flyer-kit .fs-bank-cell .fs-bank-pic').first().tap();
+    await page.waitForSelector('#cutModal:not(.hidden)', { timeout: 15000 }).catch(() => {});
+    await sleep(1500);
+    const ed = await page.evaluate(() => {
+      const r = (q) => { const e = document.querySelector(q); return e ? e.getBoundingClientRect() : null; };
+      const st = r('#cutModal .cut-stage'), soft = r('#cutModal .cut-check'), apply = r('#cutApply');
+      return { open: !!document.querySelector('#cutModal:not(.hidden)'), vw: innerWidth, vh: innerHeight, stage: st && { w: Math.round(st.width), h: Math.round(st.height) },
+        softIn: !!soft && soft.right <= innerWidth + 1 && soft.width > 60, applyIn: !!apply && apply.bottom <= innerHeight + 1 && apply.right <= innerWidth + 1,
+        label: (document.getElementById('cutMethod') || {}).textContent || '' };
+    });
+    check(ed.open && ed.stage && ed.stage.w >= ed.vw * 0.9 && ed.stage.h >= ed.vh * 0.28, 'the cut-out editor opens with the picture across the phone, big', ed);
+    check(ed.softIn && ed.applyIn, 'its controls are all on the screen (Soft edge, Use this)', ed);
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'kit-cut.png') });
+    await page.evaluate(() => { const c = document.getElementById('cutCancel'); if (c) c.click(); });
+    await sleep(300);
+
     // ── each photo has its own ✕
     const xs = await page.evaluate(() => [...document.querySelectorAll('.cp-flyer-kit .fs-bank-cell')].map((c) => {
       const x = c.querySelector('.fs-pic-x'), r = x && x.getBoundingClientRect(), cr = c.getBoundingClientRect();

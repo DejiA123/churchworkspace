@@ -202,8 +202,9 @@
       }
       const m = $('cutMethod');
       if (m) {
+        // (who cut it: the studio's own AI on the server — the good one — or this phone's smaller model)
         m.textContent = r.method === 'ai'
-          ? 'Found a person — cutting around them'
+          ? (r.by === 'server' ? 'Cut out by the studio’s AI' : 'Cut out on this phone (the studio’s own AI is not on the server yet)')
           : '🎨 No person found, so it is matching the backdrop colour';
       }
       redraw();

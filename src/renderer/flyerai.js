@@ -362,7 +362,7 @@
           const k = Math.pow(2, (Math.max(0, Math.min(1, strength)) - 0.5) * 2.4);   // (0.5: as cut; higher: firmer)
           let on = 0;
           for (let i = 0; i < alpha.length; i++) { const a = d[i * 4 + 3] / 255; alpha[i] = Math.round(255 * Math.pow(a, k)); if (alpha[i] > 127) on++; }
-          return { w, h, rgba, alpha, method: 'ai', coverage: on / alpha.length };
+          return { w, h, rgba, alpha, method: 'ai', by: 'server', coverage: on / alpha.length };
         }
       } catch (e) { /* this phone's model, then */ }
     }
