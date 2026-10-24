@@ -78,6 +78,33 @@ function frameRgb(ffmpegPath, file, t, maxW = 960) {
 }
 
 /**
+ * `n` frames of a video `w`×`h`, `step` seconds apart from `t0`, in ONE read (a look each was a second apiece on a
+ * 2 GB, 3¾-hour video: the seek is the cost): [{ rgb, width, height }], fewer near the end of the video.
+ */
+function framesRgb(ffmpegPath, file, t0, n, step, w, h, maxW = 960) {
+  const W = Math.max(2, Math.floor(Math.min(maxW, w) / 2) * 2), H = Math.max(2, Math.round((h * W) / w / 2) * 2);
+  const args = ['-hide_banner', '-v', 'error', '-ss', String(Math.max(0, t0)), '-t', String(step * (n - 1) + 0.4), '-i', file,
+    '-vf', `select='isnan(prev_selected_t)+gte(t-prev_selected_t,${(step - 0.02).toFixed(3)})',scale=${W}:${H},setsar=1`,
+    '-fps_mode', 'passthrough', '-frames:v', String(n), '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'];
+  return new Promise((resolve, reject) => {
+    const p = spawn(ffmpegPath, args, { windowsHide: true });
+    const out = [];
+    p.stdout.on('data', (d) => out.push(d));
+    p.on('error', reject);
+    p.on('close', () => {
+      const all = Buffer.concat(out), one = W * H * 3, frames = [];
+      for (let k = 0; (k + 1) * one <= all.length && k < n; k++) {
+        const rgb = new Uint8Array(one);
+        rgb.set(all.subarray(k * one, (k + 1) * one));
+        frames.push({ rgb, width: W, height: H });
+      }
+      if (!frames.length) return reject(new Error('could not read those frames'));
+      resolve(frames);
+    });
+  });
+}
+
+/**
  * The people in a video at `t` seconds: [{ score, face:{x,y,w,h}, body:{x0,x1} }]
  * as shares of the picture (0 left … 1 right). Rejects when it cannot look.
  */
@@ -99,4 +126,4 @@ function peopleIn(fr) {
 
 function stop() { if (worker) { try { worker.terminate(); } catch (e) {} worker = null; } }
 
-module.exports = { available, why, people, peopleIn, frameRgb, stop, MODEL };
+module.exports = { available, why, people, peopleIn, frameRgb, framesRgb, stop, MODEL };

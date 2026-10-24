@@ -100,9 +100,30 @@ const P = (text, start, end, extra) => Object.assign({ text, start, end, vid: 1,
     const a = m.whoKey('man, navy jumper, white towel'), b = m.whoKey('Man in a dark blue sweater with a white towel');
     const c = m.whoKey('man in a green jumper'), d = m.whoKey('woman in a red dress with a gele'), e = m.whoKey('man in a navy blazer');
     ok(a === 'm|navy|knit|towel' && a === b, 'one man described two ways is one fingerprint', [a, b]);
-    ok(m.sameWho(a, b) && !m.sameWho(a, c) && !m.sameWho(a, d) && m.sameWho(m.whoKey('man in a navy jumper'), e) && !m.sameWho(a, m.whoKey('man, navy jumper, glasses')),
-      'the same person matches; another colour, a woman, or another mark does not (a knit and a jacket may be one)', [c, d, e]);
+    ok(m.sameWho(a, b) && !m.sameWho(a, c) && !m.sameWho(a, d) && m.sameWho(m.whoKey('man in a navy jumper'), e) && m.sameWho(a, m.whoKey('man in a dark suit with a white scarf')),
+      'the same person matches (navy or black, jumper or suit, towel or scarf: the words change); another colour or a woman does not', [c, d, e]);
+    ok(!m.sameWho(m.whoKey('woman in a black dress'), m.whoKey('woman in a black jumper and jeans')), 'a dress and trousers are two people');
     ok(m.whoKey('someone') === '' && !m.sameWho('', a), 'too little said: no fingerprint, never counted as the same');
+  }
+  // ►► THE PERSON STAYS IN THE PICTURE: followed by the detector, the cut pans with them; one who walks out is not used
+  {
+    const sp = { cand: { file: 'x.mp4', kind: 'video', w: 1280, h: 720, fileDur: 9000 }, snapLook: { fx: 0.4 } };
+    const face = (x) => [{ score: 0.9, face: { x, y: 0.3, w: 0.05, h: 0.09 } }];
+    const walker = { people: async (ff, file, t) => face(0.4 + (t - 100) * 0.04) };
+    const tr = await m.followIn({ ffmpeg: 'ffmpeg' }, walker, sp, 100, 1080, 1920);
+    ok(Array.isArray(tr) && tr.length === 5 && Math.abs(tr[0].fx - 0.336) < 0.01 && Math.abs(tr[4].fx - 0.464) < 0.01, 'a person who moves is followed from 1.6 s before to 1.6 s after', tr);
+    const ov = { from: 99, len: 2.5 };
+    m.aimCut(ov, Object.assign({}, sp, { track: tr }));
+    ok(Math.abs(ov.fx - 0.36) < 0.01 && Math.abs(ov.fx2 - 0.46) < 0.01, 'and the cut pans with them over its own stretch', ov);
+    const leaver = { people: async (ff, file, t) => (t > 101 ? [] : face(0.4)) };
+    ok((await m.followIn({ ffmpeg: 'ffmpeg' }, leaver, sp, 100, 1080, 1920)) === false, 'one who walks out of the picture: the moment is not used');
+    const runner = { people: async (ff, file, t) => face(t > 100.5 ? 0.9 : 0.4) };
+    ok((await m.followIn({ ffmpeg: 'ffmpeg' }, runner, sp, 100, 1080, 1920)) === false, 'one gone far across in a moment (out of the cut): not used');
+    const blind = { people: async () => [] };
+    ok((await m.followIn({ ffmpeg: 'ffmpeg' }, blind, sp, 100, 1080, 1920)) === null, 'the detector does not see the person the AI saw: not judged');
+    const still = { from: 99, len: 2.5 };
+    m.aimCut(still, sp);
+    ok(still.fx === 0.4 && still.fx2 === undefined, 'not followed: cut round where the AI saw them, no pan');
   }
   // ►► A CLIP EVERY 2.5 SECONDS, THE WORDS WHOLE: one strong line of 2–5.5 s from each part of a long event
   {

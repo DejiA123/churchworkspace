@@ -404,9 +404,9 @@ const THUMB_SYSTEM = 'You choose the thumbnail for a short video clip of a churc
  * (numbered, in play order), which ones show a person already shown. Answers [{ photo, same_as }] (1-based).
  */
 const SAME_SYSTEM = [
-  'You check a short video edit of a church event for variety. The image is a sheet of numbered photos, each one moment of the edit, in the order they play.',
-  'Find every photo whose MAIN PERSON is the same person as the main person of an EARLIER photo — the same face, hair and clothes — even when the camera angle, the zoom or the background is different.',
-  'Different people dressed alike are NOT the same person: look at the face, the hair and the clothes together. When you are not sure, do not list it.',
+  'You check a short video edit of a church event for variety. The image is a sheet of numbered photos, each a close-up of the person one moment of the edit shows, in the order they play.',
+  'Find every photo whose MAIN PERSON is the same person as the main person of an EARLIER photo — the same face, hair, build and clothes — even when the camera angle, the zoom, the light or the background is different. One person is often on stage all night (the host, a panel member): they come back many times.',
+  'Look hard at the face, the hair and the clothes together. When it may well be the same person, list it: a wrong guess only swaps in another moment, but one person shown twice spoils the video.',
   'Reply with compact JSON only: {"repeats":[{"photo":<number>,"same_as":<earlier number>}]} — an empty list when every photo shows someone new.',
 ].join('\n');
 async function samePeople({ image, count, maxWaitMs = 30000 } = {}) {

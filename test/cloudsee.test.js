@@ -164,7 +164,7 @@ const ok = (answer) => reply(200, { choices: [{ message: { content: typeof answe
   script = [ok({ repeats: [{ photo: 5, same_as: 2 }, { photo: 3, same_as: 4 }, { photo: 9, same_as: 1 }] })];
   const sp = await cloudsee.samePeople({ image: IMG, count: 6 });
   check('the same person twice: the photos of someone already shown are named (an answer that points forward or off the sheet is not taken)',
-    sp.ok && sp.repeats.length === 1 && sp.repeats[0].photo === 5 && sp.repeats[0].same_as === 2 && /same face, hair and clothes/.test(calls[0].system), sp);
+    sp.ok && sp.repeats.length === 1 && sp.repeats[0].photo === 5 && sp.repeats[0].same_as === 2 && /same face, hair, build and clothes/.test(calls[0].system), sp);
 
   console.log('\n[9] Bad input');
   const bad = await cloudsee.whoIsSpeaking({ image: 'C:/not-a-data-url.jpg', frames: FRAMES });
