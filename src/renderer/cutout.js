@@ -184,15 +184,29 @@
   function setBusy(on, msg) {
     ED.busy = on;
     const n = $('cutBusy');
-    if (n) { n.classList.toggle('hidden', !on); if (msg) n.textContent = msg; }
+    if (n) { n.classList.toggle('hidden', !on); if (msg) n.textContent = msg; if (!on) n.classList.remove('cut-prog'); }
     ['cutApply', 'cutStrength', 'cutMode'].forEach((id) => { const e = $(id); if (e) e.disabled = on; });
+  }
+
+  /** The busy card as a bar: the words, the percentage, and the bar filling. */
+  function showProgress(p, words) {
+    const n = $('cutBusy'); if (!n || !ED.busy) return;
+    const pct = Math.max(0, Math.min(100, Math.round(p * 100)));
+    if (!n.classList.contains('cut-prog')) {
+      n.classList.add('cut-prog');
+      n.innerHTML = '<div class="cut-prog-top"><span class="cut-prog-w"></span><b class="cut-prog-n"></b></div><div class="cut-prog-bar"><i></i></div>';
+    }
+    n.querySelector('.cut-prog-w').textContent = words || 'Working…';
+    n.querySelector('.cut-prog-n').textContent = pct + '%';
+    n.querySelector('.cut-prog-bar i').style.width = pct + '%';
   }
 
   /** Re-run the algorithm at the current strength, keeping the brush work. */
   async function recompute(firstRun) {
     setBusy(true, firstRun ? '🪄 Taking the background out…' : 'Re-doing it at that strength…');
     try {
-      const r = await window.FlyerAI.maskFor(ED.src, { mode: ED.mode, strength: ED.strength });
+      // a live bar with how far along it is (the studio's AI takes half a minute: it looked stuck)
+      const r = await window.FlyerAI.maskFor(ED.src, { mode: ED.mode, strength: ED.strength, onProgress: showProgress });
       const sizeChanged = r.w !== ED.w || r.h !== ED.h;
       ED.w = r.w; ED.h = r.h; ED.rgba = r.rgba; ED.auto = r.alpha; ED.method = r.method;
       if (sizeChanged || !ED.erase) {

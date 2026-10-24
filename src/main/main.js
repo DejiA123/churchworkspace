@@ -801,10 +801,11 @@ ipcMain.handle('flyer:cutout', wrap(async (e, a) => {
   if (!m) throw new Error('That is not a picture.');
   if (!cutoutai.available()) throw new Error('The cut-out model is not installed on this server.');
   const pose = Array.isArray(a && a.pose) && a.pose.length === 33 ? a.pose : null;
-  const r = await cutoutai.cutout(getCtx().ffmpeg, Buffer.from(m[1], 'base64'), { maxSide: 2000, pose });
+  const ticket = a && typeof a.ticket === 'string' ? a.ticket.slice(0, 40) : null;   // (the phone asks after it by this: flyer:cutoutStatus)
+  const r = await cutoutai.cutout(getCtx().ffmpeg, Buffer.from(m[1], 'base64'), { maxSide: 2000, pose, ticket });
   return { dataUrl: 'data:image/png;base64,' + r.png.toString('base64'), w: r.w, h: r.h, coverage: r.coverage, ms: r.ms, waistUp: !!r.waistUp };
 }));
-ipcMain.handle('flyer:cutoutStatus', wrap(async () => cutoutai.status()));
+ipcMain.handle('flyer:cutoutStatus', wrap(async (e, a) => cutoutai.status(a && typeof a.ticket === 'string' ? a.ticket.slice(0, 40) : null)));
 // (the model is fetched once, in the background, soon after the server starts — not when the first photo waits for it)
 if (cutoutai.available()) { const t = setTimeout(() => { cutoutai.fetchModel().catch(() => {}); }, 30000); if (t.unref) t.unref(); }
 ipcMain.handle('flyer:inspoAdd', wrap(async (e, a) => flyerart.inspoAdd(a || {})));

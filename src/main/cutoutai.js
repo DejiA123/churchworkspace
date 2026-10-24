@@ -35,6 +35,35 @@ let dir = path.join(os.tmpdir(), 'mw-cutout-model');
 let ort, session = null, opening = null, fetching = null, idle = null;
 let chain = Promise.resolve();   // one cut-out at a time: each uses every core
 const state = { done: 0, failed: 0, lastMs: 0, why: '', fetching: false, fetched: 0 };
+/*
+ * ►► HOW FAR ALONG. ◄◄ A cut-out takes half a minute; with nothing moving the
+ * phone "looks like it's stuck". Each one comes with a ticket from the phone,
+ * and the phone asks after it: where it is in the queue, which step it is on
+ * (reading the photo, loading the model, the model looking at it, finishing
+ * the edges), and how far through that step — timed by how long the same step
+ * took the last time. The first one ever is the model's download, counted in
+ * bytes.
+ */
+const jobs = new Map();   // ticket -> { stage, at }
+const queue = [];         // tickets, in order: the first is the one being cut
+const took = { reading: 1500, loading: 8000, thinking: 20000, finishing: 6000 };   // learned, each time
+const SPANS = { reading: [0, 0.08], loading: [0.08, 0.22], thinking: [0.22, 0.86], finishing: [0.86, 1] };
+function stage(ticket, name) {
+  const j = ticket && jobs.get(ticket); if (!j) return;
+  const now = Date.now();
+  if (j.stage && took[j.stage] != null) took[j.stage] = Math.round(took[j.stage] * 0.4 + (now - j.at) * 0.6);
+  j.stage = name; j.at = now;
+}
+function progress(ticket) {
+  const j = ticket && jobs.get(ticket);
+  if (!j) return null;
+  if (state.fetching) return { stage: 'downloading', pct: Math.min(0.99, state.fetched / MODEL_BYTES), mb: Math.round(state.fetched / 1048576), of: Math.round(MODEL_BYTES / 1048576) };
+  if (!j.stage) return { stage: 'waiting', ahead: Math.max(0, queue.indexOf(ticket)), pct: 0 };
+  if (j.stage === 'done') return { stage: 'done', pct: 1 };
+  const [a, b] = SPANS[j.stage] || [0, 1], len = Math.max(400, took[j.stage] || 5000);
+  // (and how fast it should go on: the server is busy while it cuts, so the phone keeps the bar moving between answers)
+  return { stage: j.stage, pct: a + (b - a) * Math.min(0.95, (Date.now() - j.at) / len), to: a + (b - a) * 0.95, rate: (b - a) / len * 1000 };
+}
 
 /** Where the model is kept (the app's data folder outlives an update). */
 function setDataDir(d) { if (d) dir = path.join(d, 'cutout-model'); }
@@ -46,7 +75,7 @@ function runtime() {
 function available() { return !!runtime(); }
 const modelPath = () => path.join(dir, MODEL_NAME);
 function modelReady() { try { return fs.statSync(modelPath()).size === MODEL_BYTES; } catch (e) { return false; } }
-function status() { return Object.assign({ available: available(), model: modelReady(), file: MODEL_NAME }, state); }
+function status(ticket) { return Object.assign({ available: available(), model: modelReady(), file: MODEL_NAME, queue: queue.length }, state, ticket ? { job: progress(ticket) } : {}); }
 
 /** The model, fetched once (resumed from where a broken download stopped). */
 function fetchModel() {
@@ -332,13 +361,19 @@ const choke = (W, H) => Array.from({ length: Math.max(1, Math.round(Math.max(W, 
  * The person in a picture (the bytes of a JPEG/PNG/WebP) cut out: a PNG with the background clear, at the picture's
  * own size (at most `maxSide` across). { png, coverage, ms, specks }.
  */
-function cutout(ffmpeg, input, { maxSide = 2000, pose = null } = {}) {
-  const job = chain.then(() => cutoutNow(ffmpeg, input, { maxSide, pose }));
+function cutout(ffmpeg, input, { maxSide = 2000, pose = null, ticket = null } = {}) {
+  const t = ticket ? String(ticket).slice(0, 40) : 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  jobs.set(t, { stage: null, at: Date.now() }); queue.push(t);
+  const job = chain.then(() => cutoutNow(ffmpeg, input, { maxSide, pose, ticket: t }));
   chain = job.catch(() => {});
+  // (forgotten a little after it ends: the phone's last question still finds it done)
+  const forget = () => { const i = queue.indexOf(t); if (i >= 0) queue.splice(i, 1); const tm = setTimeout(() => jobs.delete(t), 15000); if (tm.unref) tm.unref(); };
+  job.then(forget, forget);
   return job;
 }
-async function cutoutNow(ffmpeg, input, { maxSide, pose }) {
+async function cutoutNow(ffmpeg, input, { maxSide, pose, ticket }) {
   const t0 = Date.now();
+  stage(ticket, 'reading');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mw-cut-'));
   try {
     const src = path.join(tmp, 'in');
@@ -353,10 +388,13 @@ async function cutoutNow(ffmpeg, input, { maxSide, pose }) {
     let mx = 1; for (let i = 0; i < SIZE * SIZE * 3; i++) if (small[i] > mx) mx = small[i];
     const x = new Float32Array(3 * SIZE * SIZE);
     for (let i = 0; i < SIZE * SIZE; i++) for (let c = 0; c < 3; c++) x[c * SIZE * SIZE + i] = (small[i * 3 + c] / mx - MEAN[c]) / STD[c];
+    if (!session) stage(ticket, 'loading');
     const sess = await openSession();
     const rt = runtime();
+    stage(ticket, 'thinking');
     const res = await sess.run({ [sess.inputNames[0]]: new rt.Tensor('float32', x, [1, 3, SIZE, SIZE]) });
     release();
+    stage(ticket, 'finishing');
     const o = res[sess.outputNames[0]].data;
     let lo = Infinity, hi = -Infinity;
     const p = new Float32Array(SIZE * SIZE);
@@ -393,6 +431,7 @@ async function cutoutNow(ffmpeg, input, { maxSide, pose }) {
     fs.writeFileSync(path.join(tmp, 'a'), alpha);
     const png = await run(ffmpeg, ['-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${W}x${H}`, '-i', path.join(tmp, 'rgb'),
       '-f', 'rawvideo', '-pix_fmt', 'gray', '-s', `${W}x${H}`, '-i', path.join(tmp, 'a'), '-filter_complex', `[1:v]${choke(W, H)}[a];[0:v][a]alphamerge,format=rgba`, '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', '-']);
+    stage(ticket, 'done');
     state.done++; state.lastMs = Date.now() - t0; state.why = '';
     return { png, w: W, h: H, coverage: covered / (W * H), ms: state.lastMs, specks: kp.specks, gated: gated / (W * H), waistUp: waistUp != null };
   } catch (e) {

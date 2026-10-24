@@ -202,25 +202,66 @@
    */
   const serverCuts = new Map();
   const serverCan = () => typeof window !== 'undefined' && window.api && window.api.flyer && typeof window.api.flyer.cutout === 'function';
-  async function serverCut(src) {
+  /*
+   * HOW FAR ALONG (onProgress(0..1, words)): the photo made ready here, sent, then the server asked after it
+   * by its ticket every ¾ s — its place in the queue, the step it is on, how far through (cutoutai.js). Half a
+   * minute with nothing moving "looks like it's stuck".
+   */
+  const STEP_WORDS = { reading: 'The studio’s AI is reading the photo', loading: 'Waking the studio’s AI', thinking: 'The studio’s AI is cutting it out', finishing: 'Finishing the edges', done: 'Finishing the edges' };
+  async function serverCut(src, onProgress) {
     if (!serverCan()) return null;
     const key = String(src).length > 200 ? String(src).slice(0, 120) + ':' + String(src).length + ':' + String(src).slice(-80) : String(src);
     if (!serverCuts.has(key)) {
-      serverCuts.set(key, (async () => {
+      const ent = { listeners: new Set(), last: null };
+      const say = (p, w) => { ent.last = [p, w]; ent.listeners.forEach((f) => { try { f(p, w); } catch (e) {} }); };
+      ent.job = (async () => {
+        say(0.01, 'Getting the photo ready');
         const img = await loadImage(src);
         const { cv } = drawToCanvas(img, 2000);
         // (where their body is — this phone's pose model — so the server keeps only them: no lectern, no chair)
         let pose = null;
         try { const lm = await poseOf(cv); pose = lm ? lm.map((p) => ({ x: +p.x.toFixed(4), y: +p.y.toFixed(4), v: +(p.visibility || 0).toFixed(2) })) : null; } catch (e) { pose = null; }
-        const r = await window.api.flyer.cutout(cv.toDataURL('image/jpeg', 0.93), pose);
-        return r && r.dataUrl ? r : null;
-      })().catch((e) => { serverCuts.delete(key); throw e; }));
+        say(0.05, 'Sending it to the studio');
+        const ticket = 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        let over = false, best = 0.05, glide = null, words = 'Sending it to the studio';
+        // between answers the bar goes on at the pace the server said this step goes, never past the step's end
+        const tick = setInterval(() => {
+          if (over || !glide) return;
+          const p = Math.min(glide.to, best + glide.rate * 0.25);
+          if (p > best + 0.001) { best = p; say(p, words); }
+        }, 250);
+        const ask = async () => {
+          while (!over) {
+            await new Promise((r) => setTimeout(r, 750));
+            if (over || typeof window.api.flyer.cutoutStatus !== 'function') return;
+            try {
+              const st = await window.api.flyer.cutoutStatus(ticket), j = st && st.job;
+              if (over || !j) continue;
+              const p = Math.max(best, 0.08 + 0.9 * (j.pct || 0));   // (never backwards)
+              best = p;
+              glide = j.rate ? { rate: 0.9 * j.rate, to: 0.08 + 0.9 * j.to } : null;
+              say(p, words = j.stage === 'waiting' ? (j.ahead ? `Waiting — ${j.ahead} photo${j.ahead > 1 ? 's' : ''} ahead of this one` : 'Starting…')
+                : j.stage === 'downloading' ? `Getting the studio’s AI ready — first time only (${j.mb} of ${j.of} MB)` : STEP_WORDS[j.stage] || 'Working…');
+            } catch (e) { /* asked again in a moment */ }
+          }
+        };
+        ask();
+        try {
+          const r = await window.api.flyer.cutout(cv.toDataURL('image/jpeg', 0.93), pose, ticket);
+          over = true;
+          say(1, 'Done');
+          return r && r.dataUrl ? r : null;
+        } finally { over = true; clearInterval(tick); }
+      })().catch((e) => { serverCuts.delete(key); throw e; });
+      serverCuts.set(key, ent);
     }
-    return serverCuts.get(key);
+    const ent = serverCuts.get(key);
+    if (onProgress) { ent.listeners.add(onProgress); if (ent.last) onProgress(ent.last[0], ent.last[1]); }
+    try { return await ent.job; } finally { if (onProgress) ent.listeners.delete(onProgress); }
   }
 
-  async function removePerson(src) {
-    try { const r = await serverCut(src); if (r) return { src: r.dataUrl, coverage: r.coverage, by: 'server' }; } catch (e) { /* this phone's model, then */ }
+  async function removePerson(src, onProgress) {
+    try { const r = await serverCut(src, onProgress); if (r) return { src: r.dataUrl, coverage: r.coverage, by: 'server' }; } catch (e) { /* this phone's model, then */ }
     const img = await loadImage(src);
     const { cv, cx, w, h } = drawToCanvas(img, 1600);
     const { alpha, coverage } = await fineMask(cv, cx, w, h);
@@ -345,14 +386,14 @@
    * strength: 0..1 — how much background is taken.
    * Returns { w, h, rgba, alpha, method }.
    */
-  async function maskFor(src, { mode = 'auto', strength = 0.5, maxDim = 1400 } = {}) {
+  async function maskFor(src, { mode = 'auto', strength = 0.5, maxDim = 1400, onProgress = null } = {}) {
     const img = await loadImage(src);
     const { cv, cx, w, h } = drawToCanvas(img, maxDim);
     const rgba = cx.getImageData(0, 0, w, h).data.slice();
     // the server's cut-out (see serverCut), at this size; the strength dial firms it up or lets more of the edge in
     if (mode !== 'colour') {
       try {
-        const r = await serverCut(src);
+        const r = await serverCut(src, onProgress);
         if (r) {
           const cut = drawToCanvas(await loadImage(r.dataUrl), maxDim);
           const sc = document.createElement('canvas'); sc.width = w; sc.height = h;

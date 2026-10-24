@@ -1191,6 +1191,12 @@ body.mw-cloud #cloudPass:focus { border-color: #1f6fe0; box-shadow: 0 0 0 3px rg
     body.mw-cloud .cut-foot-btns button { min-height: 46px; padding: 0 18px; }
   }
   body.mw-cloud .cut-check input { width: auto; height: auto; margin: 0; }
+  /* how far along a cut-out is: the words, the percentage, a bar that fills */
+  body.mw-cloud .cut-busy.cut-prog { width: min(320px, 84%); padding: 14px 16px; border-radius: 14px; display: grid; gap: 10px; }
+  body.mw-cloud .cut-prog-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 14px; line-height: 1.3; }
+  body.mw-cloud .cut-prog-n { font-size: 18px; font-variant-numeric: tabular-nums; color: #8ec0ff; }
+  body.mw-cloud .cut-prog-bar { height: 8px; border-radius: 6px; overflow: hidden; background: rgba(255, 255, 255, .14); }
+  body.mw-cloud .cut-prog-bar i { display: block; height: 100%; width: 0; border-radius: 6px; background: linear-gradient(90deg, #1f6fe0, #4d95ef); transition: width .25s linear; }
 
   /* ------------------------------------------- the captions window, on a phone
    *

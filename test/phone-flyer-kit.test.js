@@ -91,8 +91,36 @@ async function waitUp() {
     check(boxes.length >= 6 && boxes.every((b) => b.ratio >= 4.5), 'every box in My church is readable', boxes.filter((b) => b.ratio < 4.5));
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'kit-1.png') });
 
+    // the studio's AI stood in for: half a minute there, four seconds here — asked after by its ticket, as the real one is
+    await page.evaluate(() => {
+      const t0 = {};
+      window.api.flyer.cutoutStatus = async (ticket) => {
+        const at = t0[ticket]; if (!at) return { job: { stage: 'waiting', ahead: 1, pct: 0 } };
+        const f = Math.min(1, (Date.now() - at) / 4000);
+        return { job: { stage: f < 0.85 ? 'thinking' : 'finishing', pct: 0.22 + 0.64 * f, to: 0.86, rate: 0.64 / 4 } };
+      };
+      window.api.flyer.cutout = async (dataUrl, pose, ticket) => {
+        await new Promise((r) => setTimeout(r, 900)); t0[ticket] = Date.now();
+        await new Promise((r) => setTimeout(r, 4000));
+        return { dataUrl, w: 300, h: 400, coverage: 0.5 };
+      };
+    });
     // ── tapping a photo opens its cut-out: on a phone the picture big on top, every control on the screen
     await page.locator('.cp-flyer-kit .fs-bank-cell .fs-bank-pic').first().tap();
+    // …and while the studio's AI works, a live bar: the words, a percentage, filling
+    const bar = [];
+    for (let t = 0; t < 12; t++) {
+      await sleep(500);
+      bar.push(await page.evaluate(() => {
+        const b = document.querySelector('#cutBusy.cut-prog:not(.hidden)'); if (!b) return null;
+        return { words: b.querySelector('.cut-prog-w').textContent, n: b.querySelector('.cut-prog-n').textContent, w: parseFloat(b.querySelector('.cut-prog-bar i').style.width) };
+      }));
+      if (t === 4 && SHOTS) await page.screenshot({ path: path.join(SHOTS, 'kit-progress.png') });
+    }
+    const seen = bar.filter(Boolean), ws = seen.map((x) => x.w);
+    check(seen.length >= 4 && seen.every((x) => /^\d+%$/.test(x.n) && x.w === parseInt(x.n, 10)), 'while the studio’s AI cuts it out, a live bar with a percentage', bar);
+    check(ws.length >= 4 && ws[ws.length - 1] > ws[0] + 25 && ws.every((w, i) => !i || w >= ws[i - 1]), 'the bar keeps filling, never going back', ws);
+    check(seen.some((x) => /Waiting|cutting it out/.test(x.words)), 'it says what is happening (waiting its turn, cutting it out)', seen.map((x) => x.words));
     await page.waitForSelector('#cutModal:not(.hidden)', { timeout: 15000 }).catch(() => {});
     await sleep(1500);
     const ed = await page.evaluate(() => {

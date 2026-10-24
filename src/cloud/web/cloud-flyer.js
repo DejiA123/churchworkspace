@@ -5154,10 +5154,13 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       let n = 0;
       for (const f of files) {
         toast(`Cutting out ${++n} of ${files.length}…`, '', 4000);
+        // how far through the whole lot, live (each photo half a minute on the studio's AI: it looked stuck)
+        let shown = -1;
+        const prog = (p) => { const all = Math.round(((n - 1) + p) / files.length * 100); if (all >= shown + 3 || p >= 1) { shown = all; toast(`Cutting out ${n} of ${files.length} — ${all}%`, '', 6000); } };
         try {
           const url = await shrinkToDataUrl(f, 1800);
           let png = url;
-          try { png = await tidyCut((await window.FlyerAI.removePerson(url)).src); } catch (e) { /* kept as it is */ }
+          try { png = await tidyCut((await window.FlyerAI.removePerson(url, prog)).src); } catch (e) { /* kept as it is */ }
           // each one kept on the server as soon as it is cut out (a speaker not yet saved is made as it goes)
           let kept = png;
           // (the photo it was cut from goes with it: the framed looks show that, nothing cut out)
