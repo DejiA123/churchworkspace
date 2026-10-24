@@ -7,7 +7,7 @@
  *   - the program is started the first time it is asked, and kept for the next question
  *   - a question that wants JSON in a shape asks for it; one the program cannot force is asked plainly
  *   - one question at a time
- *   - the montage asks it first: its line check (vetLoose) uses its answer
+ *   - the montage asks it first: its line scores (vetLoose) decide which are used
  *   node test/serverllm.test.js
  */
 const fs = require('fs');
@@ -35,7 +35,10 @@ http.createServer((req, res) => {
       if (j.response_format && j.response_format.type === 'json_schema') { res.writeHead(400); return res.end('{"error":{"message":"Failed to initialize samplers"}}'); }
       const q = j.messages[1].content;
       const ids = (q.match(/^(p\\d+):/gm) || []).map((s) => s.slice(0, -1));
-      const content = /keep/.test(q) ? JSON.stringify({ keep: ids.filter((id, i) => i % 2 === 0) }) : 'hello';
+      // a line scored (the montage's rubric): "come on" is banter, the rest are statements
+      const rated = q.split('\\n').filter((l) => /^\\d+\\. /.test(l));
+      const content = /Rate each line/.test(q) ? JSON.stringify({ s: rated.map((l) => (/come on/.test(l) ? 1 : 8)) })
+        : /keep/.test(q) ? JSON.stringify({ keep: ids.filter((id, i) => i % 2 === 0) }) : 'hello';
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: '<think></think>' + content } }] }));
     }, 150);
@@ -76,7 +79,7 @@ s.setDataDir(WORK);
     // the montage: its check of the extra lines is the server's AI's answer
     const montage = require('../src/main/montage');
     const kept = await montage.vetLoose([{ id: 'p1', text: 'God is faithful' }, { id: 'p2', text: 'come on' }, { id: 'p3', text: 'Hope never fails' }]);
-    ok(kept && kept.map((p) => p.id).join() === 'p1,p3', 'the montage asks it first: the lines it keeps are the ones used', kept && kept.map((p) => p.id));
+    ok(kept && kept.map((p) => p.id).join() === 'p1,p3', 'the montage asks it first: the lines it scores well are the ones used', kept && kept.map((p) => p.id));
     ok(montage.directorStatus().director === 'server' && montage.directorStatus().server.ready, 'the montage says the server’s AI directs it', montage.directorStatus());
   } catch (e) { ok(false, 'the test ran to the end', e && e.stack); }
   s.stop();

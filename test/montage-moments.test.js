@@ -58,42 +58,55 @@ const P = (text, start, end, extra) => Object.assign({ text, start, end, vid: 1,
     const ev = (id, text, start) => Object.assign(P(text, start, start + 2.4, { score: 0.8 }), { id, vid: 0 });   // (a moment of about 2.5 s)
     const L = [ev('a1', 'God is not finished with your story yet.', 100), ev('a2', 'Oh, winner man! Oh, winner money!', 2000), ev('a3', 'His grace is enough for every season of your life.', 2100),
       ev('a4', 'Hold fast to what you have, so no one takes your crown.', 4000), ev('a5', 'Jesus is the light that never goes out.', 6000)];
-    ai.ready = () => true;
-    ai.chat = async ({ prompt }) => {
-      asked = prompt;
-      // keeps every line it is shown but the banter (a3 first in its part)
-      const parts = {};
-      for (const blk of prompt.split('PART ').slice(1)) { const k = blk.split('\n')[0].trim(); parts[k] = (blk.match(/\ba\d\b/g) || []).filter((id) => id !== 'a2').sort((x, y) => (y === 'a3') - (x === 'a3')); }
-      return JSON.stringify({ parts });
+    // the AI scores each line it is shown (0–10): the fake scores by the line's words
+    const scoring = (score) => async ({ prompt }) => {
+      asked += prompt;
+      const lines = prompt.split('\n').filter((l) => /^\d+\. /.test(l)).map((l) => l.replace(/^\d+\. /, ''));
+      return JSON.stringify({ s: lines.map(score) });
     };
+    const by = (tab) => (t) => { for (const [re, v] of tab) if (re.test(t)) return v; return 5; };
+    ai.ready = () => true;
+    ai.chat = scoring(by([[/winner/, 1], [/grace is enough/, 9], [/not finished/, 8], [/crown/, 7], [/light/, 7]]));
     try {
       const v = await m.vetParts([L[0], L[1], L[3]], L, { lengthSec: 30, eventSec: 7000 }, null);
       ok(v && v.picks[0] === L[0] && v.picks.includes(L[2]) && !v.picks.includes(L[1]) && v.approved.has(L[4]) && !v.approved.has(L[1]) && /winner money/.test(asked),
-        'a second read part by part: banter the editor took is replaced by the kept line of that part', v && v.picks.map((p) => p.id));
+        'every line scored: banter the editor took (scored 1) is replaced by the best-scored line of that part', v && v.picks.map((p) => p.id));
     } finally { ai.ready = was.ready; ai.chat = was.chat; }
-    // the AI names the line to end on: it is in the edit (in place of its part's line) and the edit ends on it
+    // the edit ends on the best-scored statement (in place of its part's line); the hook stays (scored 8+)
+    for (const L0 of L) delete L0.aiScore;
     ai.ready = () => true;
-    ai.chat = async ({ prompt }) => {
-      const parts = {};
-      for (const blk of prompt.split('PART ').slice(1)) { const k = blk.split('\n')[0].trim(); parts[k] = (blk.match(/\ba\d\b/g) || []).filter((id) => id !== 'a2').sort((x, y) => (x === 'a4') - (y === 'a4')); }
-      return JSON.stringify({ parts, close: 'a5' });
-    };
+    ai.chat = scoring(by([[/winner/, 1], [/light that never/, 10], [/not finished/, 8], [/grace/, 7], [/crown/, 6]]));
     try {
       const v = await m.vetParts([L[0], L[1], L[3]], L, { lengthSec: 30, eventSec: 7000 }, null);
       const order = v && m.eventOrder(v.picks, m.eventParts(L, { lengthSec: 30 }), v.close);
-      ok(v && v.close === L[4] && v.picks.includes(L[4]) && order[order.length - 1] === L[4] && order[0] === L[0], 'the AI names the closing line: the edit ends on it', order && order.map((p) => p.id));
+      ok(v && v.close === L[4] && v.picks.includes(L[4]) && order[order.length - 1] === L[4] && order[0] === L[0], 'the best-scored statement closes the edit; the hook (8) opens it', order && order.map((p) => p.id));
       // (the same with no close named: the strongest statement ends it, as before)
       ok(m.eventOrder(v.picks, m.eventParts(L, { lengthSec: 30 }), null).length === v.picks.length, 'no closing line named: the edit is ordered as before');
     } finally { ai.ready = was.ready; ai.chat = was.chat; }
-    // the extra lines that make up the length go through the same strict read
+    // a weak opening line (scored under 8) gives way to the best-scored line
+    for (const L0 of L) delete L0.aiScore;
     ai.ready = () => true;
-    ai.chat = async () => JSON.stringify({ keep: ['a3', 'zz'] });
+    ai.chat = scoring(by([[/winner/, 1], [/light that never/, 9], [/not finished/, 6], [/grace/, 7], [/crown/, 7]]));
+    try {
+      const v = await m.vetParts([L[0], L[1], L[3]], L, { lengthSec: 30, eventSec: 7000 }, null);
+      ok(v && v.picks[0] === L[4], 'an opening line the AI scored low gives way to its best-scored line', v && v.picks.map((p) => p.id));
+    } finally { ai.ready = was.ready; ai.chat = was.chat; }
+    // the extra lines that make up the length: only those scored 7 or more
+    for (const L0 of L) delete L0.aiScore;
+    ai.ready = () => true;
+    ai.chat = scoring(by([[/winner/, 1], [/grace/, 8]]));
     try {
       const kept = await m.vetLoose([L[1], L[2]], null);
-      ok(kept && kept.length === 1 && kept[0] === L[2], 'extra lines: only those the AI keeps are used', kept && kept.map((p) => p.id));
+      ok(kept && kept.length === 1 && kept[0] === L[2], 'extra lines: only those the AI scores 7+ are used', kept && kept.map((p) => p.id));
+      for (const L0 of L) delete L0.aiScore;
       ai.chat = async () => 'no';
       ok((await m.vetLoose([L[1], L[2]], null)) === null, 'no AI answer: the extra lines are not judged (null)');
     } finally { ai.ready = was.ready; ai.chat = was.chat; }
+    // never a line to share, whoever picks it: a prayer to God, an announcement, an instruction to the room
+    const ns = m.NOT_TO_SHARE;
+    ok(['That we would go home with a testimony, Lord.', 'Maybe you\'re here tonight and you\'re hearing, hey, I\'d love to be a presenter.', 'Speak about what you have learned, what the Lord has been teaching you.'].every((t) => ns.test(t))
+      && !['I can do all things through Christ who strengthens me.', 'God is good all the time.', 'The Lord is my shepherd, I shall not want.'].some((t) => ns.test(t)),
+      'a prayer to God, an announcement and an instruction are never lines to share; a statement of faith is');
   }
   // ►► THE SAME PERSON TWICE: told by what the AI says they look like (two takes on one man, two different men)
   {

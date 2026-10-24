@@ -1720,6 +1720,8 @@ function spreadList(phrases, max = 420) {
  * three times in a row: only the best of near-identical lines is kept.
  */
 // (words a thought cannot stop on — "…give them your card, and they" — but never "you", "it", "is": "He started it in you." is whole)
+/* never a line to share, whoever chose it: a prayer spoken to God, an invitation or announcement, an instruction to the room */
+const NOT_TO_SHARE = /(,\s*(lord|god|father|jesus)[.!]?\s*$)|^(that we would|we (just )?(thank|ask|pray|bless) you|father,|lord,|dear (god|lord)|in jesus'? name)|\b(presenters?|sign up|register|volunteer|next week|after (the|this) (service|event)|see you (next|soon|there)|follow us|subscribe|link in (the )?bio|come and see me|speak to (me|us) after)\b|^(speak about|share (with|about)|tell (the person|your neighbou?r|somebody)|turn to|look at (the|your)|repeat after me|say (it )?after me|write (it|this) down|grab (a|your))\b/i;
 const DANGLING_END = /\b(and|or|but|the|a|an|to|of|my|your|our|their|because|if|when|then|than)[,]?$/i;
 // (a thought joined on to one left out — "And then…", "Because…" — not "The joy of the Lord…", "That is the truth.")
 const MIDDLE_START = /^(and|or|but|of|to|which|because|then|anyway|anyways|no[.,!]|yeah\b|okay\b|ok[.,]|um\b|uh\b|like,|so like\b|that in itself\b|that'?s why\b|that is why\b|this is why\b|which is why\b)/i;
@@ -1826,61 +1828,80 @@ const partsFor = (opts) => clamp(Math.round((opts.lengthSec || 30) / LINE_EACH),
  * no AI answered (the edit stays as it was).
  */
 /* one JSON answer from the AI that reads the lines (the gateway, else Groq); null when none answers */
-async function askJson(system, prompt, maxTokens) {
+async function askJson(system, prompt, maxTokens, schema) {
   let text = '';
   // the server's own AI first (serverllm.js: no allowance, no key); the cloud readers only if it cannot answer
-  try { const sl = require('./serverllm'); if (sl.ready()) text = await sl.chat({ system, prompt, json: true, maxTokens, temperature: 0.2 }); } catch (e) { text = ''; }
+  try { const sl = require('./serverllm'); if (sl.ready()) text = await sl.chat({ system, prompt, json: true, schema: schema || null, maxTokens, temperature: 0.2 }); } catch (e) { text = ''; }
   if (!text) { try { const ai = require('./aaillm'); if (ai.ready()) text = await ai.chat({ system, prompt, json: true, maxTokens, temperature: 0.2 }); } catch (e) { text = ''; } }
   if (!text) { try { const cw = require('./cloudwrite'); if (cw.access && cw.access().key) text = await cw.chat({ system, prompt, json: true, maxTokens, temperature: 0.2, timeoutMs: 60000, evenIfOff: true }); } catch (e) { text = ''; } }
   // (Groq's free allowance used up: the other free readers — Mistral, Gemini)
   if (!text) { try { const bj = require('./bigjudge'); if (bj.ready()) text = await bj.chat({ system, prompt, json: true, maxTokens: Math.max(1500, maxTokens * 2), temperature: 0.2 }); } catch (e) { text = ''; } }
   try { const t = String(text || ''); const a = t.indexOf('{'), b = t.lastIndexOf('}'); return a >= 0 && b > a ? JSON.parse(t.slice(a, b + 1)) : null; } catch (e) { return null; }
 }
+/*
+ * ►► EVERY LINE SCORED. ◄◄ The server's own AI is a small model: asked to PICK
+ * the best few out of a long list it kept "Praise the Lord." and an
+ * announcement ("…I'd love to be a presenter") in the Gospel Jamz 30 s. A small
+ * model judges ONE line at a time far better than it compares a hundred, so
+ * each candidate is scored 0–10 against the same rubric, twenty at a time, the
+ * answer forced to a list of numbers; the edit is then built from the scores.
+ */
+const SCORE_SYSTEM = 'You rate lines spoken at a church event for a short viral video. Each line will be heard ON ITS OWN by a stranger scrolling social media, with nothing before or after it.';
+const SCORE_RUBRIC = 'Rate each line from 0 to 10:\n'
+  + '10 = a powerful, complete statement about God, faith, hope or life that a stranger would quote or share ("God is not finished with you yet.")\n'
+  + '7 = a clear, meaningful statement that stands on its own\n'
+  + '4 = fine but forgettable, or it needs what came before it\n'
+  + '0 to 2 = not for the video: talk to the room or the band, a welcome, thanks, an announcement or invitation ("if you would like to be a presenter…"), an instruction ("speak about what you learned", "turn to your neighbour"), '
+  + 'a prayer spoken to God ("…, Lord."), a question, banter or a joke, half a sentence, filler ("Praise the Lord.", "Amen."), or a personal detail with no point ("I have been 34 years in the faith").\n\nLines:\n';
+async function scoreLines(cands, log) {
+  const todo = cands.filter((p) => p.aiScore == null);
+  for (let i = 0; i < todo.length; i += 20) {
+    const b = todo.slice(i, i + 20);
+    const schema = { type: 'object', properties: { s: { type: 'array', items: { type: 'integer', minimum: 0, maximum: 10 }, minItems: b.length, maxItems: b.length } }, required: ['s'] };
+    const j = await askJson(SCORE_SYSTEM, SCORE_RUBRIC + b.map((p, k) => `${k + 1}. ${p.text}`).join('\n')
+      + `\n\nReply with JSON only: {"s":[…]} — exactly ${b.length} whole numbers from 0 to 10, one for each line, in order.`, 40 + b.length * 4, schema);
+    if (!j || !Array.isArray(j.s) || j.s.length !== b.length) continue;
+    b.forEach((p, k) => { const v = Number(j.s[k]); if (Number.isFinite(v)) p.aiScore = Math.max(0, Math.min(10, v)); });
+  }
+  const n = cands.filter((p) => p.aiScore != null).length;
+  if (log && todo.length) log(`score: the AI scored ${n} of ${cands.length} line(s)`);
+  return n;
+}
+const SCORE_KEEP = 6, SCORE_EXTRA = 7;   // a part's line; a line only to make up the length (a higher bar)
+
 /* the extra lines that make up the length: the same strict read as the parts — the ones the AI keeps (null when no AI answers) */
 async function vetLoose(cands, log) {
   if (!cands.length) return null;
-  const system = 'You choose the lines for a short viral video of a church event, heard one after another. You only judge the words.';
-  const prompt = 'Keep ONLY the lines below that, heard on their own by a stranger scrolling, carry a clear and powerful message about God, faith, hope or life — a line people would quote or share. Be strict; when in doubt, drop it. ' +
-    'Drop banter and jokes, crowd work, stage chat, questions, announcements, a line that only makes sense with what came before, a line cut off mid-thought, and anything unclear.\n\n' +
-    cands.map((p) => `${p.id}: ${p.text}`).join('\n') +
-    '\n\nReply with JSON only: {"keep":["id","id"]} — best first.';
-  const j = await askJson(system, prompt, 600);
-  if (!j || !Array.isArray(j.keep)) { if (log) log('vet: no AI read the extra lines — used as found'); return null; }
-  const byId = new Map(cands.map((p) => [p.id, p]));
-  const kept = j.keep.map((id) => byId.get(String(id).trim())).filter(Boolean);
-  if (log) log(`vet: of ${cands.length} extra line(s) the AI kept ${kept.length}`);
-  return [...new Set(kept)];
+  if (!(await scoreLines(cands, log))) { if (log) log('vet: no AI read the extra lines — used as found'); return null; }
+  const kept = cands.filter((p) => p.aiScore >= SCORE_EXTRA).sort((a, b) => b.aiScore - a.aiScore || lineVal(b) - lineVal(a));
+  if (log) log(`vet: of ${cands.length} extra line(s) the AI scored ${SCORE_EXTRA}+ for ${kept.length}`);
+  return kept;
 }
 async function vetParts(picks, list, opts, log) {
   const ev = eventParts(list.concat(picks), opts);
-  const ok = (p) => p.end - p.start >= MOMENT_LINE_MIN && p.end - p.start <= MOMENT_LINE_MAX && !CROWD.test(p.text) && !HOUSEKEEPING.test(p.text) && !asks(p) && wholeThought(p);
+  const ok = (p) => p.end - p.start >= MOMENT_LINE_MIN && p.end - p.start <= MOMENT_LINE_MAX && !CROWD.test(p.text) && !HOUSEKEEPING.test(p.text) && !NOT_TO_SHARE.test(p.text) && !asks(p) && wholeThought(p);
   const parts = [];
   for (let k = 0; k < ev.n; k++) {
     const mine = picks.filter((p) => ev.part(p) === k);
-    const more = list.filter((p) => ev.part(p) === k && !mine.includes(p) && ok(p)).sort((a, b) => lineVal(b) - lineVal(a)).slice(0, 6 - Math.min(2, mine.length));
+    const more = list.filter((p) => ev.part(p) === k && !mine.includes(p) && ok(p)).sort((a, b) => lineVal(b) - lineVal(a)).slice(0, 8 - Math.min(2, mine.length));
     const c = mine.concat(more);
     if (c.length) parts.push({ k, c });
   }
   if (!parts.length) return null;
-  const system = 'You choose the lines for a short viral video of a church event, heard one after another. You only judge the words.';
-  const prompt = 'For each part of the event below, keep ONLY the lines that, heard on their own by a stranger scrolling, carry a clear and powerful message about God, faith, hope or life — a line people would quote or share. Be strict: at most 3 per part, and when in doubt, drop it. ' +
-    'Drop banter and jokes, crowd work, stage chat, any question (a line that asks is not a line to share), announcements, a line that only makes sense with what came before, a line cut off mid-thought, slang or wordplay a stranger would not follow, and anything unclear. Order the kept ones best first. A part may keep none.\n\n' +
-    parts.map((pt) => `PART ${pt.k + 1}\n` + pt.c.map((p) => `${p.id}: ${p.text}`).join('\n')).join('\n\n') +
-    '\n\nThen name the ONE kept line that ends the video best — a complete, uplifting statement that sums up and lands (not a question, not mid-story, not a joke).' +
-    '\n\nReply with JSON only: {"parts":{"1":["id","id"],"2":[]},"close":"id"} — every part listed, the ids it keeps, best first; close is one of the kept ids.';
-  const j = await askJson(system, prompt, 1500);
-  if (!j || !j.parts || typeof j.parts !== 'object') { if (log) log('vet: no AI read the lines again — kept as chosen'); return null; }
-  const byId = new Map(parts.flatMap((pt) => pt.c).map((p) => [p.id, p]));
+  const all = parts.flatMap((pt) => pt.c);
+  if (!(await scoreLines(all, log))) { if (log) log('vet: no AI read the lines again — kept as chosen'); return null; }
+  const byId = new Map(all.map((p) => [p.id, p]));
   const ranked = new Map(), approved = new Set();
   for (const pt of parts) {
-    const ids = Array.isArray(j.parts[String(pt.k + 1)]) ? j.parts[String(pt.k + 1)] : [];
-    const r = ids.map((id) => byId.get(String(id).trim())).filter((p) => p && pt.c.includes(p));
+    const r = pt.c.filter((p) => p.aiScore >= SCORE_KEEP).sort((a, b) => b.aiScore - a.aiScore || lineVal(b) - lineVal(a)).slice(0, 3);
     ranked.set(pt.k, r); r.forEach((p) => approved.add(p));
   }
+  // the line that ends it: the highest-scored statement kept (never a question)
+  const j = { close: ([...approved].filter((p) => !asks(p)).sort((a, b) => b.aiScore - a.aiScore || lineVal(b) - lineVal(a))[0] || {}).id };
   if (!approved.size) { if (log) log('vet: the AI kept no line at all — kept as chosen'); return null; }
-  // the hook stays if it was kept; else the best kept line of its part (or of any part)
-  const hookPart = picks[0] ? ev.part(picks[0]) : -1;
-  const hook = picks[0] && approved.has(picks[0]) ? picks[0] : ((ranked.get(hookPart) || [])[0] || [...approved][0]);
+  // the hook: the director's opening line when it scored 8 or more; else the best-scored line of all
+  const top = [...approved].filter((p) => !asks(p)).sort((a, b) => b.aiScore - a.aiScore || lineVal(b) - lineVal(a));
+  const hook = picks[0] && approved.has(picks[0]) && picks[0].aiScore >= 8 ? picks[0] : (top[0] || [...approved][0]);
   const out = [hook];
   for (const [k, r] of ranked) {
     if (k === ev.part(hook)) continue;
@@ -1895,7 +1916,7 @@ async function vetParts(picks, list, opts, log) {
     const clash = (q) => q !== out[i] && q.vid === close.vid && Math.abs(q.start - close.start) < LINE_APART;
     if (out.some(clash)) close = null; else if (i > 0) out[i] = close; else out.push(close);
   }
-  if (log) log(`vet: the AI read every part again — kept ${approved.size} line(s); the edit has ${out.length}${close ? `; it ends on "${close.text.slice(0, 60)}"` : ''}`);
+  if (log) log(`vet: the AI scored every part's lines — kept ${approved.size} (${SCORE_KEEP}+); the edit has ${out.length}; it opens on "${hook.text.slice(0, 50)}" (${hook.aiScore})${close ? `; it ends on "${close.text.slice(0, 60)}" (${close.aiScore})` : ''}`);
   return { picks: out, approved, close };
 }
 
@@ -3241,7 +3262,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       await fill(pool, true);
       if (ev && tot < want - 1) {
         const good = (p) => !inEdit().has(p) && !rejected.has(p) && p.end - p.start >= MOMENT_LINE_MIN && p.end - p.start <= MOMENT_LINE_MAX + 0.3
-          && !CROWD.test(p.text) && !HOUSEKEEPING.test(p.text) && !(p.text.match(FILLER_ANY) || []).length && wholeThought(p) && !asks(p);
+          && !CROWD.test(p.text) && !HOUSEKEEPING.test(p.text) && !NOT_TO_SHARE.test(p.text) && !(p.text.match(FILLER_ANY) || []).length && wholeThought(p) && !asks(p);
         let looseOk = null;
         // (read by the AI too, when the parts were: the strongest 30 the rules found)
         if (approved) { try { const v = await vetLoose(list.filter(good).sort((x, y) => lineVal(y) - lineVal(x)).slice(0, 30), log); looseOk = v ? new Set(v) : null; } catch (e) { if (e instanceof jobs.CancelledError) throw e; looseOk = null; } }
@@ -3252,8 +3273,11 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         if (tot < want - 1) await fill(loose(), false);
         // ("30 seconds is 30 seconds": the last rounds take any good line that carries the message — the AI's read
         //  kept too few on Gospel Jamz and the 30 s came out 21 s — still never within 3 minutes of another)
-        if (tot < want - 1) await fill(list.filter((p) => good(p) && messageOf(p) > 0).sort(byVal), false);
-        if (tot < want - 1) await fill(list.filter((p) => good(p) && messageOf(p) > 0).sort(byVal), false, 180);
+        // (with an AI: those lines scored first, and only the ones it scored well — "Praise the Lord." made up the length)
+        let last = list.filter((p) => good(p) && messageOf(p) > 0).sort(byVal).slice(0, 40);
+        if (approved && tot < want - 1) { try { if (await scoreLines(last, log)) last = last.filter((p) => p.aiScore == null || p.aiScore >= SCORE_KEEP); } catch (e) { if (e instanceof jobs.CancelledError) throw e; } }
+        if (tot < want - 1) await fill(last.slice(), false);
+        if (tot < want - 1) await fill(last.slice(), false, 180);
         if (log && tot > before) log(`length: ${(tot - before).toFixed(1)} s more from good lines beyond the ones the AI kept`);
       }
       // 3) still off: swap a line (any — the hook and payoff too, when needed) for an unused one that shows
@@ -3671,7 +3695,8 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         try { pd = require('./persondetect'); if (!pd.available()) pd = null; } catch (e) { pd = null; }
         const fr = ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 };
         const tiles = new Map();   // (a close-up made once, kept for the next round)
-        for (let round = 0; round < 3 && see && see.ready && see.ready() && see.samePeople && tff && font; round++) {
+        // (a cloud eye only when asked for — MW_MONTAGE_LOOKS=ai: "no allowances"; without it, what they wear and when)
+        for (let round = 0; round < 3 && LOOKS_AI() && see && see.ready && see.ready() && see.samePeople && tff && font; round++) {
           const items = [];
           for (let i = speechFrom; i < speechTo; i++) {
             const sh = shots[i];
@@ -3866,7 +3891,7 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 
 /** Which director the montage would use right now (for the phone to say so). */
 /* which montage the server runs (montage:status says it: a quiet way to tell an update has landed) */
-const MONTAGE_REV = '2026-10-24.server-ai';
+const MONTAGE_REV = '2026-10-24.scored-lines';
 function directorStatus() {
   const st = directorStatusOf();
   st.rev = MONTAGE_REV;
@@ -3883,5 +3908,5 @@ function directorStatusOf() {
 }
 
 module.exports = {
-  stillOrDark, motionAt, goodLines, wholeThought, sameLine, talkBrief, vetParts, vetLoose, eventOrder, whoKey, sameWho, personTile, numberTile, textFfmpeg, lookAt, useDataDir, topColours, topOverlap, sameTop, topAt, followIn, trackAt, aimCut, eventParts, acrossEvent, beatSpans, momentSec, partsFor, MOMENT_EACH,
+  NOT_TO_SHARE, scoreLines, stillOrDark, motionAt, goodLines, wholeThought, sameLine, talkBrief, vetParts, vetLoose, eventOrder, whoKey, sameWho, personTile, numberTile, textFfmpeg, lookAt, useDataDir, topColours, topOverlap, sameTop, topAt, followIn, trackAt, aimCut, eventParts, acrossEvent, beatSpans, momentSec, partsFor, MOMENT_EACH,
   _render: render, spreadList, momentsOf, shortMoments, HOUSEKEEPING, cleanAbout, withAbout, aboutLines, phrasesOf, phraseScore, talkByRules, fromBrief, cleanBrief, make, remake, loadProject, sidecarOf, baseOf, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };
