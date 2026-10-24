@@ -3632,6 +3632,13 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         return x.faces;
       };
       const seenFace = (f) => f.length > 0 && shownFace.some((g) => fpx.samePerson(g, f));
+      /*
+       * EVERY SPEAKER IS KEPT FOR THEIR OWN LINE. The moments cut to were chosen walking the edit from the start, so
+       * a cut at 8 s took the man in green, and at 18 s his own line had him again with no one new left to cover
+       * it. Each speaker's face and top are read first, and no moment cut to is of anyone with a line of their own.
+       */
+      const speakers = new Map();   // first beat of a line -> { vid, t, top, faces }
+      const aSpeaker = (who) => [...speakers.values()].some((sp) => onePerson(sp, who, fpx));
       // (faces told apart: the same person is caught by their face, so moments need only be a minute and a half apart —
       //  3¾ minutes left 45 lively moments too few to cover a 5½-second line, and it played as one picture; a minute)
       const GAP = fpx ? clamp((opts.eventSec || 0) / (nPics * 20), 30, 60) : clamp((opts.eventSec || 0) / (nPics * 5), 45, 240);
@@ -3648,7 +3655,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         if (x.top === undefined) x.top = await topAt(ctx, pdx, x.cand, t, x.track ? trackAt(x.track, t) : x.snapLook && x.snapLook.fx, frT.W, frT.H);
         return x.top ? { vid: x.vid, t, top: x.top } : null;
       };
-      const why = { used: 0, near: 0, hour: 0, who: 0, top: 0, scene: 0, face: 0, faceless: 0 };
+      const why = { used: 0, near: 0, hour: 0, who: 0, top: 0, scene: 0, face: 0, faceless: 0, speaker: 0 };
       const fresh = async () => {
         for (const x of spare) {
           if (used.has(x)) continue;
@@ -3657,12 +3664,14 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           const wk = whoOfSpare(x);
           if (wk && shownWho.some((w) => sameWho(w, wk))) { used.add(x); why.who++; continue; }   // (someone already shown)
           const fc = await facesOfSpare(x);
+          if (fpx && fc.length && aSpeaker({ vid: x.vid, t: snapAt(x), top: null, faces: fc })) { used.add(x); why.speaker++; continue; }   // (someone with a line of their own)
           // (a moment cut to shows someone's FACE: the person detector took the people drawn on a "Gospel Jamz —
           //  Evangelism Panel" banner for one, and the cut was the banner — 24 min)
           if (fpx && !fc.length) { used.add(x); why.faceless++; continue; }
           if (seenFace(fc)) { used.add(x); sameFaces++; why.face++; continue; }   // (a face already shown)
           const tp = await topOfSpare(x);
           if (tp) tp.faces = fc;
+          if (tp && aSpeaker(tp)) { used.add(x); why.speaker++; continue; }
           if (tp && shownTop.some((w) => onePerson(w, tp, fpx))) { used.add(x); sameTops++; why.top++; continue; }   // (the same top, the same hour — unless their faces differ)
           const xs = await sigAt(x.cand.file, snapAt(x), x.snapLook && x.snapLook.fx);
           if (shown.some((g) => apart(xs, g) < SAME) || [...lineSig.values()].some((g) => apart(xs, g) < SAME)) { used.add(x); why.scene++; continue; }
@@ -3678,6 +3687,13 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       const whoOfSpare = (x) => (x.snapLook && x.snapLook.who ? whoKey(x.snapLook.who) : '');
       let cuts = 0, sameScene = 0, still = 0, samePerson = 0, sameTops = 0;
       const facesAt = new Map(), fc0 = (i) => (facesAt.has(i) ? facesAt.get(i) : '–');
+      // (each speaker read first: their face and top)
+      const speakerAt = async (sh) => {
+        const tAt = sh.from + sh.seconds / 2, fxAt = sh.fx2 != null && sh.fx != null ? (sh.fx + sh.fx2) / 2 : sh.fx, line = sh.line != null ? picks[sh.line] : null;
+        const top = await topAt(ctx, pdx, sh.cand, tAt, fxAt, frT.W, frT.H);
+        return { vid: line ? line.vid : -1, t: tAt, top, faces: await facesOf(sh.cand, tAt, fxAt) };
+      };
+      for (let i = speechFrom; i < speechTo; i++) if (firstOf(i) && !shots[i].cover && lineSig.has(i)) speakers.set(i, await speakerAt(shots[i]));
       for (let i = speechFrom; i < speechTo; i++) {
         const sh = shots[i];
         const first = firstOf(i);
@@ -3686,12 +3702,11 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           const g = lineSig.get(i);
           // (the opening line always shows its speaker)
           const wk = whoOfLine(sh);
-          const tAt = sh.from + sh.seconds / 2, line = sh.line != null ? picks[sh.line] : null;
-          const tTop = await topAt(ctx, pdx, sh.cand, tAt, sh.fx2 != null && sh.fx != null ? (sh.fx + sh.fx2) / 2 : sh.fx, frT.W, frT.H);
-          const fc = await facesOf(sh.cand, tAt, sh.fx2 != null && sh.fx != null ? (sh.fx + sh.fx2) / 2 : sh.fx);
+          const tAt = sh.from + sh.seconds / 2;
+          const sp = speakers.get(i) || await speakerAt(sh), fc = sp.faces;
           facesAt.set(i, fc.length);
           if (fpx && log) log(`people: the speaker at ${(tAt / 60).toFixed(1)} min — ${fc.length} face(s), most like someone shown ${shownFace.reduce((m, g) => Math.max(m, fpx.likeness(g, fc)), -1).toFixed(2)} (${shownFace.length} shown)`);
-          const tl = tTop ? { vid: line ? line.vid : -1, t: tAt, top: tTop, faces: fc } : null;
+          const tl = sp.top ? sp : null;
           if (i > speechFrom && shown.some((x) => apart(g, x) < SAME)) { need = true; repeat = true; }
           // (a speaker already shown — the host again, two hours later: their words go on over someone new)
           else if (i > speechFrom && wk && shownWho.some((w) => sameWho(w, wk))) { need = true; repeat = true; samePerson++; }
