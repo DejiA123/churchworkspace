@@ -3344,7 +3344,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
             let faces = [];
             // (five frames across the whole line: a speaker side on at its middle faces the room at some point of it)
             if (fpS && p.cand && p.cand.kind === 'video') { try { faces = await fpS.printsAt(ctx.ffmpeg, p.cand.file, t, fxAtLook(p, t), p.cand.w, p.cand.h, frS.W, frS.H, { n: 5, step: Math.max(0.4, (p.end - p.start) / 5) }); } catch (e) { if (e instanceof jobs.CancelledError) throw e; faces = []; } }
-            topOf.set(p, top || faces.length ? { vid: p.vid, t: p.start, top, faces } : null);
+            topOf.set(p, { vid: p.vid, t: p.start, top, faces });
           }
           return topOf.get(p);
         };
@@ -3353,14 +3353,15 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
          * lines of one video within half an hour whose faces are even a little alike (0.27 — the man in the brown polo,
          * close up at 40.6 min and on stage at 62.6, was 0.29) are taken as one.
          */
-        const twins = (a, b) => onePerson(a, b, fpS) || !!(fpS && a && b && a.vid === b.vid && Math.abs(a.t - b.t) <= 30 * 60
-          && a.faces && a.faces.length && b.faces && b.faces.length && fpS.likeness(a.faces, b.faces) >= 0.27);
+        // (and two lines of one video within a quarter of an hour are one speaker, face seen or not — lines are 10 min
+        //  apart at least, so this is the speaker going on: the man in the navy jumper at 146.5 and 156.8 min)
+        const twins = (a, b) => onePerson(a, b, fpS) || !!(fpS && a && b && a.vid === b.vid && (Math.abs(a.t - b.t) <= 15 * 60
+          || (Math.abs(a.t - b.t) <= 30 * 60 && a.faces && a.faces.length && b.faces && b.faces.length && fpS.likeness(a.faces, b.faces) >= 0.27)));
         let swaps = 0;
-        for (let i = 1; pdS && i < picks.length && swaps < 6; i++) {
+        for (let i = 1; pdS && i < picks.length && swaps < 10; i++) {
           const p = picks[i];
           if (p === closeLine) continue;   // (the line the AI named to end on stays: its twin gives way when it comes round)
           const a = await speakerOf(p);
-          if (!a) continue;
           let twin = false;
           for (let k = 0; k < picks.length && !twin; k++) if (k !== i && twins(a, await speakerOf(picks[k]))) twin = true;
           if (!twin) continue;
@@ -3372,15 +3373,17 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           const best = (x, y) => ((y.aiScore == null ? -1 : y.aiScore) - (x.aiScore == null ? -1 : x.aiScore)) || (lineVal(y) - lineVal(x));
           const alts = list.filter((q) => okAlt(q) && ev.part(q) === ev.part(p)).sort(best).slice(0, 6)
             .concat(list.filter((q) => okAlt(q) && ev.part(q) !== ev.part(p)).sort(best).slice(0, 8));
+          let swapped = false;
           for (const q of await showsSomeone(alts)) {
             const b = await speakerOf(q);
             let clash = false;
             for (let k = 0; k < picks.length && !clash; k++) if (k !== i && twins(b, await speakerOf(picks[k]))) clash = true;
             if (clash) continue;
             if (log) log(`people: "${p.text.slice(0, 40)}…" is a speaker already in the edit — "${q.text.slice(0, 40)}…" instead`);
-            picks[i] = q; tot = tot - lenOf(p) + lenOf(q); swaps++;
+            picks[i] = q; tot = tot - lenOf(p) + lenOf(q); swaps++; swapped = true;
             break;
           }
+          if (!swapped && log) log(`people: "${p.text.slice(0, 40)}…" is a speaker already in the edit — no other good line of someone new`);
         }
       }
       if (ev) picks = eventOrder(picks, ev, closeLine);
@@ -3997,7 +4000,7 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 
 /** Which director the montage would use right now (for the phone to say so). */
 /* which montage the server runs (montage:status says it: a quiet way to tell an update has landed) */
-const MONTAGE_REV = '2026-10-24.speakers-once';
+const MONTAGE_REV = '2026-10-24.speakers-once-2';
 function directorStatus() {
   const st = directorStatusOf();
   st.rev = MONTAGE_REV;
