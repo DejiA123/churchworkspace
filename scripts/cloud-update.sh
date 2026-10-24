@@ -68,11 +68,12 @@ fi
 IDLE_MIN="${MW_UPDATE_IDLE_MIN:-15}"
 if [ "${FORCE:-0}" != "1" ]; then
   # (the voice cleaner too: a long Studio-sound export spends minutes in it with no ffmpeg running)
+  # (a job still working — a montage thinking with its phone locked — is waited for too: /api/idle's "working")
   if $DOCKER compose exec -T studio sh -c 'pgrep -x ffmpeg >/dev/null || pgrep -x deep-filter >/dev/null || pgrep -f "[w]hisper-cli" >/dev/null' 2>/dev/null; then
     echo "$(stamp) $WHAT waiting — something is exporting, trying again next round"
     exit 0
   fi
-  IDLE="$($DOCKER compose exec -T studio node -e "require('http').get('http://127.0.0.1:'+(process.env.MW_CLOUD_PORT||7390)+'/api/idle',r=>{let b='';r.on('data',d=>b+=d);r.on('end',()=>{try{const j=JSON.parse(b);console.log(j.uploads>0?0:j.idleSec)}catch(e){console.log(-1)}})}).on('error',()=>console.log(-1))" 2>/dev/null | tr -dc '0-9-' || true)"
+  IDLE="$($DOCKER compose exec -T studio node -e "require('http').get('http://127.0.0.1:'+(process.env.MW_CLOUD_PORT||7390)+'/api/idle',r=>{let b='';r.on('data',d=>b+=d);r.on('end',()=>{try{const j=JSON.parse(b);console.log(j.uploads>0||j.working>0?0:j.idleSec)}catch(e){console.log(-1)}})}).on('error',()=>console.log(-1))" 2>/dev/null | tr -dc '0-9-' || true)"
   # (-1 / nothing = an older studio without /api/idle, or not running: update)
   if [ -n "$IDLE" ] && [ "$IDLE" -ge 0 ] && [ "$IDLE" -lt $((IDLE_MIN * 60)) ]; then
     echo "$(stamp) $WHAT waiting — someone is using the studio, trying again next round"

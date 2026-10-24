@@ -1084,6 +1084,8 @@ async function handle(req, res) {
     return json(res, 200, {
       idleSec: Math.round((Date.now() - (lastActive || started || Date.now())) / 1000),
       uploads: uploads.size, watching: sseClients.size,
+      // calls still working (a montage thinking, its phone locked — nobody asking after it): an update waits for them
+      working: Array.from(calls.values()).filter((c) => !c.done).length,
     });
   }
 
