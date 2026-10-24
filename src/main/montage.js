@@ -2469,9 +2469,11 @@ function sameTop(a, b) {
 /*
  * One person in two pictures ({ vid, t, top, faces }): their faces say so (faceprint.js); or, when faces cannot tell
  * (none seen, side on — a likeness between), the same top in the same stretch of the night (sameTop). Two faces
- * clearly not alike (under 0.2) are two people, whatever they wear (the band all in black).
+ * not alike (under 0.3: different people measured up to 0.36 on Gospel Jamz, one person 0.36–0.66) are two people,
+ * whatever they wear — "a dark top within 25 minutes" of seven speakers covered the whole night, and 66 of 88
+ * moments were turned down.
  */
-const FACES_DIFFER = 0.2;
+const FACES_DIFFER = 0.3;
 function onePerson(a, b, fp) {
   if (!a || !b) return false;
   if (fp && a.faces && a.faces.length && b.faces && b.faces.length) {
