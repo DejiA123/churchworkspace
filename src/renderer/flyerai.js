@@ -193,7 +193,31 @@
   }
 
   /** AI person cut-out. Returns { src, coverage } or throws. */
+  /*
+   * ►► THE SERVER CUTS THEM OUT, WHEN THERE IS ONE. ◄◄ In the Cloud Studio the server runs BiRefNet (cutoutai.js): the
+   * whole person at 1024×1024 — this phone's selfie model, at 256×256, took arms and feet off full-length stage
+   * photos and left bits of the lectern, the chair and the smoke. The phone sends the photo (as a JPEG up to 2000
+   * across) and gets the PNG back; the same photo is never sent twice. No server (the desktop app), or it cannot:
+   * this phone's model, as before.
+   */
+  const serverCuts = new Map();
+  const serverCan = () => typeof window !== 'undefined' && window.api && window.api.flyer && typeof window.api.flyer.cutout === 'function';
+  async function serverCut(src) {
+    if (!serverCan()) return null;
+    const key = String(src).length > 200 ? String(src).slice(0, 120) + ':' + String(src).length + ':' + String(src).slice(-80) : String(src);
+    if (!serverCuts.has(key)) {
+      serverCuts.set(key, (async () => {
+        const img = await loadImage(src);
+        const { cv } = drawToCanvas(img, 2000);
+        const r = await window.api.flyer.cutout(cv.toDataURL('image/jpeg', 0.93));
+        return r && r.dataUrl ? r : null;
+      })().catch((e) => { serverCuts.delete(key); throw e; }));
+    }
+    return serverCuts.get(key);
+  }
+
   async function removePerson(src) {
+    try { const r = await serverCut(src); if (r) return { src: r.dataUrl, coverage: r.coverage, by: 'server' }; } catch (e) { /* this phone's model, then */ }
     const img = await loadImage(src);
     const { cv, cx, w, h } = drawToCanvas(img, 1600);
     const { alpha, coverage } = await fineMask(cv, cx, w, h);
@@ -322,6 +346,23 @@
     const img = await loadImage(src);
     const { cv, cx, w, h } = drawToCanvas(img, maxDim);
     const rgba = cx.getImageData(0, 0, w, h).data.slice();
+    // the server's cut-out (see serverCut), at this size; the strength dial firms it up or lets more of the edge in
+    if (mode !== 'colour') {
+      try {
+        const r = await serverCut(src);
+        if (r) {
+          const cut = drawToCanvas(await loadImage(r.dataUrl), maxDim);
+          const sc = document.createElement('canvas'); sc.width = w; sc.height = h;
+          const scx = sc.getContext('2d', { willReadFrequently: true });
+          scx.drawImage(cut.cv, 0, 0, w, h);
+          const d = scx.getImageData(0, 0, w, h).data, alpha = new Uint8ClampedArray(w * h);
+          const k = Math.pow(2, (Math.max(0, Math.min(1, strength)) - 0.5) * 2.4);   // (0.5: as cut; higher: firmer)
+          let on = 0;
+          for (let i = 0; i < alpha.length; i++) { const a = d[i * 4 + 3] / 255; alpha[i] = Math.round(255 * Math.pow(a, k)); if (alpha[i] > 127) on++; }
+          return { w, h, rgba, alpha, method: 'ai', coverage: on / alpha.length };
+        }
+      } catch (e) { /* this phone's model, then */ }
+    }
     if (mode !== 'colour') {
       try {
         const r = await personAlpha(cx, w, h, cv, strength);

@@ -239,6 +239,8 @@ const ALLOWED = {
   'flyer:kitPic': true,
   'flyer:kitUsed': true,
   'flyer:kitAddPhoto': true,
+  'flyer:cutout': true,
+  'flyer:cutoutStatus': true,
   'flyer:inspoAdd': true,
   'flyer:inspoRemove': true,
   'sermon:exportShort': true,

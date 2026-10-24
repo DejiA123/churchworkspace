@@ -793,6 +793,19 @@ ipcMain.handle('flyer:kitSave', wrap(async (e, a) => flyerart.kitSave((a && a.ki
 ipcMain.handle('flyer:kitPic', wrap(async (e, a) => flyerart.kitPic(a && a.name)));
 ipcMain.handle('flyer:kitUsed', wrap(async (e, a) => flyerart.kitUsed(a || {})));
 ipcMain.handle('flyer:kitAddPhoto', wrap(async (e, a) => flyerart.kitAddPhoto(a || {})));
+/* A person cut out on this server (BiRefNet — cutoutai.js): the phone sends the photo, the PNG comes back. */
+const cutoutai = require('./cutoutai');
+try { cutoutai.setDataDir(app.getPath('userData')); } catch (e) { /* the temp folder, then */ }
+ipcMain.handle('flyer:cutout', wrap(async (e, a) => {
+  const m = /^data:image\/[a-z+.-]+;base64,(.+)$/s.exec(String((a && a.dataUrl) || ''));
+  if (!m) throw new Error('That is not a picture.');
+  if (!cutoutai.available()) throw new Error('The cut-out model is not installed on this server.');
+  const r = await cutoutai.cutout(getCtx().ffmpeg, Buffer.from(m[1], 'base64'), { maxSide: 2000 });
+  return { dataUrl: 'data:image/png;base64,' + r.png.toString('base64'), w: r.w, h: r.h, coverage: r.coverage, ms: r.ms };
+}));
+ipcMain.handle('flyer:cutoutStatus', wrap(async () => cutoutai.status()));
+// (the model is fetched once, in the background, soon after the server starts — not when the first photo waits for it)
+if (cutoutai.available()) { const t = setTimeout(() => { cutoutai.fetchModel().catch(() => {}); }, 30000); if (t.unref) t.unref(); }
 ipcMain.handle('flyer:inspoAdd', wrap(async (e, a) => flyerart.inspoAdd(a || {})));
 ipcMain.handle('flyer:inspoRemove', wrap(async (e, a) => flyerart.inspoRemove(a || {})));
 
