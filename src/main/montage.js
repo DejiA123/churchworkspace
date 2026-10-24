@@ -1856,6 +1856,28 @@ const partsFor = (opts) => clamp(Math.round((opts.lengthSec || 30) / LINE_EACH),
  * what it keeps is used, there and as any later replacement. Returns null when
  * no AI answered (the edit stays as it was).
  */
+/* one JSON answer from the AI that reads the lines (the gateway, else Groq); null when none answers */
+async function askJson(system, prompt, maxTokens) {
+  let text = '';
+  try { const ai = require('./aaillm'); if (ai.ready()) text = await ai.chat({ system, prompt, json: true, maxTokens, temperature: 0.2 }); } catch (e) { text = ''; }
+  if (!text) { try { const cw = require('./cloudwrite'); if (cw.access && cw.access().key) text = await cw.chat({ system, prompt, json: true, maxTokens, temperature: 0.2, timeoutMs: 60000, evenIfOff: true }); } catch (e) { text = ''; } }
+  try { const t = String(text || ''); const a = t.indexOf('{'), b = t.lastIndexOf('}'); return a >= 0 && b > a ? JSON.parse(t.slice(a, b + 1)) : null; } catch (e) { return null; }
+}
+/* the extra lines that make up the length: the same strict read as the parts — the ones the AI keeps (null when no AI answers) */
+async function vetLoose(cands, log) {
+  if (!cands.length) return null;
+  const system = 'You choose the lines for a short viral video of a church event, heard one after another. You only judge the words.';
+  const prompt = 'Keep ONLY the lines below that, heard on their own by a stranger scrolling, carry a clear and powerful message about God, faith, hope or life — a line people would quote or share. Be strict; when in doubt, drop it. ' +
+    'Drop banter and jokes, crowd work, stage chat, questions, announcements, a line that only makes sense with what came before, a line cut off mid-thought, and anything unclear.\n\n' +
+    cands.map((p) => `${p.id}: ${p.text}`).join('\n') +
+    '\n\nReply with JSON only: {"keep":["id","id"]} — best first.';
+  const j = await askJson(system, prompt, 600);
+  if (!j || !Array.isArray(j.keep)) { if (log) log('vet: no AI read the extra lines — used as found'); return null; }
+  const byId = new Map(cands.map((p) => [p.id, p]));
+  const kept = j.keep.map((id) => byId.get(String(id).trim())).filter(Boolean);
+  if (log) log(`vet: of ${cands.length} extra line(s) the AI kept ${kept.length}`);
+  return [...new Set(kept)];
+}
 async function vetParts(picks, list, opts, log) {
   const ev = eventParts(list.concat(picks), opts);
   const ok = (p) => p.end - p.start >= MOMENT_LINE_MIN && p.end - p.start <= MOMENT_LINE_MAX && !CROWD.test(p.text) && !HOUSEKEEPING.test(p.text) && !asks(p) && wholeThought(p);
@@ -1871,12 +1893,9 @@ async function vetParts(picks, list, opts, log) {
   const prompt = 'For each part of the event below, keep ONLY the lines that, heard on their own by a stranger scrolling, carry a clear and powerful message about God, faith, hope or life — a line people would quote or share. Be strict: at most 3 per part, and when in doubt, drop it. ' +
     'Drop banter and jokes, crowd work, stage chat, any question (a line that asks is not a line to share), announcements, a line that only makes sense with what came before, a line cut off mid-thought, slang or wordplay a stranger would not follow, and anything unclear. Order the kept ones best first. A part may keep none.\n\n' +
     parts.map((pt) => `PART ${pt.k + 1}\n` + pt.c.map((p) => `${p.id}: ${p.text}`).join('\n')).join('\n\n') +
-    '\n\nReply with JSON only: {"parts":{"1":["id","id"],"2":[]}} — every part listed, the ids it keeps, best first.';
-  let text = '';
-  try { const ai = require('./aaillm'); if (ai.ready()) text = await ai.chat({ system, prompt, json: true, maxTokens: 1500, temperature: 0.2 }); } catch (e) { text = ''; }
-  if (!text) { try { const cw = require('./cloudwrite'); if (cw.access && cw.access().key) text = await cw.chat({ system, prompt, json: true, maxTokens: 1500, temperature: 0.2, timeoutMs: 60000, evenIfOff: true }); } catch (e) { text = ''; } }
-  let j = null;
-  try { const t = String(text || ''); const a = t.indexOf('{'), b = t.lastIndexOf('}'); j = a >= 0 && b > a ? JSON.parse(t.slice(a, b + 1)) : null; } catch (e) { j = null; }
+    '\n\nThen name the ONE kept line that ends the video best — a complete, uplifting statement that sums up and lands (not a question, not mid-story, not a joke).' +
+    '\n\nReply with JSON only: {"parts":{"1":["id","id"],"2":[]},"close":"id"} — every part listed, the ids it keeps, best first; close is one of the kept ids.';
+  const j = await askJson(system, prompt, 1500);
   if (!j || !j.parts || typeof j.parts !== 'object') { if (log) log('vet: no AI read the lines again — kept as chosen'); return null; }
   const byId = new Map(parts.flatMap((pt) => pt.c).map((p) => [p.id, p]));
   const ranked = new Map(), approved = new Set();
@@ -1895,8 +1914,16 @@ async function vetParts(picks, list, opts, log) {
     const best = r.find((p) => p !== hook && !out.some((q) => q.vid === p.vid && Math.abs(q.start - p.start) < LINE_APART));
     if (best) out.push(best);
   }
-  if (log) log(`vet: the AI read every part again — kept ${approved.size} line(s); the edit has ${out.length}`);
-  return { picks: out, approved };
+  // the closing line the AI named: in the edit, in place of its part's line (never the hook)
+  let close = byId.get(String(j.close || '').trim());
+  if (!close || !approved.has(close) || close === hook) close = null;
+  if (close && !out.includes(close)) {
+    const i = out.findIndex((q, n) => n > 0 && ev.part(q) === ev.part(close));
+    const clash = (q) => q !== out[i] && q.vid === close.vid && Math.abs(q.start - close.start) < LINE_APART;
+    if (out.some(clash)) close = null; else if (i > 0) out[i] = close; else out.push(close);
+  }
+  if (log) log(`vet: the AI read every part again — kept ${approved.size} line(s); the edit has ${out.length}${close ? `; it ends on "${close.text.slice(0, 60)}"` : ''}`);
+  return { picks: out, approved, close };
 }
 
 /* where a line falls in the whole event (its videos end to end), and which of its equal parts that is */
@@ -1911,11 +1938,12 @@ function eventParts(all, opts) {
 const asks = (p) => /\?["”’']?$/.test(String(p.text || '').trim());   // a question to the room, not a line to share
 const lineVal = (p) => p.score + messageOf(p) - (p.usedBefore ? 0.5 : 0);
 /* the order of a long event's edit: the hook, the event start to finish, and the strongest statement last (the payoff) */
-function eventOrder(picks, ev) {
+function eventOrder(picks, ev, close) {
   if (picks.length < 3) return picks;
   const rest = picks.slice(1);
   const ends = rest.filter((p) => /[.!]["”’']?$/.test(p.text.trim()) && !CROWD.test(p.text));
-  const pay = (ends.length ? ends : rest).reduce((a, b) => (lineVal(b) > lineVal(a) ? b : a));
+  // (the line the AI named to end on, when it is still in the edit)
+  const pay = close && rest.includes(close) ? close : (ends.length ? ends : rest).reduce((a, b) => (lineVal(b) > lineVal(a) ? b : a));
   const mid = rest.filter((p) => p !== pay).sort((a, b) => ev.at(a) - ev.at(b));
   // (not straight after a line from the same stretch of the night — the same speaker twice in a row: swap the two before it)
   const L = mid.length;
@@ -2295,6 +2323,44 @@ let lookRun = 0;
  * always moves (the mouth, the hands, the camera's own grain). A stage too dark
  * to see is measured the same way. { still, dark, diff, luma }.
  */
+/*
+ * ►► WHO IS IT — A FINGERPRINT FROM THE AI'S FEW WORDS. ◄◄ The frame look says, of the person it keeps, "man, navy
+ * jumper, white towel". The same person (the host, on stage all night) is described the same way from any camera,
+ * any hour; a picture check could not tell. The words are folded to man/woman + the top's colour + its kind +
+ * anything that marks them out, and no fingerprint is shown twice. Two people dressed the same LOOK the same in a
+ * 2.5-second clip too — that counts as a repeat, as it should.
+ */
+const WHO_COLOURS = [['navy', /\b(navy|dark blue|midnight)\b/], ['blue', /\b(blue|denim|teal|turquoise)\b/], ['black', /\b(black|dark)\b/], ['white', /\b(white|cream|ivory)\b/],
+  ['grey', /\b(grey|gray|silver|charcoal)\b/], ['green', /\b(green|olive|khaki)\b/], ['brown', /\b(brown|beige|tan|camel|mustard)\b/], ['red', /\b(red|maroon|burgundy|wine)\b/],
+  ['yellow', /\b(yellow|gold)\b/], ['purple', /\b(purple|lilac|violet)\b/], ['pink', /\b(pink|magenta)\b/], ['orange', /\b(orange|rust)\b/]];
+const WHO_KINDS = [['knit', /\b(jumper|sweater|pullover|hoodie|hooded|sweatshirt|cardigan|knit)\b/], ['jacket', /\b(jacket|blazer|suit|coat|tuxedo|gilet|vest)\b/],
+  ['dress', /\b(dress|gown|skirt|kaftan|abaya)\b/], ['shirt', /\b(shirt|t-shirt|tee|polo|top|blouse|jersey)\b/]];
+const WHO_MARKS = ['towel', 'glasses', 'cap', 'hat', 'scarf', 'stripe', 'beard', 'braid', 'headwrap', 'gele', 'tie', 'bow'];
+function whoKey(desc) {
+  // ("dark green" is green, not black; "dark blue" is navy)
+  const d = String(desc || '').toLowerCase().replace(/\bdark blue\b/g, 'navy')
+    .replace(/\b(dark|light|bright|pale|deep|royal|sky|baby|forest|bottle)[\s-]+(?=(blue|green|red|grey|gray|brown|purple|pink|orange|yellow)\b)/g, '');
+  if (!d.trim()) return '';
+  const g = /\b(woman|lady|girl|female|she)\b/.test(d) ? 'f' : /\b(man|guy|boy|male|gentleman|he)\b/.test(d) ? 'm' : '?';
+  const c = (WHO_COLOURS.find(([, rx]) => rx.test(d)) || [''])[0];
+  const k = (WHO_KINDS.find(([, rx]) => rx.test(d)) || [''])[0];
+  const marks = WHO_MARKS.filter((m) => new RegExp(`\\b${m}(s|es|d|ed)?\\b`).test(d)).sort().join('+');
+  if (!c && !k) return '';   // (too little said to tell anyone apart)
+  return [g, c, k, marks].join('|');
+}
+/* the same person, as far as the words tell: nothing that clearly differs (man/woman, colour, the kind of top —
+ * a knit and a jacket are easily called one for the other — or what marks them out) */
+function sameWho(a, b) {
+  if (!a || !b) return false;
+  const [g1, c1, k1, m1] = a.split('|'), [g2, c2, k2, m2] = b.split('|');
+  if (g1 !== '?' && g2 !== '?' && g1 !== g2) return false;
+  if (c1 && c2 && c1 !== c2) return false;
+  const soft = new Set(['knit', 'jacket']);
+  if (k1 && k2 && k1 !== k2 && !(soft.has(k1) && soft.has(k2))) return false;
+  if (m1 && m2 && !m1.split('+').some((x) => m2.split('+').includes(x))) return false;
+  return true;
+}
+
 /** How much the picture moves round source time `t` (mean grey change between frames 0.3 s apart, the calmer of two
  *  pairs — a cut in one pair is not movement). Gospel Jamz: a panel sitting still 0.5–1.3, dancing 13.6. */
 async function motionAt(ctx, file, t) {
@@ -2416,6 +2482,7 @@ async function lookAt(ctx, reqs, tmp, log, { people = true, max = Infinity, fram
       if (a.giving) out[r.i].giving = true;
       if (a.screen) out[r.i].screen = true;
       if (typeof a.action === 'boolean') out[r.i].action = a.action;
+      if (a.who) out[r.i].who = a.who;
       if (a.away) out[r.i].away = true;
       if (!(a.column > 0)) return;
       // the column's middle on the ruled tile → across the clip's own picture (a tile pads a clip of another shape)
@@ -2783,10 +2850,10 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       if (log) log(`talk: the whole event — one short line from each of ${partsFor(opts)} parts (${before} chosen → ${picks.length})`);
     }
     // a second read, part by part: only lines the AI keeps are used (here and as replacements)
-    let approved = null;
+    let approved = null, closeLine = null;
     if (longEvent && d.director !== 'rules') {
       if (stage) stage('🎬 Reading every part of the event again for its strongest line…');
-      try { const v = await vetParts(picks, list, opts, log); if (v) { picks = v.picks; approved = v.approved; } } catch (e) { if (e instanceof jobs.CancelledError) throw e; if (log) log('vet: ' + e.message); }
+      try { const v = await vetParts(picks, list, opts, log); if (v) { picks = v.picks; approved = v.approved; closeLine = v.close || null; } } catch (e) { if (e instanceof jobs.CancelledError) throw e; if (log) log('vet: ' + e.message); }
     }
     // (a line brought in later — someone not seen, the length not met — comes from a part of the event the edit has not got yet)
     const ev = longEvent ? eventParts(list.concat(picks), opts) : null;
@@ -2795,7 +2862,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     // the length asked for, give or take a line (the hook always stays)
     let total = picks.reduce((n, p) => n + (p.end - p.start), 0);
     // (a long event drops its weakest line, not its latest: every part of the event keeps its place if it can)
-    const cutAt = () => { if (!longEvent) return picks.length - 2; let w = 1; for (let i = 1; i < picks.length - 1; i++) if (picks[i].score < picks[w].score) w = i; return w; };
+    const cutAt = () => { if (!longEvent) return picks.length - 2; let w = 1; for (let i = 1; i < picks.length - 1; i++) if (picks[i] !== closeLine && (picks[w] === closeLine || picks[i].score < picks[w].score)) w = i; return w; };
     while (picks.length > 2 && total - (picks[cutAt()].end - picks[cutAt()].start) >= opts.lengthSec * 1.15) {
       const cut = picks.splice(cutAt(), 1)[0];   // the last line is the payoff: take the one before it
       total -= cut.end - cut.start;
@@ -2825,7 +2892,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       ps.forEach((p) => { p.looks = []; looksAt(p).forEach((t) => { reqs.push({ file: p.cand.file, t: round2(clamp(t, 0, Math.max(0, p.cand.fileDur - 0.1))), w: p.cand.w, h: p.cand.h }); who.push(p); }); });
       if (!reqs.length) return;
       const got = await lookAt(ctx, reqs, tmp, log, { people: true, frame: ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 } });
-      got.forEach((g, i) => who[i].looks.push({ t: reqs[i].t, fx: g.fx, people: g.people, weak: !!g.weak || g.facing === false || !!g.screen || !!g.away, giving: !!g.giving }));
+      got.forEach((g, i) => who[i].looks.push({ t: reqs[i].t, fx: g.fx, people: g.people, weak: !!g.weak || g.facing === false || !!g.screen || !!g.away, giving: !!g.giving, who: g.who || '' }));
       // a slide or a dark stage is not a moment, even with a face in it (a speaker's photo on a "connect with" slide)
       for (const p of ps) { if (!p.vis) { try { p.vis = await stillOrDark(ctx, p); } catch (e) { if (e instanceof jobs.CancelledError) throw e; p.vis = null; } } }
     };
@@ -2973,7 +3040,10 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       if (ev && tot < want - 1) {
         const good = (p) => !inEdit().has(p) && !rejected.has(p) && p.end - p.start >= MOMENT_LINE_MIN && p.end - p.start <= MOMENT_LINE_MAX + 0.3
           && !CROWD.test(p.text) && !HOUSEKEEPING.test(p.text) && !(p.text.match(FILLER_ANY) || []).length && wholeThought(p) && !asks(p);
-        const loose = () => list.filter(good).sort((x, y) => (x.usedBefore - y.usedBefore) || (lineVal(y) - lineVal(x)));
+        let looseOk = null;
+        // (read by the AI too, when the parts were: the strongest 30 the rules found)
+        if (approved) { try { const v = await vetLoose(list.filter(good).sort((x, y) => lineVal(y) - lineVal(x)).slice(0, 30), log); looseOk = v ? new Set(v) : null; } catch (e) { if (e instanceof jobs.CancelledError) throw e; looseOk = null; } }
+        const loose = () => list.filter((p) => good(p) && (!looseOk || looseOk.has(p))).sort((x, y) => (x.usedBefore - y.usedBefore) || (lineVal(y) - lineVal(x)));
         const before = tot;
         await fill(loose().filter((p) => newPart(p)), true);
         if (tot < want - 1) await fill(loose(), false);
@@ -2998,7 +3068,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         pool.splice(pool.indexOf(pick.q), 1);
         tot = sum(picks);
       }
-      if (ev) picks = eventOrder(picks, ev);
+      if (ev) picks = eventOrder(picks, ev, closeLine);
       if (log) log(`length: ${tot.toFixed(1)} s of lines${voLen ? ` + ${voLen.toFixed(1)} s narrator` : ''} for ${opts.lengthSec} s asked`);
     }
     // moments the edit did not use, from every speaking video — B-roll for the narrator and between lines
@@ -3229,15 +3299,21 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       const fresh = async () => {
         for (const x of spare) {
           if (used.has(x) || near(x) || tooNear(x)) continue;
+          const wk = whoOfSpare(x);
+          if (wk && shownWho.some((w) => sameWho(w, wk))) { used.add(x); continue; }   // (someone already shown)
           const xs = await sigAt(x.cand.file, snapAt(x), x.snapLook && x.snapLook.fx);
           if (shown.some((g) => apart(xs, g) < SAME) || [...lineSig.values()].some((g) => apart(xs, g) < SAME)) { used.add(x); continue; }
-          used.add(x); shownAt.push(atOf(x));
+          used.add(x); shownAt.push(atOf(x)); if (wk) shownWho.push(wk);
           return { x, xs };
         }
         return null;
       };
       const firstOf = (i) => i === speechFrom || shots[i].line == null || shots[i - 1].line !== shots[i].line;
-      let cuts = 0, sameScene = 0, still = 0;
+      // who each picture shows (the frame look's few words, folded: see whoKey) — no person twice
+      const shownWho = [];
+      const whoOfLine = (sh) => { const p = sh.line != null ? picks[sh.line] : null; const l = p && (p.looks || []).find((x) => x.who); return l ? whoKey(l.who) : ''; };
+      const whoOfSpare = (x) => (x.snapLook && x.snapLook.who ? whoKey(x.snapLook.who) : '');
+      let cuts = 0, sameScene = 0, still = 0, samePerson = 0;
       for (let i = speechFrom; i < speechTo; i++) {
         const sh = shots[i];
         const first = firstOf(i);
@@ -3245,10 +3321,13 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         if (first && !sh.cover && lineSig.has(i)) {
           const g = lineSig.get(i);
           // (the opening line always shows its speaker)
+          const wk = whoOfLine(sh);
           if (i > speechFrom && shown.some((x) => apart(g, x) < SAME)) { need = true; repeat = true; }
+          // (a speaker already shown — the host again, two hours later: their words go on over someone new)
+          else if (i > speechFrom && wk && shownWho.some((w) => sameWho(w, wk))) { need = true; repeat = true; samePerson++; }
           // (a speaker's own picture that barely moves — a wide shot of a panel sitting still — is covered by a lively moment)
           else if (i > speechFrom && sh.cand.kind === 'video' && ((m) => m != null && m < 0.8)(await motionAt(ctx, sh.cand.file, sh.from + sh.seconds / 2).catch(() => null))) { need = true; repeat = true; still++; }
-          else shown.push(g);
+          else { shown.push(g); if (wk) shownWho.push(wk); }
         }
         if (!need || sh.seconds < 0.6 || ((sh.overlays || []).length && !sh.cover)) continue;
         const got = await fresh();
@@ -3291,7 +3370,6 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
        * opens on and every moment cut to, in play order, numbered — and says which are a person already seen. A
        * repeat is replaced by a new moment of the night (a speaker by one laid over their words).
        */
-      let samePerson = 0;
       try {
         const see = require('./cloudsee');
         const tff = await textFfmpeg(ctx);
@@ -3487,7 +3565,7 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 
 /** Which director the montage would use right now (for the phone to say so). */
 /* which montage the server runs (montage:status says it: a quiet way to tell an update has landed) */
-const MONTAGE_REV = '2026-10-24.people';
+const MONTAGE_REV = '2026-10-24.who';
 function directorStatus() {
   const st = directorStatusOf();
   st.rev = MONTAGE_REV;
@@ -3503,5 +3581,5 @@ function directorStatusOf() {
 }
 
 module.exports = {
-  stillOrDark, motionAt, goodLines, wholeThought, sameLine, talkBrief, vetParts, eventParts, acrossEvent, beatSpans, momentSec, partsFor, MOMENT_EACH,
+  stillOrDark, motionAt, goodLines, wholeThought, sameLine, talkBrief, vetParts, vetLoose, eventOrder, whoKey, sameWho, eventParts, acrossEvent, beatSpans, momentSec, partsFor, MOMENT_EACH,
   _render: render, spreadList, momentsOf, shortMoments, HOUSEKEEPING, cleanAbout, withAbout, aboutLines, phrasesOf, phraseScore, talkByRules, fromBrief, cleanBrief, make, remake, loadProject, sidecarOf, baseOf, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };

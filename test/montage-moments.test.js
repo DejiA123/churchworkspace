@@ -71,6 +71,38 @@ const P = (text, start, end, extra) => Object.assign({ text, start, end, vid: 1,
       ok(v && v.picks[0] === L[0] && v.picks.includes(L[2]) && !v.picks.includes(L[1]) && v.approved.has(L[4]) && !v.approved.has(L[1]) && /winner money/.test(asked),
         'a second read part by part: banter the editor took is replaced by the kept line of that part', v && v.picks.map((p) => p.id));
     } finally { ai.ready = was.ready; ai.chat = was.chat; }
+    // the AI names the line to end on: it is in the edit (in place of its part's line) and the edit ends on it
+    ai.ready = () => true;
+    ai.chat = async ({ prompt }) => {
+      const parts = {};
+      for (const blk of prompt.split('PART ').slice(1)) { const k = blk.split('\n')[0].trim(); parts[k] = (blk.match(/\ba\d\b/g) || []).filter((id) => id !== 'a2').sort((x, y) => (x === 'a4') - (y === 'a4')); }
+      return JSON.stringify({ parts, close: 'a5' });
+    };
+    try {
+      const v = await m.vetParts([L[0], L[1], L[3]], L, { lengthSec: 30, eventSec: 7000 }, null);
+      const order = v && m.eventOrder(v.picks, m.eventParts(L, { lengthSec: 30 }), v.close);
+      ok(v && v.close === L[4] && v.picks.includes(L[4]) && order[order.length - 1] === L[4] && order[0] === L[0], 'the AI names the closing line: the edit ends on it', order && order.map((p) => p.id));
+      // (the same with no close named: the strongest statement ends it, as before)
+      ok(m.eventOrder(v.picks, m.eventParts(L, { lengthSec: 30 }), null).length === v.picks.length, 'no closing line named: the edit is ordered as before');
+    } finally { ai.ready = was.ready; ai.chat = was.chat; }
+    // the extra lines that make up the length go through the same strict read
+    ai.ready = () => true;
+    ai.chat = async () => JSON.stringify({ keep: ['a3', 'zz'] });
+    try {
+      const kept = await m.vetLoose([L[1], L[2]], null);
+      ok(kept && kept.length === 1 && kept[0] === L[2], 'extra lines: only those the AI keeps are used', kept && kept.map((p) => p.id));
+      ai.chat = async () => 'no';
+      ok((await m.vetLoose([L[1], L[2]], null)) === null, 'no AI answer: the extra lines are not judged (null)');
+    } finally { ai.ready = was.ready; ai.chat = was.chat; }
+  }
+  // ►► THE SAME PERSON TWICE: told by what the AI says they look like (two takes on one man, two different men)
+  {
+    const a = m.whoKey('man, navy jumper, white towel'), b = m.whoKey('Man in a dark blue sweater with a white towel');
+    const c = m.whoKey('man in a green jumper'), d = m.whoKey('woman in a red dress with a gele'), e = m.whoKey('man in a navy blazer');
+    ok(a === 'm|navy|knit|towel' && a === b, 'one man described two ways is one fingerprint', [a, b]);
+    ok(m.sameWho(a, b) && !m.sameWho(a, c) && !m.sameWho(a, d) && m.sameWho(m.whoKey('man in a navy jumper'), e) && !m.sameWho(a, m.whoKey('man, navy jumper, glasses')),
+      'the same person matches; another colour, a woman, or another mark does not (a knit and a jacket may be one)', [c, d, e]);
+    ok(m.whoKey('someone') === '' && !m.sameWho('', a), 'too little said: no fingerprint, never counted as the same');
   }
   // ►► A CLIP EVERY 2.5 SECONDS, THE WORDS WHOLE: one strong line of 2–5.5 s from each part of a long event
   {
