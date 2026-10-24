@@ -115,15 +115,15 @@ async function printsIn(fr, x0 = 0, x1 = 1) {
 
 /**
  * The faces a picture shows: video `file` (w×h) round source time `t`, cut 9:16 (or W:H) round `fx` — three frames
- * 0.8 s apart. [] when none can be told (no one facing, too small, not available here).
+ * 0.8 s apart (or `n`, `step` s apart). [] when none can be told (no one facing, too small, not available here).
  */
-async function printsAt(ffmpeg, file, t, fx, w, h, W = 1080, H = 1920) {
+async function printsAt(ffmpeg, file, t, fx, w, h, W = 1080, H = 1920, { n = 3, step = 0.8 } = {}) {
   if (!available() || !(w > 0 && h > 0)) return [];
   const share = Math.min(1, (h * W / H) / w);
   const c = fx == null || !Number.isFinite(fx) ? 0.5 : Math.max(0, Math.min(1, fx));
   const x0 = Math.max(0, Math.min(1 - share, c - share / 2));
   let frames = [];
-  try { frames = await detector().framesRgb(ffmpeg, file, Math.max(0, t - 0.8), 3, 0.8, w, h, 1280); } catch (e) { return []; }
+  try { frames = await detector().framesRgb(ffmpeg, file, Math.max(0, t - step * (n - 1) / 2), n, step, w, h, 1280); } catch (e) { return []; }
   const all = [];
   for (const fr of frames) { try { all.push(...await printsIn(fr, x0, x0 + share)); } catch (e) { /* that frame only */ } }
   return all;

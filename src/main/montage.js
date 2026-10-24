@@ -1852,9 +1852,10 @@ const SCORE_SYSTEM = 'You rate lines spoken at a church event for a short viral 
 const SCORE_RUBRIC = 'Rate each line from 0 to 10:\n'
   + '10 = a powerful, complete statement about God, faith, hope or life that a stranger would quote or share ("God is not finished with you yet.")\n'
   + '7 = a clear, meaningful statement that stands on its own\n'
-  + '4 = fine but forgettable, or it needs what came before it\n'
+  + '4 = fine but forgettable, or it needs what came before it ("I\'m not saying don\'t do that.", "There\'s time and season for everything.")\n'
   + '0 to 2 = not for the video: talk to the room or the band, a welcome, thanks, an announcement or invitation ("if you would like to be a presenter…"), an instruction ("speak about what you learned", "turn to your neighbour"), '
-  + 'a prayer spoken to God ("…, Lord."), a question, banter or a joke, half a sentence, filler ("Praise the Lord.", "Amen."), or a personal detail with no point ("I have been 34 years in the faith").\n\nLines:\n';
+  + 'a prayer spoken to God ("…, Lord."), a question, banter or a joke, half a sentence, filler ("Praise the Lord.", "Amen.", "Yes, yes…"), a speaker talking about themselves to the room ("look at me, look what I\'m doing"), '
+  + 'a saying or song line a stranger would not understand, or a personal detail with no point ("I have been 34 years in the faith").\n\nLines:\n';
 async function scoreLines(cands, log) {
   const todo = cands.filter((p) => p.aiScore == null);
   for (let i = 0; i < todo.length; i += 20) {
@@ -1869,7 +1870,7 @@ async function scoreLines(cands, log) {
   if (log && todo.length) log(`score: the AI scored ${n} of ${cands.length} line(s)`);
   return n;
 }
-const SCORE_KEEP = 6, SCORE_EXTRA = 7;   // a part's line; a line only to make up the length (a higher bar)
+const SCORE_KEEP = 7, SCORE_EXTRA = 7;   // a part's line; a line only to make up the length (a higher bar)
 
 /* the extra lines that make up the length: the same strict read as the parts — the ones the AI keeps (null when no AI answers) */
 async function vetLoose(cands, log) {
@@ -3341,11 +3342,19 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           if (!topOf.has(p)) {
             const t = (p.start + p.end) / 2, top = pdS && p.cand ? await topAt(ctx, pdS, p.cand, t, fxAtLook(p, t), frS.W, frS.H) : null;
             let faces = [];
-            if (fpS && p.cand && p.cand.kind === 'video') { try { faces = await fpS.printsAt(ctx.ffmpeg, p.cand.file, t, fxAtLook(p, t), p.cand.w, p.cand.h, frS.W, frS.H); } catch (e) { if (e instanceof jobs.CancelledError) throw e; faces = []; } }
+            // (five frames across the whole line: a speaker side on at its middle faces the room at some point of it)
+            if (fpS && p.cand && p.cand.kind === 'video') { try { faces = await fpS.printsAt(ctx.ffmpeg, p.cand.file, t, fxAtLook(p, t), p.cand.w, p.cand.h, frS.W, frS.H, { n: 5, step: Math.max(0.4, (p.end - p.start) / 5) }); } catch (e) { if (e instanceof jobs.CancelledError) throw e; faces = []; } }
             topOf.set(p, top || faces.length ? { vid: p.vid, t: p.start, top, faces } : null);
           }
           return topOf.get(p);
         };
+        /*
+         * Two LINES are one speaker more readily than two pictures: a speaker holds the stage for a stretch, so two
+         * lines of one video within half an hour whose faces are even a little alike (0.27 — the man in the brown polo,
+         * close up at 40.6 min and on stage at 62.6, was 0.29) are taken as one.
+         */
+        const twins = (a, b) => onePerson(a, b, fpS) || !!(fpS && a && b && a.vid === b.vid && Math.abs(a.t - b.t) <= 30 * 60
+          && a.faces && a.faces.length && b.faces && b.faces.length && fpS.likeness(a.faces, b.faces) >= 0.27);
         let swaps = 0;
         for (let i = 1; pdS && i < picks.length && swaps < 6; i++) {
           const p = picks[i];
@@ -3353,16 +3362,20 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           const a = await speakerOf(p);
           if (!a) continue;
           let twin = false;
-          for (let k = 0; k < picks.length && !twin; k++) if (k !== i && onePerson(a, await speakerOf(picks[k]), fpS)) twin = true;
+          for (let k = 0; k < picks.length && !twin; k++) if (k !== i && twins(a, await speakerOf(picks[k]))) twin = true;
           if (!twin) continue;
-          const alts = list.filter((q) => !picks.includes(q) && !rejected.has(q) && ev.part(q) === ev.part(p) && Math.abs(lenOf(q) - lenOf(p)) <= 1.2
-            && q.end - q.start >= MOMENT_LINE_MIN && q.end - q.start <= MOMENT_LINE_MAX + 0.3 && fitsEvent(q) && wholeThought(q) && !CROWD.test(q.text) && !HOUSEKEEPING.test(q.text) && messageOf(q) > 0
-            && !picks.some((r) => r !== p && r.vid === q.vid && Math.abs(r.start - q.start) < LINE_APART))
-            .sort((x, y) => lineVal(y) - lineVal(x)).slice(0, 6);
+          // (another good line — the AI's best scored first; of this part of the night first, then of any)
+          const okAlt = (q) => !picks.includes(q) && !rejected.has(q) && Math.abs(lenOf(q) - lenOf(p)) <= 1.2
+            && q.end - q.start >= MOMENT_LINE_MIN && q.end - q.start <= MOMENT_LINE_MAX + 0.3 && fitsEvent(q) && wholeThought(q) && !CROWD.test(q.text) && !HOUSEKEEPING.test(q.text) && !NOT_TO_SHARE.test(q.text) && messageOf(q) > 0
+            && (q.aiScore == null || q.aiScore >= SCORE_KEEP)
+            && !picks.some((r) => r !== p && r.vid === q.vid && Math.abs(r.start - q.start) < LINE_APART);
+          const best = (x, y) => ((y.aiScore == null ? -1 : y.aiScore) - (x.aiScore == null ? -1 : x.aiScore)) || (lineVal(y) - lineVal(x));
+          const alts = list.filter((q) => okAlt(q) && ev.part(q) === ev.part(p)).sort(best).slice(0, 6)
+            .concat(list.filter((q) => okAlt(q) && ev.part(q) !== ev.part(p)).sort(best).slice(0, 8));
           for (const q of await showsSomeone(alts)) {
             const b = await speakerOf(q);
             let clash = false;
-            for (let k = 0; k < picks.length && !clash; k++) if (k !== i && onePerson(b, await speakerOf(picks[k]), fpS)) clash = true;
+            for (let k = 0; k < picks.length && !clash; k++) if (k !== i && twins(b, await speakerOf(picks[k]))) clash = true;
             if (clash) continue;
             if (log) log(`people: "${p.text.slice(0, 40)}…" is a speaker already in the edit — "${q.text.slice(0, 40)}…" instead`);
             picks[i] = q; tot = tot - lenOf(p) + lenOf(q); swaps++;
