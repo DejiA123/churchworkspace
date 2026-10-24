@@ -3521,6 +3521,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
 
   const ICON = {
     back: '<path d="m15 18-6-6 6-6"/>',
+    close: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
     undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
     redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/>',
     save: '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>',
@@ -5348,7 +5349,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         <section class="fs-sec"><h3>Speakers <small>their photos are cut out once and kept</small></h3>
           <div class="fs-kit-sps">${(k.speakers || []).map((s, i) => `<div class="fs-kit-sp"><div class="fs-kit-sp-top">
             <input data-spf="name" data-i="${i}" value="${escAttr(s.name || '')}" placeholder="Bishop David Richman"><button type="button" class="fs-x" data-k="sprm" data-i="${i}" aria-label="Remove">${ic('trash')}</button></div>
-            <div class="fs-bank fs-bank-sm">${(s.photos || []).map((p, j) => `<button type="button" class="fs-bank-pic" data-k="sppic" data-i="${i}" data-j="${j}">${picTag(p)}</button>`).join('')}
+            <div class="fs-bank fs-bank-sm">${(s.photos || []).map((p, j) => `<div class="fs-bank-cell"><button type="button" class="fs-bank-pic" data-k="sppic" data-i="${i}" data-j="${j}" aria-label="Fix this photo’s cut-out">${picTag(p)}</button>
+              <button type="button" class="fs-pic-x" data-k="sppicrm" data-i="${i}" data-j="${j}" aria-label="Remove this photo">${ic('close')}</button></div>`).join('')}
             <button type="button" class="fs-bank-pic fs-bank-add" data-k="spadd-pic" data-i="${i}">${ic('plus')}<small>Photos</small></button></div></div>`).join('')}
           <button type="button" class="fs-ghost" data-k="spadd">${ic('plus')}<span>Add a speaker</span></button></div>
         </section>
@@ -5390,15 +5392,15 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
           try { await window.api.flyer.inspoRemove(b.dataset.id); F.kit.inspo = (F.kit.inspo || []).filter((x) => x.id !== b.dataset.id); } catch (e) {}
           return drawKit();
         }
-        case 'sppic': {   // one of the bank: fix its cut-out, or take it out
+        case 'sppic': {   // one of the bank, tapped: fix its cut-out
           const sp = k.speakers[i], j = +b.dataset.j, p = sp.photos[j];
-          const fix = window.confirm('Fix this picture’s cut-out?\n\n(Cancel to choose whether to remove it.)');
-          if (fix) {
-            await bankPic(p);
-            return cutOutUrl(PICURL.get(p) || p, async (png) => { sp.photos[j] = await tidyCut(png).catch(() => png); drawKit(); });
-          }
-          if (window.confirm('Remove this picture from ' + (sp.name || 'the speaker') + '’s bank?')) { sp.photos.splice(j, 1); drawKit(); }
-          return;
+          await bankPic(p);
+          return cutOutUrl(PICURL.get(p) || p, async (png) => { sp.photos[j] = await tidyCut(png).catch(() => png); drawKit(); });
+        }
+        case 'sppicrm': {   // its ✕: out of the bank (kept until Save — closing without saving puts it back)
+          k.speakers[i].photos.splice(+b.dataset.j, 1);
+          drawKit();
+          return toast('Photo removed. Tap Save to keep the change.', '', 3500);
         }
         case 'spadd': k.speakers.push({ id: 'sp' + Date.now().toString(36), name: '', photos: [] }); return drawKit();
         case 'sprm': k.speakers.splice(i, 1); return drawKit();
