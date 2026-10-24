@@ -3389,9 +3389,13 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
      * backs of the audience (they looked random before they were checked).
      */
     const longEv = (opts.eventSec || 0) >= LONG_EVENT_SEC;
+    // (with faces told apart, twice as many moments: one person is on stage for many of them in a row, and each is shown
+    //  once — one per 2.3 min of Gospel Jamz left 3 new people to cut to for a 30 s, and a panel sitting still stayed in)
+    let faceOk = false;
+    try { faceOk = require('./faceprint').available(); } catch (e) { faceOk = false; }
     if (longEv) {
       // (enough moments for a new picture every clip — and the pictures laid over the speakers)
-      const parts = Math.max(partsFor(opts) * 2, Math.ceil((opts.lengthSec / (opts.clipSec || MOMENT_EACH)) * 8)), far = (p) => !picks.some((q) => q.vid === p.vid && Math.abs(q.start - p.start) < 30);
+      const parts = Math.max(partsFor(opts) * 2, Math.ceil((opts.lengthSec / (opts.clipSec || MOMENT_EACH)) * (faceOk ? 16 : 8))), far = (p) => !picks.some((q) => q.vid === p.vid && Math.abs(q.start - p.start) < 30);
       const span = Math.max(1, ...phrases.map((p) => p.end)), across = [];
       for (let k = 0; k < parts; k++) {
         const best = spare.filter((p) => far(p) && p.start >= k * span / parts && p.start < (k + 1) * span / parts)[0];   // (spare is in score order)
@@ -3425,7 +3429,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           const fr = ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 };
           const kept = [];
           // (the liveliest first, until there are plenty: about 2.5 for every picture the edit shows)
-          const enough = Math.ceil((opts.lengthSec / (opts.clipSec || MOMENT_EACH)) * 4.5);
+          const enough = Math.ceil((opts.lengthSec / (opts.clipSec || MOMENT_EACH)) * (faceOk ? 9 : 4.5));
           let panned = 0;
           for (const sp of good) {
             if (kept.length >= enough) break;
@@ -3629,8 +3633,8 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       };
       const seenFace = (f) => f.length > 0 && shownFace.some((g) => fpx.samePerson(g, f));
       // (faces told apart: the same person is caught by their face, so moments need only be a minute and a half apart —
-      //  3¾ minutes left 45 lively moments too few to cover a 5½-second line, and it played as one picture)
-      const GAP = fpx ? clamp((opts.eventSec || 0) / (nPics * 12), 30, 90) : clamp((opts.eventSec || 0) / (nPics * 5), 45, 240);
+      //  3¾ minutes left 45 lively moments too few to cover a 5½-second line, and it played as one picture; a minute)
+      const GAP = fpx ? clamp((opts.eventSec || 0) / (nPics * 20), 30, 60) : clamp((opts.eventSec || 0) / (nPics * 5), 45, 240);
       const atOf = (x) => ({ vid: x.vid, t: snapAt(x) });
       const shownAt = picks.map((q) => ({ vid: q.vid, t: (q.start + q.end) / 2 }));
       const tooNear = (x) => { const a = atOf(x); return shownAt.some((b) => b.vid === a.vid && Math.abs(b.t - a.t) < GAP); };
