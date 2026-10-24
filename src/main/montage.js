@@ -1864,6 +1864,8 @@ async function askJson(system, prompt, maxTokens) {
   let text = '';
   try { const ai = require('./aaillm'); if (ai.ready()) text = await ai.chat({ system, prompt, json: true, maxTokens, temperature: 0.2 }); } catch (e) { text = ''; }
   if (!text) { try { const cw = require('./cloudwrite'); if (cw.access && cw.access().key) text = await cw.chat({ system, prompt, json: true, maxTokens, temperature: 0.2, timeoutMs: 60000, evenIfOff: true }); } catch (e) { text = ''; } }
+  // (Groq's free allowance used up: the other free readers — Mistral, Gemini)
+  if (!text) { try { const bj = require('./bigjudge'); if (bj.ready()) text = await bj.chat({ system, prompt, json: true, maxTokens: Math.max(1500, maxTokens * 2), temperature: 0.2 }); } catch (e) { text = ''; } }
   try { const t = String(text || ''); const a = t.indexOf('{'), b = t.lastIndexOf('}'); return a >= 0 && b > a ? JSON.parse(t.slice(a, b + 1)) : null; } catch (e) { return null; }
 }
 /* the extra lines that make up the length: the same strict read as the parts — the ones the AI keeps (null when no AI answers) */
@@ -2137,10 +2139,26 @@ async function talkWithGroq(list, opts) {
   return null;
 }
 
+/*
+ * Groq's free allowance used up: the studio's other free readers (Mistral, then Gemini — bigjudge.js), when it has
+ * their keys. Each free allowance is a different one: together they make many more montages a day than one.
+ */
+async function talkWithFree(list, opts) {
+  let bj = null, cw = null;
+  try { bj = require('./bigjudge'); cw = require('./cloudwrite'); } catch (e) { return null; }
+  if (!bj.ready || !bj.ready()) return null;
+  const few = spreadList(list, 140);
+  const prompt = talkBrief(opts, few, { compact: true })
+    + '\n\nReply with JSON only, exactly this shape: {"concept":"","title":"","hook_text":"","post_caption":"","hashtags":[""],"picks":[{"id":"p1"}],"vo_intro":"","vo_outro":""}';
+  const text = await bj.chat({ system: TALK_SYSTEM, prompt, json: true, maxTokens: 2500, temperature: 0.7 });
+  const plan = text ? cw.parseJson(text) : null;
+  return plan && Array.isArray(plan.picks) ? { plan, director: 'free', model: bj.name ? bj.name() : '' } : null;
+}
+
 /** Without an AI: the strongest short line first, then the best lines in the order they were said. */
 /* what carries the MESSAGE (a rules edit is built from these), and the crowd work around it (not a clip's line) */
 const MESSAGE = /\b(god|jesus|christ|lord|holy spirit|spirit|faith|pray|prayers?|gospel|believe|love|grace|mercy|heaven|salvation|saved|sins?|cross|kingdom|bible|scripture|purpose|power|fire|glory|worship|testimony|hope|fear|nothing|everything|destiny|calling|anointing|freedom|truth)\b/gi;
-const CROWD = /\b(are you (guys )?ready|make some noise|come on|give it up|clap|hands up|give a shout|can somebody|say amen|how many of you|are you (guys |all )?(enjoying|having|ready)|(have|has) been enjoying|i'?m ready|i am ready|who is ready|look at the screen|say what you see|that'?s it\. all right|stand up|on your feet|(please|everybody|everyone) (stand|sit|rise|raise)|are we (enjoying|having|ready)|enjoying ourselves|god bless you|(this|that|my|your|our) team|money'?s on|my money|where is everybody|how have you (all |guys )?been|haven'?t seen you|since last year|fast forward|oh my (goodness|days|god)|we pray|let us pray|let'?s pray|my team|you guys|anybody else|where are my|put your hands|shout (it|out|with)|turn to your neighbou?r|let'?s go|round of applause|one more time|do you want to|go again)\b/i;
+const CROWD = /\b(are you (guys )?ready|make some noise|come on|give it up|clap|hands up|give a shout|can somebody|say amen|how many of you|are you (guys |all )?(enjoying|having|ready)|(have|has) been enjoying|i'?m ready|i am ready|who is ready|look at the screen|say what you see|that'?s it\. all right|stand up|on your feet|(please|everybody|everyone) (stand|sit|rise|raise)|are we (enjoying|having|ready)|enjoying ourselves|god bless you|(this|that|my|your|our) team|money'?s on|my money|where is everybody|how have you (all |guys )?been|haven'?t seen you|since last year|fast forward|oh my (goodness|days|god)|we pray|let us pray|let'?s pray|my team|you guys|anybody else|where are my|put your hands|shout (it|out|with)|turn to your neighbou?r|let'?s go|round of applause|one more time|do you want to|go again|come (out|up|forward)( here)?|i want to (just )?pray for (you|someone)|i just (feel|want to)|you know what it is)\b/i;
 const messageOf = (p) => Math.min(3, (String(p.text).match(MESSAGE) || []).length) * 0.25 - (CROWD.test(p.text) ? 0.6 : 0);
 function talkByRules(list, opts) {
   // without an AI to judge them, a line with an "um" in it or the business of the service is never used
@@ -2419,6 +2437,49 @@ async function numberTile(tff, font, tile, n, out) {
 }
 
 /*
+ * ►► WHO IT IS, WITHOUT ASKING ANYONE. ◄◄ The vision AI can tell one person from another; its free allowance runs
+ * out, and with hundreds of churches making montages it would every day. This check needs nothing but this server:
+ * the colours of what the person wears just below their face (their top), and when in the night it was. Measured on
+ * 32 close-ups of Gospel Jamz labelled by hand: one person's moments within 25 minutes of each other share their
+ * top's colours (an overlap of 0.3 or more) in 25 pairs of 32; two different people only 9 times in 100. (Their
+ * faces, with a face-recognition model, caught 3 pairs more for 80 MB more and a second a face — not worth it.)
+ */
+const TOP_BINS = 6, SAME_TOP = 0.3, SAME_TOP_SEC = 25 * 60;
+/* a person's top as colours: the share of it in each of 6×6×6 bins of red share, green share and brightness (a
+ * stage light that dims or brightens moves only the brightness) */
+function topColours(rgb, W, H, face) {
+  const fw = face.w * W, fh = face.h * H, cx = face.x * W, cy = face.y * H;
+  const x0 = Math.max(0, Math.round(cx - fw * 1.1)), x1 = Math.min(W, Math.round(cx + fw * 1.1));
+  const y0 = Math.max(0, Math.round(cy + fh * 0.9)), y1 = Math.min(H, Math.round(cy + fh * 3.2));
+  const h = new Array(TOP_BINS ** 3).fill(0);
+  let n = 0;
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+    const i = (y * W + x) * 3, r = rgb[i], g = rgb[i + 1], b = rgb[i + 2], sum = r + g + b + 1;
+    const rr = Math.min(TOP_BINS - 1, Math.floor((r / sum) * TOP_BINS * 1.5)), gg = Math.min(TOP_BINS - 1, Math.floor((g / sum) * TOP_BINS * 1.5)), v = Math.min(TOP_BINS - 1, Math.floor((sum / 766) * TOP_BINS));
+    h[(rr * TOP_BINS + gg) * TOP_BINS + v]++; n++;
+  }
+  return n >= 50 ? h.map((c) => c / n) : null;
+}
+const topOverlap = (a, b) => (a && b ? a.reduce((s, x, i) => s + Math.min(x, b[i]), 0) : 0);
+/* the same person, as far as their clothes and the hour tell: { vid, t, top } each */
+function sameTop(a, b) {
+  return !!(a && b && a.top && b.top && a.vid === b.vid && Math.abs(a.t - b.t) <= SAME_TOP_SEC && topOverlap(a.top, b.top) >= SAME_TOP);
+}
+/* the top of the person a picture shows at source time `t` (the biggest face inside the cut round `fx`); null when
+ * no one is found */
+async function topAt(ctx, pd, cand, t, fx, W, H) {
+  if (!pd || !cand || cand.kind !== 'video' || !(cand.w > 0 && cand.h > 0)) return null;
+  try {
+    const fr = await pd.frameRgb(ctx.ffmpeg, cand.file, Math.max(0, t));
+    const keep = fr.rgb.slice();   // (the detector is handed the frame itself)
+    const share = Math.min(1, (cand.h * W / H) / cand.w);
+    const x0 = clamp((fx == null || !Number.isFinite(fx) ? 0.5 : clamp(fx, 0, 1)) - share / 2, 0, 1 - share);
+    const q = (await pd.peopleIn(fr)).filter((p) => p.face && p.score >= 0.4 && p.face.x >= x0 && p.face.x <= x0 + share).sort((a, b) => b.face.w - a.face.w)[0];
+    return q ? topColours(keep, fr.width, fr.height, q.face) : null;
+  } catch (e) { if (e instanceof jobs.CancelledError) throw e; return null; }
+}
+
+/*
  * ►► THE PERSON STAYS IN THE PICTURE. ◄◄ A moment of the night plays about 2.5 s round the frame that was checked,
  * cut narrow (9:16 from a wide camera). Someone walking across the stage was gone from the cut by its end — a frame
  * of nothing but the logo (Gospel Jamz, 194 and 126 min). The person detector follows them from 1.6 s before the
@@ -2435,13 +2496,18 @@ async function followIn(ctx, pd, sp, t, W, H) {
   // (the person nearest where they were, and close enough to be them: a step of 0.8 s is never half the cut)
   const near = (ps, at) => { const q = (ps || []).filter((p) => p.score >= 0.4 && p.face).sort((a, b) => Math.abs(a.face.x - at) - Math.abs(b.face.x - at))[0]; return q && Math.abs(q.face.x - at) <= share * 0.45 ? q : null; };
   // (the five frames in one read when it can: -1.6, -0.8, 0, +0.8, +1.6 s)
-  let five = null;
+  let five = null, midFrame = null;
   if (pd.framesRgb && t >= 1.6) {
-    try { const frs = await pd.framesRgb(ctx.ffmpeg, c.file, t - 1.6, 5, 0.8, c.w, c.h); if (frs.length === 5) { five = []; for (const fr of frs) five.push(await pd.peopleIn(fr)); } } catch (e) { if (e instanceof jobs.CancelledError) throw e; five = null; }
+    try {
+      const frs = await pd.framesRgb(ctx.ffmpeg, c.file, t - 1.6, 5, 0.8, c.w, c.h);
+      if (frs.length === 5) { midFrame = { rgb: frs[2].rgb.slice(), width: frs[2].width, height: frs[2].height }; five = []; for (const fr of frs) five.push(await pd.peopleIn(fr)); }
+    } catch (e) { if (e instanceof jobs.CancelledError) throw e; five = null; }
   }
   const at = (dt) => (five ? five[Math.round(dt / 0.8) + 2] : look(t + dt));
   const mid = near(await at(0), sp.snapLook && sp.snapLook.fx != null ? sp.snapLook.fx : 0.5);
   if (!mid) return null;
+  // (what they wear, while the frame is here: see topColours)
+  if (five && midFrame) sp.top = topColours(midFrame.rgb, midFrame.width, midFrame.height, mid.face);
   const pts = [{ t, fx: mid.face.x }];
   for (const dir of [-1, 1]) {
     let at0 = mid.face.x;
@@ -2975,6 +3041,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     // (AssemblyAI first; Groq only when AssemblyAI's models could not answer — an account without the LLM Gateway —
     //  as an AI's judgement still beats the rules)
     if (!d) { try { d = await talkWithGroq(list, opts); } catch (e) { if (log) log('groq: ' + e.message); } }
+    if (!d) { try { d = await talkWithFree(list, opts); } catch (e) { if (log) log('free readers: ' + e.message); } }
     if (!d) d = talkByRules(list, opts);
     if (log) log(`talk: lines chosen by ${d.director}${d.model ? ' (' + d.model + ')' : ''}`);
     opts.directorBy = d.director;
@@ -3212,6 +3279,48 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         pool.splice(pool.indexOf(pick.q), 1);
         tot = sum(picks);
       }
+      /*
+       * ►► NO SPEAKER TWICE. ◄◄ One line from each part of the night, and two parts' lines can still be one speaker —
+       * the panel at 22 and 34 min, the man in green at 188 and 198 (Gospel Jamz). Two lines within 25 minutes whose
+       * speakers wear the same top (sameTop — this server's own check, no AI allowance) are one speaker: the later
+       * gives way to another good line of its part, of about its length, with someone else in it.
+       */
+      if (ev) {
+        let pdS = null;
+        try { pdS = require('./persondetect'); if (!pdS.available()) pdS = null; } catch (e) { pdS = null; }
+        const frS = ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 };
+        const topOf = new Map();
+        const speakerOf = async (p) => {
+          if (!topOf.has(p)) {
+            const t = (p.start + p.end) / 2, top = pdS && p.cand ? await topAt(ctx, pdS, p.cand, t, fxAtLook(p, t), frS.W, frS.H) : null;
+            topOf.set(p, top ? { vid: p.vid, t: p.start, top } : null);
+          }
+          return topOf.get(p);
+        };
+        let swaps = 0;
+        for (let i = 1; pdS && i < picks.length && swaps < 4; i++) {
+          const p = picks[i];
+          if (p === closeLine) continue;   // (the line the AI named to end on stays: its twin gives way when it comes round)
+          const a = await speakerOf(p);
+          if (!a) continue;
+          let twin = false;
+          for (let k = 0; k < picks.length && !twin; k++) if (k !== i && sameTop(a, await speakerOf(picks[k]))) twin = true;
+          if (!twin) continue;
+          const alts = list.filter((q) => !picks.includes(q) && !rejected.has(q) && ev.part(q) === ev.part(p) && Math.abs(lenOf(q) - lenOf(p)) <= 1.2
+            && q.end - q.start >= MOMENT_LINE_MIN && q.end - q.start <= MOMENT_LINE_MAX + 0.3 && fitsEvent(q) && wholeThought(q) && !CROWD.test(q.text) && !HOUSEKEEPING.test(q.text)
+            && !picks.some((r) => r !== p && r.vid === q.vid && Math.abs(r.start - q.start) < LINE_APART))
+            .sort((x, y) => lineVal(y) - lineVal(x)).slice(0, 6);
+          for (const q of await showsSomeone(alts)) {
+            const b = await speakerOf(q);
+            let clash = false;
+            for (let k = 0; k < picks.length && !clash; k++) if (k !== i && sameTop(b, await speakerOf(picks[k]))) clash = true;
+            if (clash) continue;
+            if (log) log(`people: "${p.text.slice(0, 40)}…" is a speaker already in the edit — "${q.text.slice(0, 40)}…" instead`);
+            picks[i] = q; tot = tot - lenOf(p) + lenOf(q); swaps++;
+            break;
+          }
+        }
+      }
       if (ev) picks = eventOrder(picks, ev, closeLine);
       if (log) log(`length: ${tot.toFixed(1)} s of lines${voLen ? ` + ${voLen.toFixed(1)} s narrator` : ''} for ${opts.lengthSec} s asked`);
     }
@@ -3242,7 +3351,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     const longEv = (opts.eventSec || 0) >= LONG_EVENT_SEC;
     if (longEv) {
       // (enough moments for a new picture every clip — and the pictures laid over the speakers)
-      const parts = Math.max(partsFor(opts) * 2, Math.ceil((opts.lengthSec / (opts.clipSec || MOMENT_EACH)) * 4)), far = (p) => !picks.some((q) => q.vid === p.vid && Math.abs(q.start - p.start) < 30);
+      const parts = Math.max(partsFor(opts) * 2, Math.ceil((opts.lengthSec / (opts.clipSec || MOMENT_EACH)) * 8)), far = (p) => !picks.some((q) => q.vid === p.vid && Math.abs(q.start - p.start) < 30);
       const span = Math.max(1, ...phrases.map((p) => p.end)), across = [];
       for (let k = 0; k < parts; k++) {
         const best = spare.filter((p) => far(p) && p.start >= k * span / parts && p.start < (k + 1) * span / parts)[0];   // (spare is in score order)
@@ -3456,18 +3565,35 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
        * spread over the event, about 5 minutes apart for a 45 s on a 3 h 44 night.
        */
       const nPics = Math.max(1, speechTo - speechFrom);
-      const GAP = clamp((opts.eventSec || 0) / (nPics * 2.2), 45, 420);   // (about 5 min on Gospel Jamz: the "looks the same" check takes the rest)
+      // (about 4 min on Gospel Jamz: what they wear and when — sameTop — and the "looks the same" check take the rest;
+      //  7 min left only 2 moments to cut to for a 30 s, and the speakers came back instead)
+      const GAP = clamp((opts.eventSec || 0) / (nPics * 5), 45, 240);
       const atOf = (x) => ({ vid: x.vid, t: snapAt(x) });
       const shownAt = picks.map((q) => ({ vid: q.vid, t: (q.start + q.end) / 2 }));
       const tooNear = (x) => { const a = atOf(x); return shownAt.some((b) => b.vid === a.vid && Math.abs(b.t - a.t) < GAP); };
+      // what each person shown wears, and when (sameTop: this server's own check — no AI allowance needed)
+      let pdx = null;
+      try { pdx = require('./persondetect'); if (!pdx.available()) pdx = null; } catch (e) { pdx = null; }
+      const frT = ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 };
+      const shownTop = [];
+      const topOfSpare = async (x) => {
+        const t = snapAt(x);
+        if (x.top === undefined) x.top = await topAt(ctx, pdx, x.cand, t, x.track ? trackAt(x.track, t) : x.snapLook && x.snapLook.fx, frT.W, frT.H);
+        return x.top ? { vid: x.vid, t, top: x.top } : null;
+      };
+      const why = { used: 0, near: 0, hour: 0, who: 0, top: 0, scene: 0 };
       const fresh = async () => {
         for (const x of spare) {
-          if (used.has(x) || near(x) || tooNear(x)) continue;
+          if (used.has(x)) continue;
+          if (near(x)) { why.near++; continue; }
+          if (tooNear(x)) { why.hour++; continue; }
           const wk = whoOfSpare(x);
-          if (wk && shownWho.some((w) => sameWho(w, wk))) { used.add(x); continue; }   // (someone already shown)
+          if (wk && shownWho.some((w) => sameWho(w, wk))) { used.add(x); why.who++; continue; }   // (someone already shown)
+          const tp = await topOfSpare(x);
+          if (tp && shownTop.some((w) => sameTop(w, tp))) { used.add(x); sameTops++; why.top++; continue; }   // (the same top, the same hour)
           const xs = await sigAt(x.cand.file, snapAt(x), x.snapLook && x.snapLook.fx);
-          if (shown.some((g) => apart(xs, g) < SAME) || [...lineSig.values()].some((g) => apart(xs, g) < SAME)) { used.add(x); continue; }
-          used.add(x); shownAt.push(atOf(x)); if (wk) shownWho.push(wk);
+          if (shown.some((g) => apart(xs, g) < SAME) || [...lineSig.values()].some((g) => apart(xs, g) < SAME)) { used.add(x); why.scene++; continue; }
+          used.add(x); shownAt.push(atOf(x)); if (wk) shownWho.push(wk); if (tp) shownTop.push(tp);
           return { x, xs };
         }
         return null;
@@ -3477,7 +3603,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       const shownWho = [];
       const whoOfLine = (sh) => { const p = sh.line != null ? picks[sh.line] : null; const l = p && (p.looks || []).find((x) => x.who); return l ? whoKey(l.who) : ''; };
       const whoOfSpare = (x) => (x.snapLook && x.snapLook.who ? whoKey(x.snapLook.who) : '');
-      let cuts = 0, sameScene = 0, still = 0, samePerson = 0;
+      let cuts = 0, sameScene = 0, still = 0, samePerson = 0, sameTops = 0;
       for (let i = speechFrom; i < speechTo; i++) {
         const sh = shots[i];
         const first = firstOf(i);
@@ -3486,12 +3612,17 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           const g = lineSig.get(i);
           // (the opening line always shows its speaker)
           const wk = whoOfLine(sh);
+          const tAt = sh.from + sh.seconds / 2, line = sh.line != null ? picks[sh.line] : null;
+          const tTop = await topAt(ctx, pdx, sh.cand, tAt, sh.fx2 != null && sh.fx != null ? (sh.fx + sh.fx2) / 2 : sh.fx, frT.W, frT.H);
+          const tl = tTop ? { vid: line ? line.vid : -1, t: tAt, top: tTop } : null;
           if (i > speechFrom && shown.some((x) => apart(g, x) < SAME)) { need = true; repeat = true; }
           // (a speaker already shown — the host again, two hours later: their words go on over someone new)
           else if (i > speechFrom && wk && shownWho.some((w) => sameWho(w, wk))) { need = true; repeat = true; samePerson++; }
+          // (the same top in the same hour of the night — the panel member again, ten minutes on)
+          else if (i > speechFrom && tl && shownTop.some((w) => sameTop(w, tl))) { need = true; repeat = true; samePerson++; sameTops++; }
           // (a speaker's own picture that barely moves — a wide shot of a panel sitting still — is covered by a lively moment)
           else if (i > speechFrom && sh.cand.kind === 'video' && ((m) => m != null && m < 0.8)(await motionAt(ctx, sh.cand.file, sh.from + sh.seconds / 2).catch(() => null))) { need = true; repeat = true; still++; }
-          else { shown.push(g); if (wk) shownWho.push(wk); }
+          else { shown.push(g); if (wk) shownWho.push(wk); if (tl) shownTop.push(tl); }
         }
         if (!need || sh.seconds < 0.6 || ((sh.overlays || []).length && !sh.cover)) continue;
         const got = await fresh();
@@ -3587,6 +3718,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         }
         if (log && samePerson) log(`people: ${samePerson} picture(s) of someone already shown replaced with someone new`);
       } catch (e) { if (e instanceof jobs.CancelledError) throw e; if (log) log('people: same-person check — ' + e.message); }
+      if (log) log(`people: ${sameTops} picture(s) of someone already shown left out by what they wear and when (no AI needed); of ${spare.length} moments, passed over: ${Object.entries(why).filter(([, n]) => n).map(([k, n]) => k + ' ' + n).join(', ') || 'none'}`);
       if (log) log(`pictures: ${cuts} cut(s) to other moments of the night${sameScene ? ` (${sameScene} for a speaker whose scene was already seen or barely moved${still ? `, ${still} of them still` : ''})` : ''}, ${pips} picture(s) laid over the speakers — every one distinct`);
     }
     for (let i = speechFrom + 1; i < speechTo && !longEv; i += 2) {
@@ -3738,7 +3870,7 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 
 /** Which director the montage would use right now (for the phone to say so). */
 /* which montage the server runs (montage:status says it: a quiet way to tell an update has landed) */
-const MONTAGE_REV = '2026-10-24.gemini';
+const MONTAGE_REV = '2026-10-24.local';
 function directorStatus() {
   const st = directorStatusOf();
   st.rev = MONTAGE_REV;
@@ -3754,5 +3886,5 @@ function directorStatusOf() {
 }
 
 module.exports = {
-  stillOrDark, motionAt, goodLines, wholeThought, sameLine, talkBrief, vetParts, vetLoose, eventOrder, whoKey, sameWho, personTile, numberTile, textFfmpeg, lookAt, useDataDir, followIn, trackAt, aimCut, eventParts, acrossEvent, beatSpans, momentSec, partsFor, MOMENT_EACH,
+  stillOrDark, motionAt, goodLines, wholeThought, sameLine, talkBrief, vetParts, vetLoose, eventOrder, whoKey, sameWho, personTile, numberTile, textFfmpeg, lookAt, useDataDir, topColours, topOverlap, sameTop, topAt, followIn, trackAt, aimCut, eventParts, acrossEvent, beatSpans, momentSec, partsFor, MOMENT_EACH,
   _render: render, spreadList, momentsOf, shortMoments, HOUSEKEEPING, cleanAbout, withAbout, aboutLines, phrasesOf, phraseScore, talkByRules, fromBrief, cleanBrief, make, remake, loadProject, sidecarOf, baseOf, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };
