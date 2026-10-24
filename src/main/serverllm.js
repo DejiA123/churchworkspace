@@ -169,6 +169,8 @@ async function start() {
     proc = spawn(bin, ['-m', path.join(dir, m.file), '--host', '127.0.0.1', '--port', String(port), '-c', String(CTX), '-t', String(threads),
       '-np', '1', '--no-webui', '--reasoning-budget', '0'], { stdio: ['ignore', 'ignore', 'pipe'] });
     let tail = '';
+    // (a program that cannot be started says so here — unheard, Node would take the whole studio down with it)
+    proc.on('error', (e) => { tail += '\n' + (e && e.message); });
     proc.stderr.on('data', (d) => { tail = (tail + d.toString()).slice(-2000); });
     const me = proc;
     proc.on('exit', () => { if (proc === me) { proc = null; state.running = false; } });
