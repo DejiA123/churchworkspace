@@ -1790,6 +1790,9 @@ function wholeThought(p) {
   { const w = t.toLowerCase().replace(/[^a-z' ]+/g, ' ').split(/\s+/).filter(Boolean); const n = new Map();
     for (let k = 2; k <= 4; k++) for (let j = 0; j + k <= w.length; j++) { const g = w.slice(j, j + k).join(' '); n.set(g, (n.get(g) || 0) + 1); }
     if ([...n.values()].some((c) => c >= 3)) return false; }
+  // a question inside, or a scrap of a reply ("We're starting from Ife and Mac George, right? Yes. Okay, cool.")
+  { const ss = t.split(/(?<=[.!?…])\s+/).filter(Boolean);
+    if (ss.length > 1 && ss.some((x) => /\?["”’']?$/.test(x) || x.split(/\s+/).length < 3)) return false; }
   // half a sentence: "Once the hand of the Lord comes over you and God wants to use you." (when…, if…, once… with no
   // main clause after a comma)
   if (/^(once|when|whenever|if|unless|until|although|though|while|as soon as|after|before)\b/i.test(t) && !/,/.test(t) && t.split(/(?<=[.!?…])\s+/).length === 1) return false;
@@ -2447,10 +2450,11 @@ async function numberTile(tff, font, tile, n, out) {
  * out, and with hundreds of churches making montages it would every day. This check needs nothing but this server:
  * the colours of what the person wears just below their face (their top), and when in the night it was. Measured on
  * 32 close-ups of Gospel Jamz labelled by hand: one person's moments within 25 minutes of each other share their
- * top's colours (an overlap of 0.3 or more) in 25 pairs of 32; two different people only 9 times in 100. (Their
+ * top's colours (an overlap of 0.35 or more, the stage light taken out) in 24 pairs of 32; two different people only
+ * 6 times in 100 (at 0.3, 26 pairs but 8 in 100 — a 30 s on the server lost 28 of its 46 moments to it). (Their
  * faces, with a face-recognition model, caught 3 pairs more for 80 MB more and a second a face — not worth it.)
  */
-const TOP_BINS = 6, SAME_TOP = 0.3, SAME_TOP_SEC = 25 * 60;
+const TOP_BINS = 6, SAME_TOP = 0.35, SAME_TOP_SEC = 25 * 60;
 /* a person's top as colours: the share of it in each of 6×6×6 bins of red share, green share and brightness (a
  * stage light that dims or brightens moves only the brightness) */
 function topColours(rgb, W, H, face) {
@@ -2477,8 +2481,12 @@ function topColours(rgb, W, H, face) {
 }
 const topOverlap = (a, b) => (a && b ? a.reduce((s, x, i) => s + Math.min(x, b[i]), 0) : 0);
 /* the same person, as far as their clothes and the hour tell: { vid, t, top } each */
+// (within 10 minutes a looser match: one man's green jumper on the red stage and in the purple room, 8 minutes
+//  apart, overlapped 0.23 — measured, 24 pairs of 32 caught instead of 22, no more wrongly joined)
 function sameTop(a, b) {
-  return !!(a && b && a.top && b.top && a.vid === b.vid && Math.abs(a.t - b.t) <= SAME_TOP_SEC && topOverlap(a.top, b.top) >= SAME_TOP);
+  if (!(a && b && a.top && b.top && a.vid === b.vid)) return false;
+  const dt = Math.abs(a.t - b.t), o = topOverlap(a.top, b.top);
+  return (dt <= 10 * 60 && o >= 0.2) || (dt <= SAME_TOP_SEC && o >= SAME_TOP);
 }
 /* the top of the person a picture shows at source time `t` (the biggest face inside the cut round `fx`); null when
  * no one is found */
@@ -3255,19 +3263,22 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       // 2) too short: the strongest unused lines that show someone, before the payoff
       //    (a long event: the lines the AI kept, in parts not yet in the edit; then any good line there; then a
       //     second line from a part — the length asked for is met, "30 seconds" is 30 seconds)
-      const fill = async (from, onePart) => {
+      // (`apart`: never from within that many seconds of a line already in — one speaker twice; a line passed over for
+      //  that, or for its length, is not thrown away: a looser round can still use it — only one that shows nobody is)
+      const fill = async (from, onePart, apart = LINE_APART) => {
+        const fits = (p) => lenOf(p) <= want + 1 - tot + 0.3 && (!onePart || newPart(p)) && !(ev && picks.some((q) => q.vid === p.vid && Math.abs(q.start - p.start) < apart));
         for (let round = 0; round < (ev ? 6 : 3) && tot < want - 1 && from.length; round++) {
-          const batch = from.filter((p) => lenOf(p) <= want + 1 - tot + 0.3).slice(0, 6);
+          const batch = from.filter(fits).slice(0, 6);
           if (!batch.length) break;
-          batch.forEach((p) => { from.splice(from.indexOf(p), 1); if (pool.includes(p)) pool.splice(pool.indexOf(p), 1); });
-          for (const p of await showsSomeone(batch)) {
-            if (tot >= want - 1) break;
-            // (a second line from a part is still never from the same few minutes as another: one speaker, twice)
-            if (lenOf(p) > want + 1 - tot + 0.3 || (onePart && !newPart(p)) || (ev && picks.some((q) => q.vid === p.vid && Math.abs(q.start - p.start) < LINE_APART))) continue;
+          batch.forEach((p) => from.splice(from.indexOf(p), 1));
+          const seenOk = new Set(await showsSomeone(batch));
+          for (const p of batch) {
+            if (!seenOk.has(p)) { rejected.add(p); if (pool.includes(p)) pool.splice(pool.indexOf(p), 1); continue; }
+            if (tot >= want - 1 || !fits(p)) continue;
+            if (pool.includes(p)) pool.splice(pool.indexOf(p), 1);
             if (picks.length < 2) picks.push(p); else picks.splice(picks.length - 1, 0, p);
             tot += lenOf(p);
           }
-          batch.forEach((p) => { if (!picks.includes(p)) rejected.add(p); });
         }
       };
       await fill(pool, true);
@@ -3277,10 +3288,15 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         let looseOk = null;
         // (read by the AI too, when the parts were: the strongest 30 the rules found)
         if (approved) { try { const v = await vetLoose(list.filter(good).sort((x, y) => lineVal(y) - lineVal(x)).slice(0, 30), log); looseOk = v ? new Set(v) : null; } catch (e) { if (e instanceof jobs.CancelledError) throw e; looseOk = null; } }
-        const loose = () => list.filter((p) => good(p) && (!looseOk || looseOk.has(p))).sort((x, y) => (x.usedBefore - y.usedBefore) || (lineVal(y) - lineVal(x)));
+        const byVal = (x, y) => (x.usedBefore - y.usedBefore) || (lineVal(y) - lineVal(x));
+        const loose = () => list.filter((p) => good(p) && (!looseOk || looseOk.has(p))).sort(byVal);
         const before = tot;
         await fill(loose().filter((p) => newPart(p)), true);
         if (tot < want - 1) await fill(loose(), false);
+        // ("30 seconds is 30 seconds": the last rounds take any good line that carries the message — the AI's read
+        //  kept too few on Gospel Jamz and the 30 s came out 21 s — still never within 3 minutes of another)
+        if (tot < want - 1) await fill(list.filter((p) => good(p) && messageOf(p) > 0).sort(byVal), false);
+        if (tot < want - 1) await fill(list.filter((p) => good(p) && messageOf(p) > 0).sort(byVal), false, 180);
         if (log && tot > before) log(`length: ${(tot - before).toFixed(1)} s more from good lines beyond the ones the AI kept`);
       }
       // 3) still off: swap a line (any — the hook and payoff too, when needed) for an unused one that shows
@@ -3330,7 +3346,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           for (let k = 0; k < picks.length && !twin; k++) if (k !== i && sameTop(a, await speakerOf(picks[k]))) twin = true;
           if (!twin) continue;
           const alts = list.filter((q) => !picks.includes(q) && !rejected.has(q) && ev.part(q) === ev.part(p) && Math.abs(lenOf(q) - lenOf(p)) <= 1.2
-            && q.end - q.start >= MOMENT_LINE_MIN && q.end - q.start <= MOMENT_LINE_MAX + 0.3 && fitsEvent(q) && wholeThought(q) && !CROWD.test(q.text) && !HOUSEKEEPING.test(q.text)
+            && q.end - q.start >= MOMENT_LINE_MIN && q.end - q.start <= MOMENT_LINE_MAX + 0.3 && fitsEvent(q) && wholeThought(q) && !CROWD.test(q.text) && !HOUSEKEEPING.test(q.text) && messageOf(q) > 0
             && !picks.some((r) => r !== p && r.vid === q.vid && Math.abs(r.start - q.start) < LINE_APART))
             .sort((x, y) => lineVal(y) - lineVal(x)).slice(0, 6);
           for (const q of await showsSomeone(alts)) {
@@ -3893,7 +3909,7 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 
 /** Which director the montage would use right now (for the phone to say so). */
 /* which montage the server runs (montage:status says it: a quiet way to tell an update has landed) */
-const MONTAGE_REV = '2026-10-24.own-eyes';
+const MONTAGE_REV = '2026-10-24.own-eyes2';
 function directorStatus() {
   const st = directorStatusOf();
   st.rev = MONTAGE_REV;
