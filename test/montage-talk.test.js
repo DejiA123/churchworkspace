@@ -11,6 +11,9 @@
 process.env.MW_MEMORY_MB = '512';
 delete process.env.ANTHROPIC_API_KEY;
 
+// (these synthetic videos are colour blocks the person detector cannot see: the frame looks are the stand-in AI's,
+//  the opt-in path — a real server looks with its own detector, montage.js LOOKS_AI)
+process.env.MW_MONTAGE_LOOKS = 'ai';
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

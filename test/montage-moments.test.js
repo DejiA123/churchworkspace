@@ -148,7 +148,7 @@ const P = (text, start, end, extra) => Object.assign({ text, start, end, vid: 1,
   {
     const W = 200, H = 200, face = { x: 0.5, y: 0.25, w: 0.1, h: 0.12 };
     const frame = (top) => { const rgb = new Uint8Array(W * H * 3); for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = (y * W + x) * 3; const c = y > 70 ? top : [200, 160, 130]; rgb[i] = c[0]; rgb[i + 1] = c[1]; rgb[i + 2] = c[2]; } return rgb; };
-    const navy = m.topColours(frame([20, 30, 90]), W, H, face), navy2 = m.topColours(frame([24, 34, 96]), W, H, face), green = m.topColours(frame([40, 120, 50]), W, H, face);
+    const navy = m.topColours(frame([20, 30, 90]), W, H, face), navy2 = m.topColours(frame([22, 32, 94]), W, H, face), green = m.topColours(frame([40, 120, 50]), W, H, face);
     ok(navy && Math.abs(navy.reduce((s, x) => s + x, 0) - 1) < 1e-6, 'a top is read as colours (shares that add up to one)');
     ok(m.sameTop({ vid: 0, t: 8220, top: navy }, { vid: 0, t: 8700, top: navy2 }) && !m.sameTop({ vid: 0, t: 8220, top: navy }, { vid: 0, t: 8700, top: green }),
       'the same top eight minutes apart is one person; another colour is someone else', [m.topOverlap(navy, navy2), m.topOverlap(navy, green)]);

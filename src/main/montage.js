@@ -1762,7 +1762,7 @@ function spreadList(phrases, max = 420) {
 // (words a thought cannot stop on — "…give them your card, and they" — but never "you", "it", "is": "He started it in you." is whole)
 const DANGLING_END = /\b(and|or|but|the|a|an|to|of|my|your|our|their|because|if|when|then|than)[,]?$/i;
 // (a thought joined on to one left out — "And then…", "Because…" — not "The joy of the Lord…", "That is the truth.")
-const MIDDLE_START = /^(and|or|but|of|to|which|because|then|anyway|anyways|no[.,!]|yeah\b|okay\b|ok[.,]|um\b|uh\b|like,|so like\b)/i;
+const MIDDLE_START = /^(and|or|but|of|to|which|because|then|anyway|anyways|no[.,!]|yeah\b|okay\b|ok[.,]|um\b|uh\b|like,|so like\b|that in itself\b|that'?s why\b|that is why\b|this is why\b|which is why\b)/i;
 function wholeThought(p) {
   const t = String(p.text || '').trim();
   if (!t || /[—–-]\s*$/.test(t) || DANGLING_END.test(t.replace(/[.!?…]+$/, ''))) return false;
@@ -1790,6 +1790,9 @@ function wholeThought(p) {
   { const w = t.toLowerCase().replace(/[^a-z' ]+/g, ' ').split(/\s+/).filter(Boolean); const n = new Map();
     for (let k = 2; k <= 4; k++) for (let j = 0; j + k <= w.length; j++) { const g = w.slice(j, j + k).join(' '); n.set(g, (n.get(g) || 0) + 1); }
     if ([...n.values()].some((c) => c >= 3)) return false; }
+  // half a sentence: "Once the hand of the Lord comes over you and God wants to use you." (when…, if…, once… with no
+  // main clause after a comma)
+  if (/^(once|when|whenever|if|unless|until|although|though|while|as soon as|after|before)\b/i.test(t) && !/,/.test(t) && t.split(/(?<=[.!?…])\s+/).length === 1) return false;
   // a few words on their own ("Answer.", "Over your life.") are not a moment
   if (t.split(/\s+/).length < 4) return false;
   // an introduction or a shout-out is not a moment ("I am Daiji, also known as…", "follow us on…")
@@ -2158,7 +2161,7 @@ async function talkWithFree(list, opts) {
 /** Without an AI: the strongest short line first, then the best lines in the order they were said. */
 /* what carries the MESSAGE (a rules edit is built from these), and the crowd work around it (not a clip's line) */
 const MESSAGE = /\b(god|jesus|christ|lord|holy spirit|spirit|faith|pray|prayers?|gospel|believe|love|grace|mercy|heaven|salvation|saved|sins?|cross|kingdom|bible|scripture|purpose|power|fire|glory|worship|testimony|hope|fear|nothing|everything|destiny|calling|anointing|freedom|truth)\b/gi;
-const CROWD = /\b(are you (guys )?ready|make some noise|come on|give it up|clap|hands up|give a shout|can somebody|say amen|how many of you|are you (guys |all )?(enjoying|having|ready)|(have|has) been enjoying|i'?m ready|i am ready|who is ready|look at the screen|say what you see|that'?s it\. all right|stand up|on your feet|(please|everybody|everyone) (stand|sit|rise|raise)|are we (enjoying|having|ready)|enjoying ourselves|god bless you|(this|that|my|your|our) team|money'?s on|my money|where is everybody|how have you (all |guys )?been|haven'?t seen you|since last year|fast forward|oh my (goodness|days|god)|we pray|let us pray|let'?s pray|my team|you guys|anybody else|where are my|put your hands|shout (it|out|with)|turn to your neighbou?r|let'?s go|round of applause|one more time|do you want to|go again|come (out|up|forward)( here)?|i want to (just )?pray for (you|someone)|i just (feel|want to)|you know what it is)\b/i;
+const CROWD = /\b(are you (guys )?ready|make some noise|come on|give it up|clap|hands up|give a shout|can somebody|say amen|how many of you|are you (guys |all )?(enjoying|having|ready)|(have|has) been enjoying|i'?m ready|i am ready|who is ready|look at the screen|say what you see|that'?s it\. all right|stand up|on your feet|(please|everybody|everyone) (stand|sit|rise|raise)|are we (enjoying|having|ready)|enjoying ourselves|god bless you|(this|that|my|your|our) team|money'?s on|my money|where is everybody|how have you (all |guys )?been|haven'?t seen you|since last year|fast forward|oh my (goodness|days|god)|we pray|let us pray|let'?s pray|my team|you guys|anybody else|where are my|put your hands|shout (it|out|with)|turn to your neighbou?r|let'?s go|round of applause|one more time|do you want to|go again|come (out|up|forward)( here)?|i want to (just )?pray for (you|someone)|i just (feel|want to)|you know what it is|wasn'?t (today|tonight|this)|so awesome|powerful, powerful)\b/i;
 const messageOf = (p) => Math.min(3, (String(p.text).match(MESSAGE) || []).length) * 0.25 - (CROWD.test(p.text) ? 0.6 : 0);
 function talkByRules(list, opts) {
   // without an AI to judge them, a line with an "um" in it or the business of the service is never used
@@ -2266,6 +2269,9 @@ async function someoneEverywhere(ctx, file, shots, log, fix = true, alt = null) 
       sh.overlays.splice(sh.overlays.indexOf(o), 1); fixed++; continue;
     }
     if (fresh) { sh.overlays = [Object.assign(fresh, { start: 0, len: sh.seconds, cover: true, fixed: true })]; fixed++; continue; }
+    // (a long event with no new moment left: it stays — every moment of the edit is someone already shown, and the
+    //  opening speaker came back as the "fix")
+    if (alt) continue;
     // (else a moment of the edit that WAS seen — never from this beat or the ones either side of it)
     const pool = seen.filter((m) => m.sh !== sh && Math.abs((m.sh.at || 0) - (sh.at || 0)) > 6);
     const m = pool.length ? pool[cm++ % pool.length] : null;
@@ -2449,13 +2455,22 @@ const TOP_BINS = 6, SAME_TOP = 0.3, SAME_TOP_SEC = 25 * 60;
  * stage light that dims or brightens moves only the brightness) */
 function topColours(rgb, W, H, face) {
   const fw = face.w * W, fh = face.h * H, cx = face.x * W, cy = face.y * H;
+  // (the stage light taken out: each colour scaled by how the face's own skin is lit — a red stage and a purple room
+  //  made one green jumper two colours; measured, 26 pairs of 32 instead of 25, and fewer wrongly joined)
+  const sk = [0, 0, 0];
+  let sn = 0;
+  for (let y = Math.max(0, Math.round(cy - fh * 0.1)); y < Math.min(H, Math.round(cy + fh * 0.3)); y++) for (let x = Math.max(0, Math.round(cx - fw * 0.25)); x < Math.min(W, Math.round(cx + fw * 0.25)); x++) {
+    const i = (y * W + x) * 3; sk[0] += rgb[i]; sk[1] += rgb[i + 1]; sk[2] += rgb[i + 2]; sn++;
+  }
+  const grey = sn ? (sk[0] + sk[1] + sk[2]) / (3 * sn) : 0;
+  const gain = sn && grey > 8 ? sk.map((v) => grey / Math.max(1, v / sn)) : [1, 1, 1];
   const x0 = Math.max(0, Math.round(cx - fw * 1.1)), x1 = Math.min(W, Math.round(cx + fw * 1.1));
   const y0 = Math.max(0, Math.round(cy + fh * 0.9)), y1 = Math.min(H, Math.round(cy + fh * 3.2));
   const h = new Array(TOP_BINS ** 3).fill(0);
   let n = 0;
   for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
-    const i = (y * W + x) * 3, r = rgb[i], g = rgb[i + 1], b = rgb[i + 2], sum = r + g + b + 1;
-    const rr = Math.min(TOP_BINS - 1, Math.floor((r / sum) * TOP_BINS * 1.5)), gg = Math.min(TOP_BINS - 1, Math.floor((g / sum) * TOP_BINS * 1.5)), v = Math.min(TOP_BINS - 1, Math.floor((sum / 766) * TOP_BINS));
+    const i = (y * W + x) * 3, r = rgb[i] * gain[0], g = rgb[i + 1] * gain[1], b = rgb[i + 2] * gain[2], sum = r + g + b + 1;
+    const rr = Math.min(TOP_BINS - 1, Math.floor((r / sum) * TOP_BINS * 1.5)), gg = Math.min(TOP_BINS - 1, Math.floor((g / sum) * TOP_BINS * 1.5)), v = Math.min(TOP_BINS - 1, Math.floor(Math.min(1, sum / 766) * TOP_BINS));
     h[(rr * TOP_BINS + gg) * TOP_BINS + v]++; n++;
   }
   return n >= 50 ? h.map((c) => c / n) : null;
@@ -2590,6 +2605,14 @@ async function stillOrDark(ctx, p) {
 }
 
 /*
+ * ►► THE MONTAGE LOOKS WITH THIS SERVER'S OWN EYES. ◄◄ "No allowances — hundreds of people will be using this at
+ * once." Whether someone is in a frame, and where to cut round them, is the person detector's to say (on this server,
+ * no limit, the same for every church); a cloud vision AI is asked per frame only when the server is told to
+ * (MW_MONTAGE_LOOKS=ai). Its free allowance ran out within a day, and its looks did not stop the same person coming
+ * back anyway — that is sameTop's and the same-person check's job.
+ */
+const LOOKS_AI = () => process.env.MW_MONTAGE_LOOKS === 'ai';
+/*
  * ►► WHAT THE AI SAW, KEPT. ◄◄ A look at a frame is the free vision allowance spent (Groq's is a day's worth, and one
  * tap on the phone makes three takes of the same video). What it said of a frame of a video is kept, by the video
  * and the moment, and a later take — or the same video made again — reads it back instead of asking: the allowance
@@ -2617,7 +2640,7 @@ function keepLooks() {
 const lookKey = (r, people, frame) => `${round2(r.t)}|${people ? 1 : 0}|${frame ? frame.W + 'x' + frame.H : ''}|${r.w || 0}x${r.h || 0}`;
 const LOOK_FIELDS = ['fx', 'head', 'span', 'people', 'facing', 'giving', 'screen', 'action', 'who', 'away', 'weak', 'sure'];
 
-async function lookAt(ctx, reqs, tmp, log, { people = true, max = Infinity, frame = null } = {}) {
+async function lookAt(ctx, reqs, tmp, log, { people = true, max = Infinity, frame = null, ai = true } = {}) {
   const out = reqs.map(() => ({ fx: null, people: null }));
   let see = null;
   try { see = require('./cloudsee'); } catch (e) { see = null; }
@@ -2625,8 +2648,8 @@ async function lookAt(ctx, reqs, tmp, log, { people = true, max = Infinity, fram
   const tff = await textFfmpeg(ctx);
   try { const f = path.join(require('./captioner').fontsDir(), 'Poppins-Bold.ttf'); if (fs.existsSync(f) && tff) font = f; } catch (e) {}
   if (!reqs.length) return out;
-  if (!see || !see.ready() || !font) {
-    if (log) log('look: ' + (!see || !see.ready() ? 'no AI to ask' : 'no ffmpeg here can draw the column numbers') + (people ? ' — the person detector alone' : ' — the middle of the picture'));
+  if (!ai || !see || !see.ready() || !font) {
+    if (log) log('look: ' + (!ai ? 'this server\'s own person detector' : !see || !see.ready() ? 'no AI to ask' : 'no ffmpeg here can draw the column numbers') + (people ? (ai ? ' — the person detector alone' : '') : ' — the middle of the picture'));
     if (people) await detectorLook(ctx, reqs.slice(0, max), out, frame, log);
     return out;
   }
@@ -3101,7 +3124,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       const reqs = [], who = [];
       ps.forEach((p) => { p.looks = []; looksAt(p).forEach((t) => { reqs.push({ file: p.cand.file, t: round2(clamp(t, 0, Math.max(0, p.cand.fileDur - 0.1))), w: p.cand.w, h: p.cand.h }); who.push(p); }); });
       if (!reqs.length) return;
-      const got = await lookAt(ctx, reqs, tmp, log, { people: true, frame: ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 } });
+      const got = await lookAt(ctx, reqs, tmp, log, { people: true, ai: LOOKS_AI(), frame: ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 } });
       got.forEach((g, i) => who[i].looks.push({ t: reqs[i].t, fx: g.fx, people: g.people, weak: !!g.weak || g.facing === false || !!g.screen || !!g.away, giving: !!g.giving, who: g.who || '' }));
       // a slide or a dark stage is not a moment, even with a face in it (a speaker's photo on a "connect with" slide)
       for (const p of ps) { if (!p.vis) { try { p.vis = await stillOrDark(ctx, p); } catch (e) { if (e instanceof jobs.CancelledError) throw e; p.vis = null; } } }
@@ -3332,7 +3355,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     // the silent clips too (they fill the narrator's stretches and cutaways): looked at where they play, the middle
     const silent = broll.filter((b) => b.kind === 'video');
     if (seen && silent.length) {
-      const got = await lookAt(ctx, silent.map((b) => ({ file: b.file, t: round2(Math.max(0, brollMid(b))), w: b.w, h: b.h })), tmp, log, { people: true, frame: ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 } });
+      const got = await lookAt(ctx, silent.map((b) => ({ file: b.file, t: round2(Math.max(0, brollMid(b))), w: b.w, h: b.h })), tmp, log, { people: true, ai: LOOKS_AI(), frame: ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 } });
       const out = silent.filter((b, i) => got[i] && got[i].people === 0);
       if (out.length) {
         for (const b of out) broll.splice(broll.indexOf(b), 1);
@@ -3361,7 +3384,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     }
     if (seen && spare.length && (slotsFor > 0 || longEv)) {
       const top = longEv ? spare.slice() : spare.slice(0, Math.min(24, slotsFor + 4));
-      const got = await lookAt(ctx, top.map((sp) => ({ file: sp.cand.file, t: snapAt(sp), w: sp.cand.w, h: sp.cand.h })), tmp, log, { people: true, frame: ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 } });
+      const got = await lookAt(ctx, top.map((sp) => ({ file: sp.cand.file, t: snapAt(sp), w: sp.cand.w, h: sp.cand.h })), tmp, log, { people: true, ai: LOOKS_AI(), frame: ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 } });
       top.forEach((sp, i) => { sp.snapLook = got[i]; });
       if (longEv) for (const sp of top) { if (!(sp.snapLook && sp.snapLook.people > 0) || sp.snapLook.weak || sp.snapLook.facing === false) continue; try { sp.vis = sp.vis || await stillOrDark(ctx, sp); } catch (e) { if (e instanceof jobs.CancelledError) throw e; } }
       const good = top.filter((sp) => longEv
@@ -3385,7 +3408,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           const fr = ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 };
           const kept = [];
           // (the liveliest first, until there are plenty: about 2.5 for every picture the edit shows)
-          const enough = Math.ceil((opts.lengthSec / (opts.clipSec || MOMENT_EACH)) * 2.5);
+          const enough = Math.ceil((opts.lengthSec / (opts.clipSec || MOMENT_EACH)) * 4.5);
           let panned = 0;
           for (const sp of good) {
             if (kept.length >= enough) break;
@@ -3870,7 +3893,7 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 
 /** Which director the montage would use right now (for the phone to say so). */
 /* which montage the server runs (montage:status says it: a quiet way to tell an update has landed) */
-const MONTAGE_REV = '2026-10-24.local';
+const MONTAGE_REV = '2026-10-24.own-eyes';
 function directorStatus() {
   const st = directorStatusOf();
   st.rev = MONTAGE_REV;
