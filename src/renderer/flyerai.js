@@ -209,7 +209,10 @@
       serverCuts.set(key, (async () => {
         const img = await loadImage(src);
         const { cv } = drawToCanvas(img, 2000);
-        const r = await window.api.flyer.cutout(cv.toDataURL('image/jpeg', 0.93));
+        // (where their body is — this phone's pose model — so the server keeps only them: no lectern, no chair)
+        let pose = null;
+        try { const lm = await poseOf(cv); pose = lm ? lm.map((p) => ({ x: +p.x.toFixed(4), y: +p.y.toFixed(4), v: +(p.visibility || 0).toFixed(2) })) : null; } catch (e) { pose = null; }
+        const r = await window.api.flyer.cutout(cv.toDataURL('image/jpeg', 0.93), pose);
         return r && r.dataUrl ? r : null;
       })().catch((e) => { serverCuts.delete(key); throw e; }));
     }

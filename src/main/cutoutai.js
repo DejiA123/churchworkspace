@@ -126,6 +126,153 @@ async function sizeOf(ffmpeg, file) {
   return { w: +m[1], h: +m[2] };
 }
 
+// (how close round the body: the limbs' widths as a share of the measured ones, the margin and the soft edge in shoulder widths)
+const GATE = { limbs: 0.75, margin: 0.04, feather: 0.08 };
+/*
+ * ►► ONLY WHAT IS THEM. ◄◄ The model cuts out what stands out — and the acrylic lectern he leans on, the mic stand in
+ * front of him, the chair beside him and the table with the plants stand out too (Bishop Richman's photos: four of
+ * nine). The phone's pose model knows where his body is: 33 points, shoulders to feet (MediaPipe, on the phone).
+ * Round them goes a body: the head and hair, the torso as wide as the shoulders, every limb as a rounded bar, room
+ * round each hand for what it holds (the microphone), between the legs for a robe or a dress, and a little more for
+ * a loose jacket. What the model kept outside that body goes. `lm`: [{ x, y, v }] 0..1 across the picture.
+ * Returns a gate on the grid (0..1), or null when there is no body to go by.
+ */
+function bodyGate(lm, W, H, gw, gh, k = GATE) {
+  if (!Array.isArray(lm) || lm.length < 33) return null;
+  const P = lm.map((p) => ({ x: Number(p.x) * W, y: Number(p.y) * H }));
+  if (P.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y))) return null;
+  const mid = (a, b) => ({ x: (P[a].x + P[b].x) / 2, y: (P[a].y + P[b].y) / 2 });
+  const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const sh = mid(11, 12), hp = mid(23, 24);
+  const s = Math.max(d(P[11], P[12]), 0.55 * d(sh, hp), 8);   // (the body's scale: shoulder width, or half the torso side-on)
+  if (s < 8) return null;
+  const head = { x: (P[0].x + P[7].x + P[8].x) / 3, y: (P[0].y + P[7].y + P[8].y) / 3 };
+  const caps = [];   // [ax, ay, bx, by, r]
+  const cap = (a, b, r) => caps.push([a.x, a.y, b.x, b.y, r * s * (r >= 0.8 ? 1 : k.limbs)]);
+  cap(head, head, 0.85);                                  // the head and the hair
+  cap(head, sh, 0.45);                                    // the neck
+  cap(P[11], P[12], 0.45); cap(P[23], P[24], 0.5);        // shoulders, hips
+  cap(P[11], P[23], 0.5); cap(P[12], P[24], 0.5); cap(sh, hp, 0.8);   // the torso
+  cap(P[11], P[13], 0.33); cap(P[12], P[14], 0.33);       // upper arms
+  cap(P[13], P[15], 0.3); cap(P[14], P[16], 0.3);         // forearms
+  for (const [w, a, b, c] of [[15, 17, 19, 21], [16, 18, 20, 22]]) {   // hands, and what they hold
+    for (const k of [a, b, c]) cap(P[w], P[k], 0.3);
+    cap(mid(a, b), mid(a, b), 0.45);
+  }
+  cap(P[23], P[25], 0.38); cap(P[24], P[26], 0.38);       // thighs
+  cap(P[25], P[27], 0.32); cap(P[26], P[28], 0.32);       // shins
+  for (const [a, h, t] of [[27, 29, 31], [28, 30, 32]]) { cap(P[a], P[h], 0.25); cap(P[a], P[t], 0.25); cap(P[h], P[t], 0.22); }   // feet
+  const kn = mid(25, 26), an = mid(27, 28);
+  cap(hp, kn, 0.3 + 0.5 * d(P[25], P[26]) / s); cap(kn, an, 0.25 + 0.5 * d(P[27], P[28]) / s);   // a robe, a dress
+  const feather = k.feather * s, margin = k.margin * s;
+  const gate = new Float32Array(gw * gh);
+  const sx = W / gw, sy = H / gh;
+  for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
+    const px = (x + 0.5) * sx, py = (y + 0.5) * sy;
+    let best = Infinity;
+    for (const [ax, ay, bx, by, r] of caps) {
+      const vx = bx - ax, vy = by - ay, L = vx * vx + vy * vy;
+      const t = L ? Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / L)) : 0;
+      const dd = Math.hypot(px - (ax + t * vx), py - (ay + t * vy)) - r - margin;
+      if (dd < best) best = dd;
+      if (best <= 0) break;
+    }
+    gate[y * gw + x] = best <= 0 ? 1 : best >= feather ? 0 : 1 - best / feather;
+  }
+  return gate;
+}
+
+/*
+ * ►► SOMETHING IN FRONT OF THEM: WAIST UP. ◄◄ A lectern he stands behind, a table with plants before him, a chair at
+ * his hip: the model keeps them (they stand out as much as he does), and the clear acrylic lecterns show him through
+ * them — no cut can take them away. What the flyers use then is what a designer would: him from the waist up, the
+ * picture fading out just above what is in front of him. Found as what the model kept that is NOT his body (outside
+ * bodyGate), below his shoulders, and the size of a thing (0.08 of a shoulder width squared or more — not a
+ * jacket's edge; measured on nine photos of one bishop: no false ones). Returns the line (picture px) to fade out above, or null when nothing stands in front of him.
+ */
+let OBSTRUCT = 0.08;
+function obstruction(mask, gate, W, H, gw, gh, lm) {
+  if (!gate || !Array.isArray(lm) || lm.length < 33) return null;
+  const sx = W / gw, sy = H / gh;
+  const sh = Math.min(lm[11].y, lm[12].y) * H, hipY = (lm[23].y + lm[24].y) / 2 * H;
+  const s = Math.max(Math.hypot((lm[11].x - lm[12].x) * W, (lm[11].y - lm[12].y) * H), 0.55 * Math.abs(hipY - sh), 8);
+  const out = new Uint8Array(gw * gh);
+  for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
+    const py = (y + 0.5) * sy;
+    if (py < sh + 0.25 * s) continue;
+    const mx = Math.min(W - 1, Math.floor((x + 0.5) * sx)), my = Math.min(H - 1, Math.floor(py));
+    // (a clear acrylic lectern comes out half see-through: counted from 64)
+    if (mask[my * W + mx] >= 64 && gate[y * gw + x] < 0.5) out[y * gw + x] = 1;
+  }
+  // the pieces of it, each the size of a thing or not
+  const seen = new Uint8Array(gw * gh), stack = new Int32Array(gw * gh);
+  const minCells = (OBSTRUCT * s * s) / (sx * sy);
+  let top = Infinity;
+  for (let i = 0; i < out.length; i++) {
+    if (!out[i] || seen[i]) continue;
+    let n = 0, t = 0, minY = Infinity; stack[t++] = i; seen[i] = 1;
+    while (t) {
+      const j = stack[--t]; n++;
+      const x = j % gw, y = (j - x) / gw;
+      if (y < minY) minY = y;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= gw || ny >= gh) continue;
+        const k = ny * gw + nx;
+        if (out[k] && !seen[k]) { seen[k] = 1; stack[t++] = k; }
+      }
+    }
+    if (n >= minCells) top = Math.min(top, minY * sy);
+  }
+  if (!Number.isFinite(top)) return null;
+  // (never above the chest: a portrait keeps the head and shoulders whatever is in front)
+  return Math.max(top, sh + 0.6 * s);
+}
+
+/*
+ * The model's mask (0..255, the picture's size), tidied in place with the body from the phone's pose (null: as it
+ * is): waist up when something stands in front of them (obstruction), and only what is them (bodyGate).
+ */
+function tidyMask(mask, W, H, pose) {
+  // only what is them (bodyGate — from the phone's pose of the same picture), before the shapes are counted: a
+  // lectern's edge cut off from them by it is then a speck apart, and goes
+  let gated = 0, waistUp = null;
+  if (pose) {
+    const gw = Math.max(1, Math.round(W / 4)), gh = Math.max(1, Math.round(H / 4));
+    const g = bodyGate(pose, W, H, gw, gh);
+    // something in front of them (before the gate takes the rest of it away): from there down, fade out
+    waistUp = g ? obstruction(mask, g, W, H, gw, gh, pose) : null;
+    if (waistUp != null) {
+      // (the fade ends a little above where the thing was first found outside the body: a lectern's top runs on
+      //  between the hands, inside it; never above the chest)
+      const sPx = Math.max(8, Math.hypot((pose[11].x - pose[12].x) * W, (pose[11].y - pose[12].y) * H));
+      const shY = Math.min(pose[11].y, pose[12].y) * H;
+      // (and above the hands: hands rest on what is in front of him — the lectern's top runs between them, where no
+      //  gate can tell it from him; Bishop Richman at the acrylic lectern, twice)
+      const hands = Math.min(pose[15].y, pose[16].y) * H;
+      const fade = 0.3 * sPx, end = Math.max(Math.min(waistUp - 0.5 * sPx, hands - 0.2 * sPx), shY + 0.6 * sPx);
+      for (let y = Math.max(0, Math.floor(end - fade)); y < H; y++) {
+        const v = y >= end ? 0 : (end - y) / fade;
+        for (let x2 = 0; x2 < W; x2++) mask[y * W + x2] = Math.round(mask[y * W + x2] * v);
+      }
+    }
+    if (g) {
+      for (let y = 0; y < H; y++) {
+        const fy = Math.min(gh - 1, (y + 0.5) / 4 - 0.5), y0 = Math.max(0, Math.floor(fy)), y1 = Math.min(gh - 1, y0 + 1), ty = Math.max(0, fy - y0);
+        for (let x2 = 0; x2 < W; x2++) {
+          const fx = Math.min(gw - 1, (x2 + 0.5) / 4 - 0.5), x0 = Math.max(0, Math.floor(fx)), x1 = Math.min(gw - 1, x0 + 1), tx = Math.max(0, fx - x0);
+          const v = (g[y0 * gw + x0] * (1 - tx) + g[y0 * gw + x1] * tx) * (1 - ty) + (g[y1 * gw + x0] * (1 - tx) + g[y1 * gw + x1] * tx) * ty;
+          const i = y * W + x2;
+          // (at the body's edge only what is solid: a see-through bit of acrylic by the hand goes, the hair — inside
+          //  the head's round — keeps its soft edge)
+          if (v < 0.999) { const before = mask[i]; mask[i] = before >= 200 ? Math.round(before * v) : 0; if (before >= 128 && mask[i] < 128) gated++; }
+        }
+      }
+    }
+  }
+  return { gated, waistUp };
+}
+
 /*
  * Only the person: the mask's largest shape (on a coarse grid, where specks are easy to count), and nothing apart
  * from it; holes in it smaller than a fingertip filled. Returns the kept grid (1 = keep) and its size.
@@ -184,12 +331,12 @@ const choke = (W, H) => Array.from({ length: Math.max(1, Math.round(Math.max(W, 
  * The person in a picture (the bytes of a JPEG/PNG/WebP) cut out: a PNG with the background clear, at the picture's
  * own size (at most `maxSide` across). { png, coverage, ms, specks }.
  */
-function cutout(ffmpeg, input, { maxSide = 2000 } = {}) {
-  const job = chain.then(() => cutoutNow(ffmpeg, input, { maxSide }));
+function cutout(ffmpeg, input, { maxSide = 2000, pose = null } = {}) {
+  const job = chain.then(() => cutoutNow(ffmpeg, input, { maxSide, pose }));
   chain = job.catch(() => {});
   return job;
 }
-async function cutoutNow(ffmpeg, input, { maxSide }) {
+async function cutoutNow(ffmpeg, input, { maxSide, pose }) {
   const t0 = Date.now();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mw-cut-'));
   try {
@@ -217,6 +364,7 @@ async function cutoutNow(ffmpeg, input, { maxSide }) {
     for (let i = 0; i < p.length; i++) m1[i] = Math.round(255 * (p[i] - lo) / Math.max(1e-6, hi - lo));
     // the mask at the picture's size (smoothly)
     const mask = await run(ffmpeg, ['-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'gray', '-s', `${SIZE}x${SIZE}`, '-i', '-', '-vf', `scale=${W}:${H}:flags=bicubic`, '-f', 'rawvideo', '-pix_fmt', 'gray', '-'], m1);
+    const { gated, waistUp } = tidyMask(mask, W, H, pose);
     const kp = keepPerson(mask, W, H);
     if (!kp) throw new Error('nobody could be found in that picture');
     // only the person: what is outside the kept shape (a little beyond its edge, for the soft hair) goes
@@ -245,7 +393,7 @@ async function cutoutNow(ffmpeg, input, { maxSide }) {
     const png = await run(ffmpeg, ['-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${W}x${H}`, '-i', path.join(tmp, 'rgb'),
       '-f', 'rawvideo', '-pix_fmt', 'gray', '-s', `${W}x${H}`, '-i', path.join(tmp, 'a'), '-filter_complex', `[1:v]${choke(W, H)}[a];[0:v][a]alphamerge,format=rgba`, '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', '-']);
     state.done++; state.lastMs = Date.now() - t0; state.why = '';
-    return { png, w: W, h: H, coverage: covered / (W * H), ms: state.lastMs, specks: kp.specks };
+    return { png, w: W, h: H, coverage: covered / (W * H), ms: state.lastMs, specks: kp.specks, gated: gated / (W * H), waistUp: waistUp != null };
   } catch (e) {
     state.failed++; state.why = (e && e.message) || 'the cut-out failed';
     throw e;
@@ -254,4 +402,4 @@ async function cutoutNow(ffmpeg, input, { maxSide }) {
   }
 }
 
-module.exports = { available, status, cutout, fetchModel, setDataDir, modelReady, keepPerson, MODEL_NAME, MODEL_URL };
+module.exports = { available, status, cutout, fetchModel, setDataDir, modelReady, keepPerson, bodyGate, obstruction, tidyMask, GATE, MODEL_NAME, MODEL_URL, _obstruct: (v) => { OBSTRUCT = v; } };

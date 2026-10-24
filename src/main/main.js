@@ -800,8 +800,9 @@ ipcMain.handle('flyer:cutout', wrap(async (e, a) => {
   const m = /^data:image\/[a-z+.-]+;base64,(.+)$/s.exec(String((a && a.dataUrl) || ''));
   if (!m) throw new Error('That is not a picture.');
   if (!cutoutai.available()) throw new Error('The cut-out model is not installed on this server.');
-  const r = await cutoutai.cutout(getCtx().ffmpeg, Buffer.from(m[1], 'base64'), { maxSide: 2000 });
-  return { dataUrl: 'data:image/png;base64,' + r.png.toString('base64'), w: r.w, h: r.h, coverage: r.coverage, ms: r.ms };
+  const pose = Array.isArray(a && a.pose) && a.pose.length === 33 ? a.pose : null;
+  const r = await cutoutai.cutout(getCtx().ffmpeg, Buffer.from(m[1], 'base64'), { maxSide: 2000, pose });
+  return { dataUrl: 'data:image/png;base64,' + r.png.toString('base64'), w: r.w, h: r.h, coverage: r.coverage, ms: r.ms, waistUp: !!r.waistUp };
 }));
 ipcMain.handle('flyer:cutoutStatus', wrap(async () => cutoutai.status()));
 // (the model is fetched once, in the background, soon after the server starts — not when the first photo waits for it)
