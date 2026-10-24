@@ -2574,6 +2574,27 @@ async function stillOrDark(ctx, p) {
   };
   const a = await grab(p.start + 0.4), b = await grab(p.end - 0.4);
   if (a.length < 96 * 54 || b.length < 96 * 54) return null;
+  /*
+   * The stream's own picture-in-picture layout: the camera in a small box beside a banner, on a swirl of colour
+   * ("Gospel Jamz — Evangelism Panel", 20 and 24 min — the 30 s opened on it). Its boxes have long, dead-straight
+   * sides: two or more separate runs of vertical edges down most of the picture. A live shot has none (a screen's
+   * edge, one at most — measured on 21 shots of Gospel Jamz).
+   */
+  let boxSides = 0;
+  try {
+    const W = 192, H = 108;
+    const r = await collect(ctx.ffmpeg, ['-hide_banner', '-loglevel', 'error', '-ss', String(Math.max(0, (p.start + p.end) / 2)), '-i', p.cand.file, '-frames:v', '1',
+      '-vf', `scale=${W}:${H},format=gray`, '-f', 'rawvideo', '-'], { stdout: true, maxBytes: 1 << 20 });
+    const f = r && r.stdout;
+    if (f && f.length >= W * H) {
+      let last = -9;
+      for (let x = 4; x < W - 5; x++) {
+        let k = 0;
+        for (let y = 15; y < H - 15; y++) if (Math.abs(f[y * W + x] - f[y * W + x + 1]) > 35) k++;
+        if (k >= 0.8 * (H - 30)) { if (x - last > 3) boxSides++; last = x; }
+      }
+    }
+  } catch (e) { if (e instanceof jobs.CancelledError) throw e; }
   let diff = 0, luma = 0;
   for (let i = 0; i < 96 * 54; i++) { diff += Math.abs(a[i] - b[i]); luma += (a[i] + b[i]) / 2; }
   diff /= 96 * 54; luma /= 96 * 54;
@@ -2612,7 +2633,7 @@ async function stillOrDark(ctx, p) {
     return boxed >= 8 || (n >= 50 && m > 0 && mid / m >= 50);
   };
   // (measured on Gospel Jamz: a slide 0.0–0.1, a speaker sitting still 1.1+; a dark stage 38, a lit one 55+)
-  return { still: diff < 0.5, dark: luma < 45, crowd: backs(a) || backs(b), framed: framed(a) || framed(b), diff: round2(diff), luma: round2(luma) };
+  return { still: diff < 0.5, dark: luma < 45, crowd: backs(a) || backs(b), framed: framed(a) || framed(b) || boxSides >= 2, diff: round2(diff), luma: round2(luma) };
 }
 
 /*
@@ -4000,7 +4021,7 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 
 /** Which director the montage would use right now (for the phone to say so). */
 /* which montage the server runs (montage:status says it: a quiet way to tell an update has landed) */
-const MONTAGE_REV = '2026-10-24.speakers-once-2';
+const MONTAGE_REV = '2026-10-24.no-layouts';
 function directorStatus() {
   const st = directorStatusOf();
   st.rev = MONTAGE_REV;
