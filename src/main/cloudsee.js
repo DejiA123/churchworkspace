@@ -395,6 +395,64 @@ const THUMB_SYSTEM = 'You choose the thumbnail for a short video clip of a churc
   + 'the speaker clearly visible and in focus, BOTH EYES OPEN, an engaging expression (passionate, joyful, smiling, intense, mid-gesture), face well lit and not blocked by a hand or the microphone. '
   + 'Reject: blinks or half-closed eyes, looking down at notes, the mouth awkwardly half-way through a word, motion blur, the back of the head, nobody in shot. '
   + 'Reply with JSON only: {"best": the number of the best picture, "why": a few words}.';
+/*
+ * ►► THE SAME PERSON TWICE? ◄◄ "Aren't some clips very similar — I don't want that!" A Viral montage of a
+ * three-hour night showed the man in green four times, from four different moments and camera angles: no
+ * picture check can tell it is one person. This asks the vision model, on a sheet of the edit's pictures
+ * (numbered, in play order), which ones show a person already shown. Answers [{ photo, same_as }] (1-based).
+ */
+const SAME_SYSTEM = [
+  'You check a short video edit of a church event for variety. The image is a sheet of numbered photos, each one moment of the edit, in the order they play.',
+  'Find every photo whose MAIN PERSON is the same person as the main person of an EARLIER photo — the same face, hair and clothes — even when the camera angle, the zoom or the background is different.',
+  'Different people dressed alike are NOT the same person: look at the face, the hair and the clothes together. When you are not sure, do not list it.',
+  'Reply with compact JSON only: {"repeats":[{"photo":<number>,"same_as":<earlier number>}]} — an empty list when every photo shows someone new.',
+].join('\n');
+async function samePeople({ image, count, maxWaitMs = 30000 } = {}) {
+  const a = cloudwrite.access();
+  if (!a.key) return { ok: false, why: 'no AI key yet' };
+  if (!a.url) return { ok: false, why: 'no address for that AI service' };
+  if (!image || !/^data:image\//.test(image) || !(count > 1)) return { ok: false, why: 'nothing to compare' };
+  const list = ladder(a, await discover(a));
+  if (!list.length) return { ok: false, why: `${a.providerName} has no model here that can look at pictures` };
+  let lastWhy = '', waited = 0;
+  const noJson = new Set();
+  for (let k = 0; k < list.length; k++) {
+    const model = list[k];
+    const body = Object.assign({
+      model, temperature: 0, max_tokens: 60 + 24 * count,
+      messages: [{ role: 'system', content: SAME_SYSTEM },
+        { role: 'user', content: [{ type: 'text', text: `${count} photos, numbered 1 to ${count} on the sheet (the number is in each one's top-left corner). Which show a person already shown in an earlier photo?` }, { type: 'image_url', image_url: { url: image } }] }],
+    }, tuneFor(model));
+    if (!noJson.has(model)) body.response_format = { type: 'json_object' };
+    let res, errText = '';
+    try {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), ASK_TIMEOUT_MS);
+      try { res = await fetch(a.url, { method: 'POST', headers: a.headers, body: JSON.stringify(body), signal: ac.signal }); }
+      finally { clearTimeout(timer); }
+    } catch (e) { lastWhy = 'could not reach the AI'; continue; }
+    if (res.ok) {
+      let j = null; try { j = await res.json(); } catch (e) {}
+      const r = parseJson(cloudwrite.textFrom(j));
+      if (!r || !Array.isArray(r.repeats)) { lastWhy = model + ' did not answer'; continue; }
+      const repeats = r.repeats.map((x) => ({ photo: Math.round(Number(x && x.photo)), same_as: Math.round(Number(x && x.same_as)) }))
+        .filter((x) => x.photo >= 2 && x.photo <= count && x.same_as >= 1 && x.same_as < x.photo);
+      return { ok: true, repeats, model };
+    }
+    try { errText = (await res.text()).slice(0, 400); } catch (e) {}
+    if (res.status === 401 || res.status === 403) return { ok: false, why: 'the AI key was refused' };
+    if (res.status === 400 && /json_validate_failed|failed to generate json/i.test(errText) && !noJson.has(model)) { noJson.add(model); k--; continue; }
+    if (res.status === 429 || res.status === 503) {
+      const wait = cloudwrite.waitMs(res.headers.get('retry-after')) || 8000;
+      if (waited + wait <= maxWaitMs) { waited += wait; await sleep(wait); k--; continue; }
+      lastWhy = 'the free AI allowance is used up for the moment'; continue;
+    }
+    if ((res.status === 400 || res.status === 404) && (GONE.test(errText) || CANT_SEE.test(errText))) { blocked.set(model, Date.now() + 6 * 3600e3); lastWhy = model + ' cannot look at pictures'; continue; }
+    lastWhy = model + ' ' + res.status;
+  }
+  return { ok: false, why: lastWhy || 'no answer' };
+}
+
 async function pickThumb({ image, count, maxWaitMs = 25000 } = {}) {
   const a = cloudwrite.access();
   if (!a.key) return { ok: false, why: 'no AI key yet' };
@@ -442,4 +500,4 @@ async function pickThumb({ image, count, maxWaitMs = 25000 } = {}) {
   return { ok: false, why: lastWhy || 'no AI model would answer' };
 }
 
-module.exports = { VISION, whoIsSpeaking, whereArePeople, readFlyer, pickThumb, state, ready, SYSTEM, _health: () => health, _blocked: () => blocked };
+module.exports = { VISION, whoIsSpeaking, whereArePeople, readFlyer, pickThumb, samePeople, state, ready, SYSTEM, _health: () => health, _blocked: () => blocked };

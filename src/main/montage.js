@@ -1297,7 +1297,7 @@ async function renderPiece(ctx, s, W, H, keepAudio, out, next, { overlay = null,
      * the montage, see stillsFor) or the photo itself, held for its length.
      */
     const snap = o.style === 'snapshot';
-    const still = snap && (o.still && fs.existsSync(o.still) ? o.still : (oc.kind === 'image' ? oc.file : null));
+    const still = (snap || (o.style === 'pip' && o.small)) && (o.still && fs.existsSync(o.still) ? o.still : (oc.kind === 'image' ? oc.file : null));
     let grab = '';
     if (still || oc.kind === 'image') args.push('-i', still || oc.file);
     else if (snap) { args.push('-ss', String(o.from || 0), '-t', '0.5', ...decodeOpts(oc, W, H), '-i', oc.file); grab = 'trim=end_frame=1,setpts=PTS-STARTPTS,'; }
@@ -1339,7 +1339,7 @@ async function renderPiece(ctx, s, W, H, keepAudio, out, next, { overlay = null,
       fit = fitChain(oc, W, H, 'center', 1, 'o', o.fx);
       move = `scale=w='trunc(${W}*(1+0.07*t/${o.len.toFixed(2)})/2)*2':h=-2:eval=frame,crop=${W}:${H}`;
     }
-    const hold = (oc.kind === 'image' || snap) ? `,loop=loop=${Math.ceil((o.len + 0.2) * FPS)}:size=1:start=0,setpts=N/${FPS}/TB` : '';
+    const hold = (oc.kind === 'image' || snap || still) ? `,loop=loop=${Math.ceil((o.len + 0.2) * FPS)}:size=1:start=0,setpts=N/${FPS}/TB` : '';
     const look = `${grab}${fit}${hold}${move ? ',' + move : ''}`;
     // (a cover over a whole beat goes on and off with the cut — no fade at all, not one frame of what it covers)
     const fin = snap ? 0.1 : 0.25;
@@ -1396,11 +1396,16 @@ async function stillsFor(ctx, plan, output) {
   let k = 0;
   for (const sh of plan.shots) {
     for (const o of sh.overlays || []) {
-      if (o.style !== 'snapshot' || !o.cand || o.cand.kind !== 'video') continue;
-      const file = path.join(dir, `${stem}.snap-${++k}.jpg`);
+      // (a picture laid over a speaker — "small" — is a PHOTO of the person, cut tall round them: a wide shot in a
+      //  small box was the giant "GOSPEL JAMZ" backdrop with a tiny figure in it, and read as a logo card)
+      const pic = o.style === 'pip' && o.small;
+      if (!(o.style === 'snapshot' || pic) || !o.cand || o.cand.kind !== 'video') continue;
+      const file = path.join(dir, `${stem}.${pic ? 'pic' : 'snap'}-${++k}.jpg`);
+      const fx = o.fx == null || !Number.isFinite(o.fx) ? 0.5 : clamp(o.fx, 0, 1);
+      const cut = pic ? ['-vf', `crop=w='min(iw,ih*4/5)':h=ih:x='min(max(${fx}*iw-min(iw,ih*4/5)/2,0),iw-min(iw,ih*4/5))':y=0`] : [];
       try {
         fs.mkdirSync(dir, { recursive: true });
-        await ff.runFfmpeg(ctx.ffmpeg, ['-hide_banner', '-y', '-ss', String(o.from || 0), '-i', o.cand.file, '-frames:v', '1', '-q:v', '2', file]);
+        await ff.runFfmpeg(ctx.ffmpeg, ['-hide_banner', '-y', '-ss', String((o.from || 0) + (pic ? (o.len || 1) / 2 : 0)), '-i', o.cand.file, '-frames:v', '1', ...cut, '-q:v', '2', file]);
         if (fs.existsSync(file)) o.still = file;
       } catch (e) { o.still = null; }   // the render takes the frame itself instead
     }
@@ -1841,7 +1846,7 @@ function shortMoments(picks) {
  * its speaker, and every beat after its first covered whole by a checked
  * moment from another part of the night while the voice carries on.
  */
-const MOMENT_EACH = 2.5, LINE_EACH = 3.8, MOMENT_LINE_MIN = 2, MOMENT_LINE_MAX = 5.5, LINE_APART = 480;
+const MOMENT_EACH = 2.5, LINE_EACH = 3.8, MOMENT_LINE_MIN = 2, MOMENT_LINE_MAX = 5.5, LINE_APART = 600;
 const partsFor = (opts) => clamp(Math.round((opts.lengthSec || 30) / LINE_EACH), 4, 16);
 /*
  * ►► A SECOND READ OF THE LINES, PART BY PART. ◄◄ The editor read 400 lines at
@@ -3023,7 +3028,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     const longEv = (opts.eventSec || 0) >= LONG_EVENT_SEC;
     if (longEv) {
       // (enough moments for a new picture every clip — and the pictures laid over the speakers)
-      const parts = Math.max(partsFor(opts) * 2, Math.ceil((opts.lengthSec / (opts.clipSec || MOMENT_EACH)) * 3)), far = (p) => !picks.some((q) => q.vid === p.vid && Math.abs(q.start - p.start) < 30);
+      const parts = Math.max(partsFor(opts) * 2, Math.ceil((opts.lengthSec / (opts.clipSec || MOMENT_EACH)) * 4)), far = (p) => !picks.some((q) => q.vid === p.vid && Math.abs(q.start - p.start) < 30);
       const span = Math.max(1, ...phrases.map((p) => p.end)), across = [];
       for (let k = 0; k < parts; k++) {
         const best = spare.filter((p) => far(p) && p.start >= k * span / parts && p.start < (k + 1) * span / parts)[0];   // (spare is in score order)
@@ -3047,7 +3052,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
        */
       if (longEv) {
         for (const sp of good) { try { sp.motion = await motionAt(ctx, sp.cand.file, snapAt(sp)); } catch (e) { if (e instanceof jobs.CancelledError) throw e; sp.motion = null; } }
-        const lively = good.filter((sp) => sp.motion == null || sp.motion >= 1.5);
+        const lively = good.filter((sp) => sp.motion == null || sp.motion >= 1.5 || (sp.snapLook && sp.snapLook.action === true && sp.motion >= 1));
         if (log && lively.length < good.length) log(`people: ${good.length - lively.length} moment(s) of people sitting still were left out`);
         good.length = 0; good.push(...lively.sort((a, b) => (b.motion || 0) - (a.motion || 0)));
       }
@@ -3180,17 +3185,22 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     if (longEv) {
       // (and it must LOOK new: a cut from the panel to the same panel half an hour later is no cut at all — a tiny
       //  grey picture of each is compared: the same scene 2–7 apart on Gospel Jamz, a different one 28–81)
+      // (what the VIEWER sees: the tall part of the picture round its person, in colour — two men in front of the same
+      //  purple wall read 31–37 apart on Gospel Jamz, different scenes 50–100; under 35 is "looks the same")
       const sigs = new Map();
-      const sigAt = async (file, t) => {
-        const k = file + '@' + round2(t);
+      const sigAt = async (file, t, fx) => {
+        const f = fx == null || !Number.isFinite(fx) ? 0.5 : clamp(fx, 0, 1);
+        const k = file + '@' + round2(t) + '@' + round2(f);
         if (!sigs.has(k)) {
           let b = null;
-          try { const r = await collect(ctx.ffmpeg, ['-hide_banner', '-loglevel', 'error', '-ss', String(Math.max(0, t)), '-i', file, '-frames:v', '1', '-vf', 'scale=24:14,format=gray', '-f', 'rawvideo', '-'], { stdout: true, maxBytes: 1 << 16 }); b = r && r.stdout && r.stdout.length >= 336 ? r.stdout : null; } catch (e) { if (e instanceof jobs.CancelledError) throw e; }
+          const crop = `crop=w='min(iw,ih*9/16)':h=ih:x='min(max(${f}*iw-min(iw,ih*9/16)/2,0),iw-min(iw,ih*9/16))':y=0,scale=9:16`;
+          try { const r = await collect(ctx.ffmpeg, ['-hide_banner', '-loglevel', 'error', '-ss', String(Math.max(0, t)), '-i', file, '-frames:v', '1', '-vf', crop, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { stdout: true, maxBytes: 1 << 16 }); b = r && r.stdout && r.stdout.length >= 432 ? r.stdout : null; } catch (e) { if (e instanceof jobs.CancelledError) throw e; }
           sigs.set(k, b);
         }
         return sigs.get(k);
       };
-      const apart = (a, b) => { if (!a || !b) return 99; let d = 0; for (let j = 0; j < 336; j++) d += Math.abs(a[j] - b[j]); return d / 336; };
+      const apart = (a, b) => { if (!a || !b) return 99; let d = 0; for (let j = 0; j < 432; j++) d += Math.abs(a[j] - b[j]); return d / 432; };
+      const SAME = 35;
       /*
        * ►► EVERY PICTURE DISTINCT. ◄◄ "Make sure no clips from the video are the same — variety!" Every picture
        * shown — a speaker's own beat, a cutaway, a picture laid over — is compared with every one already shown:
@@ -3204,14 +3214,24 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       for (let i = speechFrom; i < speechTo; i++) {
         const sh = shots[i];
         const first = i === speechFrom || sh.line == null || shots[i - 1].line !== sh.line;
-        if (first && !sh.cover && sh.cand && sh.cand.kind === 'video' && sh.from != null) lineSig.set(i, await sigAt(sh.cand.file, sh.from + sh.seconds / 2));
+        if (first && !sh.cover && sh.cand && sh.cand.kind === 'video' && sh.from != null) lineSig.set(i, await sigAt(sh.cand.file, sh.from + sh.seconds / 2, sh.fx));
       }
+      /*
+       * …and it must not be the same PERSON: one is on stage for a stretch of the night (the man in green at 188, 190,
+       * 194 and 196 min; the man in the striped jacket at 119 and 129), so every picture comes from its own stretch —
+       * spread over the event, about 5 minutes apart for a 45 s on a 3 h 44 night.
+       */
+      const nPics = Math.max(1, speechTo - speechFrom);
+      const GAP = clamp((opts.eventSec || 0) / (nPics * 2.2), 45, 420);   // (about 5 min on Gospel Jamz: the "looks the same" check takes the rest)
+      const atOf = (x) => ({ vid: x.vid, t: snapAt(x) });
+      const shownAt = picks.map((q) => ({ vid: q.vid, t: (q.start + q.end) / 2 }));
+      const tooNear = (x) => { const a = atOf(x); return shownAt.some((b) => b.vid === a.vid && Math.abs(b.t - a.t) < GAP); };
       const fresh = async () => {
         for (const x of spare) {
-          if (used.has(x) || near(x)) continue;
-          const xs = await sigAt(x.cand.file, snapAt(x));
-          if (shown.some((g) => apart(xs, g) < 15) || [...lineSig.values()].some((g) => apart(xs, g) < 15)) { used.add(x); continue; }
-          used.add(x);
+          if (used.has(x) || near(x) || tooNear(x)) continue;
+          const xs = await sigAt(x.cand.file, snapAt(x), x.snapLook && x.snapLook.fx);
+          if (shown.some((g) => apart(xs, g) < SAME) || [...lineSig.values()].some((g) => apart(xs, g) < SAME)) { used.add(x); continue; }
+          used.add(x); shownAt.push(atOf(x));
           return { x, xs };
         }
         return null;
@@ -3225,7 +3245,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         if (first && !sh.cover && lineSig.has(i)) {
           const g = lineSig.get(i);
           // (the opening line always shows its speaker)
-          if (i > speechFrom && shown.some((x) => apart(g, x) < 15)) { need = true; repeat = true; }
+          if (i > speechFrom && shown.some((x) => apart(g, x) < SAME)) { need = true; repeat = true; }
           // (a speaker's own picture that barely moves — a wide shot of a panel sitting still — is covered by a lively moment)
           else if (i > speechFrom && sh.cand.kind === 'video' && ((m) => m != null && m < 0.8)(await motionAt(ctx, sh.cand.file, sh.from + sh.seconds / 2).catch(() => null))) { need = true; repeat = true; still++; }
           else shown.push(g);
@@ -3261,10 +3281,65 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         if (!got) break;
         shown.push(got.xs);
         const len = round2(Math.min(1.6, sh.seconds - 0.7));
-        sh.overlays.push({ cand: got.x.cand, style: 'pip', small: true, checked: true, start: 0.45, len, pos: pips % 2 ? 'left' : 'right',
+        sh.overlays.push({ cand: got.x.cand, style: 'pip', small: true, checked: true, start: 0.45, len, pos: pips % 2 ? 'left' : 'right', fx: got.x.snapLook && got.x.snapLook.fx != null ? round2(got.x.snapLook.fx) : null,
           from: round2(clamp(snapAt(got.x) - len / 2, 0, Math.max(0, got.x.cand.fileDur - len - 0.05))) });
         pips++;
       }
+      /*
+       * ►► THE SAME PERSON TWICE: ASKED. ◄◄ No picture check tells that the man in green at 188, 190 and 196 min,
+       * from three camera angles, is one man. The vision AI is shown every person the edit shows — the speakers it
+       * opens on and every moment cut to, in play order, numbered — and says which are a person already seen. A
+       * repeat is replaced by a new moment of the night (a speaker by one laid over their words).
+       */
+      let samePerson = 0;
+      try {
+        const see = require('./cloudsee');
+        const tff = await textFfmpeg(ctx);
+        const font = (() => { try { const f = path.join(require('./captioner').fontsDir(), 'Poppins-Bold.ttf'); return fs.existsSync(f) ? f : null; } catch (e) { return null; } })();
+        if (see && see.ready && see.ready() && see.samePeople && tff && font) {
+          const items = [];
+          for (let i = speechFrom; i < speechTo; i++) {
+            const sh = shots[i];
+            const full = (sh.overlays || []).find((o) => o.style === 'cutaway' && (o.start || 0) <= 0.05 && o.len >= sh.seconds - 0.05);
+            if (full) items.push({ i, o: full, cand: full.cand, t: (full.from || 0) + full.len / 2, fx: full.fx });
+            else if (firstOf(i) && sh.cand && sh.cand.kind === 'video') items.push({ i, o: null, cand: sh.cand, t: sh.from + sh.seconds / 2, fx: sh.fx });
+            for (const o of sh.overlays || []) if (o.style === 'pip' && o.small) items.push({ i, o, cand: o.cand, t: (o.from || 0) + o.len / 2, fx: o.fx, pip: true });
+          }
+          if (items.length >= 3) {
+            const dir = path.join(tmp, 'same-' + Date.now());
+            fs.mkdirSync(dir, { recursive: true });
+            const esc = (t) => String(t).replace(/[\\:']/g, '\\$&');
+            for (let k = 0; k < items.length; k++) {
+              const it = items[k], fxv = it.fx == null || !Number.isFinite(it.fx) ? 0.5 : clamp(it.fx, 0, 1);
+              const vf = `crop=w='min(iw,ih*9/16)':h=ih:x='min(max(${fxv}*iw-min(iw,ih*9/16)/2,0),iw-min(iw,ih*9/16))':y=0,scale=180:320,`
+                + `drawtext=text='${k + 1}':fontfile='${esc(font)}':fontsize=40:fontcolor=yellow:box=1:boxcolor=black@0.85:boxborderw=6:x=8:y=8`;
+              try { await collect(tff, ['-hide_banner', '-y', '-ss', String(Math.max(0, it.t)), '-i', it.cand.file, '-frames:v', '1', '-vf', vf, '-q:v', '4', path.join(dir, `f${k + 1}.jpg`)]); } catch (e) { if (e instanceof jobs.CancelledError) throw e; }
+              if (!fs.existsSync(path.join(dir, `f${k + 1}.jpg`))) { try { await collect(tff, ['-hide_banner', '-y', '-f', 'lavfi', '-i', 'color=c=black:s=180x320:d=1', '-frames:v', '1', path.join(dir, `f${k + 1}.jpg`)]); } catch (e) { if (e instanceof jobs.CancelledError) throw e; } }
+            }
+            const cols = Math.min(7, items.length), grid = path.join(dir, 'grid.jpg');
+            await collect(tff, ['-hide_banner', '-y', '-framerate', '1', '-start_number', '1', '-i', path.join(dir, 'f%d.jpg'), '-vf', `tile=${cols}x${Math.ceil(items.length / cols)}:padding=6:color=white`, '-frames:v', '1', '-q:v', '4', grid]);
+            const ans = fs.existsSync(grid) ? await see.samePeople({ image: 'data:image/jpeg;base64,' + fs.readFileSync(grid).toString('base64'), count: items.length }) : null;
+            if (ans && ans.ok) {
+              for (const r of ans.repeats) {
+                const it = items[r.photo - 1];
+                if (!it || it.i === speechFrom && !it.o) continue;   // (the opening speaker stays)
+                const sh = shots[it.i];
+                if (it.pip) { sh.overlays = sh.overlays.filter((o) => o !== it.o); samePerson++; continue; }   // (a picture laid over: just taken off)
+                const got = await fresh();
+                if (!got) break;
+                shown.push(got.xs);
+                const len = it.o ? it.o.len : round2(sh.seconds);
+                const ov = { cand: got.x.cand, style: 'cutaway', start: it.o ? it.o.start || 0 : 0, len, pos: 'right', checked: true, cover: it.o ? !!it.o.cover : true,
+                  from: round2(clamp(snapAt(got.x) - len / 2, 0, Math.max(0, got.x.cand.fileDur - len - 0.05))) };
+                if (got.x.snapLook && got.x.snapLook.fx != null) ov.fx = round2(got.x.snapLook.fx);
+                if (it.o) sh.overlays[sh.overlays.indexOf(it.o)] = ov; else sh.overlays = [ov];
+                samePerson++;
+              }
+              if (log) log(`people: the AI saw ${ans.repeats.length} picture(s) of someone already shown — ${samePerson} replaced with someone new`);
+            } else if (log) log('people: the same-person check could not be asked — ' + ((ans && ans.why) || 'no sheet'));
+          }
+        }
+      } catch (e) { if (e instanceof jobs.CancelledError) throw e; if (log) log('people: same-person check — ' + e.message); }
       if (log) log(`pictures: ${cuts} cut(s) to other moments of the night${sameScene ? ` (${sameScene} for a speaker whose scene was already seen or barely moved${still ? `, ${still} of them still` : ''})` : ''}, ${pips} picture(s) laid over the speakers — every one distinct`);
     }
     for (let i = speechFrom + 1; i < speechTo && !longEv; i += 2) {
@@ -3412,7 +3487,7 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 
 /** Which director the montage would use right now (for the phone to say so). */
 /* which montage the server runs (montage:status says it: a quiet way to tell an update has landed) */
-const MONTAGE_REV = '2026-10-23.lively2';
+const MONTAGE_REV = '2026-10-24.people';
 function directorStatus() {
   const st = directorStatusOf();
   st.rev = MONTAGE_REV;
