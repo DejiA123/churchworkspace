@@ -3677,6 +3677,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       const whoOfLine = (sh) => { const p = sh.line != null ? picks[sh.line] : null; const l = p && (p.looks || []).find((x) => x.who); return l ? whoKey(l.who) : ''; };
       const whoOfSpare = (x) => (x.snapLook && x.snapLook.who ? whoKey(x.snapLook.who) : '');
       let cuts = 0, sameScene = 0, still = 0, samePerson = 0, sameTops = 0;
+      const facesAt = new Map(), fc0 = (i) => (facesAt.has(i) ? facesAt.get(i) : '–');
       for (let i = speechFrom; i < speechTo; i++) {
         const sh = shots[i];
         const first = firstOf(i);
@@ -3688,6 +3689,8 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           const tAt = sh.from + sh.seconds / 2, line = sh.line != null ? picks[sh.line] : null;
           const tTop = await topAt(ctx, pdx, sh.cand, tAt, sh.fx2 != null && sh.fx != null ? (sh.fx + sh.fx2) / 2 : sh.fx, frT.W, frT.H);
           const fc = await facesOf(sh.cand, tAt, sh.fx2 != null && sh.fx != null ? (sh.fx + sh.fx2) / 2 : sh.fx);
+          facesAt.set(i, fc.length);
+          if (fpx && log) log(`people: the speaker at ${(tAt / 60).toFixed(1)} min — ${fc.length} face(s), most like someone shown ${shownFace.reduce((m, g) => Math.max(m, fpx.likeness(g, fc)), -1).toFixed(2)} (${shownFace.length} shown)`);
           const tl = tTop ? { vid: line ? line.vid : -1, t: tAt, top: tTop, faces: fc } : null;
           if (i > speechFrom && shown.some((x) => apart(g, x) < SAME)) { need = true; repeat = true; }
           // (a speaker already shown — the host again, two hours later: their words go on over someone new)
@@ -3700,9 +3703,10 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           else if (i > speechFrom && sh.cand.kind === 'video' && ((m) => m != null && m < 0.8)(await motionAt(ctx, sh.cand.file, sh.from + sh.seconds / 2).catch(() => null))) { need = true; repeat = true; still++; }
           else { shown.push(g); if (wk) shownWho.push(wk); if (tl) shownTop.push(tl); if (fc.length) shownFace.push(fc); }
         }
+        if (repeat && log) log(`people: the speaker at ${((sh.from || 0) / 60).toFixed(1)} min is someone already shown (faces ${fc0(i)}) — ${sh.seconds < 0.6 ? 'too short to cover' : (sh.overlays || []).length && !sh.cover ? 'already covered' : 'covered by a new moment'}`);
         if (!need || sh.seconds < 0.6 || ((sh.overlays || []).length && !sh.cover)) continue;
         const got = await fresh();
-        if (!got) continue;   // (none left: the speaker is seen, or a covered beat keeps its cover)
+        if (!got) { if (log) log(`people: no new moment left to cut to at ${((sh.from || 0) / 60).toFixed(1)} min (passed over: ${Object.entries(why).filter(([, n]) => n).map(([k, n]) => k + ' ' + n).join(', ')})`); continue; }   // (none left: the speaker is seen, or a covered beat keeps its cover)
         shown.push(got.xs);
         const len = round2(sh.seconds);
         const ov = { cand: got.x.cand, style: 'cutaway', start: 0, len, pos: 'right', checked: true, from: round2(clamp(snapAt(got.x) - len / 2, 0, Math.max(0, got.x.cand.fileDur - len - 0.05))) };
