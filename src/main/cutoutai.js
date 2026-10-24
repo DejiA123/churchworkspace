@@ -250,7 +250,8 @@ function tidyMask(mask, W, H, pose) {
       // (and above the hands: hands rest on what is in front of him — the lectern's top runs between them, where no
       //  gate can tell it from him; Bishop Richman at the acrylic lectern, twice)
       const hands = Math.min(pose[15].y, pose[16].y) * H;
-      const fade = 0.3 * sPx, end = Math.max(Math.min(waistUp - 0.5 * sPx, hands - 0.2 * sPx), shY + 0.6 * sPx);
+      // (a short fade: a long one kept the lectern's bright top edge as a thin white line along the bottom)
+      const fade = 0.15 * sPx, end = Math.max(Math.min(waistUp - 0.5 * sPx, hands - 0.3 * sPx), shY + 0.6 * sPx);
       for (let y = Math.max(0, Math.floor(end - fade)); y < H; y++) {
         const v = y >= end ? 0 : (end - y) / fade;
         for (let x2 = 0; x2 < W; x2++) mask[y * W + x2] = Math.round(mask[y * W + x2] * v);
