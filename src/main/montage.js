@@ -1868,7 +1868,9 @@ const partsFor = (opts) => clamp(Math.round((opts.lengthSec || 30) / LINE_EACH),
 /* one JSON answer from the AI that reads the lines (the gateway, else Groq); null when none answers */
 async function askJson(system, prompt, maxTokens) {
   let text = '';
-  try { const ai = require('./aaillm'); if (ai.ready()) text = await ai.chat({ system, prompt, json: true, maxTokens, temperature: 0.2 }); } catch (e) { text = ''; }
+  // the server's own AI first (serverllm.js: no allowance, no key); the cloud readers only if it cannot answer
+  try { const sl = require('./serverllm'); if (sl.ready()) text = await sl.chat({ system, prompt, json: true, maxTokens, temperature: 0.2 }); } catch (e) { text = ''; }
+  if (!text) { try { const ai = require('./aaillm'); if (ai.ready()) text = await ai.chat({ system, prompt, json: true, maxTokens, temperature: 0.2 }); } catch (e) { text = ''; } }
   if (!text) { try { const cw = require('./cloudwrite'); if (cw.access && cw.access().key) text = await cw.chat({ system, prompt, json: true, maxTokens, temperature: 0.2, timeoutMs: 60000, evenIfOff: true }); } catch (e) { text = ''; } }
   // (Groq's free allowance used up: the other free readers — Mistral, Gemini)
   if (!text) { try { const bj = require('./bigjudge'); if (bj.ready()) text = await bj.chat({ system, prompt, json: true, maxTokens: Math.max(1500, maxTokens * 2), temperature: 0.2 }); } catch (e) { text = ''; } }
@@ -2108,6 +2110,24 @@ async function talkWithClaude(list, opts) {
   let plan = null;
   try { plan = JSON.parse(text); } catch (e) { plan = null; }
   return plan && Array.isArray(plan.picks) ? { plan, director: 'claude', model: res.model || model } : null;
+}
+
+/*
+ * THE SERVER'S OWN AI (serverllm.js): an open model on this server's processor — no account, no allowance, as
+ * many montages as the server has time for. It is shown the best lines from across the event, in the short form
+ * (it reads at the speed of four cores: 100 lines is a minute or so).
+ */
+async function talkWithLocal(list, opts) {
+  let sl;
+  try { sl = require('./serverllm'); } catch (e) { return null; }
+  if (!sl.ready()) return null;
+  const few = spreadList(list, 100);
+  const prompt = talkBrief(opts, few, { compact: true })
+    + '\n\nReply with JSON only, exactly this shape: {"concept":"","title":"","hook_text":"","post_caption":"","hashtags":[""],"picks":[{"id":"p1"}],"vo_intro":"","vo_outro":""}';
+  const text = await sl.chat({ system: TALK_SYSTEM, prompt, json: true, maxTokens: 1600, temperature: 0.6, timeoutMs: 10 * 60 * 1000 });
+  let plan = null;
+  try { const t = String(text || ''); const a = t.indexOf('{'), b = t.lastIndexOf('}'); plan = a >= 0 && b > a ? JSON.parse(t.slice(a, b + 1)) : null; } catch (e) { plan = null; }
+  return plan && Array.isArray(plan.picks) && plan.picks.length ? { plan, director: 'server', model: sl.status().model } : null;
 }
 
 /* AssemblyAI's LLM Gateway (aaillm.js): the church's AssemblyAI key, a big model, room for the whole event */
@@ -3068,6 +3088,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     if (stage) stage(process.env.ANTHROPIC_API_KEY ? '🎬 Claude is picking the lines that will stop the scroll…' : '🎬 The AI is picking the lines that will stop the scroll…');
     let d = null;
     try { d = await talkWithClaude(list, opts); } catch (e) { if (log) log('claude: ' + e.message); }
+    if (!d) { try { d = await talkWithLocal(list, opts); } catch (e) { if (log) log('server AI: ' + e.message); } }
     if (!d) { try { d = await talkWithAai(list, opts); } catch (e) { if (log) log('assemblyai: ' + e.message); } }
     // (AssemblyAI first; Groq only when AssemblyAI's models could not answer — an account without the LLM Gateway —
     //  as an AI's judgement still beats the rules)
@@ -3909,14 +3930,16 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 
 /** Which director the montage would use right now (for the phone to say so). */
 /* which montage the server runs (montage:status says it: a quiet way to tell an update has landed) */
-const MONTAGE_REV = '2026-10-24.own-eyes2';
+const MONTAGE_REV = '2026-10-24.server-ai';
 function directorStatus() {
   const st = directorStatusOf();
   st.rev = MONTAGE_REV;
+  try { st.server = require('./serverllm').status(); } catch (e) { /* not on this machine */ }
   return st;
 }
 function directorStatusOf() {
   if (process.env.ANTHROPIC_API_KEY) return { director: 'claude', model: process.env.MW_MONTAGE_MODEL || 'claude-opus-5-5' };
+  try { const sl = require('./serverllm'); if (sl.ready()) return { director: 'server', model: sl.status().model, vision: false }; } catch (e) {}
   try {
     if (require('./aaillm').ready()) { let vision = false; try { const cw = require('./cloudwrite'); vision = !!(cw.access && cw.access().key); } catch (e) {} return { director: 'assemblyai', model: '', vision, last: require('./aaillm').state().last, tries: require('./aaillm').state().tries }; }
   } catch (e) {}

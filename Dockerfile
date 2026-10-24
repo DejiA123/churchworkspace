@@ -91,6 +91,28 @@ RUN set -e; \
     echo "${S}  /deep-filter" | sha256sum -c -; \
     chmod +x /deep-filter
 
+# ── the montage's own AI ─────────────────────────────────────────────────────
+# llama.cpp's llama-server, which the Viral Montage asks which lines to use
+# (src/main/serverllm.js): an open model on this server's own processor, so no
+# account, no key and no allowance — "hundreds of people" cost minutes, not
+# money. The program only; the model (~2.5 GB) is fetched once onto /data.
+# Static (as whisper above), no HTTPS or downloads built in (the app fetches the
+# model itself). On ARM it is built for the dot-product instructions every
+# Ampere / Graviton2+ has — four to five times faster on the 4-bit model than
+# plain NEON; on x86 it targets AVX2/FMA, as whisper does.
+FROM debian:bookworm-slim AS llama
+ARG LLAMA_REF=b11854
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git build-essential cmake ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+RUN git clone --depth 1 --branch ${LLAMA_REF} https://github.com/ggml-org/llama.cpp.git \
+    && cd llama.cpp \
+    && case "$(dpkg --print-architecture)" in arm64) A="-DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16" ;; *) A="" ;; esac \
+    && cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF $A \
+         -DLLAMA_CURL=OFF -DLLAMA_OPENSSL=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF \
+    && cmake --build build --config Release -j"$(nproc)" --target llama-server
+
 # ── the studio ───────────────────────────────────────────────────────────────
 FROM node:20-bookworm-slim
 LABEL org.opencontainers.image.title="Church Work Space — Cloud Studio"
@@ -148,6 +170,11 @@ RUN /app/bin/deepfilter/deep-filter --version > /dev/null
 # plain `whisper-cli` second (see cliCandidates), and the arch-suffixed one is
 # what an x64 and an arm64 drop would use to sit side by side. Copying to both
 # means this image works whichever rule wins.
+# The montage's own AI (above), where src/main/serverllm.js looks for it — started once here, so one that cannot
+# load its libraries fails the build, not a montage.
+COPY --from=llama /src/llama.cpp/build/bin/llama-server /app/bin/llama/llama-server
+RUN chmod +x /app/bin/llama/llama-server && /app/bin/llama/llama-server --version > /dev/null 2>&1
+
 COPY --from=whisper /src/whisper.cpp/build/bin/whisper-cli /app/bin/whisper/whisper-cli
 COPY --from=whisper /src/ggml-tiny.en.bin /app/bin/whisper/ggml-tiny.en.bin
 RUN chmod +x /app/bin/whisper/whisper-cli \

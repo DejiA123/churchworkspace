@@ -808,6 +808,10 @@ ipcMain.handle('flyer:cutout', wrap(async (e, a) => {
 ipcMain.handle('flyer:cutoutStatus', wrap(async (e, a) => cutoutai.status(a && typeof a.ticket === 'string' ? a.ticket.slice(0, 40) : null)));
 // (the model is fetched once, in the background, soon after the server starts — not when the first photo waits for it)
 if (cutoutai.available()) { const t = setTimeout(() => { cutoutai.fetchModel().catch(() => {}); }, 30000); if (t.unref) t.unref(); }
+/* The montage's own reader of words (serverllm.js): its model fetched once, a little after start, on a server that has the program */
+const serverllm = require('./serverllm');
+try { serverllm.setDataDir(app.getPath('userData')); } catch (e) { /* the temp folder, then */ }
+if (serverllm.available()) { const t = setTimeout(() => { serverllm.fetchModel().catch(() => {}); }, 60000); if (t.unref) t.unref(); }
 ipcMain.handle('flyer:inspoAdd', wrap(async (e, a) => flyerart.inspoAdd(a || {})));
 ipcMain.handle('flyer:inspoRemove', wrap(async (e, a) => flyerart.inspoRemove(a || {})));
 
