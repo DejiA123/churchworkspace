@@ -9035,7 +9035,7 @@
    * why it could not be asked and this PC decided instead.
    */
   const RF_AI_KEY = 'mw-ve-reframe-ai';
-  ve.rfAi = { state: null, last: null, toldAt: 0 };
+  ve.rfAi = { state: null, last: null };
   function reframeAiMode() {
     let v = null; try { v = localStorage.getItem(RF_AI_KEY); } catch (e) {}
     return v === 'local' ? 'local' : 'cloud';
@@ -9071,7 +9071,7 @@
         + `${last.none ? ` (nobody speaking in ${last.none})` : ''} — ${(last.ms / 1000).toFixed(1)} s${last.model ? ', ' + last.model.split('/').pop() : ''}.`;
       cls = 'good';
     } else if (last) {
-      text = `⚠ Last short: the AI could not be asked (${last.why || 'no answer'}) — this PC chose who to follow instead.`; cls = 'warn';
+      text = 'Last short: this PC chose who to follow.';
     } else {
       text = `Each short: the AI looks at one frame from every camera shot and says who is speaking; this PC then follows them precisely. Free with ${(st && st.providerName) || 'Groq'}.`;
     }
@@ -9087,16 +9087,13 @@
       catch (e) { return { ok: false, why: (e && e.message) || 'the AI call failed' }; }
     };
   }
-  /** What the AI did for the short just tracked — shown in the tab, and said once out loud when it failed. */
+  /** What the AI did for the short just tracked — shown quietly in the tab. No pop-up when it could not be asked
+   *  ("the free allowance is used up — back in 5 min" told nobody anything they could act on): the person this PC
+   *  chose is followed, and that is all that needs saying. */
   function noteReframeAi(rep) {
     if (!rep) return;
     ve.rfAi.last = Object.assign({ at: Date.now() }, rep);
     renderReframeAi();
-    if (!rep.ok && Date.now() - ve.rfAi.toldAt > 10 * 60e3) {
-      ve.rfAi.toldAt = Date.now();
-      window.__toast && window.__toast('⚠️ Auto-reframe could not ask the AI who is speaking (' + (rep.why || 'no answer')
-        + ') — this short follows the person this PC chose. Details in 🎯 Reframe.', 'error', 9000);
-    }
     refreshReframeAi();
   }
   function wireReframeAi() {
