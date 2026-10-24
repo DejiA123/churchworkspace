@@ -2577,10 +2577,12 @@ async function stillOrDark(ctx, p) {
   /*
    * The stream's own picture-in-picture layout: the camera in a small box beside a banner, on a swirl of colour
    * ("Gospel Jamz — Evangelism Panel", 20 and 24 min — the 30 s opened on it). Its boxes have long, dead-straight
-   * sides: two or more separate runs of vertical edges down most of the picture. A live shot has none (a screen's
-   * edge, one at most — measured on 21 shots of Gospel Jamz).
+   * sides: two or more separate runs of vertical edges down most of the picture, that stop short of its top and
+   * bottom (a box has a top and a bottom; a wall, a curtain or a screen's edge runs off the picture), a quarter of
+   * the picture apart at least (a box that holds a picture — not a door, a banner stand or a figure). A live shot
+   * has none (one at most — measured on 21 shots of Gospel Jamz).
    */
-  let boxSides = 0;
+  let boxed = false;
   try {
     const W = 192, H = 108;
     const r = await collect(ctx.ffmpeg, ['-hide_banner', '-loglevel', 'error', '-ss', String(Math.max(0, (p.start + p.end) / 2)), '-i', p.cand.file, '-frames:v', '1',
@@ -2588,11 +2590,15 @@ async function stillOrDark(ctx, p) {
     const f = r && r.stdout;
     if (f && f.length >= W * H) {
       let last = -9;
+      const sides = [];
       for (let x = 4; x < W - 5; x++) {
-        let k = 0;
-        for (let y = 15; y < H - 15; y++) if (Math.abs(f[y * W + x] - f[y * W + x + 1]) > 35) k++;
-        if (k >= 0.8 * (H - 30)) { if (x - last > 3) boxSides++; last = x; }
+        const edge = (y) => Math.abs(f[y * W + x] - f[y * W + x + 1]) > 35;
+        let k = 0, ends = 0;
+        for (let y = 15; y < H - 15; y++) if (edge(y)) k++;
+        for (let y = 0; y < 8; y++) if (edge(y) || edge(H - 1 - y)) ends++;
+        if (k >= 0.8 * (H - 30) && ends <= 4) { if (x - last > 3) sides.push(x); last = x; }
       }
+      boxed = sides.length >= 2 && sides[sides.length - 1] - sides[0] >= W / 4;
     }
   } catch (e) { if (e instanceof jobs.CancelledError) throw e; }
   let diff = 0, luma = 0;
@@ -2633,7 +2639,7 @@ async function stillOrDark(ctx, p) {
     return boxed >= 8 || (n >= 50 && m > 0 && mid / m >= 50);
   };
   // (measured on Gospel Jamz: a slide 0.0–0.1, a speaker sitting still 1.1+; a dark stage 38, a lit one 55+)
-  return { still: diff < 0.5, dark: luma < 45, crowd: backs(a) || backs(b), framed: framed(a) || framed(b) || boxSides >= 2, diff: round2(diff), luma: round2(luma) };
+  return { still: diff < 0.5, dark: luma < 45, crowd: backs(a) || backs(b), framed: framed(a) || framed(b) || boxed, diff: round2(diff), luma: round2(luma) };
 }
 
 /*
