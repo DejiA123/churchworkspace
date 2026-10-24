@@ -125,6 +125,25 @@ const P = (text, start, end, extra) => Object.assign({ text, start, end, vid: 1,
     m.aimCut(still, sp);
     ok(still.fx === 0.4 && still.fx2 === undefined, 'not followed: cut round where the AI saw them, no pan');
   }
+  // ►► WHAT THE AI SAW, KEPT: a frame already looked at is not asked about again (the free vision allowance)
+  {
+    const see = require('../src/main/cloudsee');
+    const was = { ready: see.ready, where: see.whereArePeople };
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'mm-looks-'));
+    const vid = path.join(dir2, 'v.mp4');
+    execFileSync(ffmpeg, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc=s=640x360:r=25:d=4', '-pix_fmt', 'yuv420p', vid]);
+    let asked = 0;
+    see.ready = () => true;
+    see.whereArePeople = async ({ frames }) => { asked++; return { ok: true, answers: Object.fromEntries(frames.map((f) => [f.label, { column: 3, people: 1, who: 'man in a green jumper', sure: true }])) }; };
+    try {
+      const reqs = [{ file: vid, t: 1, w: 640, h: 360 }, { file: vid, t: 2.5, w: 640, h: 360 }];
+      const a = await m.lookAt({ ffmpeg }, reqs, dir2, null, { people: true });
+      const n1 = asked;
+      const b = await m.lookAt({ ffmpeg }, reqs, dir2, null, { people: true });
+      ok(n1 >= 1 && asked === n1 && b[0].who === 'man in a green jumper' && b[1].people === 1 && Math.abs(b[0].fx - a[0].fx) < 1e-9,
+        'a frame the AI already described is read back, not asked about again', { n1, asked, a: a[0], b: b[0] });
+    } finally { see.ready = was.ready; see.whereArePeople = was.where; fs.rmSync(dir2, { recursive: true, force: true }); }
+  }
   // ►► A CLIP EVERY 2.5 SECONDS, THE WORDS WHOLE: one strong line of 2–5.5 s from each part of a long event
   {
     ok(m.MOMENT_EACH === 2.5 && m.partsFor({ lengthSec: 30 }) === 8 && m.partsFor({ lengthSec: 45 }) === 12 && m.partsFor({ lengthSec: 15 }) === 4,

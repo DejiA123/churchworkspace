@@ -2523,6 +2523,34 @@ async function stillOrDark(ctx, p) {
   return { still: diff < 0.5, dark: luma < 45, crowd: backs(a) || backs(b), framed: framed(a) || framed(b), diff: round2(diff), luma: round2(luma) };
 }
 
+/*
+ * ►► WHAT THE AI SAW, KEPT. ◄◄ A look at a frame is the free vision allowance spent (Groq's is a day's worth, and one
+ * tap on the phone makes three takes of the same video). What it said of a frame of a video is kept, by the video
+ * and the moment, and a later take — or the same video made again — reads it back instead of asking: the allowance
+ * goes to what only it can do (is this the same person twice?).
+ */
+// (in the app's own data folder when it says where that is — it outlives an update; else the temp folder)
+let LOOKS = path.join(os.tmpdir(), 'mw-montage-looks');
+function useDataDir(dir) { if (dir) { LOOKS = path.join(dir, 'montage-looks'); looksKept.clear(); } }
+const looksKept = new Map();
+function looksOf(file) {
+  const id = crypto.createHash('sha1').update(file + '|' + fileSig(file)).digest('hex');
+  if (!looksKept.has(id)) {
+    let m = {};
+    try { m = JSON.parse(fs.readFileSync(path.join(LOOKS, id + '.json'), 'utf8')) || {}; } catch (e) { m = {}; }
+    looksKept.set(id, { id, m, dirty: false });
+  }
+  return looksKept.get(id);
+}
+function keepLooks() {
+  for (const k of looksKept.values()) {
+    if (!k.dirty) continue;
+    try { fs.mkdirSync(LOOKS, { recursive: true }); fs.writeFileSync(path.join(LOOKS, k.id + '.json'), JSON.stringify(k.m)); k.dirty = false; } catch (e) { /* no reuse next time */ }
+  }
+}
+const lookKey = (r, people, frame) => `${round2(r.t)}|${people ? 1 : 0}|${frame ? frame.W + 'x' + frame.H : ''}|${r.w || 0}x${r.h || 0}`;
+const LOOK_FIELDS = ['fx', 'head', 'span', 'people', 'facing', 'giving', 'screen', 'action', 'who', 'away', 'weak', 'sure'];
+
 async function lookAt(ctx, reqs, tmp, log, { people = true, max = Infinity, frame = null } = {}) {
   const out = reqs.map(() => ({ fx: null, people: null }));
   let see = null;
@@ -2541,8 +2569,16 @@ async function lookAt(ctx, reqs, tmp, log, { people = true, max = Infinity, fram
   const esc = (t) => String(t).replace(/[\\:']/g, '\\$&');
   const T = SPEAK_TILE_W, TH = SPEAK_TILE_H, cw = T / SPEAK_COLS;
   const LETTERS = 'ABCDEF';
-  const todo = reqs.slice(0, max).map((r, i) => Object.assign({ i }, r));
-  if (reqs.length > todo.length && log) log(`look: ${reqs.length - todo.length} moments past the first ${max} were not looked at`);
+  const all = reqs.slice(0, max).map((r, i) => Object.assign({ i }, r));
+  if (reqs.length > all.length && log) log(`look: ${reqs.length - all.length} moments past the first ${max} were not looked at`);
+  // (a frame the AI has already described: read back, not asked again)
+  const todo = [];
+  let reused = 0;
+  for (const r of all) {
+    const got = looksOf(r.file).m[lookKey(r, people, frame)];
+    if (got) { for (const k of LOOK_FIELDS) if (got[k] !== undefined) out[r.i][k] = got[k]; reused++; } else todo.push(r);
+  }
+  if (log && reused) log(`look: ${reused} of ${all.length} frames already looked at — not asked again`);
   // each look in its own folder: a frame that would not come out must never be stood in for by an older one
   const run = ++lookRun;
   for (let g = 0; g * 6 < todo.length; g++) {
@@ -2615,7 +2651,16 @@ async function lookAt(ctx, reqs, tmp, log, { people = true, max = Infinity, fram
       if (out[r.i].people == null && people) out[r.i].people = 1;
     });
   }
-  if (people) await detectorLook(ctx0, todo, out, frame, log);
+  for (const r of todo) {
+    const o = out[r.i];
+    if (o.people == null && o.fx == null) continue;   // (not answered)
+    const keep = {};
+    for (const k of LOOK_FIELDS) if (o[k] !== undefined) keep[k] = o[k];
+    const kk = looksOf(r.file);
+    kk.m[lookKey(r, people, frame)] = keep; kk.dirty = true;
+  }
+  keepLooks();
+  if (people) await detectorLook(ctx0, all, out, frame, log);
   return out;
 }
 
@@ -3127,7 +3172,8 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           batch.forEach((p) => { from.splice(from.indexOf(p), 1); if (pool.includes(p)) pool.splice(pool.indexOf(p), 1); });
           for (const p of await showsSomeone(batch)) {
             if (tot >= want - 1) break;
-            if (lenOf(p) > want + 1 - tot + 0.3 || (onePart && !newPart(p))) continue;
+            // (a second line from a part is still never from the same few minutes as another: one speaker, twice)
+            if (lenOf(p) > want + 1 - tot + 0.3 || (onePart && !newPart(p)) || (ev && picks.some((q) => q.vid === p.vid && Math.abs(q.start - p.start) < LINE_APART))) continue;
             if (picks.length < 2) picks.push(p); else picks.splice(picks.length - 1, 0, p);
             tot += lenOf(p);
           }
@@ -3692,7 +3738,7 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 
 /** Which director the montage would use right now (for the phone to say so). */
 /* which montage the server runs (montage:status says it: a quiet way to tell an update has landed) */
-const MONTAGE_REV = '2026-10-24.follow';
+const MONTAGE_REV = '2026-10-24.kept';
 function directorStatus() {
   const st = directorStatusOf();
   st.rev = MONTAGE_REV;
@@ -3708,5 +3754,5 @@ function directorStatusOf() {
 }
 
 module.exports = {
-  stillOrDark, motionAt, goodLines, wholeThought, sameLine, talkBrief, vetParts, vetLoose, eventOrder, whoKey, sameWho, personTile, numberTile, textFfmpeg, followIn, trackAt, aimCut, eventParts, acrossEvent, beatSpans, momentSec, partsFor, MOMENT_EACH,
+  stillOrDark, motionAt, goodLines, wholeThought, sameLine, talkBrief, vetParts, vetLoose, eventOrder, whoKey, sameWho, personTile, numberTile, textFfmpeg, lookAt, useDataDir, followIn, trackAt, aimCut, eventParts, acrossEvent, beatSpans, momentSec, partsFor, MOMENT_EACH,
   _render: render, spreadList, momentsOf, shortMoments, HOUSEKEEPING, cleanAbout, withAbout, aboutLines, phrasesOf, phraseScore, talkByRules, fromBrief, cleanBrief, make, remake, loadProject, sidecarOf, baseOf, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };
