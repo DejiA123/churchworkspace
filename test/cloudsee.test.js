@@ -166,6 +166,32 @@ const ok = (answer) => reply(200, { choices: [{ message: { content: typeof answe
   check('the same person twice: the photos of someone already shown are named (an answer that points forward or off the sheet is not taken)',
     sp.ok && sp.repeats.length === 1 && sp.repeats[0].photo === 5 && sp.repeats[0].same_as === 2 && /same face, hair, build and clothes/.test(calls[0].system), sp);
 
+  console.log('\n[8c] Groq\'s free vision used up: Gemini answers instead (when the studio has a Gemini key)');
+  {
+    const ge = require('../src/main/geminiear');
+    const was = { ready: ge.ready, ask: ge.ask };
+    const asked = [];
+    ge.ready = () => true;
+    ge.ask = async (parts) => { asked.push(parts); return /photos, numbered/.test(parts[0].text)
+      ? { text: JSON.stringify({ repeats: [{ photo: 4, same_as: 1 }] }), model: 'gemini-flash-latest' }
+      : { text: JSON.stringify({ frames: [{ frame: 'A', people: 1, column: 5, facing: true }, { frame: 'B', people: 0 }] }), model: 'gemini-flash-latest' }; };
+    const daily = () => reply(429, 'Rate limit reached for model on tokens per day (TPD): Limit 200000', { 'retry-after': '1200' });
+    try {
+      calls = [];
+      script = [daily(), daily(), daily(), daily(), daily(), daily()];
+      const gw = await cloudsee.whereArePeople({ image: IMG, frames: FRAMES, maxWaitMs: 0 });
+      check('the look is answered by Gemini, with the same picture', gw.ok && gw.answers.A.column === 5 && gw.answers.A.people === 1 && gw.answers.B.people === 0 && /gemini/.test(gw.model)
+        && asked.length === 1 && asked[0][1].inline_data && asked[0][1].inline_data.mime_type === 'image/jpeg', JSON.stringify(gw));
+      script = [daily(), daily(), daily(), daily()];
+      const gs = await cloudsee.samePeople({ image: IMG, count: 5, maxWaitMs: 0 });
+      check('and so is the same-person check', gs.ok && gs.repeats.length === 1 && gs.repeats[0].photo === 4 && /gemini/.test(gs.model), JSON.stringify(gs));
+      ge.ready = () => false;
+      script = [daily(), daily(), daily(), daily()];
+      const none2 = await cloudsee.samePeople({ image: IMG, count: 5, maxWaitMs: 0 });
+      check('no Gemini key: it says the allowance is used up, as before', !none2.ok, none2.why);
+    } finally { ge.ready = was.ready; ge.ask = was.ask; script = []; }
+  }
+
   console.log('\n[9] Bad input');
   const bad = await cloudsee.whoIsSpeaking({ image: 'C:/not-a-data-url.jpg', frames: FRAMES });
   check('a picture that is not a data URL is refused before any call', !bad.ok, bad.why);

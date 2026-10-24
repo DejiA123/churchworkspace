@@ -3738,7 +3738,7 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 
 /** Which director the montage would use right now (for the phone to say so). */
 /* which montage the server runs (montage:status says it: a quiet way to tell an update has landed) */
-const MONTAGE_REV = '2026-10-24.kept';
+const MONTAGE_REV = '2026-10-24.gemini';
 function directorStatus() {
   const st = directorStatusOf();
   st.rev = MONTAGE_REV;

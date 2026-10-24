@@ -195,7 +195,71 @@ function whoIsSpeaking(args) {
  *  answers: { A: { people, column, sure } } (people 0 = nobody to be seen). */
 function whereArePeople(args) { return whoIsSpeaking(Object.assign({}, args, { people: true })); }
 
-async function ask({ image, frames, columns = 8, maxWaitMs = 45000, people = false } = {}) {
+/* the answers about each frame, from the rows an AI gave (Groq's or Gemini's) */
+function framesFrom(rows, labels, columns, people) {
+  const answers = {};
+  for (const r of rows) {
+    const L = String(r && (r.frame != null ? r.frame : r.picture) || '').trim().toUpperCase();
+    if (!labels.includes(L)) continue;
+    let n = Math.round(Number(r.column != null ? r.column : r.speaker));
+    // "people: 0" is an answer on its own — nobody there — whatever the column says (or if it is left out)
+    const c = people ? Math.round(Number(r.people)) : NaN;
+    const count = Number.isFinite(c) && c >= 0 ? Math.min(9, c) : null;
+    if (count === 0) n = 0;
+    // a column past the last one is not an answer at all — neither "here" nor "nobody"
+    if (!Number.isFinite(n) || n < 0 || n > columns) { if (count != null) n = 0; else continue; }
+    answers[L] = { column: n, sure: r.sure !== false };
+    if (people) {
+      answers[L].people = count;
+      if (typeof r.facing === 'boolean') answers[L].facing = count === 0 ? false : r.facing;
+      if (r.giving === true) answers[L].giving = true;
+      if (r.screen === true) answers[L].screen = true;
+      if (typeof r.action === 'boolean') answers[L].action = count === 0 ? false : r.action;
+      if (typeof r.who === 'string' && r.who.trim() && count !== 0) answers[L].who = r.who.trim().slice(0, 80);
+      if (r.away === true) answers[L].away = true;
+      // how far the person reaches across, when given sensibly round their head
+      const lf = Math.round(Number(r.left)), rt = Math.round(Number(r.right));
+      if (n > 0 && Number.isFinite(lf) && Number.isFinite(rt) && lf >= 1 && rt <= columns && lf <= n && rt >= n) { answers[L].left = lf; answers[L].right = rt; }
+    }
+  }
+  return answers;
+}
+
+/*
+ * ►► WHEN GROQ'S FREE VISION IS USED UP: GEMINI. ◄◄ Groq's free vision allowance is a day's worth, rolling; a day of
+ * Viral montages of a 3¾-hour event used it up, and every look after that fell back to "the middle of the picture"
+ * — the same-person check could not be asked at all. When the studio also has a Gemini key (the captions' third
+ * ear, free from Google AI Studio), the same question goes to Gemini Flash instead, with the same picture.
+ */
+async function askGemini(system, text, image, maxTokens) {
+  let ge = null;
+  try { ge = require('./geminiear'); } catch (e) { ge = null; }
+  if (!ge || !ge.ready()) return null;
+  const m = /^data:(image\/[a-z+]+);base64,(.*)$/s.exec(String(image || ''));
+  if (!m) return null;
+  try {
+    const r = await ge.ask([{ text: system + '\n\n' + text }, { inline_data: { mime_type: m[1], data: m[2] } }],
+      { json: true, maxTokens: Math.max(2048, maxTokens * 3), patient: true, waits: [12000, 30000], timeoutMs: 90000 });
+    return r && r.text ? { text: r.text, model: 'gemini:' + r.model } : null;
+  } catch (e) { return null; }
+}
+const geminiReady = () => { try { return require('./geminiear').ready(); } catch (e) { return false; } };
+
+async function ask(args = {}) {
+  const r = await askGroq(args);
+  if (r.ok || !geminiReady() || !args.image || !Array.isArray(args.frames) || !args.frames.length) return r;
+  const columns = args.columns || 8, people = !!args.people, frames = args.frames, labels = frames.map((f) => String(f.label));
+  const g = await askGemini(people ? peopleSystemFor(columns) : systemFor(columns),
+    `${frames.length} frame${frames.length === 1 ? '' : 's'}: ${frames.map((f) => f.label).join(', ')}. Each is ruled into ${columns} columns. Reply with the JSON only.`, args.image, people ? 90 + 150 * frames.length : 60 + 40 * frames.length);
+  const parsed = g && parseJson(g.text);
+  const rows = parsed && (parsed.frames || parsed.pictures);
+  const answers = Array.isArray(rows) ? framesFrom(rows, labels, columns, people) : {};
+  if (!Object.keys(answers).length) return r;
+  health.ok++; health.why = ''; health.model = g.model; health.lastAt = Date.now();
+  return { ok: true, answers, model: g.model };
+}
+
+async function askGroq({ image, frames, columns = 8, maxWaitMs = 45000, people = false } = {}) {
   const a = cloudwrite.access();
   health.asked++;
   const fail = (why) => { health.failed++; health.why = why; return { ok: false, why }; };
@@ -253,31 +317,7 @@ async function ask({ image, frames, columns = 8, maxWaitMs = 45000, people = fal
       const parsed = parseJson(cloudwrite.textFrom(j));
       const rows = parsed && (parsed.frames || parsed.pictures);
       if (!Array.isArray(rows)) { lastWhy = model + ' answered something that was not a list of frames'; continue; }
-      const answers = {};
-      for (const r of rows) {
-        const L = String(r && (r.frame != null ? r.frame : r.picture) || '').trim().toUpperCase();
-        if (!labels.includes(L)) continue;
-        let n = Math.round(Number(r.column != null ? r.column : r.speaker));
-        // "people: 0" is an answer on its own — nobody there — whatever the column says (or if it is left out)
-        const c = people ? Math.round(Number(r.people)) : NaN;
-        const count = Number.isFinite(c) && c >= 0 ? Math.min(9, c) : null;
-        if (count === 0) n = 0;
-        // a column past the last one is not an answer at all — neither "here" nor "nobody"
-        if (!Number.isFinite(n) || n < 0 || n > columns) { if (count != null) n = 0; else continue; }
-        answers[L] = { column: n, sure: r.sure !== false };
-        if (people) {
-          answers[L].people = count;
-          if (typeof r.facing === 'boolean') answers[L].facing = count === 0 ? false : r.facing;
-          if (r.giving === true) answers[L].giving = true;
-          if (r.screen === true) answers[L].screen = true;
-          if (typeof r.action === 'boolean') answers[L].action = count === 0 ? false : r.action;
-          if (typeof r.who === 'string' && r.who.trim() && count !== 0) answers[L].who = r.who.trim().slice(0, 80);
-          if (r.away === true) answers[L].away = true;
-          // how far the person reaches across, when given sensibly round their head
-          const lf = Math.round(Number(r.left)), rt = Math.round(Number(r.right));
-          if (n > 0 && Number.isFinite(lf) && Number.isFinite(rt) && lf >= 1 && rt <= columns && lf <= n && rt >= n) { answers[L].left = lf; answers[L].right = rt; }
-        }
-      }
+      const answers = framesFrom(rows, labels, columns, people);
       if (!Object.keys(answers).length) { lastWhy = model + ' did not answer about any frame'; continue; }
       health.ok++; health.why = ''; health.model = model; health.lastMs = Date.now() - t0; health.lastAt = Date.now();
       return { ok: true, answers, model, ms: health.lastMs };
@@ -409,7 +449,18 @@ const SAME_SYSTEM = [
   'Look hard at the face, the hair and the clothes together. When it may well be the same person, list it: a wrong guess only swaps in another moment, but one person shown twice spoils the video.',
   'Reply with compact JSON only: {"repeats":[{"photo":<number>,"same_as":<earlier number>}]} — an empty list when every photo shows someone new.',
 ].join('\n');
-async function samePeople({ image, count, maxWaitMs = 30000 } = {}) {
+async function samePeople(args = {}) {
+  const r = await samePeopleGroq(args);
+  if (r.ok || !geminiReady() || !args.image || !(args.count > 1)) return r;
+  const count = args.count;
+  const g = await askGemini(SAME_SYSTEM, `${count} photos, numbered 1 to ${count} on the sheet (the number is in each one's top-left corner). Which show a person already shown in an earlier photo? Reply with the JSON only.`, args.image, 60 + 24 * count);
+  const j = g && parseJson(g.text);
+  if (!j || !Array.isArray(j.repeats)) return Object.assign({}, r, { why: r.why + (g ? ' (and Gemini did not answer)' : '') });
+  const repeats = j.repeats.map((x) => ({ photo: Math.round(Number(x && x.photo)), same_as: Math.round(Number(x && x.same_as)) }))
+    .filter((x) => x.photo >= 2 && x.photo <= count && x.same_as >= 1 && x.same_as < x.photo);
+  return { ok: true, repeats, model: g.model };
+}
+async function samePeopleGroq({ image, count, maxWaitMs = 30000 } = {}) {
   const a = cloudwrite.access();
   if (!a.key) return { ok: false, why: 'no AI key yet' };
   if (!a.url) return { ok: false, why: 'no address for that AI service' };
