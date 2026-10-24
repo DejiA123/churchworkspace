@@ -50,9 +50,10 @@ const anchors = [];
 }
 const sig = (v) => 1 / (1 + Math.exp(-Math.max(-100, Math.min(100, v))));
 
+let lrt = null;
 async function load() {
   if (model) return;
-  const lrt = await import('@litertjs/core');
+  lrt = await import('@litertjs/core');
   Tensor = lrt.Tensor;
   const wasmDir = path.join(path.dirname(createRequire(import.meta.url).resolve('@litertjs/core/package.json')), 'wasm') + '/';
   await lrt.loadLiteRt(wasmDir);
@@ -131,7 +132,62 @@ async function detect({ rgb, width: W, height: H, minScore = 0.5 }) {
   }));
 }
 
+/*
+ * ►► WHERE THE EYES ARE (for faceprint.js). ◄◄ The detector's face box is a rough one (a 40-pixel face in a 256-pixel
+ * box), and telling one person from another wants the face lined up: eyes, nose and mouth where a face-print model
+ * expects them. MediaPipe's BlazeFace (short range, Apache-2.0 — bin/ai, the studio's face tracker uses it in the
+ * browser) finds them in a small square round the face: squares of a few sizes are tried, the surest kept.
+ */
+const BF = 128, bfAnchors = [];
+for (const [fm, n] of [[16, 2], [8, 6]]) for (let y = 0; y < fm; y++) for (let x = 0; x < fm; x++) for (let k = 0; k < n; k++) bfAnchors.push([(x + 0.5) / fm, (y + 0.5) / fm]);
+let bf = null;
+async function marksIn(rgb, W, H, x0, y0, S) {
+  const f = new Float32Array(BF * BF * 3), k = S / BF;
+  for (let y = 0; y < BF; y++) {
+    const sy = y0 + (y + 0.5) * k - 0.5, yA = Math.floor(sy), fy = sy - yA;
+    for (let x = 0; x < BF; x++) {
+      const sx = x0 + (x + 0.5) * k - 0.5, xA = Math.floor(sx), fx = sx - xA, o = (y * BF + x) * 3;
+      for (let c = 0; c < 3; c++) {
+        const px = (xx, yy) => rgb[(Math.max(0, Math.min(H - 1, yy)) * W + Math.max(0, Math.min(W - 1, xx))) * 3 + c];
+        f[o + c] = ((1 - fy) * ((1 - fx) * px(xA, yA) + fx * px(xA + 1, yA)) + fy * ((1 - fx) * px(xA, yA + 1) + fx * px(xA + 1, yA + 1))) / 127.5 - 1;
+      }
+    }
+  }
+  const t = new Tensor(f, [1, BF, BF, 3]);
+  const r = await bf.run(t);
+  t.delete();
+  const outs = await Promise.all(r.map((o) => o.moveTo('wasm')));
+  const arrs = outs.map((o) => o.toTypedArray());
+  outs.forEach((o) => o.delete());
+  const reg = arrs.find((a) => a.length === 896 * 16), sc = arrs.find((a) => a.length === 896);
+  if (!reg || !sc) return null;
+  let best = -1, bs = 0;
+  for (let i = 0; i < 896; i++) { const v = sig(sc[i]); if (v > bs) { bs = v; best = i; } }
+  if (bs < 0.5) return null;
+  const o = best * 16, [ax, ay] = bfAnchors[best];
+  const P = (q) => [x0 + (reg[o + 4 + 2 * q] / BF + ax) * S, y0 + (reg[o + 5 + 2 * q] / BF + ay) * S];
+  // (in the picture's own pixels; "right eye" is the person's own — on the left of the picture)
+  return { s: Math.round(bs * 100) / 100, eyeR: P(0), eyeL: P(1), nose: P(2), mouth: P(3) };
+}
+async function marks({ rgb, width: W, height: H, faces }) {
+  await load();
+  if (!bf) bf = await lrt.loadAndCompile(new Uint8Array(fs.readFileSync(workerData.faceModel)), { accelerator: 'wasm' });
+  const out = [];
+  for (const fc of faces) {
+    let best = null;
+    for (const S of [60, 85, 120, 170, 240, 340, 480]) {
+      for (const dy of [0, -0.15]) {
+        const m = await marksIn(rgb, W, H, fc.x * W - S / 2, fc.y * H - S / 2 + dy * S, S);
+        // (eyes a sensible way apart for the square — a pattern on a shirt can look like a face, squeezed)
+        if (m && Math.hypot(m.eyeL[0] - m.eyeR[0], m.eyeL[1] - m.eyeR[1]) > S * 0.12 && (!best || m.s > best.s)) best = m;
+      }
+    }
+    out.push(best);
+  }
+  return out;
+}
+
 parentPort.on('message', async (m) => {
-  try { parentPort.postMessage({ id: m.id, ok: true, people: await detect(m) }); }
+  try { parentPort.postMessage(m.faces ? { id: m.id, ok: true, marks: await marks(m) } : { id: m.id, ok: true, people: await detect(m) }); }
   catch (e) { parentPort.postMessage({ id: m.id, ok: false, why: (e && e.message) || String(e) }); }
 });

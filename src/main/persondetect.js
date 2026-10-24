@@ -19,6 +19,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const MODEL = path.join(__dirname, '..', '..', 'bin', 'ai', 'person_detector.tflite');
+const FACE_MODEL = path.join(__dirname, '..', '..', 'bin', 'ai', 'blaze_face_short_range.tflite');
 let worker = null, broken = '', seq = 0;
 const waiting = new Map();
 
@@ -32,7 +33,7 @@ function why() { return broken || (available() ? '' : 'the person detector is no
 function start() {
   if (worker) return worker;
   const { Worker } = require('worker_threads');
-  worker = new Worker(path.join(__dirname, 'persondetect-worker.mjs'), { workerData: { model: MODEL }, stderr: true, stdout: true });
+  worker = new Worker(path.join(__dirname, 'persondetect-worker.mjs'), { workerData: { model: MODEL, faceModel: FACE_MODEL }, stderr: true, stdout: true });
   worker.unref();
   // (the runtime's own loading notes are not the studio's to show)
   worker.stderr.resume(); worker.stdout.resume();
@@ -124,6 +125,22 @@ function peopleIn(fr) {
   });
 }
 
+/**
+ * Where the eyes, nose and mouth are on each face (faceprint.js): `faces` [{x, y}] as shares of the picture (the
+ * people found by peopleIn), back as [{ s, eyeR, eyeL, nose, mouth } | null] in the picture's pixels. The frame is
+ * handed over, as with peopleIn.
+ */
+function marksIn(fr, faces) {
+  if (!available() || !fs.existsSync(FACE_MODEL)) return Promise.reject(new Error(why() || 'the face model is not here'));
+  const w = start();
+  const id = ++seq;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { waiting.delete(id); reject(new Error('the face finder took too long')); }, 60000);
+    waiting.set(id, (m) => { clearTimeout(timer); if (m.ok) resolve(m.marks); else reject(new Error(m.why)); });
+    w.postMessage({ id, faces: faces.map((f) => ({ x: f.x, y: f.y })), rgb: fr.rgb, width: fr.width, height: fr.height }, [fr.rgb.buffer]);
+  });
+}
+
 function stop() { if (worker) { try { worker.terminate(); } catch (e) {} worker = null; } }
 
-module.exports = { available, why, people, peopleIn, frameRgb, framesRgb, stop, MODEL };
+module.exports = { available, why, people, peopleIn, marksIn, frameRgb, framesRgb, stop, MODEL };

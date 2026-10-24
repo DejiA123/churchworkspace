@@ -821,7 +821,7 @@ ipcMain.handle('flyer:inspoRemove', wrap(async (e, a) => flyerart.inspoRemove(a 
 const montage = require('./montage');
 try { montage.useDataDir(app.getPath('userData')); } catch (e) { /* the temp folder, then */ }
 const phonecopy = require('./phonecopy');
-ipcMain.handle('montage:status', wrap(async () => Object.assign({}, montage.directorStatus(), { voiceover: require('./voiceover').status(), detector: (() => { try { const pd = require('./persondetect'); return pd.available() ? 'ready' : pd.why(); } catch (e) { return 'missing'; } })() })));
+ipcMain.handle('montage:status', wrap(async () => Object.assign({}, montage.directorStatus(), { voiceover: require('./voiceover').status(), detector: (() => { try { const pd = require('./persondetect'); return pd.available() ? 'ready' : pd.why(); } catch (e) { return 'missing'; } })(), faces: (() => { try { return require('./faceprint').available() ? 'ready' : 'missing'; } catch (e) { return 'missing'; } })() })));
 /* The talk edit's ears: every word of a video, from the cloud (Groq's Whisper)
  * or, without it, this server's own speech model — through the Word Book. */
 /*

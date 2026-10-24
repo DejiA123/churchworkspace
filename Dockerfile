@@ -148,6 +148,14 @@ RUN npm ci --omit=dev --no-audit --no-fund
 RUN (npm install --no-save --omit=dev --no-audit --no-fund kokoro-js@1.2.1 \
       && rm -rf node_modules/onnxruntime-node/bin/napi-v3/darwin node_modules/onnxruntime-node/bin/napi-v3/win32) \
     || echo "kokoro-js could not be installed — the narrator will be unavailable"
+# The montage's face recognition — "never the same person twice" (src/main/faceprint.js): OpenCV's SFace
+# (Apache-2.0, 37 MB), the copy published in the npm package maystar-facecompare@1.0.2 (the registry this build
+# already reaches), checked by its hash. Optional: without it the montage tells people apart by what they wear.
+RUN mkdir -p /app/bin/faceid && (cd /tmp && npm pack --silent maystar-facecompare@1.0.2 > /dev/null \
+      && tar -xzf maystar-facecompare-1.0.2.tgz package/weights/sface.onnx \
+      && echo "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79  package/weights/sface.onnx" | sha256sum -c - \
+      && mv package/weights/sface.onnx /app/bin/faceid/sface.onnx; rm -rf package maystar-facecompare-1.0.2.tgz) \
+    && ls /app/bin/faceid/sface.onnx > /dev/null 2>&1 || echo "the face model could not be fetched — the montage will tell people apart by what they wear"
 
 # The app itself. Only what a server runs: src/, the offline AI assets, the
 # caption fonts, and the licences.
