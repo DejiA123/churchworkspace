@@ -3650,7 +3650,11 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
        * it. Each speaker's face and top are read first, and no moment cut to is of anyone with a line of their own.
        */
       const speakers = new Map();   // first beat of a line -> { vid, t, top, faces }
-      const aSpeaker = (who) => [...speakers.values()].some((sp) => onePerson(sp, who, fpx));
+      // (and within 5 minutes of their line, they are still on stage — unless the faces plainly differ: the man in
+      //  green side on at 188 and 192 min was alike by neither his face nor his top, from two cameras)
+      const SPEAKER_STRETCH = 5 * 60, PLAINLY_OTHER = 0.15;
+      const aSpeaker = (who) => [...speakers.values()].some((sp) => onePerson(sp, who, fpx)
+        || (sp.vid === who.vid && Math.abs(sp.t - who.t) <= SPEAKER_STRETCH && !(fpx && sp.faces.length && who.faces.length && fpx.likeness(sp.faces, who.faces) < PLAINLY_OTHER)));
       // (faces told apart: the same person is caught by their face, so moments need only be a minute and a half apart —
       //  3¾ minutes left 45 lively moments too few to cover a 5½-second line, and it played as one picture; a minute)
       const GAP = fpx ? clamp((opts.eventSec || 0) / (nPics * 20), 30, 60) : clamp((opts.eventSec || 0) / (nPics * 5), 45, 240);
@@ -3687,6 +3691,10 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           const xs = await sigAt(x.cand.file, snapAt(x), x.snapLook && x.snapLook.fx);
           if (shown.some((g) => apart(xs, g) < SAME) || [...lineSig.values()].some((g) => apart(xs, g) < SAME)) { used.add(x); why.scene++; continue; }
           used.add(x); shownAt.push(atOf(x)); if (wk) shownWho.push(wk); if (who.top || fc.length) shownPeople.push(who); if (fc.length) shownFace.push(fc);
+          if (log && fpx && speakers.size) {
+            const near = [...speakers.values()].filter((sp) => sp.vid === who.vid).sort((p, q) => Math.abs(p.t - who.t) - Math.abs(q.t - who.t))[0];
+            if (near) log(`people: cut to ${(who.t / 60).toFixed(1)} min — the nearest speaker ${(near.t / 60).toFixed(1)} min, alike ${fpx.likeness(near.faces, fc).toFixed(2)}`);
+          }
           return { x, xs };
         }
         return null;
