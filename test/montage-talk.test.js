@@ -9,7 +9,6 @@
  *   node test/montage-talk.test.js
  */
 process.env.MW_MEMORY_MB = '512';
-delete process.env.ANTHROPIC_API_KEY;
 
 // (these synthetic videos are colour blocks the person detector cannot see: the frame looks are the stand-in AI's,
 //  the opt-in path — a real server looks with its own detector, montage.js LOOKS_AI)
@@ -90,35 +89,33 @@ const SCRIPT = {
   ok(stages.some((s) => /Listening/.test(s)) && stages.some((s) => /picking the lines/.test(s)), 'it says what it is doing, step by step', stages);
   ok(fs.existsSync(montage.sidecarOf(out)), 'the edit is saved beside the video, to rearrange later');
 
-  console.log('\nCLAUDE DIRECTS');
+  console.log('\nTHE SERVER\'S OWN AI DIRECTS');
   {
+    // the server's AI (serverllm.js) stood in for: it reads the lines it is shown and answers with its edit
+    const sl = require(path.join(ROOT, 'src/main/serverllm'));
+    const real = { ready: sl.ready, chat: sl.chat, status: sl.status };
     const seen = [];
-    const fake = function Anthropic() {
-      const create = async (body) => {
-        seen.push(body);
-        // the phrase list is in the prompt: pick "Why would he…" first, then "Never give up…"
-        const txt = body.messages[0].content;
-        const id = (re) => { const m = txt.split('\n').find((l) => re.test(l)); return m ? m.split(' | ')[0].trim() : ''; };
-        return { model: body.model, stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({
-          concept: 'Question, then the promise.', title: 'He did not bring you this far', hook_text: 'Don’t quit now',
-          post_caption: 'Who needs this today?', hashtags: ['faith', '#jesus'],
-          picks: [{ id: id(/Why would he/) }, { id: id(/Never give up/) }, { id: 'p999' }],
-        }) }] };
-      };
-      this.messages = { create }; this.beta = { messages: { create } };
+    sl.ready = () => true;
+    sl.status = () => Object.assign(real.status(), { ready: true, model: 'Test 4B (Q4_0)' });
+    sl.chat = async (q) => {
+      seen.push(q);
+      const id = (re) => { const m = String(q.prompt).split('\n').find((l) => re.test(l)); const k = m && /\b(p\d+)\b/.exec(m); return k ? k[1] : ''; };
+      return JSON.stringify({
+        concept: 'Question, then the promise.', title: 'He did not bring you this far', hook_text: 'Don’t quit now',
+        post_caption: 'Who needs this today?', hashtags: ['faith', '#jesus'],
+        picks: [{ id: id(/Why would he/) }, { id: id(/Never give up/) }, { id: 'p999' }],
+      });
     };
-    fake.BadRequestError = class extends Error {};
-    require.cache[require.resolve('@anthropic-ai/sdk')] = { id: 'sdk', filename: 'sdk', loaded: true, exports: fake };
-    process.env.ANTHROPIC_API_KEY = 'test-not-a-key';
-    const out2 = path.join(WORK, 'montage-talk-claude.mp4');
-    const r2 = await montage.make(ctx, video.getInfo, { mediaPaths: [A, B], style: 'cinematic', lengthSec: 15, aspect: '9:16', output: out2, mode: 'talk', hear });
-    delete process.env.ANTHROPIC_API_KEY;
-    const body = seen[0] || {};
-    ok(/Never give up on what God promised you!/.test(body.messages[0].content) && /video 2/.test(body.messages[0].content), 'Claude is shown every phrase from every video, with which video and when');
-    ok(body.output_config && body.output_config.format && body.output_config.format.type === 'json_schema', 'and answers in a fixed shape');
+    const out2 = path.join(WORK, 'montage-talk-server.mp4');
+    let r2;
+    try { r2 = await montage.make(ctx, video.getInfo, { mediaPaths: [A, B], style: 'cinematic', lengthSec: 15, aspect: '9:16', output: out2, mode: 'talk', hear }); }
+    finally { Object.assign(sl, real); }
+    const q = seen[0] || {};
+    ok(/Never give up on what God promised you!/.test(q.prompt) && /\| v2 /.test(q.prompt), 'the server’s AI is shown the lines from every video, with which video and when');
+    ok(q.json === true, 'and asked to answer in JSON');
     const w = r2.words.map((x) => x.text.toLowerCase()).join(' ');
     ok(/^why would he/.test(w) && /never give up/.test(w) && w.indexOf('why') < w.indexOf('never'), 'its lines play in its order — a line from video 2 first, then video 1', w.slice(0, 80));
-    ok(r2.director === 'claude' && r2.texts[0] && r2.texts[0].text === 'Don’t quit now' && r2.hashtags.includes('jesus'), 'its headline, title and hashtags come through (an unknown id is ignored)', { d: r2.director, t: r2.texts, h: r2.hashtags });
+    ok(r2.director === 'server' && r2.texts[0] && r2.texts[0].text === 'Don’t quit now' && r2.hashtags.includes('jesus'), 'its headline, title and hashtags come through (an unknown id is ignored)', { d: r2.director, t: r2.texts, h: r2.hashtags });
     ok(new Set(r2.shots.map((x) => x.effect)).has('slow_zoom'), 'a cinematic edit moves with slow pushes');
   }
 

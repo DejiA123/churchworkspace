@@ -106,7 +106,6 @@ const PROVIDERS = {
     free: false,
     models: [
       { id: 'openai/gpt-4.1-mini', name: 'GPT-4.1 mini' },
-      { id: 'anthropic/claude-3.5-haiku', name: 'Claude 3.5 Haiku' },
       { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B' },
       { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Llama 3.3 70B (free)' },
     ],

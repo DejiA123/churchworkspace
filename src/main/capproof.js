@@ -17,8 +17,8 @@
  *      rewrote the line is thrown away, because a caption is what was SAID —
  *      and marked SURE or not, so the studio can make the sure ones at once.
  *
- * `deps.ask({ system, prompt, schema, maxTokens })` is the model (Claude, the
- * free Groq models, or the PC's own); it is passed in so this is testable.
+ * `deps.ask({ system, prompt, schema, maxTokens })` is the model (the free
+ * Groq models, or the PC's own); it is passed in so this is testable.
  */
 const crypto = require('crypto');
 const capGrammar = require('../renderer/capgrammar.js');
@@ -28,16 +28,16 @@ async function sermonBrief(engine, ask, words, CancelledError) {
   const all = words.join(' ').replace(/\s+/g, ' ').trim();
   const count = all ? all.split(' ').length : 0;
   if (count < 60) return null;
-  // Claude reads all of it; the free Groq models have 8,000 tokens a minute, so
-  // ~3,000 words (the opening and the close); the PC's model a page.
-  const cap = engine === 'claude' ? 60000 : engine === 'groq' ? 3000 : 900;
+  // the free Groq models have 8,000 tokens a minute, so ~3,000 words (the
+  // opening and the close); the PC's model a page.
+  const cap = engine === 'groq' ? 3000 : 900;
   let text = all;
   if (count > cap) { const w = all.split(' '); text = w.slice(0, Math.ceil(cap * 0.6)).join(' ') + ' … ' + w.slice(-Math.floor(cap * 0.4)).join(' '); }
   const key = engine + ':' + crypto.createHash('sha1').update(text).digest('hex');
   if (briefCache.has(key)) return briefCache.get(key);
   const { system, prompt } = capGrammar.buildBriefPrompt(text);
   let brief = null;
-  try { brief = capGrammar.parseBrief(await ask({ system, prompt, schema: capGrammar.BRIEF_SCHEMA, maxTokens: engine === 'claude' ? 16000 : 1500 })); }
+  try { brief = capGrammar.parseBrief(await ask({ system, prompt, schema: capGrammar.BRIEF_SCHEMA, maxTokens: 1500 })); }
   catch (e) { if (CancelledError && e instanceof CancelledError) throw e; brief = null; }
   if (brief) { briefCache.set(key, brief); if (briefCache.size > 40) briefCache.delete(briefCache.keys().next().value); }
   return brief;
@@ -56,7 +56,7 @@ async function proofread({ lines, before, after, passage, caseMode, mode } = {},
   if (prog) prog(2);
   const brief = await sermonBrief(engine, ask, (P.length ? P : L).map((l) => l.text), CancelledError);
   if (prog) prog(engine === 'local' ? 5 : 15);
-  const SIZE = engine === 'claude' ? 120 : engine === 'groq' ? 40 : 12;
+  const SIZE = engine === 'groq' ? 40 : 12;
   const SIDE = engine === 'local' ? 4 : 25;
   const textAround = (fromLine, toLine) => {
     if (P.length && posOf.has(fromLine) && posOf.has(toLine)) {
@@ -90,7 +90,7 @@ async function proofread({ lines, before, after, passage, caseMode, mode } = {},
     let answer = null;
     const waits = engine === 'groq' ? (deps.retryWaits || [20000, 40000, 60000]) : [];
     for (let attempt = 0; ; attempt++) {
-      try { answer = await ask({ system, prompt, schema: capGrammar.FIX_SCHEMA, maxTokens: engine === 'claude' ? 16000 : 2000 }); }
+      try { answer = await ask({ system, prompt, schema: capGrammar.FIX_SCHEMA, maxTokens: 2000 }); }
       catch (er) { if (CancelledError && er instanceof CancelledError) throw er; answer = null; }
       if (answer || attempt >= waits.length) break;
       const until = Date.now() + waits[attempt];
@@ -111,8 +111,8 @@ async function proofread({ lines, before, after, passage, caseMode, mode } = {},
     done += part.length;
     if (prog) prog(Math.min(99, 15 + Math.round((done / L.length) * 85)));
   };
-  // Claude takes a few batches at once; the free models one at a time (tokens per minute).
-  const lanes = engine === 'claude' ? 3 : 1;
+  // one batch at a time: the free models count tokens per minute
+  const lanes = 1;
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(lanes, batches.length) }, async () => {
     while (next < batches.length) await runBatch(batches[next++]);

@@ -1875,7 +1875,6 @@ $('#saveSettings').addEventListener('click', async () => {
     // already stored instead of writing '' — saving settings must not silently
     // wipe a key the user entered in an older build.
     apiKeys: {
-      anthropic: $('#setAnthropic').value,
       image: $('#setImage').value,
       bible: $('#setBibleKey') ? $('#setBibleKey').value : (((state.settings || {}).apiKeys || {}).bible || ''),
     },
@@ -2137,7 +2136,6 @@ async function init() {
   $('#setYtClientSecret').value = acc.ytClientSecret || '';
   if ($('#setZoApiKey')) $('#setZoApiKey').value = acc.zoApiKey || '';
   const keys = state.settings.apiKeys || {};
-  $('#setAnthropic').value = keys.anthropic || '';
   $('#setImage').value = keys.image || '';
   if ($('#setBibleKey')) $('#setBibleKey').value = keys.bible || '';
 

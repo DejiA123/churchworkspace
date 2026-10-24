@@ -12,9 +12,7 @@
  *      spellings + the editor's past corrections) and what was said either
  *      side — across batch boundaries, not just at the ends;
  *   3. a respaced mishearing is a correction, a rewrite is still refused,
- *      and "sure" comes through so the studio can make those at once;
- *   4. the Claude path asks Opus 5.5 with adaptive thinking, structured JSON
- *      and the refusal fallback.
+ *      and "sure" comes through so the studio can make those at once.
  *
  *   node test/caption-ai-context.test.js
  */
@@ -120,42 +118,12 @@ function fakeModel(log) {
   check('a second check of the same sermon does not read it all again', log.briefs.length === 0 && log.batches.length === 1);
   _briefCache.clear();
 
-  head('[5] Claude reads more at once');
-  log = { briefs: [], batches: [] };
-  await proofread({ lines: all, passage: all }, { engine: 'claude', ask: fakeModel(log), terms, known });
-  check('120 lines on Claude = one batch', log.batches.length === 1, `${log.batches.length}`);
-
   head('[6] Without the notes (an AI that cannot write them), it still checks');
   _briefCache.clear();
   log = { briefs: [], batches: [] };
   const noBrief = async (a) => (/^Transcript:/.test(a.prompt) ? 'not json' : fakeModel(log)(a));
   const r2 = await proofread({ lines: all.slice(0, 10), passage: all.slice(0, 10) }, { engine: 'groq', ask: noBrief });
   check('still corrects what it can', r2.fixes.some((f) => /Amen/.test(f.text)) && r2.failedBatches === 0);
-
-  head('[7] The Claude request itself (SDK stubbed)');
-  const sent = [];
-  class FakeClient {
-    constructor() {
-      const create = async (body) => { sent.push(body); return { stop_reason: 'end_turn', model: body.model, content: [{ type: 'text', text: '{"fixes":[]}' }] }; };
-      this.messages = { create }; this.beta = { messages: { create } };
-    }
-  }
-  FakeClient.BadRequestError = class extends Error {};
-  require.cache[require.resolve('@anthropic-ai/sdk')] = { id: 'sdk', filename: 'sdk', loaded: true, exports: { default: FakeClient } };
-  const ct = require('../src/main/claudetext.js');
-  process.env.ANTHROPIC_API_KEY = 'test';
-  check('ready when the server has the key', ct.ready() === true);
-  process.env.MW_CAPTIONS_AI = 'groq';
-  check('MW_CAPTIONS_AI=groq keeps captions on Groq', ct.ready() === false);
-  delete process.env.MW_CAPTIONS_AI;
-  const txt = await ct.chatJson({ system: 's', prompt: 'p', schema: G.FIX_SCHEMA });
-  const b = sent[0] || {};
-  check('Opus 5.5', b.model === 'claude-opus-5-5', b.model);
-  check('adaptive thinking, high effort', b.thinking && b.thinking.type === 'adaptive' && b.output_config && b.output_config.effort === 'high');
-  check('structured JSON with the fix schema', b.output_config && b.output_config.format && b.output_config.format.type === 'json_schema' && b.output_config.format.schema === G.FIX_SCHEMA);
-  check('refusal fallback on', Array.isArray(b.betas) && b.betas.includes('server-side-fallback-2026-07-01') && b.fallbacks === 'default');
-  check('the answer text comes back', txt === '{"fixes":[]}');
-  delete process.env.ANTHROPIC_API_KEY;
 
   console.log(`\n${pass} PASS / ${fail} FAIL`);
   process.exit(fail ? 1 : 0);

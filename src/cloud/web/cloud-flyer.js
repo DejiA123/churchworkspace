@@ -5360,7 +5360,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         <section class="fs-sec"><h3>Inspiration <small>flyers you love — every new design leans their way</small></h3>
           <div class="fs-bank fs-bank-sm">${(F.kit.inspo || []).map((it) => `<button type="button" class="fs-bank-pic fs-inspo" data-k="inspo" data-id="${escAttr(it.id)}">${picTag(it.thumb)}${it.notes ? '<em>✓ read</em>' : ''}</button>`).join('')}
           <button type="button" class="fs-bank-pic fs-bank-add" data-k="inspoadd">${ic('plus')}<small>Add</small></button></div>
-          <p class="fs-note">Screenshot flyers you like on Pinterest or Instagram and add them here.${F.status && F.status.writer === 'claude' ? ' The AI studies each one’s lettering, layout and picture.' : ' Their colours are used for your flyers.'}</p>
+          <p class="fs-note">Screenshot flyers you like on Pinterest or Instagram and add them here. Their colours are used for your flyers.</p>
         </section>
         <section class="fs-sec"><h3>Service days <small>a flyer for one comes with its next date</small></h3>
           ${(k.services || []).map((s, i) => `<div class="fs-svc"><select data-svf="day" data-i="${i}">${DAYS.map((d, j) => `<option value="${j}"${+s.day === j ? ' selected' : ''}>${d}</option>`).join('')}</select>

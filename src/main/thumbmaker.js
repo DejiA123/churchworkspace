@@ -226,19 +226,10 @@ async function ideas(ctx, { input, hint = '' } = {}) {
   const prompt = promptFor(text, input, String(hint || '').slice(0, 200));
   let got = null, by = 'rules';
   try {
-    const ct = require('./claudetext');
-    if (ct.ready()) {
-      const raw = await ct.chatJson({ system: SYSTEM, prompt, schema: SCHEMA, effort: 'low', maxTokens: 3000 });
-      got = raw ? JSON.parse(raw) : null; if (got) by = 'claude';
-    }
+    const cw = require('./cloudwrite');
+    const raw = await cw.chat({ system: SYSTEM + '\nAnswer with ONE JSON object only: {"lines":[{"text":"…","key":"…"}],"title":"…","scenes":["…"]}.', prompt, json: true, maxTokens: 900, temperature: 0.9, evenIfOff: true, timeoutMs: 30000 });
+    got = raw ? cw.parseJson(raw) : null; if (got) by = 'groq';
   } catch (e) { got = null; }
-  if (!got) {
-    try {
-      const cw = require('./cloudwrite');
-      const raw = await cw.chat({ system: SYSTEM + '\nAnswer with ONE JSON object only: {"lines":[{"text":"…","key":"…"}],"title":"…","scenes":["…"]}.', prompt, json: true, maxTokens: 900, temperature: 0.9, evenIfOff: true, timeoutMs: 30000 });
-      got = raw ? cw.parseJson(raw) : null; if (got) by = 'groq';
-    } catch (e) { got = null; }
-  }
   let lines = cleanLines(got && got.lines);
   if (lines.length < 3) { lines = lines.concat(linesByRules(text, input).filter((l) => !lines.some((x) => x.text === l.text))).slice(0, 6); if (!got) by = 'rules'; }
   const scenes = (got && Array.isArray(got.scenes) ? got.scenes : []).map((s) => String(s || '').trim()).filter(Boolean).slice(0, 4);

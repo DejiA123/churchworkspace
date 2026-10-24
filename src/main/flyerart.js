@@ -23,9 +23,9 @@
  *      backgrounds (gradients, rays, bokeh) and says how to switch the AI on.
  *
  * WHO WRITES — the art director turns "Sunday Service, 19 Oct" into a picture
- * to paint, the colours to wear and the one word to set in script. Claude when
- * the server has ANTHROPIC_API_KEY (the AI Montage's key), else the free Groq
- * key the captions use, else a few honest rules. It never writes the names,
+ * to paint, the colours to wear and the one word to set in script. The free
+ * Groq key the captions use, else Cloudflare's free writer, else a few honest
+ * rules. It never writes the names,
  * dates or places: those are the operator's, set exactly as typed.
  */
 const fs = require('fs');
@@ -106,8 +106,7 @@ const benchedNow = (id) => (benched.get(id) || 0) > Date.now();
 function status() {
   const cf = !!(cfAccount() && cfToken());
   let writer = 'rules';
-  if (process.env.ANTHROPIC_API_KEY) writer = 'claude';
-  else { try { const cw = require('./cloudwrite'); if (cw.access && cw.access().key) writer = 'groq'; } catch (e) { /* none */ } }
+  try { const cw = require('./cloudwrite'); if (cw.access && cw.access().key) writer = 'groq'; } catch (e) { /* none */ }
   // the same free Cloudflare account that paints the pictures also has a writer: the art director
   if (writer === 'rules' && cf) writer = 'cloudflare';
   const who = space.person(), r = budget.report(who), lib = bank.report();
@@ -581,23 +580,6 @@ function fieldsText(f) {
   return lines.join('\n');
 }
 
-async function directWithClaude(f) {
-  const Anthropic = require('@anthropic-ai/sdk');
-  const Client = Anthropic.default || Anthropic;
-  const client = new Client({ maxRetries: 1, timeout: 90 * 1000 });
-  const body = {
-    model: process.env.MW_FLYER_MODEL || 'claude-opus-5-5',
-    max_tokens: 4000,
-    output_config: { effort: 'low', format: { type: 'json_schema', schema: DIRECTION_SCHEMA } },
-    system: DIRECTOR_SYSTEM,
-    messages: [{ role: 'user', content: fieldsText(f) }],
-  };
-  const res = await client.messages.create(body);
-  if (!res || res.stop_reason === 'refusal') return null;
-  const text = (res.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
-  return JSON.parse(text);
-}
-
 /* Cloudflare Workers AI's free writers, best first (a model the account lacks is skipped) */
 // (llama-3.1-8b-instruct was retired by Cloudflare on 30 May 2026)
 const CF_WRITERS = ['@cf/meta/llama-3.3-70b-instruct-fp8-fast', '@cf/meta/llama-3.1-8b-instruct-fast'];
@@ -832,10 +814,7 @@ function directionFor(base, f) {
 async function directFresh(f) {
   const st = status();
   let d = null, by = 'rules';
-  try {
-    if (st.writer === 'claude') { d = await directWithClaude(f); by = 'claude'; }
-  } catch (e) { d = null; }
-  if (!d && (st.writer === 'groq' || st.writer === 'claude')) {
+  if (st.writer === 'groq') {
     try { d = await directWithGroq(f); by = 'groq'; } catch (e) { d = null; }
   }
   if (!d && st.cloudflare) {
@@ -1011,51 +990,17 @@ function kitSave(next = {}) {
  * one thing this cannot do honestly: Pinterest has no public search API for
  * apps like this, and its terms forbid robots reading its pages. So the board
  * is fed the way designers feed theirs — a screenshot of a flyer someone loved
- * — and each is read once: its colours (worked out on the phone) and, when the
- * server has Claude, a few lines on what makes it work (the title treatment,
- * the layout, the picture). The art director reads the board before every
- * flyer, so the church's taste steers every design that follows.
+ * — and each is read once: its colours (worked out on the phone). The art
+ * director reads the board before every flyer, so the church's taste steers
+ * every design that follows.
  */
 const INSPO_MAX = 60;
-async function inspoNotes(dataUrl) {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
-  const m = /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/i.exec(String(dataUrl || ''));
-  if (!m) return null;
-  const Anthropic = require('@anthropic-ai/sdk');
-  const Client = Anthropic.default || Anthropic;
-  const client = new Client({ maxRetries: 1, timeout: 90 * 1000 });
-  const schema = {
-    type: 'object', additionalProperties: false,
-    properties: {
-      notes: { type: 'string', description: 'Two sentences: what makes this flyer striking — the title lettering, the layout, the picture, the colours.' },
-      look: { type: 'string', enum: LOOKS },
-      scene: { type: 'string', description: 'The background picture in one sentence, as a prompt for an image model (no people close up, no text).' },
-      palette: { type: 'array', items: { type: 'string' } },
-    },
-    required: ['notes', 'look', 'scene', 'palette'],
-  };
-  const res = await client.messages.create({
-    model: process.env.MW_FLYER_MODEL || 'claude-opus-5-5',
-    max_tokens: 2000,
-    output_config: { effort: 'low', format: { type: 'json_schema', schema } },
-    system: 'You study church event flyers for a design team. Describe the design of the flyer you are shown so it can inspire new ones. Never copy its words, names or dates.',
-    messages: [{ role: 'user', content: [
-      { type: 'image', source: { type: 'base64', media_type: m[1].toLowerCase(), data: m[2] } },
-      { type: 'text', text: 'What makes this flyer work? Which of the layouts is it closest to? Describe its background picture, and give its four main colours as hex (deep, mid, accent, highlight).' },
-    ] }],
-  });
-  const text = (res.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
-  const j = JSON.parse(text);
-  return { notes: String(j.notes || '').slice(0, 400), look: LOOKS.includes(j.look) ? j.look : '', scene: String(j.scene || '').slice(0, 300), palette: (j.palette || []).filter((c) => HEX.test(c)).slice(0, 4) };
-}
-
 /** Add a flyer to the board: { thumb (small JPEG), image (for the reader), palette (from the phone) } */
 async function inspoAdd({ thumb, image, palette } = {}) {
   const k = readKit();
   const name = picOut(thumb, 'inspo');
   if (!name) throw new Error('That is not a picture.');
-  let read = null;
-  try { read = await inspoNotes(image || thumb); } catch (e) { read = null; }
+  const read = null;
   const pal = (read && read.palette.length === 4 ? read.palette : (Array.isArray(palette) ? palette : []).filter((c) => HEX.test(c)).slice(0, 4));
   const item = { id: 'in' + Date.now().toString(36), thumb: name, palette: pal, notes: read ? read.notes : '', look: read ? read.look : '', scene: read ? read.scene : '', at: new Date().toISOString() };
   k.inspo = [item].concat(k.inspo || []).slice(0, INSPO_MAX);

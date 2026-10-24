@@ -248,7 +248,6 @@
     "test:caption-second-opinion": "node test/caption-second-opinion.test.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.131.0",
     "@litertjs/core": "^2.5.3",
     "ffmpeg-static": "^5.2.0",
     "ffprobe-static": "^3.1.0",

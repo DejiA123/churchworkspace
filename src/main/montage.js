@@ -13,11 +13,11 @@
  *             Photos are one moment each. (analyze)
  *   2. LISTEN the operator's own song, if they chose one: its tempo and where
  *             the beats fall, so shots change ON the beat. (beats)
- *   3. DIRECT Claude Opus 5.5 sees every candidate frame and writes the edit:
- *             the hook, the order, each shot's length and move, the words on
- *             screen and the post caption. Without a Claude key the Groq model
- *             already used elsewhere writes it from descriptions instead, and
- *             without either a rules editor does — never no montage. (direct)
+ *   3. DIRECT a model writes the edit: the hook, the order, each shot's
+ *             length and move, the words on screen and the post caption —
+ *             Groq's free vision model from contact sheets of the frames, its
+ *             text model from descriptions, and without either a rules editor
+ *             does — never no montage. (direct)
  *   4. CHECK  nothing the model says is trusted: a shot must be one that was
  *             offered, its length is clamped to the footage there is, and the
  *             cuts are snapped onto the song's beats. (finalise)
@@ -530,54 +530,13 @@ function briefOf(opts, music) {
   return lines.join('\n');
 }
 
-/** Claude Opus 5.5, looking at every candidate frame. */
-async function directWithClaude(cands, opts, music) {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
-  const Anthropic = require('@anthropic-ai/sdk');
-  const Client = Anthropic.default || Anthropic;
-  const client = new Client({ maxRetries: 2, timeout: 8 * 60 * 1000 });
-  const model = process.env.MW_MONTAGE_MODEL || 'claude-opus-5-5';
-  const content = [{ type: 'text', text: briefOf(opts, music) + `\n\n${cands.length} candidates follow, each as a line and its frame.` }];
-  for (const c of cands) {
-    content.push({ type: 'text', text: describe(c) });
-    if (c.thumb) {
-      try {
-        content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: fs.readFileSync(c.thumb).toString('base64') } });
-      } catch (e) { /* the line alone */ }
-    }
-  }
-  content.push({ type: 'text', text: 'Now write the edit.' });
-  const body = {
-    model,
-    max_tokens: 16000,
-    thinking: { type: 'adaptive' },
-    output_config: { effort: 'high', format: { type: 'json_schema', schema: PLAN_SCHEMA } },
-    system: SYSTEM,
-    messages: [{ role: 'user', content }],
-  };
-  let res;
-  try {
-    // A declined request is re-run on Anthropic's recommended fallback model
-    // instead of coming back empty.
-    res = await client.beta.messages.create(Object.assign({}, body, { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' }));
-  } catch (e) {
-    if (e instanceof Client.BadRequestError) res = await client.messages.create(body);
-    else throw e;
-  }
-  if (!res || res.stop_reason === 'refusal') return null;
-  const text = (res.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
-  let plan = null;
-  try { plan = JSON.parse(text); } catch (e) { plan = null; }
-  return plan ? { plan, director: 'claude', model: res.model || model } : null;
-}
-
 /*
  * ►► GROQ LOOKS TOO. ◄◄
  * Groq's free vision models take only a handful of pictures per request, so
  * the candidate frames are laid out on CONTACT SHEETS — up to sixteen tiles
  * each, every tile stamped with its id — and three sheets carry forty-odd
- * moments in one look. The model then directs from what it SEES, like Claude
- * does, instead of from a list of loudness numbers.
+ * moments in one look. The model then directs from what it SEES, instead of
+ * from a list of loudness numbers.
  */
 let hasDrawtext = null; // not every ffmpeg build has it (the bundled one has no freetype)
 async function canDrawText(ctx) {
@@ -736,7 +695,7 @@ function briefTexts(fb, n) {
 }
 
 async function direct(cands, opts, music, log, ctx, tmp) {
-  for (const [name, fn] of [['Claude', directWithClaude], ['Groq (looking)', directWithGroqVision], ['Groq', directWithGroq]]) {
+  for (const [name, fn] of [['Groq (looking)', directWithGroqVision], ['Groq', directWithGroq]]) {
     try {
       const r = await fn(cands, opts, music, ctx, tmp);
       if (r && r.plan && Array.isArray(r.plan.shots) && r.plan.shots.length) return r;
@@ -1698,8 +1657,9 @@ function resultOf(plan, output, opts, extra) {
  *   2. CHOOSE  the director reads every phrase from every video and builds the
  *              story: the most arresting line FIRST (the hook), then lines that
  *              follow on from each other and rise, ending on the line people
- *              will quote. Claude when the server has it, Groq otherwise, and a
- *              scorer of its own (energy, length, punch words) without either.
+ *              will quote. The server's own AI first (serverllm.js — free, no
+ *              allowance), the free cloud readers if it cannot, and a scorer of
+ *              its own (energy, length, punch words) without any.
  *   3. MOVE    constant engagement: a long line is cut into beats of two or
  *              three seconds at word boundaries, and each beat is framed
  *              differently — punch in, closer, wide, a slow push — the jump
@@ -2087,29 +2047,6 @@ function talkBrief(opts, list, how = {}) {
       // short form: id | when | words (★ a key phrase, ✗ used before)
       ? `\n\nPhrases (${list.length}) — id | time | words:\n` + list.map((p) => `${p.id} | ${p.vid > 1 ? 'v' + p.vid + ' ' : ''}${clock(p.start)}${p.hl > 0 ? ' ★' + p.hl.toFixed(2) : ''}${p.usedBefore ? ' (used before)' : ''} | ${p.text}`).join('\n')
       : `\n\nPhrases (${list.length}):\n` + list.map((p) => `${p.id} | video ${p.vid} | ${p.start.toFixed(1)}-${p.end.toFixed(1)}s | loud ${p.score}${p.hl > 0 ? ' | ★' + p.hl.toFixed(2) : ''}${p.usedBefore ? ' | (used before)' : ''} | ${p.text}`).join('\n'));
-}
-
-async function talkWithClaude(list, opts) {
-  if (!process.env.ANTHROPIC_API_KEY) return null;
-  const Anthropic = require('@anthropic-ai/sdk');
-  const Client = Anthropic.default || Anthropic;
-  const client = new Client({ maxRetries: 2, timeout: 6 * 60 * 1000 });
-  const model = process.env.MW_MONTAGE_MODEL || 'claude-opus-5-5';
-  const body = {
-    model, max_tokens: 12000, thinking: { type: 'adaptive' },
-    output_config: { effort: 'high', format: { type: 'json_schema', schema: TALK_SCHEMA } },
-    system: TALK_SYSTEM,
-    messages: [{ role: 'user', content: talkBrief(opts, list) + '\n\nNow build the edit.' }],
-  };
-  let res;
-  try { res = await client.beta.messages.create(Object.assign({}, body, { betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' })); } catch (e) {
-    if (e instanceof Client.BadRequestError) res = await client.messages.create(body); else throw e;
-  }
-  if (!res || res.stop_reason === 'refusal') return null;
-  const text = (res.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
-  let plan = null;
-  try { plan = JSON.parse(text); } catch (e) { plan = null; }
-  return plan && Array.isArray(plan.picks) ? { plan, director: 'claude', model: res.model || model } : null;
 }
 
 /*
@@ -2882,8 +2819,8 @@ async function writeTalkPost(picks, opts, P, hook) {
   const notes = cleanBrief(opts.brief).toLowerCase();
   const directors = String(P.post_caption || '').trim();
   const realOne = directors.length >= 60 && !(notes && directors.toLowerCase().includes(notes.slice(0, 40)));
-  // the big editor (Claude, or a model on AssemblyAI's gateway) wrote the post with the edit: it stands
-  if (realOne && (opts.directorBy === 'claude' || opts.directorBy === 'assemblyai')) return { caption: directors, hashtags: tags(P.hashtags) };
+  // the big editor (a model on AssemblyAI's gateway) wrote the post with the edit: it stands
+  if (realOne && opts.directorBy === 'assemblyai') return { caption: directors, hashtags: tags(P.hashtags) };
   try {
     const cw = require('./cloudwrite');
     let ai = null; try { ai = require('./aaillm'); } catch (e) { ai = null; }
@@ -3085,10 +3022,9 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     const list = spreadList(calmLines.length >= 12 ? calmLines : goodLines(phrases), 420);
     // how long the heard event is (a whole service asks for moments from across it)
     opts.eventSec = cands.reduce((n, c) => n + Math.max(0, (c.end || 0) - (c.start || 0)), 0);
-    if (stage) stage(process.env.ANTHROPIC_API_KEY ? '🎬 Claude is picking the lines that will stop the scroll…' : '🎬 The AI is picking the lines that will stop the scroll…');
+    if (stage) stage('🎬 The AI is picking the lines that will stop the scroll…');
     let d = null;
-    try { d = await talkWithClaude(list, opts); } catch (e) { if (log) log('claude: ' + e.message); }
-    if (!d) { try { d = await talkWithLocal(list, opts); } catch (e) { if (log) log('server AI: ' + e.message); } }
+    try { d = await talkWithLocal(list, opts); } catch (e) { if (log) log('server AI: ' + e.message); }
     if (!d) { try { d = await talkWithAai(list, opts); } catch (e) { if (log) log('assemblyai: ' + e.message); } }
     // (AssemblyAI first; Groq only when AssemblyAI's models could not answer — an account without the LLM Gateway —
     //  as an AI's judgement still beats the rules)
@@ -3911,7 +3847,7 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
       try { music = await beats(ctx, musicPath); } catch (e) { if (e instanceof jobs.CancelledError) throw e; music = null; }
     }
     if (onProgress) onProgress(38);
-    if (stage) stage(process.env.ANTHROPIC_API_KEY ? '🎬 Claude is directing your edit…' : '🎬 The AI is watching your shots and directing…');
+    if (stage) stage('🎬 The AI is watching your shots and directing…');
     const d = await direct(cands, opts, music, log, ctx, tmp);
     if (onProgress) onProgress(50);
     const plan = finalise(d.plan, cands, opts, music);
@@ -3938,7 +3874,6 @@ function directorStatus() {
   return st;
 }
 function directorStatusOf() {
-  if (process.env.ANTHROPIC_API_KEY) return { director: 'claude', model: process.env.MW_MONTAGE_MODEL || 'claude-opus-5-5' };
   try { const sl = require('./serverllm'); if (sl.ready()) return { director: 'server', model: sl.status().model, vision: false }; } catch (e) {}
   try {
     if (require('./aaillm').ready()) { let vision = false; try { const cw = require('./cloudwrite'); vision = !!(cw.access && cw.access().key); } catch (e) {} return { director: 'assemblyai', model: '', vision, last: require('./aaillm').state().last, tries: require('./aaillm').state().tries }; }

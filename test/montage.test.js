@@ -1,13 +1,12 @@
 'use strict';
 /*
  * AI Montage (src/main/montage.js): the beat finder, the plan checker, what is
- * asked of Claude (with the SDK stood in for, so no key and no network), and a
+ * asked of Groq's vision model (stood in for, so no key and no network), and a
  * real montage rendered end to end on a 512 MB setting.
  *
  *   npm run test:montage
  */
 process.env.MW_MEMORY_MB = '512';
-delete process.env.ANTHROPIC_API_KEY;
 
 const fs = require('fs');
 const os = require('os');
@@ -67,37 +66,8 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
   log(plan.texts.length === 1 && plan.texts[0].start === 0 && plan.texts[0].end === round(plan.shots[2].at), 'words are timed to their shots; one pointing nowhere is dropped', JSON.stringify(plan.texts));
   log(plan.hashtags.join(',') === 'church,youthcamp', 'hashtags lose their # and spaces');
 
-  console.log('\nWHAT CLAUDE IS ASKED');
-  const seen = [];
-  class FakeBadRequest extends Error {}
-  const fake = function Anthropic() {
-    const create = async (body) => {
-      seen.push(body);
-      if (body.fallbacks) throw new FakeBadRequest('fallbacks not available on this account');
-      return { model: body.model, stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify({
-        concept: 'Open on the jump.', title: 'Camp night', post_caption: 'Best night', hashtags: ['camp'],
-        shots: [{ id: 'c2', seconds: 1, effect: 'flash', focus: 'center' }, { id: 'c1', seconds: 2, effect: 'cut', focus: 'center' }],
-        texts: [{ at_shot: 0, span_shots: 1, text: 'Wait for it', role: 'hook' }],
-      }) }] };
-    };
-    this.messages = { create };
-    this.beta = { messages: { create } };
-  };
-  fake.BadRequestError = FakeBadRequest;
-  require.cache[require.resolve('@anthropic-ai/sdk')] = { id: 'sdk', filename: 'sdk', loaded: true, exports: fake };
+  console.log('\nWITHOUT A CLOUD AI IT STILL DIRECTS');
   const thumbs = cands.map((c) => { c.thumb = make(['-f', 'lavfi', '-i', 'color=c=purple:s=180x320:d=1', '-frames:v', '1'], path.join(WORK, c.id + '.jpg')); return c; });
-  process.env.ANTHROPIC_API_KEY = 'test-not-a-key';
-  const got = await montage._direct(thumbs, { style: 'hype', lengthSec: 15, aspect: '9:16', brief: 'Youth camp' }, music);
-  delete process.env.ANTHROPIC_API_KEY;
-  const first = seen[0] || {}, second = seen[1] || {};
-  const images = (first.messages && first.messages[0].content.filter((b) => b.type === 'image').length) || 0;
-  log(got.director === 'claude' && got.plan.shots.length === 2, 'Claude directs when there is a key', got.director);
-  log(first.model === 'claude-opus-5-5', 'the model is Claude Opus 5.5', first.model);
-  log(images === 3, 'it is shown every candidate frame', images + ' pictures');
-  log(first.output_config && first.output_config.format && first.output_config.format.type === 'json_schema' && first.output_config.effort === 'high',
-    'it answers to a schema, thinking hard', JSON.stringify(first.output_config && { effort: first.output_config.effort, type: first.output_config.format.type }));
-  log(first.thinking && first.thinking.type === 'adaptive', 'adaptive thinking');
-  log(first.fallbacks === 'default' && second.model && !second.fallbacks, 'a refused fallback setting is retried without it');
   const noKey = await montage._direct(thumbs, { style: 'hype', lengthSec: 15, aspect: '9:16', brief: 'Youth camp worship' }, null);
   log(noKey.director === 'rules' || noKey.director === 'groq', 'without a key it still directs (' + noKey.director + ')');
 
@@ -121,13 +91,6 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
   log(forgot.texts[0] && forgot.texts[0].text === 'Youth camp 2026' && forgot.postCaption === brief && forgot.hashtags.length, 'an AI that left the hook and caption empty is filled in from it');
   const kept = montage.finalise({ shots: [{ id: 'c1', seconds: 3, effect: 'cut', focus: 'center', transition: 'cut' }], texts: [{ at_shot: 0, span_shots: 1, text: 'They came hungry', role: 'hook' }], hashtags: ['youthcamp'], post_caption: 'Three days we will never forget', title: 'Camp', concept: '' }, cands, { lengthSec: 15, brief }, null);
   log(kept.texts.length === 1 && kept.texts[0].text === 'They came hungry' && kept.postCaption === 'Three days we will never forget', 'and what the AI did write is left alone');
-  // what the AI is told
-  seen.length = 0;
-  process.env.ANTHROPIC_API_KEY = 'test-not-a-key';
-  await montage._direct(thumbs, { style: 'hype', lengthSec: 15, aspect: '9:16', brief }, music);
-  delete process.env.ANTHROPIC_API_KEY;
-  const said = ((seen[0] && seen[0].messages[0].content[0].text) || '');
-  log(said.includes(brief) && /story of the edit/.test(said) && /exactly as written/.test(said), 'Claude is given the words verbatim, as the story to tell');
 
   console.log('\nGROQ LOOKS AT THE SHOTS TOO (contact sheets)');
   const realCw = require.cache[require.resolve(path.join(ROOT, 'src/main/cloudwrite'))];
@@ -149,7 +112,7 @@ const make = (args, out) => { execFileSync(ffmpeg, ['-v', 'error', '-y', ...args
   if (realCw) require.cache[cwPath] = realCw; else delete require.cache[cwPath];
   const g0 = sentG[0] || { messages: [{}, { content: [] }] };
   const pics = (g0.messages[1].content || []).filter((c) => c.type === 'image_url');
-  log(gotG.director === 'groq' && gotG.vision && gotG.plan.shots.length === 2, 'without a Claude key, Groq directs from what it SEES', gotG.director + (gotG.vision ? ' (looking)' : ''));
+  log(gotG.director === 'groq' && gotG.vision && gotG.plan.shots.length === 2, 'Groq directs from what it SEES', gotG.director + (gotG.vision ? ' (looking)' : ''));
   log(pics.length >= 1 && pics.length <= 4 && /^data:image\/jpeg;base64,/.test(pics[0].image_url.url), 'every candidate goes on contact sheets — within Groq’s pictures-per-request', pics.length + ' sheet(s)');
   log(/qwen|llama-4/.test(g0.model || ''), 'on a vision model', g0.model);
   const sheet = fs.readdirSync(tmpG).find((f) => /^sheet-\d+\.jpg$/.test(f));

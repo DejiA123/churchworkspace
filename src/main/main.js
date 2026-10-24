@@ -291,7 +291,7 @@ app.whenReady().then(() => {
       ffprobePath: '',
       outputDir: defaultOutputDir(),
       brand: { churchName: 'Our Church', primaryColor: '#1f6feb', accentColor: '#f5a623' },
-      apiKeys: { anthropic: '', image: '', bible: '' },
+      apiKeys: { image: '', bible: '' },
       // Presentation Studio: which monitor each output goes to, and the
       // translation the Bible panel opens on.
       present: { audienceDisplay: '', stageDisplay: '', translation: 'kjv', versesPerSlide: 1, autoOpen: false },
@@ -2176,19 +2176,16 @@ ipcMain.handle('captions:cloudKey', wrap(async (e, { key } = {}) => {
  * and the operator says yes.
  */
 const capGrammar = require('../renderer/capgrammar.js');
-const claudetext = require('./claudetext');
 const capproof = require('./capproof');
 ipcMain.handle('captions:grammar', wrap(async (e, { lines, before, after, passage, caseMode, mode, jobId } = {}) => {
-  // The reader: Claude when the server has its key, else the free Groq models, else the PC's own.
-  const engine = claudetext.ready() ? 'claude' : cloudwrite.ready() ? 'groq' : llm.isAvailable() ? 'local' : '';
+  // The reader: the free Groq models, else the PC's own.
+  const engine = cloudwrite.ready() ? 'groq' : llm.isAvailable() ? 'local' : '';
   if (!engine) {
     const cw = cloudwrite.state();
     return { fixes: [], by: '', checked: 0, unavailable: true,
       why: cw.why || (cw.hasKey || cw.borrowingKey ? 'the AI writer is switched off in Settings' : 'no Groq key yet') };
   }
-  const ask = engine === 'claude'
-    ? ({ system, prompt, schema, maxTokens }) => claudetext.chatJson({ system, prompt, schema, maxTokens: Math.max(8000, maxTokens || 0) })
-    : engine === 'groq'
+  const ask = engine === 'groq'
       /*
        * The biggest free model first. The writer's ladder keeps whichever model
        * answered last, and on the live server that was gpt-oss-20b — the one
@@ -2239,7 +2236,7 @@ ipcMain.handle('captions:grammar', wrap(async (e, { lines, before, after, passag
   if (engine === 'groq') {
     try { agreed = await secondReader(out.fixes || [], lines, passage); } catch (er) { agreed = new Set(); }
   }
-  if (engine !== 'claude') {
+  {
     /*
      * Measured on the live server (12 minutes of a real sermon): of six fixes
      * the first free reader offered, one was right ("approve" -> "approach",
@@ -2260,7 +2257,7 @@ ipcMain.handle('captions:grammar', wrap(async (e, { lines, before, after, passag
     });
   }
   const cw = cloudwrite.state();
-  out.by = engine === 'claude' ? `Claude (${claudetext.model()})` : engine === 'groq' ? `${cw.providerName}${cw.usingModel ? ' — ' + cw.usingModel : ''}` : 'the AI model on this PC';
+  out.by = engine === 'groq' ? `${cw.providerName}${cw.usingModel ? ' — ' + cw.usingModel : ''}` : 'the AI model on this PC';
   if (out.failedBatches && !out.fixes.length) out.why = engine === 'groq' ? (cw.why || 'the AI did not answer') : 'the AI did not answer';
   return out;
 }));

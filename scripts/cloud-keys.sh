@@ -100,9 +100,9 @@ fi
 echo
 echo "  The studio has:"
 if ! $DOCKER compose exec -T studio sh -c '
-  for k in GROQ_API_KEY GEMINI_API_KEY ASSEMBLYAI_API_KEY MISTRAL_API_KEY CLOUDFLARE_API_TOKEN ANTHROPIC_API_KEY; do
+  for k in GROQ_API_KEY GEMINI_API_KEY ASSEMBLYAI_API_KEY MISTRAL_API_KEY CLOUDFLARE_API_TOKEN; do
     eval v=\${$k:-}
-    case $k in GROQ_API_KEY) w="captions + scans (Whisper)";; GEMINI_API_KEY) w="the third ear that checks every caption";; ASSEMBLYAI_API_KEY) w="a second ear that is not Whisper (free credit)";; MISTRAL_API_KEY) w="Mistral Large chooses the shorts (free)";; CLOUDFLARE_API_TOKEN) w="FLUX.2 paints the flyers (free)";; *) w="Claude (paid, optional)";; esac
+    case $k in GROQ_API_KEY) w="captions + scans (Whisper)";; GEMINI_API_KEY) w="the third ear that checks every caption";; ASSEMBLYAI_API_KEY) w="a second ear that is not Whisper (free credit)";; MISTRAL_API_KEY) w="Mistral Large chooses the shorts (free)";; *) w="FLUX.2 paints the flyers (free)";; esac
     if [ -n "$v" ]; then echo "    ✓ $k — $w"; else echo "    ✗ $k — not set ($w)"; fi
   done' 2>/dev/null; then
   warn "the studio is not running — start it with: FORCE=1 bash scripts/cloud-update.sh"
