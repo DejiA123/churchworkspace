@@ -175,7 +175,9 @@ async function marks({ rgb, width: W, height: H, faces }) {
   const out = [];
   for (const fc of faces) {
     let best = null;
+    // (the sizes from small to large; a sure find ends the search — the server's processor is shared)
     for (const S of [60, 85, 120, 170, 240, 340, 480]) {
+      if (best && best.s >= 0.9) break;
       for (const dy of [0, -0.15]) {
         const m = await marksIn(rgb, W, H, fc.x * W - S / 2, fc.y * H - S / 2 + dy * S, S);
         // (eyes a sensible way apart for the square — a pattern on a shirt can look like a face, squeezed)
