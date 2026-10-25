@@ -1447,15 +1447,9 @@
       if (st0.clear < 0.04) return { img: c, meta: null };   // a plain photo, nothing cut out: leave it
       let lm = null;
       try { if (root.FlyerAI && root.FlyerAI.poseOf) lm = await root.FlyerAI.poseOf(onGray(c)); } catch (e) { lm = null; }
-      if (lm) {
-        const env = envelope(W0, H0, lm);
-        if (env) {
-          const o = canvas(W0, H0), ox = o.getContext('2d');
-          ox.drawImage(c, 0, 0); ox.globalCompositeOperation = 'destination-in'; ox.drawImage(env, 0, 0);
-          // a wrong pose would take half the person: then it is not trusted
-          if (alphaStats(o).mass >= st0.mass * 0.55) c = o;
-        }
-      }
+      // (the pose places them on the page — and nothing more: trimming the cut-out to an outline drawn from it, an oval
+      //  round the nose, took the far cheek and the back of the Bishop's head when he sang side on — "his face is too
+      //  slim, parts still cut off". The cut-out is used as it is in the bank, where it can be seen and fixed.)
       const t = tidyCanvas(c);
       const meta = metaOf(t.c, lm, t.x0, t.y0, W0, H0);
       if (meta) { const cb = cleanBottom(t.c, meta.top, meta.sy); if (cb) meta.clean = cb; }
