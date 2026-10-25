@@ -4223,6 +4223,24 @@ html, body.mw-cloud, body.mw-cloud .cloud-home .ch-scroll, body.mw-cloud #cloudG
 .fs-kit-sp-top input::placeholder { color: #9aa1ad; font-weight: 500; }
 /* a photo in a speaker's bank: tap it to fix its cut-out, its ✕ to take it out */
 .fs-bank-cell { position: relative; min-width: 0; }
+/* photos being cut out: a tile each, at once — waiting (dimmed), its own bar while it is cut out (cloud-flyer.js addPhotos) */
+.fs-cut-tiles { display: contents; }
+.fs-cut-tile .fs-bank-pic img { object-fit: cover; object-position: center; opacity: .45; filter: grayscale(.4); }
+.fs-cut-tile.cut .fs-bank-pic img { opacity: .7; filter: none; }
+.fs-cut-tile-info { position: absolute; left: 4px; right: 4px; bottom: 4px; display: grid; gap: 4px; padding: 5px 6px; border-radius: 8px; background: rgba(15, 17, 21, .78); color: #fff; }
+.fs-cut-tile-info b { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.fs-cut-tile-bar { display: block; height: 5px; border-radius: 4px; overflow: hidden; background: rgba(255, 255, 255, .22); }
+.fs-cut-tile-bar i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, #1f6fe0, #4d95ef); transition: width .3s linear; }
+.fs-cut-tile.wait .fs-cut-tile-bar i { width: 0 !important; }
+.fs-cut-tile.fail .fs-cut-tile-bar i { background: #e5484d; }
+/* …and the whole lot, pinned to the top of the screen until the last is done */
+.fs-cutbar { position: fixed; z-index: 2147483000; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 10px); transform: translateX(-50%); width: min(440px, calc(100vw - 24px));
+  display: grid; gap: 8px; padding: 12px 14px; border-radius: 16px; background: #0f1115; color: #fff; box-shadow: 0 10px 30px rgba(0, 0, 0, .35); pointer-events: none; }
+.fs-cutbar-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 14px; line-height: 1.3; }
+.fs-cutbar-n { font-size: 18px; font-variant-numeric: tabular-nums; color: #8ec0ff; }
+.fs-cutbar-bar { height: 8px; border-radius: 6px; overflow: hidden; background: rgba(255, 255, 255, .16); }
+.fs-cutbar-bar i { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, #1f6fe0, #4d95ef); transition: width .3s linear; }
+.fs-cutbar small { font-size: 12px; color: rgba(255, 255, 255, .7); }
 .fs-bank-cell .fs-bank-pic { width: 100%; }
 .fs-pic-x { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%;
   color: #fff; background: rgba(15, 17, 21, .72); box-shadow: 0 1px 4px rgba(0, 0, 0, .25); cursor: pointer; }

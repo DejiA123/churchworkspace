@@ -5133,11 +5133,58 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   }
 
   /*
+   * ►► MANY PHOTOS BEING CUT OUT — WHERE IT IS, ALWAYS IN VIEW. ◄◄ "I selected 11 pictures… the loading bar
+   * disappears… it's shocking." A toast said it, faded between photos, and its number went backwards (each photo's
+   * own progress started again). Now every photo picked has a tile in the speaker's row at once (My church) — waiting,
+   * its own bar while it is cut out, then the cut-out — and one bar is pinned to the top of the screen until the last
+   * is done: the whole lot's progress, that only ever goes forward, wherever the studio is.
+   */
+  const CUTS = new WeakMap();   // speaker -> { name, items: [{ thumb, pct, state: 'wait'|'cut'|'done'|'fail', png }], shown }
+  let cutBar = null;
+  const cutJobs = new Set();
+  function cutWhole(job) {
+    const sum = job.items.reduce((a, it) => a + (it.state === 'done' || it.state === 'fail' ? 1 : it.state === 'cut' ? it.pct : 0), 0);
+    job.shown = Math.max(job.shown || 0, Math.min(100, Math.floor(sum / job.items.length * 100)));
+    return job.shown;
+  }
+  function cutTilesHtml(sp) {
+    const job = CUTS.get(sp); if (!job) return '';
+    return job.items.map((it, k) => it.state === 'done' ? '' : `<div class="fs-bank-cell fs-cut-tile ${it.state}" data-cut="${k}">
+      <div class="fs-bank-pic"><img src="${escAttr(it.thumb)}" alt=""></div>
+      <div class="fs-cut-tile-info"><b>${it.state === 'fail' ? 'Could not cut out' : it.state === 'cut' ? Math.round(it.pct * 100) + '%' : 'Waiting'}</b><span class="fs-cut-tile-bar"><i style="width:${it.state === 'fail' ? 100 : Math.round(it.pct * 100)}%"></i></span></div></div>`).join('');
+  }
+  function paintCuts(sp) {
+    const job = CUTS.get(sp); if (!job) return;
+    const all = cutWhole(job), done = job.items.filter((it) => it.state === 'done' || it.state === 'fail').length;
+    // the tiles in the speaker's row, if My church is open
+    job.items.forEach((it, k) => {
+      document.querySelectorAll(`[data-cutfor="${job.key}"] [data-cut="${k}"]`).forEach((el) => {
+        el.className = 'fs-bank-cell fs-cut-tile ' + it.state;
+        const b = el.querySelector('b'); if (b) b.textContent = it.state === 'fail' ? 'Could not cut out' : it.state === 'cut' ? Math.round(it.pct * 100) + '%' : 'Waiting';
+        const bar = el.querySelector('.fs-cut-tile-bar i'); if (bar) bar.style.width = (it.state === 'fail' ? 100 : Math.round(it.pct * 100)) + '%';
+      });
+    });
+    // the bar pinned to the top: every speaker's photos being cut out
+    if (!cutBar) { cutBar = document.createElement('div'); cutBar.className = 'fs-cutbar'; cutBar.setAttribute('role', 'status'); document.body.appendChild(cutBar); }
+    const jobs = [...cutJobs];
+    const total = jobs.reduce((a, j) => a + j.items.length, 0), finished = jobs.reduce((a, j) => a + j.items.filter((it) => it.state === 'done' || it.state === 'fail').length, 0);
+    const pct = jobs.length === 1 ? all : Math.floor(jobs.reduce((a, j) => a + cutWhole(j) * j.items.length, 0) / Math.max(1, total));
+    cutBar.innerHTML = `<div class="fs-cutbar-top"><span>Cutting out photos${jobs.length === 1 ? ' of <b>' + esc(job.name || 'this speaker') + '</b>' : ''}</span><b class="fs-cutbar-n">${pct}%</b></div>
+      <div class="fs-cutbar-bar"><i style="width:${pct}%"></i></div><small>${Math.min(total, finished + 1)} of ${total} · keep the studio open — each takes about half a minute</small>`;
+    if (done === job.items.length) { /* (this speaker's lot is finished: its bar goes when every lot has) */ }
+  }
+  function endCuts(sp) {
+    const job = CUTS.get(sp); if (job) cutJobs.delete(job);
+    CUTS.delete(sp);
+    if (!cutJobs.size && cutBar) { cutBar.remove(); cutBar = null; }
+  }
+
+  /*
    * ADD TO A BANK. One photo: the cut-out editor, to get it perfect. Several
    * at once: each cut out by the AI on its own (any one can be fixed later
    * from the bank).
    */
-  function addPhotos(s, then) {
+  function addPhotos(s, then, { redraw } = {}) {
     const inp = document.createElement('input');
     inp.type = 'file'; inp.accept = 'image/*'; inp.multiple = true;
     inp.onchange = async () => {
@@ -5151,24 +5198,34 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
           s.photos = (s.photos || []).concat(kept); await then();
         });
       }
-      let n = 0;
-      for (const f of files) {
-        toast(`Cutting out ${++n} of ${files.length}…`, '', 4000);
-        // how far through the whole lot, live (each photo half a minute on the studio's AI: it looked stuck)
-        let shown = -1;
-        const prog = (p) => { const all = Math.round(((n - 1) + p) / files.length * 100); if (all >= shown + 3 || p >= 1) { shown = all; toast(`Cutting out ${n} of ${files.length} — ${all}%`, '', 6000); } };
+      // every photo has its tile at once; the bar is pinned until the last is done
+      const job = { key: uid(), name: s.name, items: files.map((f) => ({ thumb: URL.createObjectURL(f), pct: 0, state: 'wait' })), shown: 0 };
+      CUTS.set(s, job); cutJobs.add(job);
+      if (redraw) await redraw(); paintCuts(s);
+      let added = 0;
+      for (let k = 0; k < files.length; k++) {
+        const it = job.items[k];
+        it.state = 'cut'; paintCuts(s);
+        // (each photo's own progress only goes forward: the server's answers can step back as its stages change)
+        const prog = (p) => { if (p > it.pct) { it.pct = Math.min(0.99, p); paintCuts(s); } };
         try {
-          const url = await shrinkToDataUrl(f, 1800);
-          let png = url;
-          try { png = await tidyCut((await window.FlyerAI.removePerson(url, prog)).src); } catch (e) { /* kept as it is */ }
+          const url = await shrinkToDataUrl(files[k], 1800);
+          let png = url, cut = false;
+          try { png = await tidyCut((await window.FlyerAI.removePerson(url, prog)).src); cut = true; } catch (e) { /* kept as it is */ }
           // each one kept on the server as soon as it is cut out (a speaker not yet saved is made as it goes)
           let kept = png;
           // (the photo it was cut from goes with it: the framed looks show that, nothing cut out)
           try { kept = await window.api.flyer.kitAddPhoto(s.id, png, s.name, url); PICURL.set(kept, png); ORIG.set(kept, url); } catch (e) { /* the next Save sends it */ }
           s.photos = (s.photos || []).concat(kept);
-        } catch (e) { /* skip that one */ }
+          it.state = cut ? 'done' : 'fail'; added++;
+        } catch (e) { it.state = 'fail'; }
+        try { URL.revokeObjectURL(it.thumb); } catch (e) { /* gone */ }
+        // the cut-out takes its tile's place in the row as soon as it is done
+        if (redraw) await redraw();
+        paintCuts(s);
       }
-      toast(`${files.length} photos added to ${s.name || 'the bank'}. Tap one in My church to fix its cut-out.`, 'good', 6000);
+      endCuts(s);
+      toast(`${added} of ${files.length} photos added to ${s.name || 'the bank'}. Tap one in My church to fix its cut-out.`, added === files.length ? 'good' : '', 8000);
       await then();
     };
     if (C && C.openPicker) C.openPicker(inp); else inp.click();
@@ -5354,6 +5411,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
             <input data-spf="name" data-i="${i}" value="${escAttr(s.name || '')}" placeholder="Bishop David Richman"><button type="button" class="fs-x" data-k="sprm" data-i="${i}" aria-label="Remove">${ic('trash')}</button></div>
             <div class="fs-bank fs-bank-sm">${(s.photos || []).map((p, j) => `<div class="fs-bank-cell"><button type="button" class="fs-bank-pic" data-k="sppic" data-i="${i}" data-j="${j}" aria-label="Fix this photo’s cut-out">${picTag(p)}</button>
               <button type="button" class="fs-pic-x" data-k="sppicrm" data-i="${i}" data-j="${j}" aria-label="Remove this photo">${ic('close')}</button></div>`).join('')}
+            <span class="fs-cut-tiles" data-cutfor="${escAttr((CUTS.get(s) || {}).key || '')}">${cutTilesHtml(s)}</span>
             <button type="button" class="fs-bank-pic fs-bank-add" data-k="spadd-pic" data-i="${i}">${ic('plus')}<small>Add photos<br>(several at once)</small></button></div></div>`).join('')}
           <button type="button" class="fs-ghost" data-k="spadd">${ic('plus')}<span>Add a speaker</span></button></div>
         </section>
@@ -5388,7 +5446,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       switch (b.dataset.k) {
         // the logo exactly as it is — never cut out (see logoLayers); a PNG keeps its see-through parts
         case 'logo': return pickImage(async (url) => { k.logoUrl = url; IMGS.set('logo', await loadImg(url)); drawKit(); }, { png: true, max: 900 });
-        case 'spadd-pic': return addPhotos(k.speakers[i], async () => drawKit());
+        case 'spadd-pic': return addPhotos(k.speakers[i], async () => drawKit(), { redraw: async () => drawKit() });
         case 'inspoadd': return addInspiration(() => drawKit());
         case 'inspo': {
           if (!window.confirm('Take this flyer off your inspiration board?')) return;

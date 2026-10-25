@@ -6,6 +6,9 @@
  *   - each photo in a speaker's bank has its own ✕: tapping it takes that one
  *     photo out (no questions in between), the others stay, and after Save the
  *     server's bank no longer has it
+ *   - several photos picked at once: a tile for each at once, and one bar pinned
+ *     to the top until the last is cut out — only ever going forward ("I
+ *     selected 11 pictures… the loading bar disappears… it's shocking")
  * MW_SHOTS=<dir> saves screenshots.
  *   node test/phone-flyer-kit.test.js
  */
@@ -152,6 +155,41 @@ async function waitUp() {
     for (let t = 0; t < 40; t++) { kit = await page.evaluate(() => window.api.flyer.kitGet()); if (kit.speakers[0].photos.length === 2) break; await sleep(250); }
     check(kit && JSON.stringify(kit.speakers[0].photos) === JSON.stringify([files[0], files[2]]), 'after Save the bank has the other two, in their order', kit && kit.speakers[0].photos);
     check(!fs.existsSync(path.join(DATA, 'flyer-kit', files[1])), 'and the removed photo is gone from the server');
+
+    // ── several photos at once: a tile each straight away, one bar pinned to the top until the last is done
+    const ff = require('ffmpeg-static');
+    const picks = ['0x1e3a8a', '0x7f1d1d', '0x14532d'].map((c, k) => {
+      const f = path.join(WORK, `pick-${k}.png`);
+      require('child_process').execFileSync(ff, ['-v', 'error', '-y', '-f', 'lavfi', '-i', `color=c=${c}:s=300x400`, '-frames:v', '1', f]);
+      return f;
+    });
+    await page.evaluate(() => window.MWFlyerStudio.openKit());
+    await page.waitForSelector('.cp-flyer-kit [data-k="spadd-pic"]', { timeout: 15000 });
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser', { timeout: 10000 }), page.locator('.cp-flyer-kit [data-k="spadd-pic"]').first().tap()]);
+    await chooser.setFiles(picks);
+    const seenB = [];
+    for (let t = 0; t < 80; t++) {
+      await sleep(400);
+      const v = await page.evaluate(() => {
+        const b = document.querySelector('.fs-cutbar');
+        return { bar: b ? parseInt(b.querySelector('.fs-cutbar-n').textContent, 10) : null, words: b ? b.textContent.replace(/\s+/g, ' ').trim() : '',
+          tiles: [...document.querySelectorAll('.cp-flyer-kit .fs-cut-tile')].map((x) => x.className.replace(/.*fs-cut-tile ?/, '')),
+          bank: document.querySelectorAll('.cp-flyer-kit .fs-bank-cell:not(.fs-cut-tile)').length };
+      });
+      seenB.push(v);
+      if (t === 6 && SHOTS) await page.screenshot({ path: path.join(SHOTS, 'kit-bulk.png') });
+      if (t > 3 && v.bar == null && !v.tiles.length) break;
+    }
+    const first = seenB.find((v) => v.tiles.length) || {};
+    check(seenB.slice(0, 4).some((v) => v.tiles.length === 3), 'three photos picked: three tiles in the speaker’s row straight away', seenB.slice(0, 4));
+    check(first.tiles && first.tiles.filter((x) => x === 'wait').length >= 2, 'the ones not yet started say they are waiting', first.tiles);
+    const bars = seenB.filter((v) => v.bar != null).map((v) => v.bar);
+    const gone = seenB.findIndex((v) => v.bar == null && seenB.indexOf(v) > 0);
+    check(bars.length >= 8 && bars.every((b, i) => !i || b >= bars[i - 1]), 'one bar pinned to the top the whole time, only going forward', bars);
+    check(seenB.slice(0, Math.max(1, seenB.length - 2)).every((v) => v.bar != null || !v.tiles.length), 'it never disappears while photos are still being cut out', seenB.map((v) => [v.bar, v.tiles.length]));
+    check(/Bishop David Richman/.test((seenB.find((v) => v.words) || {}).words || '') && /of 3/.test((seenB.find((v) => v.words) || {}).words || ''), 'it says whose photos and how many', (seenB.find((v) => v.words) || {}).words);
+    const last = seenB[seenB.length - 1];
+    check(last.bar == null && last.tiles.length === 0 && last.bank === 5, 'when the last is done the bar goes, and the three cut-outs are in the bank', last);
   } catch (e) {
     check(false, 'the test ran to the end', e && e.message);
   } finally { await done(); }
