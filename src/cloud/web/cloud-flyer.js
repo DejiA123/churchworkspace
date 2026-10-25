@@ -5179,24 +5179,64 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     if (!cutJobs.size && cutBar) { cutBar.remove(); cutBar = null; }
   }
 
+  // a question with a few answers, over everything (the cut-out editor included); resolves with the answer's key, '' for none
+  function askChoice(title, options) {
+    return new Promise((resolve) => {
+      const el = document.createElement('div'); el.className = 'fs-choice';
+      el.innerHTML = `<div class="fs-choice-box" role="dialog" aria-label="${escAttr(title)}"><h3>${esc(title)}</h3>
+        ${options.map((o) => `<button type="button" class="fs-choice-opt${o.on ? ' on' : ''}" data-w="${escAttr(o.key)}"><b>${esc(o.label)}</b>${o.note ? `<small>${esc(o.note)}</small>` : ''}</button>`).join('')}
+        <button type="button" class="fs-choice-x" data-w="">Cancel</button></div>`;
+      el.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-w]');
+        if (!b && e.target !== el) return;
+        el.remove(); resolve(b ? b.dataset.w : '');
+      });
+      document.body.appendChild(el);
+    });
+  }
+
   /*
-   * ADD TO A BANK. One photo: the cut-out editor, to get it perfect. Several
-   * at once: each cut out by the AI on its own (any one can be fixed later
-   * from the bank).
+   * ADD TO A BANK. "The cut-out should not be automatic — I should have the option." Asked each time (the last
+   * answer first): the AI cuts them all out (in the background — a tile each and a bar), or each opens in turn in the
+   * cut-out editor, the AI's cut first, to be fixed and kept with "Use this".
    */
   function addPhotos(s, then, { redraw } = {}) {
     const inp = document.createElement('input');
     inp.type = 'file'; inp.accept = 'image/*'; inp.multiple = true;
     inp.onchange = async () => {
       const files = Array.from(inp.files || []).slice(0, 30); if (!files.length) return;
-      if (files.length === 1) {
-        const url = await shrinkToDataUrl(files[0], 1800);
-        return cutOutUrl(url, async (png) => {
+      let last = 'auto'; try { last = localStorage.getItem('mw.flyer.cutway') || 'auto'; } catch (e) { /* none kept */ }
+      const many = files.length > 1;
+      const way = await askChoice(`${files.length} photo${many ? 's' : ''} of ${s.name || 'this speaker'} — how should ${many ? 'they' : 'it'} be cut out?`, [
+        { key: 'auto', on: last === 'auto', label: `Cut ${many ? 'them' : 'it'} out for me`, note: `The AI does ${many ? 'each one' : 'it'}, about half a minute each. Tap any photo later to fix its cut-out.` },
+        { key: 'check', on: last === 'check', label: many ? 'Let me check each one' : 'Let me check it', note: 'Opens in the cut-out editor: the AI’s cut first, then you fix it and tap “Use this”.' },
+      ]);
+      if (!way) return;
+      try { localStorage.setItem('mw.flyer.cutway', way); } catch (e) { /* not kept */ }
+      if (way === 'check') {
+        let added = 0;
+        for (let k = 0; k < files.length; k++) {
+          const url = await shrinkToDataUrl(files[k], 1800);
+          const m = document.getElementById('cutModal'); if (m) m.style.zIndex = '2000';
+          let png = await new Promise((res) => {
+            if (!window.CutOut || !window.FlyerAI) { toast('The cut-out tool is not available here.', 'error'); return res(null); }
+            window.CutOut.open(url, (p) => res(p), { title: many ? `Photo ${k + 1} of ${files.length}` : undefined, onCancel: () => res(null) });
+          });
+          if (m) m.style.zIndex = '';
+          if (!png) {
+            if (k === files.length - 1) break;
+            const w = await askChoice(`Photo ${k + 1} was not kept.`, [{ key: 'next', on: true, label: `Go on to photo ${k + 2} of ${files.length}` }, { key: 'stop', label: 'Stop here' }]);
+            if (w !== 'next') break;
+            continue;
+          }
           png = await tidyCut(png).catch(() => png);
           let kept = png;
           try { kept = await window.api.flyer.kitAddPhoto(s.id, png, s.name, url); PICURL.set(kept, png); ORIG.set(kept, url); } catch (e) { /* the next Save sends it */ }
-          s.photos = (s.photos || []).concat(kept); await then();
-        });
+          s.photos = (s.photos || []).concat(kept); added++;
+          if (redraw) await redraw();
+        }
+        if (many) toast(`${added} of ${files.length} photos added to ${s.name || 'the bank'}.`, added ? 'good' : '', 6000);
+        return then();
       }
       // every photo has its tile at once; the bar is pinned until the last is done
       const job = { key: uid(), name: s.name, items: files.map((f) => ({ thumb: URL.createObjectURL(f), pct: 0, state: 'wait' })), shown: 0 };

@@ -245,6 +245,11 @@
       return;
     }
     ED.src = src; ED.onDone = onDone; ED.open = true;
+    // (closed without "Use this": the host is told — one photo of several is skipped, or the rest are stopped)
+    ED.onCancel = opts.onCancel || null;
+    // (one of several: "Photo 2 of 11" in the title)
+    const h = document.querySelector('#cutModal .cut-head h2');
+    if (h) { if (!h.dataset.plain) h.dataset.plain = h.textContent; h.textContent = opts.title || h.dataset.plain; }
     // "Put the background back" only means something when there IS a cut-out to
     // undo, so the host says whether to offer it rather than it always sitting
     // there doing nothing.
@@ -277,12 +282,14 @@
 
   function wire() {
     if (!$('cutModal')) return;
-    $('cutClose').onclick = close;
-    $('cutCancel').onclick = close;
+    const cancel = () => { const c = ED.onCancel; ED.onCancel = null; close(); if (c) c(); };
+    $('cutClose').onclick = cancel;
+    $('cutCancel').onclick = cancel;
     $('cutApply').onclick = () => {
-      if (!ED.rgba) return close();
+      if (!ED.rgba) return cancel();
       const png = window.FlyerAI.composite(ED.w, ED.h, ED.rgba, finalAlpha());
       const cb = ED.onDone;
+      ED.onCancel = null;
       close();
       if (cb) cb(png);
     };

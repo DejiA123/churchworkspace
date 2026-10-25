@@ -260,9 +260,12 @@ function obstruction(mask, gate, W, H, gw, gh, lm) {
 
 /*
  * The model's mask (0..255, the picture's size), tidied in place with the body from the phone's pose (null: as it
- * is): waist up when something stands in front of them (obstruction), and only what is them (bodyGate).
+ * is): only what is them (bodyGate) — the whole of them, head to feet. "The cut-out is terrible… it cuts part of
+ * the face": fading out above a lectern (obstruction, `waistUp: true`) cut the Bishop off in a straight line across
+ * his chest in five of ten photos. Canva and Adobe keep the whole person; so does this now. What stands in front
+ * of them is kept only where it is over them (a clear lectern, him seen through it); the rest of it goes.
  */
-function tidyMask(mask, W, H, pose) {
+function tidyMask(mask, W, H, pose, { waistUp: chop = false } = {}) {
   // only what is them (bodyGate — from the phone's pose of the same picture), before the shapes are counted: a
   // lectern's edge cut off from them by it is then a speck apart, and goes
   let gated = 0, waistUp = null;
@@ -271,7 +274,7 @@ function tidyMask(mask, W, H, pose) {
     const g = bodyGate(pose, W, H, gw, gh);
     // something in front of them (before the gate takes the rest of it away): from there down, fade out
     waistUp = g ? obstruction(mask, g, W, H, gw, gh, pose) : null;
-    if (waistUp != null) {
+    if (waistUp != null && chop) {
       // (the fade ends a little above where the thing was first found outside the body: a lectern's top runs on
       //  between the hands, inside it; never above the chest)
       const sPx = Math.max(8, Math.hypot((pose[11].x - pose[12].x) * W, (pose[11].y - pose[12].y) * H));

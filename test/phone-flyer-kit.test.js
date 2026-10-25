@@ -9,6 +9,8 @@
  *   - several photos picked at once: a tile for each at once, and one bar pinned
  *     to the top until the last is cut out — only ever going forward ("I
  *     selected 11 pictures… the loading bar disappears… it's shocking")
+ *   - asked each time how: cut out for me, or check each one in the cut-out
+ *     editor ("the cut-out should not be automatic — I should have the option")
  * MW_SHOTS=<dir> saves screenshots.
  *   node test/phone-flyer-kit.test.js
  */
@@ -167,6 +169,11 @@ async function waitUp() {
     await page.waitForSelector('.cp-flyer-kit [data-k="spadd-pic"]', { timeout: 15000 });
     const [chooser] = await Promise.all([page.waitForEvent('filechooser', { timeout: 10000 }), page.locator('.cp-flyer-kit [data-k="spadd-pic"]').first().tap()]);
     await chooser.setFiles(picks);
+    // asked how: the two ways, then "cut them out for me"
+    await page.waitForSelector('.fs-choice [data-w="auto"]', { timeout: 10000 });
+    const ways = await page.evaluate(() => [...document.querySelectorAll('.fs-choice [data-w]')].map((b) => b.dataset.w));
+    check(ways.join() === 'auto,check,', 'picking photos asks how: cut them out for me, or check each one (or cancel)', ways);
+    await page.locator('.fs-choice [data-w="auto"]').tap();
     const seenB = [];
     for (let t = 0; t < 80; t++) {
       await sleep(400);
@@ -190,6 +197,26 @@ async function waitUp() {
     check(/Bishop David Richman/.test((seenB.find((v) => v.words) || {}).words || '') && /of 3/.test((seenB.find((v) => v.words) || {}).words || ''), 'it says whose photos and how many', (seenB.find((v) => v.words) || {}).words);
     const last = seenB[seenB.length - 1];
     check(last.bar == null && last.tiles.length === 0 && last.bank === 5, 'when the last is done the bar goes, and the three cut-outs are in the bank', last);
+
+    // ── "let me check each one": each opens in the cut-out editor in turn; one not kept, the next comes on
+    const [ch2] = await Promise.all([page.waitForEvent('filechooser', { timeout: 10000 }), page.locator('.cp-flyer-kit [data-k="spadd-pic"]').first().tap()]);
+    await ch2.setFiles(picks.slice(0, 2));
+    await page.waitForSelector('.fs-choice [data-w="check"]', { timeout: 10000 });
+    const remembered = await page.evaluate(() => (document.querySelector('.fs-choice .on') || {}).dataset.w);
+    check(remembered === 'auto', 'the last way chosen is offered first', remembered);
+    await page.locator('.fs-choice [data-w="check"]').tap();
+    await page.waitForSelector('#cutModal:not(.hidden)', { timeout: 20000 });
+    const t1 = await page.evaluate(() => document.querySelector('#cutModal .cut-head h2').textContent);
+    check(/Photo 1 of 2/.test(t1), 'the first opens in the cut-out editor: "Photo 1 of 2"', t1);
+    await page.waitForFunction(() => window.CutOut.__test.state().w > 0, null, { timeout: 30000 }).catch(() => {});
+    await page.evaluate(() => document.getElementById('cutApply').click());
+    await page.waitForFunction(() => /Photo 2 of 2/.test((document.querySelector('#cutModal:not(.hidden) .cut-head h2') || {}).textContent || ''), null, { timeout: 30000 }).catch(() => {});
+    const t2 = await page.evaluate(() => (document.querySelector('#cutModal:not(.hidden) .cut-head h2') || {}).textContent || '');
+    check(/Photo 2 of 2/.test(t2), '"Use this" keeps it, and the next opens: "Photo 2 of 2"', t2);
+    await page.evaluate(() => document.getElementById('cutCancel').click());
+    await sleep(800);
+    const after = await page.evaluate(() => ({ bank: document.querySelectorAll('.cp-flyer-kit .fs-bank-cell:not(.fs-cut-tile)').length, open: !!document.querySelector('#cutModal:not(.hidden)'), ask: !!document.querySelector('.fs-choice') }));
+    check(after.bank === 6 && !after.open && !after.ask, 'the one kept is in the bank; the last one closed is not', after);
   } catch (e) {
     check(false, 'the test ran to the end', e && e.message);
   } finally { await done(); }

@@ -49,8 +49,11 @@ ok(typeof st.available === 'boolean' && typeof st.model === 'boolean', 'it says 
   const t2 = c.tidyMask(chair, W2, H2, lm);
   ok(at2(chair, 90, 600) === 0 && at2(chair, 300, 300) > 200, 'a chair at his side goes; he stays', t2);
   const lectern = body(); for (let y = 600; y < 1000; y++) for (let x = 150; x < 450; x++) lectern[y * W2 + x] = 255;   // a lectern in front of his legs
+  const lectern2 = Uint8Array.from(lectern);
   const t3 = c.tidyMask(lectern, W2, H2, lm);
-  ok(t3.waistUp != null && at2(lectern, 300, 950) === 0 && at2(lectern, 300, 300) > 200 && at2(lectern, 300, 100) > 200, 'a lectern in front of him: him from the waist up, faded out above it', t3);
+  ok(t3.waistUp != null && at2(lectern, 300, 950) > 200 && at2(lectern, 300, 300) > 200 && at2(lectern, 300, 100) > 200, 'a lectern in front of him: found, and all of him kept, head to feet (no line across his chest)', t3);
+  const t4 = c.tidyMask(lectern2, W2, H2, lm, { waistUp: true });
+  ok(t4.waistUp != null && at2(lectern2, 300, 950) === 0 && at2(lectern2, 300, 300) > 200 && at2(lectern2, 300, 100) > 200, 'asked for: him from the waist up, faded out above it', t4);
   ok(c.tidyMask(body(), W2, H2, null).waistUp == null, 'no pose from the phone: the mask as the model made it');
   ok(c.bodyGate([{ x: 0.5 }], W2, H2, 10, 10) === null, 'a pose that is not one: no gate');
 }
