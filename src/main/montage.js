@@ -2483,7 +2483,9 @@ function sameTop(a, b) {
  *   - alike, not surely, and no top to go by: taken as one; otherwise the same top in the same stretch (sameTop)
  * Without face recognition here (no model), it is what they wear and when, as before.
  */
-const FACES_DIFFER = 0.3, PLAINLY_OTHER = 0.15, STAGE_STRETCH = 15 * 60, STAGE_LONG = 30 * 60, A_LITTLE_ALIKE = 0.27;
+// (a quarter of an hour took 70 of 88 moments on Gospel Jamz — eight speakers cover the night — and left no cut at all: ten minutes, and
+//  faces under 0.22 alike are two people even within them)
+const FACES_DIFFER = 0.3, PLAINLY_OTHER = 0.22, STAGE_STRETCH = 10 * 60, STAGE_LONG = 30 * 60, A_LITTLE_ALIKE = 0.27;
 function onePerson(a, b, fp) {
   if (!a || !b) return false;
   const faced = !!(fp && a.faces && a.faces.length && b.faces && b.faces.length);
@@ -3392,7 +3394,8 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           // (another good line — the AI's best scored first; of this part of the night first, then of any)
           const okAlt = (q) => !picks.includes(q) && !rejected.has(q) && Math.abs(lenOf(q) - lenOf(p)) <= 1.2
             && q.end - q.start >= MOMENT_LINE_MIN && q.end - q.start <= MOMENT_LINE_MAX + 0.3 && fitsEvent(q) && wholeThought(q) && !CROWD.test(q.text) && !HOUSEKEEPING.test(q.text) && !NOT_TO_SHARE.test(q.text) && messageOf(q) > 0
-            && (q.aiScore == null || q.aiScore >= SCORE_KEEP)
+            // (a little lower than a part's own bar: a good line of someone new beats the same speaker twice)
+            && (q.aiScore == null || q.aiScore >= SCORE_KEEP - 1)
             && !picks.some((r) => r !== p && r.vid === q.vid && Math.abs(r.start - q.start) < LINE_APART);
           const best = (x, y) => ((y.aiScore == null ? -1 : y.aiScore) - (x.aiScore == null ? -1 : x.aiScore)) || (lineVal(y) - lineVal(x));
           const alts = list.filter((q) => okAlt(q) && ev.part(q) === ev.part(p)).sort(best).slice(0, 6)
@@ -4038,7 +4041,7 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 
 /** Which director the montage would use right now (for the phone to say so). */
 /* which montage the server runs (montage:status says it: a quiet way to tell an update has landed) */
-const MONTAGE_REV = '2026-10-25.one-rule';
+const MONTAGE_REV = '2026-10-25.final';
 function directorStatus() {
   const st = directorStatusOf();
   st.rev = MONTAGE_REV;
