@@ -2470,25 +2470,30 @@ function sameTop(a, b) {
   return (dt <= 10 * 60 && o >= 0.2) || (dt <= SAME_TOP_SEC && o >= SAME_TOP);
 }
 /*
- * One person in two pictures ({ vid, t, top, faces }): their faces say so (faceprint.js); or, when faces cannot tell
- * (none seen, side on — a likeness between), the same top in the same stretch of the night (sameTop). Two faces
- * not alike (under 0.3: different people measured up to 0.36 on Gospel Jamz, one person 0.36–0.66) are two people,
- * whatever they wear — "a dark top within 25 minutes" of seven speakers covered the whole night, and 66 of 88
- * moments were turned down.
+ * ►► ONE PERSON IN TWO PICTURES ({ vid, t, top, faces }) — one rule for every picture of the edit. ◄◄
+ * Faces on a stage filmed at 720p are often side on and 30 pixels wide: SFace tells one person from another only
+ * some of the time (one person measured 0.29–0.66 on Gospel Jamz, two people up to 0.36). What it can be sure of
+ * decides; where it cannot, the night's own shape does — someone on stage stays there for a stretch:
+ *   - faces surely alike (0.363, OpenCV's line): one person
+ *   - of one video within a quarter of an hour: one person, unless the faces plainly differ (under 0.15 — the band
+ *     beside the singer). The man in green at 188 and 192 min, the man in the navy jumper at 136 and 147, the
+ *     host at 7.7 and 13.5, the young man in the hoodie at 113 and 119 were each shown twice before this
+ *   - within half an hour and a little alike (0.27 — the man in the brown polo, 40.6 and 62.6 min, was 0.29)
+ *   - plainly not alike (under 0.3): two people, whatever they wear (the band all in black)
+ *   - alike, not surely, and no top to go by: taken as one; otherwise the same top in the same stretch (sameTop)
+ * Without face recognition here (no model), it is what they wear and when, as before.
  */
-const FACES_DIFFER = 0.3;
+const FACES_DIFFER = 0.3, PLAINLY_OTHER = 0.15, STAGE_STRETCH = 15 * 60, STAGE_LONG = 30 * 60, A_LITTLE_ALIKE = 0.27;
 function onePerson(a, b, fp) {
   if (!a || !b) return false;
-  if (fp && a.faces && a.faces.length && b.faces && b.faces.length) {
-    const l = fp.likeness(a.faces, b.faces);
-    if (l >= fp.SAME) return true;
-    if (l < FACES_DIFFER) return false;
-    // (alike, not surely: within a quarter of an hour of each other they are one — the man in green, 0.32 at 188
-    //  and 192 min, from two cameras his top did not match in, was shown twice; further apart their tops decide, and
-    //  with no top to go by they are taken as one)
-    if (a.vid === b.vid && Math.abs(a.t - b.t) <= 15 * 60) return true;
-    if (!(a.top && b.top)) return true;
-  }
+  const faced = !!(fp && a.faces && a.faces.length && b.faces && b.faces.length);
+  const l = faced ? fp.likeness(a.faces, b.faces) : null;
+  const apart = a.vid === b.vid && Number.isFinite(a.t) && Number.isFinite(b.t) ? Math.abs(a.t - b.t) : Infinity;
+  if (faced && l >= fp.SAME) return true;
+  if (fp && apart <= STAGE_STRETCH) return !(faced && l < PLAINLY_OTHER);
+  if (faced && l >= A_LITTLE_ALIKE && apart <= STAGE_LONG) return true;
+  if (faced && l < FACES_DIFFER) return false;
+  if (faced && !(a.top && b.top)) return true;
   return !!(a.top && b.top) && sameTop(a, b);
 }
 /* the top of the person a picture shows at source time `t` (the biggest face inside the cut round `fx`); null when
@@ -3375,15 +3380,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           }
           return topOf.get(p);
         };
-        /*
-         * Two LINES are one speaker more readily than two pictures: a speaker holds the stage for a stretch, so two
-         * lines of one video within half an hour whose faces are even a little alike (0.27 — the man in the brown polo,
-         * close up at 40.6 min and on stage at 62.6, was 0.29) are taken as one.
-         */
-        // (and two lines of one video within a quarter of an hour are one speaker, face seen or not — lines are 10 min
-        //  apart at least, so this is the speaker going on: the man in the navy jumper at 146.5 and 156.8 min)
-        const twins = (a, b) => onePerson(a, b, fpS) || !!(fpS && a && b && a.vid === b.vid && (Math.abs(a.t - b.t) <= 15 * 60
-          || (Math.abs(a.t - b.t) <= 30 * 60 && a.faces && a.faces.length && b.faces && b.faces.length && fpS.likeness(a.faces, b.faces) >= 0.27)));
+        const twins = (a, b) => onePerson(a, b, fpS);
         let swaps = 0;
         for (let i = 1; pdS && i < picks.length && swaps < 10; i++) {
           const p = picks[i];
@@ -3688,16 +3685,28 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       };
       const shownPeople = [];   // everyone shown: { vid, t, top, faces }
       /*
+       * A CUT INSIDE A MOMENT. The stream switches cameras, and cross-fades between them: a moment over one plays as
+       * two pictures, half of one through the other. Five small frames across it: a cut is one step far bigger than
+       * the rest (measured on Gospel Jamz: 46 and 48 against 5–6; a moving camera or a dancing worship team changes
+       * evenly — 20–60 every step).
+       */
+      const cutInside = async (file, from, len) => {
+        const grab = async (t) => { try { const r = await collect(ctx.ffmpeg, ['-hide_banner', '-loglevel', 'error', '-ss', String(Math.max(0, t)), '-i', file, '-frames:v', '1', '-vf', 'scale=32:18', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { stdout: true, maxBytes: 1 << 16 }); return r && r.stdout && r.stdout.length >= 1728 ? r.stdout : null; } catch (e) { if (e instanceof jobs.CancelledError) throw e; return null; } };
+        const fr = [];
+        for (let k = 0; k < 5; k++) fr.push(await grab(from + 0.1 + (len - 0.2) * k / 4));
+        if (fr.some((f) => !f)) return false;
+        const steps = [];
+        for (let k = 1; k < fr.length; k++) { let d = 0; for (let i = 0; i < 1728; i++) d += Math.abs(fr[k][i] - fr[k - 1][i]); steps.push(d / 1728); }
+        const sorted = steps.slice().sort((p, q) => p - q), big = sorted[sorted.length - 1], mid = (sorted[1] + sorted[2]) / 2;
+        return big >= 35 && big >= 3 * Math.max(mid, 1);
+      };
+      /*
        * EVERY SPEAKER IS KEPT FOR THEIR OWN LINE. The moments cut to were chosen walking the edit from the start, so
        * a cut at 8 s took the man in green, and at 18 s his own line had him again with no one new left to cover
        * it. Each speaker's face and top are read first, and no moment cut to is of anyone with a line of their own.
        */
       const speakers = new Map();   // first beat of a line -> { vid, t, top, faces }
-      // (and within 5 minutes of their line, they are still on stage — unless the faces plainly differ: the man in
-      //  green side on at 188 and 192 min was alike by neither his face nor his top, from two cameras)
-      const SPEAKER_STRETCH = 5 * 60, PLAINLY_OTHER = 0.15;
-      const aSpeaker = (who) => [...speakers.values()].some((sp) => onePerson(sp, who, fpx)
-        || (sp.vid === who.vid && Math.abs(sp.t - who.t) <= SPEAKER_STRETCH && !(fpx && sp.faces.length && who.faces.length && fpx.likeness(sp.faces, who.faces) < PLAINLY_OTHER)));
+      const aSpeaker = (who) => [...speakers.values()].some((sp) => onePerson(sp, who, fpx));
       // (faces told apart: the same person is caught by their face, so moments need only be a minute and a half apart —
       //  3¾ minutes left 45 lively moments too few to cover a 5½-second line, and it played as one picture; a minute)
       const GAP = fpx ? clamp((opts.eventSec || 0) / (nPics * 20), 30, 60) : clamp((opts.eventSec || 0) / (nPics * 5), 45, 240);
@@ -3713,7 +3722,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         if (x.top === undefined) x.top = await topAt(ctx, pdx, x.cand, t, x.track ? trackAt(x.track, t) : x.snapLook && x.snapLook.fx, frT.W, frT.H);
         return x.top ? { vid: x.vid, t, top: x.top } : null;
       };
-      const why = { used: 0, near: 0, hour: 0, who: 0, top: 0, scene: 0, face: 0, faceless: 0, speaker: 0 };
+      const why = { used: 0, near: 0, hour: 0, who: 0, top: 0, scene: 0, face: 0, faceless: 0, speaker: 0, cut: 0 };
       const fresh = async () => {
         for (const x of spare) {
           if (used.has(x)) continue;
@@ -3725,6 +3734,8 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           // (a moment cut to shows someone's FACE: the person detector took the people drawn on a "Gospel Jamz —
           //  Evangelism Panel" banner for one, and the cut was the banner — 24 min)
           if (fpx && !fc.length) { used.add(x); why.faceless++; continue; }
+          // (a moment that has a cut or a cross-fade in it is two pictures, not one: the camera changing under it)
+          if (fpx && await cutInside(x.cand.file, snapAt(x) - 1.3, 2.6)) { used.add(x); why.cut++; continue; }
           const tp = await topOfSpare(x);
           const who = { vid: x.vid, t: snapAt(x), top: tp ? tp.top : null, faces: fc };
           if (fpx && aSpeaker(who)) { used.add(x); why.speaker++; continue; }   // (someone with a line of their own)
@@ -4027,7 +4038,7 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 
 /** Which director the montage would use right now (for the phone to say so). */
 /* which montage the server runs (montage:status says it: a quiet way to tell an update has landed) */
-const MONTAGE_REV = '2026-10-24.no-layouts';
+const MONTAGE_REV = '2026-10-25.one-rule';
 function directorStatus() {
   const st = directorStatusOf();
   st.rev = MONTAGE_REV;
