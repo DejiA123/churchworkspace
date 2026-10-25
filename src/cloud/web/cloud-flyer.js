@@ -1708,6 +1708,30 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       if (dy > 0) { dy = Math.min(dy, im.h * 0.3, H * 0.12); im.y += dy; }
     });
   }
+  /*
+   * ►► THE FIRST NAMED IS NEVER THE SMALLER. ◄◄ "The woman is bigger than the man — it all looks nasty." Each
+   * person was sized from their own photo (a bust blown up, a whole figure shrunk), so the Bishop's head came out
+   * smaller than the Pastor's beside him. After any layout: no one's head is bigger than the first named's — a
+   * bigger one is brought down to it, about their feet (they stand where they stood). Faces in frames (an arch, a
+   * circle) are the frames' business.
+   */
+  function leadFirst(layers, D) {
+    const people = layers.filter((l) => l.type === 'image' && l.speaker && l.head && !l.inFrame);
+    if (people.length < 2) return;
+    const first = D.sp && D.sp[0] && D.sp[0].id;
+    const lead = people.find((l) => l.speaker === first) || people[0];
+    const hh = (l) => Math.max(1, l.head.b - l.head.t), H0 = hh(lead);
+    people.forEach((l) => {
+      if (l === lead) return;
+      const f = H0 / hh(l);
+      if (f >= 0.98) return;
+      const foot = l.y + l.h / 2, cx = l.x;
+      l.w *= f; l.h *= f; l.y = foot - l.h / 2;
+      l.head = { l: cx + (l.head.l - cx) * f, r: cx + (l.head.r - cx) * f, t: foot + (l.head.t - foot) * f, b: foot + (l.head.b - foot) * f };
+      // (a frame it was fitted to keeps its foot; its head is now the lead's)
+      if (l.frame) l.frame = Object.assign({}, l.frame, { t: foot - (foot - l.frame.t) * f, maxU: Math.min(l.frame.maxU || 1e9, H0 / 0.85) });
+    });
+  }
   let PAINTED = false;   // buildScene: the preacher is painted into the picture itself — no cut-out on top
   let PAGE_W = 1080;     // buildScene: how wide the page being built is (a flyer 1080, a YouTube thumbnail 1280)
   function hero(sp, o) {
@@ -3478,6 +3502,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     PAGE_W = D.w;
     let layers;
     try { layers = book[look](D).filter(Boolean); } finally { PAINTED = false; VAR = null; PAGE_W = W; }
+    leadFirst(layers, D);
     keepTitleClear(layers, D.h);
     if (o.variant) {
       if (o.variant.mirror && look !== 'radiant') mirrorLayers(layers, D.w);   // (Radiant stays as the church liked it)
