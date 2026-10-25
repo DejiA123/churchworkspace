@@ -11,6 +11,8 @@
  *     selected 11 pictures… the loading bar disappears… it's shocking")
  *   - asked each time how: cut out for me, or check each one in the cut-out
  *     editor ("the cut-out should not be automatic — I should have the option")
+ *   - zoom: in the cut-out editor (+ / − / the whole picture, a wheel) and on a
+ *     flyer seen big ("I should be able to zoom in… to the flyers too")
  * MW_SHOTS=<dir> saves screenshots.
  *   node test/phone-flyer-kit.test.js
  */
@@ -209,6 +211,35 @@ async function waitUp() {
     const t1 = await page.evaluate(() => document.querySelector('#cutModal .cut-head h2').textContent);
     check(/Photo 1 of 2/.test(t1), 'the first opens in the cut-out editor: "Photo 1 of 2"', t1);
     await page.waitForFunction(() => window.CutOut.__test.state().w > 0, null, { timeout: 30000 }).catch(() => {});
+    // zoom in the editor: + makes it bigger, the brush lands where the finger is; the zoom button shows the whole picture again
+    const z0 = await page.evaluate(() => window.CutOut.__test.state().zoom);
+    await page.locator('#cutZoom [data-z="in"]').tap();
+    await page.locator('#cutZoom [data-z="in"]').tap();
+    const z1 = await page.evaluate(() => ({ zoom: window.CutOut.__test.state().zoom, label: document.getElementById('cutZoomVal').textContent }));
+    check(z1.zoom >= z0 * 2 && /%$/.test(z1.label), 'the cut-out editor zooms in (+), and says how far', { z0, z1 });
+    const brushAt = await page.evaluate(() => {
+      const cv = document.getElementById('cutCanvas'), r = cv.getBoundingClientRect(), st = window.CutOut.__test.state(), v = st.view;
+      const sx = r.left + r.width * 0.5, sy = r.top + r.height * 0.5;
+      const want = { x: ((sx - r.left) * cv.width / r.width - v.ox) / v.scale, y: ((sy - r.top) * cv.height / r.height - v.oy) / v.scale };
+      return { want, inside: want.x >= 0 && want.y >= 0 && want.x <= st.w && want.y <= st.h };
+    });
+    check(brushAt.inside, 'zoomed in, a stroke lands on the picture where the finger is', brushAt);
+    await page.locator('#cutZoom [data-z="fit"]').tap();
+    const z2 = await page.evaluate(() => window.CutOut.__test.state().zoom);
+    check(z2 === 1, 'and the zoom button shows the whole picture again', z2);
+    // two fingers spread on the picture: it zooms, and nothing is painted
+    const pin = await page.evaluate(() => {
+      const cv = document.getElementById('cutCanvas'), r = cv.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      const undo0 = window.CutOut.__test.state().undoDepth;
+      const T = (id, x, y) => new Touch({ identifier: id, target: cv, clientX: x, clientY: y });
+      const fire = (type, list, tgt) => (tgt || cv).dispatchEvent(new TouchEvent(type, { touches: list, targetTouches: list, changedTouches: list, bubbles: true, cancelable: true }));
+      fire('touchstart', [T(1, cx - 30, cy), T(2, cx + 30, cy)]);
+      for (let k = 1; k <= 8; k++) fire('touchmove', [T(1, cx - 30 - k * 10, cy), T(2, cx + 30 + k * 10, cy)], document);
+      fire('touchend', [], document);
+      const st = window.CutOut.__test.state();
+      return { zoom: st.zoom, painted: st.undoDepth !== undo0 };
+    });
+    check(pin.zoom > 1.8 && !pin.painted, 'two fingers pinch the picture bigger in the cut-out editor (and paint nothing)', pin);
     await page.evaluate(() => document.getElementById('cutApply').click());
     await page.waitForFunction(() => /Photo 2 of 2/.test((document.querySelector('#cutModal:not(.hidden) .cut-head h2') || {}).textContent || ''), null, { timeout: 30000 }).catch(() => {});
     const t2 = await page.evaluate(() => (document.querySelector('#cutModal:not(.hidden) .cut-head h2') || {}).textContent || '');
@@ -217,6 +248,27 @@ async function waitUp() {
     await sleep(800);
     const after = await page.evaluate(() => ({ bank: document.querySelectorAll('.cp-flyer-kit .fs-bank-cell:not(.fs-cut-tile)').length, open: !!document.querySelector('#cutModal:not(.hidden)'), ask: !!document.querySelector('.fs-choice') }));
     check(after.bank === 6 && !after.open && !after.ask, 'the one kept is in the bank; the last one closed is not', after);
+
+    // ── a flyer seen big: sharp, and it zooms (double tap, wheel), and closes
+    const vw = await page.evaluate(async () => {
+      const F = window.MWFlyer; await F.loadFonts();
+      const S = F.buildScene({ look: 'radiant', w: 1080, h: 1350, pal: { deep: '#04114f', mid: '#1f45f0', accent: '#38d6ff', hi: '#ffffff' }, dir: {}, fields: { title: 'Sunday Service', date: '2026-11-01', time: '10:00AM' }, speakers: [] });
+      window.__v = window.MWFlyerStudio._view(S);
+      const cv = document.querySelector('.fs-viewer canvas');
+      return { open: !!document.querySelector('.fs-viewer'), w: cv && cv.width, h: cv && cv.height };
+    });
+    check(vw.open && Math.max(vw.w, vw.h) >= 2500, 'a flyer opens big, drawn sharp enough to look closely', vw);
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'kit-view.png') });
+    const pic = page.locator('.fs-viewer-pic');
+    await pic.dblclick();
+    await sleep(300);
+    const zA = await page.evaluate(() => window.__v.zoom());
+    await page.mouse.move(195, 420); await page.mouse.wheel(0, -400); await sleep(200);
+    const zB = await page.evaluate(() => window.__v.zoom());
+    check(zA > 1.5, 'a double tap zooms in', zA);
+    check(zB >= zA, 'and it zooms further (wheel; two fingers on a phone)', { zA, zB });
+    await page.locator('.fs-viewer-x').tap();
+    check(await page.evaluate(() => !document.querySelector('.fs-viewer')), 'and it closes');
   } catch (e) {
     check(false, 'the test ran to the end', e && e.message);
   } finally { await done(); }

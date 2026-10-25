@@ -3522,6 +3522,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   const ICON = {
     back: '<path d="m15 18-6-6 6-6"/>',
     close: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+    zoom: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M11 8v6"/><path d="M8 11h6"/>',
     undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
     redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/>',
     save: '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>',
@@ -4226,7 +4227,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     P.body.innerHTML = `<div class="fs-pick${thumb ? ' th-pick' : ''}">
       <p class="fs-status">${busy ? (thumb ? '<i class="fs-spin"></i> Getting the moment ready…' : 'The AI is reading your event…') : thumb && F.th.cutting ? '<i class="fs-spin"></i> Cutting the preacher out of the picture…' : F.painting > 0 ? `<i class="fs-spin"></i> Painting ${F.painting} picture${F.painting > 1 ? 's' : ''} with AI — they appear as they’re ready` : 'Tap one to edit every part of it'}</p>
       ${!busy && F.status && F.status.note ? `<p class="fs-allow">${esc(F.status.note)}</p>` : ''}
-      <div class="fs-grid">${busy ? '<div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div>' : F.designs.map((d, i) => `<button type="button" class="fs-card" data-i="${i}"><canvas></canvas><small>${esc(d.label || LOOK_NAMES[d.look] || d.look)}</small>${madeByTag(d.madeBy)}</button>`).join('')}</div>
+      <div class="fs-grid">${busy ? '<div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div>' : F.designs.map((d, i) => `<button type="button" class="fs-card" data-i="${i}"><canvas></canvas><span class="fs-card-zoom" data-view="${i}" role="button" aria-label="See it big">${ic('zoom')}</span><small>${esc(d.label || LOOK_NAMES[d.look] || d.look)}</small>${madeByTag(d.madeBy)}</button>`).join('')}</div>
       ${!busy && !thumb && F.board && F.board.shown < F.board.order.length ? `<button type="button" class="fs-ghost fs-more" data-act="more">${ic('layout')}<span>${BOARD_N} more designs</span></button>` : ''}
     </div>`;
     // one board at a time: "New pictures" waits until this one is painted (each tap used to start five more paintings)
@@ -4239,6 +4240,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         morePictures(F.board.shown - from);
         return;
       }
+      const z = e.target.closest('[data-view]'); if (z) { const d = F.designs[+z.dataset.view]; if (d) viewFlyer(d); return; }
       const c = e.target.closest('.fs-card'); if (c) { const d = F.designs[+c.dataset.i]; if (!thumb) markLiked(d && d.look, 1); openEditor(d); }
     };
     P.foot.onclick = (e) => {
@@ -4247,6 +4249,65 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       if (b.dataset.act === 'again' && !(F.painting > 0) && !b.disabled) { if (thumb) makeThumbs(); else makeFlyers(); }
     };
   }
+  /*
+   * ►► SEE IT BIG. ◄◄ "I should be able to zoom in to the flyers that were generated too, to see closer." The flyer
+   * drawn sharp (its long side about three thousand pixels), over everything: two fingers pinch it bigger and move
+   * it, a double tap zooms in and back out, a mouse wheel zooms round the pointer.
+   */
+  function viewFlyer(S) {
+    if (!S) return;
+    const k = Math.min(HD(S), 3000 / Math.max(S.w, S.h));
+    const cv = render(S, canvas(1, 1), k);
+    const el = document.createElement('div'); el.className = 'fs-viewer';
+    el.innerHTML = `<div class="fs-viewer-pic"></div><button type="button" class="fs-viewer-x" aria-label="Close">${ic('close')}</button><small class="fs-viewer-hint">Pinch or double-tap to zoom</small>`;
+    const box = el.firstElementChild;
+    cv.className = 'fs-viewer-cv'; box.appendChild(cv);
+    document.body.appendChild(el);
+    let z = 1, tx = 0, ty = 0;
+    const fit = () => { const r = box.getBoundingClientRect(); const f = Math.min(r.width / cv.width, r.height / cv.height); return { f, w: cv.width * f, h: cv.height * f, W: r.width, H: r.height }; };
+    const clampPan = () => { const g = fit(); const mx = Math.max(0, (g.w * z - g.W) / 2), my = Math.max(0, (g.h * z - g.H) / 2); tx = Math.max(-mx, Math.min(mx, tx)); ty = Math.max(-my, Math.min(my, ty)); };
+    const show = () => { clampPan(); const g = fit(); cv.style.width = g.w + 'px'; cv.style.height = g.h + 'px'; cv.style.transform = `translate(${tx}px, ${ty}px) scale(${z})`; };
+    // zoom to z1 keeping the screen point (px, py) — from the box's middle — where it is
+    const zoomTo = (z1, px, py) => { z1 = Math.max(1, Math.min(8, z1)); tx = px - (px - tx) * z1 / z; ty = py - (py - ty) * z1 / z; z = z1; show(); };
+    const mid = (e) => { const r = box.getBoundingClientRect(); return { x: e.clientX - r.left - r.width / 2, y: e.clientY - r.top - r.height / 2 }; };
+    const pts = new Map(); let pinch = null, drag = null, lastTap = 0;
+    box.addEventListener('pointerdown', (e) => {
+      try { box.setPointerCapture(e.pointerId); } catch (e2) { /* (a pointer the browser no longer tracks) */ } pts.set(e.pointerId, mid(e));
+      if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, z, tx, ty, m: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } }; drag = null; lastTap = 0; tapped = false; }
+      else if (pts.size === 1) { drag = { x: e.clientX, y: e.clientY, tx, ty, at: Date.now(), moved: 0 }; tapped = true; }
+    });
+    box.addEventListener('pointermove', (e) => {
+      if (!pts.has(e.pointerId)) return;
+      pts.set(e.pointerId, mid(e));
+      if (pinch && pts.size >= 2) {
+        const [a, b] = [...pts.values()], m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        const z1 = Math.max(1, Math.min(8, pinch.z * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d));
+        // the point that was under the fingers stays under them, and follows them
+        tx = m.x - (pinch.m.x - pinch.tx) * z1 / pinch.z; ty = m.y - (pinch.m.y - pinch.ty) * z1 / pinch.z; z = z1; show();
+      } else if (drag) {
+        drag.moved = Math.max(drag.moved, Math.hypot(e.clientX - drag.x, e.clientY - drag.y));
+        if (z > 1) { tx = drag.tx + e.clientX - drag.x; ty = drag.ty + e.clientY - drag.y; show(); }
+      }
+    });
+    // a double tap: two quick taps that did not move (a finger landing after a pinch is not one)
+    let tapped = false;
+    const up = (e) => {
+      const was = pts.get(e.pointerId); pts.delete(e.pointerId);
+      if (!pts.size && drag && tapped && drag.moved < 10 && Date.now() - drag.at < 300) {
+        const now = Date.now();
+        if (now - lastTap < 320 && was) { if (z > 1.05) { z = 1; tx = ty = 0; show(); } else zoomTo(2.5, was.x, was.y); lastTap = 0; } else lastTap = now;
+      }
+      if (pts.size < 2) pinch = null; if (!pts.size) { drag = null; tapped = false; }
+    };
+    box.addEventListener('pointerup', up); box.addEventListener('pointercancel', up);
+    box.addEventListener('wheel', (e) => { e.preventDefault(); const p = mid(e); zoomTo(z * (e.deltaY < 0 ? 1.2 : 1 / 1.2), p.x, p.y); }, { passive: false });
+    const close = () => { el.remove(); cv.width = cv.height = 1; window.removeEventListener('resize', show); };
+    el.querySelector('.fs-viewer-x').onclick = close;
+    window.addEventListener('resize', show);
+    requestAnimationFrame(show);
+    return { close, zoom: () => z };
+  }
+
   function paintThumbs() {
     if (!F.panel) return;
     $$('.fs-card', F.panel.body).forEach((c) => {
@@ -4667,6 +4728,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       <div class="fs-topbar">
         <button type="button" class="fs-tb" data-ed="back" aria-label="Back">${ic('back')}</button>
         <span class="fs-tb-sp"></span>
+        <button type="button" class="fs-tb" data-ed="view" aria-label="See it big">${ic('zoom')}</button>
         <button type="button" class="fs-tb" data-ed="undo" aria-label="Undo" disabled>${ic('undo')}</button>
         <button type="button" class="fs-tb" data-ed="redo" aria-label="Redo" disabled>${ic('redo')}</button>
         <button type="button" class="fs-tb fs-save" data-ed="save">${ic('save')}<span>Save</span></button>
@@ -4685,6 +4747,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const b = e.target.closest('[data-ed]'); if (!b || b.disabled) return;
       const a = b.dataset.ed;
       if (a === 'back') { F.step = 'pick'; F.sel = null; return drawPick(); }
+      if (a === 'view') return viewFlyer(F.scene);
       if (a === 'undo' && F.undo.length) { F.redo.push(clone(F.scene)); F.scene = F.undo.pop(); fixSel(); paint(); tools(); syncUndo(); }
       if (a === 'redo' && F.redo.length) { F.undo.push(clone(F.scene)); F.scene = F.redo.pop(); fixSel(); paint(); tools(); syncUndo(); }
       if (a === 'save') saveFlyer(b);
@@ -5589,5 +5652,5 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
 
   /* "My church" straight from Home (This week → Edit) */
   async function openKitAlone(onSaved) { await loadKit(); openKit(onSaved); }
-  root.MWFlyerStudio = { open, openThumb, openKit: openKitAlone, _state: F, _rebuild: () => rebuildDesigns() };
+  root.MWFlyerStudio = { open, openThumb, openKit: openKitAlone, _state: F, _rebuild: () => rebuildDesigns(), _view: (S) => viewFlyer(S) };
 })();

@@ -78,9 +78,19 @@
     const cw = Math.max(80, Math.floor(box.width - 8));
     const ch = Math.max(80, Math.floor(box.height - 8));
     const sc = Math.min(cw / ED.w, ch / ED.h);
-    const dw = Math.round(ED.w * sc), dh = Math.round(ED.h * sc);
+    // ZOOMED IN ("I should be able to zoom in"): the canvas fills the stage, the picture drawn bigger round a
+    // centre that is kept on it — pinch with two fingers, the − / + buttons or a mouse wheel
+    const z = Math.max(1, Math.min(ZOOM_MAX, ED.zoom || 1));
+    const dw = z > 1 ? cw : Math.round(ED.w * sc), dh = z > 1 ? ch : Math.round(ED.h * sc);
     cv.width = dw; cv.height = dh;
-    ED.view = { scale: sc, ox: 0, oy: 0 };
+    const s2 = Math.min(dw / ED.w, dh / ED.h) * z, iw2 = ED.w * s2, ih2 = ED.h * s2;
+    const c = ED.center || { x: ED.w / 2, y: ED.h / 2 };
+    let ox = dw / 2 - c.x * s2, oy = dh / 2 - c.y * s2;
+    ox = iw2 <= dw ? (dw - iw2) / 2 : Math.min(0, Math.max(dw - iw2, ox));
+    oy = ih2 <= dh ? (dh - ih2) / 2 : Math.min(0, Math.max(dh - ih2, oy));
+    ED.center = { x: (dw / 2 - ox) / s2, y: (dh / 2 - oy) / s2 };
+    ED.view = { scale: s2, ox, oy };
+    const zl = $('cutZoomVal'); if (zl) zl.textContent = Math.round(z * 100) + '%';
 
     // Checkerboard = "this is see-through", the universal way of showing it.
     const S = 10;
@@ -90,7 +100,33 @@
       for (let x = ((y / S) % 2) * S; x < dw; x += S * 2) cx.fillRect(x, y, S, S);
     }
     cx.imageSmoothingQuality = 'high';
-    cx.drawImage(off, 0, 0, dw, dh);
+    cx.drawImage(off, ox, oy, iw2, ih2);
+  }
+
+  const ZOOM_MAX = 8;
+  /* zoom to `z`, keeping the image point under the screen point (sx, sy) — canvas pixels — where it is */
+  function zoomAt(z, sx, sy) {
+    if (!ED.rgba || !ED.view) return;
+    const v = ED.view, at = { x: (sx - v.ox) / v.scale, y: (sy - v.oy) / v.scale };
+    const z0 = ED.zoom || 1, z1 = Math.max(1, Math.min(ZOOM_MAX, z));
+    const s1 = v.scale * z1 / z0;
+    const cv = $('cutCanvas');
+    // the new centre: the point under the fingers stays under them
+    ED.zoom = z1;
+    ED.center = { x: at.x + (cv.width / 2 - sx) / s1, y: at.y + (cv.height / 2 - sy) / s1 };
+    redraw();
+  }
+  /* on opening: zoomed to the person (a small figure in a big photo — black bars round a phone's screenshot) */
+  function zoomToPerson() {
+    const a = finalAlpha(); if (!a) return;
+    let x0 = ED.w, y0 = ED.h, x1 = -1, y1 = -1;
+    for (let y = 0; y < ED.h; y += 2) for (let x = 0; x < ED.w; x += 2) if (a[y * ED.w + x] > 128) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    if (x1 < 0) return;
+    const bw = (x1 - x0) * 1.3 + 8, bh = (y1 - y0) * 1.15 + 8;
+    const z = Math.min(4, Math.max(1, Math.min(ED.w / bw, ED.h / bh)));
+    if (z < 1.25) return;
+    ED.zoom = z; ED.center = { x: (x0 + x1) / 2, y: (y0 + y1) / 2 };
+    redraw();
   }
 
   /* ---------------------------------------------------------------- brushes */
@@ -137,19 +173,45 @@
     }
   }
 
+  // a screen point → canvas pixels (the canvas may be drawn at another size than its pixels)
+  function toCanvas(p) {
+    const cv = $('cutCanvas'), r = cv.getBoundingClientRect();
+    return { x: (p.clientX - r.left) * (cv.width / (r.width || 1)), y: (p.clientY - r.top) * (cv.height / (r.height || 1)) };
+  }
   function pointToImage(ev) {
-    const cv = $('cutCanvas');
-    const r = cv.getBoundingClientRect();
-    const p = (ev.touches && ev.touches[0]) || ev;
+    const p = toCanvas((ev.touches && ev.touches[0]) || ev);
     return {
-      x: (p.clientX - r.left) / ED.view.scale,
-      y: (p.clientY - r.top) / ED.view.scale,
+      x: (p.x - ED.view.ox) / ED.view.scale,
+      y: (p.y - ED.view.oy) / ED.view.scale,
     };
+  }
+
+  /* TWO FINGERS: zoom and move the picture (one finger paints; a second finger landing turns a stroke into a pinch) */
+  function startPinch(ev) {
+    const t = ev.touches, a = toCanvas(t[0]), b = toCanvas(t[1]);
+    const d0 = Math.hypot(a.x - b.x, a.y - b.y) || 1, z0 = ED.zoom || 1;
+    const m0 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, v = ED.view;
+    const at = { x: (m0.x - v.ox) / v.scale, y: (m0.y - v.oy) / v.scale };   // the image point under the fingers
+    const base = v.scale / z0;
+    const move = (e) => {
+      if (!e.touches || e.touches.length < 2) return;
+      e.preventDefault();
+      const p = toCanvas(e.touches[0]), q = toCanvas(e.touches[1]);
+      const z = Math.max(1, Math.min(ZOOM_MAX, z0 * Math.hypot(p.x - q.x, p.y - q.y) / d0)), m = { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 };
+      const s1 = base * z, cv = $('cutCanvas');
+      ED.zoom = z;
+      ED.center = { x: at.x + (cv.width / 2 - m.x) / s1, y: at.y + (cv.height / 2 - m.y) / s1 };
+      redraw();
+    };
+    const end = (e) => { if (e.touches && e.touches.length >= 2) return; document.removeEventListener('touchmove', move); document.removeEventListener('touchend', end); document.removeEventListener('touchcancel', end); };
+    document.addEventListener('touchmove', move, { passive: false });
+    document.addEventListener('touchend', end); document.addEventListener('touchcancel', end);
   }
 
   function startPaint(ev) {
     if (!ED.rgba || ED.busy) return;
     ev.preventDefault();
+    if (ev.touches && ev.touches.length >= 2) return startPinch(ev);
     snapshot();
     ED.painting = true;
     let last = pointToImage(ev);
@@ -158,6 +220,8 @@
     redraw();
     const move = (e) => {
       if (!ED.painting) return;
+      // (a second finger: not a stroke after all — what the first painted is undone, and it is a pinch)
+      if (e.touches && e.touches.length >= 2) { ED.painting = false; document.removeEventListener('touchmove', move); undo(); startPinch(e); return; }
       const p = pointToImage(e);
       // Interpolate along the drag, or a fast stroke lands as dots.
       const dist = Math.hypot(p.x - last.x, p.y - last.y);
@@ -222,6 +286,7 @@
           : '🎨 No person found, so it is matching the backdrop colour';
       }
       redraw();
+      if (firstRun && !ED.zoomedToPerson) { ED.zoomedToPerson = true; zoomToPerson(); }
     } catch (e) {
       const m = $('cutMethod');
       if (m) m.textContent = '⚠️ ' + (e.message || 'could not read that picture');
@@ -260,6 +325,7 @@
       rb.onclick = () => { const f = ED.onRestore; close(); if (f) f(); };
     }
     ED.strength = 0.5; ED.mode = 'auto'; ED.tool = 'erase'; ED.brush = 60; ED.soft = true;
+    ED.zoom = 1; ED.center = null; ED.zoomedToPerson = false;
     ED.w = ED.h = 0; ED.rgba = null; ED.erase = null; ED.keep = null; ED.history = [];
     $('cutModal').classList.remove('hidden');
     const st = $('cutStrength'); if (st) st.value = String(Math.round(ED.strength * 100));
@@ -323,6 +389,21 @@
     if (cv) {
       cv.addEventListener('mousedown', startPaint);
       cv.addEventListener('touchstart', startPaint, { passive: false });
+      // a mouse wheel zooms round the pointer
+      cv.addEventListener('wheel', (e) => { if (!ED.rgba) return; e.preventDefault(); const p = toCanvas(e); zoomAt((ED.zoom || 1) * (e.deltaY < 0 ? 1.15 : 1 / 1.15), p.x, p.y); }, { passive: false });
+      // − / Fit / + over the picture
+      const stage = cv.parentElement;
+      if (stage && !$('cutZoom')) {
+        const z = document.createElement('div');
+        z.id = 'cutZoom'; z.className = 'cut-zoom';
+        z.innerHTML = '<button type="button" data-z="out" aria-label="Zoom out">−</button><button type="button" data-z="fit" aria-label="Whole picture"><span id="cutZoomVal">100%</span></button><button type="button" data-z="in" aria-label="Zoom in">+</button>';
+        z.addEventListener('click', (e) => {
+          const b = e.target.closest('[data-z]'); if (!b || !ED.rgba) return;
+          const c = $('cutCanvas'), mid = [c.width / 2, c.height / 2];
+          if (b.dataset.z === 'fit') { ED.zoom = 1; ED.center = null; redraw(); } else zoomAt((ED.zoom || 1) * (b.dataset.z === 'in' ? 1.5 : 1 / 1.5), mid[0], mid[1]);
+        });
+        stage.appendChild(z);
+      }
     }
     window.addEventListener('resize', () => { if (ED.open) redraw(); });
   }
@@ -332,7 +413,7 @@
     // test hooks — the editor's state is the only way to check a brush landed
     __test: {
       state: () => ({
-        open: ED.open, w: ED.w, h: ED.h, method: ED.method,
+        open: ED.open, w: ED.w, h: ED.h, method: ED.method, zoom: ED.zoom || 1, view: ED.view,
         strength: ED.strength, tool: ED.tool, brush: ED.brush,
         undoDepth: ED.history.length,
       }),

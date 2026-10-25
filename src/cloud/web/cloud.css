@@ -4251,6 +4251,16 @@ html, body.mw-cloud, body.mw-cloud .cloud-home .ch-scroll, body.mw-cloud #cloudG
 .fs-choice-opt b { font-size: 15px; }
 .fs-choice-opt small { font-size: 13px; color: #555b66; line-height: 1.35; }
 .fs-choice-x { padding: 12px; border: 0; background: none; color: #555b66; font: inherit; font-weight: 600; cursor: pointer; }
+/* a flyer seen big: pinch, double-tap or wheel to zoom (cloud-flyer.js viewFlyer) */
+.fs-viewer { position: fixed; inset: 0; z-index: 2147482000; background: #0b0d12; }
+.fs-viewer-pic { position: absolute; inset: calc(env(safe-area-inset-top, 0px) + 56px) 0 calc(env(safe-area-inset-bottom, 0px) + 40px); display: grid; place-items: center; overflow: hidden; touch-action: none; }
+.fs-viewer-cv { transform-origin: center center; border-radius: 4px; box-shadow: 0 10px 40px rgba(0, 0, 0, .5); will-change: transform; }
+.fs-viewer-x { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 10px); right: 12px; width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .14); color: #fff; cursor: pointer; }
+.fs-viewer-x .fs-ic { width: 22px; height: 22px; }
+.fs-viewer-hint { position: absolute; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); text-align: center; color: rgba(255, 255, 255, .6); font-size: 13px; pointer-events: none; }
+.fs-card { position: relative; }
+.fs-card-zoom { position: absolute; top: 6px; right: 6px; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: rgba(15, 17, 21, .62); color: #fff; }
+.fs-card-zoom .fs-ic { width: 18px; height: 18px; }
 .fs-bank-cell .fs-bank-pic { width: 100%; }
 .fs-pic-x { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%;
   color: #fff; background: rgba(15, 17, 21, .72); box-shadow: 0 1px 4px rgba(0, 0, 0, .25); cursor: pointer; }

@@ -1888,6 +1888,11 @@ button.cap-model-pick .cap-model-name { align-items: flex-start; text-align: lef
 .cut-body { flex: 1; display: flex; min-height: 0; }
 .cut-stage { flex: 1; min-width: 0; position: relative; display: grid; place-items: center; padding: 10px; background: #0b0e14; }
 .cut-stage canvas { max-width: 100%; max-height: 100%; border-radius: 6px; touch-action: none; }
+/* zoom over the picture: − / the zoom (tap: the whole picture) / + — two fingers pinch and move it too */
+.cut-zoom { position: absolute; right: 12px; bottom: 12px; z-index: 2; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(11, 14, 20, .82); box-shadow: 0 4px 14px rgba(0, 0, 0, .35); }
+.cut-zoom button { min-width: 40px; height: 36px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: #fff; font: inherit; font-size: 18px; font-weight: 700; cursor: pointer; }
+.cut-zoom button[data-z="fit"] { font-size: 13px; font-variant-numeric: tabular-nums; min-width: 58px; }
+.cut-zoom button:active { background: rgba(255, 255, 255, .12); }
 .cut-busy { position: absolute; inset: auto; padding: 8px 14px; border-radius: 8px; background: rgba(8,10,16,.9);
   border: 1px solid var(--border); font-size: 12.5px; }
 .cut-busy.hidden { display: none; }

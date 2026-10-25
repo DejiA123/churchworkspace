@@ -364,17 +364,17 @@ const choke = (W, H) => Array.from({ length: Math.max(1, Math.round(Math.max(W, 
  * The person in a picture (the bytes of a JPEG/PNG/WebP) cut out: a PNG with the background clear, at the picture's
  * own size (at most `maxSide` across). { png, coverage, ms, specks }.
  */
-function cutout(ffmpeg, input, { maxSide = 2000, pose = null, ticket = null } = {}) {
+function cutout(ffmpeg, input, { maxSide = 2000, pose = null, ticket = null, trim = false } = {}) {
   const t = ticket ? String(ticket).slice(0, 40) : 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   jobs.set(t, { stage: null, at: Date.now() }); queue.push(t);
-  const job = chain.then(() => cutoutNow(ffmpeg, input, { maxSide, pose, ticket: t }));
+  const job = chain.then(() => cutoutNow(ffmpeg, input, { maxSide, pose, ticket: t, trim }));
   chain = job.catch(() => {});
   // (forgotten a little after it ends: the phone's last question still finds it done)
   const forget = () => { const i = queue.indexOf(t); if (i >= 0) queue.splice(i, 1); const tm = setTimeout(() => jobs.delete(t), 15000); if (tm.unref) tm.unref(); };
   job.then(forget, forget);
   return job;
 }
-async function cutoutNow(ffmpeg, input, { maxSide, pose, ticket }) {
+async function cutoutNow(ffmpeg, input, { maxSide, pose, ticket, trim }) {
   const t0 = Date.now();
   stage(ticket, 'reading');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mw-cut-'));
@@ -406,7 +406,14 @@ async function cutoutNow(ffmpeg, input, { maxSide, pose, ticket }) {
     for (let i = 0; i < p.length; i++) m1[i] = Math.round(255 * (p[i] - lo) / Math.max(1e-6, hi - lo));
     // the mask at the picture's size (smoothly)
     const mask = await run(ffmpeg, ['-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'gray', '-s', `${SIZE}x${SIZE}`, '-i', '-', '-vf', `scale=${W}:${H}:flags=bicubic`, '-f', 'rawvideo', '-pix_fmt', 'gray', '-'], m1);
-    const { gated, waistUp } = tidyMask(mask, W, H, pose);
+    /*
+     * THE MODEL'S OWN CUT, AS IT IS. Trimming it to the body the phone's pose found (bodyGate) left broken pieces of
+     * a lectern, a mic stand and a chair round the Bishop in four of ten photos, and fading out above them cut him
+     * across the chest in five. The model alone kept every one of the ten whole and clean — with the lectern or the
+     * stand in front of him whole too, as Canva and Adobe keep them; what is not wanted is wiped off with the eraser
+     * (zoomed in). The trim is still there for a host that asks for it (`trim`).
+     */
+    const { gated, waistUp } = trim ? tidyMask(mask, W, H, pose) : { gated: 0, waistUp: null };
     const kp = keepPerson(mask, W, H);
     if (!kp) throw new Error('nobody could be found in that picture');
     // only the person: what is outside the kept shape (a little beyond its edge, for the soft hair) goes
