@@ -838,12 +838,38 @@ ipcMain.handle('montage:status', wrap(async () => Object.assign({}, montage.dire
  */
 /* what a video says, kept a while: the montage's other takes of the same video are not listened to (or paid for) again */
 const HEARD_MT = new Map();
+/*
+ * …and kept on disk too: kept only in memory, every studio restart (each update) threw away what a 3¾-hour
+ * service says, and the next montage listened to all of it again — AssemblyAI credit spent twice, or, when that
+ * could not be had, hours of this server's own Whisper with every other montage waiting behind it.
+ */
+const heardDir = () => path.join(app.getPath('userData'), 'montage-heard');
+function heardFile(key) { return path.join(heardDir(), require('crypto').createHash('sha1').update(key).digest('hex') + '.json'); }
+function heardLoad(key) {
+  try {
+    const j = JSON.parse(fs.readFileSync(heardFile(key), 'utf8'));
+    if (!j || !Array.isArray(j.words) || !j.words.length) return null;
+    if (Array.isArray(j.highlights)) Object.defineProperty(j.words, 'highlights', { value: j.highlights, enumerable: false });
+    return j.words;
+  } catch (e) { return null; }
+}
+function heardSave(key, ws) {
+  try {
+    fs.mkdirSync(heardDir(), { recursive: true });
+    fs.writeFileSync(heardFile(key), JSON.stringify({ words: ws, highlights: Array.isArray(ws.highlights) ? ws.highlights : null }));
+    // (the newest forty kept)
+    const all = fs.readdirSync(heardDir()).map((f) => ({ f, t: fs.statSync(path.join(heardDir(), f)).mtimeMs })).sort((a, b) => b.t - a.t);
+    all.slice(40).forEach((x) => { try { fs.unlinkSync(path.join(heardDir(), x.f)); } catch (e) { /* gone */ } });
+  } catch (e) { /* only a cache */ }
+}
 async function montageHear(file, durationSec, onProgress, fromSec = 0) {
   let key = '';
   try { const st = fs.statSync(file); key = [file, st.size, st.mtimeMs, (+durationSec || 0).toFixed(1), (+fromSec || 0).toFixed(1)].join('|'); } catch (e) { key = ''; }
   if (key && HEARD_MT.has(key)) { if (onProgress) onProgress(100); return HEARD_MT.get(key); }
+  const kept = key ? heardLoad(key) : null;
+  if (kept) { HEARD_MT.set(key, kept); if (onProgress) onProgress(100); console.warn('[montage] heard before: what it says read from disk'); return kept; }
   const ws = await montageHearOnce(file, durationSec, onProgress, fromSec);
-  if (key && ws && ws.length) { HEARD_MT.set(key, ws); if (HEARD_MT.size > 12) HEARD_MT.delete(HEARD_MT.keys().next().value); }
+  if (key && ws && ws.length) { HEARD_MT.set(key, ws); if (HEARD_MT.size > 12) HEARD_MT.delete(HEARD_MT.keys().next().value); heardSave(key, ws); }
   return ws;
 }
 async function montageHearOnce(file, durationSec, onProgress, fromSec = 0) {
@@ -881,6 +907,7 @@ async function montageHearOnce(file, durationSec, onProgress, fromSec = 0) {
     console.warn('[montage] AssemblyAI could not hear it:', err && err.message);
   }
   if (cloudspeech.fileReady()) {
+    console.warn('[montage] AssemblyAI not available: listening with the cloud ear');
     let r = null;
     try { r = await cloudspeech.transcribeWords({ input: file, startSec: from, endSec: durationSec, onProgress }); } catch (err) {
       if (err && err.cancelled) throw new jobs.CancelledError();
@@ -889,6 +916,7 @@ async function montageHearOnce(file, durationSec, onProgress, fromSec = 0) {
     if (r && r.words && r.words.length && r.doneSec >= span - 0.5) return shift(wordbook.apply(r.words).entries);
   }
   if (captioner.isAvailable()) {
+    console.warn(`[montage] no cloud ear: this server's own Whisper listens to ${Math.round(span / 60)} min (slow)`);
     const r = await captioner.transcribe(getCtx(), { input: file, startSec: from, endSec: durationSec, onProgress });
     return shift(wordbook.apply((r && r.words) || []).entries);
   }
