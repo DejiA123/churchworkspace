@@ -2188,9 +2188,11 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       if (f.extra || f.theme) { const s = put(micro(f.extra || f.theme, { size: 18, letter: 0.7, fill: ink, shadow: false, maxW: 900 }), { cx: 540, t: y + 14 }); L.push(s); y = box(s).b; }
       const top = Math.max(y + 20, H * 0.36), bot = H - 150;
       if (ps.length === 2) {
-        L.push(hero(ps[1], { cx: 760, t: top + 20, b: bot, mode: 'chest', fade: 0.25, extra: { fadeLight: true, shade: 'rgba(60,30,10,.25)' } }));
-        L.push(hero(ps[0], { cx: 330, t: top, b: bot, mode: 'chest', fade: 0.25, extra: { fadeLight: true, shade: 'rgba(60,30,10,.25)' } }));
-        ps.forEach((s, i) => { const np = nameParts(s.name || ''); if (!np.name) return; L.push(...col([np.title && T({ name: 'Speaker title', text: np.title, upper: true, font: 'Montserrat', size: 15, fill: ink, align: i ? 'right' : 'left', letter: 0.1 }), T({ name: 'Speaker', text: np.name, upper: true, font: 'Barlow Black Italic', size: 30, fill: ink, align: i ? 'right' : 'left', maxW: 230 })].filter(Boolean), i ? { r: 1036, cy: top + (bot - top) * 0.55 } : { l: 44, cy: top + (bot - top) * 0.55 })); });
+        // each named over their own head ("nasty": the names sat on their suits, dark on dark, half hidden)
+        const xs = [300, 780], nh = 64;
+        L.push(hero(ps[1], { cx: xs[1], t: top + nh + 20, b: bot, mode: 'chest', fade: 0.25, minL: 560, extra: { fadeLight: true, shade: 'rgba(60,30,10,.25)' } }));
+        L.push(hero(ps[0], { cx: xs[0], t: top + nh, b: bot, mode: 'chest', fade: 0.25, maxR: 600, extra: { fadeLight: true, shade: 'rgba(60,30,10,.25)' } }));
+        ps.forEach((s, i) => { const np = nameParts(s.name || ''); if (!np.name) return; L.push(...col([np.title && T({ name: 'Speaker title', text: np.title, upper: true, font: 'Montserrat', size: 15, fill: ink, letter: 0.1 }), T({ name: 'Speaker', text: np.name, upper: true, font: 'Barlow Black Italic', size: 30, fill: ink, maxW: 440 })].filter(Boolean), { cx: xs[i], cy: top + nh / 2 + (i ? 20 : 0), gap: 2 })); });
       } else if (ps[0]) L.push(hero(ps[0], { cx: 540, t: Math.max(y + 10, H * 0.27), b: H - 60, mode: 'chest', fade: 0.12, extra: { fadeLight: true, shade: 'rgba(60,30,10,.25)' } }));   // one: big, standing behind the banner
       // the tilted cream banner
       const by = H - 112, band = [SH({ name: 'Banner', shape: 'rect', fill: '#f7e8cf', x: 540, y: by, w: 1240, h: 150, shadow: true })];
@@ -2225,10 +2227,11 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const top = Math.max(y, H * 0.44), bot = H - 70;
       if (ps.length >= 2) {
         // two: both left of the date column on the right (the second stood over "16TH OCT")
-        const xs = ps.length === 2 ? [300, 600] : [250, 540, 830];
-        ps.forEach((s, i) => { if (i) L.push(hero(s, { cx: xs[i], t: top + 40, b: bot, mode: 'chest', fade: 0.3, maxR: ps.length === 2 ? 790 : undefined, extra: { fadeLight: true, shade: 'rgba(60,30,10,.2)' } })); });
-        L.push(hero(ps[0], { cx: xs[0], t: top, b: bot, mode: 'chest', fade: 0.3, extra: { fadeLight: true, shade: 'rgba(60,30,10,.2)' } }));
-      } else if (ps[0]) L.push(hero(ps[0], { cx: 470, t: top, b: bot, mode: 'chest', fade: 0.3, extra: { fadeLight: true, shade: 'rgba(60,30,10,.2)' } }));
+        // ("nasty": the second stood behind the first, a shoulder and half a face) — side by side, each in their own half
+        const xs = ps.length === 2 ? [240, 610] : [250, 540, 830], t2 = ps.length === 2 ? Math.max(top + (bot - top) * 0.2, bot - 600) : top;   // (no taller than fits two across)
+        ps.forEach((s, i) => { if (i) L.push(hero(s, { cx: xs[i], t: t2 + 30, b: bot, mode: 'chest', fade: 0.3, maxR: ps.length === 2 ? 800 : undefined, extra: { fadeLight: true, shade: 'rgba(60,30,10,.2)' } })); });
+        L.push(hero(ps[0], { cx: xs[0], t: t2, b: bot, mode: 'chest', fade: 0.3, maxR: ps.length === 2 ? 440 : undefined, extra: { fadeLight: true, shade: 'rgba(60,30,10,.2)' } }));
+      } else if (ps[0]) L.push(hero(ps[0], { cx: 470, t: top, b: bot, mode: 'chest', fade: 0.3, maxR: 810, extra: { fadeLight: true, shade: 'rgba(60,30,10,.2)' } }));   // (clear of the date)
       if (d) L.push(...col([T({ name: 'Day', text: d.day.toUpperCase(), font: 'Montserrat', size: 18, fill: ink, align: 'right', letter: 0.2 }), T({ name: 'Date', text: `${d.ddth} ${d.mon3.toUpperCase()}`, font: 'Playfair Black', size: 46, fill: ink, align: 'right' }), T({ name: 'Year', text: d.year, font: 'Montserrat', size: 20, fill: ink, align: 'right' })], { r: 1020, cy: H * 0.7, gap: 2 }));
       if (f.time) L.push(...pill([{ text: f.time, font: 'Archivo Black', size: 36 }], { fill: red, ink: '#ffffff', radius: 6, padX: 18, padY: 8, shadow: true }).place(940, H * 0.81));
       const vt = venueText(D);
@@ -2449,7 +2452,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const H = D.h, p = D.pal, f = D.f, d = D.d, L = [], ps = spsOf(D).slice(0, 3), acc = oneColour(p);
       L.push(BG({ plain: mix(acc, '#ffffff', 0.9), grain: 0 }));
       L.push(...inked(header(D), INK));
-      const three = ps.length === 3, rowY = H - 78, lineY = H - 150, pd = three ? 230 : ps.length === 2 ? 230 : 270, pt = lineY - 40 - pd - (three ? 50 : 0);
+      // the people big enough to see who they are ("nasty": a 270 px circle under a 1000 px title); the title takes what is left
+      const three = ps.length === 3, rowY = H - 78, lineY = H - 150, pd = three ? 230 : ps.length === 2 ? Math.round(Math.min(380, H * 0.28)) : Math.round(Math.min(540, H * 0.4)), pt = lineY - 40 - pd - (three ? 50 : 0);
       // who: one in a circle with the name beside them; two side by side, named beside them; three in a row, each named under
       if (three) {
         ps.forEach((s, i) => {
@@ -2458,15 +2462,21 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
           if (s.name) L.push(put(T({ name: 'Speaker', text: s.name, upper: true, font: 'Montserrat Black', size: 19, line: 1.05, fill: INK, maxW: pd + 60 }), { cx, t: pt + pd + 16 }));
         });
       } else if (ps.length === 2) {
-        ps.forEach((s, i) => { const l = 64 + i * (pd + 40); L.push(...framed(s, { shape: 'circle', l, t: pt, w: pd, h: pd, fill: i ? mix(acc, '#000000', 0.18) : acc, mode: 'bust', head: 0.14 })); });
-        L.push(...col(ps.map((s) => T({ name: 'Speaker', text: s.name || '', upper: true, font: 'Montserrat Black', size: 24, line: 1.05, fill: INK, align: 'left', maxW: 1016 - (64 + 2 * pd + 80) })), { l: 64 + 2 * pd + 80, cy: pt + pd / 2, gap: 14 }));
+        // two circles side by side in the middle, each named under (beside them the names had 230 px and broke up)
+        const gap = 70, x0 = 540 - pd - gap / 2;
+        ps.forEach((s, i) => {
+          const l = x0 + i * (pd + gap);
+          L.push(...framed(s, { shape: 'circle', l, t: pt - 40, w: pd, h: pd, fill: i ? mix(acc, '#000000', 0.18) : acc, mode: 'bust', head: 0.14 }));
+          if (s.name) L.push(put(T({ name: 'Speaker', text: s.name, upper: true, font: 'Montserrat Black', size: 22, line: 1.05, fill: INK, maxW: pd + 60 }), { cx: l + pd / 2, t: pt - 40 + pd + 14 }));
+        });
       } else if (ps[0]) {
         L.push(...framed(ps[0], { shape: 'circle', l: 64, t: pt, w: pd, h: pd, fill: acc, mode: 'bust', head: 0.12 }));
         L.push(...simpleName(ps[0], { l: 64 + pd + 40, cy: pt + pd / 2, acc, size: 40, maxW: 1016 - (64 + pd + 40) }));
       }
       // the title, as big as it goes, in the room above them
       const lines = stack(f.title || 'Sunday Service', 3);
-      const ts = titleLines(lines, { l: 64, t: 0, w: 952, maxH: H * 0.14, fills: lines.map((_, i) => (lines.length > 1 && i === lines.length - 1 ? acc : INK)) });
+      const room = (ps.length ? pt - (ps.length === 2 ? 40 : 0) : lineY) - 40 - H * 0.13 - (f.theme ? 60 : 0);
+      const ts = titleLines(lines, { l: 64, t: 0, w: 952, maxH: Math.min(H * 0.14, room / lines.length * 0.88), fills: lines.map((_, i) => (lines.length > 1 && i === lines.length - 1 ? acc : INK)) });
       const th = f.theme ? T({ name: 'Theme', text: f.theme, upper: true, font: 'Montserrat', size: 22, letter: 0.14, fill: '#3a3a42', align: 'left', maxW: 952 }) : null;
       const block = th ? ts.concat(put(th, { l: 64, t: ts.bottom + 26 })) : ts;
       const bTop = ts.top, bBot = th ? box(th).b : ts.bottom, room0 = H * 0.13, room1 = (ps.length ? pt : lineY) - 40;
@@ -2750,11 +2760,13 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
           L.push(SH({ name: 'Line', shape: 'line', fill: rgba('#ffffff', 0.8), x: (540 + gap + l1) / 2, y: 64, w: Math.max(10, l1 - 540 - gap), h: 2 }));
         } else L.push(SH({ name: 'Line', shape: 'line', fill: rgba('#ffffff', 0.8), x: (l0 + l1) / 2, y: 64, w: Math.max(20, l1 - l0), h: 2 }));
       }
-      const lines = stack(f.title || 'Sunday Service', 2), n = lines.length, top = 108, avail = H - top - (sp ? 60 : 150);
+      // with a preacher the words take the top of the page and the preacher the foot (over the whole page, his head hid half of them)
+      const lines = stack(f.title || 'Sunday Service', 2), n = lines.length, top = 108, avail = sp ? H * 0.56 : H - top - 150;
       const ts = stackLines(lines, { t: top, fit: 1000, maxH: avail / n - 14, gap: 14,
         style: { font: 'League Gothic', upper: true, stretch: 1.45, fill: { stops: ['#ffffff', mix('#ffffff', p.accent, 0.3), mix(p.accent, p.hi, 0.25)], angle: 90 }, bevel: 0.6, glow: rgba(p.accent, 0.35), shadow: true } });
       L.push(...ts);
-      if (sp) L.push(hero(sp, { cx: 780, t: top + (ts.bottom - top) * 0.6, b: H + 30, mode: 'chest', minL: 330, extra: lit(p) }));
+      // the preacher stood in front of the giant words, not squeezed into the corner under them
+      if (sp) L.push(hero(sp, { cx: 740, t: top + (ts.bottom - top) * 0.74, b: H + 30, mode: 'chest', minL: 320, extra: lit(p) }));
       // the details down the left: the speaker stands on the right, clear of them and of the title's second line
       L.push(...col([d && T({ name: 'Date', text: `${d.mon3}. ${d.ddth}`, font: 'Anton', size: 50, fill: p.accent, align: 'left', shadow: true, edge: 2, edgeColor: mix(p.deep, '#000000', 0.5) }), f.time && T({ name: 'Time', text: f.time, font: 'Anton', size: 50, align: 'left', shadow: true }),
         sp && sp.name && T({ name: 'Speaker', text: sp.name, upper: true, font: 'Montserrat', size: 18, align: 'left', shadow: true, maxW: 300 }),
