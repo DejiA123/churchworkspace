@@ -7,10 +7,9 @@
  *   - every look builds and draws, and the page is light (not a dark poster);
  *     Arches and Big words show three ministers when there are three
  *   - one colour, clean print: no shadow under a word, no grain over the page
- *   - the PHOTO ITSELF in the frame when the bank kept it: the frame full of
- *     picture (never the frame's colour showing through), the crop inside the
- *     photo, the face near the top of the frame
- *   - without one, the cut-out on the frame's colour, stopping above the hands
+ *   - the CUT-OUT in the frame, on the frame's colour, even when the bank kept
+ *     the photo ("it doesn't match how it was cropped in the removed
+ *     background"): never the photo's own wall, the face near the top
  *   node test/flyer-simple.test.js
  */
 const fs = require('fs');
@@ -56,7 +55,7 @@ const ok = (cond, name, d) => { console.log((cond ? '  PASS ' : '  FAIL ') + nam
     const fields = { title: 'Sunday Service', date: '2026-11-01', time: '10:00AM', venue: 'The Power House, Galway, H91 958A', church: 'The Power House International', theme: 'Walking in Divine Favour' };
     const pal = { deep: '#030b2b', mid: '#1d4ed8', accent: '#38e1ff', hi: '#ffffff' };
     const lumOf = (c) => { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let s = 0, n = 0; for (let i = 0; i < d.length; i += 4 * 97) { s += (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / 255; n++; } return s / n; };
-    const out = { looks: [...F.SIMPLE], draws: [], dark: [], shadows: [], grain: [], frames: [], three: [] };
+    const out = { looks: [...F.SIMPLE], draws: [], dark: [], shadows: [], grain: [], frames: [], three: [], rawUsed: [] };
     const sp1 = [{ id: 'a', name: 'Bishop David Richman', img: 'c1', raw: 'kr:p1', photo: 'p1' }];
     const sp2 = sp1.concat({ id: 'b', name: 'Pastor Grace Richman', img: 'c1', raw: '', photo: 'p2' });
     const sp3 = sp2.concat({ id: 'c', name: 'Minister John Ade', img: 'c1', raw: 'kr:p1', photo: 'p3' });
@@ -71,15 +70,16 @@ const ok = (cond, name, d) => { console.log((cond ? '  PASS ' : '  FAIL ') + nam
             if (S.layers.some((l) => l.type === 'text' && l.shadow)) out.shadows.push(look);
             if (S.finish !== false) out.grain.push(look);
             if (speakers.length === 3 && look !== 'circle') out.three.push([look, S.layers.filter((l) => l.type === 'image' && l.speaker).length]);
-            // the photo in its frame: the frame full of picture, the crop inside the photo, the face near the top
-            const im = S.layers.find((l) => l.type === 'image' && l.img === 'kr:p1');
+            if (S.layers.some((l) => l.type === 'image' && l.img === 'kr:p1')) out.rawUsed.push([look, h, speakers.length]);
+            // the cut-out in its frame: on the frame's colour (never the photo's green wall), the face near the top
+            const im = S.layers.find((l) => l.type === 'image' && l.img === 'c1' && l.speaker === 'a');
             if (im && h === 1350 && speakers.length === 1) {
               const s = im.src, k = c.width / w;
               // (low down and to one side: inside an arch, a panel and a circle alike)
               const g = c.getContext('2d').getImageData(Math.round((im.x - im.w * 0.3) * k), Math.round((im.y + im.h * 0.3) * k), 1, 1).data;
               const frame = S.layers[S.layers.indexOf(im) - 1];
-              const faceAt = (330 / 1800 - s.y) / s.h;   // where the face's middle is, down the frame
-              out.frames.push({ look, inside: s.x >= -1e-6 && s.y >= -1e-6 && s.x + s.w <= 1 + 1e-6 && s.y + s.h <= 1 + 1e-6, foot: [g[0], g[1], g[2]], frameIs: frame && frame.name, faceAt: +faceAt.toFixed(2) });
+              const faceAt = (130 / 1300 - s.y) / s.h;   // where the face's middle is, down the frame
+              out.frames.push({ look, foot: [g[0], g[1], g[2]], frameIs: frame && frame.name, faceAt: +faceAt.toFixed(2) });
             }
           } catch (e) { out.draws.push('ERR ' + look + ' ' + e.message); }
         }
@@ -96,10 +96,10 @@ const ok = (cond, name, d) => { console.log((cond ? '  PASS ' : '  FAIL ') + nam
   ok(r.three.filter(([l]) => l === 'arches' || l === 'bigword').every(([, n]) => n === 3), 'three ministers: Arches and Big words show all three', r.three);
   ok(r.dark.length === 0, 'every one is a light page', r.dark);
   ok(r.shadows.length === 0 && r.grain.length === 0, 'clean print: no shadows under words, no grain', { s: r.shadows, g: r.grain });
-  ok(r.frames.length >= 4, 'the photo itself goes in the frame when the bank kept it', r.frames.map((f) => f.look));
-  ok(r.frames.every((f) => f.inside), 'its crop is inside the photo (never past its edge)', r.frames);
-  ok(r.frames.every((f) => Math.abs(f.foot[0] - 0x2f) + Math.abs(f.foot[1] - 0x8f) + Math.abs(f.foot[2] - 0x4e) < 40 || f.foot[0] + f.foot[1] + f.foot[2] < 120),
-    'the frame is full of picture down to its foot (the photo, not the frame colour)', r.frames.map((f) => [f.look, f.foot]));
+  ok(r.frames.length >= 4 && r.frames.every((f) => f.frameIs === 'Frame'), 'the cut-out goes in the frame, on the frame', r.frames.map((f) => [f.look, f.frameIs]));
+  ok(r.rawUsed.length === 0, 'the photo itself never does, though the bank kept it (its wall, the people beside)', r.rawUsed);
+  ok(r.frames.every((f) => Math.abs(f.foot[0] - 0x2f) + Math.abs(f.foot[1] - 0x8f) + Math.abs(f.foot[2] - 0x4e) > 60),
+    "no green wall at the frame's foot", r.frames.map((f) => [f.look, f.foot]));
   ok(r.frames.every((f) => f.faceAt > 0.08 && f.faceAt < 0.5), 'the face is in the top half of the frame', r.frames.map((f) => [f.look, f.faceAt]));
   ok(r.cutIn, 'no photo kept: the cut-out goes in the frame instead');
   await b.close();

@@ -1907,8 +1907,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   /* a person in a frame: the frame in colour, the person on it, cut by its edge */
   function framed(sp, o) {
     if (PAINTED) return [];
-    // the photo itself when the bank kept it (nothing cut out, nothing to go wrong); else the cut-out on the frame's colour
-    const key = sp && sp.raw && imgOf(sp.raw) && META.has(sp.raw) ? sp.raw : sp && sp.img;
+    // the cut-out on the frame's colour — the one made (and checked) in My church. "The cropped of the images is terrible
+    // it doesn't match how it was cropped in the removed background": the photo itself brought its wall and the people beside
+    const key = sp && sp.img;
     const im = imgOf(key); if (!im) return [];
     const shape = o.shape || 'arch', cx = o.l + o.w / 2, cy = o.t + o.h / 2;
     const clip = shape === 'circle' ? { round: true } : shape === 'arch' ? { arch: true } : o.radius ? { radius: o.radius } : {};
