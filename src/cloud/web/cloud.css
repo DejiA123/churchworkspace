@@ -4538,3 +4538,36 @@ body.mw-cloud.mw-home .cloud-home { background: #eaf5fd; color: #0d1b2c; }
 .mt-take small { grid-column: 1; font-size: 12.5px; color: #6b7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mt-take span { grid-column: 2; grid-row: 1 / span 2; padding: 8px 14px; border-radius: 999px; font-size: 13.5px; font-weight: 700; color: #fff; background: #111318; }
 .mt-take.bad small { color: #b91c1c; }
+
+/* ===================================================================== */
+/*  FINDING A FILE: a search box and chips over the list                 */
+/* ===================================================================== */
+.cloud-files-find { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 2px 16px 8px; }
+.cloud-files-find.hidden { display: none; }
+.cff-search { position: relative; display: flex; align-items: center; height: 44px; padding: 0 6px 0 40px; border-radius: 14px; background: rgba(255,255,255,.07); }
+.cff-search > svg { position: absolute; left: 13px; top: 50%; width: 19px; height: 19px; transform: translateY(-50%); color: #9b9ea8; pointer-events: none; }
+.cff-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; font-size: 16px; -webkit-appearance: none; appearance: none; }
+.cff-search input::-webkit-search-cancel-button { display: none; }
+.cff-clear { flex: none; display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; background: rgba(255,255,255,.12); color: inherit; }
+.cff-clear svg { width: 15px; height: 15px; }
+.cff-clear.hidden { display: none; }
+.cff-chips { display: flex; align-items: center; gap: 8px; overflow-x: auto; margin: 0 -16px; padding: 0 16px 2px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.cff-chips::-webkit-scrollbar { display: none; }
+.cff-chip { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border: 0; border-radius: 17px; background: rgba(255,255,255,.08); color: inherit; font: inherit; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.cff-chip.on { background: #e6e7ec; color: #0f1115; }
+.cff-chip svg { width: 16px; height: 16px; }
+.cff-sep { flex: none; width: 1px; height: 20px; background: rgba(255,255,255,.14); }
+.cff-none .cloud-files-pill { margin-top: 12px; }
+/* on the light sheets */
+.cloud-sheet-modal .cff-search { background: #f1f3f6; color: #0f1115; }
+.cloud-sheet-modal .cff-search:focus-within { box-shadow: inset 0 0 0 1.5px #1f6fe0; background: #fff; }
+.cloud-sheet-modal .cff-search > svg { color: #6b7280; }
+.cloud-sheet-modal .cff-search input::placeholder { color: #8b919c; }
+.cloud-sheet-modal .cff-clear { background: #dde1e7; color: #3b4250; }
+.cloud-sheet-modal .cff-chip { background: #f1f3f6; color: #0f1115; }
+.cloud-sheet-modal .cff-chip.on { background: #0f1115; color: #fff; }
+.cloud-sheet-modal .cff-sep { background: #dde1e7; }
+/* (the page's own input look — a box and a ring of its own — not inside the search pill) */
+body.mw-cloud .cff-search input[type="search"], body.mw-cloud .cff-search input[type="search"]:focus {
+  height: 100%; margin: 0; padding: 0 8px 0 0; border: 0; border-radius: 0; outline: 0; background: transparent; box-shadow: none; color: inherit;
+}

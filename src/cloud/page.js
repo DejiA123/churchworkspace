@@ -286,6 +286,11 @@ ${styles}
         <button id="cloudFilesRefresh" type="button" class="cloud-files-icon" aria-label="Refresh" title="Refresh"><i class="mi" data-i="refresh"></i></button>
       </div>
       <div id="cloudFilesDisk" class="cloud-files-disk hidden"></div>
+      <!-- "I should be able to search by name, even some sort of filter" -->
+      <div id="cloudFilesFind" class="cloud-files-find hidden">
+        <label class="cff-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input id="cloudFilesSearch" type="search" placeholder="Search by name" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Search by name"><button id="cloudFilesSearchClear" type="button" class="cff-clear hidden" aria-label="Clear the search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7 7 17"/></svg></button></label>
+        <div id="cloudFilesChips" class="cff-chips" role="toolbar" aria-label="Filter"></div>
+      </div>
       <div id="cloudUploadBar" class="cloud-upload-bar hidden">
         <div class="cloud-upload-name"></div>
         <div class="progress"><div class="progress-bar" style="width:0%"></div></div>

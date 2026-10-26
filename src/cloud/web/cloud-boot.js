@@ -1852,7 +1852,73 @@ let _hideTimer = null;
    * be sure; many is Select, tick them, Delete.
    */
   let filesCache = null;
-  const filesUi = { selecting: false, chosen: new Set(), sure: false };
+  const filesUi = { selecting: false, chosen: new Set(), sure: false, q: '', kind: 'all', when: 'any', sort: 'new' };
+
+  /*
+   * ►► FINDING ONE. ◄◄ "I should be able to search by name, even some sort of
+   * filter": 122 finished videos is a long scroll. A search box (every word
+   * typed must be in the name; "Gods" finds "God's") and chips: what kind
+   * (videos, photos, music — those there are), how recent (today, this week,
+   * this month) and the order (newest, oldest, A–Z). Everything done to a group
+   * — Select all, Save all, Delete all — is done to what is showing, never to
+   * what the search has hidden.
+   */
+  const fold = (t) => String(t || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  const extOf = (n) => (/\.[^.]+$/.exec(String(n).toLowerCase()) || [''])[0];
+  const kindOfFile = (f) => { const e = extOf(f.name); return VID_RE.test(e) ? 'video' : PIC_RE.test(e) ? 'photo' : AUDIO_RE.test(e) ? 'music' : 'other'; };
+  const WHEN_MS = { today: 0, week: 7 * 86400000, month: 31 * 86400000 };
+  function shownFiles(g) {
+    const exts = isPicking() ? pickState.exts : null;
+    let files = (g.files || []).filter((f) => !exts || exts.some((e) => f.name.toLowerCase().endsWith(e)));
+    const words = fold(filesUi.q).split(' ').filter(Boolean);
+    if (words.length) files = files.filter((f) => { const n = ' ' + fold((f.title || friendlyName(f.name)) + ' ' + f.name) + ' '; const flat = n.replace(/ /g, ''); return words.every((w) => n.includes(w) || flat.includes(w)); });
+    if (filesUi.kind !== 'all') files = files.filter((f) => kindOfFile(f) === filesUi.kind);
+    if (filesUi.when !== 'any') {
+      const now = new Date(), since = filesUi.when === 'today' ? new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() : Date.now() - WHEN_MS[filesUi.when];
+      files = files.filter((f) => Number(f.mtime) >= since);
+    }
+    const nm = (f) => fold(f.title || friendlyName(f.name));
+    if (filesUi.sort === 'old') files = files.slice().sort((a, b) => a.mtime - b.mtime);
+    else if (filesUi.sort === 'az') files = files.slice().sort((a, b) => nm(a).localeCompare(nm(b), undefined, { numeric: true }));
+    else files = files.slice().sort((a, b) => b.mtime - a.mtime);
+    return files;
+  }
+  const filtering = () => !!(fold(filesUi.q) || filesUi.kind !== 'all' || filesUi.when !== 'any');
+  function resetFind() {
+    Object.assign(filesUi, { q: '', kind: 'all', when: 'any', sort: 'new' });
+    const s = $('#cloudFilesSearch'); if (s) s.value = '';
+  }
+  const SORT_NEXT = { new: 'old', old: 'az', az: 'new' }, SORT_LABEL = { new: 'Newest first', old: 'Oldest first', az: 'A–Z' };
+  function paintFind() {
+    const box = $('#cloudFilesFind'); if (!box) return;
+    const exts = isPicking() ? pickState.exts : null;
+    const all = ((filesCache && filesCache.groups) || []).flatMap((g) => (g.files || []).filter((f) => !exts || exts.some((e) => f.name.toLowerCase().endsWith(e))));
+    // a handful needs no finding (but the box stays while something is being searched for)
+    box.classList.toggle('hidden', all.length < 6 && !filtering());
+    const clr = $('#cloudFilesSearchClear'); if (clr) clr.classList.toggle('hidden', !filesUi.q);
+    const kinds = ['video', 'photo', 'music'].filter((k) => all.some((f) => kindOfFile(f) === k));
+    const chip = (attr, val, label, on) => `<button type="button" class="cff-chip${on ? ' on' : ''}" data-${attr}="${val}" aria-pressed="${on}">${label}</button>`;
+    const KL = { video: 'Videos', photo: 'Photos', music: 'Music' };
+    let h = '';
+    if (kinds.length > 1) h += chip('kind', 'all', 'All', filesUi.kind === 'all') + kinds.map((k) => chip('kind', k, KL[k], filesUi.kind === k)).join('') + '<i class="cff-sep"></i>';
+    h += [['today', 'Today'], ['week', 'This week'], ['month', 'This month']].map(([k, l]) => chip('when', k, l, filesUi.when === k)).join('');
+    h += '<i class="cff-sep"></i>' + `<button type="button" class="cff-chip cff-sort" data-sort="1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4v16m0 0-3-3m3 3 3-3M17 20V4m0 0-3 3m3-3 3 3"/></svg>${SORT_LABEL[filesUi.sort]}</button>`;
+    const chips = $('#cloudFilesChips'); if (chips) chips.innerHTML = h;
+  }
+  function onFindChip(e) {
+    const b = e.target.closest('.cff-chip'); if (!b) return;
+    if (b.dataset.kind) filesUi.kind = b.dataset.kind;
+    else if (b.dataset.when) filesUi.when = filesUi.when === b.dataset.when ? 'any' : b.dataset.when;   // a second tap: any time
+    else if (b.dataset.sort) filesUi.sort = SORT_NEXT[filesUi.sort];
+    filesUi.sure = false; filesUi.delAllSure = null;
+    renderFiles();
+  }
+  let findTimer = 0;
+  function onFindInput(e) {
+    filesUi.q = e.target.value;
+    clearTimeout(findTimer);
+    findTimer = setTimeout(() => { filesUi.delAllSure = null; renderFiles(); }, 120);
+  }
 
   /*
    * ►► A SHEET COMES UP OVER WHATEVER ASKED FOR IT. ◄◄
@@ -1887,6 +1953,7 @@ let _hideTimer = null;
       : 'Add videos & photos';   // (sends any of them: videos, photos, songs)
     const title = m.querySelector('.cloud-files-title');
     if (title) title.textContent = opts.picking ? PICK_TITLE[kind] : 'My Uploads';
+    resetFind();
     setSelecting(false);
     /*
      * PICKING SEVERAL (the AI Montage's "From your files"): a tap ticks a video
@@ -1972,7 +2039,7 @@ let _hideTimer = null;
     const canDelete = filesCache.canDelete !== false && !picking;
     let html = '', any = false, anyDel = false;
     for (const g of (filesCache.groups || [])) {
-      const files = (g.files || []).filter((f) => !exts || exts.some((e) => f.name.toLowerCase().endsWith(e)));
+      const files = shownFiles(g);
       if (!files.length) continue;
       any = true;
       // exports and uploads only: the Videos folder is the machine's own
@@ -1982,11 +2049,11 @@ let _hideTimer = null;
       // finished exports: every video to Photos in one go (the same Save all as an Export all ends on)
       const vids = !picking && g.key === 'output' ? files.filter((f) => /\.(mp4|mov|m4v)$/i.test(f.name)) : [];
       const saveAllBtn = vids.length > 1
-        ? `<button type="button" class="cv-act cv-save sa-all cf-saveall" data-saveall="output">${mi('download')}<span>Save all ${vids.length} to Photos</span></button>` : '';
+        ? `<button type="button" class="cv-act cv-save sa-all cf-saveall" data-saveall="output">${mi('download')}<span>Save ${filtering() ? 'these' : 'all'} ${vids.length} to Photos</span></button>` : '';
       // …and all of them deleted in one go, once they are saved (asks once more first: it cannot be undone)
       const sureAll = filesUi.delAllSure === g.key;
       const delAllBtn = !picking && del && g.key === 'output' && files.length > 1
-        ? `<button type="button" class="cf-delall${sureAll ? ' sure' : ''}" data-delall="${g.key}">${mi('trash')}<span>${sureAll ? `Delete all ${files.length} for good?` : `Delete all ${files.length}`}</span></button>` : '';
+        ? `<button type="button" class="cf-delall${sureAll ? ' sure' : ''}" data-delall="${g.key}">${mi('trash')}<span>${sureAll ? `Delete ${filtering() ? 'these' : 'all'} ${files.length} for good?` : `Delete ${filtering() ? 'these' : 'all'} ${files.length}`}</span></button>` : '';
       let acts = saveAllBtn || delAllBtn ? `<div class="cf-group-acts">${saveAllBtn}${delAllBtn}</div>` : '';
       // choosing, one by one or all at once: Select all / Clear in place of Save all · Delete all
       if (filesUi.selecting && !picking && del) {
@@ -1996,11 +2063,16 @@ let _hideTimer = null;
       html += `<section class="cloud-files-group"><h4 class="cloud-files-head"><span>${escHtml(g.label)}</span><small>${files.length} · ${fmtSize(total)}</small></h4>`
         + acts + files.map((f) => fileRow(f, del, picking)).join('') + '</section>';
     }
-    if (!any) {
+    if (!any && filtering()) {
+      const q = fold(filesUi.q) ? `“${escHtml(String(filesUi.q).trim())}”` : 'that';
+      html = `<div class="cloud-files-empty cff-none"><b>Nothing matches ${q}</b><p>Check the spelling, or try fewer words.</p>`
+        + '<button type="button" class="cloud-files-pill" data-findclear="1">Show everything</button></div>';
+    } else if (!any) {
       html = `<div class="cloud-files-empty"><div class="cf-empty-art">${mi('folder')}</div><b>Nothing here yet</b>`
         + `<p>${exts ? 'Nothing of that kind, anyway. ' : ''}Send ${SEND_WHAT[picking ? (pickState.kind || 'video') : 'media']} with the button above.</p></div>`;
     }
     list.innerHTML = html;
+    paintFind();
     const sel = $('#cloudFilesSelect');
     if (sel) sel.classList.toggle('hidden', !anyDel);
     if (filesUi.selecting && !anyDel) setSelecting(false);
@@ -2100,10 +2172,11 @@ let _hideTimer = null;
     if (tx) tx.textContent = filesUi.sure && n ? `Delete ${n === 1 ? 'it' : n} for good?` : n > 1 ? `Delete ${n}` : 'Delete';
   }
   function onFilesClick(e) {
+    if (e.target.closest('[data-findclear]')) { resetFind(); renderFiles(); return; }
     const sa0 = e.target.closest('[data-selall]');
     if (sa0 && filesUi.selecting) {
       const g = ((filesCache && filesCache.groups) || []).find((x) => x.key === sa0.dataset.selall);
-      const ps = ((g && g.files) || []).map((f) => f.path);
+      const ps = (g ? shownFiles(g) : []).map((f) => f.path);   // (what is showing: never what the search hid)
       const all = ps.length && ps.every((p) => filesUi.chosen.has(p));
       for (const p of ps) { if (all) filesUi.chosen.delete(p); else filesUi.chosen.add(p); }
       filesUi.sure = false;
@@ -2124,7 +2197,7 @@ let _hideTimer = null;
       filesUi.delAllSure = null;
       clearTimeout(filesUi.delAllTimer);
       const g = ((filesCache && filesCache.groups) || []).find((x) => x.key === key);
-      const paths = ((g && g.files) || []).map((f) => f.path);
+      const paths = (g ? shownFiles(g) : []).map((f) => f.path);   // (only what is showing)
       if (paths.length) deletePaths(paths);
       return;
     }
@@ -2132,7 +2205,7 @@ let _hideTimer = null;
     const sa = e.target.closest('[data-saveall]');
     if (sa && !filesUi.selecting) {
       const g = ((filesCache && filesCache.groups) || []).find((x) => x.key === sa.dataset.saveall);
-      const paths = ((g && g.files) || []).filter((f) => /\.(mp4|mov|m4v)$/i.test(f.name)).map((f) => f.path);
+      const paths = (g ? shownFiles(g) : []).filter((f) => /\.(mp4|mov|m4v)$/i.test(f.name)).map((f) => f.path);
       if (!paths.length) return;
       closeFilesModal();
       saveAll(paths, { tapped: true });
@@ -6264,6 +6337,10 @@ let _hideTimer = null;
     on('#cloudFilesClose', 'click', closeFilesModal);
     on('#cloudFilesRefresh', 'click', () => refreshFiles());
     on('#cloudFilesList', 'click', onFilesClick);
+    on('#cloudFilesChips', 'click', onFindChip);
+    on('#cloudFilesSearch', 'input', onFindInput);
+    on('#cloudFilesSearch', 'keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });   // (the keyboard away: the list is to be seen)
+    on('#cloudFilesSearchClear', 'click', () => { filesUi.q = ''; const s = $('#cloudFilesSearch'); if (s) { s.value = ''; s.focus(); } renderFiles(); });
     on('#cloudFilesList', 'submit', (e) => { const f = e.target.closest('form.cf-ren'); if (f) { e.preventDefault(); renameRow(f); } });
     on('#cloudFilesSelect', 'click', () => setSelecting(!filesUi.selecting));
     on('#cloudFilesSelDelete', 'click', onSelDelete);
