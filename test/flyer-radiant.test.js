@@ -12,6 +12,7 @@
  *   - each minister stops behind the names bar (a cut-out that ends at the
  *     chest is lowered to it, not left floating; one that goes on is cut there)
  *   - the page is vivid at the top and light at the foot, where the address is
+ *   - a cut-out keeps its whole outline (nothing shaved off a face's edge)
  *   - "this is the standard type of flyer": the board in the studio is it in
  *     four colours — the event's own first, the church's blue next when the
  *     event's are not blue — and the other looks wait for "more designs"
@@ -68,6 +69,16 @@ const ok = (cond, name, d) => { console.log((cond ? '  PASS ' : '  FAIL ') + nam
         } catch (e) { out.draws.push('ERR ' + h + '/' + n + ' ' + e.message); }
       }
     }
+    // the cut-out goes on the flyer as it is in My church: nothing off its outline (an ear, the hair, a cheek)
+    {
+      const c = document.createElement('canvas'); c.width = 924; c.height = 2000; const x = c.getContext('2d');
+      x.fillStyle = '#20202c'; x.fillRect(250, 700, 420, 1300);
+      x.fillStyle = '#8a5a3c'; x.beginPath(); x.ellipse(460, 480, 150, 190, 0, 0, Math.PI * 2); x.fill();
+      x.beginPath(); x.ellipse(300, 500, 14, 40, 0, 0, Math.PI * 2); x.fill();   // an ear
+      const solid = (cv) => { const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 128) n++; return n; };
+      const before = solid(c), pr = await F.preparePerson(c);
+      out.kept = { before, after: solid(pr.img) };
+    }
     // the studio's board: Radiant in four colours
     const St = window.MWFlyerStudio, Fs = St._state;
     Fs.kit = { speakers: [{ id: 's1', name: 'Bishop David Richman', photos: ['p1'] }] }; Fs.speakers = ['s1'];
@@ -90,6 +101,7 @@ const ok = (cond, name, d) => { console.log((cond ? '  PASS ' : '  FAIL ') + nam
   ok(r.feet.length === 18 && r.feet.every((f) => f.foot > f.barT && f.foot <= f.barB), 'every minister stops behind the names bar (lowered to it, or cut there)', r.feet.filter((f) => !(f.foot > f.barT && f.foot <= f.barB)));
   ok(r.top && r.top.S > 0.5 && r.top.L < 0.7, 'the page is vivid at the top', r.top);
   ok(r.foot && r.foot.L > 0.8, 'and light at the foot, where the address is read', r.foot);
+  ok(r.kept && r.kept.after >= r.kept.before * 0.998, "the cut-out keeps its whole outline on the flyer (as in My church)", r.kept);
   ok(r.board[0] === 'radiant' && r.board.slice(1, 4).every((l) => /^radiant./.test(l)) && new Set(r.board.slice(0, 4)).size === 4, 'the board is Radiant, in four different colours', r.board);
   ok(!r.board.slice(1, 4).includes('radiantblue'), 'an event in blue already: no second blue', r.board);
   ok(r.pals.every(([, mid, way]) => way && way.mid === mid), 'each colour is drawn in its own colours', r.pals);

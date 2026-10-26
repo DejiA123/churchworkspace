@@ -514,6 +514,13 @@
     back();
   }
 
+  /* which sides of a person's picture cut through them (solid right up to that edge) */
+  function cutSides(c) {
+    const x = c.getContext('2d'), W = c.width, H = c.height;
+    const solid = (sx, sy, sw, sh, n) => { const d = x.getImageData(sx, sy, sw, sh).data; let k = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 160) k++; return k >= n; };
+    const b = Math.max(1, Math.round(Math.min(W, H) * 0.004));
+    return { l: solid(0, 0, b, H, H * b * 0.03), r: solid(W - b, 0, b, H, H * b * 0.03), t: solid(0, 0, W, b, W * b * 0.03) };
+  }
   function drawShape(x, L) {
     const w = L.w, h = L.h;
     x.fillStyle = fillOf(x, L.fill, w, h);
@@ -1004,6 +1011,7 @@
        * jacket cut off along a line, an arm ending where the photo did): the
        * person melts into the picture there instead of stopping.
        */
+      const cut = cutSides(layer);   // (before the edge is softened: a cut edge is solid right up to it)
       const fr = Math.max(1.2, L.feather * 1.8 * h / 1000), fr2 = Math.max(4, h * 0.022);
       const soft = (r) => { const mk = canvas(w, h), mx = mk.getContext('2d'); mx.filter = `blur(${r}px)`; mx.drawImage(layer, 0, 0); mx.filter = 'none'; return mk; };
       const m1 = soft(fr), m2 = soft(fr2);
@@ -1020,11 +1028,14 @@
       kx.drawImage(layer, 0, 0); kx.globalCompositeOperation = 'destination-in'; kx.drawImage(mask, 0, 0); kx.drawImage(mask, 0, 0);
       lx.clearRect(0, 0, w, h); lx.drawImage(keep, 0, 0);
       if (!L.round && !L.radius && !L.arch && !L.hard) {
-        // where the photo's own frame cut through them (an arm, a shoulder at its side): faded, never a straight line
+        // where the photo's own frame cut through them (an arm, a shoulder at its side): faded, never a straight line —
+        // only there. Faded on every side of everyone, it took the edge of a turned face and the top of the hair
+        // ("more of the speaker's face is removed than in My church").
         lx.globalCompositeOperation = 'destination-out';
         const side = (x0, x1) => { const sg = lx.createLinearGradient(x0, 0, x1, 0); sg.addColorStop(0, 'rgba(0,0,0,1)'); sg.addColorStop(1, 'rgba(0,0,0,0)'); lx.fillStyle = sg; lx.fillRect(Math.min(x0, x1), 0, Math.abs(x1 - x0), h); };
-        side(0, w * 0.09); side(w, w * 0.91);
-        const tg = lx.createLinearGradient(0, 0, 0, h * 0.025); tg.addColorStop(0, 'rgba(0,0,0,.9)'); tg.addColorStop(1, 'rgba(0,0,0,0)'); lx.fillStyle = tg; lx.fillRect(0, 0, w, h * 0.025);
+        if (cut.l) side(0, w * 0.09);
+        if (cut.r) side(w, w * 0.91);
+        if (cut.t) { const tg = lx.createLinearGradient(0, 0, 0, h * 0.025); tg.addColorStop(0, 'rgba(0,0,0,.9)'); tg.addColorStop(1, 'rgba(0,0,0,0)'); lx.fillStyle = tg; lx.fillRect(0, 0, w, h * 0.025); }
         lx.globalCompositeOperation = 'source-over';
       }
     }
@@ -1326,14 +1337,23 @@
     const full = canvas(W, H), fx = full.getContext('2d', { willReadFrequently: true });
     fx.drawImage(cv, 0, 0);
     const d = fx.getImageData(0, 0, W, H), p = d.data;
+    const keptNear = (mx, my) => {
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const X = mx + dx, Y = my + dy; if (X < 0 || Y < 0 || X >= w || Y >= h) continue;
+        const l = lab[Y * w + X]; if (l >= 0 && keep[l]) return true;
+      }
+      return false;
+    };
     let x0 = W, y0 = H, x1 = 0, y1 = 0;
     for (let y = 0; y < H; y++) {
       const my = Math.min(h - 1, (y * k) | 0);
       for (let x = 0; x < W; x++) {
         const i = (y * W + x) * 4;
         if (p[i + 3] === 0) continue;
-        const l = lab[my * w + Math.min(w - 1, (x * k) | 0)];
-        if (l < 0 || !keep[l]) { p[i + 3] = 0; continue; }
+        const mx = Math.min(w - 1, (x * k) | 0), l = lab[my * w + mx];
+        // at the outline the small copy is fainter than the photo: a pixel there goes with the shape beside it, not
+        // out ("more of the face is removed" — the cheek, an ear, the hair went, ~6 px all round a phone photo)
+        if (l < 0 ? !keptNear(mx, my) : !keep[l]) { p[i + 3] = 0; continue; }
         if (p[i + 3] > 20) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
       }
     }
@@ -1389,8 +1409,10 @@
    * A CLEAN EDGE. A cut-out made small and blown up to a poster stair-steps
    * along every shoulder and keeps a pale fringe of the old background (the
    * blocky white outline round a suit). The edge is smoothed — the alpha
-   * blurred and cut again a little inside — which rounds the steps into the
-   * real curve and takes the fringe off with them. It only ever takes away.
+   * blurred and the steps' corners rounded off. It only ever takes away, and
+   * never from inside the outline: cut "a little inside" it took a face's
+   * edge on every flyer ("more of the speaker's face is removed than in My
+   * church").
    */
   function smoothEdge(c) {
     const W = c.width, H = c.height;
@@ -1399,7 +1421,7 @@
     const d = x.getImageData(0, 0, W, H), p = d.data, n = W * H;
     const a = new Float32Array(n);
     for (let i = 0; i < n; i++) a[i] = p[i * 4 + 3] / 255;
-    const r = Math.max(2, Math.round(Math.max(W, H) * 0.0035));
+    const r = Math.max(2, Math.round(Math.max(W, H) * 0.0025));
     const b = Float32Array.from(a), tmp = new Float32Array(n);
     for (let pass = 0; pass < 2; pass++) {   // two box passes ≈ a gaussian
       for (let y = 0; y < H; y++) { let acc = 0; const row = y * W; for (let k = -r; k <= r; k++) acc += b[row + clamp(k, 0, W - 1)]; for (let xx = 0; xx < W; xx++) { tmp[row + xx] = acc / (2 * r + 1); acc += b[row + Math.min(W - 1, xx + r + 1)] - b[row + Math.max(0, xx - r)]; } }
@@ -1407,7 +1429,7 @@
     }
     for (let i = 0; i < n; i++) {
       if (a[i] === 0) continue;
-      const t = clamp((b[i] - 0.5) / 0.4, 0, 1), sm = t * t * (3 - 2 * t);
+      const t = clamp((b[i] - 0.15) / 0.3, 0, 1), sm = t * t * (3 - 2 * t);   // (the outline itself blurs to ½: kept whole)
       p[i * 4 + 3] = Math.round(Math.min(a[i], sm) * 255);
     }
     x.putImageData(d, 0, 0);
