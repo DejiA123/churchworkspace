@@ -3436,10 +3436,25 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       return L;
     },
   };
+  /*
+   * ►► RADIANT IS THE STANDARD. ◄◄ "This is the standard type of flyer, bright, simple": the church's own flyer
+   * (Radiant copies it). The board opens on it in four colours — the event's own first — and the other looks wait
+   * for "more designs". Each colour is the same layout under its own name, so the board can hold it more than once.
+   */
+  const RADIANT_WAYS = {
+    radiantblue: { name: 'Radiant blue', pal: { deep: '#04114f', mid: '#1f45f0', accent: '#38d6ff', hi: '#ffffff' } },
+    radiantpurple: { name: 'Radiant purple', pal: { deep: '#1a0640', mid: '#6d28d9', accent: '#f0abfc', hi: '#ffffff' } },
+    radiantred: { name: 'Radiant red', pal: { deep: '#3b0505', mid: '#c81e1e', accent: '#ffc46b', hi: '#ffffff' } },
+    radiantgold: { name: 'Radiant gold', pal: { deep: '#2b1600', mid: '#b7791f', accent: '#ffe08a', hi: '#ffffff' } },
+    radiantteal: { name: 'Radiant teal', pal: { deep: '#022c33', mid: '#0e8f9c', accent: '#8cf3ff', hi: '#ffffff' } },
+  };
+  Object.keys(RADIANT_WAYS).forEach((k) => { LAYOUTS[k] = (D) => LAYOUTS.radiant(D); });
+  const isRadiant = (l) => l === 'radiant' || !!RADIANT_WAYS[l];
   const THUMB_LOOKS = Object.keys(THUMBS);
   const LOOK_NAMES = { ytbold: 'Bold', ytglow: 'Glory light', ytlight: 'Light page', ytfire: 'Fire', ytserif: 'Gold serif', ytscript: 'Script', ytpanel: 'Panel', ytword: 'One word', ytmono: 'B&W on colour', ytstage: 'Stage', ytoutline: 'Outline', ytcinema: 'Cinematic', glory: 'Glory', fire: 'Fire', encounter: 'Encounter', miracle: 'Spotlight', bible: 'Golden classic', prophetic: 'Gold', sunday: 'Giant words', lineup: 'Line-up', script: 'Script', scenic: 'Scenic', light: 'Light', joinus: 'Join us', didone: 'Elegant', upper: 'Upper Room', theme: 'Theme picture', mountain: 'Sky letters', breaking: 'Breaking', spirit: 'Gold line-up',
     radiant: 'Radiant', arch: 'Arch', circle: 'Circle', split: 'Colour panel', arches: 'Arches', bigword: 'Big words',
     ailetter: 'AI lettering', jericho: 'Bright hour', unique: 'Bright duo', thanks: 'Bright sky', mantle: 'Cream & gold', urgency: 'Line-up stage', harvest: 'Rows' };
+  Object.keys(RADIANT_WAYS).forEach((k) => { LOOK_NAMES[k] = RADIANT_WAYS[k].name; });
   /* each look's own colours (the AI's colours go on the first few designs; these on the rest, for variety) */
   const SIGNATURE = {
     radiant: { deep: '#04114f', mid: '#1f45f0', accent: '#38d6ff', hi: '#ffffff' },
@@ -3512,7 +3527,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     leadFirst(layers, D);
     keepTitleClear(layers, D.h);
     if (o.variant) {
-      if (o.variant.mirror && look !== 'radiant') mirrorLayers(layers, D.w);   // (Radiant stays as the church liked it)
+      if (o.variant.mirror && !isRadiant(look)) mirrorLayers(layers, D.w);   // (Radiant stays as the church liked it)
       layers.forEach((l) => { if (l.type === 'fx' && l.seed != null) l.seed = l.seed + o.variant.seed; });
     }
     layers.forEach((l) => { delete l.head; });
@@ -3539,7 +3554,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     return t.c === c && !t.x0 && !t.y0 ? src : t.c.toDataURL('image/png');
   }
 
-  root.MWFlyer = { tidyCut, preparePerson, prepareRaw, photoMeta, hero, framedSrc, SIMPLE, META, HD, render, buildScene, loadFonts, IMGS, loadImg, proceduralBg, LAYOUTS, LOOK_NAMES, SIGNATURE, FONTS, textCanvas, boxOf, Dates };
+  root.MWFlyer = { tidyCut, preparePerson, prepareRaw, photoMeta, hero, framedSrc, SIMPLE, META, HD, render, buildScene, loadFonts, IMGS, loadImg, proceduralBg, LAYOUTS, LOOK_NAMES, SIGNATURE, RADIANT_WAYS, FONTS, textCanvas, boxOf, Dates };
 
   /* ================================================================== THE UI */
 
@@ -4155,23 +4170,32 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
        next, and the dark, dramatic ones only on "more designs". Within each,
        the scores' order. At most two with the preacher in the middle. */
     // (Radiant first of all: the one held up as better than all the rest)
-    const tier = (l) => (l === 'radiant' ? -1 : SIMPLE.has(l) ? 0 : BRIGHT.has(l) ? 1 : 2);
+    const tier = (l) => (isRadiant(l) ? -1 : SIMPLE.has(l) ? 0 : BRIGHT.has(l) ? 1 : 2);
     const order = scored.slice().sort((a, b) => tier(a) - tier(b));
-    const board = [], centred = (l) => !SIMPLE.has(l) && l !== 'radiant' && !SIDE.has(l) && !BRIGHT.has(l) && !GROUP.has(l);
+    const board = [], centred = (l) => !SIMPLE.has(l) && !isRadiant(l) && !SIDE.has(l) && !BRIGHT.has(l) && !GROUP.has(l);
+    // the standard first: Radiant in the event's own colours, then three more of its colours (blue, the church's own,
+    // whenever the event's are not blue already); the colours left over and the other looks on "more designs"
+    const [pr, , pb] = hexRgb((F.pal && F.pal.mid) || '#1f45f0'), blueOwn = pb > pr + 40;
+    const ways = Object.keys(RADIANT_WAYS).filter((k) => !(blueOwn && k === 'radiantblue'));
+    const firstWays = (blueOwn ? [] : ['radiantblue']).concat(shuffled(ways.filter((k) => k !== 'radiantblue')));
+    if (fits('radiant')) board.push('radiant', ...firstWays.slice(0, BOARD_N - 1));
     for (const l of order) {
       if (board.length >= BOARD_N) break;
+      if (board.includes(l)) continue;
       if (centred(l) && board.filter(centred).length >= 2) continue;
       board.push(l);
     }
     for (const l of order) if (board.length < BOARD_N && !board.includes(l)) board.push(l);
-    return board.concat(order.filter((l) => !board.includes(l)));
+    // (the rest of the colours after the first board, then the other looks)
+    const rest = order.filter((l) => !board.includes(l));
+    return board.concat(rest.filter(isRadiant).slice(0, 2), rest.filter((l) => !isRadiant(l)), rest.filter(isRadiant).slice(2));
   }
   // how a layout places the preacher (for a board of different flyers)
   const SIDE = new Set(['jericho', 'sunday', 'script', 'joinus', 'breaking', 'didone']);
   const BRIGHT = new Set(['jericho', 'unique', 'thanks', 'mantle', 'light']);
   const GROUP = new Set(['urgency', 'harvest', 'unique', 'lineup']);
   // the designs that show two ministers side by side, both named
-  const DUO = new Set(['unique', 'lineup', 'spirit', 'thanks', 'encounter', 'miracle', 'joinus', 'circle', 'arches', 'bigword', 'radiant']);
+  const DUO = new Set(['unique', 'lineup', 'spirit', 'thanks', 'encounter', 'miracle', 'joinus', 'circle', 'arches', 'bigword', 'radiant', ...Object.keys(RADIANT_WAYS)]);
   const COOL_TONES = ['blue', 'purple', 'teal', 'emerald', 'night', 'royal'];
   function newBoard() {
     const order = rankLooks();
@@ -4198,13 +4222,13 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const unused = (b) => n(b) < 1;
       const want = F.bgs.filter((b) => b.theme && unused(b))[0] || F.bgs.filter((b) => b.tone && b.tone === LOOK_TONE[look] && unused(b))[0];
       // (a plain page takes no painting: it is left for the looks that show one)
-      const bg = SIMPLE.has(look) || look === 'radiant' ? null : want || (F.bgs.some((b) => b.tone) ? F.bgs.slice().sort((a, b) => n(a) - n(b))[0] : F.bgs[i % F.bgs.length]);
+      const bg = SIMPLE.has(look) || isRadiant(look) ? null : want || (F.bgs.some((b) => b.tone) ? F.bgs.slice().sort((a, b) => n(a) - n(b))[0] : F.bgs[i % F.bgs.length]);
       if (bg) used.set(bg.key, n(bg) + 1);
       // the AI's colours on the first designs, each look's own on the rest — a board of different flyers, not one flyer ten times
       // a picture painted in its own light takes colours that match it; the AI's own on the rest
       const tp = bg && bg.tone && TONE_PAL[bg.tone];
       const v = F.board.variants[look];
-      const pal = tp ? (tp === 'own' ? F.pal : tp) : (i === 0 ? F.pal : v.pal || SIGNATURE[look] || F.pal);
+      const pal = RADIANT_WAYS[look] ? RADIANT_WAYS[look].pal : tp ? (tp === 'own' ? F.pal : tp) : (i === 0 ? F.pal : v.pal || SIGNATURE[look] || F.pal);
       return Object.assign(buildScene({ look, w: sz.w, h: sz.h, pal, dir: F.dir, fields: F.fields, speakers: speakersFor(i), logo: IMGS.has('logo') ? 'logo' : null, bg: bg && bg.key, variant: v }), { madeBy: (bg && bg.by) || '' });
     });
     // the preacher painted into the scene (paintPreacherIn): first on the board, labelled so the face is checked
@@ -4213,7 +4237,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const lt = F.lettered ? [Object.assign(buildScene({ look: 'ailetter', w: sz.w, h: sz.h, pal: F.pal, dir: F.dir, fields: F.fields, speakers: speakersFor(0), logo: IMGS.has('logo') ? 'logo' : null, bg: F.lettered.key }),
       { label: F.lettered.checked ? 'AI lettering' : 'AI lettering · check the spelling', madeBy: F.lettered.by || '' })] : [];
     // the bright, simple designs first; the AI's painted extras after them
-    const nPlain = F.designs.filter((d) => SIMPLE.has(d.look) || d.look === 'radiant').length;
+    const nPlain = F.designs.filter((d) => SIMPLE.has(d.look) || isRadiant(d.look)).length;
     F.designs = F.designs.slice(0, nPlain).concat(lt, pin, F.designs.slice(nPlain));
     if (F.step === 'pick') paintThumbs();
   }
@@ -5154,7 +5178,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     });
   }
   function sheetLooks() {
-    const looks = F.mode === 'thumb' ? THUMB_LOOKS : Object.keys(LAYOUTS);
+    const looks = F.mode === 'thumb' ? THUMB_LOOKS : Object.keys(LAYOUTS).filter((k) => !RADIANT_WAYS[k]);   // (a colour of Radiant is Radiant here)
     openSheet(`<div class="fs-looks${F.mode === 'thumb' ? ' th-looks' : ''}">${looks.map((k) => `<button type="button" class="fs-look${F.scene.look === k ? ' on' : ''}" data-look="${k}"><canvas></canvas><small>${esc(LOOK_NAMES[k])}</small></button>`).join('')}</div>`, (sh) => {
       const bg = F.scene.layers.find((l) => l.type === 'bg');
       const sp = sceneSpeakers();

@@ -12,7 +12,9 @@
  *   - each minister stops behind the names bar (a cut-out that ends at the
  *     chest is lowered to it, not left floating; one that goes on is cut there)
  *   - the page is vivid at the top and light at the foot, where the address is
- *   - the board in the studio starts with it, the bright simple looks after
+ *   - "this is the standard type of flyer": the board in the studio is it in
+ *     four colours — the event's own first, the church's blue next when the
+ *     event's are not blue — and the other looks wait for "more designs"
  *   node test/flyer-radiant.test.js
  */
 const fs = require('fs');
@@ -66,13 +68,18 @@ const ok = (cond, name, d) => { console.log((cond ? '  PASS ' : '  FAIL ') + nam
         } catch (e) { out.draws.push('ERR ' + h + '/' + n + ' ' + e.message); }
       }
     }
-    // the studio's board: Radiant first, then the bright simple looks
+    // the studio's board: Radiant in four colours
     const St = window.MWFlyerStudio, Fs = St._state;
     Fs.kit = { speakers: [{ id: 's1', name: 'Bishop David Richman', photos: ['p1'] }] }; Fs.speakers = ['s1'];
     Fs.board = null; Fs.bgs = []; Fs.pal = pal; Fs.dir = { looks: ['glory'] }; Fs.fields.title = 'Sunday Service'; Fs.step = 'edit';
     St._rebuild();
     out.board = Fs.designs.map((d) => d.look);
-    out.simple = [...F.SIMPLE];
+    out.order = Fs.board.order;
+    out.pals = Fs.designs.slice(1, 4).map((d) => [d.look, d.pal.mid, (F.RADIANT_WAYS[d.look] || {}).pal]);
+    // an event in red: the church's blue comes second
+    Fs.board = null; Fs.pal = { deep: '#3b0505', mid: '#c81e1e', accent: '#ffc46b', hi: '#ffffff' };
+    St._rebuild();
+    out.redBoard = Fs.designs.map((d) => d.look);
     return out;
   });
   ok(errors.length === 0, 'no errors on the page', errors);
@@ -83,7 +90,11 @@ const ok = (cond, name, d) => { console.log((cond ? '  PASS ' : '  FAIL ') + nam
   ok(r.feet.length === 18 && r.feet.every((f) => f.foot > f.barT && f.foot <= f.barB), 'every minister stops behind the names bar (lowered to it, or cut there)', r.feet.filter((f) => !(f.foot > f.barT && f.foot <= f.barB)));
   ok(r.top && r.top.S > 0.5 && r.top.L < 0.7, 'the page is vivid at the top', r.top);
   ok(r.foot && r.foot.L > 0.8, 'and light at the foot, where the address is read', r.foot);
-  ok(r.board[0] === 'radiant' && r.board.slice(1, 4).every((l) => r.simple.includes(l)), 'the board starts with Radiant, the bright simple looks after it', r.board);
+  ok(r.board[0] === 'radiant' && r.board.slice(1, 4).every((l) => /^radiant./.test(l)) && new Set(r.board.slice(0, 4)).size === 4, 'the board is Radiant, in four different colours', r.board);
+  ok(!r.board.slice(1, 4).includes('radiantblue'), 'an event in blue already: no second blue', r.board);
+  ok(r.pals.every(([, mid, way]) => way && way.mid === mid), 'each colour is drawn in its own colours', r.pals);
+  ok(r.redBoard[0] === 'radiant' && r.redBoard[1] === 'radiantblue', "an event in red: the church's blue next", r.redBoard);
+  ok(r.order.slice(4, 8).some((l) => !/^radiant/.test(l)) && r.order.includes('arch') && r.order.includes('glory'), 'the other looks are still there, on "more designs"', r.order.slice(0, 10));
   await b.close();
   console.log(`\n${pass} PASS / ${fail} FAIL`);
   process.exit(fail ? 1 : 0);
