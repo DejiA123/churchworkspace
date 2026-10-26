@@ -12,7 +12,8 @@
  *   - each minister stops behind the names bar (a cut-out that ends at the
  *     chest is lowered to it, not left floating; one that goes on is cut there)
  *   - the page is vivid at the top and light at the foot, where the address is
- *   - a cut-out keeps its whole outline (nothing shaved off a face's edge)
+ *   - a cut-out goes on the flyer exactly as saved in My church: nothing off
+ *     its outline, not blurred, the foot melting only where the frame cuts
  *   - "this is the standard type of flyer": the board in the studio is it in
  *     four colours — the event's own first, the church's blue next when the
  *     event's are not blue — and the other looks wait for "more designs"
@@ -78,6 +79,19 @@ const ok = (cond, name, d) => { console.log((cond ? '  PASS ' : '  FAIL ') + nam
       const solid = (cv) => { const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 128) n++; return n; };
       const before = solid(c), pr = await F.preparePerson(c);
       out.kept = { before, after: solid(pr.img) };
+      // …and drawn on a flyer, every pixel of it down to where the frame's foot melts is the saved cut-out's own
+      F.IMGS.set('cutx', pr.img); if (pr.meta) F.META.set('cutx', pr.meta);
+      const L = F.hero({ img: 'cutx', name: 'X', id: 'x' }, { cx: 540, t: 150, b: 1250, mode: 'chest' });
+      const S = F.render({ w: 1080, h: 1350, pal, layers: [{ type: 'bg', plain: '#ffffff' }, L], finish: false }, document.createElement('canvas'), 1);
+      const ref = document.createElement('canvas'); ref.width = S.width; ref.height = S.height; const rx = ref.getContext('2d');
+      rx.fillStyle = '#fff'; rx.fillRect(0, 0, ref.width, ref.height);
+      const P = pr.img, sr = L.src;
+      rx.drawImage(P, sr.x * P.width, sr.y * P.height, sr.w * P.width, sr.h * P.height, L.x - L.w / 2, L.y - L.h / 2, L.w, L.h);
+      const A = S.getContext('2d').getImageData(0, 0, S.width, S.height).data, B = rx.getImageData(0, 0, S.width, S.height).data;
+      const yEnd = Math.floor(L.y - L.h / 2 + L.h * (1 - (L.fade || 0) * 1.7));
+      let off = 0, n = 0;
+      for (let y = 0; y < yEnd; y++) for (let x2 = 0; x2 < S.width; x2++) { const i = (y * S.width + x2) * 4; if (B[i] + B[i + 1] + B[i + 2] < 760) { n++; if (Math.abs(A[i] - B[i]) + Math.abs(A[i + 1] - B[i + 1]) + Math.abs(A[i + 2] - B[i + 2]) > 60) off++; } }
+      out.drawn = { n, offPct: +(off / Math.max(1, n) * 100).toFixed(3), fade: L.fade };
     }
     // the studio's board: Radiant in four colours
     const St = window.MWFlyerStudio, Fs = St._state;
@@ -101,7 +115,9 @@ const ok = (cond, name, d) => { console.log((cond ? '  PASS ' : '  FAIL ') + nam
   ok(r.feet.length === 18 && r.feet.every((f) => f.foot > f.barT && f.foot <= f.barB), 'every minister stops behind the names bar (lowered to it, or cut there)', r.feet.filter((f) => !(f.foot > f.barT && f.foot <= f.barB)));
   ok(r.top && r.top.S > 0.5 && r.top.L < 0.7, 'the page is vivid at the top', r.top);
   ok(r.foot && r.foot.L > 0.8, 'and light at the foot, where the address is read', r.foot);
-  ok(r.kept && r.kept.after >= r.kept.before * 0.998, "the cut-out keeps its whole outline on the flyer (as in My church)", r.kept);
+  ok(r.kept && r.kept.after === r.kept.before, "the cut-out goes to the flyer exactly as saved in My church (not a pixel off it)", r.kept);
+  ok(r.drawn && r.drawn.n > 1000 && r.drawn.offPct < 0.5, "drawn on the flyer it is the saved cut-out itself, ear and all, down to where the foot melts", r.drawn);
+  ok(r.drawn && r.drawn.fade <= 0.16, 'and the foot melts only a little, where the frame cuts through them', r.drawn);
   ok(r.board[0] === 'radiant' && r.board.slice(1, 4).every((l) => /^radiant./.test(l)) && new Set(r.board.slice(0, 4)).size === 4, 'the board is Radiant, in four different colours', r.board);
   ok(!r.board.slice(1, 4).includes('radiantblue'), 'an event in blue already: no second blue', r.board);
   ok(r.pals.every(([, mid, way]) => way && way.mid === mid), 'each colour is drawn in its own colours', r.pals);

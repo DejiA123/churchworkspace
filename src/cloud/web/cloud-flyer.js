@@ -1003,38 +1003,20 @@
     if (body) lx.drawImage(body, 0, 0); else lx.drawImage(pic, 0, 0, w, h);
     if (L.feather) {
       /*
-       * ►► NEVER A SHARP CUT-OUT. ◄◄ A person pasted on with a hard edge is
-       * what makes a flyer look home-made ("I never want weird cut-out looking
-       * sharp, no fade"). The edge is soft all round — a mask made at the
-       * photo's own size and blown up stair-steps along every shoulder — and
-       * much softer towards the foot, where a cut-out's worst edges are (a
-       * jacket cut off along a line, an arm ending where the photo did): the
-       * person melts into the picture there instead of stopping.
+       * ►► THE CUT-OUT AS SAVED IN MY CHURCH. ◄◄ Its outline used to be softened here as well — blurred all round,
+       * heavily from the waist down — which ate an ear, a hand, a sleeve ("it is still cutting some off, it must be
+       * exactly the same as the saved in My church"). The cut-out's own edge is soft already. The one edge faded is
+       * one the original photo cut straight through (an arm at its side), so it never ends on a straight line.
        */
-      const cut = cutSides(layer);   // (before the edge is softened: a cut edge is solid right up to it)
-      const fr = Math.max(1.2, L.feather * 1.8 * h / 1000), fr2 = Math.max(4, h * 0.022);
-      const soft = (r) => { const mk = canvas(w, h), mx = mk.getContext('2d'); mx.filter = `blur(${r}px)`; mx.drawImage(layer, 0, 0); mx.filter = 'none'; return mk; };
-      const m1 = soft(fr), m2 = soft(fr2);
-      // the mask: the fine one up top, the very soft one from the waist down
-      const mask = canvas(w, h), mx = mask.getContext('2d');
-      const top = canvas(w, h), tx = top.getContext('2d');
-      tx.drawImage(m1, 0, 0); tx.globalCompositeOperation = 'destination-in';
-      let g = tx.createLinearGradient(0, h * 0.45, 0, h); g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(1, 'rgba(0,0,0,0)'); tx.fillStyle = g; tx.fillRect(0, 0, w, h);
-      const low = canvas(w, h), lw = low.getContext('2d');
-      lw.drawImage(m2, 0, 0); lw.globalCompositeOperation = 'destination-in';
-      g = lw.createLinearGradient(0, h * 0.45, 0, h); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,1)'); lw.fillStyle = g; lw.fillRect(0, 0, w, h);
-      mx.drawImage(top, 0, 0); mx.globalCompositeOperation = 'lighter'; mx.drawImage(low, 0, 0);
-      const keep = canvas(w, h), kx = keep.getContext('2d');
-      kx.drawImage(layer, 0, 0); kx.globalCompositeOperation = 'destination-in'; kx.drawImage(mask, 0, 0); kx.drawImage(mask, 0, 0);
-      lx.clearRect(0, 0, w, h); lx.drawImage(keep, 0, 0);
+      const cut = cutSides(layer);
       if (!L.round && !L.radius && !L.arch && !L.hard) {
         // where the photo's own frame cut through them (an arm, a shoulder at its side): faded, never a straight line —
         // only there. Faded on every side of everyone, it took the edge of a turned face and the top of the hair
         // ("more of the speaker's face is removed than in My church").
         lx.globalCompositeOperation = 'destination-out';
         const side = (x0, x1) => { const sg = lx.createLinearGradient(x0, 0, x1, 0); sg.addColorStop(0, 'rgba(0,0,0,1)'); sg.addColorStop(1, 'rgba(0,0,0,0)'); lx.fillStyle = sg; lx.fillRect(Math.min(x0, x1), 0, Math.abs(x1 - x0), h); };
-        if (cut.l) side(0, w * 0.09);
-        if (cut.r) side(w, w * 0.91);
+        if (cut.l) side(0, w * 0.05);
+        if (cut.r) side(w, w * 0.95);
         if (cut.t) { const tg = lx.createLinearGradient(0, 0, 0, h * 0.025); tg.addColorStop(0, 'rgba(0,0,0,.9)'); tg.addColorStop(1, 'rgba(0,0,0,0)'); lx.fillStyle = tg; lx.fillRect(0, 0, w, h * 0.025); }
         lx.globalCompositeOperation = 'source-over';
       }
@@ -1308,7 +1290,21 @@
     });
     return softened(c, Math.max(4, sw * 0.16));
   }
-  /* the person's own outline: only the biggest shape, trimmed tight (feet at the bottom edge) */
+  /* the cut-out as it is, the empty margin round it trimmed off (nothing of the person touched) */
+  function cropToPerson(cv) {
+    const W = cv.width, H = cv.height, p = cv.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data;
+    let x0 = W, y0 = H, x1 = -1, y1 = -1;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (p[(y * W + x) * 4 + 3] > 0) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; y1 = y; }
+    if (x1 < x0) return { c: cv, x0: 0, y0: 0 };
+    const pad = Math.round(Math.max(x1 - x0, y1 - y0) * 0.02);
+    x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(W - 1, x1 + pad); y1 = Math.min(H - 1, y1 + 1);
+    if (x0 === 0 && y0 === 0 && x1 === W - 1 && y1 === H - 1) return { c: cv, x0: 0, y0: 0 };
+    const out = canvas(x1 - x0 + 1, y1 - y0 + 1);
+    out.getContext('2d').drawImage(cv, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+    return { c: out, x0, y0 };
+  }
+  /* the person's own outline: only the biggest shape, trimmed tight (feet at the bottom edge) — on the way INTO My
+     church (tidyCut), where the result is seen and can be fixed; never again on the way to a flyer */
   function tidyCanvas(cv) {
     const W = cv.width, H = cv.height;
     const k = Math.min(1, 360 / Math.max(W, H)), w = Math.max(1, Math.round(W * k)), h = Math.max(1, Math.round(H * k));
@@ -1405,60 +1401,6 @@
     QM.set(im, m);
     return m;
   }
-  /*
-   * A CLEAN EDGE. A cut-out made small and blown up to a poster stair-steps
-   * along every shoulder and keeps a pale fringe of the old background (the
-   * blocky white outline round a suit). The edge is smoothed — the alpha
-   * blurred and the steps' corners rounded off. It only ever takes away, and
-   * never from inside the outline: cut "a little inside" it took a face's
-   * edge on every flyer ("more of the speaker's face is removed than in My
-   * church").
-   */
-  function smoothEdge(c) {
-    const W = c.width, H = c.height;
-    if (W < 8 || H < 8) return c;
-    const x = c.getContext('2d', { willReadFrequently: true });
-    const d = x.getImageData(0, 0, W, H), p = d.data, n = W * H;
-    const a = new Float32Array(n);
-    for (let i = 0; i < n; i++) a[i] = p[i * 4 + 3] / 255;
-    const r = Math.max(2, Math.round(Math.max(W, H) * 0.0025));
-    const b = Float32Array.from(a), tmp = new Float32Array(n);
-    for (let pass = 0; pass < 2; pass++) {   // two box passes ≈ a gaussian
-      for (let y = 0; y < H; y++) { let acc = 0; const row = y * W; for (let k = -r; k <= r; k++) acc += b[row + clamp(k, 0, W - 1)]; for (let xx = 0; xx < W; xx++) { tmp[row + xx] = acc / (2 * r + 1); acc += b[row + Math.min(W - 1, xx + r + 1)] - b[row + Math.max(0, xx - r)]; } }
-      for (let xx = 0; xx < W; xx++) { let acc = 0; for (let k = -r; k <= r; k++) acc += tmp[clamp(k, 0, H - 1) * W + xx]; for (let y = 0; y < H; y++) { b[y * W + xx] = acc / (2 * r + 1); acc += tmp[Math.min(H - 1, y + r + 1) * W + xx] - tmp[Math.max(0, y - r) * W + xx]; } }
-    }
-    for (let i = 0; i < n; i++) {
-      if (a[i] === 0) continue;
-      const t = clamp((b[i] - 0.15) / 0.3, 0, 1), sm = t * t * (3 - 2 * t);   // (the outline itself blurs to ½: kept whole)
-      p[i * 4 + 3] = Math.round(Math.min(a[i], sm) * 255);
-    }
-    x.putImageData(d, 0, 0);
-    return c;
-  }
-  /*
-   * WHERE THE PERSON STOPS BEING CLEAN. A glass lectern in front of a
-   * preacher comes out of the cut-out HALF see-through — a pane of nothing
-   * with the old background ghosting in it, a sliver at the hand ("the remove
-   * from background is terrible"). A person's own edge is only a pixel or two
-   * of half-transparency per side; glass is a wide band of it. The first row
-   * below the shoulders where that band starts is where the flyer frames them
-   * down to, and no lower.
-   */
-  function cleanBottom(c, top, sy) {
-    const W = c.width, H = c.height, k = Math.min(1, 240 / Math.max(W, H));
-    const w = Math.max(1, Math.round(W * k)), h = Math.max(1, Math.round(H * k));
-    const s2 = canvas(w, h), x = s2.getContext('2d', { willReadFrequently: true });
-    x.drawImage(c, 0, 0, w, h);
-    const d = x.getImageData(0, 0, w, h).data;
-    const u = Math.max(4, (sy - top) * k), from = Math.round(sy * k + u * 0.35);
-    let run = 0;
-    for (let y = Math.max(0, from); y < h; y++) {
-      let part = 0, solid = 0;
-      for (let xx = 0; xx < w; xx++) { const a = d[(y * w + xx) * 4 + 3]; if (a >= 215) solid++; else if (a > 25) part++; }
-      if (part >= Math.max(8, solid * 0.14)) { if (++run >= 3) return (y - 2) / k; } else run = 0;
-    }
-    return null;
-  }
   const PREP = new WeakMap();
   function preparePerson(im) {
     if (PREP.has(im)) return PREP.get(im);
@@ -1472,10 +1414,12 @@
       // (the pose places them on the page — and nothing more: trimming the cut-out to an outline drawn from it, an oval
       //  round the nose, took the far cheek and the back of the Bishop's head when he sang side on — "his face is too
       //  slim, parts still cut off". The cut-out is used as it is in the bank, where it can be seen and fixed.)
-      const t = tidyCanvas(c);
+      // ►► EXACTLY AS SAVED IN MY CHURCH. ◄◄ "It is still cutting some off… it must be exactly the same as the saved
+      // in My church": nothing is taken from it here — no bits dropped, no edge smoothed, no stop above a lectern's
+      // glass. Only the empty margin round it is trimmed. (My church is where a cut-out is checked and fixed.)
+      const t = cropToPerson(c);
       const meta = metaOf(t.c, lm, t.x0, t.y0, W0, H0);
-      if (meta) { const cb = cleanBottom(t.c, meta.top, meta.sy); if (cb) meta.clean = cb; }
-      return { img: smoothEdge(t.c), meta };
+      return { img: t.c, meta };
     })().catch(() => ({ img: im, meta: null }));
     PREP.set(im, job);
     return job;
@@ -1697,9 +1641,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     else if (mode === 'waist') nb = m.hy ? m.hy + u * 0.25 : m.sy + u * 2.4;
     else if (mode === 'chest') nb = m.wy ? clamp(m.wy + u * 0.12, m.sy + u * 0.95, m.sy + u * 1.25) : m.sy + u * 1.2;
     else nb = m.sy + u * 0.9;
-    // never down into a lectern's glass (cleanBottom): framed tighter, the cut melting into shadow
-    if (m.clean && mode !== 'full') nb = Math.min(nb, Math.max(m.sy + u * 0.45, m.clean));
-    return { t: Math.max(0, m.top - u * 0.06), nb, cx: m.cx };
+    // (the top a little above the head, so no hair is ever cut by the picture's own top)
+    return { t: Math.max(0, m.top - u * 0.15), nb, cx: m.cx };
   }
   function headBox(m, fr, k, left, top, im) {
     // the head is the top of the silhouette (m.cx is the middle of the shoulders, which a turned pose moves off the face)
@@ -1776,7 +1719,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       img: sp.img, name: sp.name || 'Speaker', speaker: sp.id || '', photo: sp.photo || '',
       src: { x: 0, y: fr.t / m.h, w: 1, h: (vb - fr.t) / m.h },
       w, h, x: X, y: o.t + h / 2,
-      fade: whole ? 0 : o.steady ? (o.fade || 0) : Math.max(o.fade == null ? 0.22 : o.fade, mode === 'chest' ? 0.34 : 0.2), feather: 1.4,
+      // the foot melts only where the frame cuts through them, and only a little ("still cutting some off": a third of
+      // the person faded away, the hands and the microphone with it); a person who ends above it is shown whole
+      fade: whole || vb >= m.h - 2 ? 0 : o.steady ? (o.fade || 0) : clamp(o.fade == null ? 0.16 : o.fade, 0.1, 0.16), feather: 1.4,
       frame: o.steady ? { mode, t: o.t0 == null ? o.t : o.t0, b: o.b, cx: o.cx, steady: true, maxR: o.maxR, maxU: o.maxU } : { mode, t: o.t, b: o.b, cx: o.cx },
       // where the head is on the page (keepTitleClear: a face never hides whole letters of the title)
       head: headBox(m, fr, k, X - w / 2, o.t, im),
