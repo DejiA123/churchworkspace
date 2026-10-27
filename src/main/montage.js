@@ -4075,6 +4075,38 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       if (log) log(`pictures: ${cuts} cut(s) to other moments of the night${sameScene ? ` (${sameScene} for a speaker whose scene was already seen or barely moved${still ? `, ${still} of them still` : ''})` : ''}, ${pips} picture(s) laid over the speakers — every one distinct${unclear ? `; ${unclear} speaker(s) whose face could not be told, covered` : ''}${silentSp ? `; ${silentSp} line(s) whose picture was of someone listening, covered` : ''}${carried ? `; ${carried} beat(s) carried on the picture before (no one new left)` : ''}`);
       // (a speaker's beats going straight on stay beats — each the clip length, each its own zoom: "each clip must fill
       //  the clip length"; joined, the opening speaker was one 5.4-second shot)
+      /*
+       * ►► A LINE NO ONE NEW CAN BE SHOWN OVER IS LEFT OUT. ◄◄ Its speaker was shown already and every new person of
+       * the night is used: carried on, the last four lines of a 45 s held one young man for 19 seconds. Such a line is
+       * taken out — a shorter edit, every clip someone new — while at least 60% of the length asked for is left.
+       */
+      const allCarried = new Map();
+      for (let i = speechFrom; i < speechTo; i++) {
+        const sh = shots[i];
+        if (sh.line == null) continue;
+        const c = (sh.overlays || []).some((o) => o.carried);
+        allCarried.set(sh.line, (allCarried.has(sh.line) ? allCarried.get(sh.line) : true) && c);
+      }
+      const lineLen = (k) => shots.filter((sh) => sh.line === k).reduce((n, sh) => n + sh.seconds, 0);
+      let cut = 0;
+      for (const [k, all] of [...allCarried].reverse()) {
+        if (!all || k === 0) continue;
+        const len = lineLen(k);
+        if (at - cut - len < opts.lengthSec * 0.6) break;
+        const gone = shots.filter((sh) => sh.line === k);
+        const t0 = Math.min(...gone.map((sh) => sh.at)), t1 = t0 + len;
+        for (let i = shots.length - 1; i >= 0; i--) if (shots[i].line === k) shots.splice(i, 1);
+        for (const sh of shots) if (sh.at >= t1 - 0.01) sh.at = round2(sh.at - len);
+        for (let w = capWords.length - 1; w >= 0; w--) {
+          const cw = capWords[w];
+          if (cw.start >= t0 - 0.01 && cw.start < t1 - 0.01) capWords.splice(w, 1);
+          else if (cw.start >= t1 - 0.01) { cw.start = round2(cw.start - len); cw.end = round2(cw.end - len); }
+        }
+        if (vo.outro && vo.outro.at >= t1 - 0.01) vo.outro.at = round2(vo.outro.at - len);
+        cut = round2(cut + len);
+        if (log) log(`pictures: a line no one new could be shown over (${len.toFixed(1)} s) left out — every clip someone new`);
+      }
+      at = round2(at - cut);
     }
     for (let i = speechFrom + 1; i < speechTo && !longEv; i += 2) {
       const sh = shots[i];
