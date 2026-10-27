@@ -2976,9 +2976,21 @@ function beatSpans(p) {
      * shared out evenly instead: as many beats as the clip length goes into it, each cut at the gap between words
      * nearest its share (a 9-second line: four of about 2.3 s).
      */
-    const t0 = ws[0].start, total = ws[ws.length - 1].end - t0, n = Math.max(1, Math.round(total / p.beatSec));
+    // (counted on what is SHOWN: a long event's line is held to about p.padTo — three seconds of words held to four
+    //  were one 4-second clip)
+    // (shared out over what is SHOWN — a long event's line held to about p.padTo, as it is below: three seconds of words
+    //  held to four were one 4-second clip)
+    const fd = (p.cand && p.cand.fileDur) || Infinity;
+    let F = Math.max(0, ws[0].start - 0.07), Lq = Math.min(fd - 0.02, ws[ws.length - 1].end + 0.16);
+    if (p.padTo > 0 && p.padTo - (Lq - F) > 0.02) {
+      let short = p.padTo - (Lq - F);
+      const tail = Math.min(short, Math.max(0, Math.min(fd - 0.02, p.nextStart != null ? p.nextStart - 0.1 : Infinity) - Lq));
+      Lq += tail; short -= tail;
+      F -= Math.min(short, Math.max(0, F - (p.prevEnd != null ? p.prevEnd + 0.1 : 0)));
+    }
+    const n = Math.max(1, Math.round((Lq - F) / p.beatSec));
     for (let k = 1; k < n; k++) {
-      const want = t0 + (total * k) / n;
+      const want = F + ((Lq - F) * k) / n;
       let best = -1;
       for (let j = b0 + 1; j < ws.length - (n - k - 1); j++) if (best < 0 || Math.abs(ws[j - 1].end - want) < Math.abs(ws[best - 1].end - want)) best = j;
       if (best < 0) break;
@@ -4054,19 +4066,8 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       if (log && fpx) log(`people: faces told apart in ${faced} of ${facesN} picture(s) in ${Math.round(facesMs / 1000)} s (this server's own face recognition); ${sameFaces} of someone already shown left out`);
       if (log) log(`people: ${sameTops} picture(s) of someone already shown left out by what they wear and when (no AI needed); of ${spare.length} moments, passed over: ${Object.entries(why).filter(([, n]) => n).map(([k, n]) => k + ' ' + n).join(', ') || 'none'}`);
       if (log) log(`pictures: ${cuts} cut(s) to other moments of the night${sameScene ? ` (${sameScene} for a speaker whose scene was already seen or barely moved${still ? `, ${still} of them still` : ''})` : ''}, ${pips} picture(s) laid over the speakers — every one distinct${unclear ? `; ${unclear} speaker(s) whose face could not be told, covered` : ''}${silentSp ? `; ${silentSp} line(s) whose picture was of someone listening, covered` : ''}${carried ? `; ${carried} beat(s) carried on the picture before (no one new left)` : ''}`);
-      /*
-       * ONE SHOT, NOT A JUMP BACK TO THE SAME FACE. A beat that goes on showing its line's speaker, straight on from the
-       * beat before (no one new was left to cut to), is joined to it: one picture of them, not two.
-       */
-      let joined = 0;
-      for (let i = speechTo - 1; i > speechFrom; i--) {
-        const a = shots[i - 1], b = shots[i];
-        if (b.line == null || b.line !== a.line || b.cand !== a.cand || a.from == null || b.from == null || b.cover) continue;
-        if (Math.abs(a.from + a.seconds - b.from) > 0.06 || (b.overlays || []).length || (a.overlays || []).some((o) => o.cover)) continue;
-        a.need = round2((a.need || a.seconds) + (b.need || b.seconds)); a.seconds = round2(a.seconds + b.seconds);
-        shots.splice(i, 1); joined++;
-      }
-      if (log && joined) log(`pictures: ${joined} beat(s) that stayed on their speaker joined to the beat before — one shot of them`);
+      // (a speaker's beats going straight on stay beats — each the clip length, each its own zoom: "each clip must fill
+      //  the clip length"; joined, the opening speaker was one 5.4-second shot)
     }
     for (let i = speechFrom + 1; i < speechTo && !longEv; i += 2) {
       const sh = shots[i];
