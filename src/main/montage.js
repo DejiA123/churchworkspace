@@ -2471,33 +2471,29 @@ function sameTop(a, b) {
 }
 /*
  * ►► ONE PERSON IN TWO PICTURES ({ vid, t, top, faces }) — one rule for every picture of the edit. ◄◄
- * Faces on a stage filmed at 720p are often side on and 30 pixels wide: SFace tells one person from another only
- * some of the time (one person measured 0.29–0.66 on Gospel Jamz, two people up to 0.36). What it can be sure of
- * decides; where it cannot, the night's own shape does — someone on stage stays there for a stretch:
- *   - faces surely alike (0.363, OpenCV's line): one person
- *   - of one video within a quarter of an hour: one person, unless the faces plainly differ (under 0.15 — the band
- *     beside the singer). The man in green at 188 and 192 min, the man in the navy jumper at 136 and 147, the
- *     host at 7.7 and 13.5, the young man in the hoodie at 113 and 119 were each shown twice before this
- *   - within half an hour and a little alike (0.27 — the man in the brown polo, 40.6 and 62.6 min, was 0.29)
- *   - plainly not alike (under 0.3): two people, whatever they wear (the band all in black)
- *   - alike, not surely, and no top to go by: taken as one; otherwise the same top in the same stretch (sameTop)
+ * "The same person from the clip is appearing twice — I want different varieties." Their faces decide, as far as
+ * they can (faceprint.js judge: measured on 126 pictures of Gospel Jamz labelled by hand — clear faces only say
+ * "two people"; a face side on says nothing, and that is how the man in the navy jumper got in three times). Where
+ * faces cannot tell, it is never taken for someone new on a guess:
+ *   - by face: one person, or two
+ *   - one of them has no clear face: of one video within ten minutes, or in the same top (sameTop), one person;
+ *     clearly other clothes (under 0.1 alike — one person never measured under that) and further apart, two
+ *   - nothing to go by at all: one person
  * Without face recognition here (no model), it is what they wear and when, as before.
  */
-// (a quarter of an hour took 70 of 88 moments on Gospel Jamz — eight speakers cover the night — and left no cut at all: ten minutes, and
-//  faces under 0.22 alike are two people even within them)
-const FACES_DIFFER = 0.3, PLAINLY_OTHER = 0.22, STAGE_STRETCH = 10 * 60, STAGE_LONG = 30 * 60, A_LITTLE_ALIKE = 0.27;
+const OTHER_TOP = 0.1, STAGE_STRETCH = 10 * 60;
 function onePerson(a, b, fp) {
   if (!a || !b) return false;
-  const faced = !!(fp && a.faces && a.faces.length && b.faces && b.faces.length);
-  const l = faced ? fp.likeness(a.faces, b.faces) : null;
   const apart = a.vid === b.vid && Number.isFinite(a.t) && Number.isFinite(b.t) ? Math.abs(a.t - b.t) : Infinity;
-  if (faced && l >= fp.SAME) return true;
-  if (fp && apart <= STAGE_STRETCH) return !(faced && l < PLAINLY_OTHER);
-  if (faced && l >= A_LITTLE_ALIKE && apart <= STAGE_LONG) return true;
-  if (faced && l < FACES_DIFFER) return false;
-  if (faced && !(a.top && b.top)) return true;
-  return !!(a.top && b.top) && sameTop(a, b);
+  if (!fp) return !!(a.top && b.top) && sameTop(a, b);
+  const byFace = fp.judge(a.faces, b.faces);
+  if (byFace !== null) return byFace;
+  if (apart <= STAGE_STRETCH) return true;
+  if (a.top && b.top) return sameTop(a, b) || topOverlap(a.top, b.top) >= OTHER_TOP;
+  return true;
 }
+/* someone whose face can be told from everyone's: a clear face in the picture */
+const readable = (who, fp) => !fp || !!(who && fp.clearOf(who.faces).length);
 /* the top of the person a picture shows at source time `t` (the biggest face inside the cut round `fx`); null when
  * no one is found */
 async function topAt(ctx, pd, cand, t, fx, W, H) {
@@ -3377,12 +3373,16 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
             const t = (p.start + p.end) / 2, top = pdS && p.cand ? await topAt(ctx, pdS, p.cand, t, fxAtLook(p, t), frS.W, frS.H) : null;
             let faces = [];
             // (five frames across the whole line: a speaker side on at its middle faces the room at some point of it)
-            if (fpS && p.cand && p.cand.kind === 'video') { try { faces = await fpS.printsAt(ctx.ffmpeg, p.cand.file, t, fxAtLook(p, t), p.cand.w, p.cand.h, frS.W, frS.H, { n: 5, step: Math.max(0.4, (p.end - p.start) / 5) }); } catch (e) { if (e instanceof jobs.CancelledError) throw e; faces = []; } }
+            // (nine, the person the line is OF — the biggest face — as every picture of the edit is read: a panel behind
+            //  a speaker is not them)
+            if (fpS && p.cand && p.cand.kind === 'video') { try { faces = await fpS.printsAt(ctx.ffmpeg, p.cand.file, t, fxAtLook(p, t), p.cand.w, p.cand.h, frS.W, frS.H, { n: 9, step: Math.max(0.25, (p.end - p.start - 0.4) / 8), main: true }); } catch (e) { if (e instanceof jobs.CancelledError) throw e; faces = []; } }
             topOf.set(p, { vid: p.vid, t: p.start, top, faces });
           }
           return topOf.get(p);
         };
-        const twins = (a, b) => onePerson(a, b, fpS);
+        // (by face when both can be told; else by what they wear and when — a speaker whose face cannot be told is dealt
+        //  with on their own below, not made everyone's twin: "can't tell" made 10 of 11 lines twins)
+        const twins = (a, b) => (fpS && readable(a, fpS) && readable(b, fpS) ? onePerson(a, b, fpS) : sameTop(a, b));
         let swaps = 0;
         for (let i = 1; pdS && i < picks.length && swaps < 10; i++) {
           const p = picks[i];
@@ -3390,7 +3390,10 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           const a = await speakerOf(p);
           let twin = false;
           for (let k = 0; k < picks.length && !twin; k++) if (k !== i && twins(a, await speakerOf(picks[k]))) twin = true;
-          if (!twin) continue;
+          // (a speaker whose face cannot be told is never shown — their line would need someone else over it, and there
+          //  are only so many: a good line of someone who can be told is better)
+          const unclear = !twin && fpS && !readable(a, fpS);
+          if (!twin && !unclear) continue;
           // (another good line — the AI's best scored first; of this part of the night first, then of any)
           const okAlt = (q) => !picks.includes(q) && !rejected.has(q) && Math.abs(lenOf(q) - lenOf(p)) <= 1.2
             && q.end - q.start >= MOMENT_LINE_MIN && q.end - q.start <= MOMENT_LINE_MAX + 0.3 && fitsEvent(q) && wholeThought(q) && !CROWD.test(q.text) && !HOUSEKEEPING.test(q.text) && !NOT_TO_SHARE.test(q.text) && messageOf(q) > 0
@@ -3405,12 +3408,12 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
             const b = await speakerOf(q);
             let clash = false;
             for (let k = 0; k < picks.length && !clash; k++) if (k !== i && twins(b, await speakerOf(picks[k]))) clash = true;
-            if (clash) continue;
-            if (log) log(`people: "${p.text.slice(0, 40)}…" is a speaker already in the edit — "${q.text.slice(0, 40)}…" instead`);
+            if (clash || (fpS && !readable(b, fpS))) continue;
+            if (log) log(`people: "${p.text.slice(0, 40)}…" is ${unclear ? 'a speaker whose face cannot be told' : 'a speaker already in the edit'} — "${q.text.slice(0, 40)}…" instead`);
             picks[i] = q; tot = tot - lenOf(p) + lenOf(q); swaps++; swapped = true;
             break;
           }
-          if (!swapped && log) log(`people: "${p.text.slice(0, 40)}…" is a speaker already in the edit — no other good line of someone new`);
+          if (!swapped && log) log(`people: "${p.text.slice(0, 40)}…" is ${unclear ? 'a speaker whose face cannot be told' : 'a speaker already in the edit'} — no other good line of someone new`);
         }
       }
       if (ev) picks = eventOrder(picks, ev, closeLine);
@@ -3447,7 +3450,9 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     try { faceOk = require('./faceprint').available(); } catch (e) { faceOk = false; }
     if (longEv) {
       // (enough moments for a new picture every clip — and the pictures laid over the speakers)
-      const parts = Math.max(partsFor(opts) * 2, Math.ceil((opts.lengthSec / (opts.clipSec || MOMENT_EACH)) * (faceOk ? 16 : 8))), far = (p) => !picks.some((q) => q.vid === p.vid && Math.abs(q.start - p.start) < 30);
+      // (×24: every moment cut to must show a clear face of someone not yet shown — a third of them do not, and panels hold
+      //  the stage for long stretches — so more of the night is looked at)
+      const parts = Math.max(partsFor(opts) * 2, Math.ceil((opts.lengthSec / (opts.clipSec || MOMENT_EACH)) * (faceOk ? 24 : 8))), far = (p) => !picks.some((q) => q.vid === p.vid && Math.abs(q.start - p.start) < 30);
       const span = Math.max(1, ...phrases.map((p) => p.end)), across = [];
       for (let k = 0; k < parts; k++) {
         const best = spare.filter((p) => far(p) && p.start >= k * span / parts && p.start < (k + 1) * span / parts)[0];   // (spare is in score order)
@@ -3481,7 +3486,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           const fr = ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 };
           const kept = [];
           // (the liveliest first, until there are plenty: about 2.5 for every picture the edit shows)
-          const enough = Math.ceil((opts.lengthSec / (opts.clipSec || MOMENT_EACH)) * (faceOk ? 9 : 4.5));
+          const enough = Math.ceil((opts.lengthSec / (opts.clipSec || MOMENT_EACH)) * (faceOk ? 14 : 4.5));
           let panned = 0;
           for (const sp of good) {
             if (kept.length >= enough) break;
@@ -3596,7 +3601,9 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     picks.forEach((p) => (p.looks || []).forEach((l) => { if (l.people > 0) seenMoments.push({ cand: p.cand, t: l.t, fx: l.fx, p }); }));
     for (const sp of spare) if (sp.snapLook && sp.snapLook.people > 0) seenMoments.push({ cand: sp.cand, t: snapAt(sp), fx: sp.snapLook.fx, p: sp });
     let cm = 0, covered = 0;
-    for (let i = speechFrom; i < speechTo; i++) {
+    // (a long event covers these beats below, each with someone new: a moment of another LINE is its speaker again —
+    //  "the same person from the clip is appearing twice")
+    for (let i = speechFrom; i < speechTo && !longEv; i++) {
       const sh = shots[i];
       if (!sh.cover) continue;
       // a moment from another line first (the same face, a different moment)
@@ -3615,6 +3622,7 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     }
     if (covered && log) log(`people: ${covered} beat(s) that cut away to nobody are covered with a moment that shows someone`);
     let bi = 0, sb = 0, altMoment = null;
+    const carriedShot = new WeakMap();   // a speaker's picture carried on through the next beat -> the shot it goes on from
     /*
      * A LONG EVENT: A NEW PICTURE EVERY BEAT (about MOMENT_EACH seconds). Each line opens on its speaker; every
      * beat after that is covered whole by a moment from another part of the night — checked to show a face, lit,
@@ -3674,10 +3682,15 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       let sameFaces = 0, faced = 0;
       const frF = ASPECTS[opts.aspect] ? { W: ASPECTS[opts.aspect].w, H: ASPECTS[opts.aspect].h } : { W: 1080, H: 1920 };
       let facesN = 0, facesMs = 0;
-      const facesOf = async (cand, t, fx) => {
+      // (five frames over the two seconds a moment plays, or across a speaker's whole line: one of them is more likely to
+      //  catch the face clear — facing the camera — and only a clear face can say "someone new")
+      const facesOf = async (cand, t, fx, span = 2) => {
         if (!fpx || !cand || cand.kind !== 'video') return [];
         const t0 = Date.now(); facesN++;
-        try { const f = await fpx.printsAt(ctx.ffmpeg, cand.file, t, fx, cand.w, cand.h, frF.W, frF.H); if (f.length) faced++; return f; }
+        const n = clamp(Math.round(span / 0.5) + 1, 5, 9);
+        // (main: the person the picture is of — the biggest face; a panel sitting behind a speaker made every panellist
+        //  "the speaker", and no moment of any of them could be cut to)
+        try { const f = await fpx.printsAt(ctx.ffmpeg, cand.file, t, fx, cand.w, cand.h, frF.W, frF.H, { n, step: span / (n - 1), main: true }); if (f.length) faced++; return f; }
         catch (e) { if (e instanceof jobs.CancelledError) throw e; return []; }
         finally { facesMs += Date.now() - t0; }
       };
@@ -3709,7 +3722,12 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
        * it. Each speaker's face and top are read first, and no moment cut to is of anyone with a line of their own.
        */
       const speakers = new Map();   // first beat of a line -> { vid, t, top, faces }
-      const aSpeaker = (who) => [...speakers.values()].some((sp) => onePerson(sp, who, fpx));
+      // (a speaker whose face cannot be told is never shown — their words go over someone who can — so only the ones
+      //  that can keep moments of themselves out)
+      // (…and only the ones that WILL be shown: a speaker already shown by an earlier line is covered on their next, so
+      //  a moment of them is no repeat of that — they kept 67 moments of the night out, and no one new was left)
+      const willShow = new Set();
+      const aSpeaker = (who) => [...speakers.entries()].some(([i, sp]) => willShow.has(i) && onePerson(sp, who, fpx));
       // (faces told apart: the same person is caught by their face, so moments need only be a minute and a half apart —
       //  3¾ minutes left 45 lively moments too few to cover a 5½-second line, and it played as one picture; a minute)
       const GAP = fpx ? clamp((opts.eventSec || 0) / (nPics * 20), 30, 60) : clamp((opts.eventSec || 0) / (nPics * 5), 45, 240);
@@ -3725,55 +3743,113 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         if (x.top === undefined) x.top = await topAt(ctx, pdx, x.cand, t, x.track ? trackAt(x.track, t) : x.snapLook && x.snapLook.fx, frT.W, frT.H);
         return x.top ? { vid: x.vid, t, top: x.top } : null;
       };
-      const why = { used: 0, near: 0, hour: 0, who: 0, top: 0, scene: 0, face: 0, faceless: 0, speaker: 0, cut: 0 };
-      const fresh = async () => {
+      const why = { used: 0, near: 0, hour: 0, who: 0, top: 0, scene: 0, face: 0, faceless: 0, unclear: 0, speaker: 0, cut: 0 };
+      // (relax: when every moment far enough from the rest is used, one nearer them, or in a scene already seen — never
+      //  someone already shown)
+      const fresh = async (relax = false) => {
         for (const x of spare) {
           if (used.has(x)) continue;
-          if (near(x)) { why.near++; continue; }
-          if (tooNear(x)) { why.hour++; continue; }
+          if (!relax && near(x)) { why.near++; continue; }
+          if (!relax && tooNear(x)) { why.hour++; continue; }
           const wk = whoOfSpare(x);
           if (wk && shownWho.some((w) => sameWho(w, wk))) { used.add(x); why.who++; continue; }   // (someone already shown)
           const fc = await facesOfSpare(x);
           // (a moment cut to shows someone's FACE: the person detector took the people drawn on a "Gospel Jamz —
           //  Evangelism Panel" banner for one, and the cut was the banner — 24 min)
           if (fpx && !fc.length) { used.add(x); why.faceless++; continue; }
+          // (…and a CLEAR one: only a clear face can tell someone new from someone shown — faceprint.js judge)
+          if (fpx && !readable({ faces: fc }, fpx)) { used.add(x); why.unclear++; continue; }
           // (a moment that has a cut or a cross-fade in it is two pictures, not one: the camera changing under it)
           if (fpx && await cutInside(x.cand.file, snapAt(x) - 1.3, 2.6)) { used.add(x); why.cut++; continue; }
           const tp = await topOfSpare(x);
           const who = { vid: x.vid, t: snapAt(x), top: tp ? tp.top : null, faces: fc };
-          if (fpx && aSpeaker(who)) { used.add(x); why.speaker++; continue; }   // (someone with a line of their own)
+          if (fpx && aSpeaker(who)) {   // (someone with a line of their own)
+            used.add(x); why.speaker++;
+            if (log && process.env.MW_PEOPLE_DEBUG) { const [k, sp] = [...speakers.entries()].find(([i, q]) => willShow.has(i) && onePerson(q, who, fpx)); log(`people-debug: speaker-like ${(who.t / 60).toFixed(2)} min fx ${x.snapLook && x.snapLook.fx} — the speaker at ${(sp.t / 60).toFixed(2)} min (beat ${k}), any ${fpx.likeness(sp.faces, who.faces).toFixed(2)}, clear ${fpx.alikeClear(fpx.clearOf(sp.faces), fpx.clearOf(who.faces)).toFixed(2)}`); }
+            continue;
+          }
           // (someone already shown: by face, or — when faces cannot tell — by what they wear and when)
           const was = shownPeople.find((w) => onePerson(w, who, fpx));
           if (was) { used.add(x); if (fc.length && was.faces && was.faces.length) { sameFaces++; why.face++; } else { sameTops++; why.top++; } continue; }
           const xs = await sigAt(x.cand.file, snapAt(x), x.snapLook && x.snapLook.fx);
-          if (shown.some((g) => apart(xs, g) < SAME) || [...lineSig.values()].some((g) => apart(xs, g) < SAME)) { used.add(x); why.scene++; continue; }
-          used.add(x); shownAt.push(atOf(x)); if (wk) shownWho.push(wk); if (who.top || fc.length) shownPeople.push(who); if (fc.length) shownFace.push(fc);
+          if (!relax && (shown.some((g) => apart(xs, g) < SAME) || [...lineSig.values()].some((g) => apart(xs, g) < SAME))) { why.scene++; continue; }
+          used.add(x); shownAt.push(atOf(x)); if (wk) shownWho.push(wk); shownPeople.push(who); if (fc.length) shownFace.push(fc);
           if (log && fpx && speakers.size) {
             const near = [...speakers.values()].filter((sp) => sp.vid === who.vid).sort((p, q) => Math.abs(p.t - who.t) - Math.abs(q.t - who.t))[0];
             if (near) log(`people: cut to ${(who.t / 60).toFixed(1)} min — the nearest speaker ${(near.t / 60).toFixed(1)} min, alike ${fpx.likeness(near.faces, fc).toFixed(2)}`);
           }
-          return { x, xs };
+          return { x, xs, who };
         }
         return null;
       };
+      const whoOfPic = new WeakMap();   // the person each picture laid on shows (kept off the saved edit)
+      const freshAny = async () => (await fresh()) || (await fresh(true));
+      /*
+       * NO ONE NEW LEFT: the picture before carries on through this beat — the moment cut to plays on, or the speaker
+       * before goes on (the words are this beat's) — one appearance, a little longer. Going back to someone already
+       * shown is never the answer. (A beat of the same line, its speaker going straight on, needs nothing: it is
+       * joined to the one before below.)
+       */
+      const carryOn = async (i) => {
+        if (i <= speechFrom) return false;
+        const a = shots[i - 1], sh = shots[i];
+        const full = (a.overlays || []).filter((o) => o.style === 'cutaway' && (o.start || 0) <= 0.05 && (o.start || 0) + o.len >= a.seconds - 0.05).pop();
+        let src = null;
+        if (full && full.cand.kind === 'video' && full.from != null) src = { cand: full.cand, from: full.from + full.len, fx: full.fx2 != null ? full.fx2 : full.fx };
+        else if (!full && a.cand && a.cand.kind === 'video' && a.from != null) {
+          if (sh.line === a.line && sh.cand === a.cand && !sh.cover && Math.abs(a.from + a.seconds - sh.from) < 0.06) return true;   // (the speaker goes straight on)
+          src = { cand: a.cand, from: a.from + a.seconds, fx: a.fx2 != null ? a.fx2 : a.fx };
+        }
+        if (!src || !(src.cand.fileDur > src.from + sh.seconds + 0.05)) return false;
+        const ov = { cand: src.cand, style: 'cutaway', start: 0, len: round2(sh.seconds), pos: 'right', cover: true, checked: true, carried: true,
+          from: round2(src.from), fx: src.fx == null ? null : round2(src.fx) };
+        const before = full ? whoOfPic.get(full) : lineWhoAt(i - 1);
+        if (before) whoOfPic.set(ov, before);
+        // (it follows its person on — they walk, and a picture held still on where they were showed an empty stage —
+        //  and a speaker's picture keeps the speaker's own framing: framed afresh, it found someone else)
+        if (full) {
+          const tr = pdx ? await followIn(ctx, pdx, { cand: src.cand, snapLook: { fx: src.fx == null ? 0.5 : src.fx } }, src.from + sh.seconds / 2, frT.W, frT.H) : null;
+          if (tr) aimCut(ov, { track: tr });
+        } else carriedShot.set(ov, a);
+        sh.overlays = [ov];
+        carried++;
+        return true;
+      };
       const firstOf = (i) => i === speechFrom || shots[i].line == null || shots[i - 1].line !== shots[i].line;
+      // the speaker a beat shows (its line's first beat, as read before anything was cut to)
+      const lineWhoAt = (i) => { let k = i; while (k > speechFrom && !firstOf(k)) k--; return speakers.get(k) || null; };
       // who each picture shows (the frame look's few words, folded: see whoKey) — no person twice
       const shownWho = [];
       const whoOfLine = (sh) => { const p = sh.line != null ? picks[sh.line] : null; const l = p && (p.looks || []).find((x) => x.who); return l ? whoKey(l.who) : ''; };
       const whoOfSpare = (x) => (x.snapLook && x.snapLook.who ? whoKey(x.snapLook.who) : '');
-      let cuts = 0, sameScene = 0, still = 0, samePerson = 0, sameTops = 0;
+      let cuts = 0, sameScene = 0, still = 0, samePerson = 0, sameTops = 0, unclear = 0, carried = 0;
       const facesAt = new Map(), fc0 = (i) => (facesAt.has(i) ? facesAt.get(i) : '–');
       // (each speaker read first: their face and top)
       const speakerAt = async (sh) => {
         const tAt = sh.from + sh.seconds / 2, fxAt = sh.fx2 != null && sh.fx != null ? (sh.fx + sh.fx2) / 2 : sh.fx, line = sh.line != null ? picks[sh.line] : null;
         const top = await topAt(ctx, pdx, sh.cand, tAt, fxAt, frT.W, frT.H);
-        return { vid: line ? line.vid : -1, t: tAt, top, faces: await facesOf(sh.cand, tAt, fxAt) };
+        // (across the whole line: they are on screen for all of it, unless it is covered)
+        const span = line ? clamp(line.end - line.start - 0.4, 2, 8) : 2, mid = line ? (line.start + line.end) / 2 : tAt;
+        return { vid: line ? line.vid : -1, t: tAt, top, faces: await facesOf(sh.cand, line ? mid : tAt, fxAt, span) };
       };
       for (let i = speechFrom; i < speechTo; i++) if (firstOf(i) && !shots[i].cover && lineSig.has(i)) speakers.set(i, await speakerAt(shots[i]));
+      { const ahead = []; for (const [i, sp] of speakers) if (readable(sp, fpx) && !ahead.some((w) => onePerson(w, sp, fpx))) { ahead.push(sp); willShow.add(i); } }
+      /*
+       * ►► THE BEATS THAT MUST CHANGE FIRST. ◄◄ The new people of the night are few (a panel holds the stage for an
+       * hour), and spent on the first lines' extra cutaways there were none left for the last lines — whose speakers
+       * had been shown — and one moment played on through four of them. So first every beat that MUST show someone
+       * else (a speaker already shown, one whose face cannot be told, a beat that showed no one), in play order; then
+       * what is left goes on the rest, each line from its last beat back — its speaker first, then someone new, never
+       * back to the speaker.
+       */
+      const optional = [];
+      let mustLine = false;
       for (let i = speechFrom; i < speechTo; i++) {
         const sh = shots[i];
         const first = firstOf(i);
         let need = !first || !!sh.cover, repeat = false;
+        // (a line opening on a beat that showed no one: who it is cannot be known, so the rest of it is covered too)
+        if (first) mustLine = !!sh.cover || !lineSig.has(i);
         if (first && !sh.cover && lineSig.has(i)) {
           const g = lineSig.get(i);
           // (the opening line always shows its speaker)
@@ -3783,6 +3859,9 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           facesAt.set(i, fc.length);
           if (fpx && log) log(`people: the speaker at ${(tAt / 60).toFixed(1)} min — ${fc.length} face(s), most like someone shown ${shownFace.reduce((m, g) => Math.max(m, fpx.likeness(g, fc)), -1).toFixed(2)} (${shownFace.length} shown)`);
           if (i > speechFrom && shown.some((x) => apart(g, x) < SAME)) { need = true; repeat = true; }
+          // (a speaker whose face cannot be told — side on all through the line, far off, in the dark — could be anyone
+          //  shown, or shown later: their words go over someone new; the opening line too)
+          else if (!readable(sp, fpx)) { need = true; repeat = true; unclear++; }
           // (a speaker already shown — the host again, two hours later: their words go on over someone new)
           else if (i > speechFrom && wk && shownWho.some((w) => sameWho(w, wk))) { need = true; repeat = true; samePerson++; }
           // (the same top in the same hour of the night — the panel member again, ten minutes on)
@@ -3790,18 +3869,43 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           else if (i > speechFrom && shownPeople.some((w) => onePerson(w, sp, fpx))) { need = true; repeat = true; samePerson++; if (fc.length) sameFaces++; else sameTops++; }
           // (a speaker's own picture that barely moves — a wide shot of a panel sitting still — is covered by a lively moment)
           else if (i > speechFrom && sh.cand.kind === 'video' && ((m) => m != null && m < 0.8)(await motionAt(ctx, sh.cand.file, sh.from + sh.seconds / 2).catch(() => null))) { need = true; repeat = true; still++; }
-          else { shown.push(g); if (wk) shownWho.push(wk); if (sp.top || fc.length) shownPeople.push(sp); if (fc.length) shownFace.push(fc); }
+          else { shown.push(g); if (wk) shownWho.push(wk); shownPeople.push(sp); if (fc.length) shownFace.push(fc); }   // (every speaker shown is on record — one whose face and top cannot be read too: then when and where tells)
         }
         if (repeat && log) log(`people: the speaker at ${((sh.from || 0) / 60).toFixed(1)} min is someone already shown (faces ${fc0(i)}) — ${sh.seconds < 0.6 ? 'too short to cover' : (sh.overlays || []).length && !sh.cover ? 'already covered' : 'covered by a new moment'}`);
+        if (first && repeat) mustLine = true;
         if (!need || sh.seconds < 0.6 || ((sh.overlays || []).length && !sh.cover)) continue;
-        const got = await fresh();
-        if (!got) { if (log) log(`people: no new moment left to cut to at ${((sh.from || 0) / 60).toFixed(1)} min (passed over: ${Object.entries(why).filter(([, n]) => n).map(([k, n]) => k + ' ' + n).join(', ')})`); continue; }   // (none left: the speaker is seen, or a covered beat keeps its cover)
+        if (!repeat && !sh.cover && !mustLine) { optional.push(i); continue; }   // (variety only: once every beat that must change has someone)
+        const got = await freshAny();
+        if (!got) {
+          // (no one new left: the picture before carries on — one appearance, longer — never someone shown before again)
+          const carriedOn = await carryOn(i);
+          if (log) log(`people: no new moment left to cut to at ${((sh.from || 0) / 60).toFixed(1)} min (passed over: ${Object.entries(why).filter(([, n]) => n).map(([k, n]) => k + ' ' + n).join(', ')}) — ${carriedOn ? 'the picture before carries on' : 'the speaker stays'}`);
+          continue;
+        }
         shown.push(got.xs);
         const len = round2(sh.seconds);
         const ov = { cand: got.x.cand, style: 'cutaway', start: 0, len, pos: 'right', checked: true, from: round2(clamp(snapAt(got.x) - len / 2, 0, Math.max(0, got.x.cand.fileDur - len - 0.05))) };
-        aimCut(ov, got.x);
-        if (sh.cover || repeat) { ov.cover = true; sh.overlays = [ov]; } else sh.overlays.push(ov);
+        aimCut(ov, got.x); whoOfPic.set(ov, got.who);
+        if (sh.cover || repeat || mustLine) { ov.cover = true; sh.overlays = [ov]; } else sh.overlays.push(ov);
         cuts++; if (repeat) sameScene++;
+      }
+      // the rest: each line's later beats, from its last back — the speaker, then new people (never back to them)
+      const byLine = new Map();
+      for (const i of optional) { const k = shots[i].line; if (!byLine.has(k)) byLine.set(k, []); byLine.get(k).push(i); }
+      for (const beats of byLine.values()) {
+        for (const i of beats.slice().reverse()) {
+          // (only a run that reaches the line's end: a cut away and back to the speaker would show them twice)
+          const sh = shots[i], next = shots[i + 1];
+          if (next && next.line === sh.line && !(next.overlays || []).some((o) => o.style === 'cutaway' && (o.start || 0) <= 0.05 && o.len >= next.seconds - 0.05)) break;
+          const got = await fresh();
+          if (!got) break;
+          shown.push(got.xs);
+          const len = round2(sh.seconds);
+          const ov = { cand: got.x.cand, style: 'cutaway', start: 0, len, pos: 'right', checked: true, from: round2(clamp(snapAt(got.x) - len / 2, 0, Math.max(0, got.x.cand.fileDur - len - 0.05))) };
+          aimCut(ov, got.x); whoOfPic.set(ov, got.who);
+          sh.overlays.push(ov);
+          cuts++;
+        }
       }
       /*
        * PICTURES OF THE NIGHT LAID OVER THE SPEAKERS. Where a speaker is seen (not the opening line, which carries
@@ -3809,11 +3913,11 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
        * of the event, the speaker still in view.
        */
       altMoment = async (len) => {
-        const got = await fresh();
+        const got = await freshAny();
         if (!got) return null;
         shown.push(got.xs);
         const ov = { cand: got.x.cand, style: 'cutaway', start: 0, len: round2(len), pos: 'right', checked: true, from: round2(clamp(snapAt(got.x) - len / 2, 0, Math.max(0, got.x.cand.fileDur - len - 0.05))) };
-        aimCut(ov, got.x);
+        aimCut(ov, got.x); whoOfPic.set(ov, got.who);
         return ov;
       };
       let pips = 0;
@@ -3824,10 +3928,57 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
         if (!got) break;
         shown.push(got.xs);
         const len = round2(Math.min(1.6, sh.seconds - 0.7));
-        sh.overlays.push({ cand: got.x.cand, style: 'pip', small: true, checked: true, start: 0.45, len, pos: pips % 2 ? 'left' : 'right', fx: got.x.snapLook && got.x.snapLook.fx != null ? round2(got.x.snapLook.fx) : null,
-          from: round2(clamp(snapAt(got.x) - len / 2, 0, Math.max(0, got.x.cand.fileDur - len - 0.05))) });
+        const pip = { cand: got.x.cand, style: 'pip', small: true, checked: true, start: 0.45, len, pos: pips % 2 ? 'left' : 'right', fx: got.x.snapLook && got.x.snapLook.fx != null ? round2(got.x.snapLook.fx) : null,
+          from: round2(clamp(snapAt(got.x) - len / 2, 0, Math.max(0, got.x.cand.fileDur - len - 0.05))) };
+        whoOfPic.set(pip, got.who);
+        sh.overlays.push(pip);
         pips++;
       }
+      /*
+       * ►► THE WHOLE EDIT, CHECKED: NO ONE TWICE. ◄◄ Every picture in play order — each line's speaker, every moment
+       * cut to, every picture laid over — with the person it shows. One appearance goes on while the picture is the
+       * same one (a line's beats on its speaker, a moment carried on); anyone seen again after someone else is
+       * taken off: a picture laid over is taken away, a beat gets someone new or the picture before carries on.
+       */
+      const playOrder = () => {
+        const pics = [];
+        for (let i = speechFrom; i < speechTo; i++) {
+          const sh = shots[i];
+          const full = (sh.overlays || []).find((o) => o.style === 'cutaway' && (o.start || 0) <= 0.05 && o.len >= sh.seconds - 0.05);
+          pics.push(full ? { i, o: full, who: whoOfPic.get(full) || null } : { i, o: null, who: lineWhoAt(i) });
+          for (const o of sh.overlays || []) if (o !== full) pics.push({ i, o, who: whoOfPic.get(o) || null, part: true });
+        }
+        return pics;
+      };
+      let retaken = 0;
+      for (let round = 0; round < 12; round++) {
+        const pics = playOrder();
+        let hit = null;
+        for (let k = 1; k < pics.length && !hit; k++) {
+          const q = pics[k];
+          if (!q.who) continue;
+          let j = k - 1;
+          while (j >= 0 && pics[j].who === q.who) j--;
+          const was = pics.slice(0, j + 1).find((p) => p.who && p.who !== q.who && onePerson(p.who, q.who, fpx));
+          if (was) hit = { q, was };
+        }
+        if (!hit) break;
+        const { q } = hit, sh = shots[q.i];
+        if (log) log(`people: the whole edit checked — ${q.part ? 'a picture laid over' : q.o ? 'a moment cut to' : 'the speaker'} at ${(sh.at || 0).toFixed(1)} s is someone already shown`);
+        if (q.part) { sh.overlays = sh.overlays.filter((o) => o !== q.o); retaken++; continue; }
+        const got = await freshAny();
+        if (got) {
+          shown.push(got.xs);
+          const ov = { cand: got.x.cand, style: 'cutaway', start: 0, len: round2(sh.seconds), pos: 'right', checked: true, cover: true, from: round2(clamp(snapAt(got.x) - sh.seconds / 2, 0, Math.max(0, got.x.cand.fileDur - sh.seconds - 0.05))) };
+          aimCut(ov, got.x); whoOfPic.set(ov, got.who);
+          sh.overlays = [ov]; retaken++; continue;
+        }
+        sh.cover = true;
+        if (await carryOn(q.i)) { retaken++; continue; }
+        if (log) log('people: no way left to take them off — left as made');
+        break;
+      }
+      if (log) log(`people: the whole edit checked in play order — ${retaken ? `${retaken} picture(s) of someone already shown taken off` : 'no one appears twice'}`);
       /*
        * ►► THE SAME PERSON TWICE: ASKED. ◄◄ No picture check tells that the man in green at 188, 190 and 196 min,
        * from three camera angles, is one man. The vision AI is shown every person the edit shows — the speakers it
@@ -3890,7 +4041,20 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
       } catch (e) { if (e instanceof jobs.CancelledError) throw e; if (log) log('people: same-person check — ' + e.message); }
       if (log && fpx) log(`people: faces told apart in ${faced} of ${facesN} picture(s) in ${Math.round(facesMs / 1000)} s (this server's own face recognition); ${sameFaces} of someone already shown left out`);
       if (log) log(`people: ${sameTops} picture(s) of someone already shown left out by what they wear and when (no AI needed); of ${spare.length} moments, passed over: ${Object.entries(why).filter(([, n]) => n).map(([k, n]) => k + ' ' + n).join(', ') || 'none'}`);
-      if (log) log(`pictures: ${cuts} cut(s) to other moments of the night${sameScene ? ` (${sameScene} for a speaker whose scene was already seen or barely moved${still ? `, ${still} of them still` : ''})` : ''}, ${pips} picture(s) laid over the speakers — every one distinct`);
+      if (log) log(`pictures: ${cuts} cut(s) to other moments of the night${sameScene ? ` (${sameScene} for a speaker whose scene was already seen or barely moved${still ? `, ${still} of them still` : ''})` : ''}, ${pips} picture(s) laid over the speakers — every one distinct${unclear ? `; ${unclear} speaker(s) whose face could not be told, covered` : ''}${carried ? `; ${carried} beat(s) carried on the picture before (no one new left)` : ''}`);
+      /*
+       * ONE SHOT, NOT A JUMP BACK TO THE SAME FACE. A beat that goes on showing its line's speaker, straight on from the
+       * beat before (no one new was left to cut to), is joined to it: one picture of them, not two.
+       */
+      let joined = 0;
+      for (let i = speechTo - 1; i > speechFrom; i--) {
+        const a = shots[i - 1], b = shots[i];
+        if (b.line == null || b.line !== a.line || b.cand !== a.cand || a.from == null || b.from == null || b.cover) continue;
+        if (Math.abs(a.from + a.seconds - b.from) > 0.06 || (b.overlays || []).length || (a.overlays || []).some((o) => o.cover)) continue;
+        a.need = round2((a.need || a.seconds) + (b.need || b.seconds)); a.seconds = round2(a.seconds + b.seconds);
+        shots.splice(i, 1); joined++;
+      }
+      if (log && joined) log(`pictures: ${joined} beat(s) that stayed on their speaker joined to the beat before — one shot of them`);
     }
     for (let i = speechFrom + 1; i < speechTo && !longEv; i += 2) {
       const sh = shots[i];
@@ -3934,6 +4098,8 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
     };
     // FULL SCREEN: every landscape moment is cropped to fill, round its speaker
     await aimShots(ctx, shots, opts.aspect, { picks, tmp, log, stage });
+    // (a speaker's picture carried on through the next beat is framed as the speaker's own shot was)
+    for (const sh of shots) for (const o of sh.overlays || []) { const a = carriedShot.get(o); if (a && a.fx != null) { o.fx = round2(a.fx2 != null ? a.fx2 : a.fx); delete o.fx2; } }
     // 4) RENDER
     if (stage) stage(`✂️ Cutting ${picks.length} lines into ${shots.length} beats — zooms, grade and B-roll…`);
     await render(ctx, plan, { aspect: opts.aspect, keepAudio: true, output, base: baseOf(output), tmp, onProgress: say(50, 90) });
@@ -4041,7 +4207,7 @@ async function make(ctx, getInfo, { mediaPaths, ranges, musicPath, style, length
 
 /** Which director the montage would use right now (for the phone to say so). */
 /* which montage the server runs (montage:status says it: a quiet way to tell an update has landed) */
-const MONTAGE_REV = '2026-10-25.final';
+const MONTAGE_REV = '2026-10-27.people';
 function directorStatus() {
   const st = directorStatusOf();
   st.rev = MONTAGE_REV;
@@ -4059,4 +4225,4 @@ function directorStatusOf() {
 
 module.exports = {
   NOT_TO_SHARE, scoreLines, stillOrDark, motionAt, goodLines, wholeThought, sameLine, talkBrief, vetParts, vetLoose, eventOrder, whoKey, sameWho, personTile, numberTile, textFfmpeg, lookAt, useDataDir, topColours, topOverlap, sameTop, topAt, followIn, trackAt, aimCut, eventParts, acrossEvent, beatSpans, momentSec, partsFor, MOMENT_EACH,
-  _render: render, spreadList, momentsOf, shortMoments, HOUSEKEEPING, cleanAbout, withAbout, aboutLines, phrasesOf, phraseScore, talkByRules, fromBrief, cleanBrief, make, remake, loadProject, sidecarOf, baseOf, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };
+  _render: render, _onePerson: onePerson, spreadList, momentsOf, shortMoments, HOUSEKEEPING, cleanAbout, withAbout, aboutLines, phrasesOf, phraseScore, talkByRules, fromBrief, cleanBrief, make, remake, loadProject, sidecarOf, baseOf, analyze, beats, finalise, directByRules, directorStatus, PLAN_SCHEMA, ASPECTS, STYLES, EFFECTS, TRANSITIONS, OVERLAY_STYLES, _direct: direct };

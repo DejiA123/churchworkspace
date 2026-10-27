@@ -98,17 +98,24 @@ async function printOf(rgb, W, H, m) {
  * The face prints in one frame already read ({ rgb, width, height }), of the faces whose middle is between `x0` and
  * `x1` (shares of the width: the part a 9:16 cut shows). The frame is handed over.
  */
-async function printsIn(fr, x0 = 0, x1 = 1) {
+async function printsIn(fr, x0 = 0, x1 = 1, { main = false } = {}) {
   if (!available()) return [];
   const { width: W, height: H } = fr;
   const keep = fr.rgb.slice();
-  const faces = (await detector().peopleIn(fr)).filter((p) => p.face && p.score >= 0.4 && p.face.x >= x0 && p.face.x <= x1).map((p) => p.face);
+  let faces = (await detector().peopleIn(fr)).filter((p) => p.face && p.score >= 0.4 && p.face.x >= x0 && p.face.x <= x1).map((p) => p.face);
+  // (main: only the person the picture is OF — the biggest face in it; a panel behind them is not them)
+  if (main && faces.length > 1) faces = [faces.reduce((a, b) => (b.w > a.w ? b : a))];
   if (!faces.length) return [];
   const marks = await detector().marksIn({ rgb: keep.slice(), width: W, height: H }, faces);
   const out = [];
   for (const m of marks) {
-    if (!m || m.s < SURE || Math.hypot(m.eyeL[0] - m.eyeR[0], m.eyeL[1] - m.eyeR[1]) < MIN_EYES) continue;
-    out.push(await printOf(keep, W, H, m));
+    const eyes = m ? Math.hypot(m.eyeL[0] - m.eyeR[0], m.eyeL[1] - m.eyeR[1]) : 0;
+    if (!m || m.s < SURE || eyes < MIN_EYES) continue;
+    const p = await printOf(keep, W, H, m);
+    // how well it can be told: the eyes' distance, and how far the head is turned (the nose off the eyes' middle,
+    // in eye-distances: 0 facing the camera, ±0.5 and more side on — a turned face reads unlike its own front)
+    p.q = { eyes: +eyes.toFixed(1), turn: +Math.abs((m.nose[0] - (m.eyeL[0] + m.eyeR[0]) / 2) / eyes).toFixed(2), s: +m.s.toFixed(2) };
+    out.push(p);
   }
   return out;
 }
@@ -117,7 +124,7 @@ async function printsIn(fr, x0 = 0, x1 = 1) {
  * The faces a picture shows: video `file` (w×h) round source time `t`, cut 9:16 (or W:H) round `fx` — three frames
  * 0.8 s apart (or `n`, `step` s apart). [] when none can be told (no one facing, too small, not available here).
  */
-async function printsAt(ffmpeg, file, t, fx, w, h, W = 1080, H = 1920, { n = 3, step = 0.8 } = {}) {
+async function printsAt(ffmpeg, file, t, fx, w, h, W = 1080, H = 1920, { n = 3, step = 0.8, main = false } = {}) {
   if (!available() || !(w > 0 && h > 0)) return [];
   const share = Math.min(1, (h * W / H) / w);
   const c = fx == null || !Number.isFinite(fx) ? 0.5 : Math.max(0, Math.min(1, fx));
@@ -125,11 +132,60 @@ async function printsAt(ffmpeg, file, t, fx, w, h, W = 1080, H = 1920, { n = 3, 
   let frames = [];
   try { frames = await detector().framesRgb(ffmpeg, file, Math.max(0, t - step * (n - 1) / 2), n, step, w, h, 1280); } catch (e) { return []; }
   const all = [];
-  for (const fr of frames) { try { all.push(...await printsIn(fr, x0, x0 + share)); } catch (e) { /* that frame only */ } }
+  for (const fr of frames) { try { all.push(...await printsIn(fr, x0, x0 + share, { main })); } catch (e) { /* that frame only */ } }
   return all;
 }
 
 const cos = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s; };
+/*
+ * ►► TELLING TWO PEOPLE APART — ONLY BY CLEAR FACES. ◄◄ "The same person is appearing twice." Measured on 126
+ * pictures of Gospel Jamz labelled by hand (16 people, 632 pairs of one person, 7,243 of two): a face turned side on
+ * reads unlike its own front — the man in green, front and side, 0.04 — so a low likeness says nothing unless BOTH
+ * faces are clear: eyes 20 pixels apart or more, facing the camera (the nose within a third of an eye-distance of
+ * the eyes' middle), BlazeFace sure of it (0.75). Between clear faces one person never read under 0.25, and every
+ * such pair under 0.3 was caught by its other faces (0.33 or more); two people read under 0.3 nine times in ten.
+ *   - clear faces both: their people 0.28 alike or more on average, one person; under, two
+ *   - otherwise any faces 0.33 alike or more: one person; else it cannot be told by face (null)
+ * Read on the person each picture is OF (printsAt main: the biggest face in it), not everyone behind them: 0 of 604
+ * pairs of one person called two, the nearest 0.19 clear of the lines; in 1,000 edits drawn from those pictures no
+ * one appeared twice.
+ */
+const ALIKE = 0.33, CLEAR_SAME = 0.28, GROUP = 0.4, CLEAR = { eyes: 20, turn: 0.35, s: 0.75 };
+const clear = (p) => !!(p && p.q && p.q.eyes >= CLEAR.eyes && p.q.turn <= CLEAR.turn && p.q.s >= CLEAR.s);
+const clearOf = (faces) => (faces || []).filter(clear);
+/* a picture's faces sorted into the people they are (one face 0.4 alike or more to another of the group: the same
+ * person in another frame; a camera that cut away mid-line makes two groups) */
+function groupsOf(faces) {
+  const groups = [];
+  for (const f of faces) {
+    const hit = groups.filter((g) => g.some((h) => cos(h, f) >= GROUP));
+    const g = [f].concat(...hit);
+    for (const h of hit) groups.splice(groups.indexOf(h), 1);
+    groups.push(g);
+  }
+  return groups;
+}
+const meanLike = (A, B) => { let s = 0; for (const a of A) for (const b of B) s += cos(a, b); return s / (A.length * B.length); };
+/**
+ * How alike two pictures' people are, by their CLEAR faces: each picture's faces sorted into people, and two of them
+ * compared on all their faces together — the average, not the best pair. (The best of 45 pairs — a speaker read in
+ * nine frames, a moment in five — found two different people 0.3–0.44 alike by chance and kept most of the night out;
+ * the average does not grow with the frames read.)
+ */
+function alikeClear(a, b) {
+  let best = -1;
+  for (const A of groupsOf(a)) for (const B of groupsOf(b)) best = Math.max(best, meanLike(A, B));
+  return best;
+}
+/** One person (true), two (false), or it cannot be told by their faces (null). */
+function judge(a, b) {
+  // (clear faces both: they alone decide — the blurred and turned ones beside them only add chances of a false match;
+  //  one person's clear faces never averaged under 0.35 on Gospel Jamz)
+  const ca = clearOf(a), cb = clearOf(b);
+  if (ca.length && cb.length) return alikeClear(ca, cb) >= CLEAR_SAME;
+  if (likeness(a, b) >= ALIKE) return true;
+  return null;
+}
 /** How alike two pictures' people are: the closest pair of their faces (-1 when either has none). */
 function likeness(a, b) {
   let best = -1;
@@ -139,4 +195,4 @@ function likeness(a, b) {
 /** One person in both (a face of one is the face of the other). */
 function samePerson(a, b) { return likeness(a, b) >= SAME; }
 
-const exp = module.exports = { debug: null, available, printsIn, printsAt, likeness, samePerson, SAME, MODEL, _align: align, _similarity: similarity };
+const exp = module.exports = { debug: null, available, printsIn, printsAt, likeness, samePerson, judge, alikeClear, groupsOf, clear, clearOf, SAME, ALIKE, CLEAR_SAME, CLEAR, MODEL, _align: align, _similarity: similarity };

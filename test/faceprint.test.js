@@ -41,6 +41,25 @@ ok(!fp.samePerson([singer], [host]), 'two different people are not', fp.likeness
 ok(!fp.samePerson([], [host]) && fp.likeness([], [host]) === -1, 'a picture with no face to tell by says nothing');
 ok(fp.SAME > 0.3 && fp.SAME < 0.4, "OpenCV's own line for SFace", fp.SAME);
 
+// telling two people apart: only clear faces can say "two people" (measured on Gospel Jamz, labelled by hand)
+const withQ = (v, q) => Object.assign(unit(v), { q });
+const front = { eyes: 30, turn: 0.1, s: 0.9 }, side = { eyes: 30, turn: 0.7, s: 0.8 }, tiny = { eyes: 12, turn: 0.1, s: 0.9 };
+const man = withQ([1, 0.1, 0, 0], front), manSide = withQ([0.1, 1, 0.2, 0], side);
+ok(fp.judge([manSide], [man]) === null, 'a face side on, unlike his front (0.2): it cannot be told — never "someone new" on that', fp.likeness([manSide], [man]));
+ok(fp.judge([withQ([0.2, 0, 1, 0], front)], [man]) === false, 'two clear faces, unlike: two people');
+ok(fp.judge([withQ([1, 0.6, 0.3, 0], front)], [man]) === true, 'two clear faces alike (0.3 or more): one person');
+ok(fp.judge([withQ([1, 0.9, 0.9, 0.5], side)], [man]) === true, 'any faces 0.33 alike or more: one person, clear or not');
+ok(fp.judge([withQ([0.2, 0, 1, 0], tiny)], [man]) === null, 'a face too small to read clearly cannot say "someone new" either');
+ok(fp.judge([], [man]) === null, 'no face at all: it cannot be told');
+// a line read across a camera cut: the speaker's frames hold two people — either of them shown later is caught
+const woman = (k) => withQ([0, 0.05 * k, 1, 0.1], front);
+const line = [man, withQ([1, 0.15, 0.05, 0], front), woman(1), woman(2), woman(3), woman(4)];
+ok(fp.groupsOf(line).length === 2, 'a line across a camera cut: its faces sort into two people', fp.groupsOf(line).length);
+ok(fp.judge(line, [withQ([1, 0.12, 0.02, 0], front)]) === true && fp.judge(line, [woman(5)]) === true, 'either of them, shown later, is one already shown');
+// the average, not the best pair: one chance likeness among many frames does not make two people one
+const noisy = [withQ([0.35, 0.94, 0, 0], front), withQ([-0.2, 1, 0.3, 0], front), withQ([0, 1, -0.3, 0.1], front)];
+ok(fp.likeness(noisy, [man]) >= 0.3 && fp.judge(noisy, [man]) === false, 'one face 0.3 alike by chance among unlike ones: still two people', [fp.likeness(noisy, [man]), fp.alikeClear(noisy, [man])]);
+
 ok(!fp.available(), 'no model here: not available');
 fp.printsAt('ffmpeg', 'x.mp4', 10, 0.5, 1280, 720).then((r) => {
   ok(Array.isArray(r) && r.length === 0, 'and asked anyway, it tells nothing (the montage goes on by what they wear)', r);
