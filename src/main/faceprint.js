@@ -82,6 +82,17 @@ function align(rgb, W, H, m) {
   return out;
 }
 
+/* the mouth of a lined-up face, in grey, its light evened out (mouths are where the template puts them: 34–78 across,
+ * 78–106 down) */
+function mouthOf(al) {
+  const v = new Float32Array(44 * 28);
+  let k = 0;
+  for (let y = 78; y < 106; y++) for (let x = 34; x < 78; x++) { const i = y * 112 + x; v[k++] = (al[i] + al[12544 + i] + al[25088 + i]) / 3; }
+  let m = 0; for (const x of v) m += x; m /= v.length;
+  let sd = 0; for (const x of v) sd += (x - m) * (x - m); sd = Math.sqrt(sd / v.length) || 1;
+  for (let i = 0; i < v.length; i++) v[i] = (v[i] - m) / sd;
+  return v;
+}
 async function printOf(rgb, W, H, m) {
   const s = await open();
   const r = await s.run({ [s.inputNames[0]]: new (runtime().Tensor)('float32', align(rgb, W, H, m), [1, 3, 112, 112]) });
@@ -90,7 +101,9 @@ async function printOf(rgb, W, H, m) {
   for (const x of e) n += x * x;
   n = Math.sqrt(n) || 1;
   const p = Float32Array.from(e, (x) => x / n);
-  if (exp.debug) exp.debug(align(rgb, W, H, m), m);
+  const al = align(rgb, W, H, m);
+  if (exp.debug) exp.debug(al, m);
+  p.mouth = mouthOf(al);
   return p;
 }
 
@@ -177,6 +190,25 @@ function alikeClear(a, b) {
   for (const A of groupsOf(a)) for (const B of groupsOf(b)) best = Math.max(best, meanLike(A, B));
   return best;
 }
+/*
+ * ►► TALKING, OR JUST SITTING THERE? ◄◄ "A man just sitting down not saying anything, just looking — I don't want
+ * that." Over about 2.5 seconds a talking mouth opens and closes: the most its lined-up picture changes between any
+ * two frames was 0.9 to 1.4 for people talking on Gospel Jamz, and 0.25 to 0.84 for the man on the panel listening
+ * (nine frames 0.3 s apart, the person the picture is of). With fewer than five frames of them it cannot be said.
+ * `faces`: one person's prints in the order they were read. → { talking, spread } or null.
+ */
+const TALKING = 0.88;
+function talkOf(faces) {
+  const ms = (faces || []).map((f) => f.mouth).filter(Boolean);
+  if (ms.length < 5) return null;
+  let spread = 0;
+  for (let i = 1; i < ms.length; i++) for (let j = 0; j < i; j++) {
+    let d = 0; const a = ms[i], b = ms[j];
+    for (let k = 0; k < a.length; k++) d += Math.abs(a[k] - b[k]);
+    spread = Math.max(spread, d / a.length);
+  }
+  return { talking: spread >= TALKING, spread: +spread.toFixed(2) };
+}
 /** One person (true), two (false), or it cannot be told by their faces (null). */
 function judge(a, b) {
   // (clear faces both: they alone decide — the blurred and turned ones beside them only add chances of a false match;
@@ -195,4 +227,4 @@ function likeness(a, b) {
 /** One person in both (a face of one is the face of the other). */
 function samePerson(a, b) { return likeness(a, b) >= SAME; }
 
-const exp = module.exports = { debug: null, available, printsIn, printsAt, likeness, samePerson, judge, alikeClear, groupsOf, clear, clearOf, SAME, ALIKE, CLEAR_SAME, CLEAR, MODEL, _align: align, _similarity: similarity };
+const exp = module.exports = { debug: null, available, printsIn, printsAt, likeness, samePerson, judge, alikeClear, groupsOf, clear, clearOf, talkOf, TALKING, SAME, ALIKE, CLEAR_SAME, CLEAR, MODEL, _align: align, _similarity: similarity };

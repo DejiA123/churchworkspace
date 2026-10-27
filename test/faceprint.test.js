@@ -41,6 +41,14 @@ ok(!fp.samePerson([singer], [host]), 'two different people are not', fp.likeness
 ok(!fp.samePerson([], [host]) && fp.likeness([], [host]) === -1, 'a picture with no face to tell by says nothing');
 ok(fp.SAME > 0.3 && fp.SAME < 0.4, "OpenCV's own line for SFace", fp.SAME);
 
+// talking, or just sitting there: a mouth that opens and closes over the frames, or one that stays as it is
+const mouthPat = (open) => { const v = new Float32Array(44 * 28); for (let y = 0; y < 28; y++) for (let x = 0; x < 44; x++) v[y * 44 + x] = Math.abs(y - 14) < open && Math.abs(x - 22) < 20 ? -1.6 : 0.4 + 0.02 * Math.sin(x); return v; };
+const withMouth = (open) => Object.assign(unit([1, 0, 0, 0]), { mouth: mouthPat(open) });
+const talker = [1, 6, 2, 10, 1, 5, 9].map(withMouth), sitter = [2, 2, 2, 2, 2, 2, 2].map(withMouth);
+ok(fp.talkOf(talker).talking === true, 'a mouth opening and closing over the frames: talking', fp.talkOf(talker));
+ok(fp.talkOf(sitter).talking === false, 'a mouth that stays as it is: just sitting there', fp.talkOf(sitter));
+ok(fp.talkOf(talker.slice(0, 4)) === null, 'fewer than five frames of them: it cannot be said');
+
 // telling two people apart: only clear faces can say "two people" (measured on Gospel Jamz, labelled by hand)
 const withQ = (v, q) => Object.assign(unit(v), { q });
 const front = { eyes: 30, turn: 0.1, s: 0.9 }, side = { eyes: 30, turn: 0.7, s: 0.8 }, tiny = { eyes: 12, turn: 0.1, s: 0.9 };
