@@ -29,6 +29,10 @@ ok(mt._onePerson(at(136, [host], navy), at(140, [hostSide], navy), fp) === true,
 ok(mt._onePerson(at(136, [host], navy), at(156, [hostSide], navyToo), fp) === true, '…twenty minutes later, in the same top: one person');
 ok(mt._onePerson(at(136, [host], navy), at(180, [hostSide], red), fp) === false, '…someone side on in clearly other clothes, far on: two people');
 ok(mt._onePerson(at(50, []), at(150, []), fp) === true, 'nothing to go by at all: taken as one person, never as someone new');
+// minutes apart, faces must be plainly unlike: the singer at 60.7 and 62 min, small and side on, read as two people
+const singerA = face([1, 0, 0, 0], front), singerB = face([0.24, 0.97, 0, 0], front);
+ok(fp.judge([singerA], [singerB]) === false && mt._onePerson(at(60.7, [singerA]), at(62, [singerB]), fp) === true, 'a minute apart, faces only somewhat unlike (0.2+): one person', fp.alikeClear([singerA], [singerB]));
+ok(mt._onePerson(at(60.7, [singerA]), at(90, [singerB]), fp) === false, 'half an hour apart, the faces decide');
 ok(fp.judge([hostSide], [host]) === null, '(the face side on cannot be told by face)');
 console.log(`\n${pass} PASS / ${fail} FAIL`);
 process.exit(fail ? 1 : 0);

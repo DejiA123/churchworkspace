@@ -2481,12 +2481,16 @@ function sameTop(a, b) {
  *   - nothing to go by at all: one person
  * Without face recognition here (no model), it is what they wear and when, as before.
  */
-const OTHER_TOP = 0.1, STAGE_STRETCH = 10 * 60;
+const OTHER_TOP = 0.1, STAGE_STRETCH = 10 * 60, NEAR_SEC = 5 * 60, NEAR_SAME = 0.2;
 function onePerson(a, b, fp) {
   if (!a || !b) return false;
   const apart = a.vid === b.vid && Number.isFinite(a.t) && Number.isFinite(b.t) ? Math.abs(a.t - b.t) : Infinity;
   if (!fp) return !!(a.top && b.top) && sameTop(a, b);
   const byFace = fp.judge(a.faces, b.faces);
+  // (minutes apart in one video, faces must be PLAINLY unlike to be two people: the singer under the song's words at
+  //  60.7 and 62 min, small and side on, read as two; one person minutes apart never read under 0.35 on Gospel Jamz,
+  //  two people mostly under 0.2)
+  if (byFace === false && apart <= NEAR_SEC && fp.alikeClear(fp.clearOf(a.faces), fp.clearOf(b.faces)) >= NEAR_SAME) return true;
   if (byFace !== null) return byFace;
   if (apart <= STAGE_STRETCH) return true;
   if (a.top && b.top) return sameTop(a, b) || topOverlap(a.top, b.top) >= OTHER_TOP;
@@ -3423,14 +3427,16 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           const unclear = !twin && fpS && !readable(a, fpS);
           if (!twin && !unclear) continue;
           // (another good line — the AI's best scored first; of this part of the night first, then of any)
-          const okAlt = (q) => !picks.includes(q) && !rejected.has(q) && Math.abs(lenOf(q) - lenOf(p)) <= 1.2
+          // (a line of someone new within two seconds of its length: a speaker the edit already has needs someone new
+          //  laid over their words, and a long night has only so many)
+          const okAlt = (q) => !picks.includes(q) && !rejected.has(q) && Math.abs(lenOf(q) - lenOf(p)) <= 2
             && q.end - q.start >= MOMENT_LINE_MIN && q.end - q.start <= MOMENT_LINE_MAX + 0.3 && fitsEvent(q) && wholeThought(q) && !CROWD.test(q.text) && !HOUSEKEEPING.test(q.text) && !NOT_TO_SHARE.test(q.text) && messageOf(q) > 0
             // (a little lower than a part's own bar: a good line of someone new beats the same speaker twice)
             && (q.aiScore == null || q.aiScore >= SCORE_KEEP - 1)
             && !picks.some((r) => r !== p && r.vid === q.vid && Math.abs(r.start - q.start) < LINE_APART);
           const best = (x, y) => ((y.aiScore == null ? -1 : y.aiScore) - (x.aiScore == null ? -1 : x.aiScore)) || (lineVal(y) - lineVal(x));
-          const alts = list.filter((q) => okAlt(q) && ev.part(q) === ev.part(p)).sort(best).slice(0, 6)
-            .concat(list.filter((q) => okAlt(q) && ev.part(q) !== ev.part(p)).sort(best).slice(0, 8));
+          const alts = list.filter((q) => okAlt(q) && ev.part(q) === ev.part(p)).sort(best).slice(0, 8)
+            .concat(list.filter((q) => okAlt(q) && ev.part(q) !== ev.part(p)).sort(best).slice(0, 16));
           let swapped = false;
           for (const q of await showsSomeone(alts)) {
             const b = await speakerOf(q);
@@ -3804,7 +3810,8 @@ async function makeTalk(ctx, getInfo, { files, parts = null, opts, hear, musicPa
           const was = shownPeople.find((w) => onePerson(w, who, fpx));
           if (was) { used.add(x); if (fc.length && was.faces && was.faces.length) { sameFaces++; why.face++; } else { sameTops++; why.top++; } continue; }
           const xs = await sigAt(x.cand.file, snapAt(x), x.snapLook && x.snapLook.fx);
-          if (!relax && (shown.some((g) => apart(xs, g) < SAME) || [...lineSig.values()].some((g) => apart(xs, g) < SAME))) { why.scene++; continue; }
+          // (a scene already seen is never relaxed: it is most often the same person in it)
+          if (shown.some((g) => apart(xs, g) < SAME) || [...lineSig.values()].some((g) => apart(xs, g) < SAME)) { why.scene++; continue; }
           used.add(x); shownAt.push(atOf(x)); if (wk) shownWho.push(wk); shownPeople.push(who); if (fc.length) shownFace.push(fc);
           if (log && fpx && speakers.size) {
             const near = [...speakers.values()].filter((sp) => sp.vid === who.vid).sort((p, q) => Math.abs(p.t - who.t) - Math.abs(q.t - who.t))[0];
