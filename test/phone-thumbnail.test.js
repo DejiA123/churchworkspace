@@ -8,6 +8,8 @@
  *   - the words: lines offered (from the sermon, or by rule), the first one on
  *     it already; typing your own, and tapping the word that goes in colour
  *   - "Pick a moment" scrubs the video and takes the moment chosen
+ *   - the photo bank: a photo tapped opens big (Dark / Light / Checks behind
+ *     the cut-out, zoom, Fix cut-out), and Use this photo takes it
  *   - Make: a board of six YouTube looks, each 1280×720, with the words on them
  *   - the editor: Layouts offers the six thumbnail looks; Save gives a
  *     1920×1080 JPEG under 2 MB; Keep puts it in My Uploads
@@ -230,10 +232,41 @@ async function until(page, fn, arg, ms = 30000) {
         add: !!document.querySelector('.cp-thumb [data-act="bankadd"]'), newp: !!document.querySelector('.cp-thumb [data-act="banknew"]') };
     }, null, 20000);
     check(s && s.ok && s.chips[0] && /Mike Adeyemi/.test(s.chips[0]) && s.add && s.newp, 'the Thumbnails page has the photo bank: the church’s preachers, their cut-out photos, Add photos and New preacher', s);
+    // tapped, a bank photo opens BIG — the cut-out exactly as kept, to check it — and Use takes it
+    const openBig = () => until(page, () => {
+      const v = document.querySelector('.fs-vb'), cv = v && v.querySelector('canvas');
+      if (!v || !cv || cv.width < 10 || v.classList.contains('fs-vb-wait')) return null;
+      const px = (x, y) => Array.from(cv.getContext('2d').getImageData(x, y, 1, 1).data.slice(0, 3));
+      return { title: v.querySelector('.fs-vb-top b').textContent, w: cv.width, h: cv.height, corner: px(5, 5), face: px(300, 230),
+        bgs: [...v.querySelectorAll('[data-bg]')].map((x) => x.textContent), on: (v.querySelector('[data-bg].on') || {}).textContent,
+        use: !!v.querySelector('[data-vb="use"]'), fix: !!v.querySelector('[data-vb="fix"]'), chosen: !!window.MWFlyerStudio._state.th.bank };
+    }, null, 15000);
     await page.locator('.cp-thumb .th-bank [data-bank]').first().tap();
+    s = await openBig();
+    check(s && /Mike Adeyemi/.test(s.title) && s.w === 600 && s.h === 800 && s.bgs.join() === 'Dark,Light,Checks' && s.on === 'Dark' && s.use && s.fix && !s.chosen,
+      'tapping a bank photo opens it big — full size, its speaker named, Dark / Light / Checks behind it, Use and Fix cut-out (nothing chosen yet)', s);
+    check(s && s.face.join() === '141,85,36' && s.corner.join() === '35,26,58', 'it is the cut-out exactly as kept, over the dark', s && { face: s.face, corner: s.corner });
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'thumb-bank-big.png') });
+    await page.locator('.fs-vb [data-bg="light"]').tap();
+    s = await openBig();
+    check(s && s.on === 'Light' && s.corner.join() === '255,255,255' && s.face.join() === '141,85,36', 'Light puts white behind the same cut-out (a leftover edge shows on one or the other)', s);
+    await page.locator('.fs-vb .fs-viewer-pic').dblclick();
     await sleep(300);
-    s = await page.evaluate(() => ({ on: !!document.querySelector('.cp-thumb .th-bank .th-bp.on'), behind: !!document.querySelector('.cp-thumb .th-fr.th-behind'), bank: !!window.MWFlyerStudio._state.th.bank }));
-    check(s.on && s.behind && s.bank, 'tapping a bank photo chooses it, the video’s moment marked as going behind it', s);
+    const zz = await page.evaluate(() => { const c = document.querySelector('.fs-vb canvas'); const m = /scale\(([\d.]+)\)/.exec(c.style.transform); return m ? +m[1] : 0; });
+    check(zz > 1.5, 'a double tap zooms in to look at the edges', zz);
+    // Fix cut-out: the cut-out tool, on this photo
+    await page.locator('.fs-vb [data-vb="fix"]').tap();
+    s = await until(page, () => (document.querySelector('#cutModal:not(.hidden)') && !document.querySelector('.fs-vb') ? true : null), null, 15000);
+    check(!!s, 'Fix cut-out opens the cut-out tool on it (the big view steps aside)', s);
+    await page.evaluate(() => document.getElementById('cutCancel').click());
+    await sleep(500);
+    await page.locator('.cp-thumb .th-bank [data-bank]').first().tap();
+    s = await openBig();
+    check(s && s.use && !s.chosen, 'closed without a new cut, the photo is as it was', s);
+    await page.locator('.fs-vb [data-vb="use"]').tap();
+    await sleep(300);
+    s = await page.evaluate(() => ({ big: !!document.querySelector('.fs-vb'), on: !!document.querySelector('.cp-thumb .th-bank .th-bp.on'), behind: !!document.querySelector('.cp-thumb .th-fr.th-behind'), bank: !!window.MWFlyerStudio._state.th.bank }));
+    check(!s.big && s.on && s.behind && s.bank, 'Use this photo chooses it (the big view closes), the video’s moment marked as going behind it', s);
     await page.locator('.cp-thumb [data-act="tmake"]').tap();
     s = await until(page, () => {
       const st = window.MWFlyerStudio._state;

@@ -4286,6 +4286,16 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const box = el.firstElementChild;
     cv.className = 'fs-viewer-cv'; box.appendChild(cv);
     document.body.appendChild(el);
+    const zm = zoomer(box, cv);
+    const close = () => { el.remove(); cv.width = cv.height = 1; zm.stop(); };
+    el.querySelector('.fs-viewer-x').onclick = close;
+    return { close, zoom: zm.zoom };
+  }
+  /*
+   * Pinch, pan and double-tap zoom for a canvas in a viewer box. `onSwipe(±1)`, when given, hears a sideways swipe
+   * made at full size (zoomed in, the same finger pans instead). `reset()` after the canvas is redrawn at a new size.
+   */
+  function zoomer(box, cv, onSwipe) {
     let z = 1, tx = 0, ty = 0;
     const fit = () => { const r = box.getBoundingClientRect(); const f = Math.min(r.width / cv.width, r.height / cv.height); return { f, w: cv.width * f, h: cv.height * f, W: r.width, H: r.height }; };
     const clampPan = () => { const g = fit(); const mx = Math.max(0, (g.w * z - g.W) / 2), my = Math.max(0, (g.h * z - g.H) / 2); tx = Math.max(-mx, Math.min(mx, tx)); ty = Math.max(-my, Math.min(my, ty)); };
@@ -4294,10 +4304,12 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const zoomTo = (z1, px, py) => { z1 = Math.max(1, Math.min(8, z1)); tx = px - (px - tx) * z1 / z; ty = py - (py - ty) * z1 / z; z = z1; show(); };
     const mid = (e) => { const r = box.getBoundingClientRect(); return { x: e.clientX - r.left - r.width / 2, y: e.clientY - r.top - r.height / 2 }; };
     const pts = new Map(); let pinch = null, drag = null, lastTap = 0;
+    // a double tap: two quick taps that did not move (a finger landing after a pinch is not one)
+    let tapped = false;
     box.addEventListener('pointerdown', (e) => {
       try { box.setPointerCapture(e.pointerId); } catch (e2) { /* (a pointer the browser no longer tracks) */ } pts.set(e.pointerId, mid(e));
       if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, z, tx, ty, m: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } }; drag = null; lastTap = 0; tapped = false; }
-      else if (pts.size === 1) { drag = { x: e.clientX, y: e.clientY, tx, ty, at: Date.now(), moved: 0 }; tapped = true; }
+      else if (pts.size === 1) { drag = { x: e.clientX, y: e.clientY, tx, ty, at: Date.now(), moved: 0, dx: 0, dy: 0, z }; tapped = true; }
     });
     box.addEventListener('pointermove', (e) => {
       if (!pts.has(e.pointerId)) return;
@@ -4308,27 +4320,105 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         // the point that was under the fingers stays under them, and follows them
         tx = m.x - (pinch.m.x - pinch.tx) * z1 / pinch.z; ty = m.y - (pinch.m.y - pinch.ty) * z1 / pinch.z; z = z1; show();
       } else if (drag) {
-        drag.moved = Math.max(drag.moved, Math.hypot(e.clientX - drag.x, e.clientY - drag.y));
-        if (z > 1) { tx = drag.tx + e.clientX - drag.x; ty = drag.ty + e.clientY - drag.y; show(); }
+        drag.dx = e.clientX - drag.x; drag.dy = e.clientY - drag.y;
+        drag.moved = Math.max(drag.moved, Math.hypot(drag.dx, drag.dy));
+        if (z > 1) { tx = drag.tx + drag.dx; ty = drag.ty + drag.dy; show(); }
       }
     });
-    // a double tap: two quick taps that did not move (a finger landing after a pinch is not one)
-    let tapped = false;
     const up = (e) => {
       const was = pts.get(e.pointerId); pts.delete(e.pointerId);
       if (!pts.size && drag && tapped && drag.moved < 10 && Date.now() - drag.at < 300) {
         const now = Date.now();
         if (now - lastTap < 320 && was) { if (z > 1.05) { z = 1; tx = ty = 0; show(); } else zoomTo(2.5, was.x, was.y); lastTap = 0; } else lastTap = now;
+      } else if (!pts.size && drag && onSwipe && drag.z <= 1.05 && z <= 1.05 && Math.abs(drag.dx) > 60 && Math.abs(drag.dx) > 1.5 * Math.abs(drag.dy)) {
+        onSwipe(drag.dx < 0 ? 1 : -1);
       }
       if (pts.size < 2) pinch = null; if (!pts.size) { drag = null; tapped = false; }
     };
     box.addEventListener('pointerup', up); box.addEventListener('pointercancel', up);
     box.addEventListener('wheel', (e) => { e.preventDefault(); const p = mid(e); zoomTo(z * (e.deltaY < 0 ? 1.2 : 1 / 1.2), p.x, p.y); }, { passive: false });
-    const close = () => { el.remove(); cv.width = cv.height = 1; window.removeEventListener('resize', show); };
-    el.querySelector('.fs-viewer-x').onclick = close;
     window.addEventListener('resize', show);
     requestAnimationFrame(show);
-    return { close, zoom: () => z };
+    return {
+      zoom: () => z,
+      reset: () => { z = 1; tx = ty = 0; show(); },
+      stop: () => window.removeEventListener('resize', show),
+    };
+  }
+  /*
+   * ►► SEE A BANK PHOTO BIG. ◄◄ "I should be able to click the pictures to see them in a bigger view so I can check
+   * how good the cutout was." The cut-out exactly as the bank keeps it, over everything and as big as the screen:
+   * pinch or double-tap to look at the edges, swipe (or the arrows) for the speaker's other photos. Behind it: dark,
+   * white or checks — a leftover edge shows on one when it hides on another — or the photo it was cut from, to
+   * compare. Use takes it; Fix cut-out cuts it again from that photo (o.onFix) and the view comes back on the new one.
+   */
+  function viewBankPics(list, at, o) {
+    list = (list || []).filter(Boolean); if (!list.length) return null;
+    o = o || {};
+    let i = Math.max(0, Math.min(list.length - 1, at | 0)), bg = 'dark', seq = 0;
+    const cv = canvas(1, 1); cv.className = 'fs-viewer-cv';
+    const el = document.createElement('div'); el.className = 'fs-viewer fs-vb';
+    el.innerHTML = `<div class="fs-viewer-pic"></div><div class="fs-vb-top"><b></b><small></small></div>
+      <button type="button" class="fs-viewer-x" aria-label="Close">${ic('close')}</button>
+      ${list.length > 1 ? `<button type="button" class="fs-vb-nav fs-vb-prev" data-vb="prev" aria-label="Previous photo">${ic('back')}</button><button type="button" class="fs-vb-nav fs-vb-next" data-vb="next" aria-label="Next photo">${ic('back')}</button>` : ''}
+      <div class="fs-vb-bar"><small class="fs-vb-hint">Pinch or double-tap to zoom${list.length > 1 ? ' · swipe for the next' : ''}</small><div class="fs-vb-bgs"></div><div class="fs-vb-acts"></div></div>`;
+    const box = el.firstElementChild;
+    box.appendChild(cv);
+    document.body.appendChild(el);
+    const zm = zoomer(box, cv, (d) => go(d));
+    const BGS = [['dark', 'Dark'], ['light', 'Light'], ['checks', 'Checks'], ['orig', 'Original']];
+    function bar() {
+      const p = list[i], used = !!(o.used && o.used(p));
+      el.querySelector('.fs-vb-top b').textContent = o.name || 'Photo bank';
+      el.querySelector('.fs-vb-top small').textContent = list.length > 1 ? `${i + 1} of ${list.length}` : '';
+      el.querySelector('.fs-vb-bgs').innerHTML = BGS.filter(([k]) => k !== 'orig' || ORIG.has(p))
+        .map(([k, t]) => `<button type="button" class="fs-vb-bg${bg === k ? ' on' : ''}" data-bg="${k}">${t}</button>`).join('');
+      el.querySelector('.fs-vb-acts').innerHTML = (o.onFix ? `<button type="button" class="fs-vb-btn" data-vb="fix">${ic('cut')}Fix cut-out</button>` : '')
+        + (!o.onUse ? '' : used ? `<button type="button" class="fs-vb-btn" data-vb="unuse">Don’t use it</button><span class="fs-vb-on">✓ On the thumbnail</span>`
+          : `<button type="button" class="fs-vb-btn fs-vb-use" data-vb="use">Use this photo</button>`);
+    }
+    async function paint() {
+      const n = ++seq, p = list[i];
+      if (bg === 'orig' && !ORIG.has(p)) bg = 'dark';
+      bar();
+      el.classList.add('fs-vb-wait');
+      let im = null;
+      try {
+        if (bg === 'orig') { const or = ORIG.get(p); im = await loadImg(/^data:/.test(or) ? or : await window.api.flyer.kitPic(or)); }
+        else { await bankPic(p); im = await loadImg(PICURL.get(p) || p); }
+      } catch (e) { im = null; }
+      if (n !== seq) return;   // another photo was asked for meanwhile
+      el.classList.remove('fs-vb-wait');
+      if (!im) { toast('That photo could not be opened.', 'error'); return; }
+      // sharp enough to zoom into, small enough for a phone (its long side 2400 pixels at most)
+      const f = Math.min(1, 2400 / Math.max(iw(im), ih(im)));
+      cv.width = Math.max(1, Math.round(iw(im) * f)); cv.height = Math.max(1, Math.round(ih(im) * f));
+      const g = cv.getContext('2d');
+      if (bg === 'light') { g.fillStyle = '#ffffff'; g.fillRect(0, 0, cv.width, cv.height); }
+      else if (bg === 'dark') { g.fillStyle = '#231a3a'; g.fillRect(0, 0, cv.width, cv.height); }
+      else if (bg === 'checks') {
+        const q = Math.max(8, Math.round(Math.max(cv.width, cv.height) / 48));
+        g.fillStyle = '#ffffff'; g.fillRect(0, 0, cv.width, cv.height); g.fillStyle = '#d4d7de';
+        for (let y = 0; y * q < cv.height; y++) for (let x = (y % 2); x * q < cv.width; x += 2) g.fillRect(x * q, y * q, q, q);
+      }
+      g.drawImage(im, 0, 0, cv.width, cv.height);
+      zm.reset();
+    }
+    const go = (d) => { if (list.length < 2) return; i = (i + d + list.length) % list.length; paint(); };
+    const close = () => { el.remove(); cv.width = cv.height = 1; zm.stop(); seq++; };
+    el.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-vb],[data-bg],.fs-viewer-x'); if (!b) return;
+      if (b.classList.contains('fs-viewer-x')) return close();
+      if (b.dataset.bg) { bg = b.dataset.bg; return paint(); }
+      const a = b.dataset.vb, p = list[i];
+      if (a === 'prev') return go(-1);
+      if (a === 'next') return go(1);
+      if (a === 'use') { close(); return o.onUse(p); }
+      if (a === 'unuse') { if (o.onUnuse) o.onUnuse(p); return bar(); }
+      if (a === 'fix') { close(); return o.onFix(p, i); }
+    });
+    paint();
+    return { close, zoom: zm.zoom, at: () => i, bg: () => bg };
   }
 
   function paintThumbs() {
@@ -4470,8 +4560,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         <section class="fs-sec th-banksec">
           <h3>Photo bank <small>your preachers’ photos, already cut out</small></h3>
           <div class="th-chips">${sps.map((x) => `<button type="button" class="th-chip${bsp && x.id === bsp.id ? ' on' : ''}" data-banksp="${escAttr(x.id)}">${esc(x.name || 'Speaker')} <i>${(x.photos || []).length}</i></button>`).join('')}<button type="button" class="th-chip th-chip-add" data-act="banknew">＋ New preacher</button></div>
-          ${bsp ? `<div class="th-frames th-bank">${(bsp.photos || []).map((ph) => `<button type="button" class="th-fr th-bp${t.bank === ph ? ' on' : ''}" data-bank="${escAttr(ph)}">${picTag(ph)}</button>`).join('')}<button type="button" class="th-fr th-bp th-tool" data-act="bankadd">${ic('plus')}<small>Add photos</small></button></div>
-            ${t.bank ? `<p class="fs-note">${t.video ? 'Their photo goes on it, the video’s moment behind them (marked).' : 'Their photo goes on it, with a picture behind them.'} Tap a moment above to use the video instead.</p>` : ''}`
+          ${bsp ? `<div class="th-frames th-bank">${(bsp.photos || []).map((ph) => `<button type="button" class="th-fr th-bp${t.bank === ph ? ' on' : ''}" data-bank="${escAttr(ph)}" aria-label="See this photo big">${picTag(ph)}<i class="th-bp-zoom">${ic('zoom')}</i></button>`).join('')}<button type="button" class="th-fr th-bp th-tool" data-act="bankadd">${ic('plus')}<small>Add photos</small></button></div>
+            <p class="fs-note">${t.bank ? (t.video ? 'Their photo goes on it, the video’s moment behind them (marked).' : 'Their photo goes on it, with a picture behind them.') + ' Tap a moment above to use the video instead.' : 'Tap a photo to see it big and check its cut-out — then Use this photo.'}</p>`
             : '<p class="fs-note">Add your preachers once — each photo is cut out and kept for every flyer and thumbnail.</p>'}
         </section>
         <section class="fs-sec fs-form">
@@ -4535,15 +4625,29 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         }, 220);
       });
     }
+    function viewThumbBank(ph) {
+      const sp = ((F.kit && F.kit.speakers) || []).find((x) => (x.photos || []).includes(ph));
+      if (!sp) return;
+      const use = (p) => { t.bank = p; t.bankSp = sp.id; if (!t.preacher) { t.preacher = sp.name || ''; keepExtras(); } drawThumbMake(); };
+      viewBankPics(sp.photos, sp.photos.indexOf(ph), {
+        name: sp.name || 'Speaker',
+        used: (p) => t.bank === p,
+        onUse: use,
+        onUnuse: () => { t.bank = null; drawThumbMake(); },
+        // cut again, kept in the bank (My church too), and looked at again straight away
+        onFix: (p, j) => recutPhoto(sp, j, async (kept) => {
+          if (t.bank === p) t.bank = kept;
+          await saveKit(true);
+          drawThumbMake();
+          viewThumbBank(kept);
+        }),
+      });
+    }
     P.body.onclick = async (e) => {
       const b = e.target.closest('[data-act],[data-fr],[data-key],[data-idea],[data-preacher],[data-kicker],[data-banksp],[data-bank]'); if (!b) return;
       if (b.dataset.banksp) { t.bankSp = b.dataset.banksp; return drawThumbMake(); }
-      if (b.dataset.bank) {
-        const sp = ((F.kit && F.kit.speakers) || []).find((x) => (x.photos || []).includes(b.dataset.bank));
-        t.bank = t.bank === b.dataset.bank ? null : b.dataset.bank;
-        if (t.bank && sp) { t.bankSp = sp.id; if (!t.preacher) { t.preacher = sp.name || ''; keepExtras(); } }
-        return drawThumbMake();
-      }
+      // a bank photo opens big — to see how good its cut-out is — and is taken from there with Use
+      if (b.dataset.bank) return viewThumbBank(b.dataset.bank);
       if (b.dataset.preacher != null) { t.preacher = t.preacher === b.dataset.preacher ? '' : b.dataset.preacher; keepExtras(); return drawThumbMake(); }
       if (b.dataset.kicker != null) { t.kicker = t.kicker === b.dataset.kicker ? '' : b.dataset.kicker; return drawThumbMake(); }
       if (b.dataset.fr != null) { t.pick = +b.dataset.fr; t.custom = null; t.photo = null; t.bank = null; return drawThumbMake(); }
@@ -5395,6 +5499,24 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
    * finds the person at once, a dial says how much goes, and two brushes put
    * back an arm it took or rub out a corner it left. All on the phone.
    */
+  /*
+   * Cut a bank photo out again — from the PHOTO it was cut from when the bank kept it: a fresh cut of the real
+   * picture, not a cut of the cut. The new one is kept on the server at once with its photo (so a later fix starts
+   * from the photo again) and takes the old one's place in sp.photos; after(kept) says what is there now.
+   */
+  async function recutPhoto(sp, j, after) {
+    const p = sp.photos[j], o = ORIG.get(p);
+    await bankPic(p);
+    let from = PICURL.get(p) || p, orig = '';
+    if (o) { try { orig = /^data:/.test(o) ? o : await window.api.flyer.kitPic(o); from = orig; } catch (e) { orig = ''; } }
+    return cutOutUrl(from, async (png) => {
+      png = await tidyCut(png).catch(() => png);
+      let kept = png;
+      if (orig && sp.id) { try { kept = await window.api.flyer.kitAddPhoto(sp.id, png, sp.name, orig); PICURL.set(kept, png); ORIG.set(kept, orig); } catch (e) { kept = png; } }
+      sp.photos[j] = kept;
+      after(kept);
+    });
+  }
   function cutOutUrl(src, done) {
     if (!window.CutOut || !window.FlyerAI) { toast('The cut-out tool is not available here.', 'error'); return; }
     const m = document.getElementById('cutModal'); if (m) m.style.zIndex = '2000';
@@ -5579,20 +5701,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
           try { await window.api.flyer.inspoRemove(b.dataset.id); F.kit.inspo = (F.kit.inspo || []).filter((x) => x.id !== b.dataset.id); } catch (e) {}
           return drawKit();
         }
-        case 'sppic': {   // one of the bank, tapped: fix its cut-out
-          // from the PHOTO it was cut from when the bank kept it — a fresh cut of the real picture, not a cut of the cut
-          const sp = k.speakers[i], j = +b.dataset.j, p = sp.photos[j], o = ORIG.get(p);
-          await bankPic(p);
-          let from = PICURL.get(p) || p, orig = '';
-          if (o) { try { orig = /^data:/.test(o) ? o : await window.api.flyer.kitPic(o); from = orig; } catch (e) { orig = ''; } }
-          return cutOutUrl(from, async (png) => {
-            png = await tidyCut(png).catch(() => png);
-            let kept = png;
-            // kept on the server at once with its photo (so a later fix starts from the photo again); Save puts it in this place
-            if (orig && sp.id) { try { kept = await window.api.flyer.kitAddPhoto(sp.id, png, sp.name, orig); PICURL.set(kept, png); ORIG.set(kept, orig); } catch (e) { kept = png; } }
-            sp.photos[j] = kept; drawKit();
-          });
-        }
+        case 'sppic':     // one of the bank, tapped: fix its cut-out (Save puts the new one in this place)
+          return recutPhoto(k.speakers[i], +b.dataset.j, () => drawKit());
         case 'sppicrm': {   // its ✕: out of the bank (kept until Save — closing without saving puts it back)
           k.speakers[i].photos.splice(+b.dataset.j, 1);
           drawKit();
