@@ -16,7 +16,8 @@
  *     its outline, not blurred, the foot melting only where the frame cuts
  *   - "this is the standard type of flyer": the board in the studio is it in
  *     four colours — the event's own first, the church's blue next when the
- *     event's are not blue — and the other looks wait for "more designs"
+ *     event's are not blue — and the other looks wait for "more designs"; a colour picked under the
+ *     live preview (Option A) leads it, the event's own colours next
  *   node test/flyer-radiant.test.js
  */
 const fs = require('fs');
@@ -96,6 +97,8 @@ const ok = (cond, name, d) => { console.log((cond ? '  PASS ' : '  FAIL ') + nam
     // the studio's board: Radiant in four colours
     const St = window.MWFlyerStudio, Fs = St._state;
     Fs.kit = { speakers: [{ id: 's1', name: 'Bishop David Richman', photos: ['p1'] }] }; Fs.speakers = ['s1'];
+    // (no colour picked under the live preview: the event's own colours lead)
+    Fs.way = null;
     Fs.board = null; Fs.bgs = []; Fs.pal = pal; Fs.dir = { looks: ['glory'] }; Fs.fields.title = 'Sunday Service'; Fs.step = 'edit';
     St._rebuild();
     out.board = Fs.designs.map((d) => d.look);
@@ -105,6 +108,10 @@ const ok = (cond, name, d) => { console.log((cond ? '  PASS ' : '  FAIL ') + nam
     Fs.board = null; Fs.pal = { deep: '#3b0505', mid: '#c81e1e', accent: '#ffc46b', hi: '#ffffff' };
     St._rebuild();
     out.redBoard = Fs.designs.map((d) => d.look);
+    // a colour picked under the live preview (Option A): it leads, the event's own colours next
+    Fs.way = 'radiantgold'; Fs.board = null;
+    St._rebuild();
+    out.wayBoard = Fs.designs.map((d) => d.look);
     return out;
   });
   ok(errors.length === 0, 'no errors on the page', errors);
@@ -122,6 +129,8 @@ const ok = (cond, name, d) => { console.log((cond ? '  PASS ' : '  FAIL ') + nam
   ok(!r.board.slice(1, 4).includes('radiantblue'), 'an event in blue already: no second blue', r.board);
   ok(r.pals.every(([, mid, way]) => way && way.mid === mid), 'each colour is drawn in its own colours', r.pals);
   ok(r.redBoard[0] === 'radiant' && r.redBoard[1] === 'radiantblue', "an event in red: the church's blue next", r.redBoard);
+  ok(r.wayBoard[0] === 'radiantgold' && r.wayBoard[1] === 'radiant' && r.wayBoard.slice(0, 4).every((l) => /^radiant/.test(l)) && new Set(r.wayBoard.slice(0, 4)).size === 4,
+    'a colour picked under the live preview comes first, the event’s own colours next', r.wayBoard);
   ok(r.order.slice(4, 8).some((l) => !/^radiant/.test(l)) && r.order.includes('arch') && r.order.includes('glory'), 'the other looks are still there, on "more designs"', r.order.slice(0, 10));
   await b.close();
   console.log(`\n${pass} PASS / ${fail} FAIL`);

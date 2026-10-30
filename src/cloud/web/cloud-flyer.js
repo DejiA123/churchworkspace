@@ -3600,13 +3600,15 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     speakers: [],          // ids from the kit, in order
     pinned: {},            // speaker id -> the photo chosen from their bank (else the AI picks)
     size: 'post',
+    way: (() => { try { return localStorage.getItem('mw-flyer-way') || 'radiantpurple'; } catch (e) { return 'radiantpurple'; } })(),   // the colour under the live preview, first on the board
     dir: null, pal: null,
     bgs: [],               // { key, by } — painted pictures, best first
     designs: [],           // scenes offered
     scene: null, sel: null, undo: [], redo: [],
     painting: 0, tries: 0,
     mode: 'flyer',         // 'flyer' | 'thumb' (a YouTube thumbnail: the same studio, made from a video)
-    th: { video: null, photo: null, frames: [], pick: 0, custom: null, dur: 0, ideas: null, line: '', key: '', ask: 0, bgs: [], person: '', frameKey: '' },
+    th: { video: null, photo: null, frames: [], pick: 0, custom: null, dur: 0, ideas: null, line: '', key: '', ask: 0, bgs: [], person: '', frameKey: '',
+      look: (() => { try { return localStorage.getItem('mw-thumb-look') || 'ytbold'; } catch (e) { return 'ytbold'; } })() },   // the look under the live preview, first on the board
   };
   const sizeOf = () => SIZES.find((s) => s.id === F.size) || SIZES[0];
 
@@ -3757,6 +3759,58 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   }
   const presetNow = () => ({ fields: Object.fromEntries(['title', 'theme', 'time', 'time2', 'venue', 'extra', 'phone', 'handles', 'notes'].map((key) => [key, F.fields[key] || ''])), speakers: F.speakers.slice(), size: F.size });
   const occKey = (o) => (o && o.id ? String(o.id).replace(/^(season:[a-z-]+)\d{4}$/, '$1') : '');
+  /*
+   * ►► SEE IT AS YOU TYPE. ◄◄ (Option A, chosen from the mockups: "Option A for both".) The first flyer of the
+   * board — Radiant in the colour picked under it, the preacher's first photo, the words as typed — drawn small at
+   * the top of the page, and again a moment after each change. Tapped, it opens big. The colour picked leads the
+   * board (rankLooks), so what is seen here is what comes first after Make.
+   */
+  const WAY_ORDER = ['radiantpurple', 'radiantblue', 'radiantred', 'radiantgold', 'radiantteal'];
+  let liveN = 0, liveT = 0, liveLast = null;
+  function liveScene() {
+    const sz = sizeOf(), way = RADIANT_WAYS[F.way] ? F.way : WAY_ORDER[0];
+    return buildScene({ look: way, w: sz.w, h: sz.h, pal: RADIANT_WAYS[way].pal, dir: F.dir || {}, fields: F.fields, speakers: speakersFor(0), logo: IMGS.has('logo') ? 'logo' : null });
+  }
+  async function paintLive() {
+    const cv = F.panel && $('.fs-live-cv', F.panel.body); if (!cv) return;
+    const n = ++liveN;
+    // the last one drawn, at once (a page drawn again would otherwise blink empty while the new one is made)
+    if (liveLast && !cv.dataset.p) { cv.width = liveLast.width; cv.height = liveLast.height; cv.getContext('2d').drawImage(liveLast, 0, 0); }
+    cv.dataset.p = '1';
+    await loadFonts();
+    await Promise.all(speakersFor(0).map((s) => bankPic(s.photo)));
+    if (n !== liveN || !cv.isConnected) return;
+    const S = liveScene();
+    const out = render(S, canvas(1, 1), Math.max(240, Math.round((cv.clientWidth || 216) * (window.devicePixelRatio || 1))) / S.w);
+    cv.width = out.width; cv.height = out.height; cv.getContext('2d').drawImage(out, 0, 0);
+    liveLast = out;
+  }
+  const liveSoon = () => { clearTimeout(liveT); liveT = setTimeout(paintLive, 140); };
+  /* a preacher's face, round, for their button: the head and shoulders from where the cut-out says they are */
+  const FACE = new Map();
+  function faceOf(p) {
+    if (!p) return Promise.resolve('');
+    if (!FACE.has(p)) {
+      FACE.set(p, bankPic(p).then((im) => {
+        if (!im) return '';
+        const m = META.get(picKey(p)), W = iw(im), H = ih(im);
+        let cx = W / 2, cy = Math.min(W, H) * 0.45, side = Math.min(W, H);
+        if (m && m.sy > m.top) { const hh = m.sy - m.top; cx = m.cx; cy = m.top + hh * 0.56; side = Math.max(hh * 1.2, (m.sw || 0) * 0.62); }
+        side = Math.max(8, Math.min(side, W, H));
+        const sx = Math.max(0, Math.min(W - side, cx - side / 2)), sy = Math.max(0, Math.min(H - side, cy - side / 2));
+        const c = canvas(160, 160), g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 160, 160);
+        gr.addColorStop(0, '#5b21b6'); gr.addColorStop(1, '#1c1238');
+        g.fillStyle = gr; g.fillRect(0, 0, 160, 160);
+        g.drawImage(im, sx, sy, side, side, 0, 0, 160, 160);
+        return c.toDataURL('image/jpeg', 0.86);
+      }).catch(() => ''));
+    }
+    return FACE.get(p);
+  }
+  function fillFaces(el) {
+    $$('img[data-face]', el).forEach((img) => faceOf(img.dataset.face).then((u) => { if (u) img.src = u; }));
+  }
+
   function drawMake() {
     if (F.panel && typingIn(F.panel.body)) {
       if (!F._redraw) { F._redraw = true; F.panel.body.addEventListener('focusout', () => setTimeout(() => { F._redraw = false; if (F.step === 'make' && !typingIn(F.panel && F.panel.body)) drawMake(); }, 60), { once: true }); }
@@ -3772,34 +3826,43 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const on = F.occasion && F.occasion.id === o.id;
       return `<button type="button" class="fs-occ${on ? ' on' : ''}${o.seasonal ? ' season' : ''}" data-occ="${escAttr(o.id)}"><b>${esc(o.name)}</b><small>${esc(d ? d.dayName.slice(0, 3) + ' ' + d.dd.toLowerCase() + ' ' + d.month.slice(0, 3).toLowerCase() : '')}${o.time || (o.service && o.service.time) ? ' · ' + esc(niceTime(o.time || o.service.time)) : ''}</small></button>`;
     }).join('') + `<button type="button" class="fs-occ${F.occasion && F.occasion.id === 'other' ? ' on' : ''}" data-occ="other"><b>Something else</b><small>a conference, a crusade…</small></button>`;
+    // each preacher with their FACE (not the whole of them, small) and their whole name
     const sp = (k.speakers || []).map((s) => {
       const on = F.speakers.includes(s.id);
       const ph = photoFor(s, 0);
-      return `<button type="button" class="fs-sp${on ? ' on' : ''}" data-sp="${escAttr(s.id)}"><span class="fs-sp-pic">${ph ? picTag(ph) : esc((s.name || '?').replace(/^(pst|pastor|rev|dr|bishop|apostle|evang)\.?\s+/i, '').charAt(0))}</span><small>${esc(s.name || 'Speaker')}</small>`
-        + (on && (s.photos || []).length ? `<em class="fs-sp-bank">${F.pinned[s.id] ? 'your pick' : 'AI picks'} · ${s.photos.length}</em>` : '') + '</button>';
-    }).join('') + '<button type="button" class="fs-sp fs-sp-add" data-act="addsp"><span class="fs-sp-pic">' + ic('plus') + '</span><small>Add</small></button>';
+      return `<button type="button" class="fs-pill${on ? ' on' : ''}" data-sp="${escAttr(s.id)}"><span class="fs-pill-pic">${ph ? `<img data-face="${escAttr(ph)}" alt="">` : esc((s.name || '?').replace(/^(pst|pastor|rev|dr|bishop|apostle|evang)\.?\s+/i, '').charAt(0))}</span>`
+        + `<span class="fs-pill-tx"><b>${esc(s.name || 'Speaker')}</b>${on && (s.photos || []).length ? `<small>${F.pinned[s.id] ? 'your pick' : 'AI picks'} · ${s.photos.length} photos</small>` : ''}</span></button>`;
+    }).join('') + `<button type="button" class="fs-pill fs-pill-add" data-act="addsp" aria-label="Add a preacher"><span class="fs-pill-pic">${ic('plus')}</span><span class="fs-pill-tx"><b>Add</b></span></button>`;
     const painter = F.status && F.status.cloudflare ? 'FLUX.2' : 'FLUX';
+    const ways = WAY_ORDER.map((k) => `<button type="button" class="fs-way${F.way === k ? ' on' : ''}" data-way="${k}" style="background:${RADIANT_WAYS[k].pal.mid}" aria-label="${esc(RADIANT_WAYS[k].name)}"></button>`).join('');
     P.body.innerHTML = `
-      <div class="fs-make">
-        <section class="fs-sec">
-          <h3>What is it for?</h3>
+      <div class="fs-make fs-a">
+        <div class="fs-a-top">
+          <button type="button" class="fs-live" data-act="livebig" data-shape="${escAttr(F.size)}" aria-label="See this flyer big"><canvas class="fs-live-cv"></canvas></button>
+          <div class="fs-ways">${ways}<small class="fs-live-note"><i></i>Live as you type</small></div>
+        </div>
+        <div class="fs-a-sheet">
+        <section class="fs-asec">
+          <h4>What is it for?</h4>
           <div class="fs-occs">${chips}</div>
         </section>
-        <section class="fs-sec">
-          <h3>My presets <small>tap one to fill everything in</small></h3>
+        <section class="fs-asec">
+          <h4>My presets <small>tap one to fill everything in</small></h4>
           <div class="fs-occs fs-presets">${(k.presets || []).map((pr) => `<span class="fs-occ fs-preset" data-preset="${escAttr(pr.id)}"><b>${esc(pr.name)}</b><small>${esc([pr.fields && niceTime(pr.fields.time), pr.fields && pr.fields.venue].filter(Boolean).join(' · ') || 'saved details')}</small><button type="button" class="fs-preset-x" data-unpreset="${escAttr(pr.id)}" aria-label="Delete ${escAttr(pr.name)}">×</button></span>`).join('')}<button type="button" class="fs-occ fs-preset-add" data-act="savepreset"><b>＋ Save these</b><small>as a preset</small></button></div>
         </section>
-        <section class="fs-sec">
-          <h3>Who is preaching? <small>tap to put them on · tap again for their pictures</small></h3>
-          <div class="fs-sps">${sp}</div>
-          ${chosenSpeakers().map((s) => `<button type="button" class="fs-bulk" data-act="bulk" data-id="${escAttr(s.id)}">${ic('photo')}<span><b>Add photos of ${esc(s.name || 'this speaker')}</b><small>pick many at once — each is cut out for you · ${(s.photos || []).length} in the bank</small></span>${ic('plus')}</button>`).join('')}
+        <section class="fs-asec">
+          <h4>Who is preaching? <small>tap again for their photos</small></h4>
+          <div class="fs-pills">${sp}</div>
+          ${chosenSpeakers().map((s) => `<button type="button" class="fs-addph" data-act="bulk" data-id="${escAttr(s.id)}">${ic('plus')}<span>Add photos of ${esc(s.name || 'this speaker')} <i>· ${(s.photos || []).length} in the bank</i></span></button>`).join('')}
         </section>
-        <section class="fs-sec fs-form">
-          <label class="fs-f fs-wide"><span>Title</span><input data-f="title" value="${escAttr(f.title)}" placeholder="Sunday Service" ${TXT('words')}></label>
-          <label class="fs-f fs-wide"><span>Theme <i>(optional)</i></span><input data-f="theme" value="${escAttr(f.theme)}" placeholder="e.g. Loose Him and Let Him Go" ${TXT('sentences')}></label>
-          <label class="fs-f"><span>Date</span><input type="date" data-f="date" value="${escAttr(f.date)}"></label>
-          <label class="fs-f"><span>Time</span><input type="time" data-f="time" data-time value="${escAttr(hhmm(f.time))}"></label>
-          <label class="fs-f fs-wide"><span>Where</span><input data-f="venue" value="${escAttr(f.venue)}" placeholder="12 Airport Road, Benin City" ${TXT('words')}></label>
+        <section class="fs-asec fs-form">
+          <h4>The words</h4>
+          <div class="fs-box">
+            <label class="fs-row"><span>Title</span><input data-f="title" value="${escAttr(f.title)}" placeholder="Sunday Service" ${TXT('words')}></label>
+            <label class="fs-row"><span>Theme</span><input data-f="theme" value="${escAttr(f.theme)}" placeholder="optional — e.g. Loose Him and Let Him Go" ${TXT('sentences')}></label>
+            <div class="fs-row fs-row2"><label><span>Date</span><input type="date" data-f="date" value="${escAttr(f.date)}"></label><label><span>Time</span><input type="time" data-f="time" data-time value="${escAttr(hhmm(f.time))}"></label></div>
+            <label class="fs-row"><span>Where</span><input data-f="venue" value="${escAttr(f.venue)}" placeholder="12 Airport Road, Benin City" ${TXT('words')}></label>
+          </div>
           <details class="fs-more"${f.extra || f.time2 || f.notes ? ' open' : ''}><summary>More</summary>
             <label class="fs-f"><span>Second service</span><input type="time" data-f="time2" data-time value="${escAttr(hhmm(f.time2))}"></label>
             <label class="fs-f"><span>Extra line</span><input data-f="extra" value="${escAttr(f.extra)}" placeholder="10th Edition" ${TXT('words')}></label>
@@ -3808,16 +3871,19 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
             <label class="fs-f fs-wide"><span>Tell the AI the mood <i>(optional)</i></span><textarea data-f="notes" rows="2" placeholder="fire, revival, purple and gold, mountains…">${esc(f.notes)}</textarea></label>
           </details>
         </section>
-        <section class="fs-sec">
-          <h3>Size</h3>
+        <section class="fs-asec">
+          <h4>Size</h4>
           <div class="fs-seg">${SIZES.map((s) => `<button type="button" data-size="${s.id}" class="${F.size === s.id ? 'on' : ''}">${esc(s.name)}</button>`).join('')}</div>
         </section>
         <button type="button" class="fs-kit-link" data-act="kit">${ic('church')}<span><b>My church</b><small>${esc(k.church ? k.church : 'Name, logo, address, speakers and service days — set once')}</small></span>${ic('back').replace('fs-ic', 'fs-ic fs-chev')}</button>
         ${F.status && F.status.owner && F.status.cloudflare && window.api.flyer.library ? `<button type="button" class="fs-kit-link" data-act="library">${ic('photo')}<span><b>Church picture library</b><small>Every AI picture kept for the church · today’s free allowance (only you see this)</small></span>${ic('back').replace('fs-ic', 'fs-ic fs-chev')}</button>` : ''}
         <p class="fs-note">${F.status && !F.status.cloudflare ? 'Pictures are painted free by FLUX. For faster, sharper ones (FLUX.2, about 70 a day, free), add a free Cloudflare account to the server — see CLOUD.md.' : `Pictures are painted free by ${painter}. Your words are set exactly as you type them.`}</p>
+        </div>
       </div>`;
     P.foot.innerHTML = `<button type="button" class="fs-go" data-act="make">${ic('spark')}<span>Make my flyers</span></button>`;
     fillPics(P.body);
+    fillFaces(P.body);
+    paintLive();
     wireMake();
   }
 
@@ -3825,7 +3891,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const P = F.panel;
     const boxes = $$('[data-f]', P.body);
     boxes.forEach((el, i) => {
-      const keep = () => { F.fields[el.dataset.f] = el.hasAttribute('data-time') ? niceTime(el.value) : el.value; };
+      const keep = () => { F.fields[el.dataset.f] = el.hasAttribute('data-time') ? niceTime(el.value) : el.value; liveSoon(); };
       el.addEventListener('input', keep); el.addEventListener('change', keep);
       // Next goes to the next box, the last one puts the keyboard away
       el.addEventListener('keydown', (e) => {
@@ -3851,7 +3917,18 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       }
       const pb = e.target.closest('[data-preset]');
       if (pb) { applyPreset((F.kit.presets || []).find((q) => q.id === pb.dataset.preset)); toast('Filled in from your preset.', 'good', 2500); return drawMake(); }
+      const w = e.target.closest('[data-way]');
+      if (w) {
+        F.way = w.dataset.way;
+        try { localStorage.setItem('mw-flyer-way', F.way); } catch (er) { /* private window */ }
+        $$('[data-way]', P.body).forEach((x) => x.classList.toggle('on', x === w));
+        return paintLive();
+      }
       const b = e.target.closest('[data-occ],[data-sp],[data-size],[data-act]'); if (!b) return;
+      if (b.dataset.act === 'livebig') {
+        await Promise.all(speakersFor(0).map((x) => bankPic(x.photo)));
+        return viewFlyer(liveScene());
+      }
       if (b.dataset.act === 'savepreset') {
         const name = (window.prompt('Name this preset (e.g. Tuesday Word Study):', F.fields.title || '') || '').trim();
         if (!name) return;
@@ -4145,7 +4222,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const [pr, , pb] = hexRgb((F.pal && F.pal.mid) || '#1f45f0'), blueOwn = pb > pr + 40;
     const ways = Object.keys(RADIANT_WAYS).filter((k) => !(blueOwn && k === 'radiantblue'));
     const firstWays = (blueOwn ? [] : ['radiantblue']).concat(shuffled(ways.filter((k) => k !== 'radiantblue')));
-    if (fits('radiant')) board.push('radiant', ...firstWays.slice(0, BOARD_N - 1));
+    // (the colour picked under the live preview leads — it IS the flyer seen there — and the event's own colours follow it)
+    const lead = RADIANT_WAYS[F.way] ? F.way : null;
+    if (fits('radiant')) board.push(...(lead ? [lead, 'radiant', ...firstWays.filter((k) => k !== lead).slice(0, BOARD_N - 2)] : ['radiant', ...firstWays.slice(0, BOARD_N - 1)]));
     for (const l of order) {
       if (board.length >= BOARD_N) break;
       if (board.includes(l)) continue;
@@ -4517,6 +4596,87 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     return t.frames[t.pick] || t.frames[0] || null;
   }
 
+  /*
+   * ►► SEE IT AS YOU TYPE. ◄◄ (Option A, as for the flyers.) The thumbnail drawn at the top of the page in the look
+   * picked under it — the moment chosen, the preacher on it, the words as typed — and drawn again a moment after
+   * each change; a strip of every look under it, small, each drawn the same way. The preacher is cut out of the
+   * moment as soon as it is chosen (the same cut-out Make does), so they are on the preview before Make; until then
+   * the moment and the words are. Tapped, the preview opens big.
+   */
+  const TH_LOOK_ORDER = ['ytbold', 'ytglow', 'ytlight', 'ytfire', 'ytserif', 'ytscript', 'ytpanel', 'ytword', 'ytmono', 'ytstage', 'ytoutline', 'ytcinema'];
+  const TH_PAINTED = new Set(['ytglow', 'ytlight', 'ytfire', 'ytserif', 'ytscript', 'ytpanel', 'ytword', 'ytstage']);
+  const LIVECUT = new Map();   // a moment's picture -> { key } the preacher cut out of it ('' nobody; null still cutting)
+  let thLiveN = 0, thLiveT = 0, thLooksN = 0, thLooksT = 0, thLiveLast = null;
+  function liveCut(url) {
+    if (!LIVECUT.has(url)) {
+      const job = { key: null };
+      LIVECUT.set(url, job);
+      cutPreacher(url, 'live' + LIVECUT.size).then((k) => { job.key = k || ''; if (F.step === 'tmake' && F.mode === 'thumb') thPaint(); });
+    }
+    return LIVECUT.get(url);
+  }
+  // the looks that can be made from what is chosen (Cinematic is the video's own frame: none without one)
+  const thLooks = () => { const src = thumbPickSrc(), fr = src && (src.bank ? src.bgFrom : src); return TH_LOOK_ORDER.filter((l) => l !== 'ytcinema' || !!(fr && fr.url)); };
+  const thLook = () => (thLooks().includes(F.th.look) ? F.th.look : thLooks()[0]);
+  async function thLiveParts() {
+    const t = F.th, src = thumbPickSrc(); if (!src) return null;
+    const fr = src.bank ? src.bgFrom : src;
+    let frameKey = null;
+    if (fr && fr.url) {
+      frameKey = 'thlf:' + fr.url;
+      if (!IMGS.has(frameKey)) { try { IMGS.set(frameKey, await loadImg(fr.url)); } catch (e) { frameKey = null; } }
+    }
+    let person = '', cutting = false;
+    if (src.bank) person = (await bankPic(src.bank)) ? picKey(src.bank) : '';
+    else if (fr && fr.url) { const job = liveCut(fr.url); person = job.key || ''; cutting = job.key === null; }
+    return { frameKey, person, cutting, face: (!src.bank && fr && fr.face) || null, bank: t.bank || '', bankSp: t.bankSp || '' };
+  }
+  function thSceneOf(look, parts) {
+    const t = F.th, pal = THUMB_PAL[look] || TH_PALS[0];
+    // a look that shows a painting behind the preacher: a picture of light in its colours until Make paints one
+    let bg = null;
+    if (!parts.frameKey || TH_PAINTED.has(look)) { bg = 'thlpr:' + look; if (!IMGS.has(bg)) IMGS.set(bg, proceduralBg(TH.w, TH.h, pal, 7)); }
+    const fields = Object.assign({}, fieldsNow(), { title: String(t.line || '').trim() || 'YOUR WORDS HERE' });
+    return buildScene({ look, w: TH.w, h: TH.h, pal, dir: {}, fields, speakers: parts.person ? [{ id: parts.bank ? parts.bankSp : '', name: '', img: parts.person, photo: parts.bank }] : [],
+      logo: logoNow(), bg, frame: parts.frameKey, face: parts.face });
+  }
+  async function thLiveScene(look) { await loadFonts(); const parts = await thLiveParts(); return parts ? thSceneOf(look, parts) : null; }
+  function thDraw(cv, S, cssW) {
+    const out = render(S, canvas(1, 1), Math.max(120, Math.round((cv.clientWidth || cssW) * (window.devicePixelRatio || 1))) / S.w);
+    cv.width = out.width; cv.height = out.height; cv.getContext('2d').drawImage(out, 0, 0);
+    return out;
+  }
+  async function thPaintLive() {
+    const P = F.panel, cv = P && $('.th-live-cv', P.body); if (!cv) return;
+    const n = ++thLiveN;
+    if (thLiveLast && !cv.dataset.p) { cv.width = thLiveLast.width; cv.height = thLiveLast.height; cv.getContext('2d').drawImage(thLiveLast, 0, 0); }
+    cv.dataset.p = '1';
+    await loadFonts();
+    const parts = await thLiveParts();
+    if (n !== thLiveN || !cv.isConnected || !parts) return;
+    thLiveLast = thDraw(cv, thSceneOf(thLook(), parts), 358);
+    const tag = $('.th-live-tag', P.body);
+    if (tag) tag.innerHTML = parts.cutting ? '<i class="fs-spin"></i>Cutting out the preacher…' : '<i></i>LIVE';
+  }
+  // every look, small (one at a time, giving the page room between them)
+  async function thPaintLooks() {
+    const P = F.panel; if (!P || !$('[data-lookcv]', P.body)) return;
+    const n = ++thLooksN;
+    await loadFonts();
+    const parts = await thLiveParts();
+    if (!parts) return;
+    for (const cv of $$('[data-lookcv]', P.body)) {
+      if (n !== thLooksN || !cv.isConnected) return;
+      thDraw(cv, thSceneOf(cv.dataset.lookcv, parts), 72);
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  }
+  function thPaint() { thPaintLive(); clearTimeout(thLooksT); thLooksT = setTimeout(thPaintLooks, 60); }
+  function thLiveSoon() {
+    clearTimeout(thLiveT); thLiveT = setTimeout(thPaintLive, 150);
+    clearTimeout(thLooksT); thLooksT = setTimeout(thPaintLooks, 600);
+  }
+
   function drawThumbMake() {
     const P = F.panel; if (!P) return;
     if (typingIn(P.body)) {
@@ -4540,14 +4700,25 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const kickers = Array.from(new Set(['Sunday Service'].concat((k.services || []).map((x) => x.name).filter(Boolean), ['Part 2', 'Live', 'Full Sermon']))).slice(0, 8);
     const churchLine = k.church ? k.church + (IMGS.has('logo') ? ' · with the logo' : '') : 'Set your church’s name and logo once in Flyers → My church';
     P.body.innerHTML = `
-      <div class="fs-make th-make">
-        <section class="fs-sec">
-          <h3>Video</h3>
-          ${t.video ? `<button type="button" class="th-vid" data-act="vid">${vidPic ? `<img src="${escAttr(vidPic)}" alt="">` : `<span class="th-vid-ph">${ic('photo')}</span>`}<span><b>${esc(baseName(t.video))}</b><small>${t.dur ? esc(fmtT(t.dur)) + ' · ' : ''}tap to choose another</small></span>${ic('back').replace('fs-ic', 'fs-ic fs-chev')}</button>`
-            : `<button type="button" class="th-choose" data-act="vid">${ic('photo')}<span><b>Choose a video</b><small>a sermon, a short — anything you made or uploaded</small></span></button>`}
+      <div class="fs-make th-make fs-a">
+        <div class="fs-a-top th-a-top">
+          ${src ? `<button type="button" class="th-live" data-act="livebig" aria-label="See this thumbnail big"><canvas class="th-live-cv"></canvas><span class="fs-live-tag th-live-tag"><i></i>LIVE</span></button>
+          <div class="th-looks">${thLooks().map((l) => `<button type="button" class="th-look${l === thLook() ? ' on' : ''}" data-look="${l}" aria-label="${escAttr(LOOK_NAMES[l] || l)}"><canvas data-lookcv="${l}"></canvas></button>`).join('')}</div>
+          <small class="th-looks-tip">${esc(LOOK_NAMES[thLook()] || '')} · tap a look · it changes as you type</small>`
+            : `<button type="button" class="th-livechoose" data-act="vid">${ic('photo')}<b>Choose a video</b><small>a sermon, a short — anything you made or uploaded</small></button>`}
+        </div>
+        <div class="fs-a-sheet">
+        ${t.video ? `<button type="button" class="th-vid" data-act="vid">${vidPic ? `<img src="${escAttr(vidPic)}" alt="">` : `<span class="th-vid-ph">${ic('photo')}</span>`}<span><b>${esc(baseName(t.video))}</b><small>${t.dur ? esc(fmtT(t.dur)) + ' · ' : ''}tap to choose another video</small></span>${ic('back').replace('fs-ic', 'fs-ic fs-chev')}</button>` : ''}
+        <section class="fs-asec fs-form">
+          <h4>Words on it <small>3 to 5 big words work best</small></h4>
+          <label class="fs-box th-linebox"><input data-th="line" value="${escAttr(t.line)}" maxlength="40" placeholder="GOD IS NOT DONE WITH YOU" ${TXT('characters')}></label>
+          ${words.length > 1 ? `<div class="th-keys"><small>The word in colour:</small>${words.map((w) => `<button type="button" class="th-key${w.replace(/[^\w’']/g, '') === String(t.key || '').toUpperCase().replace(/[^\w’']/g, '') ? ' on' : ''}" data-key="${escAttr(w)}">${esc(w)}</button>`).join('')}</div>` : ''}
+          <div class="th-ideas">${t.loadingIdeas && t.video ? '<p class="th-listening"><i class="fs-spin"></i> Listening to the sermon for ideas…</p>'
+            : lines.map((l) => `<button type="button" class="th-idea${l.text === String(t.line || '').toUpperCase() ? ' on' : ''}" data-idea="${escAttr(l.text)}" data-ikey="${escAttr(l.key)}">${esc(l.text)}</button>`).join('')}</div>
+          ${t.ideas && !t.loadingIdeas ? `<p class="fs-note">${t.ideas.by === 'rules' ? (t.ideas.heard ? 'Ideas from what was said in the sermon.' : 'A few strong lines to start from — or type your own.') : 'Written by AI from what was preached' + (t.ideas.heard ? '' : ' (no speech could be heard, so these are general)') + '.'}</p>` : ''}
         </section>
-        ${t.video || t.photo ? `<section class="fs-sec">
-          <h3>The moment <small>${t.loadingFrames ? 'looking through the video…' : 'the best shots of the preacher, best first'}</small></h3>
+        ${t.video || t.photo ? `<section class="fs-asec">
+          <h4>The moment <small>${t.loadingFrames ? 'looking through the video…' : 'the best shots of the preacher, best first'}</small></h4>
           ${t.err ? `<p class="fs-note th-err">${esc(t.err)}</p>` : ''}
           <div class="th-frames">${photo}${custom}${tiles}
             ${t.video ? `<button type="button" class="th-fr th-tool" data-act="scrub">${ic('layout')}<small>Pick a moment</small></button>` : ''}
@@ -4557,23 +4728,15 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
             <input type="range" min="0" max="${Math.max(1, Math.floor(t.dur || 1))}" step="0.5" value="${t.scrubT || 0}" data-th="scrub" aria-label="Moment in the video">
             <div class="th-scrub-row"><span data-th="scrubT">${esc(fmtT(t.scrubT || 0))}</span><button type="button" class="fs-go th-use" data-act="usemoment">Use this moment</button></div></div>` : ''}
         </section>` : ''}
-        <section class="fs-sec th-banksec">
-          <h3>Photo bank <small>your preachers’ photos, already cut out</small></h3>
+        <section class="fs-asec th-banksec">
+          <h4>Photo bank <small>your preachers’ photos, already cut out</small></h4>
           <div class="th-chips">${sps.map((x) => `<button type="button" class="th-chip${bsp && x.id === bsp.id ? ' on' : ''}" data-banksp="${escAttr(x.id)}">${esc(x.name || 'Speaker')} <i>${(x.photos || []).length}</i></button>`).join('')}<button type="button" class="th-chip th-chip-add" data-act="banknew">＋ New preacher</button></div>
           ${bsp ? `<div class="th-frames th-bank">${(bsp.photos || []).map((ph) => `<button type="button" class="th-fr th-bp${t.bank === ph ? ' on' : ''}" data-bank="${escAttr(ph)}" aria-label="See this photo big">${picTag(ph)}<i class="th-bp-zoom">${ic('zoom')}</i></button>`).join('')}<button type="button" class="th-fr th-bp th-tool" data-act="bankadd">${ic('plus')}<small>Add photos</small></button></div>
             <p class="fs-note">${t.bank ? (t.video ? 'Their photo goes on it, the video’s moment behind them (marked).' : 'Their photo goes on it, with a picture behind them.') + ' Tap a moment above to use the video instead.' : 'Tap a photo to see it big and check its cut-out — then Use this photo.'}</p>`
             : '<p class="fs-note">Add your preachers once — each photo is cut out and kept for every flyer and thumbnail.</p>'}
         </section>
-        <section class="fs-sec fs-form">
-          <h3>Words on it <small>3 to 5 big words work best</small></h3>
-          <label class="fs-f fs-wide"><input data-th="line" value="${escAttr(t.line)}" maxlength="40" placeholder="GOD IS NOT DONE WITH YOU" ${TXT('characters')}></label>
-          ${words.length > 1 ? `<div class="th-keys"><small>The word in colour:</small>${words.map((w) => `<button type="button" class="th-key${w.replace(/[^\w’']/g, '') === String(t.key || '').toUpperCase().replace(/[^\w’']/g, '') ? ' on' : ''}" data-key="${escAttr(w)}">${esc(w)}</button>`).join('')}</div>` : ''}
-          <div class="th-ideas">${t.loadingIdeas && t.video ? '<p class="th-listening"><i class="fs-spin"></i> Listening to the sermon for ideas…</p>'
-            : lines.map((l) => `<button type="button" class="th-idea${l.text === String(t.line || '').toUpperCase() ? ' on' : ''}" data-idea="${escAttr(l.text)}" data-ikey="${escAttr(l.key)}">${esc(l.text)}</button>`).join('')}</div>
-          ${t.ideas && !t.loadingIdeas ? `<p class="fs-note">${t.ideas.by === 'rules' ? (t.ideas.heard ? 'Ideas from what was said in the sermon.' : 'A few strong lines to start from — or type your own.') : 'Written by AI from what was preached' + (t.ideas.heard ? '' : ' (no speech could be heard, so these are general)') + '.'}</p>` : ''}
-        </section>
-        <section class="fs-sec fs-form th-extra">
-          <h3>Also on it <small>all optional</small></h3>
+        <section class="fs-asec fs-form th-extra">
+          <h4>Also on it <small>all optional</small></h4>
           <label class="fs-f fs-wide"><span>Preacher</span><input data-th="preacher" value="${escAttr(t.preacher || '')}" placeholder="Pastor John Doe" ${TXT('words')}></label>
           ${kitNames.length ? `<div class="th-chips">${kitNames.map((n) => `<button type="button" class="th-chip${n === t.preacher ? ' on' : ''}" data-preacher="${escAttr(n)}">${esc(n)}</button>`).join('')}</div>` : ''}
           <label class="fs-f fs-wide"><span>Small line <i>(series, service, part)</i></span><input data-th="kicker" value="${escAttr(t.kicker || '')}" placeholder="SUNDAY SERVICE · PART 2" ${TXT('characters')}></label>
@@ -4581,9 +4744,11 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
           <label class="fs-f fs-wide"><span>Date or time <i>(in a pill)</i></span><input data-th="when" value="${escAttr(t.when || '')}" placeholder="SUN 19 OCT · 10AM" ${TXT('characters')}></label>
           <label class="th-switch"><input type="checkbox" data-th="church"${t.showChurch ? ' checked' : ''}><span><b>Church name & logo</b><small>${esc(churchLine)}</small></span></label>
         </section>
+        </div>
       </div>`;
     P.foot.innerHTML = `<button type="button" class="fs-go" data-act="tmake"${src && String(t.line || '').trim() ? '' : ' disabled'}>${ic('spark')}<span>Make thumbnails</span></button>`;
     fillPics(P.body);
+    thPaint();
     wireThumbMake();
   }
 
@@ -4597,17 +4762,18 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         const ws = line.value.toUpperCase().split(/\s+/).filter(Boolean);
         if (!ws.some((w) => w.replace(/[^\w’']/g, '') === String(t.key || '').toUpperCase().replace(/[^\w’']/g, ''))) t.key = ws.slice().sort((a, b) => b.length - a.length)[0] || '';
         const go = $('[data-act="tmake"]', P.foot); if (go) go.disabled = !(thumbPickSrc() && line.value.trim());
+        thLiveSoon();
       });
       line.addEventListener('change', () => drawThumbMake());
       line.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); line.blur(); } });
     }
     [['preacher', 'preacher'], ['kicker', 'kicker'], ['when', 'when']].forEach(([f, k]) => {
       const el = $(`[data-th="${f}"]`, P.body); if (!el) return;
-      el.addEventListener('input', () => { t[k] = el.value; if (k === 'preacher') keepExtras(); });
+      el.addEventListener('input', () => { t[k] = el.value; if (k === 'preacher') keepExtras(); thLiveSoon(); });
       el.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); } });
     });
     const ch = $('[data-th="church"]', P.body);
-    if (ch) ch.addEventListener('change', () => { t.showChurch = ch.checked; keepExtras(); });
+    if (ch) ch.addEventListener('change', () => { t.showChurch = ch.checked; keepExtras(); thLiveSoon(); });
     const sl = $('[data-th="scrub"]', P.body);
     if (sl) {
       sl.addEventListener('input', () => {
@@ -4644,7 +4810,16 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       });
     }
     P.body.onclick = async (e) => {
+      const lk = e.target.closest('[data-look]');
+      if (lk) {
+        t.look = lk.dataset.look;
+        try { localStorage.setItem('mw-thumb-look', t.look); } catch (er) { /* private window */ }
+        $$('[data-look]', P.body).forEach((x) => x.classList.toggle('on', x === lk));
+        const tip = $('.th-looks-tip', P.body); if (tip) tip.textContent = (LOOK_NAMES[t.look] || '') + ' · tap a look · it changes as you type';
+        return thPaintLive();
+      }
       const b = e.target.closest('[data-act],[data-fr],[data-key],[data-idea],[data-preacher],[data-kicker],[data-banksp],[data-bank]'); if (!b) return;
+      if (b.dataset.act === 'livebig') { const S = await thLiveScene(thLook()); if (S) viewFlyer(S); return; }
       if (b.dataset.banksp) { t.bankSp = b.dataset.banksp; return drawThumbMake(); }
       // a bank photo opens big — to see how good its cut-out is — and is taken from there with Use
       if (b.dataset.bank) return viewThumbBank(b.dataset.bank);
@@ -4749,9 +4924,12 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       try { const key = 'stock:' + n; if (!IMGS.has(key)) IMGS.set(key, await loadImg('/flyerphotos/' + encodeURIComponent(n))); return { key, by: 'photo', proc: true }; } catch (e) { return null; }
     }));
     t.bgs = stock.filter(Boolean);
-    // the board goes up straight away with the frame; the cut-out joins it a moment later
+    // the board goes up straight away with the frame — and the preacher cut out for the live preview already on it,
+    // when there is one; the sharp cut from the full-size moment takes its place a moment later
+    const early = !src.bank && fr && fr.url && LIVECUT.has(fr.url) ? LIVECUT.get(fr.url).key || '' : '';
+    if (early) t.person = early;
     rebuildThumbs();
-    t.person = src.bank ? ((await bankPic(src.bank)) ? picKey(src.bank) : '') : await cutPreacher(full, tryNo);
+    t.person = src.bank ? ((await bankPic(src.bank)) ? picKey(src.bank) : '') : (await cutPreacher(full, tryNo)) || early;
     t.cutting = false;
     if (tryNo !== F.tries) return;
     rebuildThumbs();
@@ -4783,10 +4961,13 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     // no video frame (a bank photo, no video): every look gets a picture, and the frame-only Cinematic is left out
     const painted = new Set(t.frameKey ? ['ytglow', 'ytlight', 'ytfire', 'ytserif', 'ytscript', 'ytpanel', 'ytword', 'ytstage'] : THUMB_LOOKS);
     if (!t.frameKey) order.splice(order.indexOf('ytcinema'), 1);
+    // (the look picked under the live preview leads, in the colours it was seen in; the AI's colours go on the next)
+    const lead = t.look && order.includes(t.look) ? t.look : null;
+    if (lead) { order.splice(order.indexOf(lead), 1); order.unshift(lead); }
     const ai = t.bgs.filter((b) => !b.proc), stock = t.bgs.filter((b) => b.proc);
     let n = 0;
     F.designs = order.map((look, i) => {
-      const pal = i === 0 && t.pal ? t.pal : THUMB_PAL[look] || t.pal;
+      const pal = lead && i === 0 ? THUMB_PAL[look] || t.pal : i === (lead ? 1 : 0) && t.pal ? t.pal : THUMB_PAL[look] || t.pal;
       let bg = null;
       if (painted.has(look)) {
         bg = ai.length ? ai[n % ai.length] : stock.length && n < stock.length ? stock[n] : null;

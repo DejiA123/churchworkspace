@@ -8,6 +8,9 @@
  *   - the words: lines offered (from the sermon, or by rule), the first one on
  *     it already; typing your own, and tapping the word that goes in colour
  *   - "Pick a moment" scrubs the video and takes the moment chosen
+ *   - the live preview: the thumbnail drawn at the top in the look picked
+ *     under it (every look small), redrawn as it is typed, opened big when
+ *     tapped; the look picked leads the board
  *   - the photo bank: a photo tapped opens big (Dark / Light / Checks behind
  *     the cut-out, zoom, Fix cut-out), and Use this photo takes it
  *   - Make: a board of six YouTube looks, each 1280×720, with the words on them
@@ -111,7 +114,7 @@ async function until(page, fn, arg, ms = 30000) {
     const tile = await page.evaluate(() => { const b = document.querySelector('.ch-tool[data-home="thumbs"]'); return b && { text: b.textContent.trim(), w: b.getBoundingClientRect().width }; });
     check(!!tile && /Thumbnails/.test(tile.text) && tile.w > 60, 'Home has a Thumbnails tile', tile);
     await page.locator('.ch-tool[data-home="thumbs"]').tap();
-    let s = await until(page, () => { const b = document.querySelector('.cp-thumb .th-choose'); return { ok: !!b, title: (document.querySelector('.cp-thumb') || {}).textContent || '' }; });
+    let s = await until(page, () => { const b = document.querySelector(".cp-thumb .th-livechoose"); return { ok: !!b, title: (document.querySelector('.cp-thumb') || {}).textContent || '' }; });
     check(s && s.ok, 'the tile opens the thumbnail studio, asking for a video', s && s.title.slice(0, 80));
     await page.evaluate(() => { const x = document.querySelector('.cp-thumb .cp-close, .cp-thumb [data-close], .cp-thumb .cp-x'); if (x) x.click(); });
     await sleep(500);
@@ -158,11 +161,32 @@ async function until(page, fn, arg, ms = 30000) {
     // back to the AI's best moment for the board
     await page.locator('.cp-thumb .th-fr[data-fr="0"]').tap();
     await sleep(200);
-    // ── also on it: the preacher, a small line, the date
+    // ── the live preview (Option A): the thumbnail drawn at the top as it is typed, every look small under it
+    s = await until(page, () => {
+      const c = document.querySelector('.cp-thumb .th-live canvas'), looks = [...document.querySelectorAll('.cp-thumb [data-lookcv]')];
+      return { ok: !!c && c.width > 300 && Math.abs(c.width / c.height - 16 / 9) < 0.03 && looks.length >= 11 && looks.every((x) => x.width > 50), w: c && c.width, h: c && c.height, looks: looks.length };
+    }, null, 20000);
+    check(s && s.ok, 'the thumbnail is drawn live at the top (16:9), every look drawn small under it', s);
+    const livePx = () => page.evaluate(() => { const c = document.querySelector('.cp-thumb .th-live canvas'); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let h = 0; for (let i = 0; i < d.length; i += 389) h = (h * 31 + d[i]) >>> 0; return h; });
+    const px0 = await livePx();
+    await page.locator('.cp-thumb [data-look="ytserif"]').tap();
+    await sleep(900);
+    const px1 = await livePx();
+    s = await page.evaluate(() => ({ look: window.MWFlyerStudio._state.th.look, kept: localStorage.getItem('mw-thumb-look'), on: (document.querySelector('.cp-thumb .th-look.on') || {}).dataset }));
+    check(s.look === 'ytserif' && s.kept === 'ytserif' && px1 !== px0, 'tapping a look puts the preview in it (and it is remembered)', { s, px0, px1 });
+    await page.locator('.cp-thumb .th-live').tap();
+    s = await until(page, () => ({ ok: !!document.querySelector('.fs-viewer canvas') }), null, 10000);
+    check(s && s.ok, 'tapping the preview opens it big', s);
+    await page.locator('.fs-viewer-x').tap();
+    await sleep(200);
+    // ── also on it: the preacher, a small line, the date (the preview follows the typing)
     await page.locator('.cp-thumb [data-th="preacher"]').fill('Pastor Mike Adeyemi');
     await page.locator('.cp-thumb [data-th="when"]').fill('Sun 19 Oct · 10AM');
     await page.locator('.cp-thumb .th-chip[data-kicker="Part 2"]').tap();
     await sleep(200);
+    await sleep(700);
+    const px2 = await livePx();
+    check(px2 !== px1, 'typing redraws the live preview', { px1, px2 });
     const ex = await page.evaluate(() => { const t = window.MWFlyerStudio._state.th; return { preacher: t.preacher, kicker: t.kicker, when: t.when, church: t.showChurch, kept: localStorage.getItem('mw-thumb-extra') }; });
     check(ex.preacher === 'Pastor Mike Adeyemi' && ex.kicker === 'Part 2' && /10AM/.test(ex.when) && ex.church && /Mike Adeyemi/.test(ex.kept || ''), 'the preacher, a small line and the date go on it (the preacher is remembered for next time)', ex);
 
@@ -176,6 +200,7 @@ async function until(page, fn, arg, ms = 30000) {
         person: !!st.th.person, words: st.designs.map((d) => d.layers.filter((l) => l.type === 'text').map((l) => l.text).join(' ')) };
     }, null, 90000);
     check(s && s.ok && s.sizes.every((z) => z === '1280x720') && new Set(s.looks).size === 12, 'Make: a board of twelve different YouTube looks, each 1280×720', s);
+    check(s && s.looks[0] === 'ytserif', 'the look seen live comes first on the board', s && s.looks);
     check(s && s.words.every((w) => /DONE/.test(w.toUpperCase())), 'every design has the words on it', s && s.words);
     check(s && s.words.filter((w) => /ADEYEMI/i.test(w)).length >= 10 && s.words.filter((w) => /PART 2/i.test(w)).length >= 8 && s.words.filter((w) => /10AM/i.test(w)).length >= 8,
       'the preacher’s name, the small line and the date are on the designs', s && s.words);
