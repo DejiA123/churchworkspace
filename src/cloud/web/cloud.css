@@ -4571,3 +4571,8 @@ body.mw-cloud.mw-home .cloud-home { background: #eaf5fd; color: #0d1b2c; }
 body.mw-cloud .cff-search input[type="search"], body.mw-cloud .cff-search input[type="search"]:focus {
   height: 100%; margin: 0; padding: 0 8px 0 0; border: 0; border-radius: 0; outline: 0; background: transparent; box-shadow: none; color: inherit;
 }
+/* another Zernio account: sign out of the first one there first */
+.cs-switch-note { margin: 8px 0 10px; padding: 10px 12px; border-radius: 12px; background: #fff7e6; color: #7a4a00; font-size: 13.5px; line-height: 1.4; }
+.cs-switch-note b { color: #5c3700; }
+.cs-key .cs-switch-note { flex-basis: 100%; }
+.cs-key-open { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 8px; text-decoration: none; }

@@ -2476,6 +2476,12 @@
    *     platform, no coming back to the app in between
    * Connect beside a platform still does just that one.
    */
+  /*
+   * ANOTHER ZERNIO ACCOUNT, FROM THE SAME PHONE. "The browser in the app did not clear, so I could not log in to a
+   * different Zernio account (with Google etc.)": the window Zernio opens in keeps the first account signed in, and
+   * this page cannot sign anyone out of another site. So it says what to do there, before they need it.
+   */
+  const SWITCH_NOTE = '<p class="cs-switch-note">Zernio opens still signed in to your first account. In Zernio, <b>log out</b> first (in its menu), then sign up with the other email. With Google, tap <b>Use another account</b> on Google’s screen.</p>';
   function openConnect(after) {
     const panel = C.openPanel({ id: 'csConnect', title: 'Accounts', cls: 'cp-connect', onClose: () => { stopClaim(); stopWatch(); if (after) after(); } });
     let claiming = null;   // { platform, timer, until }
@@ -2510,6 +2516,7 @@
       const keyRow = (k, title, sub) => `<div class="cs-key${S.keys[k] ? ' set' : ''}">`
         + `<div class="cs-key-tx"><b>${title}</b><small>${S.keys[k] ? 'Saved on the studio machine — it never comes back to this phone' : sub}</small></div>`
         + (S.keys[k] ? `<button type="button" class="cs-mini" data-k="edit-${k}">Replace</button>` : '')
+        + (k !== 'zo' && !S.keys[k] ? SWITCH_NOTE + `<a class="cs-mini cs-key-open" href="https://zernio.com/signup" target="_blank" rel="noopener">${mi('external')}Open Zernio</a>` : '')
         + `<div class="cs-key-in${S.keys[k] ? ' hidden' : ''}" data-key-row="${k}"><input class="cs-input" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste the API key" data-key="${k}">`
         + `<button type="button" class="cs-btn primary" data-k="save-${k}">Save</button></div></div>`;
       const needs = S.keys.zo || S.keys.zoFb;
@@ -2549,6 +2556,7 @@
         hero = '<div class="cs-setup cs-second">'
           + `<div class="cs-step"><span class="cs-step-n">+</span><div class="cs-step-tx"><b>Free account${keyCount() > 1 ? 's' : ''} full — add another free one</b>`
           + `<small>Each free Zernio account holds 2 accounts. Make ${keyCount() > 1 ? 'a third' : 'a second'} free Zernio account (use another email), open <b>API keys</b> in its menu, tap <b>Create key</b>, then <b>Copy</b>. It stays free.</small></div></div>`
+          + SWITCH_NOTE
           + `<a class="cs-btn ghost cs-wide" href="https://zernio.com/signup" target="_blank" rel="noopener">${mi('external')}Open Zernio</a>`
           + `<button type="button" class="cs-btn primary cs-wide cs-big" data-k="paste2">📋 Paste the new key</button>`
           + (typing ? `<div class="cs-key-in" data-key-row="${nextSlot()}"><input class="cs-input" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste the new key here" data-key="${nextSlot()}"><button type="button" class="cs-btn primary" data-k="save-${nextSlot()}">Save</button></div>` : '')
