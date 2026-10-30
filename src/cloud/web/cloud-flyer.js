@@ -2359,11 +2359,11 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
        behind the title. Its family (below) keeps that finish and changes the composition. */
     radiant(D) {
       const H = D.h, f = D.f, L = [], ps = spsOf(D).slice(0, 3), P = stdPal(D.pal);
-      L.push(...stdLight(D, P, D.std === 'spot' ? 'spot' : 'electric'));
+      L.push(...stdLight(D, P, 'electric'));
       L.push(...crest(D, 58, '#ffffff'));
       // the title: as wide as the page, white going icy at the foot of each line, a glow of the light behind
       const lines = stack(f.title || 'Sunday Service', 3), tTop = H > 1200 ? 112 : 100, maxH0 = Math.min(lines.length > 2 ? 128 : 178, H * (lines.length > 2 ? 0.1 : 0.165));
-      const fill = D.std === 'spot' ? 'gold' : { stops: ['#ffffff', '#ffffff', mix(P.glow, '#ffffff', 0.45)], angle: 90 };
+      const fill = { stops: ['#ffffff', '#ffffff', mix(P.glow, '#ffffff', 0.45)], angle: 90 };
       const titleAt = (stretch, maxH) => titleLines(lines, { align: 'center', t: tTop, w: 950, maxH, gap: 12, letter: -0.02,
         fill, style: { stretch, glow: rgba(P.glow, 0.5), shadow: true, inkSet: true } });
       let ts = titleAt(1.12, maxH0);
@@ -2387,11 +2387,45 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       // when: the day, the date large in italics, a line, the time — a column at the right with a line of light beside it
       L.push(...stdWhen(D, P, n ? { l: 886, cy: (top + barT) / 2 + 30 } : { cx: 540, cy: (top + barT) / 2 + 30 }));
       L.push(...stdBars(D, P, ps, barT, f.theme || ''));
-      L.push(...stdFoot(D, P, barT + 82, D.std === 'spot'));
+      L.push(...stdFoot(D, P, barT + 82, false));
       return L;
     },
-    /* ── SPOTLIGHT: the standard on a dark stage — beams from above, the title in gold, the foot deep, not white ── */
-    radiantspot(D) { return LAYOUTS.radiant(Object.assign({}, D, { std: 'spot' })); },
+    /* ── SPOTLIGHT: the standard on a dark stage, set like a poster — the ministers big at the top in the beams, the
+          title huge in gold low on the page over the dark they fade into, the date on one line under it, WITH over
+          their names, the address in white ("they look the same": it was Radiant's layout in gold) ── */
+    radiantspot(D) {
+      const H = D.h, f = D.f, d = D.d, L = [], ps = spsOf(D).slice(0, 3), P = stdPal(D.pal), n = ps.length;
+      L.push(...stdLight(D, P, 'spot'));
+      L.push(...crest(D, 58, '#ffffff'));
+      const barT = H - 240, gold = '#e9bd5a';
+      // from the foot up: the bars, the date line, the theme, then the title
+      const whenTxt = [d && `${d.day}, ${d.ddth} ${d.mon3} ${d.year}`, f.time && f.time + (f.time2 ? ' & ' + f.time2 : '')].filter(Boolean).join('  •  ');
+      const whenY = barT - (n ? 92 : 50);
+      const theme = n && f.theme ? f.theme : '';
+      const lines = stack(f.title || 'Sunday Service', 2);
+      const ts = titleLines(lines, { align: 'center', t: 0, w: 960, maxH: Math.min(lines.length > 1 ? 160 : 200, H * (lines.length > 1 ? 0.115 : 0.16)), gap: 8, letter: -0.02,
+        fill: 'gold', style: { stretch: 1.12, glow: rgba('#ffcf6b', 0.35), shadow: true, inkSet: true } });
+      shiftY(ts, whenY - (whenTxt ? 46 : 0) - (theme ? 52 : 0) - ts.bottom); ts.bottom = Math.max(...ts.map((l) => box(l).b));
+      const tTop = Math.min(...ts.map((l) => box(l).t));
+      // the ministers: big, from the top, down behind the title (their faces kept above it)
+      const xs = n === 3 ? [0.24, 0.5, 0.76] : n === 2 ? [0.35, 0.65] : [0.5];
+      const people = stdPeople(ps, (i) => ({ cx: W * xs[i], t: H * (H / W < 1.1 ? 0.1 : 0.11) + (n === 3 && i !== 1 ? 30 : 0), b: tTop + (tTop - H * 0.1) * 0.55, maxR: null,
+        maxU: W * (n === 1 ? 0.36 : n === 2 ? 0.27 : 0.19) * clamp(H / 1350, 1, 1.15) }), P);
+      L.push(...people);
+      // the dark they fade into, so the gold title reads
+      L.push(SH({ name: 'Stage dark', lock: true, shape: 'fade', fill: '#05030c', strength: 1, x: 540, y: (tTop - H * 0.12 + H) / 2, w: W, h: H - tTop + H * 0.12 }));
+      L.push(...stdScript(D, P, ts), ...ts);
+      if (theme) L.push(put(T({ name: 'Theme', text: theme, upper: true, font: 'Montserrat', size: 26, letter: 0.24, fill: '#fff3d6', maxW: 900, shadow: true, inkSet: true }), { cx: 540, cy: ts.bottom + 32 }));
+      if (whenTxt) {
+        const wt = put(T({ name: 'When', text: whenTxt, upper: true, font: 'Montserrat Black', size: 36, fill: '#ffffff', maxW: 860, shadow: true, inkSet: true }), { cx: 540, cy: whenY });
+        const r = box(wt), rl = Math.min(90, (r.l - 40) * 0.8);
+        L.push(wt);
+        if (rl > 24) L.push(SH({ name: 'Rule', shape: 'rect', fill: gold, x: r.l - 20 - rl / 2, y: whenY, w: rl, h: 3 }), SH({ name: 'Rule', shape: 'rect', fill: gold, x: r.r + 20 + rl / 2, y: whenY, w: rl, h: 3 }));
+      }
+      L.push(...stdBars(D, P, ps, barT, f.theme || ''));
+      L.push(...stdFoot(D, P, barT + 82, true));
+      return L;
+    },
 
     /* ── SIDE: the minister big at one side, from the waist; the title stacked huge beside them, the date under it,
           WITH over the name across their foot; the address and the apps on the white ── */
@@ -2447,7 +2481,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const waveT = H * 0.7, barT = H - 250;
       const xs = n === 3 ? [0.27, 0.5, 0.73] : n === 2 ? [0.36, 0.64] : [0.5];
       const people = stdPeople(ps, (i) => ({ cx: W * xs[i], t: y + 8 + (n === 3 && i !== 1 ? 34 : 0), b: waveT + 60, maxR: null,
-        maxU: W * (n === 1 ? 0.33 : n === 2 ? 0.25 : 0.18) * clamp(H / 1350, 1, 1.15) }), P);
+        maxU: W * (n === 1 ? 0.42 : n === 2 ? 0.29 : 0.2) * clamp(H / 1350, 1, 1.15) }), P);
       L.push(...people);
       // the wave, in front of their feet: deep colour with a bright crest, the date across it in one line
       L.push(SH({ name: 'Wave glow', lock: true, shape: 'swoosh', bend: -1, thick: H * 0.05, fill: rgba(P.glow, 0.9), x: 540, y: waveT + 30, w: W * 1.3, h: H * 0.12, rot: -4 }));
@@ -4662,7 +4696,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       <p class="fs-status">${busy ? (thumb ? '<i class="fs-spin"></i> Getting the moment ready…' : 'The AI is reading your event…') : thumb && F.th.cutting ? '<i class="fs-spin"></i> Cutting the preacher out of the picture…' : F.painting > 0 ? `<i class="fs-spin"></i> Painting ${F.painting} picture${F.painting > 1 ? 's' : ''} with AI — they appear as they’re ready` : 'Tap one to edit every part of it'}</p>
       ${!busy && F.status && F.status.note ? `<p class="fs-allow">${esc(F.status.note)}</p>` : ''}
       ${busy ? '' : judgeLine()}
-      <div class="fs-grid">${busy ? '<div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div>' : F.designs.map((d, i) => `<button type="button" class="fs-card" data-i="${i}"><canvas></canvas>${d.score != null ? `<em class="fs-score${d.score >= 8 ? ' hi' : ''}" title="${escAttr(d.issue || '')}">${ic('spark')}${esc(String(Math.round(d.score)))}/10</em>` : ''}<span class="fs-card-zoom" data-view="${i}" role="button" aria-label="See it big">${ic('zoom')}</span><small>${esc(d.label || LOOK_NAMES[d.look] || d.look)}</small>${madeByTag(d.madeBy)}</button>`).join('')}</div>
+      <div class="fs-grid">${busy ? '<div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div>' : F.designs.map((d, i) => `<button type="button" class="fs-card" data-i="${i}"><canvas></canvas><span class="fs-card-row">${d.score != null ? `<em class="fs-score${d.score >= 8 ? ' hi' : ''}" title="${escAttr(d.issue || '')}">${ic('spark')}${esc(String(Math.round(d.score)))}/10</em>` : ''}<small>${esc(d.label || LOOK_NAMES[d.look] || d.look)}</small><span class="fs-card-zoom" data-view="${i}" role="button" aria-label="See it big">${ic('zoom')}</span></span>${madeByTag(d.madeBy)}</button>`).join('')}</div>
       ${!busy && !thumb && F.board && F.board.shown < F.board.order.length ? `<button type="button" class="fs-ghost fs-more" data-act="more">${ic('layout')}<span>${BOARD_N} more designs</span></button>` : ''}
     </div>`;
     // one board at a time: "New pictures" waits until this one is painted (each tap used to start five more paintings)

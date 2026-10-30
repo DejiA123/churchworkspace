@@ -4367,8 +4367,11 @@ html, body.mw-cloud, body.mw-cloud .cloud-home .ch-scroll, body.mw-cloud #cloudG
 .th-bp-zoom { position: absolute; right: 6px; bottom: 6px; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; background: rgba(0, 0, 0, .5); color: #fff; pointer-events: none; }
 .th-bp-zoom .fs-ic { width: 14px; height: 14px; }
 .fs-card { position: relative; }
-.fs-card-zoom { position: absolute; top: 6px; right: 6px; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: rgba(15, 17, 21, .62); color: #fff; }
-.fs-card-zoom .fs-ic { width: 18px; height: 18px; }
+/* the zoom button and the score sit under the picture, beside its name ("the circles are nasty": a dark button sat on the title) */
+.fs-card-row { display: flex; align-items: center; gap: 6px; min-height: 32px; }
+.fs-card-row small { flex: 1 1 auto; min-width: 0; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fs-card-zoom { flex: none; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 50%; background: #f1eff7; color: #17112b; }
+.fs-card-zoom .fs-ic { width: 17px; height: 17px; }
 .fs-bank-cell .fs-bank-pic { width: 100%; }
 .fs-pic-x { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%;
   color: #fff; background: rgba(15, 17, 21, .72); box-shadow: 0 1px 4px rgba(0, 0, 0, .25); cursor: pointer; }
@@ -4697,7 +4700,7 @@ body.mw-cloud .cff-search input[type="search"], body.mw-cloud .cff-search input[
 .fs-judge.ok { color: #4c1d95; font-weight: 600; }
 .fs-judge .fs-ic { width: 16px; height: 16px; flex: none; margin-top: 1px; }
 .fs-card { position: relative; }
-.fs-score { position: absolute; top: 8px; left: 8px; z-index: 1; display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px;
-  font-style: normal; font-size: 12px; font-weight: 800; color: #17112b; background: rgba(255, 255, 255, .92); box-shadow: 0 1px 4px rgba(0, 0, 0, .2); pointer-events: none; }
+.fs-score { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px;
+  font-style: normal; font-size: 12px; font-weight: 800; color: #17112b; background: #f1eff7; pointer-events: none; }
 .fs-score .fs-ic { width: 12px; height: 12px; }
 .fs-score.hi { color: #fff; background: #6d28d9; }
