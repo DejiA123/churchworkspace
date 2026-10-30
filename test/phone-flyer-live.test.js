@@ -6,7 +6,7 @@
  *   - each preacher's button shows their face, cut from their bank photo, and their whole name
  *   - typing redraws it; a colour under it puts it in that colour (remembered); the size changes its shape
  *   - tapped, it opens big
- *   - Make: the colour picked leads the board, the event's own colours next
+ *   - Make: the colour picked leads the board, the standard's family after it
  * The AI painter is stood in for (no network in a test).
  */
 const fs = require('fs');
@@ -135,7 +135,8 @@ async function until(page, fn, arg, ms = 30000) {
     // ── Make: the colour seen live leads the board
     await page.locator('.cp-flyer [data-act="make"]').tap();
     s = await until(page, () => { const st = window.MWFlyerStudio._state; return { ok: st.designs.length >= 4, looks: st.designs.map((d) => d.look) }; }, null, 60000);
-    check(s && s.looks[0] === 'radiantgold' && s.looks[1] === 'radiant' && s.looks.slice(0, 4).every((l) => /^radiant/.test(l)), 'Make: the colour picked comes first, the event’s own colours next', s);
+    check(s && s.looks[0] === 'radiantgold' && JSON.stringify(s.looks.slice(1, 4)) === JSON.stringify(['radiantside', 'radiantspot', 'radiantwave']),
+      'Make: the colour picked comes first, then the standard’s family (Side, Spotlight, Wave)', s);
   } catch (e) {
     check(false, 'the run finished', e.stack || e.message);
   } finally {

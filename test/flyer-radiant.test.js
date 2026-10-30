@@ -14,10 +14,11 @@
  *   - the page is vivid at the top and light at the foot, where the address is
  *   - a cut-out goes on the flyer exactly as saved in My church: nothing off
  *     its outline, not blurred, the foot melting only where the frame cuts
- *   - "this is the standard type of flyer": the board in the studio is it in
- *     four colours — the event's own first, the church's blue next when the
- *     event's are not blue — and the other looks wait for "more designs"; a colour picked under the
- *     live preview (Option A) leads it, the event's own colours next
+ *   - "this is the standard type of flyer": the board in the studio is it and
+ *     its family — Radiant, Side, Spotlight, Wave, each in its own colour ("they
+ *     look the same" of four colourways); the other looks and colours on "more
+ *     designs", never a framed photo ("the circles are nasty"); a colour picked
+ *     under the live preview (Option A) leads it
  *   node test/flyer-radiant.test.js
  */
 const fs = require('fs');
@@ -103,15 +104,18 @@ const ok = (cond, name, d) => { console.log((cond ? '  PASS ' : '  FAIL ') + nam
     St._rebuild();
     out.board = Fs.designs.map((d) => d.look);
     out.order = Fs.board.order;
-    out.pals = Fs.designs.slice(1, 4).map((d) => [d.look, d.pal.mid, (F.RADIANT_WAYS[d.look] || {}).pal]);
+    out.pals = Fs.designs.slice(0, 4).map((d) => [d.look, d.pal.mid, (Fs.board.pals || {})[d.look]]);
     // an event in red: the church's blue comes second
     Fs.board = null; Fs.pal = { deep: '#3b0505', mid: '#c81e1e', accent: '#ffc46b', hi: '#ffffff' };
     St._rebuild();
     out.redBoard = Fs.designs.map((d) => d.look);
+    out.redOrder = Fs.board.order;
     // a colour picked under the live preview (Option A): it leads, the event's own colours next
     Fs.way = 'radiantgold'; Fs.board = null;
     St._rebuild();
     out.wayBoard = Fs.designs.map((d) => d.look);
+    out.wayOrder = Fs.board.order;
+    out.wayPals = Fs.designs.slice(0, 4).map((d) => d.pal.mid);
     return out;
   });
   ok(errors.length === 0, 'no errors on the page', errors);
@@ -125,13 +129,14 @@ const ok = (cond, name, d) => { console.log((cond ? '  PASS ' : '  FAIL ') + nam
   ok(r.kept && r.kept.after === r.kept.before, "the cut-out goes to the flyer exactly as saved in My church (not a pixel off it)", r.kept);
   ok(r.drawn && r.drawn.n > 1000 && r.drawn.offPct < 0.5, "drawn on the flyer it is the saved cut-out itself, ear and all, down to where the foot melts", r.drawn);
   ok(r.drawn && r.drawn.fade <= 0.16, 'and the foot melts only a little, where the frame cuts through them', r.drawn);
-  ok(r.board[0] === 'radiant' && r.board.slice(1, 4).every((l) => /^radiant./.test(l)) && new Set(r.board.slice(0, 4)).size === 4, 'the board is Radiant, in four different colours', r.board);
-  ok(!r.board.slice(1, 4).includes('radiantblue'), 'an event in blue already: no second blue', r.board);
-  ok(r.pals.every(([, mid, way]) => way && way.mid === mid), 'each colour is drawn in its own colours', r.pals);
-  ok(r.redBoard[0] === 'radiant' && r.redBoard[1] === 'radiantblue', "an event in red: the church's blue next", r.redBoard);
-  ok(r.wayBoard[0] === 'radiantgold' && r.wayBoard[1] === 'radiant' && r.wayBoard.slice(0, 4).every((l) => /^radiant/.test(l)) && new Set(r.wayBoard.slice(0, 4)).size === 4,
-    'a colour picked under the live preview comes first, the event’s own colours next', r.wayBoard);
-  ok(r.order.slice(4, 8).some((l) => !/^radiant/.test(l)) && r.order.includes('arch') && r.order.includes('glory'), 'the other looks are still there, on "more designs"', r.order.slice(0, 10));
+  // ("They look the same": not the one layout in four colours — the standard and its family, each its own composition)
+  ok(JSON.stringify(r.board.slice(0, 4)) === JSON.stringify(['radiant', 'radiantside', 'radiantspot', 'radiantwave']), 'the board is the standard and its family: Radiant, Side, Spotlight, Wave', r.board);
+  ok(r.pals.slice(1).every(([, mid, pal]) => pal && pal.mid === mid) && new Set(r.pals.map(([, mid]) => mid)).size === 4, 'each in a colour of its own', r.pals);
+  ok(r.redBoard[0] === 'radiant' && r.redOrder[4] === 'radiantblue', "an event in red: the church's blue is the first more colour", r.redOrder.slice(0, 6));
+  ok(r.wayBoard[0] === 'radiantgold' && JSON.stringify(r.wayBoard.slice(1, 4)) === JSON.stringify(['radiantside', 'radiantspot', 'radiantwave']) && r.wayOrder[4] === 'radiant'
+    && !r.wayPals.slice(1).includes(r.wayPals[0]), 'a colour picked under the live preview comes first, the family in other colours, the event’s own colours next', { b: r.wayBoard, o: r.wayOrder.slice(0, 6), p: r.wayPals });
+  ok(r.order.slice(4, 8).filter((l) => !/^radiant/.test(l)).length >= 2 && r.order.includes('glory'), 'the other looks are on "more designs" (not four more of the same)', r.order.slice(0, 10));
+  ok(!['circle', 'arch', 'arches', 'bigword', 'split'].some((l) => r.order.includes(l)), '"the circles are nasty": no framed photo is on a board', r.order);
   await b.close();
   console.log(`\n${pass} PASS / ${fail} FAIL`);
   process.exit(fail ? 1 : 0);
