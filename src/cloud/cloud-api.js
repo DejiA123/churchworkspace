@@ -242,6 +242,7 @@ const ALLOWED = {
   'flyer:cutout': true,
   'flyer:cutoutStatus': true,
   'flyer:inspoAdd': true,
+  'flyer:judge': { args: (a) => !!a && typeof a.image === 'string' && a.image.length < 8e6 && /^data:image\/(jpeg|png);base64,/.test(a.image) && Number.isInteger(a.count) && a.count >= 1 && a.count <= 16 && (a.kind == null || a.kind === 'flyer' || a.kind === 'thumb') },
   'flyer:inspoRemove': true,
   'sermon:exportShort': true,
   'video:copyPieces': true,

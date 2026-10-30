@@ -735,6 +735,7 @@ let _hideTimer = null;
       cutout: (dataUrl, pose, ticket) => call('flyer:cutout', { dataUrl, pose, ticket }),
       cutoutStatus: (ticket) => call('flyer:cutoutStatus', { ticket }),
       inspoAdd: (a) => call('flyer:inspoAdd', a),
+      judge: (a) => call('flyer:judge', a),
       inspoRemove: (id) => call('flyer:inspoRemove', { id }),
     },
     montage: {

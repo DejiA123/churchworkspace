@@ -4692,3 +4692,12 @@ body.mw-cloud .cff-search input[type="search"], body.mw-cloud .cff-search input[
 .fs-a .th-ideas::-webkit-scrollbar { display: none; }
 .fs-a .th-ideas .th-idea { flex: none; padding: 10px 13px; font-size: 15px; white-space: nowrap; }
 .fs-a .th-listening { margin: 0; }
+/* the design checker's line over the board, and each design's score */
+.fs-judge { display: flex; align-items: flex-start; gap: 8px; margin: 0 2px 10px; font-size: 13px; line-height: 1.4; color: #4b4560; }
+.fs-judge.ok { color: #4c1d95; font-weight: 600; }
+.fs-judge .fs-ic { width: 16px; height: 16px; flex: none; margin-top: 1px; }
+.fs-card { position: relative; }
+.fs-score { position: absolute; top: 8px; left: 8px; z-index: 1; display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 999px;
+  font-style: normal; font-size: 12px; font-weight: 800; color: #17112b; background: rgba(255, 255, 255, .92); box-shadow: 0 1px 4px rgba(0, 0, 0, .2); pointer-events: none; }
+.fs-score .fs-ic { width: 12px; height: 12px; }
+.fs-score.hi { color: #fff; background: #6d28d9; }

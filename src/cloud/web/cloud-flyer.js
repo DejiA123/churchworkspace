@@ -4417,6 +4417,165 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     F.board = { order, tones, variants, shown: BOARD_N, pals };
     markSeen(order.slice(0, BOARD_N));
   }
+  /*
+   * ►► THE DESIGN CHECKER. ◄◄ "Maybe have an agent… that runs and checks if the flyers and thumbnails generated are
+   * up to standard, so it is best always!" Two looks at every board before anyone picks from it:
+   *   1. THE RULES, here, on every design: no words running off the page, no words on top of other words or over a
+   *      face, nothing too small to read, no words that vanish into what is behind them, no face cut off at an
+   *      edge. A design that breaks one is taken off the board (two at least always stay).
+   *   2. THE ART DIRECTOR, on the server (cloudsee.judgeDesigns): the board on one sheet, beside the church's own
+   *      flyer (the first on its inspiration board) marked STANDARD, scored 1–10 by the vision model the way a
+   *      designer would. The best go first, and what it scores 5 or less comes off the board. Each card says its
+   *      score. With no AI to ask, the rules alone decide.
+   */
+  const INFO_TEXT = /^(Venue|Phone|Handles|Date|Day|Time|When|Speakers|Speaker|With|Theme|Church)$/;
+  // the words a design lays behind everything on purpose — a giant outline word, the day in script — are not read as words
+  const decorWord = (l) => l.hidden || l.lock || l.fill === 'none' || /^(Script word|Watermark)/.test(l.name || '') || !String(l.text || '').trim() || (l.opacity != null && l.opacity < 0.5);
+  const lumHex = (c) => { try { return lum(c); } catch (e) { return null; } };
+  function inkOf(L) {
+    const f = L.fill;
+    if (typeof f === 'string') return METALS[f] ? METALS[f][2] : /^#[0-9a-f]{6}$/i.test(f) ? f : null;
+    if (f && Array.isArray(f.stops) && typeof f.stops[0] === 'string' && /^#[0-9a-f]{6}$/i.test(f.stops[0])) return f.stops[0];
+    return null;
+  }
+  function designFlaws(S) {
+    const W = S.w, H = S.h, flaws = [];
+    const texts = S.layers.filter((l) => l.type === 'text' && !decorWord(l) && !l.rot);
+    const at = (l) => S.layers.indexOf(l), short = (t) => String(t).replace(/\s+/g, ' ').slice(0, 24);
+    const area = (b) => Math.max(0, b.r - b.l) * Math.max(0, b.b - b.t);
+    const meet = (a, b) => Math.max(0, Math.min(a.r, b.r) - Math.max(a.l, b.l)) * Math.max(0, Math.min(a.b, b.b) - Math.max(a.t, b.t));
+    const bx = new Map(texts.map((l) => [l, box(l)]));
+    for (const l of texts) {
+      const b = bx.get(l), out = Math.max(0, -b.l) + Math.max(0, b.r - W) + Math.max(0, -b.t) + Math.max(0, b.b - H);
+      if (out > Math.max(10, (b.r - b.l) * 0.04)) flaws.push(`“${short(l.text)}” runs off the page`);
+      if (INFO_TEXT.test(l.name || '') && (l.size || 0) * (l.s || 1) * (1080 / W) < 15) flaws.push(`“${short(l.text)}” is too small to read`);
+    }
+    for (let i = 0; i < texts.length; i++) for (let j = i + 1; j < texts.length; j++) {
+      const a = texts[i], c = texts[j];
+      if (/^Title/.test(a.name || '') && /^Title/.test(c.name || '')) continue;   // the lines of one title, set close on purpose
+      const m = meet(bx.get(a), bx.get(c));
+      if (m > 0.18 * Math.min(area(bx.get(a)), area(bx.get(c)))) flaws.push(`“${short(a.text)}” and “${short(c.text)}” overlap`);
+    }
+    for (const im of S.layers.filter((l) => l.type === 'image' && l.head && !l.hidden)) {
+      const h = im.head;
+      if (h.t < -4 || h.l < -4 || h.r > W + 4) flaws.push('a face is cut off at the edge');
+      // words laid OVER a face (a title behind the minister is how the standard is set: that is not a flaw)
+      for (const l of texts) if (at(l) > at(im) && meet(bx.get(l), h) > 0.12 * area(h)) flaws.push(`“${short(l.text)}” covers a face`);
+    }
+    return flaws;
+  }
+  /* words that vanish into what is behind them: the page drawn small without its words, the light behind each measured.
+     The layers that do, by name: a title that does is a flaw; a small line (the church's name, a date) is mended */
+  function contrastFlaws(S) { return lowContrast(S).filter((l) => /^Title/.test(l.name || '')).map((l) => `“${String(l.text).slice(0, 24)}” is hard to read on what is behind it`); }
+  function lowContrast(S) {
+    const flaws = [], k = 240 / S.w;
+    try {
+      const bare = Object.assign({}, S, { layers: S.layers.filter((l) => l.type !== 'text') });
+      const cv = render(bare, canvas(1, 1), k), x = cv.getContext('2d', { willReadFrequently: true });
+      for (const l of S.layers.filter((t) => t.type === 'text' && !decorWord(t))) {
+        const ink = inkOf(l); if (!ink) continue;
+        const b = box(l), x0 = clamp(Math.floor(b.l * k), 0, cv.width - 1), y0 = clamp(Math.floor(b.t * k), 0, cv.height - 1);
+        const w = clamp(Math.ceil((b.r - b.l) * k), 1, cv.width - x0), h = clamp(Math.ceil((b.b - b.t) * k), 1, cv.height - y0);
+        const d = x.getImageData(x0, y0, w, h).data;
+        let sum = 0, n = 0;
+        for (let i = 0; i < d.length; i += 16) { sum += (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255; n++; }
+        const bgL = n ? sum / n : 0.5, inkL = lumHex(ink); if (inkL == null) continue;
+        const ratio = (Math.max(bgL, inkL) + 0.05) / (Math.min(bgL, inkL) + 0.05);
+        // (a shadow, a glow or an outline carries words over a light of their own colour: only the worst are flagged)
+        // (a title in big letters, a gradient or a metal, holds up better than its first colour says)
+        const need = /^Title/.test(l.name || '') ? 1.35 : 1.6;
+        if (ratio < (l.shadow || l.glow || l.stroke ? Math.min(need, 1.25) : need)) flaws.push(l);
+      }
+      cv.width = cv.height = 1;
+    } catch (e) { /* (a picture another site sent cannot be read back: not judged by this) */ }
+    return flaws;
+  }
+  const designKey = (d) => [d.look, ((d.layers || []).find((l) => l.type === 'bg') || {}).img || '', d.w + 'x' + d.h, F.tries].join('|');
+  /* the board as the checks leave it: the flawed off it (two always stay), the art director's best first */
+  function checkBoard() {
+    const J = F.judge || (F.judge = { tries: -1, scores: new Map(), flaws: new Map(), busy: false, model: '', why: '' });
+    if (J.tries !== F.tries) { J.tries = F.tries; J.scores = new Map(); J.flaws = new Map(); J.mend = new Map(); J.done = false; J.why = ''; }
+    F.designs.forEach((d) => {
+      const key = designKey(d);
+      if (!J.flaws.has(key)) {
+        const low = lowContrast(d);
+        J.flaws.set(key, designFlaws(d).concat(low.filter((l) => /^Title/.test(l.name || '')).map((l) => `“${String(l.text).slice(0, 24)}” is hard to read on what is behind it`)));
+        J.mend = J.mend || new Map(); J.mend.set(key, low.filter((l) => !/^Title/.test(l.name || '')).map((l) => l.name));
+      }
+      // a small line lost in what is behind it: black or white, whichever the page needs there (inkFor), with a shadow
+      const mend = (J.mend && J.mend.get(key)) || [];
+      if (mend.length) d.layers.forEach((l) => { if (l.type === 'text' && mend.includes(l.name)) Object.assign(l, { fill: '#ffffff', inkSet: false, shadow: true }); });
+      d.flaws = J.flaws.get(key); d.score = J.scores.has(key) ? J.scores.get(key).score : null; d.issue = J.scores.has(key) ? J.scores.get(key).issue : '';
+    });
+    const ok = F.designs.filter((d) => !d.flaws.length && !(d.score != null && d.score <= 5));
+    const keep = ok.length >= 2 ? ok : F.designs.slice().sort((a, b) => a.flaws.length - b.flaws.length || (b.score || 0) - (a.score || 0)).slice(0, Math.max(2, ok.length));
+    F.hidden = F.designs.length - keep.length;
+    F.removed = F.designs.filter((d) => !keep.includes(d)).map((d) => ({ look: d.look, flaws: d.flaws, score: d.score, issue: d.issue }));
+    // the art director's order: the best first — the colour picked under the live preview stays first unless it scored low
+    const first = F.mode !== 'thumb' && keep[0] && RADIANT_WAYS[keep[0].look] && keep[0].look === F.way && !(keep[0].score != null && keep[0].score < 7) ? keep[0] : null;
+    const rest = keep.filter((d) => d !== first).map((d, i) => [d, i]).sort((a, b) => ((b[0].score == null ? 6.5 : b[0].score) - (a[0].score == null ? 6.5 : a[0].score)) || a[1] - b[1]).map((x) => x[0]);
+    F.designs = (first ? [first] : []).concat(rest);
+  }
+  let judgeT = 0;
+  function judgeSoon() {
+    clearTimeout(judgeT);
+    const thumb = F.mode === 'thumb';
+    // when the board has settled: the paintings in (a board of the standard and its family paints nothing), the preacher cut out
+    const painted = thumb || F.designs.some((d) => !isRadiant(d.look));
+    if ((painted && F.painting > 0) || (thumb && F.th.cutting) || !F.designs.length || !window.api.flyer.judge) return;
+    judgeT = setTimeout(judgeBoard, 700);
+  }
+  async function judgeBoard() {
+    const J = F.judge; if (!J || J.busy || F.step !== 'pick') return;
+    const todo = F.designs.filter((d) => !J.scores.has(designKey(d))).slice(0, 12);
+    if (!todo.length) return;
+    const tryNo = F.tries;
+    J.busy = true; if (F.step === 'pick') drawPick();
+    try {
+      // the church's own flyer, from its inspiration board, marked STANDARD on the sheet (flyers only)
+      let std = null;
+      const ins = F.mode !== 'thumb' && F.kit && (F.kit.inspo || [])[0];
+      if (ins && ins.thumb) { try { std = await loadImg(/^data:/.test(ins.thumb) ? ins.thumb : await window.api.flyer.kitPic(ins.thumb)); } catch (e) { std = null; } }
+      const sheet = designSheet(todo, std);
+      const r = await window.api.flyer.judge({ image: sheet, count: todo.length, kind: F.mode === 'thumb' ? 'thumb' : 'flyer', standard: !!std });
+      if (tryNo !== F.tries) return;
+      if (r && r.ok) {
+        (r.scores || []).forEach((x) => { const d = todo[x.n - 1]; if (d) J.scores.set(designKey(d), { score: x.score, issue: x.issue || '' }); });
+        J.model = r.model || ''; J.why = '';
+      } else J.why = (r && r.why) || 'no answer';
+    } catch (e) { J.why = (e && e.message) || 'no answer'; }
+    finally { J.busy = false; }
+    J.done = true;
+    if (F.step !== 'pick') return;
+    if (F.mode === 'thumb') rebuildThumbs(); else rebuildDesigns();
+    drawPick();
+  }
+  /* the board on one sheet for the art director: each design numbered in its top-left corner, the STANDARD first */
+  function designSheet(list, std) {
+    const S0 = list[0], wide = S0.w / S0.h > 1.2, cw = wide ? 320 : 240, ch = Math.round(cw * S0.h / S0.w), gap = 8;
+    const cells = (std ? 1 : 0) + list.length, cols = Math.min(cells, wide ? 4 : 5), rows = Math.ceil(cells / cols);
+    const c = canvas(cols * cw + (cols + 1) * gap, rows * ch + (rows + 1) * gap), x = c.getContext('2d');
+    x.fillStyle = '#ffffff'; x.fillRect(0, 0, c.width, c.height);
+    const tag = (cx, cy, text, fill) => {
+      x.font = '800 22px Arial, sans-serif'; const w = x.measureText(text).width + 16;
+      x.fillStyle = fill; x.fillRect(cx, cy, w, 32); x.fillStyle = fill === '#ffd60a' ? '#000000' : '#ffffff'; x.fillText(text, cx + 8, cy + 24);
+    };
+    let i = 0;
+    const at = (k) => [gap + (k % cols) * (cw + gap), gap + Math.floor(k / cols) * (ch + gap)];
+    if (std) {
+      const [px, py] = at(i++), f = Math.min(cw / iw(std), ch / ih(std));
+      x.fillStyle = '#eeeeee'; x.fillRect(px, py, cw, ch);
+      x.drawImage(std, px + (cw - iw(std) * f) / 2, py + (ch - ih(std) * f) / 2, iw(std) * f, ih(std) * f);
+      tag(px + 4, py + 4, 'STANDARD', '#ffd60a');
+    }
+    list.forEach((S, n) => {
+      const [px, py] = at(i++), cv = render(S, canvas(1, 1), cw / S.w);
+      x.drawImage(cv, px, py, cw, ch); cv.width = cv.height = 1;
+      tag(px + 4, py + 4, String(n + 1), '#000000');
+    });
+    return c.toDataURL('image/jpeg', 0.82);
+  }
+
   /* the light each look is built for (the reference it copies): Join us is purple, Upper Room is fire, the gold line-up gold… */
   const LOOK_TONE = { joinus: 'purple', miracle: 'purple', script: 'purple', didone: 'red', upper: 'red', breaking: 'red', fire: 'red', mountain: 'teal', scenic: 'teal',
     spirit: 'gold', bible: 'gold', prophetic: 'gold', sunday: 'gold', encounter: 'blue', theme: 'own', glory: 'own', lineup: 'blue', light: 'own',
@@ -4449,7 +4608,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     // the bright, simple designs first; the AI's painted extras after them
     const nPlain = F.designs.filter((d) => SIMPLE.has(d.look) || isRadiant(d.look)).length;
     F.designs = F.designs.slice(0, nPlain).concat(lt, pin, F.designs.slice(nPlain));
-    if (F.step === 'pick') paintThumbs();
+    checkBoard();
+    if (F.step === 'pick') { paintThumbs(); judgeSoon(); }
   }
 
   /*
@@ -4485,6 +4645,14 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     // a picture from the church's library was painted for someone earlier and kept: new to this person, and free
     return `<em class="fs-by" title="${escAttr('Painted by ' + by.replace(/\s*·\s*library/i, '') + (lib ? ' for the church’s picture library' : ''))}"><b>☁</b> Made by Cloudflare AI${model || lib ? `<i>${esc([model, lib ? 'library' : ''].filter(Boolean).join(' · '))}</i>` : ''}</em>`;
   }
+  /* what the checks did to the board, in a line over it */
+  function judgeLine() {
+    const J = F.judge, hid = F.hidden || 0;
+    if (J && J.busy) return '<p class="fs-judge"><i class="fs-spin"></i> The AI art director is checking each design against your standard…</p>';
+    if (J && J.done && !J.why) return `<p class="fs-judge ok">${ic('spark')}<span>Checked by the AI art director against your standard — the best first${hid ? ` · ${hid} not good enough ${hid === 1 ? 'was' : 'were'} taken off` : ''}.</span></p>`;
+    if (hid) return `<p class="fs-judge">${hid} design${hid === 1 ? '' : 's'} with a flaw (words overlapping, cut off or hard to read) ${hid === 1 ? 'was' : 'were'} taken off.</p>`;
+    return '';
+  }
   function drawPick() {
     const P = F.panel; if (!P) return;
     P.setTitle('Pick one');
@@ -4493,12 +4661,14 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     P.body.innerHTML = `<div class="fs-pick${thumb ? ' th-pick' : ''}">
       <p class="fs-status">${busy ? (thumb ? '<i class="fs-spin"></i> Getting the moment ready…' : 'The AI is reading your event…') : thumb && F.th.cutting ? '<i class="fs-spin"></i> Cutting the preacher out of the picture…' : F.painting > 0 ? `<i class="fs-spin"></i> Painting ${F.painting} picture${F.painting > 1 ? 's' : ''} with AI — they appear as they’re ready` : 'Tap one to edit every part of it'}</p>
       ${!busy && F.status && F.status.note ? `<p class="fs-allow">${esc(F.status.note)}</p>` : ''}
-      <div class="fs-grid">${busy ? '<div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div>' : F.designs.map((d, i) => `<button type="button" class="fs-card" data-i="${i}"><canvas></canvas><span class="fs-card-zoom" data-view="${i}" role="button" aria-label="See it big">${ic('zoom')}</span><small>${esc(d.label || LOOK_NAMES[d.look] || d.look)}</small>${madeByTag(d.madeBy)}</button>`).join('')}</div>
+      ${busy ? '' : judgeLine()}
+      <div class="fs-grid">${busy ? '<div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div>' : F.designs.map((d, i) => `<button type="button" class="fs-card" data-i="${i}"><canvas></canvas>${d.score != null ? `<em class="fs-score${d.score >= 8 ? ' hi' : ''}" title="${escAttr(d.issue || '')}">${ic('spark')}${esc(String(Math.round(d.score)))}/10</em>` : ''}<span class="fs-card-zoom" data-view="${i}" role="button" aria-label="See it big">${ic('zoom')}</span><small>${esc(d.label || LOOK_NAMES[d.look] || d.look)}</small>${madeByTag(d.madeBy)}</button>`).join('')}</div>
       ${!busy && !thumb && F.board && F.board.shown < F.board.order.length ? `<button type="button" class="fs-ghost fs-more" data-act="more">${ic('layout')}<span>${BOARD_N} more designs</span></button>` : ''}
     </div>`;
     // one board at a time: "New pictures" waits until this one is painted (each tap used to start five more paintings)
     P.foot.innerHTML = `<button type="button" class="fs-ghost" data-act="back">${ic('back')}<span>${thumb ? 'Back' : 'Details'}</span></button><button type="button" class="fs-ghost" data-act="again"${F.painting > 0 || busy ? ' disabled' : ''}>${ic('refresh')}<span>New pictures</span></button>`;
     paintThumbs();
+    if (!busy) judgeSoon();
     P.body.onclick = (e) => {
       if (e.target.closest('[data-act="more"]')) {
         const from = F.board.shown; F.board.shown = Math.min(F.board.order.length, from + BOARD_N);
@@ -5142,7 +5312,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       return Object.assign(buildScene({ look, w: TH.w, h: TH.h, pal, dir: F.dir || {}, fields: fieldsNow(), speakers: thumbSpeakers(),
         logo: logoNow(), bg: bg ? bg.key : null, frame: t.frameKey, face: t.face }), { madeBy: (bg && bg.by) || '' });
     });
-    if (F.step === 'pick') drawPick();
+    checkBoard();
+    if (F.step === 'pick') { drawPick(); judgeSoon(); }
   }
 
   /* the thumbnail as YouTube takes it: 1920×1080 JPEG, under 2 MB */
@@ -6130,5 +6301,5 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
 
   /* "My church" straight from Home (This week → Edit) */
   async function openKitAlone(onSaved) { await loadKit(); openKit(onSaved); }
-  root.MWFlyerStudio = { open, openThumb, openKit: openKitAlone, _state: F, _rebuild: () => rebuildDesigns(), _view: (S) => viewFlyer(S) };
+  root.MWFlyerStudio = { open, openThumb, openKit: openKitAlone, _state: F, _rebuild: () => rebuildDesigns(), _view: (S) => viewFlyer(S), _flaws: (S) => designFlaws(S).concat(contrastFlaws(S)) };
 })();

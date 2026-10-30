@@ -7,6 +7,8 @@
  *   - typing redraws it; a colour under it puts it in that colour (remembered); the size changes its shape
  *   - tapped, it opens big
  *   - Make: the colour picked leads the board, the standard's family after it
+ *   - the design checker: the art director (stood in for) scores the board on one sheet — the best first,
+ *     what scores 5 or less off it, each card its score; the rules see words off the page or on other words
  * The AI painter is stood in for (no network in a test).
  */
 const fs = require('fs');
@@ -132,11 +134,39 @@ async function until(page, fn, arg, ms = 30000) {
     await page.locator('.fs-viewer-x').tap();
     await sleep(200);
 
-    // ── Make: the colour seen live leads the board
+    // ── Make: the colour seen live leads the board — and the art director checks it (stood in for: no AI in a test)
+    await page.evaluate(() => {
+      window.__judged = [];
+      window.api.flyer.judge = async (a) => {
+        window.__judged.push({ count: a.count, kind: a.kind, sheet: a.image.length });
+        const sc = { 1: 8, 2: 4, 3: 9, 4: 7 };
+        return { ok: true, model: 'test', scores: Array.from({ length: a.count }, (x, i) => ({ n: i + 1, score: sc[i + 1] || 7, issue: i === 1 ? 'words over the face' : '' })) };
+      };
+    });
     await page.locator('.cp-flyer [data-act="make"]').tap();
-    s = await until(page, () => { const st = window.MWFlyerStudio._state; return { ok: st.designs.length >= 4, looks: st.designs.map((d) => d.look) }; }, null, 60000);
-    check(s && s.looks[0] === 'radiantgold' && JSON.stringify(s.looks.slice(1, 4)) === JSON.stringify(['radiantside', 'radiantspot', 'radiantwave']),
+    s = await until(page, () => { const st = window.MWFlyerStudio._state; return { ok: st.designs.length >= 3, looks: st.designs.map((d) => d.look), removed: (st.removed || []).map((r) => r.look) }; }, null, 60000);
+    check(s && s.looks[0] === 'radiantgold' && ['radiantside', 'radiantspot', 'radiantwave'].every((l) => s.looks.includes(l) || s.removed.includes(l)),
       'Make: the colour picked comes first, then the standard’s family (Side, Spotlight, Wave)', s);
+    s = await until(page, () => {
+      const st = window.MWFlyerStudio._state, line = document.querySelector('.cp-flyer .fs-judge');
+      return { ok: !!(st.judge && st.judge.done) && /art director/.test(line && line.textContent), looks: st.designs.map((d) => d.look), scores: st.designs.map((d) => d.score),
+        removed: (st.removed || []).map((r) => r.look), badges: [...document.querySelectorAll('.cp-flyer .fs-score')].map((b) => b.textContent), line: line && line.textContent, judged: window.__judged };
+    }, null, 20000);
+    check(s && s.ok && s.judged.length === 1 && s.judged[0].count === 4 && s.judged[0].kind === 'flyer', 'the art director is shown the board on one sheet', s);
+    check(s && s.removed.length === 1 && s.looks.length === 3 && !s.scores.some((x) => x <= 5), 'what it scores 5 or less comes off the board', s);
+    check(s && s.looks[0] === 'radiantgold' && s.scores[1] >= s.scores[2], 'the best first (the colour picked stays first: it scored well)', s);
+    check(s && s.badges.length === 3 && s.badges.every((b) => /\/10$/.test(b)) && /taken off/.test(s.line), 'each card says its score, and the line says one was taken off', s);
+    // the rules, on a design: words off the page, words on words
+    s = await page.evaluate(() => {
+      const st = window.MWFlyerStudio._state, d = JSON.parse(JSON.stringify(st.designs[0]));
+      const clean = window.MWFlyerStudio._flaws(d);
+      const venue = d.layers.find((l) => l.type === 'text' && /^(Time|Speakers|Day|Date)$/.test(l.name || '')); if (venue) venue.x = 1300;
+      const off = window.MWFlyerStudio._flaws(d);
+      if (venue) { venue.x = 540; const t = d.layers.find((l) => /^Title/.test(l.name)); venue.y = t.y; }
+      const on = window.MWFlyerStudio._flaws(d);
+      return { clean, off, on };
+    });
+    check(s && !s.clean.length && s.off.some((f) => /runs off the page/.test(f)) && s.on.some((f) => /overlap/.test(f)), 'the rules see words run off the page and words on top of words (and nothing on a good design)', s);
   } catch (e) {
     check(false, 'the run finished', e.stack || e.message);
   } finally {

@@ -553,4 +553,86 @@ async function pickThumb({ image, count, maxWaitMs = 25000 } = {}) {
   return { ok: false, why: lastWhy || 'no AI model would answer' };
 }
 
-module.exports = { VISION, whoIsSpeaking, whereArePeople, readFlyer, pickThumb, samePeople, state, ready, SYSTEM, _health: () => health, _blocked: () => blocked };
+/*
+ * ►► THE ART DIRECTOR. ◄◄ "Maybe have an agent… that runs and checks if the flyers and thumbnails generated are up to
+ * standard, so it is best always!" The board the studio made, on one sheet, numbered — with the church's own flyer
+ * beside it marked STANDARD when it has one (its inspiration board) — is shown to the vision model, which scores each
+ * design the way a designer would and names its worst flaw. The phone puts the best first and takes off the board
+ * what scores too low (cloud-flyer.js judgeBoard). Answers { ok, scores: [{ n, score, issue }] } (n 1-based).
+ */
+const JUDGE_RULES = {
+  flyer: 'church event flyers for Instagram and WhatsApp',
+  thumb: 'YouTube thumbnails for church sermons (seen small, on a phone: big readable words, the face big and clear)',
+};
+const judgeSystem = (kind, standard) => [
+  `You are the art director of a church's media team, judging ${JUDGE_RULES[kind] || JUDGE_RULES.flyer}.`,
+  standard
+    ? 'The image is a sheet. The design in its top-left corner marked STANDARD is the church\'s own — the bar every design must reach. The others are candidates, numbered 1 to N in their top-left corners.'
+    : 'The image is a sheet of candidate designs, numbered 1 to N in their top-left corners.',
+  'Score every candidate from 1 to 10 the way a professional designer would:',
+  '- it looks premium and finished: rich light and colour, strong contrast, a clear focal point — nothing cheap, flat, clip-art or amateur;',
+  '- nothing is wrong: no words on top of other words or over a face, nothing cut off at an edge, no face cut through, every word readable, no awkward empty gaps or crowding;',
+  '- the preacher looks good: the face clear, well lit, not tiny, not stretched or squashed;',
+  '- the title is big and bold and reads first.',
+  `10 = as good as ${standard ? 'the standard' : 'the best church design you have seen'} or better; 7 = good enough to post; 5 or less = it should not be shown.`,
+  'Reply with compact JSON only: {"scores":[{"n":1,"score":8,"issue":"its main flaw in a few words, or empty"}]} — one entry for every candidate.',
+].join('\n');
+async function judgeDesigns(args = {}) {
+  const count = Math.round(Number(args.count) || 0), kind = args.kind === 'thumb' ? 'thumb' : 'flyer', standard = !!args.standard;
+  if (!args.image || !/^data:image\//.test(args.image) || !(count >= 1 && count <= 16)) return { ok: false, why: 'nothing to judge' };
+  const sys = judgeSystem(kind, standard), text = `${count} candidate designs, numbered 1 to ${count}${standard ? ' (the STANDARD is not one of them)' : ''}. Score each.`;
+  const valid = (j) => {
+    const list = j && Array.isArray(j.scores) ? j.scores : null;
+    if (!list) return null;
+    const out = list.map((x) => ({ n: Math.round(Number(x && x.n)), score: Number(x && x.score), issue: String((x && x.issue) || '').slice(0, 80) }))
+      .filter((x) => x.n >= 1 && x.n <= count && x.score >= 0 && x.score <= 10);
+    return out.length >= Math.ceil(count / 2) ? out : null;
+  };
+  const r = await judgeGroq(sys, text, args.image, 40 + 30 * count, args.maxWaitMs || 30000, valid);
+  if (r.ok || !geminiReady()) return r;
+  const g = await askGemini(sys, text + ' Reply with the JSON only.', args.image, 40 + 30 * count);
+  const scores = g && valid(parseJson(g.text));
+  return scores ? { ok: true, scores, model: g.model } : Object.assign({}, r, { why: r.why + (g ? ' (and Gemini did not answer)' : '') });
+}
+async function judgeGroq(system, text, image, maxTokens, maxWaitMs, valid) {
+  const a = cloudwrite.access();
+  if (!a.key) return { ok: false, why: 'no AI key yet' };
+  if (!a.url) return { ok: false, why: 'no address for that AI service' };
+  const list = ladder(a, await discover(a));
+  if (!list.length) return { ok: false, why: `${a.providerName} has no model here that can look at pictures` };
+  let lastWhy = '', waited = 0;
+  const noJson = new Set();
+  for (let k = 0; k < list.length; k++) {
+    const model = list[k];
+    const body = Object.assign({ model, temperature: 0, max_tokens: maxTokens,
+      messages: [{ role: 'system', content: system }, { role: 'user', content: [{ type: 'text', text }, { type: 'image_url', image_url: { url: image } }] }] }, tuneFor(model));
+    if (!noJson.has(model)) body.response_format = { type: 'json_object' };
+    let res, errText = '';
+    try {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), ASK_TIMEOUT_MS * 2);
+      try { res = await fetch(a.url, { method: 'POST', headers: a.headers, body: JSON.stringify(body), signal: ac.signal }); }
+      finally { clearTimeout(timer); }
+    } catch (e) { lastWhy = 'could not reach the AI'; continue; }
+    if (!res) { lastWhy = 'no answer'; continue; }
+    if (res.ok) {
+      let j = null; try { j = await res.json(); } catch (e) {}
+      const scores = valid(parseJson(cloudwrite.textFrom(j)));
+      if (!scores) { lastWhy = model + ' did not score the designs'; continue; }
+      return { ok: true, scores, model };
+    }
+    try { errText = (await res.text()).slice(0, 400); } catch (e) {}
+    if (res.status === 401 || res.status === 403) return { ok: false, why: 'the AI key was refused' };
+    if (res.status === 400 && /json_validate_failed|failed to generate json/i.test(errText) && !noJson.has(model)) { noJson.add(model); k--; continue; }
+    if (res.status === 429 || res.status === 503) {
+      const wait = cloudwrite.waitMs(res.headers.get('retry-after')) || 8000;
+      if (waited + wait <= maxWaitMs) { waited += wait; await sleep(wait); k--; continue; }
+      lastWhy = 'the free AI allowance is used up for the moment'; continue;
+    }
+    if ((res.status === 400 || res.status === 404) && (GONE.test(errText) || CANT_SEE.test(errText))) { blocked.set(model, Date.now() + 6 * 3600e3); lastWhy = model + ' cannot look at pictures'; continue; }
+    lastWhy = `the AI answered ${res.status}`;
+  }
+  return { ok: false, why: lastWhy || 'no AI model would answer' };
+}
+
+module.exports = { VISION, whoIsSpeaking, whereArePeople, readFlyer, pickThumb, samePeople, judgeDesigns, state, ready, SYSTEM, _health: () => health, _blocked: () => blocked };

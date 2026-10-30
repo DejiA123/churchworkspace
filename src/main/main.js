@@ -813,6 +813,8 @@ const serverllm = require('./serverllm');
 try { serverllm.setDataDir(app.getPath('userData')); } catch (e) { /* the temp folder, then */ }
 if (serverllm.available()) { const t = setTimeout(() => { serverllm.fetchModel().catch(() => {}); }, 60000); if (t.unref) t.unref(); }
 ipcMain.handle('flyer:inspoAdd', wrap(async (e, a) => flyerart.inspoAdd(a || {})));
+// the art director: a sheet of the board's designs scored against the church's standard (cloudsee.judgeDesigns)
+ipcMain.handle('flyer:judge', wrap(async (e, a) => cloudsee.judgeDesigns({ image: a && a.image, count: a && a.count, kind: a && a.kind, standard: !!(a && a.standard) })));
 ipcMain.handle('flyer:inspoRemove', wrap(async (e, a) => flyerart.inspoRemove(a || {})));
 
 /* AI montage: a pile of videos and pictures → one edit, directed by the best

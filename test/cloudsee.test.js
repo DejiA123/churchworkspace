@@ -192,6 +192,37 @@ const ok = (answer) => reply(200, { choices: [{ message: { content: typeof answe
     } finally { ge.ready = was.ready; ge.ask = was.ask; script = []; }
   }
 
+  console.log('\n[8d] The art director: the board scored against the church\'s standard');
+  {
+    cloudsee._blocked().clear();   // (the allowances used up above come back)
+    calls = [];
+    script = [ok({ scores: [{ n: 1, score: 9, issue: '' }, { n: 2, score: 4, issue: 'words over the face' }, { n: 3, score: 7.5, issue: 'a little plain' }, { n: 9, score: 10 }, { n: 4, score: 'x' }] })];
+    const j = await cloudsee.judgeDesigns({ image: IMG, count: 4, kind: 'flyer', standard: true });
+    check('each design is scored 1-10 with its worst flaw (a number past the last design, or no number, is not taken)',
+      j.ok && j.scores.length === 3 && j.scores[0].score === 9 && j.scores[1].issue === 'words over the face' && !j.scores.some((x) => x.n === 9), JSON.stringify(j));
+    check('…by the vision model, on one sheet, against the STANDARD it is told is not a candidate', calls[0].images === 1 && calls[0].json && /marked STANDARD/.test(calls[0].system) && /art director/.test(calls[0].system), calls[0].system && calls[0].system.slice(0, 120));
+    calls = [];
+    script = [ok({ scores: [{ n: 1, score: 8 }, { n: 2, score: 6 }] })];
+    const t = await cloudsee.judgeDesigns({ image: IMG, count: 2, kind: 'thumb' });
+    check('thumbnails are judged as YouTube thumbnails, and with no standard none is mentioned', t.ok && /YouTube thumbnails/.test(calls[0].system) && !/STANDARD/.test(calls[0].system), calls[0].system && calls[0].system.slice(0, 160));
+    calls = [];
+    script = [1, 2, 3, 4, 5].map(() => ok({ scores: [{ n: 1, score: 8 }] }));
+    const few = await cloudsee.judgeDesigns({ image: IMG, count: 6, maxWaitMs: 0 });
+    check('an answer that scores too few of them is not taken', !few.ok, few.why);
+    const ge = require('../src/main/geminiear');
+    const was = { ready: ge.ready, ask: ge.ask };
+    ge.ready = () => true;
+    ge.ask = async () => ({ text: JSON.stringify({ scores: [{ n: 1, score: 6 }, { n: 2, score: 9 }] }), model: 'gemini-flash-latest' });
+    try {
+      const daily = () => reply(429, 'Rate limit reached for model on tokens per day (TPD): Limit 200000', { 'retry-after': '1200' });
+      script = [daily(), daily(), daily(), daily()];
+      const g = await cloudsee.judgeDesigns({ image: IMG, count: 2, maxWaitMs: 0 });
+      check('Groq\'s free vision used up: Gemini scores the board instead', g.ok && g.scores[1].score === 9 && /gemini/.test(g.model), JSON.stringify(g));
+    } finally { ge.ready = was.ready; ge.ask = was.ask; script = []; }
+    const none = await cloudsee.judgeDesigns({ image: IMG, count: 0 });
+    check('nothing to judge: no call', !none.ok);
+  }
+
   console.log('\n[9] Bad input');
   const bad = await cloudsee.whoIsSpeaking({ image: 'C:/not-a-data-url.jpg', frames: FRAMES });
   check('a picture that is not a data URL is refused before any call', !bad.ok, bad.why);

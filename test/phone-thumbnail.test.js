@@ -197,7 +197,7 @@ async function until(page, fn, arg, ms = 30000) {
       const st = window.MWFlyerStudio._state;
       return { ok: cards.length === 12 && !st.th.cutting && cards.every((c) => c.querySelector('canvas').width > 100), n: cards.length,
         looks: st.designs.map((d) => d.look), sizes: st.designs.map((d) => d.w + 'x' + d.h), names: cards.map((c) => c.querySelector('small').textContent),
-        person: !!st.th.person, words: st.designs.map((d) => d.layers.filter((l) => l.type === 'text').map((l) => l.text).join(' ')) };
+        person: !!st.th.person, words: st.designs.map((d) => d.layers.filter((l) => l.type === 'text').map((l) => l.text).join(' ')), removed: st.removed || [] };
     }, null, 90000);
     check(s && s.ok && s.sizes.every((z) => z === '1280x720') && new Set(s.looks).size === 12, 'Make: a board of twelve different YouTube looks, each 1280×720', s);
     check(s && s.looks[0] === 'ytserif', 'the look seen live comes first on the board', s && s.looks);
