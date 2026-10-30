@@ -326,16 +326,10 @@ contextBridge.exposeInMainWorld('api', {
   },
   accounts: {
     list: () => call('accounts:list'),
-    connectFb: () => call('accounts:connectFb'),
-    connectYt: () => call('accounts:connectYt'),
-    connectTk: () => call('accounts:connectTk'),
-    connectTkEasy: () => call('accounts:connectTkEasy'),
     connectZo: () => call('accounts:connectZo'),
     connectZoYt: () => call('accounts:connectZoYt'),
     connectZoFb: () => call('accounts:connectZoFb'),
     connectZoIg: () => call('accounts:connectZoIg'),
-    connectUpIg: () => call('accounts:connectUpIg'),
-    add: (connectId, selections) => call('accounts:add', { connectId, selections }),
     remove: (id) => call('accounts:remove', { id }),
     check: (id) => call('accounts:check', { id }),
   },
@@ -366,7 +360,6 @@ contextBridge.exposeInMainWorld('api', {
     // which still need this PC on — keyed by post id.
     plans: () => call('scheduler:plans'),
     handOff: (id) => call('scheduler:handOff', { id }),
-    testFb: (pageId, token) => call('scheduler:testFb', { pageId, token }),
   },
   // Posting when the app is closed: the OS-level poster (src/main/autopost.js).
   autopost: {

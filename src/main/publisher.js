@@ -1084,8 +1084,9 @@ async function publishViaUploadPost({ apiKey, upUser, username, platform = 'tikt
 
 /**
  * Turn a Zernio failure into a message the media team can act on. A plan/limit
- * rejection points at the free backup route (Upload-Post) instead of a raw HTTP
- * dump; everything else keeps Zernio's own words plus a spec tip.
+ * rejection points at another free Zernio account (Zernio is the only way in)
+ * instead of a raw HTTP dump; everything else keeps Zernio's own words plus a
+ * spec tip.
  */
 const ZO_LABELS = { tiktok: 'TikTok', youtube: 'YouTube', facebook: 'Facebook', instagram: 'Instagram' };
 const ZO_PROFILE = {
@@ -1139,11 +1140,11 @@ function zoFriendlyError(rawMsg, platform) {
   const msg = String(rawMsg || 'the upload failed.').replace(/^HTTP \d+:\s*/, '').trim();
   if (/payment|free_tier_exceeded|more than 2 accounts/i.test(msg)) {
     return 'Zernio will not take this post: its free plan covers 2 linked accounts and they are already in use. '
-      + 'Unlink one on zernio.com, or connect this platform its own direct way (YouTube has a free unlimited Google route).';
+      + 'Unlink one on zernio.com, or put this account on another free Zernio account (another email).';
   }
   if (/\b(limit|quota|exceed|upgrade|plan|subscription|payment required|402|403|429|too many)\b/i.test(msg)) {
     return 'Zernio rejected the post: "' + msg + '". Zernio\'s free plan is unlimited for posts but covers 2 accounts — ' +
-      'if you hit a wall, free up a Zernio slot, or connect the free backup route (Connect → Upload-Post).';
+      'if you hit a wall, free up a Zernio slot, or move this account to another free Zernio account (another email).';
   }
   const tip = (platform === 'tiktok') ? ' TikTok wants MP4 (H.264/AAC), 3s–10min, 9:16 works best.'
     : (platform === 'youtube') ? ' YouTube wants MP4 (H.264/AAC).'

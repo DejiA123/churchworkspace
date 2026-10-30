@@ -859,8 +859,10 @@ app.whenReady().then(async () => {
     T.closeAllInputs();
     // scheduler auto-post UI
     const banner = !!document.getElementById('schedAutoBanner');
-    const fbFields = !!document.getElementById('setFbPageId') && !!document.getElementById('setFbToken') && !!document.getElementById('testFb');
-    return { nav, view, els, api, slots, pgmRed, pgmGreen, banner, fbFields };
+    // Zernio is the only way to connect accounts: its keys are in Settings, no Meta/Google app or pasted Page token
+    const zoOnly = !!document.getElementById('setZoApiKey') && !!document.getElementById('setZoApiKeyFb')
+      && !['setFbPageId', 'setFbToken', 'testFb', 'setFbAppId', 'setFbAppSecret', 'setYtClientId', 'setYtClientSecret'].some((id) => document.getElementById(id));
+    return { nav, view, els, api, slots, pgmRed, pgmGreen, banner, zoOnly };
     } catch (e) { return { __error: e.message + '\\n' + e.stack }; }
   })()`);
   if (r.__error) { console.error('R SCRIPT ERROR:\n' + r.__error); }
@@ -871,7 +873,7 @@ app.whenReady().then(async () => {
   log(r.pgmRed && r.pgmRed[0] > 220 && r.pgmGreen && r.pgmGreen[1] > 220,
     '[R] real switch works: program shows red, then CUT takes green', `red=${r.pgmRed && r.pgmRed.slice(0,3)} green=${r.pgmGreen && r.pgmGreen.slice(0,3)}`);
   log(r.banner, '[R] Scheduler shows the auto-posting status banner');
-  log(r.fbFields, '[R] Settings has Facebook Page ID + token + Test connection');
+  log(r.zoOnly, '[R] Settings connects accounts through Zernio only (no Meta/Google app, no Page token)');
 
   /* ---------- [S] Live auto-reframe preview: hard leash during a fast walk ---- */
   console.log('\n[S] Live preview hard leash: speaker never drifts past the crop safe-zone mid-walk');

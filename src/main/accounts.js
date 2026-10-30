@@ -775,7 +775,8 @@ class Accounts {
    * The one that matters is the free tier running out: Zernio gives two linked
    * accounts free, and the third is refused with a payment demand. That is not a
    * fault to debug — it is a decision to make — so the message says which two
-   * are already using the slots and points at the route that costs nothing.
+   * are already using the slots and points at the way that costs nothing: a
+   * second free Zernio account (Zernio is the only way in — no direct route).
    */
   _connectErrorText(raw, label, listed) {
     const msg = String(raw || '');
@@ -784,10 +785,8 @@ class Accounts {
         .map((a) => (a.platform || a.provider || '?')).filter(Boolean);
       const using = names.length ? ` They are being used by ${names.join(' and ')}.` : '';
       return `Zernio's free plan covers 2 linked accounts and both are taken.${using} `
-        + `To put ${label} on Zernio you would have to unlink one of them (or add a payment method). `
-        + (/youtube/i.test(label)
-          ? 'YouTube does not need Zernio at all — connect it with your own Google app instead: it is free, unlimited, and costs no Zernio slot.'
-          : 'Free up a slot, or use that platform\'s own direct connection instead.');
+        + `To put ${label} on too, make another free Zernio account (another email) and paste its key as your second Zernio key — `
+        + 'or unlink one of the two on zernio.com.';
     }
     return 'Zernio could not start the ' + label + ' connect flow (' + msg + ').';
   }

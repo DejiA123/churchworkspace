@@ -3367,19 +3367,13 @@ ipcMain.handle('autopost:testBackground', wrap(async () => {
 /* ------------------------ IPC: linked social accounts ------------------------ */
 
 ipcMain.handle('accounts:list', wrap(async () => accounts.list()));
-ipcMain.handle('accounts:connectFb', wrap(async () => accounts.connectFacebook(mainWindow)));
-ipcMain.handle('accounts:connectYt', wrap(async () => accounts.connectYouTube(mainWindow)));
-ipcMain.handle('accounts:connectTk', wrap(async () => accounts.connectTikTok(mainWindow)));
-ipcMain.handle('accounts:connectTkEasy', wrap(async () => accounts.connectTikTokEasy(mainWindow)));
-// Instagram through Upload-Post: the second cloud route, and the one that
-// matters when a church has used up Zernio's free slots. Meta itself offers no
-// way to book an Instagram post in advance, so one of these two IS the fix.
-ipcMain.handle('accounts:connectUpIg', wrap(async () => accounts.connectUploadPost(mainWindow, { platform: 'instagram' })));
+// ZERNIO IS THE ONLY WAY IN ("only Zernio should be the option to connect accounts"). The direct routes — a Meta
+// app, a Google app, a TikTok developer app, Upload-Post, a pasted Page token — have no channel here any more, so
+// nothing on this machine can open one. Accounts linked that way before still post (publisher.js) until removed.
 ipcMain.handle('accounts:connectZo', wrap(async () => accounts.connectZernio(mainWindow)));
 ipcMain.handle('accounts:connectZoYt', wrap(async () => accounts.connectZernio(mainWindow, { platform: 'youtube' })));
 ipcMain.handle('accounts:connectZoFb', wrap(async () => accounts.connectZernio(mainWindow, { platform: 'facebook' })));
 ipcMain.handle('accounts:connectZoIg', wrap(async () => accounts.connectZernio(mainWindow, { platform: 'instagram' })));
-ipcMain.handle('accounts:add', wrap(async (e, { connectId, selections }) => accounts.addFromConnect(connectId, selections)));
 ipcMain.handle('accounts:remove', wrap(async (e, { id }) => accounts.remove(id)));
 ipcMain.handle('accounts:check', wrap(async (e, { id }) => accounts.check(id)));
 
@@ -3507,13 +3501,6 @@ ipcMain.handle('social:setupStatus', wrap(async (e, { code } = {}) => {
   if (!run || run.expires < Date.now()) return { expired: true };
   if (run.final) return { done: true, results: run.final.results };
   return { running: true, current: run.current };
-}));
-
-ipcMain.handle('scheduler:testFb', wrap(async (e, { pageId, token }) => {
-  const acc = (store.get('settings') || {}).accounts || {};
-  return publisher.testFacebook({
-    pageId: pageId || acc.fbPageId, token: token || acc.fbToken, apiBase: acc.fbApiBase,
-  });
 }));
 
 /* ---------------------------- IPC: live stream -------------------------- */

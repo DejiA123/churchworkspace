@@ -1618,32 +1618,10 @@
           <label>Facebook Page<input type="text" id="setFb" placeholder="Our Church" /></label>
         </div>
         <div class="panel">
-          <div class="panel-head"><h2>📘 Meta — Facebook &amp; Instagram (for “Connect account”)</h2></div>
-          <details class="set-how"><summary>How?</summary><p class="muted small">One-time setup so the app can link your Facebook &amp; Instagram: at <b>developers.facebook.com/apps</b> create ONE free app (<i>Other → Business</i>), add the <b>Facebook Login</b> product and in its Settings turn ON <b>Client OAuth login</b> + <b>Embedded browser OAuth login</b> (leave redirect URIs empty, save + verify). Then paste the app's <b>App ID</b> + <b>App Secret</b> (App settings → Basic) here. Development mode is enough for Pages you admin. The full walkthrough is in <b>Social Scheduler → ＋ Connect account</b>.</p></details>
-          <label>Meta App ID<input type="text" id="setFbAppId" placeholder="e.g. 1089…" /></label>
-          <label>Meta App Secret <span class="muted small">(recommended)</span><input type="password" id="setFbAppSecret" placeholder="optional but keeps the link from expiring" /></label>
-        </div>
-        <div class="panel">
-          <div class="panel-head"><h2>▶️ YouTube — advanced (your own Google app)</h2></div>
-          <details class="set-how"><summary>How?</summary><p class="muted small">⚡ <b>Easiest way:</b> skip all this and use the free <b>Zernio API key</b> from the TikTok section above — the same key connects YouTube too (just sign into YouTube once, no Google Cloud Console). Only fill this in if you want the app to upload straight to Google instead.</p></details>
-          <details class="set-how"><summary>How?</summary><p class="muted small">Advanced setup so the app can upload directly to your channel: at <b>console.cloud.google.com</b> enable the <b>YouTube Data API v3</b>, then create an <b>OAuth client ID</b> (type: <i>Desktop app</i>) and paste it here.</p></details>
-          <label>Google Client ID<input type="text" id="setYtClientId" placeholder="e.g. 1234…apps.googleusercontent.com" /></label>
-          <label>Google Client Secret<input type="password" id="setYtClientSecret" placeholder="GOCSPX-…" /></label>
-        </div>
-        <div class="panel">
-          <div class="panel-head"><h2>🎵 TikTok — easy connect, free &amp; unlimited (recommended)</h2></div>
-          <details class="set-how"><summary>How?</summary><p class="muted small">The 1-minute way: sign up free at <b>zernio.com</b> (no card), create a key under <b>API keys</b> in its menu, paste it here, then hit “＋ Connect account”. Public posting works right away — no TikTok developer portal, no audit wait, and <b>no monthly post limit</b>. Heads-up: videos upload via Zernio's servers.</p></details>
+          <div class="panel-head"><h2>⚡ Zernio — how accounts connect</h2></div>
+          <details class="set-how"><summary>How?</summary><p class="muted small">Every account — Facebook, Instagram, YouTube and TikTok — connects through Zernio, and nothing else. Sign up free at <b>zernio.com</b> (no card), create a key under <b>API keys</b> in its menu, paste it here, then hit “＋ Connect account”. Public posting works right away with <b>no monthly post limit</b>. Each free Zernio account holds 2 accounts: for more, make a second free Zernio account with another email and paste its key below — Facebook and Instagram go there. Your posts upload through Zernio's servers.</p></details>
           <label>Zernio API key<input type="password" id="setZoApiKey" placeholder="paste it here" /></label>
-        </div>
-        <div class="panel">
-          <div class="panel-head"><h2>⚙️ Advanced: manual Facebook token</h2></div>
-          <details class="set-how"><summary>How?</summary><p class="muted small">Prefer not to use “Connect account”? Paste a Page ID + Page access token (needs <code>pages_manage_posts</code>) and scheduled Facebook posts publish by themselves — photos, videos, and text.</p></details>
-          <label>Page ID<input type="text" id="setFbPageId" placeholder="e.g. 1234567890" /></label>
-          <label>Page access token<input type="password" id="setFbToken" placeholder="EAAB…" /></label>
-          <div class="path-row">
-            <button class="ghost-btn small" id="testFb">🔌 Test connection</button>
-            <span id="testFbResult" class="muted small"></span>
-          </div>
+          <label>Second Zernio API key <span class="muted small">(optional — Facebook &amp; Instagram)</span><input type="password" id="setZoApiKeyFb" placeholder="from a second free Zernio account" /></label>
         </div>
         <div class="panel">
           <div class="panel-head"><h2>AI keys (optional)</h2></div>

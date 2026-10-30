@@ -1188,15 +1188,16 @@ function httpFollow(urlStr, hops = 3) {
   check('[I] TikTok failure surfaces Zernio\'s reason', /TikTok rejected/.test(zoFailErr || ''), zoFailErr);
   zoFail = false;
 
-  // A plan/limit rejection → actionable message pointing at the free backup route.
+  // A plan/limit rejection → actionable message pointing at another free Zernio account (never another service).
   zoLimit = true;
   let zoLimitErr = null;
   try {
     await publisher.publishViaZernio({ apiKey: ZO_KEY, accountId: 'zoacc_1', username: 'gracetok' },
       { caption: 'x', mediaPaths: [videoF] }, { zoApiBase: origin + '/zo/v1' });
   } catch (e) { zoLimitErr = e.message; }
-  check('[I] plan/limit → actionable guidance (backup route, no raw HTTP)',
-    /Upload-Post|backup|roll/i.test(zoLimitErr || '') && !/HTTP \d/.test(zoLimitErr || ''), zoLimitErr);
+  check('[I] plan/limit → actionable guidance (another free Zernio account, no raw HTTP, no other service)',
+    /another free Zernio account/i.test(zoLimitErr || '') && !/Upload-Post|Google route|direct way/i.test(zoLimitErr || '')
+    && !/HTTP \d/.test(zoLimitErr || ''), zoLimitErr);
   zoLimit = false;
 
   // A flyer goes to TikTok as a PHOTO post — as a JPEG (TikTok refuses PNG), with TikTok's music.

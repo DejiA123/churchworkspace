@@ -611,7 +611,7 @@ function renderAcctStrip() {
   const el = $('#acctStrip');
   if (!el) return;
   if (!state.accounts.length) {
-    el.innerHTML = '<p class="muted small">Nothing linked yet. Hit <b>＋ Connect account</b> — sign in once and the app posts for you: Facebook photos, videos &amp; text, and Instagram photos &amp; Reels.</p>';
+    el.innerHTML = '<p class="muted small">Nothing linked yet. Hit <b>＋ Connect account</b> — one free Zernio key, sign in once on each, and the app posts for you to Facebook, Instagram, YouTube and TikTok.</p>';
     return;
   }
   el.innerHTML = state.accounts.map((a) => `
@@ -657,90 +657,61 @@ $('#acctModal').addEventListener('click', (e) => { if (e.target.id === 'acctModa
 
 $('#connectAccount').addEventListener('click', showPlatformChooser);
 
-function showPlatformChooser() {
-  acctModal(`
-    <div class="acct-modal-head"><h2>＋ Connect an account</h2><button class="icon-btn" id="acctClose">✕</button></div>
-    <p class="muted small">Link once — then scheduled posts publish by themselves.</p>
-    <div class="acct-pagelist">
-      <button class="acct-pagerow acct-choose" id="chooseFb">
-        <span class="acct-ava acct-ava-fallback">📘</span>
-        <span><b>Facebook Page + Instagram</b><br /><span class="muted small">Photos, videos &amp; text to your Page · Photos &amp; Reels to Instagram Business</span></span></button>
-      <button class="acct-pagerow acct-choose" id="chooseYt">
-        <span class="acct-ava acct-ava-fallback">▶️</span>
-        <span><b>YouTube channel</b><br /><span class="muted small">Videos upload straight to your channel</span></span></button>
-      <button class="acct-pagerow acct-choose" id="chooseTk">
-        <span class="acct-ava acct-ava-fallback">🎵</span>
-        <span><b>TikTok account</b><br /><span class="muted small">Videos post straight to your TikTok</span></span></button>
-      <button class="acct-pagerow acct-choose" id="chooseIgZo">
-        <span class="acct-ava acct-ava-fallback">📸</span>
-        <span><b>Instagram — second route</b><br /><span class="muted small">A backup way in for Reels, for when Meta&rsquo;s own video service is refusing them</span></span></button>
-    </div>`);
-  $('#acctClose').onclick = closeAcctModal;
-  // Facebook + Instagram connect directly through your Meta app (no third-party).
-  $('#chooseFb').onclick = () => {
-    const acc = (state.settings && state.settings.accounts) || {};
-    if (!(acc.fbAppId || '').trim()) showAppSetup();
-    else startFbConnect();
-  };
-  /*
-   * YouTube prefers its OWN Google app whenever one is set up.
-   *
-   * Both routes work, but they are not equal: the Google one is free and
-   * unlimited and costs nothing, while every platform on Zernio spends one of
-   * the two slots its free plan allows — and a church that has already spent
-   * both on Instagram and TikTok cannot put YouTube there at all (Zernio
-   * answers "add a payment method"). So when the Google credentials are
-   * present, that is simply the right answer and the app stops asking.
-   * The Zernio route stays one click away inside the chooser for anyone who
-   * has not set Google up.
-   */
-  $('#chooseYt').onclick = () => {
-    const acc = (state.settings && state.settings.accounts) || {};
-    const hasGoogle = !!((acc.ytClientId || '').trim() && (acc.ytClientSecret || '').trim());
-    if (hasGoogle) startYtConnect();
-    else showYtChoice();
-  };
-  // Instagram, the second way in. Meta direct (via the Facebook row above) stays
-  // the primary route — this is what you reach for when it will not take video.
-  $('#chooseIgZo').onclick = () => {
-    const acc = (state.settings && state.settings.accounts) || {};
-    if ((acc.zoApiKey || '').trim()) startZoConnect('instagram');
-    else showZoSetup('instagram');
-  };
-  // TikTok uses the free & unlimited Zernio easy-connect only.
-  $('#chooseTk').onclick = () => {
-    const acc = (state.settings && state.settings.accounts) || {};
-    if ((acc.zoApiKey || '').trim()) startTkZoConnect();
-    else showTkZoSetup();
-  };
-}
-
-/* ---- Zernio: the free & unlimited easy connect (TikTok + YouTube) ---- */
-// One free Zernio key connects TikTok + YouTube (2 accounts free), so the same
-// wizard drives either platform — `platform` picks the labels + connect call.
+/*
+ * ZERNIO IS THE ONLY WAY IN. "Only Zernio should be the option to connect accounts": every platform links
+ * through a free Zernio key — no Meta app, no Google app, no TikTok developer app, no Upload-Post, no pasted
+ * Page token. Each free Zernio account holds 2 linked accounts, so Facebook and Instagram can sit on a second
+ * free one (Settings → Zernio → Second key; accounts.js zoCfg).
+ */
+const ZO_PLATS = ['facebook', 'instagram', 'youtube', 'tiktok'];
 const ZO_LABEL = { tiktok: 'TikTok', youtube: 'YouTube', instagram: 'Instagram', facebook: 'Facebook' };
 const ZO_SIGNIN = { tiktok: 'TikTok', youtube: 'YouTube (Google)', instagram: 'Instagram', facebook: 'Facebook' };
 const ZO_CONNECT = { tiktok: 'connectZo', youtube: 'connectZoYt', instagram: 'connectZoIg', facebook: 'connectZoFb' };
-function zoAdvanced(platform) {
-  if (platform === 'youtube') return showYtSetup();
-  return; // TikTok has no own-app route anymore — Zernio easy-connect only.
+const ZO_CHOOSE = { facebook: 'chooseFb', instagram: 'chooseIg', youtube: 'chooseYt', tiktok: 'chooseTk' };
+const ZO_ROW = {
+  facebook: ['📘', 'Photos, videos &amp; text to your Page'],
+  instagram: ['📸', 'Photos &amp; Reels'],
+  youtube: ['▶️', 'Videos &amp; Shorts to your channel'],
+  tiktok: ['🎵', 'Videos to your TikTok'],
+};
+const zoMeta = (platform) => platform === 'facebook' || platform === 'instagram';
+// the key a platform connects with: Facebook and Instagram use the second free Zernio account when one is set
+function zoKeyFor(platform) {
+  const acc = (state.settings && state.settings.accounts) || {};
+  return ((zoMeta(platform) && (acc.zoApiKeyFb || '').trim()) || acc.zoApiKey || '').trim();
+}
+function connectThroughZernio(platform) {
+  if (zoKeyFor(platform)) startZoConnect(platform);
+  else showZoSetup(platform);
+}
+
+function showPlatformChooser() {
+  acctModal(`
+    <div class="acct-modal-head"><h2>＋ Connect an account</h2><button class="icon-btn" id="acctClose">✕</button></div>
+    <p class="muted small">Every account links through <b>Zernio</b> — one free key, then sign in once on each. Scheduled posts then publish by themselves, even with this PC off.</p>
+    <div class="acct-pagelist">
+      ${ZO_PLATS.map((p) => `
+      <button class="acct-pagerow acct-choose" id="${ZO_CHOOSE[p]}" data-zo="${p}">
+        <span class="acct-ava acct-ava-fallback">${ZO_ROW[p][0]}</span>
+        <span><b>${ZO_LABEL[p]}</b><br /><span class="muted small">${ZO_ROW[p][1]} · through Zernio</span></span></button>`).join('')}
+    </div>`);
+  $('#acctClose').onclick = closeAcctModal;
+  $$('#acctModalBox [data-zo]').forEach((b) => { b.onclick = () => connectThroughZernio(b.dataset.zo); });
 }
 
 function showZoSetup(platform, err) {
   const acc = (state.settings && state.settings.accounts) || {};
   const label = ZO_LABEL[platform] || 'TikTok';
   const signIn = ZO_SIGNIN[platform] || label;
-  const noPortal = platform === 'youtube' ? ', and <b>no Google Cloud Console</b> to set up' : '';
-  // Only YouTube keeps a "fully direct" fallback (your own Google app); TikTok is
-  // Zernio easy-connect only.
-  const advancedLink = platform === 'youtube'
-    ? ` Prefer fully direct? Use <a href="#" id="zoGoAdvanced">the advanced setup</a> instead.` : '';
+  // Facebook or Instagram once the first key is in: what is asked for now is a SECOND free Zernio account
+  const second = zoMeta(platform) && !!(acc.zoApiKey || '').trim();
+  const field = second ? 'zoApiKeyFb' : 'zoApiKey';
   acctModal(`
-    <div class="acct-modal-head"><h2>⚡ ${label} easy connect (free &amp; unlimited)</h2><button class="icon-btn" id="acctClose">✕</button></div>
+    <div class="acct-modal-head"><h2>⚡ Connect ${label} through Zernio</h2><button class="icon-btn" id="acctClose">✕</button></div>
     ${err ? `<div class="post-error">⚠️ ${esc(err)}</div>` : ''}
-    <p class="muted small">One-time setup (~1 minute). Zernio's ${label} app is already approved, so posts are <b>public immediately</b> — the free plan has <b>no monthly post limit</b>${noPortal}.</p>
+    <p class="muted small">One-time setup (~1 minute). Zernio's ${label} app is already approved, so posts are <b>public immediately</b> — free, with <b>no monthly post limit</b>. Each free Zernio account holds <b>2 accounts</b>.${second ? ' This key is for a <b>second</b> free Zernio account (sign up with another email) — it holds Facebook and Instagram.' : ''}</p>
     <ol class="acct-steps muted small">
-      <li>Tap <b>Sign up free</b> below → create a Zernio account (no card — its <b>2 free slots</b> cover TikTok + YouTube).</li>
+      <li>Tap <b>Sign up free</b> below → create a Zernio account (no card).</li>
       <li>Tap <b>API keys</b> → <b>Create API Key</b> → copy it.</li>
       <li>Paste the key below and hit Continue — a browser tab opens where you sign in to ${signIn} once.</li>
     </ol>
@@ -748,14 +719,13 @@ function showZoSetup(platform, err) {
       <button class="ghost-btn small" id="wizZoOpenSignup">🌐 Sign up free at Zernio</button>
       <button class="ghost-btn small" id="wizZoOpenKeys">🔑 API keys</button>
     </div>
-    <p class="muted small">Heads-up: with this route your posts upload via Zernio's servers.${advancedLink}</p>
-    <label>Zernio API key<input type="password" id="wizZoKey" value="${esc(acc.zoApiKey || '')}" placeholder="paste it here" /></label>
+    <p class="muted small">Your posts upload through Zernio's servers.</p>
+    <label>${second ? 'Second Zernio API key (Facebook &amp; Instagram)' : 'Zernio API key'}<input type="password" id="wizZoKey" value="${esc(acc[field] || '')}" placeholder="paste it here" /></label>
     <div class="acct-modal-foot">
       <button class="ghost-btn" id="acctCancel">Cancel</button>
       <button class="primary-btn" id="wizZoContinue">Continue →</button>
     </div>`);
   $('#acctClose').onclick = $('#acctCancel').onclick = closeAcctModal;
-  if ($('#zoGoAdvanced')) $('#zoGoAdvanced').onclick = (e) => { e.preventDefault(); zoAdvanced(platform); };
   const openExt = (url) => { try { api.shell.openExternal(url); } catch (e) { toast('Open ' + url + ' in your browser.', 'error'); } };
   $('#wizZoOpenSignup').onclick = () => openExt('https://zernio.com/signup');
   $('#wizZoOpenKeys').onclick = () => openExt('https://zernio.com/signup');
@@ -763,8 +733,9 @@ function showZoSetup(platform, err) {
     const key = $('#wizZoKey').value.trim();
     if (!key) return toast('Paste the Zernio API key first.', 'error');
     const cur = (state.settings || {}).accounts || {};
-    state.settings = await api.settings.update({ accounts: { ...cur, zoApiKey: key } });
-    if ($('#setZoApiKey')) $('#setZoApiKey').value = key;
+    state.settings = await api.settings.update({ accounts: { ...cur, [field]: key } });
+    const mirror = $(second ? '#setZoApiKeyFb' : '#setZoApiKey');
+    if (mirror) mirror.value = key;
     startZoConnect(platform);
   };
 }
@@ -795,22 +766,16 @@ async function startZoConnect(platform) {
   }
 }
 
-// Thin platform wrappers so existing TikTok call sites stay unchanged.
-function showTkZoSetup(err) { return showZoSetup('tiktok', err); }
-function startTkZoConnect() { return startZoConnect('tiktok'); }
-
 /* ============ MAKING INSTAGRAM (or TikTok) SURVIVE A SHUTDOWN ============
  *
  * Meta offers NO way to book an Instagram post in advance — no price, no
  * permission and no API version changes that; the content container it would
  * need expires after 24 hours. TikTok's own API is the same. So an account
- * connected directly to them can only be posted by something awake at the
- * time, which means this PC on.
+ * linked directly to them (before Zernio was the only way in) can only be
+ * posted by something awake at the time, which means this PC on.
  *
- * The way out is not a setting, it is a different route: link the account
- * through a service that IS awake, and hand IT the post with its time. The app
- * speaks two, both with free tiers, and the second exists because the first
- * one's free plan runs out of slots.
+ * The way out is not a setting, it is a different route: re-link the account
+ * through Zernio, which IS awake, and hand IT the post with its time.
  */
 const EASY_LABEL = { instagram: 'Instagram', tiktok: 'TikTok' };
 
@@ -818,87 +783,14 @@ function showEasyFix(platform) {
   const label = EASY_LABEL[platform] || platform;
   acctModal(`
     <div class="acct-modal-head"><h2>🔒 Make ${label} post with the PC off</h2><button class="icon-btn" id="acctClose">✕</button></div>
-    <p class="muted small">${label} has <b>no way to book a post in advance</b> — that is Meta's API, not this app, and no setting or payment changes it. Right now this post waits on this PC.</p>
-    <p class="muted small">Re-link the same ${label} account through a service that stays awake, and the post gets handed over the moment you schedule it. It posts exactly as it does now; the difference is that <b>this PC can be off</b>. Both are free — pick either, and if one says its free slots are full, use the other.</p>
-    <div class="acct-pagelist">
-      <button class="acct-pagerow acct-choose" id="fixZo">
-        <span class="acct-ava acct-ava-fallback">⚡</span>
-        <span><b>Zernio</b><br /><span class="muted small">Free, no post limit. Facebook &amp; Instagram get their own 2 free slots here, separate from TikTok/YouTube.</span></span></button>
-      <button class="acct-pagerow acct-choose" id="fixUp">
-        <span class="acct-ava acct-ava-fallback">📤</span>
-        <span><b>Upload-Post</b><br /><span class="muted small">Free tier, already approved by ${label}. A separate account from Zernio — use this if Zernio's free slots are gone.</span></span></button>
-    </div>
-    <div class="acct-modal-foot"><button class="ghost-btn" id="acctCancel">Not now</button></div>`);
-  $('#acctClose').onclick = $('#acctCancel').onclick = closeAcctModal;
-  $('#fixZo').onclick = () => {
-    const acc = (state.settings && state.settings.accounts) || {};
-    // Facebook/Instagram use their own Zernio key when one is set (see zoCfg).
-    if ((acc.zoApiKeyFb || acc.zoApiKey || '').trim()) startZoConnect(platform);
-    else showZoSetup(platform);
-  };
-  $('#fixUp').onclick = () => {
-    const acc = (state.settings && state.settings.accounts) || {};
-    if ((acc.upApiKey || '').trim()) startUpConnect(platform);
-    else showUpSetup(platform);
-  };
-}
-
-function showUpSetup(platform, err) {
-  const label = EASY_LABEL[platform] || platform;
-  const acc = (state.settings && state.settings.accounts) || {};
-  acctModal(`
-    <div class="acct-modal-head"><h2>📤 ${label} via Upload-Post</h2><button class="icon-btn" id="acctClose">✕</button></div>
-    ${err ? `<div class="post-error">⚠️ ${esc(err)}</div>` : ''}
-    <p class="muted small">One-time setup (~1 minute). Their ${label} app is already approved, so posts go out public, and booked posts are held on their servers — not on this PC.</p>
-    <ol class="acct-steps muted small">
-      <li>Tap <b>Sign up free</b> below → create an Upload-Post account.</li>
-      <li>Tap <b>API keys</b> → copy your key.</li>
-      <li>Paste it below and hit Continue — a browser tab opens where you sign in to ${label} once.</li>
-    </ol>
-    <div class="acct-openrow">
-      <button class="ghost-btn small" id="wizUpOpenSignup">🌐 Sign up free at Upload-Post</button>
-      <button class="ghost-btn small" id="wizUpOpenKeys">🔑 API keys</button>
-    </div>
-    <p class="muted small">Heads-up: with this route your posts upload via Upload-Post's servers.</p>
-    <label>Upload-Post API key<input type="password" id="wizUpKey" value="${esc(acc.upApiKey || '')}" placeholder="paste it here" /></label>
+    <p class="muted small">${label} has <b>no way to book a post in advance</b> — that is ${platform === 'tiktok' ? 'TikTok' : 'Meta'}'s API, not this app, and no setting or payment changes it. Right now this post waits on this PC.</p>
+    <p class="muted small">Re-link the same ${label} account through <b>Zernio</b>, which stays awake, and the post gets handed over the moment you schedule it. It posts exactly as it does now; the difference is that <b>this PC can be off</b>. Free, with no post limit.</p>
     <div class="acct-modal-foot">
-      <button class="ghost-btn" id="acctCancel">Cancel</button>
-      <button class="primary-btn" id="wizUpContinue">Continue →</button>
+      <button class="ghost-btn" id="acctCancel">Not now</button>
+      <button class="primary-btn" id="fixZo">⚡ Re-link through Zernio</button>
     </div>`);
   $('#acctClose').onclick = $('#acctCancel').onclick = closeAcctModal;
-  const openExt = (url) => { try { api.shell.openExternal(url); } catch (e) { toast('Open ' + url + ' in your browser.', 'error'); } };
-  $('#wizUpOpenSignup').onclick = () => openExt('https://www.upload-post.com/');
-  $('#wizUpOpenKeys').onclick = () => openExt('https://app.upload-post.com/api-keys');
-  $('#wizUpContinue').onclick = async () => {
-    const key = $('#wizUpKey').value.trim();
-    if (!key) return toast('Paste the Upload-Post API key first.', 'error');
-    const cur = (state.settings || {}).accounts || {};
-    state.settings = await api.settings.update({ accounts: { ...cur, upApiKey: key } });
-    startUpConnect(platform);
-  };
-}
-
-async function startUpConnect(platform) {
-  const label = EASY_LABEL[platform] || platform;
-  acctModal(`
-    <div class="acct-modal-head"><h2>📤 Connecting ${label}…</h2><button class="icon-btn" id="acctClose">✕</button></div>
-    <div class="acct-wait"><div class="spinner"></div>
-      <p>Checking your Upload-Post account…</p>
-      <p class="muted small">If ${label} isn't linked yet, a browser tab opens — sign in there and allow access. This window finishes by itself.</p></div>
-    <div class="acct-modal-foot">
-      <button class="ghost-btn small" id="wizEditUp">API key</button>
-      <button class="ghost-btn" id="acctCancel">Cancel</button>
-    </div>`);
-  $('#acctClose').onclick = $('#acctCancel').onclick = closeAcctModal;
-  $('#wizEditUp').onclick = () => showUpSetup(platform);
-  try {
-    const acc = await api.accounts.connectUpIg();
-    closeAcctModal();
-    toast(`✅ ${acc.name} reconnected — its posts are booked in advance now and go out with this PC off.`, 'good', 9000);
-    await afterEasyFix();
-  } catch (e) {
-    showUpSetup(platform, e.message);
-  }
+  $('#fixZo').onclick = () => connectThroughZernio(platform);
 }
 
 /**
@@ -914,175 +806,6 @@ async function afterEasyFix() {
   }
   if (booked) toast(`🔒 ${booked} scheduled post${booked === 1 ? '' : 's'} booked with the platform — safe with this PC off.`, 'good', 9000);
   refreshPosts();
-}
-
-/* ---- YouTube: easy (Zernio) vs advanced (your own Google app) ---- */
-function showYtChoice() {
-  acctModal(`
-    <div class="acct-modal-head"><h2>▶️ Connect YouTube</h2><button class="icon-btn" id="acctClose">✕</button></div>
-    <p class="muted small">Two ways to auto-post to your channel — pick one:</p>
-    <div class="acct-pagelist">
-      <button class="acct-pagerow acct-choose" id="ytEasy">
-        <span class="acct-ava acct-ava-fallback">⚡</span>
-        <span><b>Easy connect — no Google setup</b> <span class="muted small">(uses 1 of your 2 free Zernio slots)</span><br />
-          <span class="muted small">One free key from <b>zernio.com</b> (the same key that connects TikTok) — just sign into YouTube once. <b>No Google Cloud Console, no OAuth client.</b></span></span></button>
-      <button class="acct-pagerow acct-choose" id="ytAdvanced">
-        <span class="acct-ava acct-ava-fallback">🛠️</span>
-        <span><b>Your own Google app — free, unlimited, no Zernio slot</b><br />
-          <span class="muted small">Upload straight to YouTube via your own Google Cloud OAuth client — more setup, but nothing goes through anyone else's servers.</span></span></button>
-    </div>`);
-  $('#acctClose').onclick = closeAcctModal;
-  $('#ytEasy').onclick = () => {
-    const acc = (state.settings && state.settings.accounts) || {};
-    if ((acc.zoApiKey || '').trim()) startZoConnect('youtube');
-    else showZoSetup('youtube');
-  };
-  $('#ytAdvanced').onclick = () => {
-    const acc = (state.settings && state.settings.accounts) || {};
-    if ((acc.ytClientId || '').trim() && (acc.ytClientSecret || '').trim()) startYtConnect();
-    else showYtSetup();
-  };
-}
-
-function showYtSetup(err) {
-  const acc = (state.settings && state.settings.accounts) || {};
-  acctModal(`
-    <div class="acct-modal-head"><h2>▶️ Connect YouTube</h2><button class="icon-btn" id="acctClose">✕</button></div>
-    ${err ? `<div class="post-error">⚠️ ${esc(err)}</div>` : ''}
-    <p class="muted small">One-time setup (~3 minutes). The app talks straight to Google — nothing goes through anyone else's servers.</p>
-    <p class="muted small">😮‍💨 Too much? <a href="#" id="ytGoEasy">Easy connect</a> needs just one pasted Zernio key and no Google setup at all.</p>
-    <ol class="acct-steps muted small">
-      <li>Open <b>console.cloud.google.com</b> → create a project (any name).</li>
-      <li><b>APIs &amp; Services → Library</b> → enable <b>YouTube Data API v3</b>.</li>
-      <li><b>OAuth consent screen</b> → External → add yourself as a test user.</li>
-      <li><b>Credentials → Create credentials → OAuth client ID</b> → type <b>Desktop app</b> — copy the Client ID + Secret below.</li>
-    </ol>
-    <label>Google Client ID<input type="text" id="wizYtId" value="${esc(acc.ytClientId || '')}" placeholder="e.g. 1234…apps.googleusercontent.com" /></label>
-    <label>Google Client Secret<input type="password" id="wizYtSecret" value="${esc(acc.ytClientSecret || '')}" placeholder="GOCSPX-…" /></label>
-    <div class="acct-modal-foot">
-      <button class="ghost-btn" id="acctCancel">Cancel</button>
-      <button class="primary-btn" id="wizYtContinue">Continue with Google →</button>
-    </div>`);
-  $('#acctClose').onclick = $('#acctCancel').onclick = closeAcctModal;
-  $('#ytGoEasy').onclick = (e) => { e.preventDefault(); showZoSetup('youtube'); };
-  $('#wizYtContinue').onclick = async () => {
-    const cid = $('#wizYtId').value.trim();
-    const csec = $('#wizYtSecret').value.trim();
-    if (!cid || !csec) return toast('Paste both the Client ID and the Client Secret.', 'error');
-    const cur = (state.settings || {}).accounts || {};
-    state.settings = await api.settings.update({ accounts: { ...cur, ytClientId: cid, ytClientSecret: csec } });
-    $('#setYtClientId').value = cid;
-    $('#setYtClientSecret').value = csec;
-    startYtConnect();
-  };
-}
-
-async function startYtConnect() {
-  acctModal(`
-    <div class="acct-modal-head"><h2>▶️ Connecting to YouTube…</h2><button class="icon-btn" id="acctClose">✕</button></div>
-    <div class="acct-wait"><div class="spinner"></div>
-      <p>Your browser opened — sign in with the Google account that owns the channel.</p>
-      <p class="muted small">Come back here when Google says “Connected”.</p></div>
-    <div class="acct-modal-foot">
-      <button class="ghost-btn small" id="wizEditYt">App setup</button>
-      <button class="ghost-btn" id="acctCancel">Cancel</button>
-    </div>`);
-  $('#acctClose').onclick = $('#acctCancel').onclick = closeAcctModal;
-  $('#wizEditYt').onclick = () => showYtSetup();
-  try {
-    const acc = await api.accounts.connectYt();
-    closeAcctModal();
-    toast('✅ Connected ' + acc.name + ' — YouTube auto-posting is ON.', 'good');
-    refreshAccounts().then(refreshPosts);
-  } catch (e) {
-    showYtSetup(e.message);
-  }
-}
-
-function showAppSetup(err) {
-  const acc = (state.settings && state.settings.accounts) || {};
-  acctModal(`
-    <div class="acct-modal-head"><h2>🔗 Connect Facebook &amp; Instagram</h2><button class="icon-btn" id="acctClose">✕</button></div>
-    ${err ? `<div class="post-error">⚠️ ${esc(err)}</div>` : ''}
-    <p class="muted small">One-time setup (~4 minutes). The app talks straight to Facebook — your login never goes through anyone else's servers. You must be an <b>admin of the Facebook Page</b> you want to post to.</p>
-    <ol class="acct-steps muted small">
-      <li>Open <b>developers.facebook.com/apps</b> and sign in with the Facebook account that manages your Page. <i>(Ignore any “Meta Model API” / AI banners — that's a different product, and it's geo-blocked in some countries. Your posting API works everywhere.)</i></li>
-      <li>Hit <b>Create App</b> → choose <b>Other</b> → type <b>Business</b> → any name → Create. <i>(Create ONE app and stick with it — its App ID goes below.)</i></li>
-      <li>In the app's left sidebar find <b>Add Product</b> → <b>Facebook Login</b> (may be called <i>Facebook Login for Business</i>) → <b>Set up</b>.</li>
-      <li>Open <b>Facebook Login → Settings</b> and switch <b>ON</b>: ✅ <b>Client OAuth login</b> and ✅ <b>Embedded browser OAuth login</b> → hit <b>Save changes</b> and make sure it really saved (reload the page — both must still say Yes). Leave <b>Valid OAuth Redirect URIs empty</b> — pasting a facebook.com link there silently blocks the save.</li>
-      <li><b>App settings → Basic</b>: copy the <b>App ID</b> and the <b>App Secret</b> (click <i>Show</i>) into the boxes below, then Continue — you'll sign in to Facebook and pick your Page.</li>
-    </ol>
-    <p class="muted small">💡 The app can stay in <b>Development mode</b> — that's enough to auto-post to Pages you admin, no review needed. If the Facebook popup says <b>“Can't load URL”</b>, step 4 didn't save — go back and check both toggles.</p>
-    <label>Meta App ID<input type="text" id="wizAppId" value="${esc(acc.fbAppId || '')}" placeholder="e.g. 1089…" /></label>
-    <label>Meta App Secret <span class="muted small">(recommended)</span><input type="password" id="wizAppSecret" value="${esc(acc.fbAppSecret || '')}" placeholder="keeps the link from expiring" /></label>
-    <div class="acct-modal-foot">
-      <button class="ghost-btn" id="acctCancel">Cancel</button>
-      <button class="primary-btn" id="wizContinue">Continue with Facebook →</button>
-    </div>`);
-  $('#acctClose').onclick = $('#acctCancel').onclick = closeAcctModal;
-  $('#wizContinue').onclick = async () => {
-    const appId = $('#wizAppId').value.trim();
-    if (!appId) return toast('Paste your Meta App ID first.', 'error');
-    const cur = (state.settings || {}).accounts || {};
-    state.settings = await api.settings.update({
-      accounts: { ...cur, fbAppId: appId, fbAppSecret: $('#wizAppSecret').value.trim() },
-    });
-    $('#setFbAppId').value = appId;
-    $('#setFbAppSecret').value = $('#wizAppSecret').value.trim();
-    startFbConnect();
-  };
-}
-
-async function startFbConnect() {
-  acctModal(`
-    <div class="acct-modal-head"><h2>🔗 Connecting to Facebook…</h2><button class="icon-btn" id="acctClose">✕</button></div>
-    <div class="acct-wait"><div class="spinner"></div>
-      <p>A Facebook window is open — sign in and allow access.</p>
-      <p class="muted small">Then the app finds your Pages and Instagram accounts.</p></div>
-    <div class="acct-modal-foot">
-      <button class="ghost-btn small" id="wizEditApp">App setup</button>
-      <button class="ghost-btn" id="acctCancel">Cancel</button>
-    </div>`);
-  $('#acctClose').onclick = $('#acctCancel').onclick = closeAcctModal;
-  $('#wizEditApp').onclick = () => showAppSetup();
-  try {
-    const res = await api.accounts.connectFb();
-    showPagePicker(res);
-  } catch (e) {
-    showAppSetup(e.message);
-  }
-}
-
-function showPagePicker({ connectId, pages }) {
-  acctModal(`
-    <div class="acct-modal-head"><h2>Pick what to connect</h2><button class="icon-btn" id="acctClose">✕</button></div>
-    <p class="muted small">Found ${pages.length} Page${pages.length === 1 ? '' : 's'}. Check everything the app should post to:</p>
-    <div class="acct-pagelist">
-      ${pages.map((p) => `
-        <label class="acct-pagerow"><input type="checkbox" data-sel="facebook" data-page="${esc(p.pageId)}" checked />
-          ${p.picture ? `<img class="acct-ava" src="${p.picture}" alt="" />` : '<span class="acct-ava acct-ava-fallback">📘</span>'}
-          <span><b>${esc(p.name)}</b><br /><span class="muted small">📘 Facebook Page — photos, videos &amp; text auto-post</span></span></label>
-        ${p.ig ? `
-        <label class="acct-pagerow acct-pagerow-ig"><input type="checkbox" data-sel="instagram" data-page="${esc(p.pageId)}" checked />
-          ${p.ig.picture ? `<img class="acct-ava" src="${p.ig.picture}" alt="" />` : '<span class="acct-ava acct-ava-fallback">📸</span>'}
-          <span><b>@${esc(p.ig.username || p.name)}</b><br /><span class="muted small">📸 Instagram Business — photos &amp; Reels auto-post</span></span></label>` : ''}
-      `).join('')}
-    </div>
-    <div class="acct-modal-foot">
-      <button class="ghost-btn" id="acctCancel">Cancel</button>
-      <button class="primary-btn" id="wizFinish">🔗 Connect selected</button>
-    </div>`);
-  $('#acctClose').onclick = $('#acctCancel').onclick = closeAcctModal;
-  $('#wizFinish').onclick = async () => {
-    const selections = $$('#acctModalBox [data-sel]:checked').map((c) => ({ type: c.dataset.sel, pageId: c.dataset.page }));
-    if (!selections.length) return toast('Check at least one account.', 'error');
-    try {
-      const added = await api.accounts.add(connectId, selections);
-      closeAcctModal();
-      toast('✅ Connected ' + added.map((a) => a.name).join(', ') + ' — auto-posting is ON.', 'good');
-      refreshAccounts().then(refreshPosts);
-    } catch (e) { toast('⚠️ ' + e.message, 'error'); }
-  };
 }
 
 /* ===================== SCHEDULER ===================== */
@@ -1756,9 +1479,7 @@ async function refreshPosts() {
     catch (e) { toast('⚠️ ' + e.message, 'error'); }
     setTimeout(refreshPosts, 800);
   }));
-  // Meta/TikTok cannot book a post at all, so the fix is a different route in.
-  // Offer both free ones rather than picking for them — a full free tier on one
-  // is exactly the case the other exists for.
+  // Meta/TikTok cannot book a post at all, so the fix is a different route in: Zernio.
   $$('#postList [data-easyfix]').forEach((b) => b.addEventListener('click',
     () => showEasyFix(b.dataset.easyfix)));
   $$('#postList [data-del]').forEach((b) => b.addEventListener('click', async () => {
@@ -1845,20 +1566,24 @@ $('#saveSettings').addEventListener('click', async () => {
     },
     accounts: {
       instagram: $('#setIg').value, tiktok: $('#setTt').value, facebook: $('#setFb').value,
-      fbPageId: $('#setFbPageId').value.trim(), fbToken: $('#setFbToken').value.trim(),
-      fbAppId: $('#setFbAppId').value.trim(), fbAppSecret: $('#setFbAppSecret').value.trim(),
-      ytClientId: $('#setYtClientId').value.trim(), ytClientSecret: $('#setYtClientSecret').value.trim(),
       zoApiKey: $('#setZoApiKey').value.trim(),
-      // TikTok own-app + Upload-Post backup + FB/IG Zernio settings panels were
-      // removed from the UI (TikTok/YouTube = Zernio easy-connect; FB/IG = Meta).
-      // Preserve any previously-stored values rather than reading absent fields.
+      zoApiKeyFb: $('#setZoApiKeyFb').value.trim(),
+      // Zernio is the only way to connect: the Meta app, Google app, TikTok own-app,
+      // Upload-Post and manual Page-token panels are gone from the UI. Preserve any
+      // previously-stored values rather than reading absent fields.
+      fbPageId: ((state.settings || {}).accounts || {}).fbPageId,
+      fbToken: ((state.settings || {}).accounts || {}).fbToken,
+      fbAppId: ((state.settings || {}).accounts || {}).fbAppId,
+      fbAppSecret: ((state.settings || {}).accounts || {}).fbAppSecret,
+      ytClientId: ((state.settings || {}).accounts || {}).ytClientId,
+      ytClientSecret: ((state.settings || {}).accounts || {}).ytClientSecret,
       tkClientKey: ((state.settings || {}).accounts || {}).tkClientKey,
       tkClientSecret: ((state.settings || {}).accounts || {}).tkClientSecret,
       tkRedirectUri: ((state.settings || {}).accounts || {}).tkRedirectUri,
       tkTokenProxy: ((state.settings || {}).accounts || {}).tkTokenProxy,
       tkProxyToken: ((state.settings || {}).accounts || {}).tkProxyToken,
       upApiKey: ((state.settings || {}).accounts || {}).upApiKey,
-      zoApiKeyFb: ((state.settings || {}).accounts || {}).zoApiKeyFb,
+      zoApiKey3: ((state.settings || {}).accounts || {}).zoApiKey3,
       // keep test overrides if set
       fbApiBase: ((state.settings || {}).accounts || {}).fbApiBase,
       fbOauthBase: ((state.settings || {}).accounts || {}).fbOauthBase,
@@ -1883,17 +1608,6 @@ $('#saveSettings').addEventListener('click', async () => {
   $('#brandName').textContent = patch.brand.churchName;
   $('#brandName').title = patch.brand.churchName;
   toast('💾 Settings saved.', 'good');
-});
-
-$('#testFb').addEventListener('click', async () => {
-  const out = $('#testFbResult');
-  out.textContent = 'Testing…';
-  try {
-    const r = await api.scheduler.testFb($('#setFbPageId').value.trim(), $('#setFbToken').value.trim());
-    out.textContent = `✅ Connected to "${r.name}" — auto-posting is ready.`;
-  } catch (e) {
-    out.textContent = '✖ ' + e.message;
-  }
 });
 
 $('#changeOutput').addEventListener('click', async () => {
@@ -2128,13 +1842,8 @@ async function init() {
   $('#setIg').value = acc.instagram || '';
   $('#setTt').value = acc.tiktok || '';
   $('#setFb').value = acc.facebook || '';
-  $('#setFbPageId').value = acc.fbPageId || '';
-  $('#setFbToken').value = acc.fbToken || '';
-  $('#setFbAppId').value = acc.fbAppId || '';
-  $('#setFbAppSecret').value = acc.fbAppSecret || '';
-  $('#setYtClientId').value = acc.ytClientId || '';
-  $('#setYtClientSecret').value = acc.ytClientSecret || '';
   if ($('#setZoApiKey')) $('#setZoApiKey').value = acc.zoApiKey || '';
+  if ($('#setZoApiKeyFb')) $('#setZoApiKeyFb').value = acc.zoApiKeyFb || '';
   const keys = state.settings.apiKeys || {};
   $('#setImage').value = keys.image || '';
   if ($('#setBibleKey')) $('#setBibleKey').value = keys.bible || '';
