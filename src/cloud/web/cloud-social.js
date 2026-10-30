@@ -2481,7 +2481,14 @@
    * different Zernio account (with Google etc.)": the window Zernio opens in keeps the first account signed in, and
    * this page cannot sign anyone out of another site. So it says what to do there, before they need it.
    */
-  const SWITCH_NOTE = '<p class="cs-switch-note">Zernio opens still signed in to your first account. In Zernio, <b>log out</b> first (in its menu), then sign up with the other email. With Google, tap <b>Use another account</b> on Google’s screen.</p>';
+  // ("…but I signed out": logging out of Zernio is not enough — the window is still signed in to GOOGLE, and Sign in
+  //  with Google hands Zernio the same Google account straight back. Google's own sign-out page, opened in that same
+  //  window, clears it: the next Sign in with Google asks which account.)
+  const SWITCH_NOTE = '<div class="cs-switch-note"><b>Using a different account?</b> The Zernio window remembers the last one — Google too, so '
+    + 'Sign in with Google picks the same account again even after you log out of Zernio.'
+    + '<ol><li>Tap <b>Sign out of Google</b>, then close that window.</li><li>Tap <b>Open Zernio</b>. If it is still signed in, log out there.</li>'
+    + '<li>Sign up or sign in with the other account — Google now asks which one.</li></ol>'
+    + '<a class="cs-mini cs-google-out" href="https://accounts.google.com/Logout" target="_blank" rel="noopener">Sign out of Google</a></div>';
   function openConnect(after) {
     const panel = C.openPanel({ id: 'csConnect', title: 'Accounts', cls: 'cp-connect', onClose: () => { stopClaim(); stopWatch(); if (after) after(); } });
     let claiming = null;   // { platform, timer, until }
