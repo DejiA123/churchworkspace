@@ -2691,6 +2691,11 @@ button.cap-model-pick .cap-model-name { align-items: flex-start; text-align: lef
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid rgba(255, 255, 255, .14); background: rgba(255, 255, 255, .06); color: #e6e8ef; }
 .cap-rev-acts .cap-rev-keep { background: #7c3aed; border-color: #7c3aed; color: #fff; }
 .cap-fix-tabs .cap-seg .cap-tab-fixed.on { background: rgba(139, 92, 246, .3); color: #fff; }
+/* Mistakes: a dot that says something is waiting; its list opens under a header of its own */
+.cap-tab-dot { display: inline-block; width: 7px; height: 7px; margin: 0 6px 1px 0; border-radius: 50%; background: #f59e0b; vertical-align: middle; box-shadow: 0 0 0 3px rgba(245, 158, 11, .18); }
+.cap-fix-tabs .cap-seg .cap-tab-mist.on { background: rgba(245, 158, 11, .2); color: #fde68a; }
+.cap-rev.cap-rev-mist { background: linear-gradient(135deg, rgba(245, 158, 11, .16), rgba(34, 197, 94, .06)); border-color: rgba(245, 158, 11, .4); }
+.cap-rev-mist .cap-rev-keep { background: #16a34a; border-color: #16a34a; }
 /* the note under the list, when it says what was fixed, is the way to see it */
 .cap-fix-note.tap { cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .cap-foot-msg .cap-fix-note.tap.seen { display: none; }

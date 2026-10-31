@@ -287,6 +287,36 @@ async function waitUp() {
       await sleep(300);
       rv = await page.evaluate(() => ({ lines: window.VideoEditor.__test.capLines().map((l) => l.text), fixed: document.querySelectorAll('#capList .cap-row.fixed').length, tab: !!document.querySelector('#capList [data-capfix="fixed"]') }));
       check(rv.lines[1] === lines0[1] && rv.lines[3] === lines0[3] && !rv.fixed && !rv.tab, '"Keep them all" keeps the fixes and clears the marks', { rv, lines0 });
+
+      // "I should be able to see which 3 mistakes need to be made": Mistakes lists just those lines, each with
+      // what would change, before anything is fixed
+      await page.evaluate(() => { const T = window.VideoEditor.__test; T.markCapFixed(2, 'x', 'I SAW A ELEPHANT'); T.markCapFixed(2, null); T.markCapFixed(4, 'x', 'HE DONT LEAVE ME'); T.markCapFixed(4, null); });
+      await sleep(300);
+      rv = await page.evaluate(() => ({ tab: (document.querySelector('#capList [data-capfix="mistakes"]') || {}).textContent || '', button: document.getElementById('capGrammarFix').dataset.count }));
+      check(/Mistakes/.test(rv.tab) && rv.tab.trim().endsWith(rv.button) && +rv.button >= 2, 'the list has a Mistakes tab, counting what the ✍ Fix button would fix', rv);
+      await page.locator('#capList [data-capfix="mistakes"]').tap();
+      await sleep(400);
+      rv = await page.evaluate(() => {
+        const rows = [...document.querySelectorAll('#capList .cap-row')];
+        return { rows: rows.map((r) => r.querySelector('.cap-text').value), cards: rows.filter((r) => r.querySelector('.cap-sugg')).length,
+          head: (document.querySelector('#capList .cap-rev-mist') || {}).textContent || '', lines: window.VideoEditor.__test.capLines().map((l) => l.text) };
+      });
+      check(rv.rows.length === 2 && rv.cards === 2 && /What needs fixing/.test(rv.head) && /on 2 lines/.test(rv.head) && rv.lines[2] === 'I SAW A ELEPHANT',
+        'tapped, it lists just the lines with mistakes, each showing what would change, and nothing is fixed yet', rv);
+      if (process.env.MW_SHOTS) {
+        const vp = page.viewportSize();
+        await page.setViewportSize({ width: vp.width, height: 1500 }); await sleep(400);
+        await page.evaluate(() => { const l = document.getElementById('capList'); l.scrollTop = 0; });
+        await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'mistakes.png') });
+        await page.setViewportSize(vp); await sleep(400);
+      }
+      await page.locator('#capList [data-mist="all"]').tap();
+      await sleep(500);
+      rv = await page.evaluate(() => ({ lines: window.VideoEditor.__test.capLines().map((l) => l.text), mode: !!document.querySelector('#capList [data-capfix="fixed"].on'),
+        mist: !!document.querySelector('#capList [data-capfix="mistakes"]'), fixed: document.querySelectorAll('#capList .cap-row.fixed').length }));
+      check(rv.lines[2] !== 'I SAW A ELEPHANT' && rv.lines[4] !== 'HE DONT LEAVE ME' && !rv.mist && rv.mode && rv.fixed >= 2,
+        '"Fix all" fixes them, and the list turns to what was fixed', rv);
+      await page.evaluate((L) => { const T = window.VideoEditor.__test; [2, 4].forEach((i) => { T.markCapFixed(i, 'x', L[i]); T.markCapFixed(i, null); }); }, lines0);
       await page.evaluate(() => document.getElementById('capModal').classList.add('hidden'));
       await sleep(400);
     }

@@ -13130,11 +13130,23 @@
     const nDoubt = inScope.filter(({ c }) => isDoubt(c)).length;
     syncCapFixNote(nFixed, ve.capListMode === 'fixed' && nFixed);
     const nUnchecked = inScope.filter(({ c }) => c.unchecked).length;
+    /*
+     * ►► WHAT NEEDS FIXING, BEFORE IT IS FIXED. ◄◄ "I should be able to see which 3 mistakes need to be made."
+     * "Mistakes" lists just the lines with an underlined mistake or an AI suggestion, each with its card open —
+     * what would go (red) and what would come in (green), a tap to fix that one, Fix this line, Ignore — and
+     * over them Fix all, the same as the ✍ button. (Counted as that button counts them.)
+     */
+    const mist = CG() ? inScope.map(({ i }) => { const r = grammarFor(i); return (r ? r.issues.length : 0) + (aiFor(i) ? 1 : 0); }) : inScope.map(() => 0);
+    const nMist = mist.reduce((a, b) => a + b, 0), nMistLines = mist.filter(Boolean).length;
+    // (all fixed: what was done is the next thing to see)
+    if (ve.capListMode === 'mistakes' && !nMist) ve.capListMode = nFixed ? 'fixed' : 'all';
     if (ve.capListMode === 'fixed' && !nFixed) ve.capListMode = 'all';
     if (ve.capListMode === 'check' && !nDoubt) ve.capListMode = 'all';
     const mode = ve.capListMode || 'all';
     let rows = mode === 'fixed' ? inScope.filter(({ c }) => isFixed(c))
-      : mode === 'check' ? inScope.filter(({ c }) => isDoubt(c)) : inScope;
+      : mode === 'check' ? inScope.filter(({ c }) => isDoubt(c))
+        : mode === 'mistakes' ? inScope.filter((x, k) => mist[k]) : inScope;
+    if (mode === 'mistakes') rows.forEach(({ c }) => gram().open.add(lineKey(c)));
     // 🔍 Search: only the lines that contain what was typed (any case, punctuation ignored)
     const fold = (t) => String(t || '').toLowerCase().replace(/[’']/g, "'").replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim();
     const q = fold(ve.capQuery);
@@ -13220,17 +13232,25 @@
           + `<span class="cap-check-tx">✓ Heard twice · ${nDoubt ? `${n0(heard.length - nDoubt)} of ${n0(heard.length)} agree` : `all ${n0(heard.length)} lines agree`}</span>`
           + `<span class="cap-check-bar" aria-hidden="true"><i style="width:${pct}%"></i></span></div>`
         : `<div class="cap-check-note"><span class="cap-check-tx">ℹ️ ${nUnchecked === heard.length ? 'Heard once, not double-checked' : n0(nUnchecked) + ' lines heard once, not double-checked'}${ve._capCheckWhy ? ` (${escape2(ve._capCheckWhy)})` : ''} — give them a read</span></div>`;
-    const seg = nFixed || nDoubt;
+    const seg = nFixed || nDoubt || nMist;
+    const nTabs = 1 + !!nDoubt + !!nMist + !!nFixed;
     const tabs = note + `<div class="cap-fix-tabs${seg ? ' seg' : ''}" role="tablist">`
       + (seg
         ? `<div class="cap-seg">`
-          + `<button type="button" role="tab" data-capfix="all" class="${mode === 'all' ? 'on' : ''}">All lines <span>${inScope.length}</span></button>`
+          + `<button type="button" role="tab" data-capfix="all" class="${mode === 'all' ? 'on' : ''}">${nTabs > 2 ? 'All' : 'All lines'} <span>${inScope.length}</span></button>`
           + (nDoubt ? `<button type="button" role="tab" data-capfix="check" class="cap-tab-check ${mode === 'check' ? 'on' : ''}">⚠ Check <span>${nDoubt}</span></button>` : '')
+          + (nMist ? `<button type="button" role="tab" data-capfix="mistakes" class="cap-tab-mist ${mode === 'mistakes' ? 'on' : ''}"><i class="cap-tab-dot" aria-hidden="true"></i>Mistakes <span>${nMist}</span></button>` : '')
           + (nFixed ? `<button type="button" role="tab" data-capfix="fixed" class="cap-tab-fixed ${mode === 'fixed' ? 'on' : ''}">${nAi ? '✨' : '✍'} Fixed <span>${nFixed}</span></button>` : '')
           + `</div>`
         : '')
       + `<button type="button" class="cap-add-line${seg ? ' cap-add-sq' : ''}" data-capadd aria-label="Add caption" title="Add a caption line at the playhead and type it">${seg ? '<b aria-hidden="true">+</b>' : '＋ Add caption'}</button>`
       + `</div>`;
+    // Mistakes: what is waiting, said over the list, with Fix all
+    const mistHead = mode !== 'mistakes' ? ''
+      : `<div class="cap-rev cap-rev-mist"><div class="cap-rev-hd"><b>What needs fixing</b>`
+        + `<span>${nMist} mistake${nMist === 1 ? '' : 's'} on ${nMistLines} line${nMistLines === 1 ? '' : 's'}</span></div>`
+        + `<div class="cap-rev-key"><del>red</del> goes · <ins>green</ins> comes in · tap one to fix just it</div>`
+        + `<div class="cap-rev-acts"><button type="button" class="cap-rev-keep" data-mist="all">✓ Fix all ${nMist}</button></div></div>`;
     // ✍ Fixed: what was changed, said over the list, with the two answers to all of it at once
     const review = mode !== 'fixed' ? ''
       : `<div class="cap-rev"><div class="cap-rev-hd"><b>${nAi ? '✨ What the AI changed' : '✍ What was fixed'}</b>`
@@ -13238,7 +13258,9 @@
         + `<div class="cap-rev-key"><del>red</del> was taken out · <ins>green</ins> was put in · ▶ plays the line</div>`
         + `<div class="cap-rev-acts"><button type="button" class="cap-rev-keep" data-rev="keep">✓ Keep them all</button>`
         + `<button type="button" class="cap-rev-back" data-rev="back">↶ Put them all back</button></div></div>`;
-    list.innerHTML = tabs + review + rows.map(({ c, i }) => capRowHtml(c, i, base, mode !== 'all')).join('');
+    list.innerHTML = tabs + mistHead + review + rows.map(({ c, i }) => capRowHtml(c, i, base, mode !== 'all')).join('');
+    const mAll = list.querySelector('[data-mist="all"]');
+    if (mAll) mAll.addEventListener('click', () => fixAllGrammar());
     list.querySelectorAll('[data-rev]').forEach((b) => b.addEventListener('click', () => {
       const fixed = inScope.filter(({ c }) => isFixed(c)).map(({ i }) => i);
       if (b.dataset.rev === 'keep') {
@@ -14090,6 +14112,7 @@
     const ai = aiFor(i);
     if (ai) gram().ignore.add(ignoreKey(e.text, 'ai:' + ai.text.toLowerCase()));
     gram().open.delete(lineKey(e));
+    if (ve.capListMode === 'mistakes') { renderCapList(); return; }   // (looked at: off the list of what needs fixing)
     const row = document.querySelector(`#capList .cap-row[data-row="${i}"]`);
     if (row) paintGrammarRow(row);
     updateGrammarSummary();
