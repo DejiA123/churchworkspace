@@ -12887,6 +12887,31 @@
    * to the one shared caption store — the timeline blocks, the preview overlay
    * and the burned-in export all change with it, because there is only one copy.
    */
+  /*
+   * ►► WHAT THE AI CHANGED, WORD BY WORD. ◄◄ "It says AI fixed 10 lines — I should be able to see what it
+   * fixed." A fixed line shows the words taken out struck through in red and the words put in, in green, the way
+   * a marked-up page does — not the whole old line to compare by eye. (Words that only changed their case or a
+   * comma are shown as put in, softly.)
+   */
+  function capWordDiff(was, now) {
+    const A = String(was || '').split(/\s+/).filter(Boolean), B = String(now || '').split(/\s+/).filter(Boolean);
+    const k = (w) => w.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
+    const n = A.length, m = B.length, L = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = k(A[i]) === k(B[j]) ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    const out = [];   // [kind, word]: '=' the same, '-' taken out, '+' put in, '~' only its case or a comma changed
+    let i = 0, j = 0;
+    while (i < n || j < m) {
+      if (i < n && j < m && k(A[i]) === k(B[j])) { out.push([A[i] === B[j] ? '=' : '~', B[j]]); i++; j++; }
+      else if (i < n && (j >= m || L[i + 1][j] >= L[i][j + 1])) { out.push(['-', A[i]]); i++; }
+      else { out.push(['+', B[j]]); j++; }
+    }
+    // words side by side that went (or came) together are one mark, not a box each
+    const runs = [];
+    for (const [t, w] of out) { const r = runs[runs.length - 1]; if (r && r[0] === t && t !== '=') r[1].push(w); else runs.push([t, [w]]); }
+    const html = runs.map(([t, ws]) => { const x = escape2(ws.join(' ')); return t === '-' ? `<del>${x}</del>` : t === '+' ? `<ins>${x}</ins>` : t === '~' ? `<ins class="soft">${x}</ins>` : x; }).join(' ');
+    // a line taken out altogether: what it said, struck through
+    return html || `<del>${escape2(was)}</del>`;
+  }
   /** One line of the captions window (renderCapList, and a line added on its own). */
   function capRowHtml(c, i, base, ctx) {
     return (
@@ -12906,8 +12931,11 @@
         : '')
       // A line a fix changed says so, and what it said before, with its own way back.
       + (c._was != null && c._was !== c.text
-        ? `<div class="cap-was"><span class="cap-was-tx" title="${escape2(c._byAi || '').replace(/"/g, '&quot;')}">${c._byAi ? '✨ AI fixed' : '✍ Fixed'} — was “${escape2(c._was)}”</span>`
-          + `<button type="button" class="cap-was-back" data-was-i="${i}" title="Put this line back to what it said before">↶ Put back</button></div>`
+        ? `<div class="cap-was${c._byAi ? ' ai' : ''}"><span class="cap-was-tag">${c._byAi ? '✨ AI fixed' : '✍ Fixed'}</span>`
+          + `<span class="cap-was-diff" title="${escape2('Was “' + c._was + '”').replace(/"/g, '&quot;')}">${capWordDiff(c._was, c.text)}</span>`
+          + `<button type="button" class="cap-was-back" data-was-i="${i}" title="Put this line back to what it said before">↶ Put back</button>`
+          + (c._byAi && c._byAi !== 'AI correction' ? `<span class="cap-was-why">${escape2(c._byAi)}</span>` : '')
+          + `</div>`
         : '')
       // ⚠ Check and ✍ Fixed list lines on their own: the line before and the
       // line after come with them (drawn above and below — CSS order), and the
@@ -13098,7 +13126,9 @@
      */
     const isDoubt = (c) => !!c.doubt;
     const nFixed = inScope.filter(({ c }) => isFixed(c)).length;
+    const nAi = inScope.filter(({ c }) => isFixed(c) && c._byAi).length;
     const nDoubt = inScope.filter(({ c }) => isDoubt(c)).length;
+    syncCapFixNote(nFixed, ve.capListMode === 'fixed' && nFixed);
     const nUnchecked = inScope.filter(({ c }) => c.unchecked).length;
     if (ve.capListMode === 'fixed' && !nFixed) ve.capListMode = 'all';
     if (ve.capListMode === 'check' && !nDoubt) ve.capListMode = 'all';
@@ -13196,12 +13226,28 @@
         ? `<div class="cap-seg">`
           + `<button type="button" role="tab" data-capfix="all" class="${mode === 'all' ? 'on' : ''}">All lines <span>${inScope.length}</span></button>`
           + (nDoubt ? `<button type="button" role="tab" data-capfix="check" class="cap-tab-check ${mode === 'check' ? 'on' : ''}">⚠ Check <span>${nDoubt}</span></button>` : '')
-          + (nFixed ? `<button type="button" role="tab" data-capfix="fixed" class="${mode === 'fixed' ? 'on' : ''}">✍ Fixed <span>${nFixed}</span></button>` : '')
+          + (nFixed ? `<button type="button" role="tab" data-capfix="fixed" class="cap-tab-fixed ${mode === 'fixed' ? 'on' : ''}">${nAi ? '✨' : '✍'} Fixed <span>${nFixed}</span></button>` : '')
           + `</div>`
         : '')
       + `<button type="button" class="cap-add-line${seg ? ' cap-add-sq' : ''}" data-capadd aria-label="Add caption" title="Add a caption line at the playhead and type it">${seg ? '<b aria-hidden="true">+</b>' : '＋ Add caption'}</button>`
       + `</div>`;
-    list.innerHTML = tabs + rows.map(({ c, i }) => capRowHtml(c, i, base, mode !== 'all')).join('');
+    // ✍ Fixed: what was changed, said over the list, with the two answers to all of it at once
+    const review = mode !== 'fixed' ? ''
+      : `<div class="cap-rev"><div class="cap-rev-hd"><b>${nAi ? '✨ What the AI changed' : '✍ What was fixed'}</b>`
+        + `<span>${nFixed} line${nFixed === 1 ? '' : 's'}${nAi && ve._aiFixBy ? ' · ' + escape2(ve._aiFixBy) : ''}</span></div>`
+        + `<div class="cap-rev-key"><del>red</del> was taken out · <ins>green</ins> was put in · ▶ plays the line</div>`
+        + `<div class="cap-rev-acts"><button type="button" class="cap-rev-keep" data-rev="keep">✓ Keep them all</button>`
+        + `<button type="button" class="cap-rev-back" data-rev="back">↶ Put them all back</button></div></div>`;
+    list.innerHTML = tabs + review + rows.map(({ c, i }) => capRowHtml(c, i, base, mode !== 'all')).join('');
+    list.querySelectorAll('[data-rev]').forEach((b) => b.addEventListener('click', () => {
+      const fixed = inScope.filter(({ c }) => isFixed(c)).map(({ i }) => i);
+      if (b.dataset.rev === 'keep') {
+        fixed.forEach((i) => { delete ve.capEvents[i]._was; delete ve.capEvents[i]._byAi; });
+        ve.capListMode = 'all';
+        renderCapList();
+        window.__toast && window.__toast(`✓ Kept all ${fixed.length} fix${fixed.length === 1 ? '' : 'es'}.`, 'good', 3000);
+      } else putLinesBack(fixed);
+    }));
     const addBtn = list.querySelector('[data-capadd]');
     if (addBtn) addBtn.addEventListener('click', () => { ve.capListMode = 'all'; addCaptionHere({ inList: true }); });
     list.querySelectorAll('[data-capfix]').forEach((b) => b.addEventListener('click', () => {
@@ -13334,10 +13380,47 @@
     afterGrammarChange();
     window.__toast && window.__toast(`↶ Put back: “${was}”`, 'good', 3500);
   }
+  /** Every line given back to what it said before its fixes — one undo step for all of them. */
+  function putLinesBack(idx) {
+    const evs = ve.capEvents || [];
+    const todo = idx.filter((i) => evs[i] && evs[i]._was != null).sort((a, b) => b - a);
+    if (!todo.length) return;
+    pushHistory({ captions: true });
+    for (const i of todo) {
+      const e = evs[i], was = e._was;
+      evs[i] = Object.assign({}, e, { text: was });
+      delete evs[i]._was; delete evs[i]._byAi;
+      syncCapWordsFor(e, e.text, was);
+    }
+    ve.capListMode = 'all';
+    afterGrammarChange();
+    window.__toast && window.__toast(`↶ Put back ${todo.length} line${todo.length === 1 ? '' : 's'} to what they said before.`, 'good', 3500);
+  }
+  /*
+   * The note under the list says what was fixed — and is the way to see it: a tap opens ✍ Fixed. It is kept true:
+   * once nothing is marked fixed any more (all kept or put back) a note that still said "fixed 10 lines" goes.
+   */
+  function syncCapFixNote(nFixed, open) {
+    const el = document.getElementById('capFixNote'); if (!el) return;
+    if (!nFixed && /fixed \d+ line|Fixed \d+ line/.test(el.textContent || '')) setCapFixNote('');
+    el.classList.toggle('tap', !!nFixed && /fixed/i.test(el.textContent || ''));
+    // (what it opens is on the screen already: the note steps aside for the lines)
+    el.classList.toggle('seen', !!open && el.classList.contains('tap'));
+    if (!el._wired) {
+      el._wired = true;
+      el.addEventListener('click', () => {
+        if (!el.classList.contains('tap')) return;
+        ve.capListMode = 'fixed';
+        renderCapList();
+        const list = document.getElementById('capList'); if (list) list.scrollTop = 0;
+      });
+    }
+  }
   function closeCapModal() {
     commitCapEdit();
-    // The "fixed — was …" marks are for this sitting; the next one starts clean.
-    (ve.capEvents || []).forEach((e) => { if (e && e._was != null) delete e._was; if (e) delete e._byAi; });
+    // The "fixed — was …" marks STAY until they are kept or put back (✍ Fixed): "it says AI fixed 10 lines, I
+    // should be able to see what it fixed" — closing the window used to wipe them while the note still said ten.
+    ve.capListMode = 'all';
     ve.capScope = null;
     capPlayerClose();
     document.getElementById('capModal').classList.add('hidden');
@@ -14270,13 +14353,17 @@
       for (const f of plan.sort((a, b) => b.i - a.i)) {
         if (setCapLineText(f.i, f.text)) { applied++; if (ve.capEvents[f.i]) ve.capEvents[f.i]._byAi = f.why || 'AI correction'; }
       }
+      ve._aiFixBy = res.by || '';
+      // (asked for, with nothing left waiting under other lines: the window turns to what it changed)
+      if (applied && !o.auto && !shown && capModalOpen()) ve.capListMode = 'fixed';
       afterGrammarChange();
     }
     paintAllGrammar();
     const by = res.by ? ` (${res.by})` : '';
     if (applied) {
       const more = shown ? ` and suggests ${shown} more under their lines` : '';
-      setCapFixNote(`✨ The AI fixed ${applied} line${applied === 1 ? '' : 's'}${by}${more} — ↶ Undo puts them all back`, true);
+      setCapFixNote(`✨ The AI fixed ${applied} line${applied === 1 ? '' : 's'}${more} — see what changed`, true);
+      syncCapFixNote(applied);
       window.__toast && window.__toast(`✨ Fixed ${applied} misheard line${applied === 1 ? '' : 's'}${more}. Each says what it was, with a button to put it back; ↶ Undo puts them all back.`, 'good', 8000);
       return Object.assign({}, res, { shown, applied });
     }
@@ -19421,7 +19508,8 @@
       capSelect(i) { ve.capSel = i; ve.activeRow = i == null ? null : 'caption'; ve.textSel = null; renderCapTrack(); },
       capPickedShown() { syncCapPicked(); return document.getElementById('veCapOverlay').classList.contains('picked'); },
       markAllChecked() { (ve.capEvents || []).forEach((e) => { if (!e.manual) { e.checked = true; delete e.unchecked; } }); renderCapList(); },
-      markCapFixed(i, was, text) { const e = (ve.capEvents || [])[i]; if (!e) return; if (was == null) delete e._was; else { e._was = was; if (text != null) e.text = text; } renderCapList(); },
+      markCapFixed(i, was, text, ai) { const e = (ve.capEvents || [])[i]; if (!e) return; if (was == null) { delete e._was; delete e._byAi; } else { e._was = was; if (text != null) e.text = text; if (ai) e._byAi = ai; } renderCapList(); },
+      setCapFixNote(t, good) { setCapFixNote(t, good); },
       // drive the two caption dropdowns the way a click on them does
       setCapWordsPerLine(v) { document.getElementById('capWords').value = String(v); rebuildCapEvents(); return this.capLines(); },
       setCapCase(v) { document.getElementById('capCase').value = String(v); rebuildCapEvents({ caseOnly: true }); return this.capLines(); },

@@ -2666,8 +2666,34 @@ button.cap-model-pick .cap-model-name { align-items: flex-start; text-align: lef
 /* ---- a line a fix changed: marked, with what it said and its own way back ---- */
 #capModal .cap-row.fixed { background: rgba(139, 92, 246, .10); box-shadow: inset 3px 0 0 #8b5cf6; }
 #capModal .cap-row.fixed .cap-text { border-color: rgba(139, 92, 246, .55); }
-.cap-was { flex: 1 1 100%; display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0 0 4px 72px; font-size: 11.5px; }
-.cap-was-tx { flex: 1 1 auto; min-width: 0; color: #c4b5fd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* a fixed line: what was taken out (red, struck through) and what was put in (green), word by word */
+.cap-was { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; margin: 2px 0 6px 72px; padding: 8px 10px;
+  border-radius: 10px; background: rgba(255, 255, 255, .035); border: 1px solid rgba(255, 255, 255, .07); font-size: 12.5px; }
+.cap-was-tag { flex: none; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 750; letter-spacing: .02em; color: #d6ccf5; background: rgba(148, 163, 184, .18); }
+.cap-was.ai .cap-was-tag { color: #ede9fe; background: rgba(139, 92, 246, .32); }
+/* the tag, why and Put back on one row; the words under them, the whole width */
+.cap-was-diff { order: 3; flex: 1 1 100%; min-width: 0; line-height: 1.65; color: #c9cede; overflow-wrap: anywhere; }
+.cap-was-diff del, .cap-rev-key del { text-decoration: line-through; text-decoration-thickness: 2px; text-decoration-color: rgba(255, 107, 107, .9);
+  color: #ffa3a3; background: rgba(248, 81, 73, .15); border-radius: 4px; padding: 0 3px; }
+.cap-was-diff ins, .cap-rev-key ins { text-decoration: none; color: #86efac; background: rgba(34, 197, 94, .17); border-radius: 4px; padding: 0 3px; font-weight: 700; }
+.cap-was-diff ins.soft { font-weight: 500; background: rgba(34, 197, 94, .08); }
+.cap-was-why { order: 1; flex: 1 1 auto; min-width: 0; font-size: 11.5px; color: var(--muted, #8b93a7); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cap-was .cap-was-back { order: 2; margin-left: auto; }
+/* ✍ Fixed: what was changed, said over the list, with Keep all / Put all back */
+.cap-rev { margin: 4px 2px 10px; padding: 12px 14px; border-radius: 14px; background: linear-gradient(135deg, rgba(139, 92, 246, .18), rgba(34, 197, 94, .07));
+  border: 1px solid rgba(167, 139, 250, .35); }
+.cap-rev-hd { display: flex; align-items: baseline; justify-content: space-between; gap: 4px 10px; flex-wrap: wrap; }
+.cap-rev-hd b { font-size: 15px; color: #fff; }
+.cap-rev-hd span { font-size: 12px; color: #b9b2cc; }
+.cap-rev-key { margin-top: 6px; font-size: 12px; line-height: 1.6; color: #a3a9bb; }
+.cap-rev-acts { display: flex; gap: 8px; margin-top: 10px; }
+.cap-rev-acts button { flex: 1 1 0; min-width: 0; width: auto; margin: 0; padding: 8px 12px; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid rgba(255, 255, 255, .14); background: rgba(255, 255, 255, .06); color: #e6e8ef; }
+.cap-rev-acts .cap-rev-keep { background: #7c3aed; border-color: #7c3aed; color: #fff; }
+.cap-fix-tabs .cap-seg .cap-tab-fixed.on { background: rgba(139, 92, 246, .3); color: #fff; }
+/* the note under the list, when it says what was fixed, is the way to see it */
+.cap-fix-note.tap { cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.cap-foot-msg .cap-fix-note.tap.seen { display: none; }
 .cap-was-back { flex: 0 0 auto; width: auto; margin: 0; padding: 3px 10px; font-size: 11.5px; border-radius: 999px; cursor: pointer;
   background: transparent; color: #ddd6fe; border: 1px solid rgba(139, 92, 246, .6); white-space: nowrap; }
 .cap-was-back:hover { background: rgba(139, 92, 246, .18); }

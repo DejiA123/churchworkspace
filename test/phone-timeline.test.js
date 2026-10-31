@@ -219,6 +219,67 @@ async function waitUp() {
       await sleep(300);
       check((await st()).rows === all.rows, '"All lines" brings the whole transcript back');
       await page.evaluate(() => { const T = window.VideoEditor.__test; T.markCapFixed(1, null); T.markCapFixed(3, null); });
+
+      // "It says AI fixed 10 lines — I should be able to see what it fixed": the note opens them, each says
+      // word by word what went and what came, and they are still there after the window is closed and opened
+      const lines0 = await page.evaluate(() => window.VideoEditor.__test.capLines().map((l) => l.text));
+      await page.evaluate(() => {
+        const T = window.VideoEditor.__test;
+        T.markCapFixed(1, 'THE LORD IS MY SHEPHARD', 'THE LORD IS MY SHEPHERD', 'misheard word');
+        T.markCapFixed(3, 'I SHALL NOT WANT WANT', 'I SHALL NOT WANT', 'AI correction');
+        T.setCapFixNote('✨ The AI fixed 2 lines — see what changed', true);
+        T.markCapFixed(0, null);
+      });
+      await sleep(300);
+      let rv = await page.evaluate(() => ({ tap: document.getElementById('capFixNote').classList.contains('tap'), mode: !!document.querySelector('#capList .cap-rev') }));
+      check(rv.tap && !rv.mode, 'the note that says the AI fixed lines is a button', rv);
+      await page.locator('#capFixNote').tap();
+      await sleep(300);
+      rv = await page.evaluate(() => {
+        const was = [...document.querySelectorAll('#capList .cap-was')];
+        return { rows: document.querySelectorAll('#capList .cap-row').length, head: (document.querySelector('#capList .cap-rev-hd') || {}).textContent || '',
+          tab: (document.querySelector('#capList [data-capfix="fixed"]') || {}).textContent || '',
+          del: was.map((w) => [...w.querySelectorAll('del')].map((x) => x.textContent)), ins: was.map((w) => [...w.querySelectorAll('ins')].map((x) => x.textContent)),
+          tags: was.map((w) => w.querySelector('.cap-was-tag').textContent), why: was.map((w) => (w.querySelector('.cap-was-why') || {}).textContent || '') };
+      });
+      check(rv.rows === 2 && /What the AI changed/.test(rv.head) && /2 lines/.test(rv.head) && /✨ Fixed/.test(rv.tab), 'tapped, it opens on just the lines the AI fixed, under "What the AI changed"', rv);
+      check(rv.del[0].join() === 'SHEPHARD' && rv.ins[0].join() === 'SHEPHERD' && rv.del[1].join() === 'WANT' && !rv.ins[1].length && rv.tags.every((t) => /AI fixed/.test(t)),
+        'each fixed line shows just the words taken out (struck through) and the words put in', rv);
+      check(rv.why[0] === 'misheard word' && rv.why[1] === '', 'the AI’s reason is given when it gave one', rv.why);
+      if (process.env.MW_SHOTS) {
+        await page.evaluate(() => { document.querySelectorAll('.toast, #toast, .mw-toast').forEach((t) => { t.style.display = 'none'; }); const l = document.getElementById('capList'); l.scrollTop = l.querySelector('.cap-rev').offsetTop - 8; });
+        await sleep(200);
+        await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'fixed-ai.png') });
+        const vp = page.viewportSize();
+        await page.setViewportSize({ width: vp.width, height: 1500 });
+        await sleep(400);
+        await page.evaluate(() => { const l = document.getElementById('capList'); l.scrollTop = l.querySelector('.cap-rev').offsetTop - 8; });
+        await sleep(200);
+        await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'fixed-ai-rows.png') });
+        await page.setViewportSize(vp);
+        await sleep(400);
+      }
+      await page.evaluate(() => { const T = window.VideoEditor.__test; T.closeCapModal(); });
+      await sleep(300);
+      await page.evaluate(() => { window.VideoEditor.__test.openCaptionsWindow(); document.getElementById('capModal').classList.remove('hidden'); });
+      await sleep(600);
+      rv = await page.evaluate(() => ({ fixed: document.querySelectorAll('#capList .cap-row.fixed').length, tab: !!document.querySelector('#capList [data-capfix="fixed"]'), tap: document.getElementById('capFixNote').classList.contains('tap') }));
+      check(rv.fixed === 2 && rv.tab && rv.tap, 'closed and opened again, the fixes are still there to see', rv);
+      await page.locator('#capList [data-capfix="fixed"]').tap();
+      await sleep(300);
+      await page.locator('#capList [data-rev="back"]').tap();
+      await sleep(300);
+      rv = await page.evaluate(() => ({ lines: window.VideoEditor.__test.capLines().map((l) => l.text), fixed: document.querySelectorAll('#capList .cap-row.fixed').length,
+        note: document.getElementById('capFixNote').textContent }));
+      check(rv.lines[1] === 'THE LORD IS MY SHEPHARD' && rv.lines[3] === 'I SHALL NOT WANT WANT' && !rv.fixed && !rv.note, '"Put them all back" gives every line back what it said, and the note goes', rv);
+      await page.evaluate(() => window.VideoEditor.__test.undo && window.VideoEditor.__test.undo());
+      await page.evaluate((L) => { const T = window.VideoEditor.__test; T.markCapFixed(1, 'WAS ONE', L[1], 'x'); T.markCapFixed(3, 'WAS THREE', L[3], 'y'); }, lines0);
+      await page.locator('#capList [data-capfix="fixed"]').tap();
+      await sleep(300);
+      await page.locator('#capList [data-rev="keep"]').tap();
+      await sleep(300);
+      rv = await page.evaluate(() => ({ lines: window.VideoEditor.__test.capLines().map((l) => l.text), fixed: document.querySelectorAll('#capList .cap-row.fixed').length, tab: !!document.querySelector('#capList [data-capfix="fixed"]') }));
+      check(rv.lines[1] === lines0[1] && rv.lines[3] === lines0[3] && !rv.fixed && !rv.tab, '"Keep them all" keeps the fixes and clears the marks', { rv, lines0 });
       await page.evaluate(() => document.getElementById('capModal').classList.add('hidden'));
       await sleep(400);
     }
