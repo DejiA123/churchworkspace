@@ -3994,6 +3994,9 @@ body.mw-cloud #vePresetModal .primary-btn { background: #1f6fe0; border-color: #
 body.mw-cloud #vePresetModal .ghost-btn { background: #1c1d23; border: 1px solid rgba(255,255,255,.08); color: #fff; border-radius: 12px; }
 body.mw-cloud #vePresetModal .ve-pre-del.sure { background: #c62828; border-color: #c62828; }
 body.mw-cloud #vePresetModal .ve-pre-save input { background: #1c1d23; color: #fff; border: 1px solid rgba(255,255,255,.12); }
+body.mw-cloud #vePresetModal .ve-pre-ren { width: 40px; height: 40px; color: #a1a6b4; }
+body.mw-cloud #vePresetModal .ve-pre-rename input { background: #121318; color: #fff; border: 1px solid rgba(77,149,239,.7); }
+body.mw-cloud #vePresetModal .ve-pre-rename-btns button { min-height: 44px; font-size: 15px; border-radius: 12px; }
 body.mw-cloud #vePresetModal .ve-pre-card, body.mw-cloud #vePresetModal .ve-pre-save { background: #1c1d23; border-color: rgba(255,255,255,.08); }
 body.mw-cloud #vePresetModal .ve-pre-intro, body.mw-cloud #vePresetModal .ve-pre-line, body.mw-cloud #vePresetModal .ve-pre-empty, body.mw-cloud #vePresetModal .ve-pre-label { color: #a1a6b4; }
 

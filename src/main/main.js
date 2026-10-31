@@ -1172,6 +1172,7 @@ ipcMain.handle('library:rename', wrap(async (e, { kind, id, name }) => library.r
 // ⭐ presets: a sermon's edit (text, music, ending, looks) to put on the next one
 ipcMain.handle('presets:list', wrap(async () => library.presetList()));
 ipcMain.handle('presets:save', wrap(async (e, { preset }) => library.presetSave(preset)));
+ipcMain.handle('presets:rename', wrap(async (e, { id, name }) => library.presetRename(id, name)));
 ipcMain.handle('presets:remove', wrap(async (e, { id }) => library.presetRemove(id)));
 /*
  * ►► A POST WITH MUSIC, WITHOUT ADDING IT BY HAND. ◄◄ No app may attach

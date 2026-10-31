@@ -16352,6 +16352,11 @@
       if (e.target.closest('[data-pre-new]')) return showForm(true);
       if (e.target.closest('[data-pre-cancel]')) { name.value = ''; return showForm(false); }
       if (e.target.closest('[data-pre-save]')) return savePresetNow(name.value).then((ok) => { if (ok) { name.value = ''; showForm(false); } });
+      const ren = e.target.closest('[data-pre-ren]');
+      if (ren) return startRename(ren.closest('.ve-pre-card'));
+      const rs = e.target.closest('[data-pre-ren-save]');
+      if (rs) return renameNow(rs.closest('.ve-pre-card'));
+      if (e.target.closest('[data-pre-ren-cancel]')) return renderPresetList();
       const use = e.target.closest('[data-pre-use]');
       if (use) return usePreset(use.dataset.preUse);
       const del = e.target.closest('[data-pre-del]');
@@ -16363,7 +16368,48 @@
       }
     });
     name.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); m.querySelector('[data-pre-save]').click(); } });
+    m.addEventListener('keydown', (e) => {
+      const inp = e.target.closest && e.target.closest('.ve-pre-rename input'); if (!inp) return;
+      if (e.key === 'Enter') { e.preventDefault(); renameNow(inp.closest('.ve-pre-card')); }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); renderPresetList(); }
+    });
     return m;
+  }
+  /*
+   * ►► RENAME. ◄◄ "I should be able to rename the presets." ✏️ beside a preset's name turns the name into a box
+   * to type in, in its own card; Save (or Enter) keeps the new name, Cancel (or Esc) leaves it as it was. The
+   * preset keeps its place in the list and everything it adds.
+   */
+  function startRename(card) {
+    if (!card) return;
+    renderPresetList();   // (one name being changed at a time)
+    const c = document.querySelector(`#vePresetModal .ve-pre-card[data-id="${CSS.escape(card.dataset.id)}"]`); if (!c) return;
+    const p = (ve.presetList || []).find((x) => x.id === c.dataset.id); if (!p) return;
+    const row = c.querySelector('.ve-pre-name');
+    c.classList.add('renaming');   // (Use and 🗑 step aside: the box has the card's width)
+    row.outerHTML = `<div class="ve-pre-rename"><input type="text" maxlength="50" autocomplete="off" enterkeyhint="done" aria-label="New name for this preset" value="${attr2(p.name)}" />`
+      + `<div class="ve-pre-rename-btns"><button type="button" class="ghost-btn" data-pre-ren-cancel>Cancel</button><button type="button" class="primary-btn" data-pre-ren-save>Save name</button></div></div>`;
+    const inp = c.querySelector('.ve-pre-rename input');
+    setTimeout(() => { try { inp.focus(); inp.select(); } catch (e) {} }, 30);
+  }
+  async function renameNow(card) {
+    const inp = card && card.querySelector('.ve-pre-rename input'); if (!inp) return false;
+    const p = (ve.presetList || []).find((x) => x.id === card.dataset.id); if (!p) return false;
+    const nm = inp.value.trim();
+    if (!nm) { inp.focus(); window.__toast && window.__toast('Give the preset a name.', 'error'); return false; }
+    if (nm === p.name) { renderPresetList(); return true; }
+    if ((ve.presetList || []).some((x) => x.id !== p.id && x.name.toLowerCase() === nm.toLowerCase())) {
+      inp.focus(); window.__toast && window.__toast(`You already have a preset called “${nm}” — pick another name.`, 'error'); return false;
+    }
+    try {
+      const r = await window.api.presets.rename(p.id, nm);
+      await refreshPresets();
+      window.__toast && window.__toast(`✏️ Renamed to “${(r && r.name) || nm}”.`, 'good', 3500);
+      return true;
+    } catch (e) {
+      window.__toast && window.__toast('⚠️ ' + (e.message || 'Could not rename the preset.'), 'error');
+      return false;
+    }
   }
   function renderPresetList() {
     const m = document.getElementById('vePresetModal'); if (!m) return;
@@ -16376,7 +16422,7 @@
     el.innerHTML = '<p class="ve-pre-label">Your presets</p>' + list.map((p) => `
       <div class="ve-pre-card" data-id="${attr2(p.id)}">
         <div class="ve-pre-main">
-          <b>${escape2(p.name)}</b>
+          <div class="ve-pre-name"><b>${escape2(p.name)}</b><button type="button" class="ve-pre-ren" data-pre-ren="${attr2(p.id)}" aria-label="Rename this preset" title="Rename"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button></div>
           ${presetParts(p).map((x) => `<span class="ve-pre-line"><span class="ve-pre-ic">${escape2(x.icon)}</span>${escape2(x.label)}</span>`).join('')}
         </div>
         <div class="ve-pre-btns">

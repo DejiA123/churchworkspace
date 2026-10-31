@@ -2897,6 +2897,17 @@ body.ve-pfull .ve-preview .ve-fs-exit {
 .ve-pre-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: rgba(255,255,255,.04); border: 1px solid var(--border); }
 .ve-pre-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .ve-pre-main > b { font-size: 16px; overflow-wrap: anywhere; }
+/* the name, with ✏️ beside it to rename; renaming, a box to type in with Cancel / Save name */
+.ve-pre-name { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.ve-pre-name b { min-width: 0; font-size: 16px; overflow-wrap: anywhere; }
+.ve-pre-ren { flex: none; width: 36px; height: 36px; min-height: 0; margin: -6px 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: 10px;
+  background: transparent; color: var(--muted); cursor: pointer; }
+.ve-pre-ren:hover { background: rgba(255,255,255,.08); color: var(--text); }
+.ve-pre-card.renaming .ve-pre-btns { display: none; }
+.ve-pre-rename { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
+.ve-pre-rename input { width: 100%; min-height: 44px; margin: 0; padding: 0 12px; border-radius: 10px; font-size: 16px; font-weight: 700; }
+.ve-pre-rename-btns { display: flex; gap: 8px; }
+.ve-pre-rename-btns button { flex: 1 1 0; min-width: 0; min-height: 40px; margin: 0; }
 .ve-pre-btns { flex: 0 0 auto; display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
 .ve-pre-btns .primary-btn { min-height: 44px; min-width: 76px; font-weight: 800; }
 .ve-pre-del { min-height: 40px; }

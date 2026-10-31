@@ -311,6 +311,7 @@ const ALLOWED = {
   'library:rename': true,
   'presets:list': true,
   'presets:save': true,
+  'presets:rename': true,
   'presets:remove': true,
   'music:free': true,
   'music:freeGet': true,

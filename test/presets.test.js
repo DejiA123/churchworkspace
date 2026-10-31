@@ -13,7 +13,8 @@
  *       clip — and on the shorts made after it
  *   [3] Use again does not stack the text; hand-typed text is left alone
  *   [4] the preset is on the studio: a reload still has it
- *   [5] deleting asks once ("Delete?"), then deletes
+ *   [5] deleting asks once ("Delete?"), then deletes — and first, "I should be able to rename the presets":
+ *       ✏️ renames one in place (Enter keeps it, Cancel does not, a name already used is refused)
  *
  *   node test/presets.test.js
  */
@@ -139,6 +140,36 @@ const vid = (file, d, colour) => execFileSync(ffmpeg, ['-v', 'error', '-y', '-f'
     console.log('\n[5] delete');
     await page.waitForFunction(() => window.VideoEditor && window.VideoEditor.openPath, null, { timeout: 30000 });
     await open(A);
+    // rename: a second preset first, so its place in the list can be seen to stay
+    const id0 = kept[0].id;
+    await page.evaluate(() => window.api.presets.save({ name: 'Christmas', text: [] }));
+    await dockBtn.tap(); await sleep(800);
+    const sermonCard = () => page.locator('#vePresetModal .ve-pre-card').filter({ hasText: /Sunday s/ });
+    await sermonCard().locator('[data-pre-ren]').tap(); await sleep(300);
+    const box = page.locator('#vePresetModal .ve-pre-rename input');
+    check(await box.isVisible() && (await box.inputValue()) === 'Sunday sermon', '✏️ turns the name into a box to type in, the name in it');
+    await page.screenshot({ path: path.join(process.env.MW_SHOTS || WORK, 'preset-rename.png') }).catch(() => {});
+    await box.fill('Sunday service');
+    await box.press('Enter'); await sleep(800);
+    let names = await page.evaluate(() => window.api.presets.list().then((l) => l.map((x) => ({ id: x.id, name: x.name }))));
+    let cards = await page.locator('#vePresetModal .ve-pre-card b').allInnerTexts();
+    check(names.length === 2 && names[1].name === 'Sunday service' && names[1].id === id0 && cards[1] === 'Sunday service' && names[0].name === 'Christmas',
+      'Enter keeps the new name: the same preset, in the same place', { names, cards });
+    await sermonCard().locator('[data-pre-ren]').tap(); await sleep(300);
+    await box.fill('Something else');
+    await page.locator('[data-pre-ren-cancel]').tap(); await sleep(300);
+    cards = await page.locator('#vePresetModal .ve-pre-card b').allInnerTexts();
+    check(cards[1] === 'Sunday service' && (await page.evaluate(() => window.api.presets.list()))[1].name === 'Sunday service', 'Cancel leaves the name as it was', cards);
+    await sermonCard().locator('[data-pre-ren]').tap(); await sleep(300);
+    await box.fill('christmas');
+    await page.locator('[data-pre-ren-save]').tap(); await sleep(500);
+    names = await page.evaluate(() => window.api.presets.list().then((l) => l.map((x) => x.name)));
+    const taken = await page.evaluate(() => [...document.querySelectorAll('.toast, .mw-island, #cloudIsland, [class*="island"]')].map((t) => t.innerText).join(' '));
+    check(names[1] === 'Sunday service' && (await box.isVisible()) && /already have a preset called/.test(taken), 'a name another preset has is refused, and the box stays open to change it', { names, taken: taken.slice(0, 160) });
+    const errs = await page.evaluate(async (id) => { const out = []; for (const n of ['', '   ', 'Christmas']) { try { await window.api.presets.rename(id, n); out.push('renamed'); } catch (e) { out.push(e.message); } } return out; }, id0);
+    check(/Give the preset a name/.test(errs[0]) && /Give the preset a name/.test(errs[1]) && /already have/.test(errs[2]), 'the studio itself refuses an empty name or one already used', errs);
+    await page.evaluate(async () => { const l = await window.api.presets.list(); await window.api.presets.remove(l.find((x) => x.name === 'Christmas').id); });
+    await page.locator('[data-pre-close]').first().tap(); await sleep(300);
     await dockBtn.tap(); await sleep(800);
     const del = page.locator('[data-pre-del]').first();
     await del.tap(); await sleep(200);

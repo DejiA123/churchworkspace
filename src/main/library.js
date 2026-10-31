@@ -265,6 +265,19 @@ function presetSave(preset) {
   presetWrite(list.slice(0, PRESET_MAX));
   return p;
 }
+/* "I should be able to rename the presets": a new name only — where it is in the list and what it holds stay */
+function presetRename(id, name) {
+  const list = presetList();
+  const p = list.find((x) => x.id === id);
+  if (!p) throw new Error('That preset is not there any more.');
+  const nm = String(name || '').trim() ? safeName(name).slice(0, 50) : '';
+  if (!nm) throw new Error('Give the preset a name.');
+  // (two with one name would be one: saving under a name brings that preset up to date)
+  if (list.some((x) => x.id !== id && String(x.name).toLowerCase() === nm.toLowerCase())) throw new Error(`You already have a preset called “${nm}”.`);
+  p.name = nm;
+  presetWrite(list);
+  return p;
+}
 function presetRemove(id) {
   presetWrite(presetList().filter((x) => x.id !== id));
   return true;
@@ -543,7 +556,7 @@ async function ytImport(ctx, video, { url, title, onProgress }) {
 
 module.exports = {
   init, list, add, remove, rename, root, toolsDir, relevel,
-  presetList, presetSave, presetRemove,
+  presetList, presetSave, presetRename, presetRemove,
   ytPath, ytStatus, ytInstall, ytSearch, ytImport, looksCopyrightFree, ytAuthArgs, isBotCheck,
   MUSIC_EXT, CLIP_EXT, STILL_EXT, STILL_SEC, safeName,
 };

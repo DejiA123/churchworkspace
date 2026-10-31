@@ -753,6 +753,7 @@ let _hideTimer = null;
     presets: {
       list: () => call('presets:list'),
       save: (preset) => call('presets:save', { preset }),
+      rename: (id, name) => call('presets:rename', { id, name }),
       remove: (id) => call('presets:remove', { id }),
     },
     /* songs that are safe to post (freemusic.js) */
