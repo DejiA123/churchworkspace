@@ -1330,31 +1330,42 @@
     const big = sizes.indexOf(Math.max(...sizes));
     const B = boxes[big], bw = B[2] - B[0], left = B[0] - bw * 0.08, right = B[2] + bw * 0.08;
     const keep = sizes.map((n, i) => i === big || (n >= sizes[big] * 0.1 && boxes[i][0] >= left && boxes[i][2] <= right));
+    /*
+     * ►► A SMOOTH EDGE, NOT BLOCKS. ◄◄ "The cut out of the man is not good, the shoulders are so pixeled." What is
+     * kept was decided on the small copy and applied to the photo a small pixel at a time — five photo pixels square
+     * — so the soft edge of a shoulder was chopped into steps. Now what is kept (the kept shapes, and the faint edge
+     * three small pixels round them: at the outline the small copy is fainter than the photo, and a cheek, an ear, the
+     * hair must stay) is softened and laid over the photo as a smooth mask: the cut-out's own edge is left as it was.
+     */
+    const K = new Uint8ClampedArray(w * h * 4), R = 3;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const l0 = lab[y * w + x];
+      let on = l0 >= 0 && keep[l0];
+      // (a shape that is not kept stays out, even beside the person)
+      if (!on && l0 < 0) {
+        for (let dy = -R; dy <= R && !on; dy++) for (let dx = -R; dx <= R && !on; dx++) {
+          const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= w || Y >= h || dx * dx + dy * dy > R * R) continue;
+          const l = lab[Y * w + X]; if (l >= 0 && keep[l]) on = true;
+        }
+      }
+      if (on) K[(y * w + x) * 4 + 3] = 255;
+    }
+    const km = canvas(w, h), kx = km.getContext('2d');
+    kx.putImageData(new ImageData(K, w, h), 0, 0);
+    const kb = canvas(w, h), kbx = kb.getContext('2d');
+    kbx.filter = 'blur(1px)'; kbx.drawImage(km, 0, 0); kbx.filter = 'none';
     const full = canvas(W, H), fx = full.getContext('2d', { willReadFrequently: true });
     fx.drawImage(cv, 0, 0);
-    const d = fx.getImageData(0, 0, W, H), p = d.data;
-    const keptNear = (mx, my) => {
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const X = mx + dx, Y = my + dy; if (X < 0 || Y < 0 || X >= w || Y >= h) continue;
-        const l = lab[Y * w + X]; if (l >= 0 && keep[l]) return true;
-      }
-      return false;
-    };
+    fx.globalCompositeOperation = 'destination-in';
+    fx.imageSmoothingEnabled = true; fx.imageSmoothingQuality = 'high';
+    fx.drawImage(kb, 0, 0, W, H);
+    fx.globalCompositeOperation = 'source-over';
+    const p = fx.getImageData(0, 0, W, H).data;
     let x0 = W, y0 = H, x1 = 0, y1 = 0;
-    for (let y = 0; y < H; y++) {
-      const my = Math.min(h - 1, (y * k) | 0);
-      for (let x = 0; x < W; x++) {
-        const i = (y * W + x) * 4;
-        if (p[i + 3] === 0) continue;
-        const mx = Math.min(w - 1, (x * k) | 0), l = lab[my * w + mx];
-        // at the outline the small copy is fainter than the photo: a pixel there goes with the shape beside it, not
-        // out ("more of the face is removed" — the cheek, an ear, the hair went, ~6 px all round a phone photo)
-        if (l < 0 ? !keptNear(mx, my) : !keep[l]) { p[i + 3] = 0; continue; }
-        if (p[i + 3] > 20) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
-      }
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      if (p[(y * W + x) * 4 + 3] > 20) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
     }
     if (x1 <= x0 || y1 <= y0) return { c: cv, x0: 0, y0: 0 };
-    fx.putImageData(d, 0, 0);
     const pad = Math.round(Math.max(x1 - x0, y1 - y0) * 0.02);
     x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(W - 1, x1 + pad); y1 = Math.min(H - 1, y1 + 1);
     const out = canvas(x1 - x0 + 1, y1 - y0 + 1);
