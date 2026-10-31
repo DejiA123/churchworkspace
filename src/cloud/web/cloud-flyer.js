@@ -4524,7 +4524,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     } catch (e) { /* (a picture another site sent cannot be read back: not judged by this) */ }
     return flaws;
   }
-  const designKey = (d) => [d.look, ((d.layers || []).find((l) => l.type === 'bg') || {}).img || '', d.w + 'x' + d.h, F.tries].join('|');
+  const designKey = (d) => [d.look, ((d.layers || []).find((l) => l.type === 'bg') || {}).img || '', d.w + 'x' + d.h, F.tries, d.batch || 0].join('|');
   /* the board as the checks leave it: the flawed off it (two always stay), the art director's best first */
   function checkBoard() {
     const J = F.judge || (F.judge = { tries: -1, scores: new Map(), flaws: new Map(), busy: false, model: '', why: '' });
@@ -4547,7 +4547,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     F.removed = F.designs.filter((d) => !keep.includes(d)).map((d) => ({ look: d.look, flaws: d.flaws, score: d.score, issue: d.issue }));
     // the art director's order: the best first — the colour picked under the live preview stays first unless it scored low
     const first = F.mode !== 'thumb' && keep[0] && RADIANT_WAYS[keep[0].look] && keep[0].look === F.way && !(keep[0].score != null && keep[0].score < 7) ? keep[0] : null;
-    const rest = keep.filter((d) => d !== first).map((d, i) => [d, i]).sort((a, b) => ((b[0].score == null ? 6.5 : b[0].score) - (a[0].score == null ? 6.5 : a[0].score)) || a[1] - b[1]).map((x) => x[0]);
+    // (best first within each batch the feed brought in: what was already scrolled past stays where it was)
+    const rest = keep.filter((d) => d !== first).map((d, i) => [d, i]).sort((a, b) => ((a[0].batch || 0) - (b[0].batch || 0)) || ((b[0].score == null ? 6.5 : b[0].score) - (a[0].score == null ? 6.5 : a[0].score)) || a[1] - b[1]).map((x) => x[0]);
     F.designs = (first ? [first] : []).concat(rest);
   }
   let judgeT = 0;
@@ -4632,7 +4633,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const v = F.board.variants[look];
       const pal = RADIANT_WAYS[look] ? RADIANT_WAYS[look].pal : STD_FAMILY.includes(look) ? (F.board.pals && F.board.pals[look]) || F.pal
         : tp ? (tp === 'own' ? F.pal : tp) : (i === 0 ? F.pal : v.pal || SIGNATURE[look] || F.pal);
-      return Object.assign(buildScene({ look, w: sz.w, h: sz.h, pal, dir: F.dir, fields: F.fields, speakers: speakersFor(i), logo: IMGS.has('logo') ? 'logo' : null, bg: bg && bg.key, variant: v }), { madeBy: (bg && bg.by) || '' });
+      return Object.assign(buildScene({ look, w: sz.w, h: sz.h, pal, dir: F.dir, fields: F.fields, speakers: speakersFor(i), logo: IMGS.has('logo') ? 'logo' : null, bg: bg && bg.key, variant: v }), { madeBy: (bg && bg.by) || '', batch: Math.floor(i / BOARD_N) });
     });
     // the preacher painted into the scene (paintPreacherIn): first on the board, labelled so the face is checked
     const pin = (F.paintedIn || []).map((b) => Object.assign(buildScene({ look: b.look, painted: true, w: sz.w, h: sz.h, pal: F.pal, dir: F.dir, fields: F.fields, speakers: speakersFor(0), logo: IMGS.has('logo') ? 'logo' : null, bg: b.key, variant: F.board.variants[b.look] }), { label: 'AI scene · check the face', madeBy: b.by || '' }));
@@ -4697,19 +4698,22 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       ${!busy && F.status && F.status.note ? `<p class="fs-allow">${esc(F.status.note)}</p>` : ''}
       ${busy ? '' : judgeLine()}
       <div class="fs-grid">${busy ? '<div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div><div class="fs-ph"></div>' : F.designs.map((d, i) => `<button type="button" class="fs-card" data-i="${i}"><canvas></canvas><span class="fs-card-row">${d.score != null ? `<em class="fs-score${d.score >= 8 ? ' hi' : ''}" title="${escAttr(d.issue || '')}">${ic('spark')}${esc(String(Math.round(d.score)))}/10</em>` : ''}<small>${esc(d.label || LOOK_NAMES[d.look] || d.look)}</small><span class="fs-card-zoom" data-view="${i}" role="button" aria-label="See it big">${ic('zoom')}</span></span>${madeByTag(d.madeBy)}</button>`).join('')}</div>
-      ${!busy && !thumb && F.board && F.board.shown < F.board.order.length ? `<button type="button" class="fs-ghost fs-more" data-act="more">${ic('layout')}<span>${BOARD_N} more designs</span></button>` : ''}
+      ${busy ? '' : moreLeft() ? `<button type="button" class="fs-ghost fs-more" data-act="more">${ic('layout')}<span>${thumb ? 'More thumbnails' : `${BOARD_N} more designs`}</span></button>`
+        : `<p class="fs-end">That’s every design${thumb ? '' : ' for now'} — tap <b>New pictures</b> for fresh ones.</p>`}
     </div>`;
     // one board at a time: "New pictures" waits until this one is painted (each tap used to start five more paintings)
     P.foot.innerHTML = `<button type="button" class="fs-ghost" data-act="back">${ic('back')}<span>${thumb ? 'Back' : 'Details'}</span></button><button type="button" class="fs-ghost" data-act="again"${F.painting > 0 || busy ? ' disabled' : ''}>${ic('refresh')}<span>New pictures</span></button>`;
     paintThumbs();
     if (!busy) judgeSoon();
+    // ►► A FEED. ◄◄ "When I scroll down… it automatically clicks the 4 more thing, like a Facebook news feed": near
+    // the foot of the board the next designs come in by themselves (the button stays, for a screen that never scrolls)
+    P.body.onscroll = () => {
+      const b = P.body;
+      if (F.step !== 'pick' || !b.scrollTop || b.scrollTop + b.clientHeight < b.scrollHeight - 320) return;
+      if (b.querySelector('[data-act="more"]')) showMore();
+    };
     P.body.onclick = (e) => {
-      if (e.target.closest('[data-act="more"]')) {
-        const from = F.board.shown; F.board.shown = Math.min(F.board.order.length, from + BOARD_N);
-        markSeen(F.board.order.slice(from, F.board.shown)); rebuildDesigns(); drawPick();
-        morePictures(F.board.shown - from);
-        return;
-      }
+      if (e.target.closest('[data-act="more"]')) { showMore(); return; }
       const z = e.target.closest('[data-view]'); if (z) { const d = F.designs[+z.dataset.view]; if (d) viewFlyer(d); return; }
       const c = e.target.closest('.fs-card'); if (c) { const d = F.designs[+c.dataset.i]; if (!thumb) markLiked(d && d.look, 1); openEditor(d); }
     };
@@ -4718,6 +4722,18 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       if (b.dataset.act === 'back') { F.tries++; if (thumb) { F.step = 'tmake'; drawThumbMake(); } else { F.step = 'make'; drawMake(); } }
       if (b.dataset.act === 'again' && !(F.painting > 0) && !b.disabled) { if (thumb) makeThumbs(); else makeFlyers(); }
     };
+  }
+  /* the next designs on the board: four more flyers, or every thumbnail look again in other colours */
+  const moreLeft = () => (F.mode === 'thumb' ? thRounds() < TH_ROUNDS : !!(F.board && F.board.shown < F.board.order.length));
+  let moreAt = 0;
+  function showMore() {
+    // (one batch at a time: a fling to the foot does not bring in three)
+    if (!moreLeft() || Date.now() - moreAt < 800) return;
+    moreAt = Date.now();
+    if (F.mode === 'thumb') { F.th.rounds = thRounds() + 1; F.th.roundsAt = F.tries; rebuildThumbs(); return; }
+    const from = F.board.shown; F.board.shown = Math.min(F.board.order.length, from + BOARD_N);
+    markSeen(F.board.order.slice(from, F.board.shown)); rebuildDesigns(); drawPick();
+    morePictures(F.board.shown - from);
   }
   /*
    * ►► SEE IT BIG. ◄◄ "I should be able to zoom in to the flyers that were generated too, to see closer." The flyer
@@ -5321,6 +5337,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   }
 
   /* the board: twelve YouTube looks, the preacher and the words on each, the painted pictures shared out */
+  /* how many rounds of the thumbnail looks the feed has brought in (one until the board is scrolled to its end) */
+  const TH_ROUNDS = 3;
+  const thRounds = () => (F.th.roundsAt === F.tries ? F.th.rounds || 1 : 1);
   function rebuildThumbs() {
     const t = F.th;
     const order = t.person
@@ -5334,17 +5353,21 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     if (lead) { order.splice(order.indexOf(lead), 1); order.unshift(lead); }
     const ai = t.bgs.filter((b) => !b.proc), stock = t.bgs.filter((b) => b.proc);
     let n = 0;
-    F.designs = order.map((look, i) => {
-      const pal = lead && i === 0 ? THUMB_PAL[look] || t.pal : i === (lead ? 1 : 0) && t.pal ? t.pal : THUMB_PAL[look] || t.pal;
+    F.designs = [];
+    // the feed's rounds (thRounds): each round after the first is every look again in another look's colours
+    // (5 places on, never its own), on the next of the AI's pictures
+    for (let r = 0; r < thRounds(); r++) order.forEach((look, i) => {
+      const pal = r ? THUMB_PAL[order[(i + r * 5) % order.length]] || t.pal
+        : lead && i === 0 ? THUMB_PAL[look] || t.pal : i === (lead ? 1 : 0) && t.pal ? t.pal : THUMB_PAL[look] || t.pal;
       let bg = null;
       if (painted.has(look)) {
         bg = ai.length ? ai[n % ai.length] : stock.length && n < stock.length ? stock[n] : null;
         n++;
         // nothing painted yet: a picture of light in this look's own colours, made here
-        if (!bg) { const key = 'thpr:' + look + ':' + F.tries; if (!IMGS.has(key)) IMGS.set(key, proceduralBg(TH.w, TH.h, pal, F.tries * 31 + i * 7)); bg = { key, by: '' }; }
+        if (!bg) { const key = 'thpr:' + look + ':' + F.tries + (r ? ':' + r : ''); if (!IMGS.has(key)) IMGS.set(key, proceduralBg(TH.w, TH.h, pal, F.tries * 31 + i * 7 + r * 101)); bg = { key, by: '' }; }
       }
-      return Object.assign(buildScene({ look, w: TH.w, h: TH.h, pal, dir: F.dir || {}, fields: fieldsNow(), speakers: thumbSpeakers(),
-        logo: logoNow(), bg: bg ? bg.key : null, frame: t.frameKey, face: t.face }), { madeBy: (bg && bg.by) || '' });
+      F.designs.push(Object.assign(buildScene({ look, w: TH.w, h: TH.h, pal, dir: F.dir || {}, fields: fieldsNow(), speakers: thumbSpeakers(),
+        logo: logoNow(), bg: bg ? bg.key : null, frame: t.frameKey, face: t.face }), { madeBy: (bg && bg.by) || '', batch: r }));
     });
     checkBoard();
     if (F.step === 'pick') { drawPick(); judgeSoon(); }

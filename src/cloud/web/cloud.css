@@ -4384,6 +4384,7 @@ html, body.mw-cloud, body.mw-cloud .cloud-home .ch-scroll, body.mw-cloud #cloudG
 .fs-kit .fs-ghost { width: 100%; margin-top: 8px; }
 /* the rest of the designs, after the board's ten */
 .fs-pick .fs-more { display: flex; width: 100%; margin-top: 14px; }
+.fs-end { margin: 18px 4px 6px; text-align: center; font-size: 13px; color: #6b6580; }
 .fs-inspo em { position: absolute; left: 4px; bottom: 4px; padding: 1px 5px; border-radius: 6px; font-style: normal; font-size: 10px; font-weight: 700; color: #fff; background: rgba(22, 163, 74, .9); }
 .fs-inspo img { object-fit: cover; object-position: center; }
 

@@ -208,6 +208,21 @@ async function until(page, fn, arg, ms = 30000) {
     if (process.env.MW_THUMB_VIDEO) check(s && s.person, 'the preacher is cut out of the moment (a real recording)', s && s.person);
     s = await until(page, () => ({ ok: window.__painted >= 3 && window.MWFlyerStudio._state.th.bgs.some((b) => /^tha:/.test(b.key)), painted: window.__painted }), null, 20000);
     check(s && s.ok, 'the AI paints backgrounds for the board (three)', s);
+    // the feed: scrolled to its foot, every look comes again in other colours by itself (nothing tapped), after the
+    // ones already seen; scrolled on, it says that was all
+    const firstTh = await page.evaluate(() => window.MWFlyerStudio._state.designs.map((d) => d.look));
+    const thFoot = () => page.evaluate(() => { const b = document.querySelector('.cp-thumb .cp-body'); b.scrollTop = b.scrollHeight; });
+    await thFoot();
+    s = await until(page, (n) => {
+      const st = window.MWFlyerStudio._state, key = (d) => JSON.stringify(d.pal);
+      const two = st.designs.filter((d) => d.batch === 1), one = new Map(st.designs.filter((d) => !d.batch).map((d) => [d.look, key(d)]));
+      return { ok: st.designs.length > n, n: st.designs.length, first: st.designs.slice(0, n).map((d) => d.look), two: two.length, recoloured: two.filter((d) => one.get(d.look) !== key(d)).length };
+    }, firstTh.length, 20000);
+    check(s && s.ok && s.two >= 10 && s.recoloured === s.two && firstTh.every((l, i) => s.first[i] === l), 'scrolled to the foot, the looks come again in other colours by themselves, after the ones already seen', { firstTh, s });
+    for (let k = 0; k < 6 && await page.evaluate(() => !!document.querySelector('.cp-thumb [data-act="more"]')); k++) { await sleep(900); await thFoot(); }
+    s = await page.evaluate(() => { const end = document.querySelector('.cp-thumb .fs-end'); return { more: !!document.querySelector('.cp-thumb [data-act="more"]'), end: end && end.textContent, n: window.MWFlyerStudio._state.designs.length }; });
+    check(!s.more && /every design/.test(s.end || '') && s.n <= 36, 'kept scrolling, it stops after three rounds and says that was all', s);
+    await page.evaluate(() => { document.querySelector('.cp-thumb .cp-body').scrollTop = 0; });
     await sleep(800);
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'thumb-2-board.png'), fullPage: false });
     if (SHOTS) {

@@ -156,6 +156,16 @@ async function until(page, fn, arg, ms = 30000) {
     check(s && s.removed.length === 1 && s.looks.length === 3 && !s.scores.some((x) => x <= 5), 'what it scores 5 or less comes off the board', s);
     check(s && s.looks[0] === 'radiantgold' && s.scores[1] >= s.scores[2], 'the best first (the colour picked stays first: it scored well)', s);
     check(s && s.badges.length === 3 && s.badges.every((b) => /\/10$/.test(b)) && /taken off/.test(s.line), 'each card says its score, and the line says one was taken off', s);
+    // the feed: scrolled to its foot, the board brings in the next designs by itself (nothing tapped), and what was
+    // already seen stays where it was
+    const first = s.looks;
+    const toFoot = () => page.evaluate(() => { const b = document.querySelector('.cp-flyer .cp-body'); b.scrollTop = b.scrollHeight; });
+    await toFoot();
+    s = await until(page, (n) => { const st = window.MWFlyerStudio._state; return { ok: st.designs.length > n && !(st.judge && st.judge.busy), looks: st.designs.map((d) => d.look), shown: st.board.shown }; }, first.length, 20000);
+    check(s && s.ok && s.shown === 8 && first.every((l, i) => s.looks[i] === l), 'scrolled to the foot, four more designs come in by themselves, after the ones already seen', { first, s });
+    for (let k = 0; k < 12 && await page.evaluate(() => !!document.querySelector('.cp-flyer [data-act="more"]')); k++) { await page.waitForTimeout(900); await toFoot(); }
+    s = await page.evaluate(() => { const st = window.MWFlyerStudio._state, end = document.querySelector('.cp-flyer .fs-end'); return { shown: st.board.shown, all: st.board.order.length, end: end && end.textContent }; });
+    check(s.shown === s.all && /every design/.test(s.end || ''), 'kept scrolling, it brings in every design, then says that was all', s);
     // the rules, on a design: words off the page, words on words
     s = await page.evaluate(() => {
       const st = window.MWFlyerStudio._state, d = JSON.parse(JSON.stringify(st.designs[0]));
