@@ -209,6 +209,13 @@ async function waitUp() {
       }));
       const all = await st();
       check(all.tabs === 2 && all.rows > 2 && all.fixed === 2, 'the captions window offers "All lines | ✍ Fixed" when lines were fixed', all);
+      // "The box after fix sure ones is black, can't see the text": the AI's Exact words / Tidy grammar are two
+      // buttons, not an iPhone dropdown in the sliding row
+      const gm = await page.evaluate(() => {
+        const s = document.getElementById('capGrammarMode'), c = s.nextElementSibling;
+        return { hidden: getComputedStyle(s).display === 'none', chips: !!(c && c.classList.contains('cloud-chips')), names: c ? [...c.children].map((b) => b.textContent) : [], on: c ? [...c.querySelectorAll('.on')].map((b) => b.textContent) : [] };
+      });
+      check(gm.hidden && gm.chips && gm.names.join('|') === 'Exact words|Tidy grammar' && gm.on.join() === 'Exact words', 'the AI’s Exact words / Tidy grammar are two buttons you can read, not a dropdown', gm);
       if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'fixed-all.png') });
       await page.locator('#capList [data-capfix="fixed"]').tap();
       await sleep(300);

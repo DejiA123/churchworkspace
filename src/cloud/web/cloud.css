@@ -1377,6 +1377,9 @@ body.mw-cloud #cloudPass:focus { border-color: #1f6fe0; box-shadow: 0 0 0 3px rg
   body.mw-cloud #capModal .cap-fix-sep { flex: none; align-self: center; width: 1px; height: 22px; margin: 0 2px; }
   body.mw-cloud #capModal .cap-g-autolab { flex: none; gap: 6px; font-size: 13.5px; color: var(--ph-text); }
   body.mw-cloud #capModal .cap-g-mode { flex: none; height: 36px; padding: 0 28px 0 10px; font-size: 16px; border-radius: 10px; }
+  /* Exact words | Tidy grammar: two buttons, each its own width, in the row that slides */
+  body.mw-cloud #capModal .cap-fix-row .cloud-chips { flex: none; height: 38px; }
+  body.mw-cloud #capModal .cap-fix-row .cloud-chips button { flex: none; padding: 0 12px; font-size: 13.5px; white-space: nowrap; }
 
   /* the player */
   body.mw-cloud #capModal .cap-player { flex: none; gap: 8px 10px; margin: 0; padding: 10px 16px; border-width: 0 0 1px; border-radius: 0; }
