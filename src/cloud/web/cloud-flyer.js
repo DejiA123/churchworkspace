@@ -224,6 +224,47 @@
   const uid = () => 'l' + Math.random().toString(36).slice(2, 9);
   function rng(seed) { let s = (seed >>> 0) || 1; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
   function canvas(w, h) { const c = document.createElement('canvas'); c.width = Math.max(1, Math.ceil(w)); c.height = Math.max(1, Math.ceil(h)); return c; }
+  /*
+   * ►► A BUDGET FOR CANVASES. ◄◄ "This page is buggy": on the board the words, the people and the logo were gone
+   * from every design — only what is drawn straight onto it (the light, the bars, the apps) was there. An iPhone
+   * gives a page so much canvas memory and, past it, every new canvas is blank. The caches kept hundreds of
+   * canvases (160 words, 30 people, 24 pictures — some at the size a flyer is seen big, 3000 px: 45 MB for one
+   * picture). Now each cache keeps to a budget of pixels, the least used going first, and a canvas that leaves
+   * one — or was only needed for a moment — gives its memory back at once (0 × 0) instead of whenever the
+   * browser collects it.
+   */
+  function freeCanvas(c) { if (c && c.tagName === 'CANVAS') { c.width = 0; c.height = 0; } }
+  /*
+   * The stand-in pictures made here for a board while the AI paints (proc:, thpr: — a canvas each, about a
+   * megapixel) were kept for good: every board's, three rounds of twelve for a thumbnail feed. A new board lets the
+   * old boards' go — all but one in the design being edited.
+   */
+  function dropOldStandIns() {
+    const inUse = new Set(((F.scene && F.scene.layers) || []).map((l) => l.img).filter(Boolean));
+    for (const k of [...IMGS.keys()]) {
+      const m = /^(?:proc:(\d+)|thpr:[^:]+:(\d+)(?::\d+)?)$/.exec(k);
+      if (!m || +(m[1] || m[2]) === F.tries || inUse.has(k)) continue;
+      freeCanvas(IMGS.get(k)); IMGS.delete(k);
+    }
+  }
+  function canvasCache(maxPx) {
+    const m = new Map(); let px = 0;
+    const cv = (v) => (v && v.tagName === 'CANVAS' ? v : v && v.c);
+    const size = (v) => { const c = cv(v); return c ? c.width * c.height : 0; };
+    return {
+      has: (k) => m.has(k),
+      get: (k) => { const v = m.get(k); if (v !== undefined) { m.delete(k); m.set(k, v); } return v; },
+      set: (k, v) => {
+        if (m.has(k)) { px -= size(m.get(k)); m.delete(k); }
+        m.set(k, v); px += size(v);
+        // (the newest stays, even alone over the budget: it is about to be drawn)
+        while (px > maxPx && m.size > 1) { const [k0, v0] = m.entries().next().value; m.delete(k0); px -= size(v0); freeCanvas(cv(v0)); }
+      },
+      clear: () => { for (const v of m.values()) freeCanvas(cv(v)); m.clear(); px = 0; },
+      get size() { return m.size; },
+      get px() { return px; },
+    };
+  }
   function hexRgb(h) { const m = /^#?([0-9a-f]{6})$/i.exec(String(h || '')); const n = m ? parseInt(m[1], 16) : 0; return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
   function rgba(h, a) { const [r, g, b] = hexRgb(h); return `rgba(${r},${g},${b},${a})`; }
   function mix(h1, h2, t) { const a = hexRgb(h1), b = hexRgb(h2); return '#' + a.map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, '0')).join(''); }
@@ -331,7 +372,7 @@
    * accent in the light — so any photo comes out orange-and-gold, or
    * purple-and-pink, like the rest of the flyer.
    */
-  const adjCache = new Map();
+  const adjCache = canvasCache(6e6);
   function duoLut(stops) {
     const lut = new Float32Array(256 * 3);
     for (let v = 0; v < 256; v++) {
@@ -354,6 +395,7 @@
       const f = clamp(1 - a.blur / 30, 0.04, 1), s = canvas(w * f, h * f);
       s.getContext('2d').drawImage(c, 0, 0, s.width, s.height);
       x.clearRect(0, 0, w, h); x.drawImage(s, 0, 0, w, h);
+      freeCanvas(s);
     }
     if (a.bright || a.contrast || a.sat || a.gray || a.duo) {
       const d = x.getImageData(0, 0, w, h), p = d.data;
@@ -372,7 +414,6 @@
       }
       x.putImageData(d, 0, 0);
     }
-    if (adjCache.size > 24) adjCache.delete(adjCache.keys().next().value);
     adjCache.set(key, c);
     return c;
   }
@@ -845,7 +886,7 @@
    * how tall the capitals may be, `stretch` makes condensed letters taller.
    * Drawn on its own canvas (cached) at the flyer's output sharpness.
    */
-  const txtCache = new Map();
+  const txtCache = canvasCache(8e6);
   let measC = null;
   function textCanvas(L) {
     const key = JSON.stringify([Q, L.text, L.font, L.size, L.fit, L.maxH, L.maxW, L.stretch, L.wide, L.fill, L.stroke, L.strokeColor, L.extrude, L.extrudeColor, L.bevel, L.edge, L.edgeColor, L.glow, L.shadow, L.shadowColor, L.letter, L.align, L.line, L.slant, L.upper, L.grain, L.speck, L.erode, L.imgFill, L.imgFillA, L.imgFill && IMGS.has(L.imgFill)]);
@@ -967,14 +1008,13 @@
       x.drawImage(face, 0, 0);
     }
     const out = { c, w: W, h: H, ink: { w: inkW_, h: inkH_ }, pad, size };
-    if (txtCache.size > 160) txtCache.delete(txtCache.keys().next().value);
     txtCache.set(key, out);
     return out;
   }
 
   /* ----------------------------------------------------------------- images */
 
-  const picCache = new Map();
+  const picCache = canvasCache(10e6);
   const srcOf = (L) => L.src || (L.crop && L.crop < 1 ? { x: 0, y: 0, w: 1, h: L.crop } : null);
   /*
    * A PICTURE LAYER — a person, mostly. `src` is the part of the photo shown
@@ -1034,6 +1074,7 @@
       tx.fillStyle = g; tx.fillRect(0, 0, w, h);
       tx.globalCompositeOperation = 'destination-in'; tx.drawImage(layer, 0, 0);
       lx.clearRect(0, 0, w, h); lx.drawImage(t, 0, 0);
+      freeCanvas(t);
     }
     if (L.rim) {   // the edge lit from behind: the outline minus the outline pulled in
       const r = Math.max(1.5, h * 0.004 * (L.rimW || 1));
@@ -1047,6 +1088,7 @@
       const g = tx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, 'rgba(0,0,0,1)'); g.addColorStop(0.55, 'rgba(0,0,0,.5)'); g.addColorStop(1, 'rgba(0,0,0,0)');
       tx.fillStyle = g; tx.fillRect(0, 0, w, h);
       lx.globalCompositeOperation = 'screen'; lx.globalAlpha = 0.9; lx.filter = `blur(${Math.max(0.6, r * 0.45)}px)`; lx.drawImage(t, 0, 0); lx.filter = 'none'; lx.globalAlpha = 1; lx.globalCompositeOperation = 'source-over';
+      freeCanvas(e); freeCanvas(t);
     }
     if (L.fade) {
       /* the bottom of a person melts into SHADOW, as a designer does it — it
@@ -1070,13 +1112,15 @@
       for (let a = 0; a < 16; a++) ox.drawImage(layer, pad + Math.cos(a / 8 * Math.PI) * 9 * Q, pad + Math.sin(a / 8 * Math.PI) * 9 * Q);
       ox.globalCompositeOperation = 'source-in'; ox.fillStyle = L.outline; ox.fillRect(0, 0, o.width, o.height);
       x.drawImage(o, 0, 0);
+      freeCanvas(o);
     }
     if (L.shade) { x.save(); x.shadowColor = L.shade; x.shadowBlur = Math.max(24, L.h * 0.05) * Q; x.drawImage(layer, pad, pad); x.restore(); }
     if (L.glow) { x.save(); x.shadowColor = L.glow; x.shadowBlur = Math.max(30, L.h * 0.07) * Q; x.drawImage(layer, pad, pad); x.restore(); }
     x.drawImage(layer, pad, pad);
     const out = { c, pad };
-    if (picCache.size > 30) picCache.delete(picCache.keys().next().value);
     picCache.set(key, out);
+    // (what it was made from, only needed for a moment)
+    [pic !== im && pic, layer].forEach(freeCanvas);
     return out;
   }
 
@@ -1421,7 +1465,8 @@
       const st0 = alphaStats(c);
       if (st0.clear < 0.04) return { img: c, meta: null };   // a plain photo, nothing cut out: leave it
       let lm = null;
-      try { if (root.FlyerAI && root.FlyerAI.poseOf) lm = await root.FlyerAI.poseOf(onGray(c)); } catch (e) { lm = null; }
+      const g = onGray(c);
+      try { if (root.FlyerAI && root.FlyerAI.poseOf) lm = await root.FlyerAI.poseOf(g); } catch (e) { lm = null; } finally { freeCanvas(g); }
       // (the pose places them on the page — and nothing more: trimming the cut-out to an outline drawn from it, an oval
       //  round the nose, took the far cheek and the back of the Bishop's head when he sang side on — "his face is too
       //  slim, parts still cut off". The cut-out is used as it is in the bank, where it can be seen and fixed.)
@@ -1429,6 +1474,7 @@
       // in My church": nothing is taken from it here — no bits dropped, no edge smoothed, no stop above a lectern's
       // glass. Only the empty margin round it is trimmed. (My church is where a cut-out is checked and fixed.)
       const t = cropToPerson(c);
+      if (t.c !== c) freeCanvas(c);   // (the trimmed copy is what is kept)
       const meta = metaOf(t.c, lm, t.x0, t.y0, W0, H0);
       return { img: t.c, meta };
     })().catch(() => ({ img: im, meta: null }));
@@ -3718,7 +3764,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     return t.c === c && !t.x0 && !t.y0 ? src : t.c.toDataURL('image/png');
   }
 
-  root.MWFlyer = { tidyCut, preparePerson, prepareRaw, photoMeta, hero, framedSrc, SIMPLE, META, HD, render, buildScene, loadFonts, IMGS, loadImg, proceduralBg, LAYOUTS, LOOK_NAMES, SIGNATURE, RADIANT_WAYS, FONTS, textCanvas, boxOf, Dates };
+  root.MWFlyer = { tidyCut, preparePerson, prepareRaw, photoMeta, hero, framedSrc, SIMPLE, META, HD, render, buildScene, loadFonts, IMGS, loadImg, proceduralBg, LAYOUTS, LOOK_NAMES, SIGNATURE, RADIANT_WAYS, FONTS, textCanvas, boxOf, Dates, _canvasPx: () => ({ txt: txtCache.px, pic: picCache.px, adj: adjCache.px }) };
 
   /* ================================================================== THE UI */
 
@@ -4167,6 +4213,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     // "New pictures" keeps the AI-lettered title it already has (another would spend the day's dearest painting again)
     const keepLetter = F.lettered && F.lettered.title === String(F.fields.title || '').trim() ? F.lettered : null;
     F.step = 'pick'; F.bgs = []; F.designs = []; F.dir = null; F.tries++; F.paintedIn = []; F.lettered = keepLetter;
+    dropOldStandIns();
     const tryNo = F.tries;
     drawPick();
     await loadFonts();
@@ -4619,7 +4666,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       x.drawImage(cv, px, py, cw, ch); cv.width = cv.height = 1;
       tag(px + 4, py + 4, String(n + 1), '#000000');
     });
-    return c.toDataURL('image/jpeg', 0.82);
+    try { return c.toDataURL('image/jpeg', 0.82); } finally { freeCanvas(c); }
   }
 
   /* the light each look is built for (the reference it copies): Join us is purple, Upper Room is fire, the gold line-up gold… */
@@ -4704,6 +4751,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     P.setTitle('Pick one');
     P.el.classList.remove('fs-editing');
     const busy = !F.designs.length, thumb = F.mode === 'thumb';
+    // (the cards about to be drawn again give their memory back now, not when the browser gets round to it)
+    $$('.fs-card canvas', P.body).forEach(freeCanvas);
     P.body.innerHTML = `<div class="fs-pick${thumb ? ' th-pick' : ''}">
       <p class="fs-status">${busy ? (thumb ? '<i class="fs-spin"></i> Getting the moment ready…' : 'The AI is reading your event…') : thumb && F.th.cutting ? '<i class="fs-spin"></i> Cutting the preacher out of the picture…' : F.painting > 0 ? `<i class="fs-spin"></i> Painting ${F.painting} picture${F.painting > 1 ? 's' : ''} with AI — they appear as they’re ready` : 'Tap one to edit every part of it'}</p>
       ${!busy && F.status && F.status.note ? `<p class="fs-allow">${esc(F.status.note)}</p>` : ''}
@@ -4730,7 +4779,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     };
     P.foot.onclick = (e) => {
       const b = e.target.closest('[data-act]'); if (!b) return;
-      if (b.dataset.act === 'back') { F.tries++; if (thumb) { F.step = 'tmake'; drawThumbMake(); } else { F.step = 'make'; drawMake(); } }
+      if (b.dataset.act === 'back') { F.tries++; dropOldStandIns(); if (thumb) { F.step = 'tmake'; drawThumbMake(); } else { F.step = 'make'; drawMake(); } }
       if (b.dataset.act === 'again' && !(F.painting > 0) && !b.disabled) { if (thumb) makeThumbs(); else makeFlyers(); }
     };
   }
@@ -5287,6 +5336,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const t = F.th, src = thumbPickSrc();
     if (!src || !String(t.line || '').trim()) return;
     F.tries++;
+    dropOldStandIns();
     const tryNo = F.tries;
     // a bank photo: the preacher already cut out, the video's moment (when there is one) only behind them
     const fr = src.bank ? src.bgFrom : src;

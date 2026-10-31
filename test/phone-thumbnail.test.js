@@ -307,6 +307,10 @@ async function until(page, fn, arg, ms = 30000) {
     await sleep(300);
     s = await page.evaluate(() => ({ big: !!document.querySelector('.fs-vb'), on: !!document.querySelector('.cp-thumb .th-bank .th-bp.on'), behind: !!document.querySelector('.cp-thumb .th-fr.th-behind'), bank: !!window.MWFlyerStudio._state.th.bank }));
     check(!s.big && s.on && s.behind && s.bank, 'Use this photo chooses it (the big view closes), the video’s moment marked as going behind it', s);
+    // "This page is buggy" — the words, people and logo gone from a board: an iPhone's canvas memory used up. A new
+    // board lets the earlier boards' stand-in pictures (a canvas each, kept for good before) go
+    const standIns = () => page.evaluate(() => { const t = window.MWFlyerStudio._state.tries; return [...window.MWFlyer.IMGS.keys()].filter((k) => /^thpr:/.test(k)).map((k) => +k.split(':')[2] === t ? 'now' : 'old'); });
+    const si0 = await standIns();
     await page.locator('.cp-thumb [data-act="tmake"]').tap();
     s = await until(page, () => {
       const st = window.MWFlyerStudio._state;
@@ -314,6 +318,9 @@ async function until(page, fn, arg, ms = 30000) {
       return { ok: st.designs.length >= 11 && !st.th.cutting && /^kp:/.test(st.th.person) && ims.filter((n) => n > 0).length >= 10, person: st.th.person, n: st.designs.length, ims };
     }, null, 60000);
     check(s && s.ok, 'Make puts the bank photo on the designs (the preacher’s own, so “Their photos” swaps it in the editor)', s);
+    const si1 = await standIns();
+    // (Back from a board is a new one too: none of the first board's were left by then)
+    check(!si0.includes('old') && !si1.includes('old') && si1.length <= 12, 'a new board lets the earlier boards’ stand-in pictures go (they used up an iPhone’s canvas memory)', { before: si0, after: si1 });
     if (SHOTS) {
       const u = await page.evaluate(() => window.MWFlyer.render(window.MWFlyerStudio._state.designs[0], document.createElement('canvas'), 1).toDataURL('image/jpeg', 0.9));
       fs.writeFileSync(path.join(SHOTS, 'thumb-bank.jpg'), Buffer.from(u.split(',')[1], 'base64'));
