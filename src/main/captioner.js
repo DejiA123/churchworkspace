@@ -360,7 +360,9 @@ const FONT_LIST = [
   { name: 'Arial', family: 'Arial', file: null },
 ];
 const FONTS = FONT_LIST.reduce((m, f) => { m[f.name] = f.family; return m; }, {});
-const SIZE_PCT = { xs: 0.036, s: 0.045, m: 0.058, l: 0.072, xl: 0.088 };
+/* ("M is too big, S should be smaller, XS should be smaller": every step about a quarter smaller —
+ *  the same table as caplayout.js, which the preview and the export's rasteriser draw with) */
+const SIZE_PCT = { xs: 0.026, s: 0.032, m: 0.040, l: 0.050, xl: 0.062 };
 
 /* ------------------------- how a caption line ARRIVES -------------------------
  *

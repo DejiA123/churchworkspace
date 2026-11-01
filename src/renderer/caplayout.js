@@ -26,7 +26,9 @@
 window.CapLayout = (() => {
   /** Font height as a fraction of the frame height. MUST match SIZE_PCT in
    *  src/main/captioner.js — that is the .ass fallback's copy of this table. */
-  const SIZE_PCT = { xs: 0.036, s: 0.045, m: 0.058, l: 0.072, xl: 0.088 };
+  /* ("The caption size needs tweaking: M is too big, S should be smaller, XS should be smaller." Every step
+   *  about a quarter smaller than it was — S is under the old XS, M about the old S — 1.25x apart.) */
+  const SIZE_PCT = { xs: 0.026, s: 0.032, m: 0.040, l: 0.050, xl: 0.062 };
   /** How wide the caption block is, as a fraction of the frame — the thing the
    *  drag handles on the preview change. */
   const DEFAULT_WIDTH = 0.86;
@@ -126,8 +128,8 @@ window.CapLayout = (() => {
    */
   /** The caption's font height as a fraction of the frame.
    *
-   *  Four named steps, and — when the operator has asked for one — an exact
-   *  figure. S/M/L/XL are 1.3x apart, which is a big jump when the size is being
+   *  Five named steps, and — when the operator has asked for one — an exact
+   *  figure. XS/S/M/L/XL are 1.25x apart, which is a big jump when the size is being
    *  matched to something (a house style, another channel's look, the size the
    *  last video went out at): the answer is often between two of them, and
    *  before `sizePct` there was simply no way to say so. */
