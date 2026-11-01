@@ -21,7 +21,9 @@
  *       caption names nobody; names given on the post are used, and remembered
  *   [11] bulk upload: several picked on the phone at once — a tile each while
  *       sending, then a card per post with its own AI caption to edit, its own
- *       time; Schedule makes one post each, with its own caption
+ *       time; Schedule makes one post each, with its own caption — and each
+ *       card rewritten on its own as often as you like (Rewrite, Shorter, More
+ *       hype), with Back through its earlier versions
  *   [9] "I selected a video from this phone but it did not show up": on a slow
  *       connection the video shows AT ONCE, played from the phone, with how far
  *       the sending has got — then the caption is written when it lands
@@ -60,6 +62,7 @@ function aiServer() {
       let out;
       if (vision) { AI.calls.push('read'); out = FLYER; }
       else if (/WHAT TO DO: Make it SHORTER/.test(text)) { AI.calls.push('shorten'); out = { title: 'Night of Worship', caption: 'Night of Worship, Friday 24 October, 7 pm. 🙌\n\n#ThePowerHouse #Worship' }; }
+      else if (/WHAT TO DO: Write a FRESH version/.test(text)) { AI.calls.push('rewrite'); AI.rewrites = (AI.rewrites || 0) + 1; out = { title: 'Fresh take ' + AI.rewrites, caption: `Fresh take ${AI.rewrites}: when God's people gather, healing comes. 🙌` }; }
       else if (/ruthless short-form copy editor/.test(text)) { AI.calls.push('polish'); out = { scores: [] }; }
       else if (/"options"/.test(text) && !/WHAT IS PRINTED ON THE FLYER/.test(text)) {
         AI.calls.push('write'); AI.lastVideoWrite = text;
@@ -322,6 +325,34 @@ function aiServer() {
     check(cards.length === 3 && cards.every((c) => c.length > 10), 'then a card per post, each with its own AI caption', cards.map((c) => c.slice(0, 40)));
     const ink = await page.$eval('#csCompose .csb-bcap', (x) => getComputedStyle(x).color);
     check(ink === 'rgb(15, 17, 21)', 'each card\'s caption is dark, readable text on the light sheet', ink);
+    // "There should be an option to rewrite infinitely, not just all at once": each card its own Rewrite — again and again — and Back
+    const capOf = (i) => page.$eval(`#csCompose .csb-bcap[data-bcap="${i}"]`, (x) => x.value).catch(() => '');
+    const changed = (i, from) => page.waitForFunction(([i, from]) => { const t = document.querySelector(`#csCompose .csb-bcap[data-bcap="${i}"]`); return t && t.value !== from; }, [i, from], { timeout: 20000 }).catch(() => {});
+    const acts = await page.$$eval('#csCompose .csb-bpost', (xs) => xs.map((x) => [...x.querySelectorAll('.csb-bacts [data-c]')].map((b) => b.textContent.trim())));
+    check(acts.length === 3 && acts.every((a) => a.join() === 'Rewrite,Shorter,More hype'), 'each card has its own Rewrite, Shorter and More hype', acts);
+    await page.tap('#csCompose [data-c="brev"][data-a="rewrite"][data-i="0"]');
+    await changed(0, cards[0]);
+    const r1 = await capOf(0);
+    await page.tap('#csCompose [data-c="brev"][data-a="rewrite"][data-i="0"]');
+    await changed(0, r1);
+    const r2 = await capOf(0);
+    await page.tap('#csCompose [data-c="brev"][data-a="rewrite"][data-i="0"]');
+    await changed(0, r2);
+    const r3 = await capOf(0);
+    const rest = [await capOf(1), await capOf(2)];
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'b-real-10b-rewrite-one.png') });
+    check(/^Fresh take 1:/.test(r1) && /^Fresh take 2:/.test(r2) && /^Fresh take 3:/.test(r3) && rest[0] === cards[1] && rest[1] === cards[2],
+      'Rewrite on one card writes it afresh — again, and again — the other cards left as they were', { r1, r2, r3, rest });
+    const tagLine = (c) => String(c).trim().split('\n').pop().trim();
+    check(/^#/.test(tagLine(cards[0])) && tagLine(r3) === tagLine(cards[0]), 'a rewrite keeps the post\'s own hashtags', { was: tagLine(cards[0]), now: tagLine(r3) });
+    const backOne = async () => { const v = await capOf(0); await page.tap('#csCompose [data-c="bback"][data-i="0"]'); await changed(0, v); return capOf(0); };
+    const b1 = await backOne(), b2 = await backOne(), b3 = await backOne();
+    const noBack = !(await page.$('#csCompose [data-c="bback"][data-i="0"]'));
+    check(b1 === r2 && b2 === r1 && b3 === cards[0] && noBack, 'Back goes through every earlier version, to the first — then there is no Back', { b1, b2, b3, noBack });
+    await page.tap('#csCompose [data-c="brev"][data-a="shorten"][data-i="2"]');
+    await changed(2, cards[2]);
+    const short2 = await capOf(2);
+    check(/^Night of Worship, Friday 24 October, 7 pm/.test(short2) && (await capOf(0)) === cards[0], 'Shorter on another card changes just that one', short2);
     await page.fill('#csCompose .csb-bcap[data-bcap="1"]', 'My own words for clip two');
     // several days, one by one: starts Tonight 7 pm, then exactly every 6 hours
     await page.tap('#csCompose [data-c="quick"][data-k="tonight"]');

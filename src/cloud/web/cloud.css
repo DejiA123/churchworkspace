@@ -3603,6 +3603,10 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
 .csb-bmain { flex: 1; min-width: 0; padding-right: 26px; }
 .csb-bmain > small { display: inline-flex; align-items: center; gap: 5px; color: #8ec0ff; font-size: 12px; font-weight: 700; }
 .csb-bmain > small .mi { width: 13px; height: 13px; }
+/* each post's own Rewrite / Shorter / More hype / Back */
+.csb-bacts { margin-top: 8px; gap: 6px; }
+.csb-bacts .csb-act { height: 32px; padding: 0 10px; font-size: 12.5px; }
+.csb-bacts .csb-act .mi { width: 14px; height: 14px; }
 .csb-sheet .csb-bcap { width: 100%; margin-top: 6px; padding: 0; border: 0; background: transparent; color: #fff; font-size: 14px; line-height: 1.4; resize: none; min-height: 84px; outline: none; box-shadow: none; }
 .csb-bwait { margin: 8px 0 0; color: rgba(235,235,245,.45); font-size: 13px; }
 .csb-bmain .csb-shims { margin-top: 10px; }

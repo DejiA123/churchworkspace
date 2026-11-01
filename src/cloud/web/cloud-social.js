@@ -1304,6 +1304,8 @@
       options: null,
       writing: false,
       batchCaps: {},
+      // ►► EACH POST REWRITTEN AS OFTEN AS YOU LIKE ◄◄ — the one being changed (file -> what), and each post's earlier versions
+      brev: {}, bhist: {},
       music: null,          // { free: id | 'auto' } or { lib: id } — laid under the video before it posts
       musicMood: 'uplift',
       shelf: null, songs: [],
@@ -1762,6 +1764,31 @@
         + `<button type="button" class="csb-act ghost" data-c="names-clear">Leave names out</button></div>`
         + '<small class="csb-names-hint">Left empty, captions name nobody — never "the speaker" or "our church". Remembered on this phone.</small></div>';
     }
+    /*
+     * ►► EACH POST REWRITTEN AS OFTEN AS YOU LIKE. ◄◄ "There should be an option to rewrite infinitely, not just all at
+     * once." A post of many had only "Write them all again" — every caption thrown away for one you did not like. Each
+     * post now has the single post's own: Rewrite (a fresh take, the same facts, quote and hashtags — a new one every
+     * tap), Shorter, More hype; and Back, through every version it has had (a rewrite you liked less is never lost —
+     * nor one "Write them all again" replaced).
+     */
+    function postActs(f, i) {
+      const busy = !!st.brev[f] || st.writingFile === f;
+      const n = (st.bhist[f] || []).length;
+      return `<div class="csb-acts csb-bacts">`
+        + `<button type="button" class="csb-act" data-c="brev" data-a="rewrite" data-i="${i}"${busy ? ' disabled' : ''}>${mi('refresh')}Rewrite</button>`
+        + `<button type="button" class="csb-act" data-c="brev" data-a="shorten" data-i="${i}"${busy ? ' disabled' : ''}>${mi('scissors')}Shorter</button>`
+        + `<button type="button" class="csb-act" data-c="brev" data-a="hype" data-i="${i}"${busy ? ' disabled' : ''}>${mi('flame')}More hype</button>`
+        + (n ? `<button type="button" class="csb-act ghost" data-c="bback" data-i="${i}"${busy ? ' disabled' : ''} title="Back to the version before (${n} kept)">${mi('undo')}Back</button>` : '')
+        + '</div>';
+    }
+    /* a post's caption as it is now, kept before it is changed (at most 30 kept) */
+    function keepVersion(f) {
+      const own = st.batchCaps[f];
+      if (!own || !String(own.caption || '').trim()) return;
+      const h = st.bhist[f] || (st.bhist[f] = []);
+      if (!h.length || h[h.length - 1].caption !== own.caption) h.push({ title: own.title || '', caption: own.caption });
+      if (h.length > 30) h.shift();
+    }
     function textBlock() {
       if (many()) {
         // ►► BULK: every post its own card — its picture, its time, its own AI caption to edit
@@ -1773,7 +1800,9 @@
             const writing = st.writingFile === f;
             return `<div class="csb-bpost"><span class="csb-bpic"${isVideo(f) ? ` data-c="play" data-f="${escAttr(f)}" role="button" aria-label="Play"` : ''} data-thumb="${escAttr(f)}">${isVideo(f) ? `<i class="csb-play sm">${mi('play')}</i>` : ''}</span>`
               + `<div class="csb-bmain"><small>${mi('clock')}${esc(times[i] ? shortWhen(times[i]) : '')}</small>`
-              + (own ? `<textarea class="cs-input csb-bcap" data-bcap="${i}" rows="4" maxlength="2200">${esc(own.caption || '')}</textarea>`
+              + (own && st.brev[f] ? '<div class="csb-shims"><i class="csb-shim w90"></i><i class="csb-shim w75"></i><i class="csb-shim w50"></i></div>'
+                : own ? `<textarea class="cs-input csb-bcap" data-bcap="${i}" rows="4" maxlength="2200">${esc(own.caption || '')}</textarea>`
+                  + postActs(f, i)
                 : writing ? '<div class="csb-shims"><i class="csb-shim w90"></i><i class="csb-shim w75"></i><i class="csb-shim w50"></i></div>'
                   : `<p class="csb-bwait">${st.writing ? 'Waiting its turn…' : 'No caption yet'}</p>`)
               + `</div><button type="button" class="csb-x" data-c="drop" data-i="${i}" aria-label="Leave this one out">${mi('x')}</button></div>`;
@@ -2260,7 +2289,29 @@
         return;
       }
       if (c === 'write') return autoWrite(true);
-      if (c === 'write-all') { if (st.batchRun) return; st.batchCaps = {}; return writeAll(); }
+      if (c === 'write-all') { if (st.batchRun) return; st.files.forEach(keepVersion); st.batchCaps = {}; return writeAll(); }
+      // one post: a fresh take, shorter, more hype — as often as you like
+      if (c === 'brev') {
+        const f = st.files[+b.dataset.i], own = f && st.batchCaps[f];
+        if (!own || !String(own.caption || '').trim() || st.brev[f] || st.writingFile === f) return;
+        const action = b.dataset.a;
+        st.brev[f] = action;
+        draw();
+        try {
+          const r = await window.api.social.reviseCopy({ caption: own.caption, title: own.title || '', action });
+          if (r && r.source === 'ai' && r.caption) {
+            keepVersion(f);
+            st.batchCaps[f] = Object.assign({}, st.batchCaps[f], { caption: r.caption, title: r.title || own.title || '' });
+          } else C.island({ kind: 'warn', title: 'The caption was not changed', sub: (r && r.why) || '', ms: 4500 });
+        } catch (er) { C.island({ kind: 'error', title: 'Could not change it', sub: er.message }); }
+        delete st.brev[f];
+        return draw();
+      }
+      if (c === 'bback') {
+        const f = st.files[+b.dataset.i], h = f && st.bhist[f];
+        if (h && h.length && !st.brev[f]) st.batchCaps[f] = Object.assign({}, st.batchCaps[f], h.pop());
+        return draw();
+      }
       if (c === 'names') { st.namesOpen = true; return draw(); }
       if (c === 'names-save' || c === 'names-clear') {
         const v = (k) => ((panel.body.querySelector(`input[data-n="${k}"]`) || {}).value || '').trim();
