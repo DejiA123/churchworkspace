@@ -37,6 +37,7 @@
     "test:cover-caps": "node test/cover-caps.test.js",
     "test:thumbnail": "node test/thumbnail.test.js",
     "test:copyhouse": "node test/social-copy-house.test.js",
+    "test:socialquotes": "node test/social-quotes.test.js",
     "test:inframe": "electron test/reframe-inframe.test.js",
     "test:pip": "node test/pip-range.test.js",
     "test:overlaymedia": "node test/media-overlay.test.js",

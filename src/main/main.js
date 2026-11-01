@@ -2491,6 +2491,20 @@ ipcMain.handle('captions:burnTrack', wrap(async (e, { input, track, jobId, outNa
   return output;
 }));
 
+/*
+ * ►► A CAPTIONED VIDEO KEEPS ITS CHECKED WORDS. ◄◄ "The AI write-ups should be accurate with the words, like the
+ * captions in the Video Studio." The captions burned into a short are the words the church checked: the ears, the
+ * Word Book, every line put right by hand. They are kept beside the file (<video>.words.json, gone with it), so the
+ * post's writer quotes THOSE — not a quick new listen that never had any of that (social:suggestCopy).
+ */
+ipcMain.handle('captions:keepWords', wrap(async (e, { path: p, lines } = {}) => {
+  if (typeof p !== 'string' || !/\.(mp4|mov|m4v|webm|mkv)$/i.test(p) || !fs.existsSync(p)) return false;
+  const text = (Array.isArray(lines) ? lines : []).map((x) => String(x == null ? '' : x).replace(/\s+/g, ' ').trim().slice(0, 400)).filter(Boolean).slice(0, 4000);
+  if (!text.length) return false;
+  fs.writeFileSync(p + '.words.json', JSON.stringify({ lines: text, at: new Date().toISOString() }));
+  return true;
+}));
+
 // Burn positioned "add text anywhere" overlays onto a video.
 ipcMain.handle('overlays:burn', wrap(async (e, { input, overlays, jobId, outName, deleteInput }) => {
   const info = await video.getInfo(getCtx(), input);
@@ -3197,6 +3211,22 @@ ipcMain.handle('social:suggestCopy', wrap(async (e, { mediaPath, kind, durationS
   }
 
   /*
+   * ►► THE CHECKED WORDS FIRST. ◄◄ A short exported with its captions keeps the words the church checked beside it
+   * (captions:keepWords): every quote is checked against THOSE (social-copy.js, THE SECOND HEAD). A clip without
+   * them has what was just heard put through the Word Book — the names and words this church taught it — first.
+   */
+  let checked = '';
+  if (isVideo && mediaPath) {
+    try {
+      const kept = JSON.parse(fs.readFileSync(mediaPath + '.words.json', 'utf8'));
+      if (kept && Array.isArray(kept.lines)) checked = kept.lines.map((x) => String(x || '')).join(' ').replace(/\s+/g, ' ').trim().slice(0, 20000);
+    } catch (er) { /* none kept */ }
+  }
+  if (transcript && !checked) {
+    try { const fixedT = wordbook.apply([{ start: 0, end: 1, text: transcript }]); if (fixedT.count && fixedT.entries[0]) transcript = fixedT.entries[0].text; } catch (er) { /* as heard */ }
+  }
+
+  /*
    * ►► A FLYER IS READ, NOT GUESSED. ◄◄ A picture has nothing to listen to,
    * and its file name is not a fact. The vision model reads every word on it
    * (cloudsee.readFlyer) — the event, the day, the time, the place, who is
@@ -3239,7 +3269,7 @@ ipcMain.handle('social:suggestCopy', wrap(async (e, { mediaPath, kind, durationS
     // The clip's real length, when we had to open it anyway to listen to it.
     // A writer told "a 41-second clip" writes to 41 seconds.
     mediaPath, kind, durationSec: durationSec || Math.round(dur) || 0,
-    churchName, eventName, speakers, allowBait, transcript, llm: writer, quick: !!quick, flyer,
+    churchName, eventName, speakers, allowBait, transcript, llm: writer, quick: !!quick, flyer, checked,
   });
   // The operator has to be able to see WHY a caption is good or poor — which
   // ear heard the clip and which writer wrote it. Without this, "it's terrible
@@ -3256,7 +3286,7 @@ ipcMain.handle('social:suggestCopy', wrap(async (e, { mediaPath, kind, durationS
   const cw = cloudwrite.state();
   const rules = out.source !== 'ai';
   return Object.assign({}, out, {
-    heardBy, flyer,
+    heardBy, flyer, checkedWords: !!checked,
     wroteBy: out.source === 'ai' ? (cloudReady ? 'cloud' : 'local') : 'rules',
     writerName: cloudReady ? cw.providerName : '',
     writerWhy: !rules ? ''

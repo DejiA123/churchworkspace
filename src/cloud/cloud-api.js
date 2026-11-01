@@ -261,6 +261,8 @@ const ALLOWED = {
   'captions:transcribe': true,
   'captions:burn': true,
   'captions:burnTrack': true,
+  // a captioned export's checked words, kept beside it for the post's writer (a path, and lines of text)
+  'captions:keepWords': { args: (a) => !!a && typeof a.path === 'string' && Array.isArray(a.lines) && a.lines.length <= 4000 && a.lines.every((x) => typeof x === 'string' && x.length <= 400) },
   'captions:trackPut': true,
   // ☁️ which ear is available, and the ✍ AI proof-reader. NOT captions:cloudKey —
   // a key is pasted at the desk, never set from the internet.
@@ -961,6 +963,8 @@ async function deleteFiles(req, res, me) {
     // a montage's saved edit goes with it, and any copy made for saving to a phone
     try { freed += require('../main/phonecopy').removeFor(full); } catch (e) { /* none */ }
     try { const sc = full + '.montage.json'; const ss = fs.statSync(sc); fs.unlinkSync(sc); freed += ss.size; } catch (e) { /* none */ }
+    // …and the checked words its captions were (captions:keepWords)
+    try { const wf = full + '.words.json'; const ws = fs.statSync(wf); fs.unlinkSync(wf); freed += ws.size; } catch (e) { /* none */ }
     // …and the copy without its overlays that the studio edits (montage.js baseOf)
     try { const bo = path.join(path.dirname(full), '.montage-edit', path.basename(full)); const bs = fs.statSync(bo); fs.unlinkSync(bo); freed += bs.size; alsoGone.push(bo); } catch (e) { /* none */ }
     // …and the stills its snapshot overlays froze (montage.js stillsFor: <name>.snap-N.jpg)

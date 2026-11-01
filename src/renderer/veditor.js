@@ -7171,10 +7171,17 @@
         track = await capTrackForExport(list, cfg, w, h, durationSec, pct, say);
       }
     } catch (e) { track = null; }
+    // the captions' checked words go with the file, for the post's writer to quote (captions:keepWords)
+    const keepWords = (out) => {
+      if (typeof out === 'string' && list.length && window.api.captions.keepWords) {
+        window.api.captions.keepWords({ path: out, lines: list.map((e) => String(e.text)) }).catch(() => {});
+      }
+      return out;
+    };
     if (track) {
       return window.__runJob(msg, jobId, () => window.api.captions.burnTrack({
         input, track, jobId, outName, deleteInput, images: images || [],
-      }), { task, chain: 'burn' });
+      }), { task, chain: 'burn' }).then(keepWords);
     }
     /*
      * The subtitle burner draws the captions instead, and it has no way to carry
@@ -7202,7 +7209,7 @@
     const p = capAssPayload(cfg, w, h, list);
     return window.__runJob(msg, jobId, () => window.api.captions.burn({
       input, events: p.events, opts: p.opts, jobId, outName, deleteInput,
-    }), { task, chain: 'burn' });
+    }), { task, chain: 'burn' }).then(keepWords);
   }
   /** The export frame the captions are laid out against. */
   const capOutW = (size) => (size && (size.w || size.width)) || (ve.presets[ve.aspect] || {}).w || 1080;

@@ -24,6 +24,8 @@
  *       time; Schedule makes one post each, with its own caption — and each
  *       card rewritten on its own as often as you like (Rewrite, Shorter, More
  *       hype), with Back through its earlier versions
+ *   [12] a captioned short keeps its checked caption words beside it, and the
+ *       post's writer is given those to quote (never a path outside the studio)
  *   [9] "I selected a video from this phone but it did not show up": on a slow
  *       connection the video shows AT ONCE, played from the phone, with how far
  *       the sending has got — then the caption is written when it lands
@@ -374,6 +376,21 @@ function aiServer() {
     const t7 = new Date(times[0]);
     check(times[1] - times[0] === 6 * 3600e3 && times[2] - times[1] === 6 * 3600e3 && t7.getHours() === 19 && t7.getMinutes() === 0,
       'they go out one by one: 7 pm, then exactly every 6 hours', times.map((t) => new Date(t).toString()));
+
+    // [12] "make the AI write-ups accurate with the words, like the captions in the Video Studio": a captioned short
+    // keeps its checked caption words beside it, and the post's writer is given THOSE
+    {
+      const lines = ['YOU KNOW GOD IS NOT FINISHED', 'WITH YOU YET HE WILL', 'COMPLETE THE WORK HE STARTED'];
+      const kept = await page.evaluate(async ([p, lines]) => window.api.captions.keepWords({ path: p, lines }), [VID, lines]);
+      const onDisk = (() => { try { return JSON.parse(fs.readFileSync(VID + '.words.json', 'utf8')); } catch (e) { return null; } })();
+      check(kept === true && onDisk && onDisk.lines.join(' ') === lines.join(' '), 'a captioned video keeps its checked caption words beside it', { kept, onDisk });
+      const refused = await page.evaluate(async () => { try { await window.api.captions.keepWords({ path: '/etc/hosts.mp4', lines: ['X'] }); return 'written'; } catch (e) { return 'refused'; } });
+      check(refused === 'refused' && !fs.existsSync('/etc/hosts.mp4.words.json'), 'a path outside the studio\'s folders is refused', refused);
+      AI.lastVideoWrite = '';
+      const out = await page.evaluate(async (p) => window.api.social.suggestCopy({ mediaPath: p, kind: 'video', listen: true, quick: true, jobId: 'copy_t12' }), VID);
+      check(out && out.checkedWords === true && /THE CHECKED WORDS/.test(AI.lastVideoWrite) && AI.lastVideoWrite.includes(lines.join(' ')),
+        'the post\'s writer is given those checked words to quote', { checked: out && out.checkedWords, prompt: AI.lastVideoWrite.slice(0, 160) });
+    }
 
     if (SHOTS) {
       await page.evaluate(() => { const x = document.querySelector('#csCompose .cp-x'); if (x) x.click(); });

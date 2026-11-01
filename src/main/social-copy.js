@@ -280,6 +280,137 @@ function properCase(text) {
     .replace(/(^|[\s(\[:—–-])([“"‘])([a-z])/g, (m, pre, q, c) => pre + q + c.toUpperCase());
 }
 
+/*
+ * ►► THE SECOND HEAD: EVERY QUOTE IS THE WORDS. ◄◄ "Make those AI write-ups better: a second head, like the captions
+ * in the Video Studio — accurate with the words." A writer asked to quote word for word still tidies a quote, or
+ * makes one up that sounds right. So every quote it wrote (three words or more, in quote marks) is looked for in
+ * the words — the CAPTIONS the church checked when there are any (captions:keepWords), else what was heard — with
+ * capitals and punctuation ignored. Found: it stands. Not found: it becomes the stretch of the words closest to it
+ * (most of the same words, in the same order); and one with nothing close is counted, so it can be said.
+ */
+const normTok = (t) => String(t).toLowerCase().replace(/[’‘`]/g, "'").replace(/[^a-z0-9']+/g, '').replace(/^'+|'+$/g, '');
+// "double", “curly”, and British ‘single’ quotes (an apostrophe inside one, as in ‘don’t’, is part of a word)
+const QUOTE_RX = /(["“])([^"“”\n]{6,500}?)(["”])|(‘)((?:[^‘’\n]|’(?=[A-Za-z])){6,500}?)(’)(?![A-Za-z])/g;
+/** Longest common subsequence of two token lists, in words. */
+function lcs(a, b) {
+  const m = a.length, n = b.length;
+  if (!m || !n) return 0;
+  let prev = new Array(n + 1).fill(0), cur = new Array(n + 1).fill(0);
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) cur[j] = a[i - 1] === b[j - 1] ? prev[j - 1] + 1 : Math.max(prev[j], cur[j - 1]);
+    [prev, cur] = [cur, prev];
+  }
+  return prev[n];
+}
+/** One longest common subsequence, as the pairs of places it matches: [[i in a, j in b], …]. */
+function lcsPairs(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Int32Array(n + 1));
+  for (let i = m - 1; i >= 0; i--) for (let j = n - 1; j >= 0; j--) dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const pairs = [];
+  let i = 0, j = 0;
+  while (i < m && j < n) {
+    if (a[i] === b[j]) { pairs.push([i, j]); i++; j++; } else if (dp[i + 1][j] >= dp[i][j + 1]) i++; else j++;
+  }
+  return pairs;
+}
+const noQuoteMarks = (w) => String(w).replace(/["“”]/g, '');
+const endsSentence = (w) => /[.!?]["”’)]*$/.test(String(w));
+/**
+ * The words as the quote should read. `src` is the stretch of the words (as they are written there), `writer` the
+ * writer's token for each of them where the two line up (or ''). Captions in capitals are written in ordinary sentence
+ * case — each word with the capital the writer gave the word in its place (a name, "God", "He"), the rest small.
+ */
+function asQuoted(src, writer) {
+  const letters = src.join(' ').replace(/[^A-Za-z]/g, '');
+  const shouted = letters && letters.replace(/[^A-Z]/g, '').length / letters.length > 0.8;
+  // captions carry no punctuation: where the words have none, the writer's stops and commas show the sentences
+  const bare = !/[.,!?;:]/.test(src.join(' '));
+  let out = src.map((w, k) => {
+    w = noQuoteMarks(w);
+    const wr = noQuoteMarks((writer && writer[k]) || '');
+    if (bare) { const mark = (/([.,!?;:]+)$/.exec(wr) || [])[1]; if (mark && !/[.,!?;:]$/.test(w)) w += mark; }
+    if (!shouted) return w;
+    const lower = w.toLowerCase();
+    const cap = /^[^A-Za-z]*[A-Z]/.test(wr);
+    return cap ? lower.replace(/[a-z]/, (c) => c.toUpperCase()) : lower;
+  }).filter(Boolean).join(' ');
+  out = out.replace(/^[\s,;:.]+|[\s,;:]+$/g, '');
+  // a new sentence starts with a capital
+  out = properCase(out).replace(/([.!?]\s+)([a-z])/g, (m, gap, c) => gap + c.toUpperCase());
+  return out.charAt(0).toUpperCase() + out.slice(1);
+}
+function fixQuotes(text, source) {
+  const t = String(text || '');
+  const raw = String(source || '').split(/\s+/).filter(Boolean);
+  const keep = [];   // the source's words, normalised, each with where it is in `raw`
+  raw.forEach((w, i) => { const n = normTok(w); if (n) keep.push({ n, i }); });
+  if (keep.length < 3 || !t) return { text: t, fixed: 0, unsure: 0 };
+  const S = keep.map((k) => k.n);
+  const joined = ' ' + S.join(' ') + ' ';
+  let fixed = 0, unsure = 0;
+  const out = t.replace(QUOTE_RX, (m, o1, i1, c1, o2, i2, c2) => {
+    const open = o1 || o2, inner = i1 != null ? i1 : i2, close = c1 || c2;
+    const qRaw = inner.split(/\s+/).filter((w) => normTok(w));
+    const q = qRaw.map(normTok);
+    if (q.length < 3) return m;                                   // a word or two in quotes: a phrase, not a quote
+    if (joined.includes(' ' + q.join(' ') + ' ')) return m;       // the words, word for word
+    // the stretch with the most of its words, in order; of those the shortest, then the first
+    let best = null;
+    for (let s = 0; s < S.length; s++) {
+      for (let len = Math.max(3, q.length - 4); len <= q.length + 4 && s + len <= S.length; len++) {
+        const c = lcs(q, S.slice(s, s + len));
+        if (!best || c > best.c || (c === best.c && len < best.len)) best = { s, len, c };
+      }
+    }
+    if (!best || best.c < 3 || best.c / q.length < 0.6) { unsure++; return m; }   // nothing close: left, and counted
+    const pairs = lcsPairs(q, S.slice(best.s, best.s + best.len));
+    const qFirst = pairs[0][0], qLast = pairs[pairs.length - 1][0];
+    const wFirst = best.s + pairs[0][1], wLast = best.s + pairs[pairs.length - 1][1];
+    // as many words before and after as the quote has there, never across the end of a sentence of the words
+    let a = wFirst, b = wLast;
+    for (let k = 0; k < qFirst && a > 0 && !endsSentence(raw[keep[a - 1].i]); k++) a--;
+    for (let k = 0; k < q.length - 1 - qLast && b < S.length - 1 && !endsSentence(raw[keep[b].i]); k++) b++;
+    // a word the writer moved (a statement turned round into a question: "is God…" for "God is…") is just beside it
+    const moved = new Set(q.filter((x, i) => !pairs.some(([qi]) => qi === i)));
+    for (let p = wFirst - 1; p >= Math.max(0, wFirst - 2) && !endsSentence(raw[keep[p].i]); p--) if (moved.has(S[p])) a = Math.min(a, p);
+    for (let p = wLast + 1; p <= Math.min(S.length - 1, wLast + 2); p++) { if (moved.has(S[p])) b = Math.max(b, p); if (endsSentence(raw[keep[p].i])) break; }
+    const punct = raw.some((w) => /[.,;:!?]["”’)]*$/.test(w));
+    // the writer's word for each of them (for its capitals): matched ones exactly, the others by their place
+    const at = new Map(pairs.map(([qi, wj]) => [best.s + wj, qi]));
+    const writerFor = [];
+    for (let p = a; p <= b; p++) {
+      let qi = at.get(p);
+      if (qi == null) {
+        let pb = -1, qb = -1;
+        for (const [qq, ww] of pairs) if (best.s + ww < p) { pb = best.s + ww; qb = qq; }
+        qi = pb >= 0 ? qb + (p - pb) : qFirst - (wFirst - p);
+      }
+      let wr = qi >= 0 && qi < qRaw.length ? qRaw[qi] : '';
+      // (a capital that only starts the writer's sentence is not a name's)
+      if (wr && (qi === 0 || endsSentence(qRaw[qi - 1]))) wr = wr.replace(/[A-Z]/, (c) => c.toLowerCase());
+      writerFor.push(wr);
+    }
+    const words = [];
+    for (let p = a; p <= b; p++) words.push(raw[keep[p].i]);
+    fixed++;
+    // it ends as the writer ended it — that is what fits the sentence around it (‘…,’ he said) — but never as a
+    // question or a cry the speaker did not make: where the words have their own stop, a ? or ! is theirs
+    let ending = (/([.,!?;:…]+)$/.exec(inner.trim()) || [])[1] || '';
+    const own = (/([.!?])["”’)]*$/.exec(words[words.length - 1] || '') || [])[1] || '';
+    if (/[?!]/.test(ending) && punct) ending = own === '?' || own === '!' ? own : '.';
+    // captions have no stops: a ? stays only on words that ask (are you…, what…), never on a statement turned round
+    const ASK = /^(are|is|am|do|does|did|can|could|will|would|should|shall|have|has|had|what|why|how|who|whom|where|when|which|isn't|aren't|don't|doesn't|didn't|won't|can't)$/;
+    if (ending === '?' && !punct && !ASK.test(normTok(words[0] || ''))) ending = '.';
+    if (/[?!]/.test(own) && punct && ending !== own && /^[.]?$/.test(ending)) ending = own;
+    let said = asQuoted(words, writerFor).replace(/[.,!?;:…]+$/, '');
+    // a quote the writer began in the middle of a sentence (small letter) begins the same way
+    if (/^[^A-Za-z]*[a-z]/.test(inner) && !/^(I|God|Jesus|Christ|Lord|Holy)\b/.test(said)) said = said.charAt(0).toLowerCase() + said.slice(1);
+    return open + said + ending + close;
+  });
+  return { text: out, fixed, unsure };
+}
+
 function houseStyle(text, opts) {
   const o = opts || {};
   let t = String(text == null ? '' : text);
@@ -669,7 +800,7 @@ function ruleOption(style, ctx) {
  * #SermonClip, no manufactured urgency. Those raise a number and cost the
  * account its voice, and the operator ruled on them already.
  */
-function buildPrompt({ hook, kind, churchName, eventName, speaker, durationSec, transcript, allowBait, quotes, flyer }) {
+function buildPrompt({ hook, kind, churchName, eventName, speaker, durationSec, transcript, allowBait, quotes, flyer, checked }) {
   const read = flyer || (transcript ? readTranscript(transcript) : null);
   const secs = Math.round(durationSec || 0);
   const what = kind === 'image' ? 'a photo or flyer' : `a ${secs || 'short'}${secs ? '-second' : ''} vertical clip`;
@@ -701,7 +832,12 @@ function buildPrompt({ hook, kind, churchName, eventName, speaker, durationSec, 
     `THE POST: ${what} from a church service.`,
     churchName ? `THE CHURCH: ${churchName}` : '',
     '',
-    read ? (flyer ? 'WHAT IS PRINTED ON THE FLYER (this is the only source of fact you have — give the event, day, time and place exactly as printed):' : 'WHAT IS ACTUALLY SAID IN IT (this is the only source of fact you have):') : '',
+    // the captions the church checked, word by word: what every quote must be (see THE SECOND HEAD)
+    checked ? 'THE CHECKED WORDS: the captions on this clip, checked word by word by the church. Every word and every name in a quote must be exactly these (write them in ordinary sentence case with punctuation):' : '',
+    checked ? '"""' : '', checked || '', checked ? '"""' : '',
+    read ? (flyer ? 'WHAT IS PRINTED ON THE FLYER (this is the only source of fact you have — give the event, day, time and place exactly as printed):'
+      : checked ? 'THE SAME CLIP HEARD BY MACHINE (for where sentences start and stop; where a word differs from the checked words, the checked words are right):'
+        : 'WHAT IS ACTUALLY SAID IN IT (this is the only source of fact you have):') : '',
     read ? '"""' : '', read ? (read.full || read.summary) : '', read ? '"""' : '',
     '',
     shortlist.length ? 'THE MOST QUOTABLE LINES IN IT, strongest first:' : '',
@@ -805,8 +941,14 @@ function buildPolishPrompt({ options, eventName, speaker, allowBait }) {
  * six rules will eventually forget one.
  */
 async function suggest({ mediaPath, kind = 'video', churchName: churchIn = '', eventName = '', speakers = [],
-  durationSec = 0, transcript = '', allowBait = false, llm = null, signal, quick = false, flyer = null } = {}) {
+  durationSec = 0, transcript = '', allowBait = false, llm = null, signal, quick = false, flyer = null, checked = '' } = {}) {
   const churchName = realChurch(churchIn);
+  // the checked caption words (captions:keepWords): what every quote is checked against; else what was heard
+  checked = String(checked || '').replace(/\s+/g, ' ').trim();
+  if (checked && !String(transcript || '').trim()) transcript = asQuoted(checked.split(' '), []);
+  const quoteSource = checked || transcript;
+  let quotesFixed = 0, quotesUnsure = 0;
+  const checkQuotes = (x) => { const r = fixQuotes(x, quoteSource); quotesFixed += r.fixed; quotesUnsure += r.unsure; return r.text; };
   /*
    * A FLYER'S WORDS ARE ALL FACT. They are short lines ("FRIDAY 24 OCT",
    * "7PM"), which the transcript reader drops as too short to be sentences —
@@ -827,6 +969,8 @@ async function suggest({ mediaPath, kind = 'video', churchName: churchIn = '', e
     source: read ? 'heard' : 'rules', heard: !!read, hook, speaker, eventName,
     words: read ? read.words : 0,
   };
+  // (the rules quote what was heard: with checked words, those are what they quote)
+  if (checked) base.options = base.options.map((o) => Object.assign({}, o, { title: fixQuotes(o.title, checked).text, caption: fixQuotes(o.caption, checked).text }));
   base.title = base.options[0].title;
   base.caption = base.options[0].caption;
   if (!llm) return base;
@@ -840,8 +984,8 @@ async function suggest({ mediaPath, kind = 'video', churchName: churchIn = '', e
     const options = STYLES.map((st, i) => {
       const o = raw[i] || {};
       const guard = (x) => (speaker ? stripInventedNames(x, { speaker, transcript, churchName }) : dropFaceless(stripInventedNames(x, { speaker, transcript, churchName })));
-      const title = houseStyle(guard(tidy(o.title, 100)), { allowBait, title: true });
-      let caption = houseStyle(guard(tidy(o.caption, 2100)), { allowBait });
+      const title = checkQuotes(houseStyle(guard(tidy(o.title, 100)), { allowBait, title: true }));
+      let caption = checkQuotes(houseStyle(guard(tidy(o.caption, 2100)), { allowBait }));
       // Judged on what the MODEL wrote, before the repairs below: appending a
       // hashtag line to "Hi" would otherwise make a useless answer look usable.
       const wroteSomething = caption.length >= 30;
@@ -871,7 +1015,7 @@ async function suggest({ mediaPath, kind = 'video', churchName: churchIn = '', e
   try {
     const out = await llm.chat({
       prompt: buildPrompt({ hook, kind, churchName, eventName, speaker, durationSec, transcript, allowBait, flyer: flyer ? read : null,
-                           quotes: read ? read.quotes : null }),
+                           quotes: read ? read.quotes : null, checked }),
       maxTokens: 1800, temperature: 0.85, json: true, signal,
     });
     const j = llm.parseJson ? llm.parseJson(out) : JSON.parse(out);
@@ -925,7 +1069,7 @@ async function suggest({ mediaPath, kind = 'video', churchName: churchIn = '', e
             // A high score means "leave it alone", and a rewrite that came back
             // shorter than half the original is a model that lost the plot.
             if (Number.isFinite(score) && score >= 8) return o;
-            const cap0 = houseStyle(dropFaceless(stripInventedNames(tidy(c.caption, 2100), { speaker, transcript, churchName })), { allowBait });
+            const cap0 = checkQuotes(houseStyle(dropFaceless(stripInventedNames(tidy(c.caption, 2100), { speaker, transcript, churchName })), { allowBait }));
             const cap = cap0 ? withPopularTags(cap0, STYLES[i] || STYLES[0], { speaker, eventName, text: hook + ' ' + (read ? (read.summary || read.full || '') : '') }) : cap0;
             if (cap.length < Math.max(60, o.caption.length * 0.5)) return o;
             if (eventName && cap.toLowerCase().indexOf(eventName.toLowerCase()) < 0) return o;
@@ -941,7 +1085,7 @@ async function suggest({ mediaPath, kind = 'video', churchName: churchIn = '', e
     }
     return Object.assign({}, base, {
       options, title: options[0].title, caption: options[0].caption,
-      source: 'ai', polished,
+      source: 'ai', polished, quotesFixed, quotesUnsure, quotesFrom: checked ? 'captions' : transcript ? 'heard' : '',
     });
   } catch (e) {
     return base;
@@ -1000,7 +1144,8 @@ async function revise({ title = '', caption = '', action = 'rewrite', instructio
     const t = r.title ? houseStyle(guard(tidy(r.title, 100)), { allowBait, title: true }) : was.title;
     if (!cap || cap.length < 8) return Object.assign({ source: 'unchanged', why: 'The writer did not give a usable caption.' }, was);
     // the post's own hashtag line stays as it was (the popular one) — none the writer made up
-    let out = withoutTags(cap);
+    // (a quote the rewrite tidied is put back as the post had it — THE SECOND HEAD)
+    let out = withoutTags(fixQuotes(cap, was.caption).text);
     const paras = was.caption.split(/\n\s*\n/);
     const tags = paras.filter((x) => /^\s*#/.test(x)).pop() || (was.caption.match(/#\w+/g) || []).join(' ');
     if (tags) out = out.trimEnd() + '\n\n' + tags.trim();
@@ -1011,7 +1156,7 @@ async function revise({ title = '', caption = '', action = 'rewrite', instructio
 }
 
 module.exports = {
-  properCase,
+  properCase, fixQuotes,
   suggest, revise, dropFaceless, realChurch, withPopularTags, withoutTags, POPULAR_CORE, forPlatform, APP_TAGS, ruleCopy, ruleOption, hookFromFilename, readTranscript, sentencesOf, hookScore,
   buildPrompt, buildPolishPrompt, tidy, houseStyle, tagOf, tagLine, whoIsSpeaking, asSentence,
   stripInventedNames, STYLES, TELLS,
