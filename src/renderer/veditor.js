@@ -10592,10 +10592,19 @@
    */
   function clipFootage(s) {
     const input = ve.video.path;
-    const fx = fxPayload(s);   // 🎛️ the clip's look rides on its pieces
-    if (!hasCuts(s)) return { input, ss: s.start, ee: s.end, pieces: fx ? [{ start: s.start, end: s.end, fx }] : null };
+    /*
+     * 🎛️ The clip's look rides on its pieces. ►► A SHORT WEARS WHAT THE PREVIEW SHOWED. ◄◄ "Reduce image noise is
+     * there on the preview, but not in the exported shorts." The preview shows the look of the sermon clip under
+     * the playhead (syncClipLook), while a short is played too; the short's export wore only the short's own look —
+     * and This clip in Video quality is a clip of the timeline, never a short, so the short had none. Now a short
+     * with no look of its own takes the look of the clip it is cut from, piece by piece (a short across two clips
+     * of different looks gets each): what was seen is what is saved. A short given its own look keeps it.
+     */
+    const own = fxPayload(s);
+    const fxAt = (a, b) => own || (s.ai ? fxPayload(lookClipAt((a + b) / 2)) : undefined);
+    if (!hasCuts(s)) { const fx = fxAt(s.start, s.end); return { input, ss: s.start, ee: s.end, pieces: fx ? [{ start: s.start, end: s.end, fx }] : null }; }
     // The input is always the recording itself now, so these are its own times.
-    const pieces = keptPieces(s).map((p) => (fx ? Object.assign(p, { fx }) : p));
+    const pieces = keptPieces(s).map((p) => { const fx = fxAt(p.start, p.end); return fx ? Object.assign(p, { fx }) : p; });
     // ss/ee are only used if the pieces are dropped
     return { input, ss: pieces[0].start, ee: pieces[pieces.length - 1].end, pieces };
   }
@@ -15323,12 +15332,17 @@
     return gradePicture(p, typeof f === 'object' ? f : { sharp: f }, true);
   }
   /** The main video shows the look of the clip under the playhead — and sounds at its volume. */
+  /** The main clip whose look the preview shows at source time t: the one being adjusted where clips lie over one
+      another, else the first. (A short's export wears it too, when the short has no look of its own — clipFootage.) */
+  function lookClipAt(t) {
+    const here = mainClips().filter((x) => t >= x.start - 1e-3 && t < x.end);
+    const tgt = ve.fxUi && ve.fxUi.clipId;
+    return here.find((x) => x.id === tgt) || here[0] || null;
+  }
   function syncClipLook(t) {
     const p = ve.refs.player; if (!p || !ve.video) return;
-    // under the playhead: the clip being adjusted when it is there (clips can lie over one another), else the first
-    const here = ve.tailT != null ? [] : mainClips().filter((x) => t >= x.start - 1e-3 && t < x.end);
-    const tgt = ve.fxUi && ve.fxUi.clipId;
-    const s = here.find((x) => x.id === tgt) || here[0] || null;
+    // under the playhead (nothing over a clip placed after the video)
+    const s = ve.tailT != null ? null : lookClipAt(t);
     const f = fxOf(s);
     // the grade layer (WebGL) draws Sharpen and the new tools on every screen; where it cannot run, the SVG sharpen
     const drawn = sharpPreview(f);

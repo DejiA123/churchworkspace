@@ -11,6 +11,9 @@
  *       own ffmpeg recipe (video.js fxVideo), block by block;
  *   [C] each editor sets what it says (HSL, a curve dragged, a wheel dragged,
  *       the Quality switches), and each is ONE undo step.
+ *   [D] a short wears what the preview showed: one with no look of its own
+ *       is exported with the look of the clip it is cut from (Reduce image
+ *       noise and all); one given its own look keeps it.
  *
  *   node test/capcut-tools.test.js
  */
@@ -291,6 +294,29 @@ const worst = (a, b) => { const d = []; for (let i = 0; i < a.length; i++) d.pus
     for (let i = 0; i < 6 && await canUndo(); i++) await undo();
     f = await fxNow();
     check(!f, 'undo all the way: the clip is untouched again', f);
+
+    console.log('\n=== [D] a short wears the look the preview shows ===');
+    {
+      // "Reduce image noise is there on the preview, but not in the exported shorts"
+      await T('closeFx');
+      const short = await T('addShort', 2, 6);
+      const mainId = (await T('fxClipIds'))[0];
+      await T('openFx', 'quality'); await T('fxScope', 'clip');
+      await T('setClipFx', 'dn', 0.9);   // This clip: the sermon's clip, as the Quality tab sets it
+      const own0 = await T('clipFxOf', short.id), main0 = await T('clipFxOf', mainId);
+      const fp = await T('fxFootage', short.id);
+      const pfx = fp && fp.pieces && fp.pieces[0] && fp.pieces[0].fx;
+      check(main0 && main0.dn === 0.9 && !own0 && pfx && pfx.dn === 0.9,
+        'Reduce image noise (Strong) on the clip: a short cut from it, with no look of its own, is exported with it', { main0, own0, pieces: fp && fp.pieces });
+      check(/hqdn3d/.test(video.fxVideo(pfx || {})), 'the short\'s export recipe has the noise removal', video.fxVideo(pfx || {}).slice(0, 80));
+      await T('fxScope', 'all'); await T('setClipFx', 'dn', 0.5);   // All clips: the shorts get a look of their own
+      await T('fxScope', 'clip'); await T('setClipFx', 'dn', 0.2);  // …then the clip alone is changed
+      const fp2 = await T('fxFootage', short.id), p2 = fp2 && fp2.pieces && fp2.pieces[0] && fp2.pieces[0].fx;
+      check(p2 && p2.dn === 0.5 && (await T('clipFxOf', mainId)).dn === 0.2, 'a short given its own look keeps it', { short: p2, main: await T('clipFxOf', mainId) });
+      const fpMain = await T('fxFootage', mainId);
+      check(!fpMain || !fpMain.pieces || fpMain.pieces.every((x) => !x.fx || x.fx.dn === 0.2), 'the clip itself is exported with its own look, as before', fpMain && fpMain.pieces);
+      await T('closeFx');
+    }
   } catch (e) {
     check(false, 'the test ran to the end', e.message);
   } finally {
