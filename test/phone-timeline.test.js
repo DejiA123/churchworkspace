@@ -16,6 +16,9 @@
  *       long press on empty track still draws a clip; a wide screen keeps the
  *       desk's timeline
  *   [E] a caption typed in lower case wears the Case that is chosen
+ *   [H] ⚠ Check: the lines to look at, the line before and after each one (to
+ *       hear, and to type in), and — once checked — "You checked": what was done
+ *       with each, and the way back to Check
  *
  * Needs Playwright with Chromium (it is not one of the app's dependencies);
  * without it this says so and skips.
@@ -376,12 +379,25 @@ async function waitUp() {
       if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'check-tab.png') });
       const ctx = await page.evaluate((L) => {
         const row = document.querySelector('#capList .cap-row[data-row="2"]');
-        const before = row && row.querySelector('.cap-ctx-before'), after = row && row.querySelector('.cap-ctx-after .cap-ctx-tx');
+        const before = row && row.querySelector('.cap-ctx-before .cap-ctx-in'), after = row && row.querySelector('.cap-ctx-after .cap-ctx-in');
         const bb = before && before.getBoundingClientRect(), ib = row && row.querySelector('.cap-text').getBoundingClientRect();
-        return { before: before && before.textContent, after: after && after.textContent, above: !!(bb && ib && bb.bottom <= ib.top + 1), want: [L[1].text, L[3].text] };
+        return { before: before && before.value, after: after && after.value, above: !!(bb && ib && bb.bottom <= ib.top + 1), want: [L[1].text, L[3].text] };
       }, L);
       check(ctx.before && ctx.before.includes(ctx.want[0]) && ctx.after && ctx.after.includes(ctx.want[1]) && ctx.above,
         'a line to check shows the line before (above it) and the line after', ctx);
+      // "I should be able to edit the next line right after the line AssemblyAI is not sure about"
+      await page.locator('#capList .cap-row[data-row="2"] .cap-ctx-in-after').tap();
+      await page.locator('#capList .cap-row[data-row="2"] .cap-ctx-in-after').fill('goodness and mercy');
+      await page.locator('#capList .cap-row[data-row="2"] .cap-ctx-in-after').press('Enter');
+      await sleep(300);
+      const nx = await page.evaluate(() => { const T = window.VideoEditor.__test; return { line: T.capLines()[3].text, doubts: document.querySelectorAll('#capList .cap-row.doubt').length,
+        box: (document.querySelector('#capList .cap-row[data-row="2"] .cap-ctx-in-after') || {}).value }; });
+      check(nx.line === 'GOODNESS AND MERCY' && nx.box === 'GOODNESS AND MERCY' && nx.doubts === 2,
+        'the line after one to check is typed in right there (in the chosen Case), the one to check still waiting', nx);
+      await page.evaluate(() => { document.getElementById('veUndo').click(); });
+      await sleep(300);
+      const nxBack = await page.evaluate(() => ({ line: window.VideoEditor.__test.capLines()[3].text, box: (document.querySelector('#capList .cap-row[data-row="2"] .cap-ctx-in-after') || {}).value }));
+      check(nxBack.line === L[3].text, 'one Undo puts that line back', { nxBack, want: L[3].text });
       await page.evaluate(() => { document.getElementById('vePlayer').muted = true; });
       await page.locator('#capList .cap-row[data-row="2"] [data-ctx-i]').tap();
       await sleep(250);
@@ -399,6 +415,43 @@ async function waitUp() {
       await sleep(300);
       const c = await st();
       check(c.doubts === 0 && !/⚠ Check/.test(c.check), '"✓ It\'s right" settles the other — nothing left to check', c);
+      // "I should be able to see the ones AssemblyAI was not sure about that I clicked It's right — the history,
+      // just like I can for the AI fixed ones"
+      const hist = () => page.evaluate(() => ({
+        tab: (document.querySelector('#capList [data-capfix="check"]') || {}).textContent || '',
+        on: !!document.querySelector('#capList [data-capfix="check"].on'),
+        head: (document.querySelector('#capList .cap-done-hd') || {}).textContent || '',
+        note: (document.querySelector('#capList .cap-check-note') || {}).textContent || '',
+        rows: [...document.querySelectorAll('#capList .cap-row')].map((r) => ({ i: +r.dataset.row, doubt: r.classList.contains('doubt'),
+          tag: (r.querySelector('.cap-chk-tag') || {}).textContent || '', del: [...r.querySelectorAll('.cap-chk del')].map((x) => x.textContent).join(' '),
+          ins: [...r.querySelectorAll('.cap-chk ins')].map((x) => x.textContent).join(' '), back: (r.querySelector('[data-chk-back]') || {}).textContent || '',
+          was: !!r.querySelector('.cap-was'), ok: !!r.querySelector('[data-doubt-ok]') })),
+      }));
+      const h = await hist();
+      const r2 = h.rows.find((r) => r.i === 2), r4 = h.rows.find((r) => r.i === 4);
+      check(/✓ Checked\s*2/.test(h.tab) && h.on && /You checked/.test(h.head) && h.rows.length === 2 && /2 checked/.test(h.note),
+        'checked, they stay: the tab says "✓ Checked 2" and lists both under "You checked"', h);
+      check(r2 && /took what the second listen heard/.test(r2.tag) && r2.ins === 'I' && /Put back/.test(r2.back) && !r2.was,
+        'a line given the other ear’s words: what changed from what was heard (green: "I" put in), Put back — one note, not two', r2);
+      check(r4 && /said it’s right/.test(r4.tag) && !r4.del && !r4.ins && /Back to Check/.test(r4.back), 'a line said to be right says so, with Back to Check', r4);
+      if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'check-history.png') });
+      await page.locator('#capList .cap-row[data-row="4"] [data-chk-back]').tap();
+      await sleep(300);
+      const h2 = await hist();
+      const r4b = h2.rows.find((r) => r.i === 4);
+      check(/⚠ Check\s*1/.test(h2.tab) && r4b && r4b.doubt && r4b.ok && h2.rows.filter((r) => !r.doubt).length === 1,
+        '"Back to Check" puts it back to look at again (the other stays under You checked)', h2);
+      await page.locator('#capList .cap-row[data-row="4"] [data-doubt-ok]').tap();
+      await sleep(300);
+      // words per line changed: the lines are made again from the words — and the checked ones are still checked
+      const regroup = await page.evaluate(() => {
+        const T = window.VideoEditor.__test, was = document.getElementById('capWords').value;
+        T.setCapWordsPerLine(was === '3' ? 4 : 3);
+        const n = document.querySelectorAll('#capList .cap-row').length, tab = (document.querySelector('#capList [data-capfix="check"]') || {}).textContent || '';
+        T.setCapWordsPerLine(was);
+        return { n, tab };
+      });
+      check(/✓ Checked/.test(regroup.tab) && regroup.n >= 1, 'lines made again (another Words per line) are still the ones checked', regroup);
       await page.evaluate(() => { document.getElementById('veUndo').click(); });   // put line 2 back as it was
       await page.evaluate(() => document.getElementById('capModal').classList.add('hidden'));
       await sleep(300);

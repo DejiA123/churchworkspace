@@ -6510,7 +6510,7 @@
         pushHistory({ captions: true }); ve._capEditAt = Date.now();
         ve.capEvents[i].text = now;
       }
-      if (ve.capEvents[i]) { if (ve.capEvents[i].text !== txt || ve.capEvents[i].doubt) settleDoubt(ve.capEvents[i]); ve.capEvents[i].text = txt; }
+      if (ve.capEvents[i]) { if (ve.capEvents[i].text !== txt || ve.capEvents[i].doubt) settleDoubt(ve.capEvents[i], txt !== orig ? 'typed' : 'right', orig); ve.capEvents[i].text = txt; }
       if (label.textContent !== txt) label.textContent = txt;
       label.removeAttribute('contenteditable');
       el.classList.remove('editing');
@@ -11730,6 +11730,8 @@
       // the second listen's verdict travels from the words to their line (noteCheck)
       if (g.some((x) => x.doubt)) ev.doubt = 'differ';
       else if (g.some((x) => x.unsure)) ev.doubt = 'unsure';
+      // (a line a person checked stays checked: what was heard is the words' own text)
+      else if (g.some((x) => x.okd)) ev._checked = { kind: 'unsure', how: g.find((x) => x.okd).okd, heard: null };
       if (g.some((x) => x.unchecked)) ev.unchecked = true;
       else if (g.every((x) => x.checked)) ev.checked = true;
       events.push(ev);
@@ -11820,6 +11822,59 @@
     document.querySelectorAll('#capList .cap-text').forEach((inp) => {
       const e = evs[+inp.dataset.i];
       if (e && inp.value !== e.text) inp.value = e.text;
+    });
+    // (the line before and after a line to check, too — unless it is being typed in)
+    document.querySelectorAll('#capList .cap-ctx-in').forEach((inp) => {
+      const e = evs[+inp.dataset.ci];
+      if (e && inp.value !== e.text && document.activeElement !== inp) inp.value = e.text;
+    });
+  }
+  /**
+   * The line before / after a line to check, put right in place. Saved as a line's own box saves (wireCapInput):
+   * one step to undo, the Case chosen, a line in doubt settled, the Word Book taught — and every box showing that
+   * line says it now. Emptied, it is left as it was: a line is taken out in All lines.
+   */
+  function wireCtxInput(inp) {
+    const at = () => +inp.dataset.ci;
+    const commit = () => {
+      ve._capLive = null;
+      const j = at(), e = (ve.capEvents || [])[j]; if (!e) return;
+      const typed = inp.value;
+      const v = inChosenCase(typed);
+      if (!String(v).trim()) { inp.value = e.text; return; }
+      if (v === e.text) { if (inp.value !== v) inp.value = v; return; }
+      const before = e.text;
+      pushHistory({ captions: true }); ve._capEditAt = Date.now();
+      e.text = v; inp.value = v;
+      const wasDoubt = !!e.doubt;
+      if (wasDoubt) settleDoubt(e, 'typed', before);
+      if (e._was != null && e._was === e.text) delete e._was;
+      document.querySelectorAll(`#capList .cap-ctx-in[data-ci="${j}"], #capList .cap-text[data-i="${j}"]`).forEach((x) => { if (x !== inp) x.value = v; });
+      renderCapTrack(); renderClipList();
+      updateCapOverlay(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
+      learnCaptionEdit(before, capGroupCfg().tc === 'upper' ? v : typed, j);
+      updateGrammarSummary();
+      if (wasDoubt) setTimeout(renderCapList, 0);   // it moves to "You checked"
+    };
+    inp._commit = commit;
+    inp.addEventListener('change', commit);
+    inp.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); commit(); inp.blur(); }
+      else if (ev.key === 'Escape') { const e = (ve.capEvents || [])[at()]; if (e) inp.value = e.text; ve._capLive = null; inp.blur(); }
+    });
+    // as typed: the caption on the picture shows it, and (if asked) the sound stops
+    inp.addEventListener('input', () => {
+      ve._capLive = { i: at(), text: inChosenCase(inp.value) };
+      updateCapOverlay(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
+      capPauseForTyping();
+    });
+    inp.addEventListener('blur', () => { if (ve._capLive && ve._capLive.i === at()) ve._capLive = null; });
+    // tapped: the playhead goes to that line, to hear what is being put right
+    inp.addEventListener('focus', () => {
+      const e = (ve.capEvents || [])[at()]; if (!e) return;
+      ve._capFocusI = at(); ve._capLine = null;
+      seekTo(Math.max(0, capOff() + e.start));
+      capPlayerPaint(true);
     });
   }
   function setCapFixNote(text, good) {
@@ -12929,8 +12984,16 @@
             + (alt ? `<button type="button" class="cap-doubt-use" data-doubt-use="${i}">Use that</button>` : '')
             + `<button type="button" class="cap-doubt-ok" data-doubt-ok="${i}">✓ It's right</button></div>`; })()
         : '')
-      // A line a fix changed says so, and what it said before, with its own way back.
-      + (c._was != null && c._was !== c.text
+      // A line a person checked (⚠ Check, under "You checked"): what they did, and the way back.
+      + (c._checked && !c.doubt && ve.capListMode === 'check'
+        ? (() => { const k = c._checked, changed = !!k.heard && k.heard !== c.text;
+          return `<div class="cap-chk"><span class="cap-chk-tag">${k.how === 'right' ? '✓ You said it’s right' : k.how === 'took' ? '✓ You took what the second listen heard' : '✍ You put it right'}</span>`
+            + (changed ? `<span class="cap-was-diff" title="${escape2('Heard “' + k.heard + '”').replace(/"/g, '&quot;')}">${capWordDiff(k.heard, c.text)}</span>` : '')
+            + `<button type="button" class="cap-chk-back" data-chk-back="${i}" title="${changed ? 'Put back what was heard, and back in ⚠ Check' : 'Back in ⚠ Check, to look at again'}">↶ ${changed ? 'Put back' : 'Back to Check'}</button></div>`; })()
+        : '')
+      // A line a fix changed says so, and what it said before, with its own way back. (Under "You checked" the
+      // note above says it — with one way back, not two.)
+      + (c._was != null && c._was !== c.text && !(c._checked && !c.doubt && ve.capListMode === 'check')
         ? `<div class="cap-was${c._byAi ? ' ai' : ''}"><span class="cap-was-tag">${c._byAi ? '✨ AI fixed' : '✍ Fixed'}</span>`
           + `<span class="cap-was-diff" title="${escape2('Was “' + c._was + '”').replace(/"/g, '&quot;')}">${capWordDiff(c._was, c.text)}</span>`
           + `<button type="button" class="cap-was-back" data-was-i="${i}" title="Put this line back to what it said before">↶ Put back</button>`
@@ -12946,8 +13009,11 @@
   function capCtxHtml(i) {
     const evs = ve.capEvents || [];
     const prev = evs[i - 1], next = evs[i + 1];
-    return (prev ? `<div class="cap-ctx cap-ctx-before" title="The line before">… ${escape2(prev.text)}</div>` : '')
-      + `<div class="cap-ctx cap-ctx-after">${next ? `<span class="cap-ctx-tx" title="The line after">${escape2(next.text)} …</span>` : '<span class="cap-ctx-tx"></span>'}`
+    // ("I should be able to edit the next line right after the line AssemblyAI is not sure about": the line
+    //  before and the line after are boxes to type in, saved as a line's own box saves — wireCtxInput)
+    const box = (j, e, cls, what) => `<input class="cap-ctx-in ${cls}" data-ci="${j}" value="${escape2(e.text).replace(/"/g, '&quot;')}" spellcheck="false" aria-label="${what} — tap to change it" title="${what} — tap to change it" />`;
+    return (prev ? `<div class="cap-ctx cap-ctx-before"><span aria-hidden="true">…</span>${box(i - 1, prev, 'cap-ctx-in-before', 'The line before')}</div>` : '')
+      + `<div class="cap-ctx cap-ctx-after">${next ? `<span class="cap-ctx-tx">${box(i + 1, next, 'cap-ctx-in-after', 'The line after')}<span aria-hidden="true">…</span></span>` : '<span class="cap-ctx-tx"></span>'}`
       + `<button type="button" class="cap-ctx-play" data-ctx-i="${i}" title="Play the line before, this line and the line after">▶ Hear it in context</button></div>`;
   }
   /** A line's box: commit, live preview, Enter, focus — its index read at the moment, never captured. */
@@ -12962,7 +13028,7 @@
       // a retyped line is an edit like any other: ↶ puts it back (it never could — nothing was recorded)
       pushHistory({ captions: true }); ve._capEditAt = Date.now();
       e.text = inp.value;
-      if (e.doubt) { settleDoubt(e); setTimeout(renderCapList, 0); }   // looked at and put right
+      if (e.doubt) { settleDoubt(e, 'typed', before); setTimeout(renderCapList, 0); }   // looked at and put right
       if (e._was != null && e._was === e.text) { delete e._was; renderCapList(); }
       renderCapTrack(); renderClipList();
       updateCapOverlay(ve.refs.player.currentTime || 0);
@@ -13057,6 +13123,8 @@
         row.querySelectorAll('[data-doubt-ok]').forEach((el) => el.setAttribute('data-doubt-ok', n));
         row.querySelectorAll('[data-was-i]').forEach((el) => el.setAttribute('data-was-i', n));
         row.querySelectorAll('[data-ctx-i]').forEach((el) => el.setAttribute('data-ctx-i', n));
+        row.querySelectorAll('[data-chk-back]').forEach((el) => el.setAttribute('data-chk-back', n));
+        row.querySelectorAll('[data-ci]').forEach((el) => el.setAttribute('data-ci', String(v + by + (el.classList.contains('cap-ctx-in-before') ? -1 : 1))));
       }
     }
   }
@@ -13096,7 +13164,7 @@
     const list = document.getElementById('capList');
     const row = list && list.querySelector(`.cap-row[data-row="${i}"]`);
     if (!capModalOpen()) return;             // opening the window draws it afresh
-    if (!row || ve.capScope) { renderCapList(); return; }
+    if (!row || ve.capScope || (ve.capListMode || 'all') !== 'all') { renderCapList(); return; }
     row.remove();
     capListRenumber(list, i + 1, -1);
     capListCounts();
@@ -13125,6 +13193,9 @@
      * what the other ear heard, one tap to take it, one tap to say it is right.
      */
     const isDoubt = (c) => !!c.doubt;
+    // …and the ones a person has checked stay in the tab, under "You checked", with what was done (settleDoubt)
+    const isChecked = (c) => !c.doubt && !!c._checked;
+    const nChecked = inScope.filter(({ c }) => isChecked(c)).length;
     const nFixed = inScope.filter(({ c }) => isFixed(c)).length;
     const nAi = inScope.filter(({ c }) => isFixed(c) && c._byAi).length;
     const nDoubt = inScope.filter(({ c }) => isDoubt(c)).length;
@@ -13141,27 +13212,29 @@
     // (all fixed: what was done is the next thing to see)
     if (ve.capListMode === 'mistakes' && !nMist) ve.capListMode = nFixed ? 'fixed' : 'all';
     if (ve.capListMode === 'fixed' && !nFixed) ve.capListMode = 'all';
-    if (ve.capListMode === 'check' && !nDoubt) ve.capListMode = 'all';
+    if (ve.capListMode === 'check' && !nDoubt && !nChecked) ve.capListMode = 'all';
     const mode = ve.capListMode || 'all';
     let rows = mode === 'fixed' ? inScope.filter(({ c }) => isFixed(c))
       : mode === 'check' ? inScope.filter(({ c }) => isDoubt(c))
         : mode === 'mistakes' ? inScope.filter((x, k) => mist[k]) : inScope;
+    let done = mode === 'check' ? inScope.filter(({ c }) => isChecked(c)) : [];
     if (mode === 'mistakes') rows.forEach(({ c }) => gram().open.add(lineKey(c)));
     // 🔍 Search: only the lines that contain what was typed (any case, punctuation ignored)
     const fold = (t) => String(t || '').toLowerCase().replace(/[’']/g, "'").replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim();
     const q = fold(ve.capQuery);
-    if (q) rows = rows.filter(({ c }) => (' ' + fold(c.text) + ' ').includes(q));
+    if (q) { rows = rows.filter(({ c }) => (' ' + fold(c.text) + ' ').includes(q)); done = done.filter(({ c }) => (' ' + fold(c.text) + ' ').includes(q)); }
+    const nShown = rows.length + done.length;
     const sn = document.getElementById('capSearchN');
-    if (sn) sn.textContent = q ? `${rows.length} line${rows.length === 1 ? '' : 's'}` : '';
+    if (sn) sn.textContent = q ? `${nShown} line${nShown === 1 ? '' : 's'}` : '';
     document.getElementById('capCount').textContent = scope
-      ? `${rows.length} caption line${rows.length === 1 ? '' : 's'} in this short`
+      ? `${nShown} caption line${nShown === 1 ? '' : 's'} in this short`
       : all.length + ' caption lines';
     const list = document.getElementById('capList');
-    if (!rows.length && q) {
+    if (!nShown && q) {
       list.innerHTML = `<div class="cap-search-none muted">No caption line contains “${escape2(ve.capQuery.trim())}”.</div>`;
       return;
     }
-    if (!rows.length) {
+    if (!nShown) {
       /*
        * THE WINDOW OPENS BEFORE THERE ARE ANY WORDS, and that is the point.
        *
@@ -13225,20 +13298,21 @@
     const note = !heard.length || (!checkedAll && !nUnchecked) ? ''
       : checkedAll && capCheckedByAai()
         ? `<div class="cap-check-note ${nDoubt ? 'warn' : 'good'}" title="AssemblyAI says how sure it was of every word; the lines with a word it was less than half sure of are listed under Check">`
-          + `<span class="cap-check-tx">✓ AssemblyAI · ${nDoubt ? `unsure of ${n0(nDoubt)} of ${n0(heard.length)} lines` : `sure of all ${n0(heard.length)} lines`}</span>`
+          + `<span class="cap-check-tx">✓ AssemblyAI · ${nDoubt + nChecked ? `unsure of ${n0(nDoubt + nChecked)} of ${n0(heard.length)} lines${nChecked ? ` · ${n0(nChecked)} checked` : ''}` : `sure of all ${n0(heard.length)} lines`}</span>`
           + `<span class="cap-check-bar" aria-hidden="true"><i style="width:${pct}%"></i></span></div>`
       : checkedAll
         ? `<div class="cap-check-note ${nDoubt ? 'warn' : 'good'}" title="Every line was heard twice, by two different models">`
-          + `<span class="cap-check-tx">✓ Heard twice · ${nDoubt ? `${n0(heard.length - nDoubt)} of ${n0(heard.length)} agree` : `all ${n0(heard.length)} lines agree`}</span>`
+          + `<span class="cap-check-tx">✓ Heard twice · ${nDoubt + nChecked ? `${n0(heard.length - nDoubt - nChecked)} of ${n0(heard.length)} agree${nChecked ? ` · ${n0(nChecked)} checked` : ''}` : `all ${n0(heard.length)} lines agree`}</span>`
           + `<span class="cap-check-bar" aria-hidden="true"><i style="width:${pct}%"></i></span></div>`
         : `<div class="cap-check-note"><span class="cap-check-tx">ℹ️ ${nUnchecked === heard.length ? 'Heard once, not double-checked' : n0(nUnchecked) + ' lines heard once, not double-checked'}${ve._capCheckWhy ? ` (${escape2(ve._capCheckWhy)})` : ''} — give them a read</span></div>`;
-    const seg = nFixed || nDoubt || nMist;
-    const nTabs = 1 + !!nDoubt + !!nMist + !!nFixed;
+    const seg = nFixed || nDoubt || nChecked || nMist;
+    const nTabs = 1 + !!(nDoubt || nChecked) + !!nMist + !!nFixed;
     const tabs = note + `<div class="cap-fix-tabs${seg ? ' seg' : ''}" role="tablist">`
       + (seg
         ? `<div class="cap-seg">`
           + `<button type="button" role="tab" data-capfix="all" class="${mode === 'all' ? 'on' : ''}">${nTabs > 2 ? 'All' : 'All lines'} <span>${inScope.length}</span></button>`
-          + (nDoubt ? `<button type="button" role="tab" data-capfix="check" class="cap-tab-check ${mode === 'check' ? 'on' : ''}">⚠ Check <span>${nDoubt}</span></button>` : '')
+          // (⚠ while some are left to check; ✓ Checked once they all are — the tab stays, for what was done)
+          + (nDoubt || nChecked ? `<button type="button" role="tab" data-capfix="check" class="cap-tab-check${nDoubt ? '' : ' done'} ${mode === 'check' ? 'on' : ''}">${nDoubt ? `⚠ Check <span>${nDoubt}</span>` : `✓ Checked <span>${nChecked}</span>`}</button>` : '')
           + (nMist ? `<button type="button" role="tab" data-capfix="mistakes" class="cap-tab-mist ${mode === 'mistakes' ? 'on' : ''}"><i class="cap-tab-dot" aria-hidden="true"></i>Mistakes <span>${nMist}</span></button>` : '')
           + (nFixed ? `<button type="button" role="tab" data-capfix="fixed" class="cap-tab-fixed ${mode === 'fixed' ? 'on' : ''}">${nAi ? '✨' : '✍'} Fixed <span>${nFixed}</span></button>` : '')
           + `</div>`
@@ -13258,7 +13332,12 @@
         + `<div class="cap-rev-key"><del>red</del> was taken out · <ins>green</ins> was put in · ▶ plays the line</div>`
         + `<div class="cap-rev-acts"><button type="button" class="cap-rev-keep" data-rev="keep">✓ Keep them all</button>`
         + `<button type="button" class="cap-rev-back" data-rev="back">↶ Put them all back</button></div></div>`;
-    list.innerHTML = tabs + mistHead + review + rows.map(({ c, i }) => capRowHtml(c, i, base, mode !== 'all')).join('');
+    // ⚠ Check: under the lines still to check, the ones a person has checked — what they did, and the way back
+    const doneHead = !done.length ? ''
+      : `<div class="cap-done-hd"><b>✓ You checked</b><span>${done.length} line${done.length === 1 ? '' : 's'}${capCheckedByAai() ? ' AssemblyAI was not sure of' : ''}</span>`
+        + `<small><del>red</del> was heard · <ins>green</ins> is what it says now · ↶ puts a line back in Check</small></div>`;
+    list.innerHTML = tabs + mistHead + review + rows.map(({ c, i }) => capRowHtml(c, i, base, mode !== 'all')).join('')
+      + doneHead + done.map(({ c, i }) => capRowHtml(c, i, base, true)).join('');
     const mAll = list.querySelector('[data-mist="all"]');
     if (mAll) mAll.addEventListener('click', () => fixAllGrammar());
     list.querySelectorAll('[data-rev]').forEach((b) => b.addEventListener('click', () => {
@@ -13281,7 +13360,7 @@
     }));
     list.querySelectorAll('[data-doubt-ok]').forEach((b) => b.addEventListener('click', () => {
       const e = ve.capEvents[+b.dataset.doubtOk]; if (!e) return;
-      settleDoubt(e);
+      settleDoubt(e, 'right');
       renderCapList(); renderCapTrack();
     }));
     list.querySelectorAll('[data-doubt-use]').forEach((b) => b.addEventListener('click', () => {
@@ -13291,12 +13370,14 @@
       const before = e.text;
       if (e._was == null) e._was = before;      // shows under ✍ Fixed, with Put back
       e.text = alt;
-      settleDoubt(e);
+      settleDoubt(e, 'took', before);
       renderCapList(); renderCapTrack(); updateCapOverlay(ve.refs.player.currentTime || 0);
       // the same correction everywhere else, and remembered for next time
       learnCaptionEdit(before, alt, i);
     }));
     list.querySelectorAll('.cap-was-back').forEach((b) => b.addEventListener('click', () => putLineBack(+b.dataset.wasI)));
+    list.querySelectorAll('[data-chk-back]').forEach((b) => b.addEventListener('click', () => unsettleDoubt(+b.dataset.chkBack)));
+    list.querySelectorAll('.cap-ctx-in').forEach(wireCtxInput);
     list.querySelectorAll('.cap-was').forEach((w) => w.closest('.cap-row').classList.add('fixed'));
     list.scrollTop = keepScroll;
     list.querySelectorAll('.cap-text').forEach(wireCapInput);
@@ -14486,15 +14567,46 @@
     const t = inChosenCase(cleanCapText(w.map((x) => x.text).join(' ')));
     return t && t !== e.text ? t : null;
   }
-  /** A line a person has looked at is settled: its words are no longer in doubt either. */
-  function settleDoubt(e) {
+  /**
+   * A line a person has looked at is settled: its words are no longer in doubt either.
+   *
+   * ►► AND WHAT THEY FOUND IS KEPT. ◄◄ "I should be able to see the ones AssemblyAI was not sure about that I
+   * clicked It's right — the history, just like I can for the AI fixed ones." `_checked` says what the line was in
+   * doubt for, what was heard, and what was done: 'right' (✓ It's right), 'typed' (put right by hand) or 'took' (the
+   * second listen's words) — the ⚠ Check tab lists these under "You checked", each with its way back. The words
+   * carry it too (`okd`), so lines made again from them (Words per line) are still the ones checked.
+   */
+  function settleDoubt(e, how, heard) {
     if (!e) return;
+    if (e.doubt && !e._checked) e._checked = { kind: e.doubt, how: how || 'right', heard: heard != null ? heard : e.text };
     delete e.doubt;
-    const off = capOff();
     if (Array.isArray(ve.capWords) && ve.capWords !== ve.capEvents) {
-      for (const w of ve.capWords) { const m = (w.start + w.end) / 2; if (m >= e.start - 0.01 && m <= e.end + 0.01) { delete w.doubt; delete w.unsure; } }
+      for (const w of ve.capWords) {
+        const m = (w.start + w.end) / 2;
+        if (m >= e.start - 0.01 && m <= e.end + 0.01) { if (e._checked) w.okd = e._checked.how; delete w.doubt; delete w.unsure; }
+      }
     }
-    void off;
+  }
+  /** "↶ Back to Check": a checked line in doubt again — and, if it was changed, saying what was heard again. */
+  function unsettleDoubt(i) {
+    const e = (ve.capEvents || [])[i]; if (!e || !e._checked) return;
+    pushHistory({ captions: true });
+    const k = e._checked;
+    if (k.heard && k.heard !== e.text) {
+      const now = e.text;
+      e.text = k.heard;
+      if (e._was === k.heard) { delete e._was; delete e._byAi; }
+      syncCapWordsFor(e, now, k.heard);
+    }
+    e.doubt = k.kind || 'unsure';
+    delete e._checked;
+    if (Array.isArray(ve.capWords) && ve.capWords !== ve.capEvents) {
+      for (const w of ve.capWords) {
+        const m = (w.start + w.end) / 2;
+        if (m >= e.start - 0.01 && m <= e.end + 0.01) { delete w.okd; if (e.doubt === 'differ') w.doubt = true; else w.unsure = true; }
+      }
+    }
+    renderCapList(); renderCapTrack(); updateCapOverlay(ve.refs.player ? (ve.refs.player.currentTime || 0) : 0);
   }
 
   /**

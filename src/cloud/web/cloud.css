@@ -1433,6 +1433,14 @@ body.mw-cloud #cloudPass:focus { border-color: #1f6fe0; box-shadow: 0 0 0 3px rg
   body.mw-cloud #capModal .cap-foot-msg:has(.cap-fix-note.tap.seen) { display: none; }
   body.mw-cloud #capModal .cap-ctx { margin: 0 0 2px 42px; font-size: 13.5px; }
   body.mw-cloud #capModal .cap-ctx-play { min-height: 34px; padding: 5px 12px; font-size: 13px; }
+  body.mw-cloud #capModal .cap-ctx-in { min-height: 34px; padding: 4px 8px; font-size: 15px; border-radius: 8px; }
+  body.mw-cloud #capModal .cap-chk { margin: 2px 0 8px 42px; padding: 10px 12px; font-size: 14px; }
+  body.mw-cloud #capModal .cap-chk-tag { font-size: 12px; padding: 3px 9px; }
+  body.mw-cloud #capModal .cap-chk-back { min-height: 32px; font-size: 12.5px; }
+  body.mw-cloud #capModal .cap-chk .cap-was-diff { font-size: 15px; }
+  body.mw-cloud #capModal .cap-done-hd { margin: 16px 0 10px; padding: 12px 14px; border-radius: 14px; }
+  body.mw-cloud #capModal .cap-done-hd b { font-size: 15.5px; }
+  body.mw-cloud #capModal .cap-done-hd span, body.mw-cloud #capModal .cap-done-hd small { font-size: 13px; }
   /* the Word Book's footer: the count on its own line, the buttons sharing the width */
   body.mw-cloud #capModal .cap-wb-foot { flex-wrap: wrap; gap: 8px; padding: 10px 16px; }
   body.mw-cloud #capModal .cap-wb-foot #capWbCount { flex: 1 1 100%; font-size: 12.5px; line-height: 1.4; }

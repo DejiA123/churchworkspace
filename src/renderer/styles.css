@@ -2850,6 +2850,30 @@ body.ve-pfull .ve-preview .ve-fs-exit {
 .cap-ctx { flex: 1 1 100%; min-width: 0; display: flex; align-items: center; gap: 8px; margin: 0 0 2px 72px; font-size: 12px; color: var(--muted, #8b93a7); }
 .cap-ctx-before { order: -1; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
 .cap-ctx-tx { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the line before and the line after: boxes to type in, quiet until touched */
+.cap-ctx-before { display: flex; align-items: center; gap: 2px; }
+.cap-ctx-tx { display: flex; align-items: center; gap: 2px; }
+.cap-ctx-in { flex: 1 1 auto; min-width: 0; width: 100%; margin: 0; padding: 3px 6px; border: 1px solid transparent; border-radius: 6px;
+  background: transparent; color: inherit; font: inherit; text-overflow: ellipsis; }
+.cap-ctx-in:hover { border-color: rgba(255, 255, 255, .12); }
+.cap-ctx-in:focus { outline: none; color: var(--text, #e8ebf2); background: rgba(255, 255, 255, .06); border-color: rgba(99, 102, 241, .65); }
+/* ⚠ Check, "You checked": what was done with each line AssemblyAI was not sure of, and the way back */
+.cap-done-hd { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 14px 2px 8px; padding: 10px 12px; border-radius: 12px;
+  background: rgba(34, 197, 94, .08); border: 1px solid rgba(34, 197, 94, .3); }
+.cap-done-hd b { font-size: 14px; color: #bbf7d0; }
+.cap-done-hd span { font-size: 12px; color: #a3a9bb; }
+.cap-done-hd small { flex: 1 1 100%; font-size: 12px; line-height: 1.6; color: #a3a9bb; }
+.cap-done-hd del { text-decoration: line-through; text-decoration-thickness: 2px; text-decoration-color: rgba(255, 107, 107, .9); color: #ffa3a3; background: rgba(248, 81, 73, .15); border-radius: 4px; padding: 0 3px; }
+.cap-done-hd ins { text-decoration: none; color: #86efac; background: rgba(34, 197, 94, .17); border-radius: 4px; padding: 0 3px; font-weight: 700; }
+.cap-chk { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; margin: 2px 0 6px 72px; padding: 8px 10px;
+  border-radius: 10px; background: rgba(34, 197, 94, .06); border: 1px solid rgba(34, 197, 94, .22); font-size: 12.5px; }
+.cap-chk-tag { flex: none; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 750; letter-spacing: .02em; color: #bbf7d0; background: rgba(34, 197, 94, .2); }
+.cap-chk .cap-was-diff { order: 3; }
+.cap-chk-back { order: 2; flex: 0 0 auto; width: auto; margin: 0 0 0 auto; padding: 3px 10px; font-size: 11.5px; border-radius: 999px; cursor: pointer;
+  background: transparent; color: #fde68a; border: 1px solid rgba(245, 158, 11, .6); white-space: nowrap; }
+.cap-chk-back:hover { background: rgba(245, 158, 11, .15); }
+.cap-fix-tabs .cap-seg .cap-tab-check.done { color: #86efac; }
+.cap-fix-tabs .cap-seg .cap-tab-check.done.on { background: rgba(34, 197, 94, .2); color: #dcfce7; }
 .cap-ctx-play { flex: 0 0 auto; width: auto; margin: 0; padding: 3px 10px; font-size: 11.5px; border-radius: 999px; cursor: pointer; font-weight: 650;
   background: rgba(79,124,255,.12); color: #c7d2fe; border: 1px solid rgba(79,124,255,.45); }
 /* 🎙 AI voice (openAiVoice) */
