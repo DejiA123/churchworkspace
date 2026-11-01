@@ -309,6 +309,11 @@ const worst = (a, b) => { const d = []; for (let i = 0; i < a.length; i++) d.pus
       check(main0 && main0.dn === 0.9 && !own0 && pfx && pfx.dn === 0.9,
         'Reduce image noise (Strong) on the clip: a short cut from it, with no look of its own, is exported with it', { main0, own0, pieces: fp && fp.pieces });
       check(/hqdn3d/.test(video.fxVideo(pfx || {})), 'the short\'s export recipe has the noise removal', video.fxVideo(pfx || {}).slice(0, 80));
+      // "I hope the Enhance quality is also exported too"
+      await T('setClipFx', 'enh', 1);
+      const fe = await T('fxFootage', short.id), efx = fe && fe.pieces && fe.pieces[0] && fe.pieces[0].fx, evf = video.fxVideo(efx || {});
+      check(efx && efx.enh === 1 && efx.dn === 0.9 && /hqdn3d/.test(evf) && /gblur/.test(evf) && /convolution/.test(evf),
+        'Enhance quality on the clip reaches the short too: noise out, clarity and sharpening in its export recipe', { efx, vf: evf.slice(0, 80) });
       await T('fxScope', 'all'); await T('setClipFx', 'dn', 0.5);   // All clips: the shorts get a look of their own
       await T('fxScope', 'clip'); await T('setClipFx', 'dn', 0.2);  // …then the clip alone is changed
       const fp2 = await T('fxFootage', short.id), p2 = fp2 && fp2.pieces && fp2.pieces[0] && fp2.pieces[0].fx;
