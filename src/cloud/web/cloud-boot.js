@@ -2844,7 +2844,7 @@ let _hideTimer = null;
         if (stopped()) throw halt();
         const i = next++;
         const blob = await one(i);
-        if (disk) await disk.write(i * CHUNK, blob); else parts[i] = blob;
+        if (disk) { try { await disk.write(i * CHUNK, blob); } catch (er) { throw noRoom(er); } } else parts[i] = blob;
         got += blob.size;
         const pc = Math.min(99, Math.floor((got / total) * 100));
         if (pc !== shown) { shown = pc; onPct(pc, got, total); }
@@ -2861,7 +2861,7 @@ let _hideTimer = null;
     }
     if (disk) {
       let f;
-      try { f = await disk.finish(); } catch (e) { disk.abort(); throw e; }
+      try { f = await disk.finish(); } catch (e) { disk.abort(); throw noRoom(e); }
       const file = f.type ? f : new File([f], nice, { type });
       saveFolderOf.set(file, disk.dir);
       return file;
@@ -2871,6 +2871,17 @@ let _hideTimer = null;
 
   /* Past this, a video is only ever saved through the phone's storage. */
   const MEMORY_MAX = 150 * 1024 * 1024;
+  /*
+   * ►► THE PHONE'S STORAGE, SAID AS IT IS — NOT "THE SIGNAL". ◄◄ "Could not save it — the download kept dropping",
+   * at 0%, on Wi-Fi: the pieces came down, but the phone would not take them (its storage full). Any error but a
+   * cancel was told as a dropped download. A piece that cannot be WRITTEN is the phone's storage, and says so.
+   */
+  function noRoom(er) {
+    if (er && (er.code === 'SPACE' || er.name === 'AbortError')) return er;
+    const e = new Error('Your iPhone has no room for it — its storage is full. Free some space (Settings › General › iPhone Storage), then try again.');
+    e.code = 'SPACE'; e.cause = er;
+    return e;
+  }
   /*
    * ►► ONE SAVE NEVER WIPES ANOTHER. ◄◄
    * Every save used to begin by deleting the whole 'mw-saves' folder — "one
@@ -2892,12 +2903,40 @@ let _hideTimer = null;
   const offeredSaves = [];           // the finished ones, oldest first
   const saveFolderOf = new WeakMap(); // a File brought down -> its folder
   let saveSeq = 0;
-  function releaseSave(file) {
+  function releaseSave(file, now) {
     const d = file && saveFolderOf.get(file);
     if (!d) return;
     liveSaves.delete(d);
     const k = offeredSaves.indexOf(d); if (k >= 0) offeredSaves.splice(k, 1);
+    // in Photos now: off the phone's storage at once, not at the next save (see ►► AS LITTLE OF THE PHONE AS IT CAN ◄◄)
+    if (now) removeSaveDir(d);
   }
+  async function removeSaveDir(d) {
+    try {
+      const root = await navigator.storage.getDirectory();
+      const saves = await root.getDirectoryHandle(SAVE_DIR);
+      await saves.removeEntry(d, { recursive: true });
+    } catch (e) { /* still open somewhere, or gone already: the next sweep */ }
+  }
+  /*
+   * ►► AS LITTLE OF THE PHONE AS IT CAN. ◄◄ "Save 18 videos": one short "could not be got", one saved, then the share
+   * sheet opened on a blank card — twice, the first save working and the next ones not. A share needs room: memory
+   * for Safari to read the video, and the phone's storage for the copy it hands to Photos (and Photos keeps one).
+   * The app was taking that room itself: an Export all brought ALL its shorts onto the phone's storage at once (18
+   * shorts, a gigabyte and more), a video already in Photos stayed there until the next save began, and what a page
+   * that ended (closed, or killed) had brought down stayed until a save swept it. Now: what an ended page left is
+   * cleared when the app opens; a video is taken off the moment it is in Photos; only the next couple of shorts are
+   * brought down ahead (PREFETCH_AHEAD) — the Save all panel fetches each of the rest when it is its turn; and each
+   * share is ONE video. At most a video or two of the app on the phone at any time.
+   */
+  const PREFETCH_AHEAD = 2;
+  setTimeout(async () => {
+    try {
+      if (!navigator.storage || !navigator.storage.getDirectory) return;
+      const root = await navigator.storage.getDirectory();
+      await sweepSaves(await root.getDirectoryHandle(SAVE_DIR, { create: true }));
+    } catch (e) { /* no private storage here */ }
+  }, 4000);
   /* Is this File still readable? One kept in memory always is; one on the
      phone's storage only while its folder has not been let go of. */
   const saveAlive = (file) => !!file && (!saveFolderOf.has(file) || liveSaves.has(saveFolderOf.get(file)));
@@ -3051,7 +3090,9 @@ let _hideTimer = null;
         if (e && e.code === 'SPACE') return show.fail(e.message);
         if (e && e.code === 'TOO_BIG') { show.fail('Too big to save from inside the app on this phone — opening it in the player: tap Share, then “Save Video”.'); openInPlayer(p); return; }
         if (e && e.code === 'COPY') return show.fail(e.message);
-        show.fail('The download kept dropping. Check the signal and try again.');
+        // (what it was, in a word, so the next report says it: an HTTP status, a timeout)
+        const why = e && e.message && /^(HTTP \d+|short piece|.*(network|load|abort|timed? ?out).*)$/i.test(e.message) ? ` (${e.message})` : '';
+        show.fail(`The download kept dropping${why}. Check the signal and try again.`);
       };
       try {
         const cached = cachedSave(p);
@@ -3139,7 +3180,7 @@ let _hideTimer = null;
            * leaves "Save Video" out.
            */
           const share = () => navigator.share({ files: [part.file] }).then(() => {
-            part.saved = true; releaseSave(part.file); part.file = null;
+            part.saved = true; releaseSave(part.file, true); part.file = null;
             step(k + 1).catch(failed);
           }, (e) => {
             if (e && e.name === 'AbortError') return show.cancelled(share, k, n);
@@ -3511,18 +3552,15 @@ let _hideTimer = null;
    */
   const prefetched = new Map();   // path -> [{ file, size, saved }]
   /*
-   * ►► SEVERAL VIDEOS IN ONE SHARE: LESS THAN ONE VIDEO MAY BE. ◄◄ "When I click Save 2 videos it doesn't work —
-   * the other time worked": the share sheet opened on a blank card, which is what Safari does when a share is more
-   * than it can read into memory (phonecopy.js). One share of up to 140 MB saves; but a Save all shares again and
-   * again in the same page, beside everything the studio holds, and its first batch had worked. So several videos
-   * go together only up to what is known to save well on an iPhone (95 MB did); a video bigger than that still
-   * goes on its own, as before. And a share of several that is closed — a blank card closed, or Cancel — is
-   * offered again ONE video to a tap: the same batch again would only open on the same blank card.
+   * ►► ONE VIDEO TO A SHARE. ◄◄ "When I click Save 2 videos it doesn't work — the other time worked": the share
+   * sheet opened on a blank card, which is what Safari does when a share is more than the phone can give it room
+   * for (phonecopy.js) — and a Save all shares again and again in the same page, beside everything the studio
+   * holds. Several videos in one share (up to 140 MB, then 90) still opened blank; so each share is one video, the
+   * least a share can be. (See also ►► AS LITTLE OF THE PHONE AS IT CAN ◄◄.)
    */
-  const SHARE_MANY_MAX = 90 * 1024 * 1024;
-  /* In Photos: let go of the file — its folder, and the page's hold on it, so what Safari read can be freed before
-     the next share. */
-  function savedToPhotos(x) { x.saved = true; releaseSave(x.file); x.file = null; }
+  /* In Photos: let go of the file — off the phone's storage at once, and the page's hold on it, so what Safari read
+     can be freed before the next share. */
+  function savedToPhotos(x) { x.saved = true; releaseSave(x.file, true); x.file = null; }
   function dropPrefetched() {
     for (const parts of prefetched.values()) for (const x of parts) if (!x.saved) releaseSave(x.file);
     prefetched.clear();
@@ -3629,10 +3667,11 @@ let _hideTimer = null;
   async function prefetchShorts(paths, { stopped, progress }) {
     const mb = (b) => Math.max(1, Math.round(b / 1048576)) + ' MB';
     dropPrefetched();
-    const items = saveItemsOf(paths);
+    // only the next couple, not all of them (►► AS LITTLE OF THE PHONE AS IT CAN ◄◄): Save all brings the rest in turn
+    const items = saveItemsOf(paths).slice(0, PREFETCH_AHEAD);
     await sizeItems(items);
     const meter = saveMeter(items);
-    const N = items.length;
+    const N = items.length, ALL = saveItemsOf(paths).length;
     let got = 0, space = null;
     for (let i = 0; i < N; i++) {
       if (stopped()) break;
@@ -3642,7 +3681,7 @@ let _hideTimer = null;
           meter, stopped,
           say: (text, kind, g, t) => progress(meter.pct(), kind === 'copy'
             ? `📲 Making a phone copy of short ${i + 1} of ${N}…`
-            : `📲 Getting short ${i + 1} of ${N} onto your phone${t && g ? ` — ${mb(g)} of ${mb(t)}` : '…'}`),
+            : `📲 Getting ${N < ALL ? `the first ${N} of ${ALL} shorts` : `short ${i + 1} of ${N}`} onto your phone${t && g ? ` — ${mb(g)} of ${mb(t)}` : '…'}`),
         });
         prefetched.set(it.path, parts);
         got++;
@@ -3658,9 +3697,9 @@ let _hideTimer = null;
   }
   /*
    * The parts that can go to the share sheet straight away, in order: what is
-   * already on the phone from the first short not yet saved, up to what several
-   * videos may be in one share (SHARE_MANY_MAX; one video alone may be bigger),
-   * or just one with `one`. Empty when the first short still has to come down.
+   * already on the phone from the first short not yet saved: one video (or one
+   * part of one) — ►► ONE VIDEO TO A SHARE ◄◄. Empty when the first short still
+   * has to come down.
    */
   function firstBundleOf(items, one) {
     const b = [];
@@ -3671,7 +3710,7 @@ let _hideTimer = null;
       if (!it.parts) break;
       for (const x of it.parts) {
         if (x.saved) continue;
-        if (b.length && (one || bytes + x.size > SHARE_MANY_MAX)) return b;
+        if (b.length) return b;   // one video (one part of one) to a share
         x.i = i; b.push(x); bytes += x.size;
       }
     }
@@ -3684,8 +3723,7 @@ let _hideTimer = null;
    * this very tap — no second "are you sure" tap for files that are ready.
    */
   function saveAll(paths, opts = {}) {
-    // one video to a tap (a share of several was closed): see SHARE_MANY_MAX
-    const one = !!opts.one;
+    const one = true;   // one video to a share: see ►► ONE VIDEO TO A SHARE ◄◄
     const items = saveItemsOf(paths);
     if (!items.length) return;
     if (!canSaveHere()) { items.forEach((it) => offerDownload(it.path)); return; }
@@ -3713,7 +3751,7 @@ let _hideTimer = null;
       }, (e) => {
         if (e && (e.name === 'AbortError' || e.name === 'NotAllowedError')) {
           island({ kind: 'info', title: 'Not saved yet', sub: `${n} video${n > 1 ? 's' : ''} on your phone`, sticky: true,
-            action: { label: 'Save all', onClick: () => saveAll(paths, { tapped: true, one: one || first.bundle.length > 1 }) } });
+            action: { label: 'Save all', onClick: () => saveAll(paths, { tapped: true }) } });
         } else saveAll(paths);
       });
       return;
@@ -3744,15 +3782,19 @@ let _hideTimer = null;
     });
     go('ready', `Save all ${items.length} to Photos`);
     let onTap = null;
-    btn.addEventListener('click', () => { if (btn.dataset.state === 'ready' && onTap) { const f = onTap; onTap = null; f(); } });
+    btn.addEventListener('click', () => {
+      if (btn.dataset.state === 'ready' && onTap) { const f = onTap; onTap = null; f(); return; }
+      // some could not be saved: the button tries just those again
+      if (btn.dataset.state === 'fail') { const rest = items.filter((it) => !it.done).map((it) => it.path); if (rest.length) saveAll(rest, { tapped: true }); }
+    });
     const tapThen = (text) => new Promise((resolve) => { go('ready', text); onTap = resolve; try { if (navigator.vibrate) navigator.vibrate(15); } catch (e) {} });
     const run = async (first) => {
       const total = items.length;
       let cur = 0;
       let bundle = [];            // { file, i, size, saved }
       let bundleBytes = 0;
-      let single = one;           // one video to a tap from now on (a share of several was closed)
-      const tooMany = (size) => bundle.length && (single || bundleBytes + size > SHARE_MANY_MAX);
+      let single = one;           // one video to a tap (always, now: ►► ONE VIDEO TO A SHARE ◄◄)
+      const tooMany = () => bundle.length > 0 && single;
       const oneByOne = (g) => {
         if (single || g.length < 2) return;
         single = true;
@@ -3798,13 +3840,13 @@ let _hideTimer = null;
             shared(g);
           } catch (e) {
             if (!(e && e.name === 'AbortError')) { g.forEach((b) => row(b.i, 'The share sheet would not open', 'fail')); continue; }
-            // closed: the same again — but several are offered one to a tap (see SHARE_MANY_MAX)
+            // closed — or a blank card closed: the same again (several are split, one to a tap)
             if (n > 1) { oneByOne(g); todo.unshift(...g.map((b) => [b])); } else todo.unshift(g);
           }
         }
       };
       const queue = async (x) => {
-        if (tooMany(x.size)) await flush();
+        if (tooMany()) await flush();
         bundle.push(x); bundleBytes += x.size;
       };
       for (let i = 0; i < items.length; i++) {
@@ -3821,20 +3863,21 @@ let _hideTimer = null;
             meter,
             say: (text) => { row(i, text, 'loading'); paint(); },
             // share what is waiting before the next part would make it too big for one share
-            beforePart: async (part) => { if (tooMany(part.size || 0)) await flush(); },
+            // (the one on the phone goes to Photos — and off the phone — before the next comes down)
+            beforePart: async () => { if (tooMany()) await flush(); },
             afterPart: (x) => { bundle.push(x); bundleBytes += x.size; },
           });
           prefetched.set(it.path, it.parts);
           row(i, 'On your phone — ready to save', 'ready');
         } catch (e) {
           meter.set(i, 1);
-          row(i, (e && e.code === 'SPACE') ? e.message : 'Could not get this one — the rest carry on', 'fail');
+          row(i, (e && e.code === 'SPACE') ? e.message : `Could not get this one${e && e.message ? ` (${String(e.message).slice(0, 40)})` : ''} — the rest carry on`, 'fail');
         }
       }
       await flush();
       const saved = items.filter((it) => it.done).length;
       const failed = items.length - saved;
-      go(failed ? 'fail' : 'done', failed ? `Saved ${saved} of ${items.length}` : `All ${items.length} saved ✓`);
+      go(failed ? 'fail' : 'done', failed ? `Saved ${saved} of ${items.length} · Try the other ${failed} again` : `All ${items.length} saved ✓`);
       if (!failed) island({ kind: 'good', title: `All ${items.length} saved`, sub: 'Find them in your Photos', ms: 4000 });
     };
     if (first) { run(first).catch(() => go('fail', 'Something went wrong — try again')); return; }
