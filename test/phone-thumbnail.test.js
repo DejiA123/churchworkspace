@@ -11,8 +11,12 @@
  *   - the live preview: the thumbnail drawn at the top in the look picked
  *     under it (every look small), redrawn as it is typed, opened big when
  *     tapped; the look picked leads the board
+ *   - the preacher on it: Photo bank / From the video / No one — the
+ *     preacher's own bank photo by itself when they have one; From the video
+ *     cuts them out of the moment picked; No one puts the words on the picture
  *   - the photo bank: a photo tapped opens big (Dark / Light / Checks behind
  *     the cut-out, zoom, Fix cut-out), and Use this photo takes it
+ *   - the editor: "Their photos" on a preacher cut out of the video too
  *   - Make: a board of six YouTube looks, each 1280×720, with the words on them
  *   - the editor: Layouts offers the six thumbnail looks; Save gives a
  *     1920×1080 JPEG under 2 MB; Keep puts it in My Uploads
@@ -133,10 +137,29 @@ async function until(page, fn, arg, ms = 30000) {
         on: document.querySelectorAll('.cp-thumb .th-fr.on').length, times: [...document.querySelectorAll('.cp-thumb .th-fr[data-fr] small')].map((x) => x.textContent) };
     }, null, 120000);
     check(s && s.ok && s.vid === 'Faith Over Fear (Pastor Mike)', 'it opens with that video, and the server offers its best moments', s);
-    check(s && s.frames.length && s.frames.every(([w, h]) => Math.abs(w / h - 16 / 9) < 0.02) && s.times.every((t) => /^\d+:\d\d$/.test(t)) && s.on === 1, 'the moments are 16:9 pictures with their time on them, the best one chosen', s && { frames: s.frames, times: s.times, on: s.on });
+    check(s && s.frames.length && s.frames.every(([w, h]) => Math.abs(w / h - 16 / 9) < 0.02) && s.times.every((t) => /^\d+:\d\d$/.test(t)), 'the moments are 16:9 pictures with their time on them', s && { frames: s.frames, times: s.times });
     check(s && s.line && s.ideas.includes(s.line) && s.ideas.some((l) => /FAITH OVER FEAR/.test(l)) && !s.ideas.some((l) => /PASTOR|MIKE/.test(l)),
       'lines to put on it are offered (the video’s own name among them, not the preacher’s), the first one already on it', s && { line: s.line, ideas: s.ideas });
+    // "If the person has a picture bank, those should be the images of the speaker on the thumbnail, not the snapshots
+    // of the moment from the video": the one preacher in the bank has a photo — it is on it by itself
+    const whoNow = () => page.evaluate(() => {
+      const t = window.MWFlyerStudio._state.th, sec = document.querySelector('.cp-thumb .th-banksec');
+      return { who: t.who, bank: !!t.bank, seg: [...document.querySelectorAll('.cp-thumb .th-who [data-thwho]')].map((b) => (b.classList.contains('on') ? '*' : '') + b.textContent.trim()),
+        grid: !!document.querySelector('.cp-thumb .th-bank [data-bank]'), bpOn: !!document.querySelector('.cp-thumb .th-bank .th-bp.on'),
+        on: document.querySelectorAll('.cp-thumb .th-fr.on[data-fr]').length, behind: document.querySelectorAll('.cp-thumb .th-fr.th-behind').length,
+        momentH: ([...document.querySelectorAll('.cp-thumb .fs-asec h4')].find((h) => /moment|behind|picture/i.test(h.textContent)) || {}).textContent || '',
+        note: ((sec && sec.querySelector('.fs-note')) || {}).textContent || '' };
+    });
+    s = await whoNow();
+    check(s.who === 'bank' && s.seg.join() === '*Photo bank,From the video,No one' && s.bank && s.grid && s.bpOn && s.behind === 1 && s.on === 0 && /^Behind them/.test(s.momentH),
+      'a preacher with photos in the bank: Photo bank is chosen by itself, their own photo on it (the video’s moment only behind them)', s);
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'thumb-1-make.png') });
+    // From the video: the preacher cut out of the moment picked, the moments to pick from
+    await page.locator('.cp-thumb .th-who [data-thwho="video"]').tap();
+    await sleep(200);
+    s = await whoNow();
+    check(s.who === 'video' && s.seg[1] === '*From the video' && !s.grid && s.on === 1 && s.behind === 0 && /^The moment/.test(s.momentH) && /Cut out of the moment/.test(s.note),
+      'From the video: the preacher cut out of the moment, the best moment chosen (the bank’s photos put away)', s);
 
     // ── typing your own words, and the word in colour
     await page.locator('.cp-thumb [data-th="line"]').fill('God is not done with you');
@@ -266,6 +289,8 @@ async function until(page, fn, arg, ms = 30000) {
     await page.locator('.cp-thumb [data-ed="back"]').tap();
     await sleep(300);
     await page.locator('.cp-thumb .cp-foot [data-act="back"]').tap();
+    await page.locator('.cp-thumb .th-who [data-thwho="bank"]').tap();
+    await sleep(200);
     s = await until(page, () => {
       const b = [...document.querySelectorAll('.cp-thumb .th-bank [data-bank] img')];
       return { ok: b.length === 1 && b[0].naturalWidth > 0, chips: [...document.querySelectorAll('.cp-thumb [data-banksp]')].map((x) => x.textContent.trim()),
@@ -279,12 +304,13 @@ async function until(page, fn, arg, ms = 30000) {
       const px = (x, y) => Array.from(cv.getContext('2d').getImageData(x, y, 1, 1).data.slice(0, 3));
       return { title: v.querySelector('.fs-vb-top b').textContent, w: cv.width, h: cv.height, corner: px(5, 5), face: px(300, 230),
         bgs: [...v.querySelectorAll('[data-bg]')].map((x) => x.textContent), on: (v.querySelector('[data-bg].on') || {}).textContent,
-        use: !!v.querySelector('[data-vb="use"]'), fix: !!v.querySelector('[data-vb="fix"]'), chosen: !!window.MWFlyerStudio._state.th.bank };
+        use: !!v.querySelector('[data-vb="use"]'), fix: !!v.querySelector('[data-vb="fix"]'), onIt: !!v.querySelector('[data-vb="unuse"]'),
+        chosen: window.MWFlyerStudio._state.th.who === 'bank' && !!window.MWFlyerStudio._state.th.bank };
     }, null, 15000);
     await page.locator('.cp-thumb .th-bank [data-bank]').first().tap();
     s = await openBig();
-    check(s && /Mike Adeyemi/.test(s.title) && s.w === 600 && s.h === 800 && s.bgs.join() === 'Dark,Light,Checks' && s.on === 'Dark' && s.use && s.fix && !s.chosen,
-      'tapping a bank photo opens it big — full size, its speaker named, Dark / Light / Checks behind it, Use and Fix cut-out (nothing chosen yet)', s);
+    check(s && /Mike Adeyemi/.test(s.title) && s.w === 600 && s.h === 800 && s.bgs.join() === 'Dark,Light,Checks' && s.on === 'Dark' && s.onIt && !s.use && s.fix && s.chosen,
+      'tapping a bank photo opens it big — full size, its speaker named, Dark / Light / Checks behind it, Fix cut-out (Photo bank put it on already: “On the thumbnail”)', s);
     check(s && s.face.join() === '141,85,36' && s.corner.join() === '35,26,58', 'it is the cut-out exactly as kept, over the dark', s && { face: s.face, corner: s.corner });
     if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'thumb-bank-big.png') });
     await page.locator('.fs-vb [data-bg="light"]').tap();
@@ -302,7 +328,11 @@ async function until(page, fn, arg, ms = 30000) {
     await sleep(500);
     await page.locator('.cp-thumb .th-bank [data-bank]').first().tap();
     s = await openBig();
-    check(s && s.use && !s.chosen, 'closed without a new cut, the photo is as it was', s);
+    check(s && s.onIt && s.chosen, 'closed without a new cut, the photo is as it was', s);
+    // Don't use it: Photo bank stays, no one on it until a photo is used
+    await page.locator('.fs-vb [data-vb="unuse"]').tap();
+    s = await openBig();
+    check(s && s.use && !s.chosen && (await page.evaluate(() => window.MWFlyerStudio._state.th.who)) === 'bank', 'Don’t use it takes it off (Use this photo offered again)', s);
     await page.locator('.fs-vb [data-vb="use"]').tap();
     await sleep(300);
     s = await page.evaluate(() => ({ big: !!document.querySelector('.fs-vb'), on: !!document.querySelector('.cp-thumb .th-bank .th-bp.on'), behind: !!document.querySelector('.cp-thumb .th-fr.th-behind'), bank: !!window.MWFlyerStudio._state.th.bank }));
@@ -325,6 +355,100 @@ async function until(page, fn, arg, ms = 30000) {
       const u = await page.evaluate(() => window.MWFlyer.render(window.MWFlyerStudio._state.designs[0], document.createElement('canvas'), 1).toDataURL('image/jpeg', 0.9));
       fs.writeFileSync(path.join(SHOTS, 'thumb-bank.jpg'), Buffer.from(u.split(',')[1], 'base64'));
     }
+
+    // ── the editor: "Their photos" on a preacher cut out of the VIDEO — nobody's yet, so it had only Replace (the
+    // phone's photos). "I should be able to replace the image of the speaker in the thumbnail with their photos in the bank"
+    await page.evaluate(() => {
+      // a second preacher in the bank (this phone's copy: a photo not yet saved is its data URL)
+      const c = document.createElement('canvas'); c.width = 600; c.height = 800;
+      const x = c.getContext('2d');
+      x.fillStyle = '#c68642'; x.beginPath(); x.ellipse(300, 250, 100, 130, 0, 0, Math.PI * 2); x.fill();
+      x.fillStyle = '#7f1d1d'; x.beginPath(); x.moveTo(80, 800); x.quadraticCurveTo(90, 430, 300, 410); x.quadraticCurveTo(510, 430, 520, 800); x.fill();
+      window.MWFlyerStudio._state.kit.speakers.push({ id: 'spgrace', name: 'Bishop Grace Okafor', photos: [c.toDataURL('image/png')] });
+    });
+    await page.locator('.cp-thumb .fs-card').first().tap();
+    await page.waitForSelector('.cp-thumb #fsCanvas', { timeout: 10000 });
+    const isPerson = (l) => l.type === 'image' && Object.prototype.hasOwnProperty.call(l, 'speaker');
+    const person0 = await page.evaluate((fn) => {
+      const st = window.MWFlyerStudio._state, isP = eval(fn);
+      const L = st.scene.layers.find((l) => isP(l) && l.speaker === 'spmike');
+      if (!L) return null;
+      L.speaker = ''; L.photo = '';   // as a cut-out from the video is
+      window.MWFlyerStudio._select(L.id);
+      return { id: L.id, look: st.scene.look, x: L.x, y: L.y, w: L.w, h: L.h, top: L.y - L.h / 2, tools: [...document.querySelectorAll('.cp-thumb .fs-tool span')].map((x) => x.textContent) };
+    }, isPerson.toString());
+    check(person0 && person0.tools[0] === 'Their photos' && person0.tools.includes('Replace'), 'a preacher cut out of the video has “Their photos” in the editor, not only Replace', person0);
+    await page.locator('.cp-thumb .fs-tool[data-t="bank"]').tap();
+    s = await until(page, () => {
+      const sh = document.querySelector('.cp-thumb #fsSheet:not(.hidden)'); if (!sh) return { ok: false };
+      const pics = [...sh.querySelectorAll('[data-photo] img')];
+      return { ok: pics.length === 1 && pics[0].naturalWidth > 0, h: (sh.querySelector('h4') || {}).textContent, add: !!sh.querySelector('[data-addpics]'),
+        who: [...sh.querySelectorAll('[data-who]')].map((b) => (b.classList.contains('on') ? '*' : '') + b.dataset.who) };
+    }, null, 15000);
+    check(s && s.ok && /Mike Adeyemi/.test(s.h) && s.who.join() === '*spmike,spgrace,+' && s.add,
+      'it opens on the photos of the preacher named on it, every preacher in the bank a tap away (Add photos, New preacher too)', s);
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'thumb-their-photos.png') });
+    await page.locator('.cp-thumb #fsSheet [data-who="spgrace"]').tap();
+    s = await until(page, () => { const sh = document.querySelector('.cp-thumb #fsSheet'), pics = [...sh.querySelectorAll('[data-photo] img')], h = (sh.querySelector('h4') || {}).textContent;
+      return { ok: pics.length === 1 && pics[0].naturalWidth > 0 && /Grace Okafor/.test(h), h, on: (sh.querySelector('[data-who].on') || {}).textContent }; }, null, 15000);
+    check(s && s.ok, 'another preacher tapped: their photos', s);
+    const undo0 = await page.evaluate(() => window.MWFlyerStudio._state.undo && window.MWFlyerStudio._state.undo.length);
+    await page.locator('.cp-thumb #fsSheet [data-photo]').first().tap();
+    s = await until(page, (id) => {
+      const st = window.MWFlyerStudio._state, L = st.scene.layers.find((l) => l.id === id);
+      return { ok: !!L && L.speaker === 'spgrace' && /^data:/.test(L.photo) && /^kd:/.test(L.img) && !!window.MWFlyer.IMGS.get(L.img) && !!document.querySelector('.cp-thumb #fsSheet .fs-bank-pic.on'),
+        speaker: L && L.speaker, img: L && L.img, name: L && L.name, x: L && L.x, w: L && L.w, h: L && L.h, top: L && L.y - L.h / 2, sw: st.scene.w, sh: st.scene.h,
+        undo: st.undo && st.undo.length };
+    }, person0.id, 15000);
+    check(s && s.ok && s.name === 'Bishop Grace Okafor', 'a photo tapped puts that preacher on in place of the video’s cut-out (now theirs)', s);
+    check(s && s.h > s.sh * 0.4 && s.x > 0 && s.x < s.sw && Math.abs(s.top - person0.top) < s.sh * 0.15,
+      'placed where the cut-out stood, the same size on the page', { before: person0, after: s });
+    check(s && undo0 != null && s.undo === undo0 + 1, 'one step to undo', { undo0, undo: s && s.undo });
+    // …and another layout keeps them (a thumbnail's preacher is the one on it now, not the video's cut-out)
+    await page.locator('.cp-thumb #fsSheet .fs-sheet-done').tap();
+    await page.evaluate(() => window.MWFlyerStudio._select(null));
+    await page.locator('.cp-thumb .fs-tool[data-t="looks"]').tap();
+    await page.waitForSelector('.cp-thumb .fs-look', { timeout: 10000 });
+    const other = await page.evaluate((cur) => [...document.querySelectorAll('.cp-thumb .fs-look')].map((b) => b.dataset.look).find((l) => l !== cur && l !== 'ytcinema'), person0.look);
+    await page.locator(`.cp-thumb .fs-look[data-look="${other}"]`).tap();
+    await sleep(500);
+    s = await page.evaluate((fn) => { const st = window.MWFlyerStudio._state, isP = eval(fn); return { look: st.scene.look, people: st.scene.layers.filter(isP).map((l) => l.speaker + (/^data:/.test(l.photo || '') ? ':bank' : ':?')) }; }, isPerson.toString());
+    check(s.look === other && s.people.length >= 1 && s.people.every((p) => p === 'spgrace:bank'), 'another layout keeps the photo swapped in', { other, s });
+
+    // ── No one: a thumbnail of the video with no one on it ("…without a speaker if I want to")
+    await page.evaluate(() => window.MWFlyerStudio._select(null));
+    await page.locator('.cp-thumb .fs-tool[data-t="words"]').tap();
+    await page.waitForSelector('.cp-thumb .th-who [data-thwho="none"]', { timeout: 10000 });
+    await page.locator('.cp-thumb .th-who [data-thwho="none"]').tap();
+    await sleep(200);
+    s = await whoNow();
+    check(s.who === 'none' && s.seg[2] === '*No one' && !s.grid && s.behind === 0 && s.on === 1 && /^The picture/.test(s.momentH) && /no one/.test(s.note),
+      'No one: the page says just the words go on the picture (the moment is the picture)', s);
+    await page.locator('.cp-thumb [data-act="tmake"]').tap();
+    s = await until(page, (fn) => {
+      const st = window.MWFlyerStudio._state, isP = eval(fn);
+      return { ok: st.designs.length === 12 && !st.th.cutting && document.querySelectorAll('.cp-thumb .fs-card').length === 12, n: st.designs.length, person: st.th.person,
+        people: st.designs.map((d) => d.layers.filter(isP).length), words: st.designs.every((d) => d.layers.some((l) => l.type === 'text' && /DONE/i.test(l.text))) };
+    }, isPerson.toString(), 60000);
+    check(s && s.ok && s.person === '' && s.people.every((n) => n === 0) && s.words, 'Make with No one: twelve thumbnails, no one on any of them, the words on every one', s);
+    if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'thumb-no-one.png') });
+    // Photo bank again: their photo back on
+    await page.locator('.cp-thumb [data-act="back"]').tap();
+    await page.waitForSelector('.cp-thumb .th-who [data-thwho="bank"]', { timeout: 10000 });
+    await page.locator('.cp-thumb .th-who [data-thwho="bank"]').tap();
+    await sleep(200);
+    s = await whoNow();
+    check(s.who === 'bank' && s.bank && s.bpOn && s.behind === 1, 'Photo bank again puts their photo back on', s);
+    // a new video starts on the default again: a guest named who is not in the bank is cut out of the video; the
+    // preacher named, with photos, is their own photo
+    const redraw = () => page.evaluate(() => { const b = document.querySelector('.cp-thumb .th-chip[data-kicker="Live"]'); b.click(); });
+    await page.evaluate(() => { const t = window.MWFlyerStudio._state.th; t.whoSet = false; t.preacher = 'Pastor John Guest'; });
+    await redraw(); await sleep(200);
+    const guest = await whoNow();
+    await page.evaluate(() => { const t = window.MWFlyerStudio._state.th; t.whoSet = false; t.preacher = 'Pastor Mike Adeyemi'; });
+    await redraw(); await sleep(200);
+    const named = await whoNow();
+    check(guest.who === 'video' && named.who === 'bank' && named.bank, 'by itself: a guest not in the bank is cut out of the video; a preacher named with photos is their own photo', { guest: guest.who, named: named.who });
 
     // ── New post → Thumbnail: made from the post's own video, and "Use" puts it on the post
     await page.evaluate(() => { const x = window.MWFlyerStudio._state.panel; if (x) x.close(); });

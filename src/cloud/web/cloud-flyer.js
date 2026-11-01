@@ -4982,8 +4982,33 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   ];
   const fieldsNow = () => (F.mode === 'thumb' ? { title: F.th.line, key: F.th.key, preacher: String(F.th.preacher || '').trim(), kicker: String(F.th.kicker || '').trim(),
     when: String(F.th.when || '').trim(), church: F.th.showChurch && F.kit ? F.kit.church || '' : '' } : F.fields);
-  /* the preacher on the thumbnail: a bank photo keeps its speaker (so "Their photos" in the editor swaps it), a cut-out from the video is nobody's */
-  const thumbSpeakers = () => (F.th.person ? [{ id: F.th.bank ? F.th.bankSp || '' : '', name: '', img: F.th.person, photo: F.th.bank || '' }] : []);
+  /* the preacher on the thumbnail as Make put them on: a bank photo keeps its speaker (so "Their photos" in the editor swaps it), a cut-out from the video is nobody's */
+  const thumbSpeakers = () => (F.th.person ? [{ id: F.th.personSp || '', name: '', img: F.th.person, photo: F.th.personPhoto || '' }] : []);
+  /*
+   * ►► WHO IS ON IT: THE PHOTO BANK, FROM THE VIDEO, OR NO ONE. ◄◄ "If the person has a picture bank, those should be
+   * the images of the speaker on the thumbnail, not the snapshots of the moment of the person from the video — an
+   * option to either use the photo bank or from the video, and if from the video, the moments." And "I hope I can make
+   * a thumbnail of a video without a speaker." Until the operator picks (whoSet), each video starts on the preacher's
+   * own photo when they have one: the preacher named on it, or — no one named — the only preacher in the bank with
+   * photos. A guest named who is not in the bank is cut out of the video.
+   */
+  const thWho = () => F.th.who || 'video';
+  const bankOwner = (p) => ((((F.kit && F.kit.speakers) || []).find((x) => (x.photos || []).includes(p))) || {}).id || '';
+  const hasPics = (x) => !!(x && (x.photos || []).length);
+  const normName = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  /* the preacher in the bank with this name ("David Richman" on a design is "Bishop David Richman" there) */
+  function speakerNamed(name) {
+    const n = normName(name); if (!n) return null;
+    return ((F.kit && F.kit.speakers) || []).find((x) => { const m = normName(x.name); return m && (m === n || m.endsWith(' ' + n) || n.endsWith(' ' + m)); }) || null;
+  }
+  /* their photo on it: the one chosen before if it is theirs, else the bank's pick */
+  function bankFor(sp) { const t = F.th; t.bankSp = sp.id; if (!(sp.photos || []).includes(t.bank)) t.bank = photoFor(sp, 0) || null; }
+  function autoWho() {
+    const t = F.th; if (t.whoSet) return;
+    const withPics = ((F.kit && F.kit.speakers) || []).filter(hasPics);
+    const sp = String(t.preacher || '').trim() ? (hasPics(speakerNamed(t.preacher)) ? speakerNamed(t.preacher) : null) : withPics.length === 1 ? withPics[0] : null;
+    if (sp && (t.video || t.photo)) { t.who = 'bank'; bankFor(sp); } else t.who = 'video';
+  }
   const logoNow = () => (F.mode === 'thumb' && !F.th.showChurch ? null : IMGS.has('logo') ? 'logo' : null);
   /* the preacher and whether the church signs it come back next time (the same on most of a church's videos) */
   const TH_KEEP = 'mw-thumb-extra';
@@ -5015,7 +5040,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   /* a video chosen: its best moments and the words for it, both asked for at once */
   function setThumbVideo(p) {
     const t = F.th;
-    Object.assign(t, { video: p, photo: null, frames: [], pick: 0, custom: null, dur: 0, err: '', ideas: null, scrub: false, line: '', key: '', typed: false });
+    Object.assign(t, { video: p, photo: null, frames: [], pick: 0, custom: null, dur: 0, err: '', ideas: null, scrub: false, line: '', key: '', typed: false, whoSet: false });
     const ask = ++t.ask;
     t.loadingFrames = true; t.loadingIdeas = true;
     window.api.thumb.frames(p, 6).then((r) => {
@@ -5033,11 +5058,11 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
 
   function thumbPickSrc() {
     const t = F.th;
-    // a photo from the bank: the preacher already cut out; the video's moment (if there is one) goes behind them
-    if (t.bank) return { bank: t.bank, bgFrom: t.custom || t.frames[t.pick] || null };
-    if (t.photo) return { url: t.photo, photo: true };
-    if (t.custom) return t.custom;
-    return t.frames[t.pick] || t.frames[0] || null;
+    // the picture: a photo of the operator's own, a moment picked, or the video's best
+    const fr = t.photo ? { url: t.photo, photo: true } : t.custom || t.frames[t.pick] || t.frames[0] || null;
+    // a photo from the bank: the preacher already cut out; the picture (if there is one) goes behind them
+    if (thWho() === 'bank' && t.bank) return { bank: t.bank, bgFrom: fr };
+    return fr;
   }
 
   /*
@@ -5071,9 +5096,10 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       if (!IMGS.has(frameKey)) { try { IMGS.set(frameKey, await loadImg(fr.url)); } catch (e) { frameKey = null; } }
     }
     let person = '', cutting = false;
+    // their bank photo, the preacher cut out of the moment, or no one (the words on the picture)
     if (src.bank) person = (await bankPic(src.bank)) ? picKey(src.bank) : '';
-    else if (fr && fr.url) { const job = liveCut(fr.url); person = job.key || ''; cutting = job.key === null; }
-    return { frameKey, person, cutting, face: (!src.bank && fr && fr.face) || null, bank: t.bank || '', bankSp: t.bankSp || '' };
+    else if (thWho() === 'video' && fr && fr.url) { const job = liveCut(fr.url); person = job.key || ''; cutting = job.key === null; }
+    return { frameKey, person, cutting, face: (!src.bank && fr && fr.face) || null, bank: src.bank || '', bankSp: src.bank ? bankOwner(src.bank) : '' };
   }
   function thSceneOf(look, parts) {
     const t = F.th, pal = THUMB_PAL[look] || TH_PALS[0];
@@ -5127,13 +5153,17 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       if (!F._redraw) { F._redraw = true; P.body.addEventListener('focusout', () => setTimeout(() => { F._redraw = false; if (F.step === 'tmake' && !typingIn(F.panel && F.panel.body)) drawThumbMake(); }, 60), { once: true }); }
       return;
     }
-    const t = F.th, src = thumbPickSrc();
+    const t = F.th;
+    autoWho();
+    const src = thumbPickSrc(), who = thWho();
+    // (the bank photo is on it only in Photo bank: one chosen before is kept for coming back to it)
+    const bk = who === 'bank' ? t.bank : null;
     P.setTitle('Thumbnails');
     P.el.classList.remove('fs-editing');
     const tiles = t.loadingFrames ? '<div class="th-fr th-ph"><i class="fs-spin"></i></div>'.repeat(4)
-      : t.frames.map((f, i) => `<button type="button" class="th-fr${!t.bank && !t.photo && !t.custom && t.pick === i ? ' on' : ''}${t.bank && t.pick === i && !t.custom ? ' th-behind' : ''}" data-fr="${i}"><img src="${escAttr(f.url)}" alt=""><small>${esc(fmtT(f.t))}</small>${i === 0 && t.by === 'ai' ? '<em>AI pick</em>' : ''}</button>`).join('');
-    const custom = t.custom ? `<button type="button" class="th-fr ${t.bank ? 'th-behind' : 'on'}" data-act="scrub"><img src="${escAttr(t.custom.url)}" alt=""><small>${esc(fmtT(t.custom.t))}</small></button>` : '';
-    const photo = t.photo ? `<button type="button" class="th-fr on" data-act="photo"><img src="${escAttr(t.photo)}" alt=""><small>Your photo</small></button>` : '';
+      : t.frames.map((f, i) => `<button type="button" class="th-fr${!bk && !t.photo && !t.custom && t.pick === i ? ' on' : ''}${bk && t.pick === i && !t.custom ? ' th-behind' : ''}" data-fr="${i}"><img src="${escAttr(f.url)}" alt=""><small>${esc(fmtT(f.t))}</small>${i === 0 && t.by === 'ai' ? '<em>AI pick</em>' : ''}</button>`).join('');
+    const custom = t.custom ? `<button type="button" class="th-fr ${bk ? 'th-behind' : 'on'}" data-act="scrub"><img src="${escAttr(t.custom.url)}" alt=""><small>${esc(fmtT(t.custom.t))}</small></button>` : '';
+    const photo = t.photo ? `<button type="button" class="th-fr ${bk ? 'th-behind' : 'on'}" data-act="photo"><img src="${escAttr(t.photo)}" alt=""><small>Your photo</small></button>` : '';
     const words = String(t.line || '').toUpperCase().split(/\s+/).filter(Boolean);
     const lines = (t.ideas && t.ideas.lines) || [];
     const k = F.kit || {};
@@ -5161,8 +5191,20 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
             : lines.map((l) => `<button type="button" class="th-idea${l.text === String(t.line || '').toUpperCase() ? ' on' : ''}" data-idea="${escAttr(l.text)}" data-ikey="${escAttr(l.key)}">${esc(l.text)}</button>`).join('')}</div>
           ${t.ideas && !t.loadingIdeas ? `<p class="fs-note">${t.ideas.by === 'rules' ? (t.ideas.heard ? 'Ideas from what was said in the sermon.' : 'A few strong lines to start from — or type your own.') : 'Written by AI from what was preached' + (t.ideas.heard ? '' : ' (no speech could be heard, so these are general)') + '.'}</p>` : ''}
         </section>
+        <section class="fs-asec th-banksec">
+          <h4>The preacher on it</h4>
+          <div class="fs-seg th-who" role="radiogroup" aria-label="The preacher on it">${[['bank', 'Photo bank'], ['video', 'From the video'], ['none', 'No one']].map(([k, l]) => `<button type="button" role="radio" aria-checked="${who === k}" class="${who === k ? 'on' : ''}" data-thwho="${k}">${l}</button>`).join('')}</div>
+          ${who === 'bank' ? `<div class="th-chips">${sps.map((x) => `<button type="button" class="th-chip${bsp && x.id === bsp.id ? ' on' : ''}" data-banksp="${escAttr(x.id)}">${esc(x.name || 'Speaker')} <i>${(x.photos || []).length}</i></button>`).join('')}<button type="button" class="th-chip th-chip-add" data-act="banknew">＋ New preacher</button></div>
+          ${bsp ? `<div class="th-frames th-bank">${(bsp.photos || []).map((ph) => `<button type="button" class="th-fr th-bp${t.bank === ph ? ' on' : ''}" data-bank="${escAttr(ph)}" aria-label="See this photo big">${picTag(ph)}<i class="th-bp-zoom">${ic('zoom')}</i></button>`).join('')}<button type="button" class="th-fr th-bp th-tool" data-act="bankadd">${ic('plus')}<small>Add photos</small></button></div>
+            <p class="fs-note">${t.bank ? 'Their own photo goes on it' + (t.video || t.photo ? ', the picture below behind them.' : ', with a picture behind them.') + ' Tap a photo to see it big, check its cut-out or use another.'
+              : hasPics(bsp) ? 'Tap a photo to see it big and check its cut-out — then Use this photo.' : `No photos of ${esc(bsp.name || 'them')} yet — Add photos, or pick From the video.`}</p>`
+            : '<p class="fs-note">Add your preachers once — each photo is cut out and kept for every flyer and thumbnail.</p>'}`
+          : `<p class="fs-note">${who === 'none' ? 'Just the words on the picture — no one cut out or put on.'
+            : sps.some(hasPics) ? 'Cut out of the moment you pick below. Photo bank puts their own photo on instead — sharper than a moment of the video.'
+            : 'Cut out of the moment you pick below. Add your preachers’ photos in Photo bank once, for sharper ones.'}</p>`}
+        </section>
         ${t.video || t.photo ? `<section class="fs-asec">
-          <h4>The moment <small>${t.loadingFrames ? 'looking through the video…' : 'the best shots of the preacher, best first'}</small></h4>
+          <h4>${who === 'video' ? 'The moment' : bk ? 'Behind them' : 'The picture'} <small>${t.loadingFrames ? 'looking through the video…' : who === 'video' ? 'the preacher is cut out of it · best shots first' : bk ? 'a moment from the video, behind their photo' : 'a moment from the video, the words over it'}</small></h4>
           ${t.err ? `<p class="fs-note th-err">${esc(t.err)}</p>` : ''}
           <div class="th-frames">${photo}${custom}${tiles}
             ${t.video ? `<button type="button" class="th-fr th-tool" data-act="scrub">${ic('layout')}<small>Pick a moment</small></button>` : ''}
@@ -5172,13 +5214,6 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
             <input type="range" min="0" max="${Math.max(1, Math.floor(t.dur || 1))}" step="0.5" value="${t.scrubT || 0}" data-th="scrub" aria-label="Moment in the video">
             <div class="th-scrub-row"><span data-th="scrubT">${esc(fmtT(t.scrubT || 0))}</span><button type="button" class="fs-go th-use" data-act="usemoment">Use this moment</button></div></div>` : ''}
         </section>` : ''}
-        <section class="fs-asec th-banksec">
-          <h4>Photo bank <small>your preachers’ photos, already cut out</small></h4>
-          <div class="th-chips">${sps.map((x) => `<button type="button" class="th-chip${bsp && x.id === bsp.id ? ' on' : ''}" data-banksp="${escAttr(x.id)}">${esc(x.name || 'Speaker')} <i>${(x.photos || []).length}</i></button>`).join('')}<button type="button" class="th-chip th-chip-add" data-act="banknew">＋ New preacher</button></div>
-          ${bsp ? `<div class="th-frames th-bank">${(bsp.photos || []).map((ph) => `<button type="button" class="th-fr th-bp${t.bank === ph ? ' on' : ''}" data-bank="${escAttr(ph)}" aria-label="See this photo big">${picTag(ph)}<i class="th-bp-zoom">${ic('zoom')}</i></button>`).join('')}<button type="button" class="th-fr th-bp th-tool" data-act="bankadd">${ic('plus')}<small>Add photos</small></button></div>
-            <p class="fs-note">${t.bank ? (t.video ? 'Their photo goes on it, the video’s moment behind them (marked).' : 'Their photo goes on it, with a picture behind them.') + ' Tap a moment above to use the video instead.' : 'Tap a photo to see it big and check its cut-out — then Use this photo.'}</p>`
-            : '<p class="fs-note">Add your preachers once — each photo is cut out and kept for every flyer and thumbnail.</p>'}
-        </section>
         <section class="fs-asec fs-form th-extra">
           <h4>Also on it <small>all optional</small></h4>
           <label class="fs-f fs-wide"><span>Preacher</span><input data-th="preacher" value="${escAttr(t.preacher || '')}" placeholder="Pastor John Doe" ${TXT('words')}></label>
@@ -5238,12 +5273,13 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     function viewThumbBank(ph) {
       const sp = ((F.kit && F.kit.speakers) || []).find((x) => (x.photos || []).includes(ph));
       if (!sp) return;
-      const use = (p) => { t.bank = p; t.bankSp = sp.id; if (!t.preacher) { t.preacher = sp.name || ''; keepExtras(); } drawThumbMake(); };
+      const use = (p) => { t.bank = p; t.bankSp = sp.id; t.who = 'bank'; t.whoSet = true; if (!t.preacher) { t.preacher = sp.name || ''; keepExtras(); } drawThumbMake(); };
       viewBankPics(sp.photos, sp.photos.indexOf(ph), {
         name: sp.name || 'Speaker',
-        used: (p) => t.bank === p,
+        used: (p) => thWho() === 'bank' && t.bank === p,
         onUse: use,
-        onUnuse: () => { t.bank = null; drawThumbMake(); },
+        // (Photo bank stays chosen, with no one on it until another photo is used)
+        onUnuse: () => { t.bank = null; t.whoSet = true; drawThumbMake(); },
         // cut again, kept in the bank (My church too), and looked at again straight away
         onFix: (p, j) => recutPhoto(sp, j, async (kept) => {
           if (t.bank === p) t.bank = kept;
@@ -5262,14 +5298,30 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         const tip = $('.th-looks-tip', P.body); if (tip) tip.textContent = (LOOK_NAMES[t.look] || '') + ' · tap a look · it changes as you type';
         return thPaintLive();
       }
-      const b = e.target.closest('[data-act],[data-fr],[data-key],[data-idea],[data-preacher],[data-kicker],[data-banksp],[data-bank]'); if (!b) return;
+      const b = e.target.closest('[data-act],[data-fr],[data-key],[data-idea],[data-preacher],[data-kicker],[data-banksp],[data-bank],[data-thwho]'); if (!b) return;
+      // Photo bank / From the video / No one — the operator's choice from now on, for this video
+      if (b.dataset.thwho) {
+        t.who = b.dataset.thwho; t.whoSet = true;
+        if (t.who === 'bank') {
+          const sps = (F.kit && F.kit.speakers) || [], named = speakerNamed(t.preacher);
+          const sp = (hasPics(named) && named) || sps.find((x) => x.id === t.bankSp) || sps.find(hasPics) || sps[0];
+          if (sp) bankFor(sp);
+        }
+        return drawThumbMake();
+      }
       if (b.dataset.act === 'livebig') { const S = await thLiveScene(thLook()); if (S) viewFlyer(S); return; }
       if (b.dataset.banksp) { t.bankSp = b.dataset.banksp; return drawThumbMake(); }
       // a bank photo opens big — to see how good its cut-out is — and is taken from there with Use
       if (b.dataset.bank) return viewThumbBank(b.dataset.bank);
-      if (b.dataset.preacher != null) { t.preacher = t.preacher === b.dataset.preacher ? '' : b.dataset.preacher; keepExtras(); return drawThumbMake(); }
+      if (b.dataset.preacher != null) {
+        t.preacher = t.preacher === b.dataset.preacher ? '' : b.dataset.preacher; keepExtras();
+        // the name and the photo go together: in Photo bank, their own photo on it
+        const sp = speakerNamed(t.preacher);
+        if (thWho() === 'bank' && hasPics(sp) && t.bankSp !== sp.id) bankFor(sp);
+        return drawThumbMake();
+      }
       if (b.dataset.kicker != null) { t.kicker = t.kicker === b.dataset.kicker ? '' : b.dataset.kicker; return drawThumbMake(); }
-      if (b.dataset.fr != null) { t.pick = +b.dataset.fr; t.custom = null; t.photo = null; t.bank = null; return drawThumbMake(); }
+      if (b.dataset.fr != null) { t.pick = +b.dataset.fr; t.custom = null; t.photo = null; return drawThumbMake(); }
       if (b.dataset.key) { t.key = b.dataset.key; return drawThumbMake(); }
       if (b.dataset.idea) { t.line = b.dataset.idea; t.key = b.dataset.ikey || ''; t.typed = true; return drawThumbMake(); }
       const a = b.dataset.act;
@@ -5280,26 +5332,14 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         if (p && typeof p === 'string') { setThumbVideo(p); drawThumbMake(); }
         return;
       }
-      if (a === 'photo') return pickImage((url) => { t.photo = url; t.custom = null; t.bank = null; drawThumbMake(); }, { max: 1920 });
+      if (a === 'photo') return pickImage((url) => { t.photo = url; t.custom = null; drawThumbMake(); }, { max: 1920 });
       // the photo banks are the flyers' own (My church): added here, they are there too
       if (a === 'bankadd') {
         const sp = ((F.kit && F.kit.speakers) || []).find((x) => x.id === t.bankSp) || ((F.kit && F.kit.speakers) || [])[0];
         if (sp) addPhotos(sp, async () => { await saveKit(true); t.bankSp = sp.id; drawThumbMake(); });
         return;
       }
-      if (a === 'banknew') {
-        if (!F.kit) await loadKit();
-        const name = (window.prompt('The preacher’s name, as it should be on thumbnails (e.g. Pastor John Doe):') || '').trim();
-        if (!name) return;
-        const sp = { id: 'sp' + Date.now().toString(36), name, photos: [] };
-        addPhotos(sp, async () => {
-          F.kit.speakers = (F.kit.speakers || []).concat(sp);
-          await saveKit(true); await loadKit();
-          t.bankSp = sp.id; if (!t.preacher) { t.preacher = name; keepExtras(); }
-          drawThumbMake();
-        });
-        return;
-      }
+      if (a === 'banknew') return newPreacher((sp) => { t.bankSp = sp.id; if (!t.preacher) { t.preacher = sp.name; keepExtras(); } drawThumbMake(); });
       if (a === 'scrub') {
         t.scrub = !t.scrub;
         if (t.scrub && t.scrubT == null) t.scrubT = Math.round((t.frames[t.pick] && t.frames[t.pick].t) || (t.dur || 0) / 2);
@@ -5310,7 +5350,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       if (a === 'usemoment') {
         try {
           const r = await window.api.thumb.frameAt(t.video, t.scrubT || 0, 1280);
-          t.custom = { t: r.t, url: r.url, face: null }; t.photo = null; t.scrub = false; t.bank = null;
+          t.custom = { t: r.t, url: r.url, face: null }; t.photo = null; t.scrub = false;
         } catch (er) { toast('That moment could not be read: ' + (er.message || er), 'error'); }
         return drawThumbMake();
       }
@@ -5340,7 +5380,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const tryNo = F.tries;
     // a bank photo: the preacher already cut out, the video's moment (when there is one) only behind them
     const fr = src.bank ? src.bgFrom : src;
-    Object.assign(t, { bgs: [], person: '', frameKey: '', face: (!src.bank && fr && fr.face) || null, painting: 0, cutting: true });
+    Object.assign(t, { bgs: [], person: '', personPhoto: src.bank || '', personSp: src.bank ? bankOwner(src.bank) : '', frameKey: '', face: (!src.bank && fr && fr.face) || null,
+      painting: 0, cutting: !!src.bank || thWho() === 'video' });
     F.step = 'pick'; F.designs = []; F.painting = 0;
     drawPick();
     await loadFonts();
@@ -5371,10 +5412,12 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     t.bgs = stock.filter(Boolean);
     // the board goes up straight away with the frame — and the preacher cut out for the live preview already on it,
     // when there is one; the sharp cut from the full-size moment takes its place a moment later
-    const early = !src.bank && fr && fr.url && LIVECUT.has(fr.url) ? LIVECUT.get(fr.url).key || '' : '';
+    const fromVideo = !src.bank && thWho() === 'video';
+    const early = fromVideo && fr && fr.url && LIVECUT.has(fr.url) ? LIVECUT.get(fr.url).key || '' : '';
     if (early) t.person = early;
     rebuildThumbs();
-    t.person = src.bank ? ((await bankPic(src.bank)) ? picKey(src.bank) : '') : (await cutPreacher(full, tryNo)) || early;
+    // (No one: nobody on them — the looks that are the video's moment and the words come first)
+    t.person = src.bank ? ((await bankPic(src.bank)) ? picKey(src.bank) : '') : fromVideo ? (await cutPreacher(full, tryNo)) || early : '';
     t.cutting = false;
     if (tryNo !== F.tries) return;
     rebuildThumbs();
@@ -5661,7 +5704,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       html = btn('edit', 'words', 'Edit') + btn('font', 'font', 'Font') + btn('colour', 'palette', 'Colour') + btn('effects', 'fx', 'Effects')
         + btn('spacing', 'layout', 'Spacing') + btn('opacity', 'sun', 'Opacity') + btn('dup', 'copy', 'Duplicate') + btn('front', 'up', 'Forward') + btn('back', 'down', 'Back') + btn('del', 'trash', 'Delete');
     } else if (L.type === 'image') {
-      html = (L.speaker ? btn('bank', 'photo', 'Their photos') : '') + btn('cutout', 'cut', 'Remove BG') + btn('replace', 'photo', 'Replace') + btn('imglook', 'sun', 'Adjust') + btn('glow', 'glow', 'Glow') + btn('outline', 'fx', 'Outline')
+      // "Their photos" on every person, not only one put on from the bank: a preacher cut out of the video is nobody's
+      // yet ("I should be able to replace the image of the speaker in the thumbnail with their photos in the bank")
+      html = (isPerson(L) ? btn('bank', 'photo', 'Their photos') : '') + btn('cutout', 'cut', 'Remove BG') + btn('replace', 'photo', 'Replace') + btn('imglook', 'sun', 'Adjust') + btn('glow', 'glow', 'Glow') + btn('outline', 'fx', 'Outline')
         + btn('gray', 'gray', 'B&W') + btn('fade', 'down', 'Fade') + btn('flip', 'flip', 'Flip') + btn('opacity', 'sun', 'Opacity') + btn('dup', 'copy', 'Duplicate') + btn('front', 'up', 'Forward') + btn('back', 'down', 'Back') + btn('del', 'trash', 'Delete');
     } else {
       html = btn('colour', 'palette', 'Colour') + btn('opacity', 'sun', 'Opacity') + btn('dup', 'copy', 'Duplicate') + btn('front', 'up', 'Forward') + btn('back', 'down', 'Back') + btn('del', 'trash', 'Delete');
@@ -5868,9 +5913,11 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   function sceneSpeakers() {
     const base = F.mode === 'thumb' ? thumbSpeakers() : speakersFor(0);
     return base.map((s) => {
-      const L = F.scene && F.scene.layers.find((l) => l.speaker === s.id && l.photo);
+      // (a thumbnail has its one preacher: one cut out of the video, nobody's, given a bank photo in the editor is
+      // that preacher now — and stays so in another layout)
+      const L = F.scene && F.scene.layers.find((l) => l.photo && (l.speaker === s.id || (F.mode === 'thumb' && isPerson(l) && l.speaker)));
       // (a frame shows the photo itself: the cut-out of it for a look that cuts them out)
-      return L ? Object.assign(s, { photo: L.photo, img: /^kr:/.test(L.img) ? picKey(L.photo) : L.img, raw: IMGS.has(rawKey(L.photo)) ? rawKey(L.photo) : '' }) : s;
+      return L ? Object.assign(s, { id: L.speaker, photo: L.photo, img: /^kr:/.test(L.img) ? picKey(L.photo) : L.img, raw: IMGS.has(rawKey(L.photo)) ? rawKey(L.photo) : '' }) : s;
     });
   }
   function sheetPalettes() {
@@ -5917,15 +5964,48 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     if (im) L.w = L.h * iw(im) / ih(im);
   }
 
-  /* swap a speaker's picture for another from their bank */
-  function sheetBank(L) {
-    const s = ((F.kit && F.kit.speakers) || []).find((x) => x.id === L.speaker); if (!s) return;
-    openSheet(`<h4>${esc(s.name || 'Speaker')}</h4><div class="fs-bank">${(s.photos || []).map((p) => `<button type="button" class="fs-bank-pic${L.photo === p ? ' on' : ''}" data-photo="${escAttr(p)}">${picTag(p)}</button>`).join('')}</div>`, (sh) => {
+  /* a person on the design (put there by a look: from the bank, or cut out of the video), not a logo or an added photo */
+  const isPerson = (L) => !!L && L.type === 'image' && Object.prototype.hasOwnProperty.call(L, 'speaker');
+  /* whose photos to show for a person who is nobody's yet: the preacher named on it (Also on it → Preacher, or the
+     name on the design), else the one chosen in the Thumbnails page's photo bank */
+  function bankGuess() {
+    const names = [F.mode === 'thumb' ? F.th.preacher : ''].concat(((F.scene && F.scene.layers) || []).filter((l) => l.type === 'text' && l.name === 'Speaker').map((l) => l.text));
+    // ("DAVID RICHMAN" on the design is "Bishop David Richman" in the bank: the title is a line of its own)
+    for (const n of names) { const s = speakerNamed(n); if (s) return s; }
+    return (F.mode === 'thumb' && ((F.kit && F.kit.speakers) || []).find((x) => x.id === F.th.bankSp)) || null;
+  }
+  /* a new preacher: named, their photos added (and cut out), kept in the bank — My church too */
+  async function newPreacher(then) {
+    if (!F.kit) await loadKit();
+    const name = (window.prompt('The preacher’s name, as it should be on thumbnails (e.g. Pastor John Doe):') || '').trim();
+    if (!name) return;
+    const sp = { id: 'sp' + Date.now().toString(36), name, photos: [] };
+    addPhotos(sp, async () => {
+      F.kit.speakers = (F.kit.speakers || []).concat(sp);
+      await saveKit(true); await loadKit();
+      then(sp);
+    });
+  }
+  /* swap a person's picture for one from the photo bank — theirs first, any preacher's a tap away (one cut out of the
+     video is nobody's until a photo is picked here: then they are that preacher, and Layouts keeps the photo) */
+  function sheetBank(L, spId) {
+    const sps = (F.kit && F.kit.speakers) || [];
+    const s = sps.find((x) => x.id === (spId || L.speaker)) || bankGuess() || sps[0] || null;
+    const who = sps.length > 1 || (sps.length && !L.speaker)
+      ? `<div class="th-chips fs-bank-who">${sps.map((x) => `<button type="button" class="th-chip${s && x.id === s.id ? ' on' : ''}" data-who="${escAttr(x.id)}">${esc(x.name || 'Speaker')} <i>${(x.photos || []).length}</i></button>`).join('')}<button type="button" class="th-chip th-chip-add" data-who="+">＋ New preacher</button></div>` : '';
+    const pics = s
+      ? `<div class="fs-bank">${(s.photos || []).map((p) => `<button type="button" class="fs-bank-pic${L.photo === p ? ' on' : ''}" data-photo="${escAttr(p)}">${picTag(p)}</button>`).join('')}<button type="button" class="fs-bank-pic fs-bank-add" data-addpics="1">${ic('plus')}<small>Add photos</small></button></div>`
+      : `<p class="fs-note">No preachers in the photo bank yet. Add one — their photos are cut out once and kept for every thumbnail and flyer.</p><div class="th-chips fs-bank-who"><button type="button" class="th-chip th-chip-add" data-who="+">＋ New preacher</button></div>`;
+    openSheet(`<h4>${s ? esc(s.name || 'Speaker') + ' · tap a photo to put it on' : 'Photo bank'}</h4>${who}${pics}`, (sh) => {
       fillPics(sh);
-      sh.addEventListener('click', async (e) => {
+      // (on the sheet's own inside, made new each time: the sheet itself keeps every listener ever put on it)
+      sh.firstElementChild.addEventListener('click', async (e) => {
+        const w = e.target.closest('[data-who]');
+        if (w) return w.dataset.who === '+' ? newPreacher((sp) => sheetBank(L, sp.id)) : sheetBank(L, w.dataset.who);
+        if (e.target.closest('[data-addpics]')) return addPhotos(s, async () => { await saveKit(true); sheetBank(L, s.id); });
         const b = e.target.closest('[data-photo]'); if (!b) return;
         const p = b.dataset.photo, im = await bankPic(p); if (!im) return;
-        change(() => { refit(L, { img: picKey(p), photo: p }); });
+        change(() => { refit(L, { img: picKey(p), photo: p }); L.speaker = s.id; if (s.name) L.name = s.name; });
         F.pinned[s.id] = p;
         $$('.fs-bank-pic', sh).forEach((x) => x.classList.toggle('on', x === b));
       });
@@ -6419,5 +6499,5 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
 
   /* "My church" straight from Home (This week → Edit) */
   async function openKitAlone(onSaved) { await loadKit(); openKit(onSaved); }
-  root.MWFlyerStudio = { open, openThumb, openKit: openKitAlone, _state: F, _rebuild: () => rebuildDesigns(), _view: (S) => viewFlyer(S), _flaws: (S) => designFlaws(S).concat(contrastFlaws(S)) };
+  root.MWFlyerStudio = { open, openThumb, openKit: openKitAlone, _state: F, _rebuild: () => rebuildDesigns(), _view: (S) => viewFlyer(S), _select: (id) => { F.sel = id || null; paint(); tools(); }, _flaws: (S) => designFlaws(S).concat(contrastFlaws(S)) };
 })();

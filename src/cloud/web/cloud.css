@@ -4310,6 +4310,13 @@ html, body.mw-cloud, body.mw-cloud .cloud-home .ch-scroll, body.mw-cloud #cloudG
 .fs-bank-ai, .fs-bank-add { background: #f3f4f7; }
 .fs-sheet .fs-bank-pic { background: repeating-conic-gradient(#2f3038 0 25%, #3a3b44 0 50%) 0 0 / 14px 14px; }
 .fs-sheet .fs-bank-pic.on { box-shadow: 0 0 0 3px #a78bfa; }
+/* the editor's "Their photos": whose photos (the preachers in the bank), on the dark sheet */
+.fs-sheet .fs-bank-add { background: #2f3038; color: #d4d6dd; }
+.fs-sheet .fs-bank-who { margin: 0 -14px 10px; padding: 0 14px 2px; }
+.fs-sheet .fs-bank-who .th-chip { color: #e5e7eb; background: #2f3038; }
+.fs-sheet .fs-bank-who .th-chip.on { color: #fff; background: #7c3aed; }
+.fs-sheet .fs-bank-who .th-chip-add { color: #c4b5fd; background: #2a2340; }
+.fs-sheet .fs-note { color: #aeb0b9; }
 
 /* My church */
 .cp-flyer-kit .cp-foot { display: flex; gap: 10px; }
@@ -4602,6 +4609,9 @@ body.mw-cloud.mw-home .cloud-home { background: #eaf5fd; color: #0d1b2c; }
 .th-bank .th-bp.th-tool { background: #f3f4f7; }
 .th-chip i { font-style: normal; opacity: .55; margin-left: 2px; }
 .th-chip-add { color: #6d28d9; background: #f3efff; }
+/* "The preacher on it": Photo bank / From the video / No one */
+.th-who + .th-chips { margin-top: 12px; }
+.th-who ~ .fs-note { margin-top: 10px; }
 .th-fr.th-behind { box-shadow: 0 0 0 2px #a78bfa; }
 .th-fr.th-behind::after { content: 'behind'; position: absolute; top: 6px; right: 6px; padding: 2px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 800; color: #fff; background: rgba(124, 58, 237, .9); }
 /* 🖼 a video post's thumbnail (New post → Thumbnail) */
