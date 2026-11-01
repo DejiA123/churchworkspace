@@ -27,6 +27,9 @@
  *       down, and ends on "on your phone · Save all", one tap for both; a batch
  *       that cannot bring them down keeps its Save all, with ONE bar
  *   [I] two saves at once do not wipe each other's files
+ *   [L] a share of several videos closed (the blank card an iPhone shows when
+ *       a share is too much for it): the Save all panel goes on one video to
+ *       a tap, and saves them all
  *   [K] a file finished outside an export task comes down in its own overlay
  *       and ends on the same card (the phone's finishedFile is the one used)
  *   [J] a computer's browser: an export ends as it always has
@@ -156,6 +159,8 @@ const stopSampler = (page) => page.evaluate(() => { clearInterval(window.__sampl
           const files = (d && d.files) || [];
           const rec = files.map((f) => ({ name: f.name, size: f.size }));
           window.__shares.push(rec);
+          // the blank card, closed: a share of several that is told to fail ends as the sheet closed does
+          if (window.__shareFail > 0 && files.length > 1) { window.__shareFail--; await new Promise((r) => setTimeout(r, 120)); throw new DOMException('Share canceled', 'AbortError'); }
           if (window.__shareRead) for (let i = 0; i < files.length; i++) rec[i].read = (await files[i].arrayBuffer()).byteLength;
           await new Promise((r) => setTimeout(r, 120));
         } });
@@ -453,6 +458,33 @@ const stopSampler = (page) => page.evaluate(() => { clearInterval(window.__sampl
       `[H] its bar is ONE number for the whole save — it never starts again for the second short (${loading.map((f) => Math.round(f.w)).join(',')})`,
       loading.filter((f, i) => i && f.w < loading[i - 1].w).slice(0, 3).concat(loading.slice(0, 2)));
     await page.evaluate(() => window.MWCloud.closePanel && window.MWCloud.closePanel('cloudSaveAll'));
+
+    console.log('\n=== [L] a share of several closed: then one video to a tap ===');
+    {
+      // "When I click Save 2 videos it doesn't work — the other time worked": the share sheet opened on a blank card
+      await page.evaluate(() => { window.__shareFail = 1; });
+      const n0 = await page.evaluate(() => window.__shares.length);
+      const batch = (state) => page.evaluate(([outs, state]) => {
+        const items = outs.map((o, i) => ({ label: 'Short ' + (i + 1), state: state === 'done' || !i ? 'done' : 'running', output: state === 'done' || !i ? o : null }));
+        window.MWCloud.showServerBatch({ id: 'b-blank', label: 'Exporting 2 shorts', total: 2, done: state === 'done' ? 2 : 1, failed: 0, received: 2, sealed: true, state,
+          current: state === 'done' ? null : { label: 'Short 2', pct: 50 }, items });
+      }, [outs, state]);
+      await batch('running'); await sleep(300); await batch('done'); await sleep(1200);
+      await page.evaluate(() => { const a = document.querySelector('.cloud-island.on .ci-act'); if (a) a.click(); });
+      await page.waitForSelector('#cloudSaveAll .sa-go', { timeout: 5000 });
+      const asked = [];
+      const lDone = await until(async () => {
+        const st = await page.evaluate(() => { const b = document.querySelector('#cloudSaveAll .sa-go'); return b ? b.dataset.state + '|' + b.textContent.trim() : ''; });
+        if (/^ready\|Save/.test(st)) { if (asked[asked.length - 1] !== st) asked.push(st); await page.evaluate(() => document.querySelector('#cloudSaveAll .sa-go').click()); await sleep(150); }
+        return /^(done|fail)\|/.test(st) ? st : null;
+      }, 40000, 100);
+      const L = await page.evaluate((n0) => ({ shares: window.__shares.slice(n0).map((x) => x.length), rows: [...document.querySelectorAll('#cloudSaveAll .sa-row small')].map((x) => x.textContent) }), n0);
+      check(L.shares.length === 3 && L.shares[0] === 2 && L.shares[1] === 1 && L.shares[2] === 1,
+        '[L] the share of both, closed, is offered again one video to a tap (not the same two again)', { L, asked });
+      check(/^done\|All 2 saved/.test(lDone || '') && asked.some((a) => /Save to Photos · 2 left/.test(a)),
+        '[L] it says how many are to go, and ends with both saved', { lDone, asked });
+      await page.evaluate(() => { window.__shareFail = 0; window.MWCloud.closePanel && window.MWCloud.closePanel('cloudSaveAll'); });
+    }
 
     console.log('\n=== [I] two saves at once ===');
     {

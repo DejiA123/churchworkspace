@@ -3510,6 +3510,19 @@ let _hideTimer = null;
    * batch's worth is kept: a new Export all lets go of the last one's.
    */
   const prefetched = new Map();   // path -> [{ file, size, saved }]
+  /*
+   * ►► SEVERAL VIDEOS IN ONE SHARE: LESS THAN ONE VIDEO MAY BE. ◄◄ "When I click Save 2 videos it doesn't work —
+   * the other time worked": the share sheet opened on a blank card, which is what Safari does when a share is more
+   * than it can read into memory (phonecopy.js). One share of up to 140 MB saves; but a Save all shares again and
+   * again in the same page, beside everything the studio holds, and its first batch had worked. So several videos
+   * go together only up to what is known to save well on an iPhone (95 MB did); a video bigger than that still
+   * goes on its own, as before. And a share of several that is closed — a blank card closed, or Cancel — is
+   * offered again ONE video to a tap: the same batch again would only open on the same blank card.
+   */
+  const SHARE_MANY_MAX = 90 * 1024 * 1024;
+  /* In Photos: let go of the file — its folder, and the page's hold on it, so what Safari read can be freed before
+     the next share. */
+  function savedToPhotos(x) { x.saved = true; releaseSave(x.file); x.file = null; }
   function dropPrefetched() {
     for (const parts of prefetched.values()) for (const x of parts) if (!x.saved) releaseSave(x.file);
     prefetched.clear();
@@ -3645,10 +3658,11 @@ let _hideTimer = null;
   }
   /*
    * The parts that can go to the share sheet straight away, in order: what is
-   * already on the phone from the first short not yet saved, up to one share's
-   * worth (PHONE_PART_MAX). Empty when the first short still has to come down.
+   * already on the phone from the first short not yet saved, up to what several
+   * videos may be in one share (SHARE_MANY_MAX; one video alone may be bigger),
+   * or just one with `one`. Empty when the first short still has to come down.
    */
-  function firstBundleOf(items) {
+  function firstBundleOf(items, one) {
     const b = [];
     let bytes = 0;
     for (let i = 0; i < items.length; i++) {
@@ -3657,7 +3671,7 @@ let _hideTimer = null;
       if (!it.parts) break;
       for (const x of it.parts) {
         if (x.saved) continue;
-        if (b.length && bytes + x.size > PHONE_PART_MAX) return b;
+        if (b.length && (one || bytes + x.size > SHARE_MANY_MAX)) return b;
         x.i = i; b.push(x); bytes += x.size;
       }
     }
@@ -3670,6 +3684,8 @@ let _hideTimer = null;
    * this very tap — no second "are you sure" tap for files that are ready.
    */
   function saveAll(paths, opts = {}) {
+    // one video to a tap (a share of several was closed): see SHARE_MANY_MAX
+    const one = !!opts.one;
     const items = saveItemsOf(paths);
     if (!items.length) return;
     if (!canSaveHere()) { items.forEach((it) => offerDownload(it.path)); return; }
@@ -3680,7 +3696,7 @@ let _hideTimer = null;
     // The share sheet, FIRST — inside the tap, before anything is awaited.
     let first = null;
     if (opts.tapped) {
-      const fb = firstBundleOf(items);
+      const fb = firstBundleOf(items, one);
       if (fb.length) first = { bundle: fb, sharing: navigator.share({ files: fb.map((x) => x.file) }) };
     }
     const left = items.filter((it) => !it.done);
@@ -3691,13 +3707,13 @@ let _hideTimer = null;
     if (first && left.every((it) => it.parts && it.parts.every((x) => x.saved || first.bundle.includes(x)))) {
       const n = left.length;
       first.sharing.then(() => {
-        first.bundle.forEach((x) => { x.saved = true; releaseSave(x.file); });
+        first.bundle.forEach(savedToPhotos);
         left.forEach((it) => prefetched.delete(it.path));
         island({ kind: 'good', title: n > 1 ? `All ${n} saved to Photos` : 'Saved to Photos', sub: 'Find them in your Photos', ms: 4500 });
       }, (e) => {
         if (e && (e.name === 'AbortError' || e.name === 'NotAllowedError')) {
           island({ kind: 'info', title: 'Not saved yet', sub: `${n} video${n > 1 ? 's' : ''} on your phone`, sticky: true,
-            action: { label: 'Save all', onClick: () => saveAll(paths, { tapped: true }) } });
+            action: { label: 'Save all', onClick: () => saveAll(paths, { tapped: true, one: one || first.bundle.length > 1 }) } });
         } else saveAll(paths);
       });
       return;
@@ -3735,9 +3751,16 @@ let _hideTimer = null;
       let cur = 0;
       let bundle = [];            // { file, i, size, saved }
       let bundleBytes = 0;
+      let single = one;           // one video to a tap from now on (a share of several was closed)
+      const tooMany = (size) => bundle.length && (single || bundleBytes + size > SHARE_MANY_MAX);
+      const oneByOne = (g) => {
+        if (single || g.length < 2) return;
+        single = true;
+        g.forEach((b) => row(b.i, 'On your phone — one video to each tap now', 'ready'));
+      };
       // gone to Photos: let go of the files, and tick off every short now complete
       const shared = (g) => {
-        g.forEach((b) => { b.saved = true; releaseSave(b.file); });
+        g.forEach(savedToPhotos);
         items.forEach((it, i) => {
           if (it.done || !it.parts || !it.parts.length || !it.parts.every((x) => x.saved)) return;
           it.done = true; prefetched.delete(it.path); row(i, 'Saved ✓', 'done');
@@ -3747,9 +3770,11 @@ let _hideTimer = null;
         go('sharing', 'Opening…');
         try { await first.sharing; shared(first.bundle); }
         catch (e) {
-          // closed, or not allowed: they wait for a tap below like any other
+          // closed, or not allowed: they wait for a tap below like any other — one to a tap, if several were closed
           if (!(e && (e.name === 'AbortError' || e.name === 'NotAllowedError'))) first.bundle.forEach((b) => row(b.i, 'The share sheet would not open', 'fail'));
+          else oneByOne(first.bundle);
         }
+        first = null;
       }
       await sizeItems(items);
       const meter = saveMeter(items);
@@ -3759,25 +3784,27 @@ let _hideTimer = null;
       const flush = async () => {
         if (!bundle.length) return;
         const files = bundle.map((b) => b.file);
-        const groups = files.length > 1 && !navigator.canShare({ files }) ? bundle.map((b) => [b]) : [bundle];
-        for (const g of groups) {
+        const todo = files.length > 1 && (single || !navigator.canShare({ files })) ? bundle.map((b) => [b]) : [bundle];
+        bundle = []; bundleBytes = 0;
+        while (todo.length) {
+          const g = todo.shift();
           const n = g.length;
-          for (;;) {
-            await tapThen(n > 1 ? `Save ${n} videos to Photos` : 'Save to Photos');
-            go('sharing', 'Opening…');
-            try {
-              await navigator.share({ files: g.map((b) => b.file) });
-              shared(g);
-              break;
-            } catch (e) {
-              if (!(e && e.name === 'AbortError')) { g.forEach((b) => row(b.i, 'The share sheet would not open', 'fail')); break; }
-            }
+          // (one to a tap: how many of the whole save are still to go)
+          const left = items.filter((it) => !it.done).length;
+          await tapThen(n > 1 ? `Save ${n} videos to Photos` : single && left > 1 ? `Save to Photos · ${left} left` : 'Save to Photos');
+          go('sharing', 'Opening…');
+          try {
+            await navigator.share({ files: g.map((b) => b.file) });
+            shared(g);
+          } catch (e) {
+            if (!(e && e.name === 'AbortError')) { g.forEach((b) => row(b.i, 'The share sheet would not open', 'fail')); continue; }
+            // closed: the same again — but several are offered one to a tap (see SHARE_MANY_MAX)
+            if (n > 1) { oneByOne(g); todo.unshift(...g.map((b) => [b])); } else todo.unshift(g);
           }
         }
-        bundle = []; bundleBytes = 0;
       };
       const queue = async (x) => {
-        if (bundle.length && bundleBytes + x.size > PHONE_PART_MAX) await flush();
+        if (tooMany(x.size)) await flush();
         bundle.push(x); bundleBytes += x.size;
       };
       for (let i = 0; i < items.length; i++) {
@@ -3794,7 +3821,7 @@ let _hideTimer = null;
             meter,
             say: (text) => { row(i, text, 'loading'); paint(); },
             // share what is waiting before the next part would make it too big for one share
-            beforePart: async (part) => { if (bundle.length && bundleBytes + (part.size || 0) > PHONE_PART_MAX) await flush(); },
+            beforePart: async (part) => { if (tooMany(part.size || 0)) await flush(); },
             afterPart: (x) => { bundle.push(x); bundleBytes += x.size; },
           });
           prefetched.set(it.path, it.parts);
@@ -3813,7 +3840,7 @@ let _hideTimer = null;
     if (first) { run(first).catch(() => go('fail', 'Something went wrong — try again')); return; }
     onTap = () => {
       // already on the phone: this tap opens the share sheet for them
-      const fb = firstBundleOf(items);
+      const fb = firstBundleOf(items, one);
       const now = fb.length ? { bundle: fb, sharing: navigator.share({ files: fb.map((x) => x.file) }) } : null;
       run(now).catch(() => go('fail', 'Something went wrong — try again'));
     };
