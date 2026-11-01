@@ -2844,7 +2844,8 @@ let _hideTimer = null;
         if (stopped()) throw halt();
         const i = next++;
         const blob = await one(i);
-        if (disk) await disk.write(i * CHUNK, blob); else parts[i] = blob;
+        // (a piece that came down but cannot be WRITTEN is the phone's storage, not the signal)
+        if (disk) { try { await disk.write(i * CHUNK, blob); } catch (er) { throw noRoom(er); } } else parts[i] = blob;
         got += blob.size;
         const pc = Math.min(99, Math.floor((got / total) * 100));
         if (pc !== shown) { shown = pc; onPct(pc, got, total); }
@@ -2861,7 +2862,7 @@ let _hideTimer = null;
     }
     if (disk) {
       let f;
-      try { f = await disk.finish(); } catch (e) { disk.abort(); throw e; }
+      try { f = await disk.finish(); } catch (e) { disk.abort(); throw noRoom(e); }
       const file = f.type ? f : new File([f], nice, { type });
       saveFolderOf.set(file, disk.dir);
       return file;
@@ -2871,6 +2872,22 @@ let _hideTimer = null;
 
   /* Past this, a video is only ever saved through the phone's storage. */
   const MEMORY_MAX = 150 * 1024 * 1024;
+  /*
+   * ►► A FULL iPHONE, SAID AS IT IS. ◄◄ "Save 18 videos" saved one, then the share sheet opened on a blank card;
+   * a single Save stopped at 0% with "the download kept dropping — check the signal", on Wi-Fi. The iPhone's
+   * storage was full (freeing it fixed everything) — and nothing said so. "At least mention that iPhone memory is
+   * full so users are informed." A piece the phone will not take is the phone's storage, and says so (noRoom); and
+   * a share sheet closed without saving reminds that an EMPTY one is the same full phone (FULL_HINT) — the app
+   * cannot see the sheet's inside, so it says it as an if.
+   */
+  const FULL_MSG = 'Your iPhone’s storage is full, so it could not take the video. Free some space (Settings › General › iPhone Storage), then try again.';
+  const FULL_HINT = 'If the share sheet opened empty, your iPhone’s storage is full — free some in Settings › General › iPhone Storage.';
+  function noRoom(er) {
+    if (er && (er.code === 'SPACE' || er.name === 'AbortError')) return er;
+    const e = new Error(FULL_MSG);
+    e.code = 'SPACE'; e.cause = er;
+    return e;
+  }
   /*
    * ►► ONE SAVE NEVER WIPES ANOTHER. ◄◄
    * Every save used to begin by deleting the whole 'mw-saves' folder — "one
@@ -2923,7 +2940,7 @@ let _hideTimer = null;
       try {
         const est = navigator.storage.estimate ? await navigator.storage.estimate() : null;
         if (est && est.quota && est.quota - (est.usage || 0) < total * 1.05) {
-          const q = new Error(`Not enough free space on this phone — it needs about ${Math.ceil(total / 1048576)} MB.`); q.code = 'SPACE'; throw q;
+          const q = new Error(`Your iPhone’s storage is full — it needs about ${Math.ceil(total / 1048576)} MB free for this video. Free some space (Settings › General › iPhone Storage), then try again.`); q.code = 'SPACE'; throw q;
         }
       } catch (e) { if (e && e.code === 'SPACE') throw e; }
       const root = await navigator.storage.getDirectory();
@@ -3012,7 +3029,7 @@ let _hideTimer = null;
       ready: (share, k, n) => island({ id, kind: 'good', title: `Ready to save${of(k, n)}`, sub: name, sticky: true,
         action: { label: 'Save Video', onClick: () => { islandHide(id); share(); } } }),
       done: (n) => island({ id, kind: 'good', title: n > 1 ? `All ${n} parts saved` : 'Saved', sub: 'Find it in Photos (or Files, if you chose that)', ms: 4000 }),
-      cancelled: (share, k, n) => island({ id, kind: 'info', title: `Not saved yet${of(k, n)}`, sub: name, sticky: true,
+      cancelled: (share, k, n) => island({ id, kind: 'info', title: `Not saved yet${of(k, n)}`, sub: `${name} · ${FULL_HINT}`, sticky: true,
         action: { label: 'Save Video', onClick: () => { islandHide(id); share(); } } }),
       fail: (msg) => island({ id, kind: 'warn', title: 'Could not save it', sub: msg, ms: 6000 }),
     };
@@ -3361,7 +3378,7 @@ let _hideTimer = null;
       progress: (pc, got, total, k, n) => busy(pc, `📲 Getting ${n > 1 ? `part ${k + 1} of ${n}` : 'it'} onto your phone${total && got ? ` — ${mb(got)} of ${mb(total)}` : '…'}`),
       ready: (sh, k, n) => ready(sh, n > 1 ? `Part ${k + 1} of ${n} is on your phone` : 'Your video is ready',
         `Tap “${label(k, n)}”, then choose “Save Video”.`, label(k, n)),
-      cancelled: (sh, k, n) => ready(sh, 'Not saved yet', `Tap “${label(k, n)}”, then choose “Save Video”.`, label(k, n)),
+      cancelled: (sh, k, n) => ready(sh, 'Not saved yet', `Tap “${label(k, n)}”, then choose “Save Video”. ${FULL_HINT}`, label(k, n)),
       done: (n) => { close(); island({ kind: 'good', title: 'Saved to Photos', sub: n > 1 ? `All ${n} parts — find them in your Photos` : 'Find it in your Photos (or Files, if you chose that)', ms: 4500 }); },
       fail: (m) => { close(); island({ kind: 'warn', title: 'Could not save it', sub: m, ms: 8000 }); },
     };
@@ -3478,7 +3495,7 @@ let _hideTimer = null;
         try { if (navigator.vibrate) navigator.vibrate(15); } catch (e) {}
       },
       done: (n) => { btn._share = null; go('done', 'Saved ✓', n > 1 ? `All ${n} parts saved — find them in your Photos.` : 'Saved — find it in your Photos (or Files, if you chose that).'); },
-      cancelled: (share, k, n) => { btn._share = share; go('ready', n > 1 ? `Save part ${k + 1} of ${n}` : 'Save to Photos', `Not saved yet — tap “${n > 1 ? `Save part ${k + 1} of ${n}` : 'Save to Photos'}” and choose “Save Video”.`); },
+      cancelled: (share, k, n) => { btn._share = share; go('ready', n > 1 ? `Save part ${k + 1} of ${n}` : 'Save to Photos', `Not saved yet — tap “${n > 1 ? `Save part ${k + 1} of ${n}` : 'Save to Photos'}” and choose “Save Video”. ${FULL_HINT}`); },
       fail: (msg) => { btn._share = null; go('fail', 'Try again', msg); },
       player: () => go('done', 'Save', 'Opening it in the player: tap Share, then “Save Video”.'),
       browser: () => go('done', 'Saved ✓', 'Your browser is downloading it.'),
@@ -3772,7 +3789,7 @@ let _hideTimer = null;
         catch (e) {
           // closed, or not allowed: they wait for a tap below like any other — one to a tap, if several were closed
           if (!(e && (e.name === 'AbortError' || e.name === 'NotAllowedError'))) first.bundle.forEach((b) => row(b.i, 'The share sheet would not open', 'fail'));
-          else oneByOne(first.bundle);
+          else { oneByOne(first.bundle); first.bundle.forEach((b) => row(b.i, `Not saved yet. ${FULL_HINT}`, 'ready')); }
         }
         first = null;
       }
@@ -3800,6 +3817,7 @@ let _hideTimer = null;
             if (!(e && e.name === 'AbortError')) { g.forEach((b) => row(b.i, 'The share sheet would not open', 'fail')); continue; }
             // closed: the same again — but several are offered one to a tap (see SHARE_MANY_MAX)
             if (n > 1) { oneByOne(g); todo.unshift(...g.map((b) => [b])); } else todo.unshift(g);
+            g.forEach((b) => row(b.i, `Not saved yet. ${FULL_HINT}`, 'ready'));
           }
         }
       };

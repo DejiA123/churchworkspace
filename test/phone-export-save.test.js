@@ -29,7 +29,10 @@
  *   [I] two saves at once do not wipe each other's files
  *   [L] a share of several videos closed (the blank card an iPhone shows when
  *       a share is too much for it): the Save all panel goes on one video to
- *       a tap, and saves them all
+ *       a tap, and saves them all — and says an empty share sheet is a full
+ *       iPhone
+ *   [M] a full iPhone: a Save the phone has no room for says its storage is
+ *       full (and where to free it), never "the signal"
  *   [K] a file finished outside an export task comes down in its own overlay
  *       and ends on the same card (the phone's finishedFile is the one used)
  *   [J] a computer's browser: an export ends as it always has
@@ -472,8 +475,9 @@ const stopSampler = (page) => page.evaluate(() => { clearInterval(window.__sampl
       await batch('running'); await sleep(300); await batch('done'); await sleep(1200);
       await page.evaluate(() => { const a = document.querySelector('.cloud-island.on .ci-act'); if (a) a.click(); });
       await page.waitForSelector('#cloudSaveAll .sa-go', { timeout: 5000 });
-      const asked = [];
+      const asked = [], rowsSeen = new Set();
       const lDone = await until(async () => {
+        (await page.evaluate(() => [...document.querySelectorAll('#cloudSaveAll .sa-row small')].map((x) => x.textContent))).forEach((t) => rowsSeen.add(t));
         const st = await page.evaluate(() => { const b = document.querySelector('#cloudSaveAll .sa-go'); return b ? b.dataset.state + '|' + b.textContent.trim() : ''; });
         if (/^ready\|Save/.test(st)) { if (asked[asked.length - 1] !== st) asked.push(st); await page.evaluate(() => document.querySelector('#cloudSaveAll .sa-go').click()); await sleep(150); }
         return /^(done|fail)\|/.test(st) ? st : null;
@@ -483,7 +487,28 @@ const stopSampler = (page) => page.evaluate(() => { clearInterval(window.__sampl
         '[L] the share of both, closed, is offered again one video to a tap (not the same two again)', { L, asked });
       check(/^done\|All 2 saved/.test(lDone || '') && asked.some((a) => /Save to Photos · 2 left/.test(a)),
         '[L] it says how many are to go, and ends with both saved', { lDone, asked });
+      check([...rowsSeen].some((t) => /share sheet opened empty/.test(t) && /storage is full/.test(t) && /iPhone Storage/.test(t)),
+        '[L] a share closed without saving says an empty share sheet is a full iPhone (and where to free it)', [...rowsSeen]);
       await page.evaluate(() => { window.__shareFail = 0; window.MWCloud.closePanel && window.MWCloud.closePanel('cloudSaveAll'); });
+    }
+
+    console.log('\n=== [M] a full iPhone, said as it is ===');
+    {
+      // "At least mention that iPhone memory is full so users are informed" — the phone's storage refuses every write
+      await page.evaluate(() => {
+        const W = window.FileSystemWritableFileStream && window.FileSystemWritableFileStream.prototype;
+        if (W && !W.__orig) {
+          W.__orig = W.write;
+          W.write = function (...a) { return window.__noRoom ? Promise.reject(new DOMException('The operation failed for an unknown transient reason', 'UnknownError')) : W.__orig.apply(this, a); };
+        }
+        window.__noRoom = true;
+        if (window.__islandHide) window.__islandHide();
+      });
+      await page.evaluate((p) => { window.MWCloud.offerDownload(p); }, VID);
+      const full = await until(() => page.evaluate(() => { const i = document.querySelector('.cloud-island.on'); return i && /Could not save/.test(i.textContent) ? i.textContent : null; }), 30000, 50);
+      check(!!full && /storage is full/.test(full) && /iPhone Storage/.test(full) && !/signal/.test(full),
+        '[M] a Save the phone has no room for says the iPhone\'s storage is full, and where to free it — not "the signal"', full);
+      await page.evaluate(() => { window.__noRoom = false; if (window.__islandHide) window.__islandHide(); });
     }
 
     console.log('\n=== [I] two saves at once ===');
