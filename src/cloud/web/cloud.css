@@ -3274,6 +3274,65 @@ textarea.cs-cap { min-height: 118px; resize: vertical; }
   body.mw-cloud #capModal .cap-box.folded .cap-foot { padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid rgba(255,255,255,.07); background: #1c1c1f; }
   body.mw-cloud #capModal .cap-box.folded .cap-foot-btns { grid-template-columns: 52px 1fr; }
   body.mw-cloud #capModal .cap-box.folded .cap-foot-btns button { height: 44px; font-size: 15px; border-radius: 12px; }
+
+  /*
+   * ►► MORE OF THE LINES, LESS OF THE FRAME. ◄◄ "Make the edit captions area smaller so I can see more — the buttons
+   * are very big, that is why I'm seeing a lot of '…'." Every part around the lines takes less: the header, ▶ and
+   * Tools, the search, the summary, the filters (smaller words, so All, Check, Mistakes and Fixed are whole, never
+   * "Mistak…"), and the bottom is ONE slim row on every phone — Preview and Save; ✓ at the top closes, as Cancel did.
+   * A line is a shorter row in a slightly smaller size, still easy to read.
+   */
+  body.mw-cloud #capModal .cap-box.folded .cap-head { height: 42px; }
+  body.mw-cloud #capModal .cap-box.folded #capTitle::after { font-size: 16px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-player { padding: 3px 10px 3px 12px; gap: 6px 8px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-pl-play { width: 30px; height: 30px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-tools-btn { height: 28px; padding: 0 10px; font-size: 13px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-search { margin: 4px 8px 2px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-search input { font-size: 15px; padding: 6px 12px; border-radius: 10px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-check-note { font-size: 12px; margin: 0 0 2px; }
+  body.mw-cloud #capModal .cap-box.folded #capList .cap-fix-tabs { padding: 5px 10px; gap: 6px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-fix-tabs .cap-seg { flex: 1 1 auto; min-width: 0; padding: 2px; gap: 1px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-fix-tabs .cap-seg button {
+    flex: 1 1 auto; min-width: 0; min-height: 30px; padding: 0 5px; font-size: 12.5px; letter-spacing: -.1px; white-space: nowrap;
+  }
+  body.mw-cloud #capModal .cap-box.folded .cap-fix-tabs .cap-seg button span { font-size: 11px; margin-left: 1px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-fix-tabs .cap-tab-dot { width: 6px; height: 6px; margin-right: 4px; box-shadow: none; }
+  body.mw-cloud #capModal .cap-box.folded .cap-fix-tabs .cap-add-line.cap-add-sq { width: 34px; height: 34px; min-height: 34px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-row {
+    min-height: 40px; gap: 4px; padding: 0 8px 0 4px;
+    background: linear-gradient(rgba(255,255,255,.07), rgba(255,255,255,.07)) 74px 100% / calc(100% - 74px) 1px no-repeat;
+  }
+  body.mw-cloud #capModal .cap-box.folded .cap-row-play { width: 26px; height: 26px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-row-play .mi { width: 12px; height: 12px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-time { flex: 0 0 38px; font-size: 12.5px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-text { height: 36px; padding: 0 6px; font-size: 15.5px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-ai-line { width: 26px; height: 26px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-foot { padding: 6px 10px calc(6px + env(safe-area-inset-bottom)); gap: 6px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-foot-btns { grid-template-columns: 44px 1fr; gap: 6px; }
+  body.mw-cloud #capModal .cap-box.folded #capCancel { display: none; }
+  body.mw-cloud #capModal .cap-box.folded #capPreview { width: 44px; height: 40px; padding: 0; font-size: 0; }
+  body.mw-cloud #capModal .cap-box.folded #capPreview .mi { width: 20px; height: 20px; margin: 0; }
+  body.mw-cloud #capModal .cap-box.folded #capBurn { grid-column: auto; height: 40px; padding: 0 10px; font-size: 14.5px; }
+  /* …and what a line can carry under it — fixed, unsure, checked, the lines either side — in the same smaller size,
+     lined up with the words (the line's ▶ and time are 74 px) */
+  body.mw-cloud #capModal .cap-box.folded .cap-was,
+  body.mw-cloud #capModal .cap-box.folded .cap-chk { margin: 0 0 6px 74px; padding: 6px 10px; gap: 4px 8px; font-size: 12.5px; border-radius: 10px; }
+  body.mw-cloud #capModal .cap-box.folded :is(.cap-was-tag, .cap-chk-tag) { font-size: 11px; padding: 2px 7px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-was-why { font-size: 11.5px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-was-diff { font-size: 13.5px; line-height: 1.5; }
+  body.mw-cloud #capModal .cap-box.folded :is(.cap-was-back, .cap-chk-back) { height: 28px; min-height: 28px; padding: 0 10px; font-size: 12px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-doubt { margin: 0 0 4px 74px; gap: 6px; font-size: 12px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-doubt button { min-height: 30px; padding: 4px 11px; font-size: 12.5px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-ctx { margin: 0 0 2px 74px; font-size: 12.5px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-ctx-in { min-height: 30px; padding: 3px 6px; font-size: 14px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-ctx-play { min-height: 30px; padding: 4px 10px; font-size: 12px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-done-hd { margin: 10px 4px 6px; padding: 8px 12px; border-radius: 12px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-done-hd b { font-size: 14px; }
+  body.mw-cloud #capModal .cap-box.folded :is(.cap-done-hd span, .cap-done-hd small) { font-size: 12px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-rev { margin: 4px 6px 8px; padding: 10px 12px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-rev-hd b { font-size: 14.5px; }
+  body.mw-cloud #capModal .cap-box.folded :is(.cap-rev-hd span, .cap-rev-key) { font-size: 12px; }
+  body.mw-cloud #capModal .cap-box.folded .cap-rev-acts button { min-height: 36px; font-size: 13px; }
 }
 
 /* 🔍 Search the captions (phone): thumb-sized, never zooms the page */
