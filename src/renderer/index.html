@@ -2125,11 +2125,8 @@
         <button type="button" id="capGrammarAi" class="ghost-btn cap-wb-btn cap-g-ai"
           title="Ask the AI to proof-read these lines — it reads the whole sermon first, then catches words the speech recognition misheard (“begotten sun” → “begotten Son”, “is real” → “Israel”). Everything it suggests waits under its line for you.">✨ AI check</button>
         <label class="cap-g-autolab" title="Have the AI proof-read new captions as soon as they are made. Uses the same free Groq key as the captions."><input type="checkbox" id="capGrammarAuto" checked /> auto</label>
-        <label class="cap-g-autolab" title="Make the corrections it is sure of straight away (each line says what it was, with a button to put it back; ↶ Undo puts them all back); only the doubtful ones wait under their lines. The free Groq models' corrections always wait for you — measured, their sure ones were too often wrong to make unseen. Untick to have every suggestion wait."><input type="checkbox" id="capGrammarApply" checked /> fix sure ones</label>
-        <select id="capGrammarMode" class="cap-g-mode" title="How much the AI may change">
-          <option value="exact" title="Fix mishearings, spelling and names — keep the speaker's own words">Exact words</option>
-          <option value="tidy" title="Also tidy clear grammar slips, keeping the speaker's voice">Tidy grammar</option>
-        </select>
+        <!-- (no "fix sure ones" box and no Exact words / Tidy grammar choice: the sure fixes are always made — each
+             shown under ✨ Fixed with Put back — and the AI keeps the speaker's own words. "Is it necessary?") -->
       </div>
       <!-- ▶ LISTEN WHILE YOU FIX. The words are only half of proof-reading
            captions; the other half is hearing what was said. Every line also has

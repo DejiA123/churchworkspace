@@ -14382,15 +14382,6 @@
       box._wired = true;
       box.addEventListener('change', () => { try { localStorage.setItem(AI_AUTO_KEY, box.checked ? '1' : '0'); } catch (e) {} });
     }
-    // …and whether the corrections it is sure of are made at once (on unless unticked)
-    const ap = document.getElementById('capGrammarApply');
-    if (ap && !ap._wired) {
-      ap._wired = true;
-      let w = null;
-      try { w = localStorage.getItem('mw-cap-ai-apply'); } catch (e) {}
-      ap.checked = w !== '0';
-      ap.addEventListener('change', () => { try { localStorage.setItem('mw-cap-ai-apply', ap.checked ? '1' : '0'); } catch (e) {} });
-    }
   }
   /** After captions are made: hand the new lines to the AI, without waiting on it. */
   function maybeAutoProofread(indexes) {
@@ -14416,7 +14407,8 @@
     const lo = idx[0], hi = idx[idx.length - 1];
     const before = [lo - 2, lo - 1].filter((k) => k >= 0 && evs[k]).map((k) => ({ i: k, text: evs[k].text }));
     const after = [hi + 1, hi + 2].filter((k) => evs[k]).map((k) => ({ i: k, text: evs[k].text }));
-    const mode = ($('#capGrammarMode') || {}).value || 'exact';
+    // (the speaker's own words kept: mishearings, spelling and names fixed, nothing reworded — captions say what was said)
+    const mode = 'exact';
     // Everything that was said, in order: the AI reads it for the sermon's notes and the context around each line.
     const passage = evs.map((e, i) => ({ i, text: e.text }));
     const btn = only != null ? document.querySelector(`#capList .cap-ai-line[data-ai-i="${only}"]`) : $('#capGrammarAi');
@@ -14447,10 +14439,10 @@
      * took the doubtful ones). Now the corrections the AI is sure of are made
      * at once — one ↶ Undo for all of them, and each line says "✨ AI fixed —
      * was …" with a button to put it back — and only the judgement calls wait
-     * as suggestions. Untick "apply sure fixes" to have them all wait.
+     * as suggestions.
      */
-    const applyBox = document.getElementById('capGrammarApply');
-    const applySure = only == null && (!applyBox || applyBox.checked);
+    // (always: the sure ones are made, each shown under ✨ Fixed with Put back; the doubtful ones wait under their lines)
+    const applySure = only == null;
     let shown = 0, applied = 0;
     const plan = [];
     for (const f of (res.fixes || [])) {

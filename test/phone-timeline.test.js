@@ -212,13 +212,10 @@ async function waitUp() {
       }));
       const all = await st();
       check(all.tabs === 2 && all.rows > 2 && all.fixed === 2, 'the captions window offers "All lines | ✍ Fixed" when lines were fixed', all);
-      // "The box after fix sure ones is black, can't see the text": the AI's Exact words / Tidy grammar are two
-      // buttons, not an iPhone dropdown in the sliding row
-      const gm = await page.evaluate(() => {
-        const s = document.getElementById('capGrammarMode'), c = s.nextElementSibling;
-        return { hidden: getComputedStyle(s).display === 'none', chips: !!(c && c.classList.contains('cloud-chips')), names: c ? [...c.children].map((b) => b.textContent) : [], on: c ? [...c.querySelectorAll('.on')].map((b) => b.textContent) : [] };
-      });
-      check(gm.hidden && gm.chips && gm.names.join('|') === 'Exact words|Tidy grammar' && gm.on.join() === 'Exact words', 'the AI’s Exact words / Tidy grammar are two buttons you can read, not a dropdown', gm);
+      // "Is it necessary to have a tick box for the fix sure ones… the two options beside it?": neither is there — the sure
+      // fixes are always made (each under Fixed, with Put back), and the AI keeps the speaker's own words
+      const gm = await page.evaluate(() => ({ box: !!document.getElementById('capGrammarApply'), mode: !!document.getElementById('capGrammarMode'), auto: !!document.getElementById('capGrammarAuto') }));
+      check(!gm.box && !gm.mode && gm.auto, 'no "fix sure ones" box and no Exact words / Tidy grammar choice (the AI check and its auto box stay)', gm);
       if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'fixed-all.png') });
       await page.locator('#capList [data-capfix="fixed"]').tap();
       await sleep(300);

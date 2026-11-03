@@ -1377,9 +1377,6 @@ body.mw-cloud #cloudPass:focus { border-color: #1f6fe0; box-shadow: 0 0 0 3px rg
   body.mw-cloud #capModal .cap-fix-sep { flex: none; align-self: center; width: 1px; height: 22px; margin: 0 2px; }
   body.mw-cloud #capModal .cap-g-autolab { flex: none; gap: 6px; font-size: 13.5px; color: var(--ph-text); }
   body.mw-cloud #capModal .cap-g-mode { flex: none; height: 36px; padding: 0 28px 0 10px; font-size: 16px; border-radius: 10px; }
-  /* Exact words | Tidy grammar: two buttons, each its own width, in the row that slides */
-  body.mw-cloud #capModal .cap-fix-row .cloud-chips { flex: none; height: 38px; }
-  body.mw-cloud #capModal .cap-fix-row .cloud-chips button { flex: none; padding: 0 12px; font-size: 13.5px; white-space: nowrap; }
 
   /* the player */
   body.mw-cloud #capModal .cap-player { flex: none; gap: 8px 10px; margin: 0; padding: 10px 16px; border-width: 0 0 1px; border-radius: 0; }
@@ -4804,3 +4801,7 @@ body.mw-cloud .cff-search input[type="search"], body.mw-cloud .cff-search input[
   font-style: normal; font-size: 12px; font-weight: 800; color: #17112b; background: #f1eff7; pointer-events: none; }
 .fs-score .fs-ic { width: 12px; height: 12px; }
 .fs-score.hi { color: #fff; background: #6d28d9; }
+/* "Last designs" beside Make: back to the board just made */
+.cp-flyer .cp-foot .fs-last { flex: 0 0 auto; min-height: 56px; padding: 0 14px; border-radius: 18px; font-weight: 700; }
+.cp-flyer .cp-foot .fs-last i { font-style: normal; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; display: inline-grid; place-items: center;
+  background: #6d28d9; color: #fff; font-size: 12px; font-weight: 800; }

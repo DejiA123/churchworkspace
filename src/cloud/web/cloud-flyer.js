@@ -234,6 +234,8 @@
    * browser collects it.
    */
   function freeCanvas(c) { if (c && c.tagName === 'CANVAS') { c.width = 0; c.height = 0; } }
+  // (every cache's canvases given back at once: they are drawn again as they are needed)
+  function freeCaches() { [txtCache, picCache, adjCache].forEach((m) => { try { m.clear(); } catch (e) { /* not made yet */ } }); }
   /*
    * The stand-in pictures made here for a board while the AI paints (proc:, thpr: — a canvas each, about a
    * megapixel) were kept for good: every board's, three rounds of twelve for a thumbnail feed. A new board lets the
@@ -1236,6 +1238,7 @@
     if (L.type === 'bg') return drawBg(x, S, L);
     if (L.type === 'fx') return drawFx(x, S, L);
     x.save();
+    try {
     x.globalAlpha = L.opacity == null ? 1 : L.opacity;
     x.translate(L.x, L.y);
     if (L.rot) x.rotate((L.rot * Math.PI) / 180);
@@ -1248,7 +1251,7 @@
       const im = imgOf(L.img);
       if (im) { const p = imageCanvas(L, im); x.drawImage(p.c, -L.w / 2 - p.pad / Q, -L.h / 2 - p.pad / Q, p.c.width / Q, p.c.height / Q); }
     } else if (L.type === 'shape') drawShape(x, L);
-    x.restore();
+    } finally { x.restore(); }
   }
 
   function render(S, cv, q) {
@@ -1259,7 +1262,13 @@
     x.setTransform(Q, 0, 0, Q, 0, 0);
     x.clearRect(0, 0, S.w, S.h);
     try {
-      for (const L of S.layers) drawLayer(x, S, L);
+      /* "Could not save: The object is in an invalid state" and a blank flyer: a phone out of canvas memory cannot
+         make the canvas a layer is drawn on, and one failed layer lost the whole flyer. Now the caches give their
+         memory back and that layer is drawn again; one that still cannot be is left out, not everything. */
+      for (const L of S.layers) {
+        try { drawLayer(x, S, L); }
+        catch (e) { freeCaches(); x.setTransform(Q, 0, 0, Q, 0, 0); try { drawLayer(x, S, L); } catch (e2) { x.setTransform(Q, 0, 0, Q, 0, 0); } }
+      }
       if (S.finish !== false) { x.save(); x.globalCompositeOperation = 'overlay'; x.globalAlpha = 0.05; x.fillStyle = x.createPattern(grainTile(), 'repeat'); x.fillRect(0, 0, S.w, S.h); x.restore(); }
     } finally { Q = 1; }
     return cv;
@@ -4123,7 +4132,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         <p class="fs-note">${F.status && !F.status.cloudflare ? 'Pictures are painted free by FLUX. For faster, sharper ones (FLUX.2, about 70 a day, free), add a free Cloudflare account to the server — see CLOUD.md.' : `Pictures are painted free by ${painter}. Your words are set exactly as you type them.`}</p>
         </div>
       </div>`;
-    P.foot.innerHTML = `<button type="button" class="fs-go" data-act="make">${ic('spark')}<span>Make my flyers</span></button>`;
+    P.foot.innerHTML = lastBoardBtn() + `<button type="button" class="fs-go" data-act="make">${ic('spark')}<span>Make my flyers</span></button>`;
     fillPics(P.body);
     fillFaces(P.body);
     paintLive();
@@ -4200,7 +4209,33 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         if (s) return addPhotos(s, async () => { await saveKit(true); drawMake(); });
       }
     };
-    P.foot.onclick = (e) => { if (e.target.closest('[data-act="make"]')) makeFlyers(); };
+    P.foot.onclick = (e) => { if (e.target.closest('[data-act="last"]')) return backToBoard(); if (e.target.closest('[data-act="make"]')) makeFlyers(); };
+  }
+  /*
+   * ►► THE BOARD YOU JUST MADE, AGAIN. ◄◄ "If I click Details to go back… I can't see the flyers it just generated."
+   * Details used to throw the board away. Now it is kept: "Last designs" beside Make goes back to it — the same
+   * designs and pictures, with whatever was changed in the details since (a date, a word) on them, and checked
+   * again for that. Make still makes a new board.
+   */
+  const boardSig = () => JSON.stringify(F.mode === 'thumb'
+    ? [F.th.line, F.th.kicker, F.th.when, F.th.preacher, F.th.showChurch, F.th.look]
+    : [F.fields, F.speakers, F.size, F.way, F.pinned]);
+  const hasLastBoard = () => F.madeFor === F.mode && F.designs.length > 0 && F.step !== 'pick';
+  function lastBoardBtn() {
+    if (!hasLastBoard()) return '';
+    const n = F.designs.length;
+    return `<button type="button" class="fs-ghost fs-last" data-act="last" aria-label="See the ${n} designs you just made">${ic('layout')}<span>Last designs</span><i>${n}</i></button>`;
+  }
+  function backToBoard() {
+    if (!hasLastBoard()) return;
+    const changed = F.boardSig !== boardSig();
+    F.step = 'pick';
+    // nothing changed: the board exactly as it was left, in its order
+    if (!changed) return drawPick();
+    // (a date, a word changed: the same designs made again with it, and checked again)
+    if (F.judge) { F.judge.flaws = new Map(); F.judge.mend = new Map(); F.judge.scores = new Map(); F.judge.done = false; }
+    F.boardSig = boardSig();
+    if (F.mode === 'thumb') rebuildThumbs(); else { rebuildDesigns(); drawPick(); }
   }
 
   /* ------------------------------------------------------ step 2: make + pick */
@@ -4213,6 +4248,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     // "New pictures" keeps the AI-lettered title it already has (another would spend the day's dearest painting again)
     const keepLetter = F.lettered && F.lettered.title === String(F.fields.title || '').trim() ? F.lettered : null;
     F.step = 'pick'; F.bgs = []; F.designs = []; F.dir = null; F.tries++; F.paintedIn = []; F.lettered = keepLetter;
+    F.madeFor = 'flyer'; F.boardSig = boardSig();
     dropOldStandIns();
     const tryNo = F.tries;
     drawPick();
@@ -4245,7 +4281,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     for (let j = 0; scenes.length && scenes.length < BOARD_N; j++) scenes.push(scenes[j % scenes.length]);
     const nTheme = Math.min(F.dir.themeScenes == null ? 0 : F.dir.themeScenes, 3);
     F.painting = scenes.length;
-    drawPick();
+    // (still being made while the details are open again: it carries on there, and is waiting under Last designs)
+    if (F.step === 'pick') drawPick();
     const paintingIn = paintPreacherIn(tryNo, sz);   // alongside the six, not after them
     const lettering = paintLettering(tryNo);
     await Promise.all(scenes.map(async (scene, i) => {
@@ -4779,7 +4816,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     };
     P.foot.onclick = (e) => {
       const b = e.target.closest('[data-act]'); if (!b) return;
-      if (b.dataset.act === 'back') { F.tries++; dropOldStandIns(); if (thumb) { F.step = 'tmake'; drawThumbMake(); } else { F.step = 'make'; drawMake(); } }
+      // (the board is kept: "Last designs" on the details brings it back)
+      if (b.dataset.act === 'back') { if (thumb) { F.step = 'tmake'; drawThumbMake(); } else { F.step = 'make'; drawMake(); } }
       if (b.dataset.act === 'again' && !(F.painting > 0) && !b.disabled) { if (thumb) makeThumbs(); else makeFlyers(); }
     };
   }
@@ -5225,7 +5263,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         </section>
         </div>
       </div>`;
-    P.foot.innerHTML = `<button type="button" class="fs-go" data-act="tmake"${src && String(t.line || '').trim() ? '' : ' disabled'}>${ic('spark')}<span>Make thumbnails</span></button>`;
+    P.foot.innerHTML = lastBoardBtn() + `<button type="button" class="fs-go" data-act="tmake"${src && String(t.line || '').trim() ? '' : ' disabled'}>${ic('spark')}<span>Make thumbnails</span></button>`;
     fillPics(P.body);
     thPaint();
     wireThumbMake();
@@ -5355,7 +5393,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         return drawThumbMake();
       }
     };
-    P.foot.onclick = (e) => { const b = e.target.closest('[data-act="tmake"]'); if (b && !b.disabled) makeThumbs(); };
+    P.foot.onclick = (e) => { if (e.target.closest('[data-act="last"]')) return backToBoard(); const b = e.target.closest('[data-act="tmake"]'); if (b && !b.disabled) makeThumbs(); };
   }
 
   /* the preacher cut out of the picture, on this phone (the flyers' cut-out): a key into IMGS, or '' when nobody is in it */
@@ -5376,6 +5414,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     const t = F.th, src = thumbPickSrc();
     if (!src || !String(t.line || '').trim()) return;
     F.tries++;
+    F.madeFor = 'thumb'; F.boardSig = boardSig();
     dropOldStandIns();
     const tryNo = F.tries;
     // a bank photo: the preacher already cut out, the video's moment (when there is one) only behind them
@@ -5479,6 +5518,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
 
   /* the thumbnail as YouTube takes it: 1920×1080 JPEG, under 2 MB */
   async function thumbBlob() {
+    freeCaches();   // (room for it: see sceneBlob)
     const S = F.scene, k = 1920 / S.w;
     const cv = render(S, canvas(1, 1), k);
     try {
@@ -5574,10 +5614,39 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       paintQueued = false;
       const cv = $('#fsCanvas'); if (!cv || !F.scene) return;
       const k = stageScale();
+      // (a drag: what is under and over the thing moved, drawn once when it started — only the one thing drawn again)
+      const D = F.drag;
+      if (D && cv.width === D.below.width && cv.height === D.below.height) {
+        const x = cv.getContext('2d');
+        x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, cv.width, cv.height); x.drawImage(D.below, 0, 0);
+        Q = D.q; x.setTransform(Q, 0, 0, Q, 0, 0);
+        try { drawLayer(x, F.scene, D.L); } catch (e) { /* drawn whole when the finger lifts */ } finally { Q = 1; }
+        x.setTransform(1, 0, 0, 1, 0, 0); x.drawImage(D.above, 0, 0);
+        selBox();
+        return;
+      }
       render(F.scene, cv, clamp(k * (window.devicePixelRatio || 1), 1, 2));
       cv.style.width = Math.round(F.scene.w * k) + 'px'; cv.style.height = Math.round(F.scene.h * k) + 'px';
       selBox();
     });
+  }
+  /*
+   * ►► A SMOOTH DRAG. ◄◄ "The moving of the components, pictures etc. must be smooth." Every move of a finger drew
+   * the whole flyer again — the picture, the light, every word, both preachers — at the phone's full sharpness. Now,
+   * as a drag starts, what is under the thing being moved and what is over it are drawn once; each move puts those
+   * back and draws only the one thing that moves. The whole flyer is drawn again when the finger lifts.
+   */
+  function dragStart(L) {
+    if (F.drag || !L || L.type === 'bg' || !F.scene) return;
+    const i = F.scene.layers.indexOf(L); if (i < 0) return;
+    const q = clamp(stageScale() * (window.devicePixelRatio || 1), 1, 2);
+    const part = (layers) => render(Object.assign({}, F.scene, { layers, finish: false }), canvas(1, 1), q);
+    try { F.drag = { L, q, below: part(F.scene.layers.slice(0, i)), above: part(F.scene.layers.slice(i + 1)) }; } catch (e) { F.drag = null; }
+  }
+  function dragEnd() {
+    if (!F.drag) return;
+    freeCanvas(F.drag.below); freeCanvas(F.drag.above); F.drag = null;
+    paint();
   }
   function selBox() {
     const box = $('#fsSel'), cv = $('#fsCanvas'); if (!box || !cv) return;
@@ -5656,20 +5725,21 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
         const [a, b] = Array.from(pts.values());
         L.s = clamp(g.s0 * Math.hypot(a[0] - b[0], a[1] - b[1]) / g.d0, 0.1, 8);
         L.rot = snapAngle(g.r0 + ((Math.atan2(b[1] - a[1], b[0] - a[0]) - g.a0) * 180) / Math.PI);
-        g.moved = true; paint(); return;
+        dragStart(L); g.moved = true; paint(); return;
       }
       const [sx, sy] = toScene(e.clientX, e.clientY);
       if (g.mode === 'move') {
         if (!g.moved && Math.hypot(sx - g.x0, sy - g.y0) < 6) return;
+        if (!g.moved) dragStart(L);
         g.moved = true;
         let nx = g.lx + sx - g.x0, ny = g.ly + sy - g.y0;
         // snap to the middle, the way Canva's guides do
         if (Math.abs(nx - F.scene.w / 2) < 14) nx = F.scene.w / 2;
         L.x = nx; L.y = ny; paint();
       } else if (g.mode === 'scale') {
-        L.s = clamp(g.s0 * Math.hypot(sx - L.x, sy - L.y) / Math.max(1, g.d0), 0.1, 8); g.moved = true; paint();
+        dragStart(L); L.s = clamp(g.s0 * Math.hypot(sx - L.x, sy - L.y) / Math.max(1, g.d0), 0.1, 8); g.moved = true; paint();
       } else if (g.mode === 'rotate') {
-        L.rot = snapAngle(g.r0 + ((Math.atan2(sy - L.y, sx - L.x) - g.a0) * 180) / Math.PI); g.moved = true; paint();
+        dragStart(L); L.rot = snapAngle(g.r0 + ((Math.atan2(sy - L.y, sx - L.x) - g.a0) * 180) / Math.PI); g.moved = true; paint();
       }
     });
     const end = (e) => {
@@ -5678,7 +5748,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       if (g.moved && g.snap) { F.undo.push(g.snap); if (F.undo.length > 60) F.undo.shift(); F.redo = []; syncUndo(); }
       // a second tap on a selected text: edit its words
       else if (!g.moved && g.L && g.L.type === 'text' && g.was === g.L.id && g.mode === 'move') editText();
-      if (pts.size === 0) g = null;
+      if (pts.size === 0) { g = null; dragEnd(); }
     };
     st.addEventListener('pointerup', end);
     st.addEventListener('pointercancel', end);
@@ -5958,7 +6028,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     }
     if (L.frame) {
       const N = root.MWFlyer.hero({ img: o.img, name: L.name, id: L.speaker, photo: o.photo || L.photo }, L.frame);
-      if (N) { ['img', 'photo', 'src', 'w', 'h', 'x', 'y', 'fade'].forEach((k) => { L[k] = N[k]; }); delete L.crop; delete L.len; return; }
+      // (where they stand stays: the frame's own middle is where the look first put them, before two were kept apart
+      //  — or before they were moved — and a new photo jumped them across onto the other preacher)
+      if (N) { const x0 = L.x; ['img', 'photo', 'src', 'w', 'h', 'x', 'y', 'fade'].forEach((k) => { L[k] = N[k]; }); L.x = x0; delete L.crop; delete L.len; return; }
     }
     const im = imgOf(o.img); L.img = o.img; if (o.photo) L.photo = o.photo; delete L.src; delete L.crop;
     if (im) L.w = L.h * iw(im) / ih(im);
@@ -5991,7 +6063,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   function sheetBank(L, spId) {
     const sps = (F.kit && F.kit.speakers) || [];
     const s = sps.find((x) => x.id === (spId || L.speaker)) || bankGuess() || sps[0] || null;
-    const who = sps.length > 1 || (sps.length && !L.speaker)
+    // ("It's changing both pictures… there were two different people": a preacher's own photos only — another
+    // preacher's photo on them made the flyer two of the same person. Only someone who is nobody's yet chooses whose.)
+    const who = sps.length && !L.speaker
       ? `<div class="th-chips fs-bank-who">${sps.map((x) => `<button type="button" class="th-chip${s && x.id === s.id ? ' on' : ''}" data-who="${escAttr(x.id)}">${esc(x.name || 'Speaker')} <i>${(x.photos || []).length}</i></button>`).join('')}<button type="button" class="th-chip th-chip-add" data-who="+">＋ New preacher</button></div>` : '';
     const pics = s
       ? `<div class="fs-bank">${(s.photos || []).map((p) => `<button type="button" class="fs-bank-pic${L.photo === p ? ' on' : ''}" data-photo="${escAttr(p)}">${picTag(p)}</button>`).join('')}<button type="button" class="fs-bank-pic fs-bank-add" data-addpics="1">${ic('plus')}<small>Add photos</small></button></div>`
@@ -6250,9 +6324,23 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
 
   /* ---------------------------------------------------------- save and post */
 
+  /* the flyer as a JPEG: 4K — or, on a phone with too little canvas memory left for that, a size it can make */
+  async function sceneBlob(S, ks, q) {
+    freeCaches();   // (room for the big one: the board's cached pieces are made again when they are next drawn)
+    for (const k of ks) {
+      let cv = null;
+      try {
+        cv = render(S, canvas(1, 1), k);
+        const b = await new Promise((res) => { try { cv.toBlob(res, 'image/jpeg', q); } catch (e) { res(null); } });
+        if (b && b.size > 1000) return b;
+      } catch (e) { /* smaller, then */ } finally { freeCanvas(cv); }
+      freeCaches();
+    }
+    throw new Error('this phone has run out of memory for pictures — close the studio, open it again and try once more');
+  }
   function flyerBlob() {
-    const cv = render(F.scene, canvas(1, 1), HD(F.scene));   // 4K
-    return new Promise((res) => cv.toBlob((b) => { cv.width = cv.height = 1; res(b); }, 'image/jpeg', 0.95));
+    const hd = HD(F.scene);
+    return sceneBlob(F.scene, [hd, Math.min(hd, 2), Math.min(hd, 1.4), 1], 0.95);
   }
   // the scheduler names a post after its file: "Bible Study flyer", not "bible study 2026 10 13"
   const fileName = () => `${(F.fields.title || 'Flyer').replace(/[^\w' ]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Flyer'} flyer.jpg`;

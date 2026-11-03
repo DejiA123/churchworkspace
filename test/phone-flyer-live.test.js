@@ -166,6 +166,29 @@ async function until(page, fn, arg, ms = 30000) {
     for (let k = 0; k < 12 && await page.evaluate(() => !!document.querySelector('.cp-flyer [data-act="more"]')); k++) { await page.waitForTimeout(900); await toFoot(); }
     s = await page.evaluate(() => { const st = window.MWFlyerStudio._state, end = document.querySelector('.cp-flyer .fs-end'); return { shown: st.board.shown, all: st.board.order.length, end: end && end.textContent }; });
     check(s.shown === s.all && /every design/.test(s.end || ''), 'kept scrolling, it brings in every design, then says that was all', s);
+    // "If I click Details to go back… I can't see the flyers it just generated": Last designs brings the same board back
+    // (the paintings still landing on it first: each one is a design more)
+    await page.waitForFunction(() => { const F = window.MWFlyerStudio._state; return !(F.painting > 0) && !(F.judge && F.judge.busy); }, null, { timeout: 60000 });
+    await sleep(1500);
+    const looks0 = await page.evaluate(() => window.MWFlyerStudio._state.designs.map((d) => d.look));
+    await page.locator('.cp-flyer [data-act="back"]').tap(); await sleep(500);
+    s = await page.evaluate(() => { const b = document.querySelector('.cp-flyer [data-act="last"]'); return { step: window.MWFlyerStudio._state.step, btn: b && b.textContent }; });
+    check(s.step === 'make' && /Last designs/.test(s.btn || '') && s.btn.includes(String(looks0.length)), 'Details keeps the board: "Last designs" is beside Make, with how many', s);
+    await page.locator('.cp-flyer [data-act="last"]').tap(); await sleep(800);
+    s = await page.evaluate(() => ({ step: window.MWFlyerStudio._state.step, looks: window.MWFlyerStudio._state.designs.map((d) => d.look), cards: document.querySelectorAll('.cp-flyer .fs-card').length }));
+    check(s.step === 'pick' && s.looks.join() === looks0.join() && s.cards === looks0.length, 'Last designs brings back the very designs it made, not new ones', { looks0, s });
+    // a drag moves one thing over what is under and over it, drawn once — and the whole flyer is drawn when it ends
+    await page.locator('.cp-flyer .fs-card').first().tap(); await sleep(1200);
+    const L0 = await page.evaluate(() => { const S = window.MWFlyerStudio._state.scene, l = S.layers.find((x) => x.type === 'image' && 'speaker' in x) || S.layers.find((x) => x.type === 'text'); return { id: l.id, x: l.x, y: l.y, W: S.w, H: S.h }; });
+    const cvb = await page.locator('#fsCanvas').boundingBox();
+    const at = (x, y) => [cvb.x + cvb.width * x / L0.W, cvb.y + cvb.height * y / L0.H];
+    await page.evaluate((id) => { window.MWFlyerStudio._state.sel = id; }, L0.id);
+    const [px, py] = at(L0.x, L0.y);
+    await page.mouse.move(px, py); await page.mouse.down(); await page.mouse.move(px + 20, py + 10, { steps: 3 });
+    const during = await page.evaluate(() => !!window.MWFlyerStudio._state.drag);
+    await page.mouse.move(px + 60, py + 30, { steps: 6 }); await page.mouse.up(); await sleep(400);
+    s = await page.evaluate((id) => { const F = window.MWFlyerStudio._state, l = F.scene.layers.find((x) => x.id === id); return { drag: !!F.drag, x: l && l.x, y: l && l.y }; }, L0.id);
+    check(during && !s.drag && Math.abs(s.x - L0.x) > 20, 'dragging draws only the thing moved (what is under and over it kept), and all of it again at the end', { during, s, L0 });
     // the rules, on a design: words off the page, words on words
     s = await page.evaluate(() => {
       const st = window.MWFlyerStudio._state, d = JSON.parse(JSON.stringify(st.designs[0]));

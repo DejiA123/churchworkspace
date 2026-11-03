@@ -4166,9 +4166,7 @@ let _hideTimer = null;
    * nothing else changes). A value set from elsewhere — a saved session, the
    * look — is shown when the window opens.
    */
-  // (and the AI's Exact words / Tidy grammar: as an iPhone's own dropdown, in the row that slides sideways, it
-  // showed as an empty black box — "the box after fix sure ones is black, can't see the text")
-  const CAP_CHIPS = { capSize: null, capWords: null, capPos: { center: 'Middle' }, capGrammarMode: null };
+  const CAP_CHIPS = { capSize: null, capWords: null, capPos: { center: 'Middle' } };
   /*
    * The captions window, calm (cloud.css, "Edit captions"): the tools that are
    * not the lines themselves go under one "Tools" switch, and the close button
