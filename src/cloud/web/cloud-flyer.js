@@ -3805,6 +3805,8 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     trash: '<path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M5 7l1 13h12l1-13"/><path d="M9 7V4h6v3"/>',
     up: '<path d="m12 5-7 7"/><path d="m12 5 7 7"/><path d="M12 5v14"/>',
     down: '<path d="m12 19-7-7"/><path d="m12 19 7-7"/><path d="M12 19V5"/>',
+    crop: '<path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/>',
+    check: '<path d="m5 12 5 5 9-10"/>',
     cut: '<path d="m15 4 5 5L8 21l-5-5z"/><path d="M13 6l5 5"/><path d="M5 2.5v3M3.5 4h3"/><path d="M19.5 15.5v3M18 17h3"/>',
     flip: '<path d="M12 3v18"/><path d="M8 7 3 12l5 5z"/><path d="M16 7l5 5-5 5z"/>',
     sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
@@ -5520,7 +5522,9 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   async function thumbBlob() {
     freeCaches();   // (room for it: see sceneBlob)
     const S = F.scene, k = 1920 / S.w;
-    const cv = render(S, canvas(1, 1), k);
+    let cv = null;
+    try { cv = render(S, canvas(1, 1), k); if (blank(cv)) throw new Error('blank'); }
+    catch (e) { freeCanvas(cv); return sceneBlob(S, [1280 / S.w, 1], 0.9, () => $('#fsCanvas')); }   // (as for a flyer: a size the phone can make)
     try {
       for (const q of [0.92, 0.86, 0.8, 0.72, 0.62]) {
         const b = await new Promise((res) => cv.toBlob(res, 'image/jpeg', q));
@@ -5776,7 +5780,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
     } else if (L.type === 'image') {
       // "Their photos" on every person, not only one put on from the bank: a preacher cut out of the video is nobody's
       // yet ("I should be able to replace the image of the speaker in the thumbnail with their photos in the bank")
-      html = (isPerson(L) ? btn('bank', 'photo', 'Their photos') : '') + btn('cutout', 'cut', 'Remove BG') + btn('replace', 'photo', 'Replace') + btn('imglook', 'sun', 'Adjust') + btn('glow', 'glow', 'Glow') + btn('outline', 'fx', 'Outline')
+      html = (isPerson(L) ? btn('bank', 'photo', 'Their photos') : '') + btn('crop', 'crop', 'Crop') + btn('cutout', 'cut', 'Remove BG') + btn('replace', 'photo', 'Replace') + btn('imglook', 'sun', 'Adjust') + btn('glow', 'glow', 'Glow') + btn('outline', 'fx', 'Outline')
         + btn('gray', 'gray', 'B&W') + btn('fade', 'down', 'Fade') + btn('flip', 'flip', 'Flip') + btn('opacity', 'sun', 'Opacity') + btn('dup', 'copy', 'Duplicate') + btn('front', 'up', 'Forward') + btn('back', 'down', 'Back') + btn('del', 'trash', 'Delete');
     } else {
       html = btn('colour', 'palette', 'Colour') + btn('opacity', 'sun', 'Opacity') + btn('dup', 'copy', 'Duplicate') + btn('front', 'up', 'Forward') + btn('back', 'down', 'Back') + btn('del', 'trash', 'Delete');
@@ -5832,6 +5836,7 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       case 'outline': return change(() => { L.outline = L.outline ? '' : '#ffffff'; });
       case 'fade': return change(() => { L.fade = L.fade ? 0 : 0.25; });
       case 'cutout': return cutOut(L);
+      case 'crop': return openCrop(L);
       case 'bank': return sheetBank(L);
       case 'replace': return pickImage(async (url) => {
         const im = await loadImg(url); const key = 'user:' + uid(); IMGS.set(key, im);
@@ -6325,22 +6330,48 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
   /* ---------------------------------------------------------- save and post */
 
   /* the flyer as a JPEG: 4K — or, on a phone with too little canvas memory left for that, a size it can make */
-  async function sceneBlob(S, ks, q) {
-    freeCaches();   // (room for the big one: the board's cached pieces are made again when they are next drawn)
+  /*
+   * ►► SAVED, EVERY TIME. ◄◄ "Ensure the flyer can be saved!!! 100%." It was drawn at three times its size to save
+   * (3240 × 4050, 13 megapixels — 52 MB for that one canvas, and its people and words at that size too): more than
+   * an iPhone gives a page, so it failed ("the object is in an invalid state"). Now: twice its size (2160 across —
+   * twice what Instagram and Facebook show), everything cached let go first; if the phone still cannot, a size it
+   * can; and each one is looked at before it is kept — a blank one is never saved. Last of all, the flyer as the
+   * editor is showing it.
+   */
+  function blank(cv) {
+    try {
+      const t = canvas(12, 12), x = t.getContext('2d', { willReadFrequently: true }); x.drawImage(cv, 0, 0, 12, 12);
+      const d = x.getImageData(0, 0, 12, 12).data; let lo = 765, hi = 0, on = 0;
+      for (let i = 0; i < d.length; i += 4) { if (d[i + 3] > 20) on++; const v = d[i] + d[i + 1] + d[i + 2]; lo = Math.min(lo, v); hi = Math.max(hi, v); }
+      freeCanvas(t);
+      return on < 100 || hi - lo < 12;   // (nothing drawn, or one flat colour: a background with nothing on it)
+    } catch (e) { return false; }
+  }
+  const toBlobOf = (cv, q) => new Promise((res) => {
+    try { cv.toBlob((b) => res(b), 'image/jpeg', q); }
+    catch (e) { try { const u = cv.toDataURL('image/jpeg', q); fetch(u).then((r) => r.blob()).then(res, () => res(null)); } catch (e2) { res(null); } }
+  });
+  async function sceneBlob(S, ks, q, fallback) {
+    freeCaches();   // (room for it: the board's cached pieces are made again when they are next drawn)
+    if (F.drag) { freeCanvas(F.drag.below); freeCanvas(F.drag.above); F.drag = null; }
     for (const k of ks) {
       let cv = null;
       try {
         cv = render(S, canvas(1, 1), k);
-        const b = await new Promise((res) => { try { cv.toBlob(res, 'image/jpeg', q); } catch (e) { res(null); } });
-        if (b && b.size > 1000) return b;
+        if (!cv.width || blank(cv)) throw new Error('blank');
+        const b = await toBlobOf(cv, q);
+        if (b && b.size > 2000) return b;
       } catch (e) { /* smaller, then */ } finally { freeCanvas(cv); }
       freeCaches();
     }
-    throw new Error('this phone has run out of memory for pictures — close the studio, open it again and try once more');
+    // (the editor's own picture of it, as a last resort: what is on the screen is what is saved)
+    const shown = fallback && fallback();
+    if (shown && shown.width > 300 && !blank(shown)) { const b = await toBlobOf(shown, q); if (b && b.size > 2000) return b; }
+    throw new Error('this phone has run out of memory for pictures — close the studio, open it again and save once more');
   }
   function flyerBlob() {
-    const hd = HD(F.scene);
-    return sceneBlob(F.scene, [hd, Math.min(hd, 2), Math.min(hd, 1.4), 1], 0.95);
+    const big = Math.min(2, HD(F.scene));
+    return sceneBlob(F.scene, [big, 1.5, 1.2, 1], 0.93, () => $('#fsCanvas'));
   }
   // the scheduler names a post after its file: "Bible Study flyer", not "bible study 2026 10 13"
   const fileName = () => `${(F.fields.title || 'Flyer').replace(/[^\w' ]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Flyer'} flyer.jpg`;
@@ -6363,7 +6394,11 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       const file = new File([blob], thumb ? thumbName() : fileName(), { type: 'image/jpeg' });
       // an iPhone saves a picture to Photos from the share sheet
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        try { await navigator.share({ files: [file] }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
+        try { await navigator.share({ files: [file] }); return; } catch (e) {
+          if (e && e.name === 'AbortError') return;
+          // (the flyer took a moment to make, and the iPhone no longer counts the tap: one more tap opens it)
+          if (e && e.name === 'NotAllowedError') return readyToSave(file, blob);
+        }
       }
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob); a.download = file.name;
@@ -6372,6 +6407,113 @@ const lit = (p) => ({ glow: rgba(p.accent, 0.28), rim: rgba(mix(p.accent, '#ffff
       toast('Saved.', 'good');
     } catch (e) { toast('Could not save: ' + (e.message || e), 'error'); }
     finally { btn.disabled = false; }
+  }
+
+  /*
+   * ►► CROP. ◄◄ "When editing a speaker in a generated flyer I should be able to crop the speaker, not just remove
+   * the background." The whole photo, big, with the part on the flyer in a frame: drag it, or a corner or a side,
+   * then Done. On the flyer the speaker stays the same size, and where they were — only what is shown changes (a
+   * side cut through them is faded, as the flyer does where a photo's own edge cuts through someone).
+   */
+  function openCrop(L) {
+    const im = L && imgOf(L.img); if (!im) return;
+    const W0 = iw(im), H0 = ih(im), sr0 = srcOf(L) || { x: 0, y: 0, w: 1, h: 1 };
+    let r = Object.assign({}, sr0);   // the crop, 0..1 of the photo
+    const el = document.createElement('div'); el.className = 'fs-crop';
+    el.innerHTML = `<div class="fs-crop-top"><b>Crop</b><small>Drag the frame, or a corner or a side</small></div><div class="fs-crop-box"><canvas></canvas></div>
+      <div class="fs-crop-bar"><button type="button" class="fs-ghost" data-c="cancel"><span>Cancel</span></button><button type="button" class="fs-ghost" data-c="all"><span>Whole photo</span></button><button type="button" class="fs-go" data-c="done">${ic('check')}<span>Done</span></button></div>`;
+    document.body.appendChild(el);
+    const box = el.querySelector('.fs-crop-box'), cv = el.querySelector('canvas'), x = cv.getContext('2d');
+    let fit = null;
+    const draw = () => {
+      const bw = box.clientWidth, bh = box.clientHeight, dpr = window.devicePixelRatio || 1, f = Math.min((bw - 28) / W0, (bh - 28) / H0);   // (room round it for the corners)
+      fit = { f, w: W0 * f, h: H0 * f, ox: (bw - W0 * f) / 2, oy: (bh - H0 * f) / 2 };
+      cv.width = Math.round(bw * dpr); cv.height = Math.round(bh * dpr); cv.style.width = bw + 'px'; cv.style.height = bh + 'px';
+      x.setTransform(dpr, 0, 0, dpr, 0, 0); x.clearRect(0, 0, bw, bh);
+      // (a cut-out on the checks of nothing, so its own edge can be seen)
+      const sq = 12; for (let yy = 0; yy < fit.h; yy += sq) for (let xx = 0; xx < fit.w; xx += sq) { x.fillStyle = ((xx + yy) / sq) % 2 ? '#2a2d36' : '#20232b'; x.fillRect(fit.ox + xx, fit.oy + yy, Math.min(sq, fit.w - xx), Math.min(sq, fit.h - yy)); }
+      x.drawImage(im, fit.ox, fit.oy, fit.w, fit.h);
+      const R = { l: fit.ox + r.x * fit.w, t: fit.oy + r.y * fit.h, w: r.w * fit.w, h: r.h * fit.h };
+      x.fillStyle = 'rgba(0,0,0,.6)';
+      x.fillRect(fit.ox, fit.oy, fit.w, R.t - fit.oy); x.fillRect(fit.ox, R.t + R.h, fit.w, fit.oy + fit.h - R.t - R.h);
+      x.fillRect(fit.ox, R.t, R.l - fit.ox, R.h); x.fillRect(R.l + R.w, R.t, fit.ox + fit.w - R.l - R.w, R.h);
+      x.strokeStyle = '#fff'; x.lineWidth = 2; x.strokeRect(R.l, R.t, R.w, R.h);
+      x.strokeStyle = 'rgba(255,255,255,.35)'; x.lineWidth = 1;
+      for (const k of [1, 2]) { x.beginPath(); x.moveTo(R.l + R.w * k / 3, R.t); x.lineTo(R.l + R.w * k / 3, R.t + R.h); x.moveTo(R.l, R.t + R.h * k / 3); x.lineTo(R.l + R.w, R.t + R.h * k / 3); x.stroke(); }
+      x.fillStyle = '#fff';
+      for (const [px, py] of [[R.l, R.t], [R.l + R.w, R.t], [R.l, R.t + R.h], [R.l + R.w, R.t + R.h]]) { x.beginPath(); x.arc(px, py, 9, 0, Math.PI * 2); x.fill(); }
+      for (const [px, py] of [[R.l + R.w / 2, R.t], [R.l + R.w / 2, R.t + R.h], [R.l, R.t + R.h / 2], [R.l + R.w, R.t + R.h / 2]]) x.fillRect(px - 9, py - 3, 18, 6);
+    };
+    draw();
+    const MIN = 0.06;
+    let g = null;
+    const at = (e) => { const b = cv.getBoundingClientRect(); return [(e.clientX - b.left - fit.ox) / fit.w, (e.clientY - b.top - fit.oy) / fit.h]; };
+    cv.addEventListener('pointerdown', (e) => {
+      const [u, v] = at(e), tx = 26 / fit.w, ty = 26 / fit.h;
+      const near = (a, b, t) => Math.abs(a - b) < t;
+      const inX = u > r.x - tx && u < r.x + r.w + tx, inY = v > r.y - ty && v < r.y + r.h + ty;
+      const ed = { l: inY && near(u, r.x, tx), r: inY && near(u, r.x + r.w, tx), t: inX && near(v, r.y, ty), b: inX && near(v, r.y + r.h, ty) };
+      const any = ed.l || ed.r || ed.t || ed.b;
+      if (!any && !(u > r.x && u < r.x + r.w && v > r.y && v < r.y + r.h)) return;
+      try { cv.setPointerCapture(e.pointerId); } catch (er) { /* fine */ }
+      g = { u, v, r0: Object.assign({}, r), ed: any ? ed : null };
+      e.preventDefault();
+    });
+    cv.addEventListener('pointermove', (e) => {
+      if (!g) return;
+      const [u, v] = at(e), du = u - g.u, dv = v - g.v, o = g.r0;
+      if (!g.ed) { r.x = clamp(o.x + du, 0, 1 - o.w); r.y = clamp(o.y + dv, 0, 1 - o.h); }
+      else {
+        let l = o.x, t = o.y, rr = o.x + o.w, b = o.y + o.h;
+        if (g.ed.l) l = clamp(l + du, 0, rr - MIN);
+        if (g.ed.r) rr = clamp(rr + du, l + MIN, 1);
+        if (g.ed.t) t = clamp(t + dv, 0, b - MIN);
+        if (g.ed.b) b = clamp(b + dv, t + MIN, 1);
+        r = { x: l, y: t, w: rr - l, h: b - t };
+      }
+      requestAnimationFrame(draw);
+    });
+    const up = () => { g = null; };
+    cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+    const onResize = () => draw(); window.addEventListener('resize', onResize);
+    const close = () => { window.removeEventListener('resize', onResize); el.remove(); };
+    el.querySelector('.fs-crop-bar').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-c]'); if (!b) return;
+      if (b.dataset.c === 'cancel') return close();
+      if (b.dataset.c === 'all') { r = { x: 0, y: 0, w: 1, h: 1 }; return draw(); }
+      // Done: the same size on the flyer, the part kept where it was
+      const kx = L.w / sr0.w, ky = L.h / sr0.h;   // flyer units per unit of the photo
+      let dx = ((r.x + r.w / 2) - (sr0.x + sr0.w / 2)) * kx * (L.flip ? -1 : 1), dy = ((r.y + r.h / 2) - (sr0.y + sr0.h / 2)) * ky;
+      const s0 = L.s || 1, a = (L.rot || 0) * Math.PI / 180;
+      [dx, dy] = [(dx * Math.cos(a) - dy * Math.sin(a)) * s0, (dx * Math.sin(a) + dy * Math.cos(a)) * s0];
+      change(() => {
+        L.src = { x: r.x, y: r.y, w: r.w, h: r.h }; delete L.crop; delete L.len; delete L._src0; delete L.zoom;
+        L.w = r.w * kx; L.h = r.h * ky; L.x += dx; L.y += dy;
+        L.feather = L.feather || 1.4;   // (an edge cut through them faded, never a straight line)
+      });
+      close();
+    });
+  }
+
+  /* the flyer made, waiting for the tap that saves it (the share sheet only opens straight from a tap) */
+  function readyToSave(file, blob) {
+    const url = URL.createObjectURL(blob);
+    const el = document.createElement('div'); el.className = 'fs-ready';
+    el.innerHTML = `<div class="fs-ready-in"><img src="${url}" alt="The flyer"><b>Your flyer is ready</b>
+      <button type="button" class="fs-go" data-r="save">${ic('save')}<span>Save to Photos</span></button>
+      <button type="button" class="fs-ghost" data-r="close"><span>Not now</span></button></div>`;
+    document.body.appendChild(el);
+    const close = () => { el.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000); };
+    el.addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-r]'); if (!b) { if (e.target === el) close(); return; }
+      if (b.dataset.r === 'close') return close();
+      try { await navigator.share({ files: [file] }); close(); }
+      catch (er) {
+        if (er && er.name === 'AbortError') return;
+        const a = document.createElement('a'); a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
+        toast('Saved.', 'good'); close();
+      }
+    });
   }
 
   async function postFlyer(btn) {

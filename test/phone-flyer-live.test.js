@@ -189,6 +189,46 @@ async function until(page, fn, arg, ms = 30000) {
     await page.mouse.move(px + 60, py + 30, { steps: 6 }); await page.mouse.up(); await sleep(400);
     s = await page.evaluate((id) => { const F = window.MWFlyerStudio._state, l = F.scene.layers.find((x) => x.id === id); return { drag: !!F.drag, x: l && l.x, y: l && l.y }; }, L0.id);
     check(during && !s.drag && Math.abs(s.x - L0.x) > 20, 'dragging draws only the thing moved (what is under and over it kept), and all of it again at the end', { during, s, L0 });
+    // "I should be able to crop the speaker": Crop, the top of the frame pulled down, Done — less of the photo, the same size
+    const P0 = await page.evaluate(() => { const S = window.MWFlyerStudio._state.scene, l = S.layers.find((x) => x.type === 'image' && 'speaker' in x); return l && { id: l.id, src: l.src || { x: 0, y: 0, w: 1, h: 1 }, w: l.w, h: l.h }; });
+    if (P0) {
+      await page.evaluate((id) => { const F = window.MWFlyerStudio._state; F.sel = id; }, P0.id);
+      await page.locator('.cp-flyer [data-t="bank"], .cp-flyer [data-t="crop"]').first().waitFor({ timeout: 2000 }).catch(() => {});
+      // (the tools follow a selection made by a tap: tap the person)
+      const pb = await page.evaluate((id) => { const S = window.MWFlyerStudio._state.scene, l = S.layers.find((x) => x.id === id); return { x: l.x, y: l.y - l.h * 0.2, W: S.w, H: S.h }; }, P0.id);
+      const cb2 = await page.locator('#fsCanvas').boundingBox();
+      for (const fy of [0.1, 0.25, -0.1, 0.35]) {
+        if (await page.locator('[data-t="crop"]').count()) break;
+        const yy = pb.y + (fy + 0.2) * (await page.evaluate((id) => window.MWFlyerStudio._state.scene.layers.find((x) => x.id === id).h, P0.id));
+        await page.mouse.click(cb2.x + cb2.width * pb.x / pb.W, cb2.y + cb2.height * yy / pb.H); await sleep(500);
+      }
+      const sel = await page.evaluate(() => window.MWFlyerStudio._state.sel);
+      await page.locator('[data-t="crop"]').tap(); await sleep(500);
+      const cr = await page.evaluate(() => !!document.querySelector('.fs-crop canvas'));
+      // the frame's top edge, from where the crop is: pull it down by a fifth of the photo
+      const fb = await page.locator('.fs-crop canvas').boundingBox();
+      const geo = await page.evaluate((id) => { const S = window.MWFlyerStudio._state.scene, l = S.layers.find((x) => x.id === id), im = window.MWFlyer.IMGS.get(l.img); return { iw: im.naturalWidth || im.width, ih: im.naturalHeight || im.height }; }, sel);
+      const f = Math.min(fb.width / geo.iw, fb.height / geo.ih), ox = fb.x + (fb.width - geo.iw * f) / 2, oy = fb.y + (fb.height - geo.ih * f) / 2;
+      const src = await page.evaluate((id) => { const l = window.MWFlyerStudio._state.scene.layers.find((x) => x.id === id); return l.src || { x: 0, y: 0, w: 1, h: 1 }; }, sel);
+      const tx = ox + (src.x + src.w / 2) * geo.iw * f, ty = oy + src.y * geo.ih * f;
+      await page.mouse.move(tx, ty + 2); await page.mouse.down(); await page.mouse.move(tx, ty + 2 + src.h * 0.2 * geo.ih * f, { steps: 5 }); await page.mouse.up();
+      await page.locator('.fs-crop [data-c="done"]').tap(); await sleep(500);
+      s = await page.evaluate((id) => { const l = window.MWFlyerStudio._state.scene.layers.find((x) => x.id === id); return { src: l.src, w: l.w, h: l.h, open: !!document.querySelector('.fs-crop') }; }, sel);
+      check(cr && !s.open && s.src && s.src.h < src.h * 0.9 && s.src.y > src.y, 'Crop: the top of the frame pulled down, Done — less of the photo shown', { cr, s, src });
+    } else check(false, 'a person on the design to crop');
+    // "Ensure the flyer can be saved 100%": a phone that cannot make a big picture (the error the iPhone gave) still saves
+    await page.evaluate(() => {
+      window.__saved = [];
+      const make = URL.createObjectURL.bind(URL);
+      URL.createObjectURL = (b) => { if (b && b.type === 'image/jpeg') window.__saved.push(b.size); return make(b); };
+      const tb = HTMLCanvasElement.prototype.toBlob;
+      HTMLCanvasElement.prototype.toBlob = function (cb, ...r) { if (this.width > 1700) { const e = new Error('The object is in an invalid state.'); e.name = 'InvalidStateError'; throw e; } return tb.call(this, cb, ...r); };
+      const td = HTMLCanvasElement.prototype.toDataURL;
+      HTMLCanvasElement.prototype.toDataURL = function (...r) { if (this.width > 1700) { const e = new Error('The object is in an invalid state.'); e.name = 'InvalidStateError'; throw e; } return td.apply(this, r); };
+    });
+    await page.locator('[data-ed="save"]').tap();
+    s = await until(page, () => { const t = [...document.querySelectorAll('.toast, .mw-island, #cloudIsland, [class*="island"]')].map((n) => n.innerText).join(' '); return { ok: window.__saved.length > 0 || /Could not save/.test(t), saved: window.__saved, t: t.slice(0, 160) }; }, null, 30000);
+    check(s && s.saved.length && s.saved[0] > 50000 && !/Could not save/.test(s.t), 'Save works even on a phone that cannot make the big picture (a smaller one, never an error)', s);
     // the rules, on a design: words off the page, words on words
     s = await page.evaluate(() => {
       const st = window.MWFlyerStudio._state, d = JSON.parse(JSON.stringify(st.designs[0]));

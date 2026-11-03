@@ -4805,3 +4805,20 @@ body.mw-cloud .cff-search input[type="search"], body.mw-cloud .cff-search input[
 .cp-flyer .cp-foot .fs-last { flex: 0 0 auto; min-height: 56px; padding: 0 14px; border-radius: 18px; font-weight: 700; }
 .cp-flyer .cp-foot .fs-last i { font-style: normal; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; display: inline-grid; place-items: center;
   background: #6d28d9; color: #fff; font-size: 12px; font-weight: 800; }
+/* the flyer made, one tap from Photos */
+.fs-ready { position: fixed; inset: 0; z-index: 2147482500; display: grid; place-items: center; padding: 20px; background: rgba(8, 10, 16, .72); }
+.fs-ready-in { width: min(360px, 100%); display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: 22px; background: #fff; color: #17112b; text-align: center; }
+.fs-ready-in img { width: 100%; max-height: 52vh; object-fit: contain; border-radius: 12px; background: #f1eff7; }
+.fs-ready-in b { font-size: 17px; }
+.fs-ready-in .fs-go, .fs-ready-in .fs-ghost { flex: none; width: 100%; }
+/* Crop: the whole photo, the part on the flyer in a frame */
+.fs-crop { position: fixed; inset: 0; z-index: 2147482400; display: flex; flex-direction: column; background: #0b0d12; color: #fff;
+  padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px); }
+.fs-crop-top { display: flex; flex-direction: column; gap: 2px; padding: 14px 18px 8px; }
+.fs-crop-top b { font-size: 19px; }
+.fs-crop-top small { font-size: 13px; color: #a1a6b4; }
+.fs-crop-box { flex: 1 1 auto; min-height: 0; margin: 0 12px; touch-action: none; }
+.fs-crop-box canvas { display: block; touch-action: none; }
+.fs-crop-bar { display: flex; gap: 8px; padding: 12px 14px 14px; }
+.fs-crop-bar .fs-ghost { flex: 0 0 auto; padding: 0 14px; background: rgba(255,255,255,.1); color: #fff; }
+.fs-crop-bar .fs-go { flex: 1 1 auto; }
