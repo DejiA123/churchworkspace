@@ -4632,7 +4632,8 @@ let _hideTimer = null;
        (Ratio, Background, Reframe), and Montage sits with the Project things. */
     main: [
       { icon: 'sparkles', label: 'AI Shorts', ai: true, sheet: 'shorts', count: true },
-      { icon: 'captions', label: 'Captions', ai: true, sheet: 'insp', tab: '#veInspTabCaptions' },
+      // ("No need to show that part, it should go straight to the caption editor": the editor itself, not a panel with a button to it)
+      { icon: 'captions', label: 'Captions', ai: true, press: '#veAutoCaptions' },
       // ⭐ the last sermon's text, music, ending and looks, on this one in a tap
       { icon: 'preset', label: 'Presets', call: 'presets' },
       { icon: 'scissors', label: 'Edit', row: 'edit' },
@@ -4699,7 +4700,7 @@ let _hideTimer = null;
       { icon: 'template', label: 'Templates', call: 'textTemplates' },
       { icon: 'animate', label: 'Animation', call: 'textAnimation' },
       { icon: 'plus', label: 'Add caption', call: 'addCaptionHere' },
-      { icon: 'captions', label: 'Captions', ai: true, sheet: 'insp', tab: '#veInspTabCaptions' },
+      { icon: 'captions', label: 'Captions', ai: true, press: '#veAutoCaptions' },
     ],
     /* What a caption block on the timeline can do. Comes up by itself when
      * one is tapped (see followCaptionPick) — the way CapCut swaps its tools
@@ -4716,7 +4717,7 @@ let _hideTimer = null;
       { icon: 'trash', label: 'Delete', call: 'deleteSelectedCaption' },
       { icon: 'pen', label: 'Edit words', call: 'editSelectedCaption' },
       { icon: 'plus', label: 'Add caption', call: 'addCaptionHere' },
-      { icon: 'captions', label: 'Captions', sheet: 'insp', tab: '#veInspTabCaptions' },
+      { icon: 'captions', label: 'Captions', press: '#veAutoCaptions' },
     ],
     ratio: [],      // built from the desk's own list of shapes
     /* What fills the frame when the video is another shape (16:9 in a 9:16

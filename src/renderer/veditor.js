@@ -13265,26 +13265,14 @@
         `<div class="cap-empty-state">
            <div class="cap-empty-ic">💬</div>
            <p class="cap-empty-title">${scope ? 'No captions for this short yet' : 'No captions yet'}</p>
-           <p class="cap-empty-sub muted small">Choose the <b>look</b> and the <b>Hearing</b> model above first — they are what the
-             words will be written and listened with. Then press the button and the app transcribes the speech on this PC.</p>
            <button type="button" id="capGenerate" class="cap-generate">🎧 Generate captions</button>
            <button type="button" class="cap-add-line cap-add-empty" data-capadd>＋ Or type your own caption</button>
-           <p class="cap-empty-note muted small" id="capGenNote"></p>
          </div>`;
       const gen = document.getElementById('capGenerate');
       if (gen) gen.addEventListener('click', () => generateCaptions(scope));
       const add0 = list.querySelector('[data-capadd]');
       if (add0) add0.addEventListener('click', () => addCaptionHere({ inList: true }));
-      const note = document.getElementById('capGenNote');
-      if (note && ve.video && ve.video.info) {
-        const mins = ve.video.info.durationSec / 60;
-        const span = scope ? (scope.end - scope.start) / 60 : mins;
-        const est = Math.max(1, Math.round(span * 2.5));
-        note.textContent = `Listening to ${span < 1 ? Math.round(span * 60) + ' seconds' : Math.round(span) + ' minutes'} of speech`
-          + (capHearsInCloud()
-            ? ` — Groq's free cloud Whisper hears it in seconds.`
-            : ` — about ${est >= 60 ? (est / 60).toFixed(1) + ' hours' : est + ' min'} on this PC.`);
-      }
+      // ("the descriptions are too wordy, no need for them": the title and the two buttons say it)
       updateGrammarSummary();
       capListMarkRows();
       capPlayerPaint(true);
@@ -14264,6 +14252,8 @@
     const ctl = document.querySelector('#capModal .cap-controls');
     if (ctl) ctl.addEventListener('change', () => renderCapSummary());
     on('capGrammarFix', 'click', fixAllGrammar);
+    // (every line off at once: it was only on the panel that Captions in the phone's bar no longer opens)
+    on('capClearAll', 'click', () => { clearAllCaptions(); renderCapList(); renderCapSummary(); });
     on('capGrammarAi', 'click', () => aiProofread(null));
     loadAiAuto();
     const scrub = document.getElementById('capPlayScrub');
