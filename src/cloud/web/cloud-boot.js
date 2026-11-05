@@ -4193,6 +4193,85 @@ let _hideTimer = null;
     if (close) { close.innerHTML = mi('check'); close.setAttribute('aria-label', 'Done'); close.title = 'Done'; }
   }
 
+  /*
+   * ►► THE CAPTIONS EDITOR, AS CAPCUT HAS IT (design A). ◄◄ "I like A": under the video and its play bar, five
+   * tabs — Words (the lines), Style (the looks as tiles, the highlight, the colour), Text (font, size, words on a
+   * line, capitals), Motion (how lines come in, where they sit) and Fix (mistakes, the AI, the Word Book, listening
+   * again, clear all, playback). The settings are the editor's own controls, moved into the tabs — nothing lost.
+   */
+  const CAP_TABS = [['words', 'captions', 'Words'], ['style', 'palette', 'Style'], ['text', 'type', 'Text'], ['motion', 'zap', 'Motion'], ['fix', 'wand', 'Fix']];
+  function installCapTabs() {
+    const box = document.querySelector('#capModal .cap-box');
+    const player = document.getElementById('capPlayer');
+    if (!box || !player || box.querySelector('.cap-tabs')) return;
+    box.classList.add('cap-tabbed');
+    const bar = document.createElement('div');
+    bar.className = 'cap-tabs'; bar.setAttribute('role', 'tablist');
+    bar.innerHTML = CAP_TABS.map(([k, icon, label]) => `<button type="button" role="tab" data-ctab="${k}">${mi(icon)}<span>${label}</span>${k === 'fix' ? '<em class="cap-tab-n hidden"></em>' : ''}</button>`).join('');
+    const panes = document.createElement('div');
+    panes.className = 'cap-panes';
+    panes.innerHTML = CAP_TABS.slice(1).map(([k]) => `<div class="cap-pane" data-cpane="${k}"></div>`).join('');
+    player.after(bar); bar.after(panes);
+    const pane = (k) => panes.querySelector(`[data-cpane="${k}"]`);
+    const labelOf = (id) => { const el = document.getElementById(id); return el && (el.closest('label') || el); };
+    const put = (k, title, ...els) => {
+      const sec = document.createElement('section'); sec.className = 'cap-sec';
+      if (title) sec.innerHTML = `<h5>${title}</h5>`;
+      els.filter(Boolean).forEach((el) => sec.appendChild(el));
+      pane(k).appendChild(sec);
+      return sec;
+    };
+    // the label's own word ("Font", "Size"…) gives way to the section's heading
+    const bare = (lab) => { if (lab && lab.tagName === 'LABEL') [...lab.childNodes].forEach((n) => { if (n.nodeType === 3) n.textContent = ''; }); return lab; };
+    // Style: the looks as tiles, the highlight and its colour, the words' colour, every look
+    const tiles = document.createElement('div'); tiles.className = 'cap-looks';
+    put('style', 'Look', tiles, document.getElementById('capStyleMore'));
+    put('style', '', labelOf('capWordHl'), labelOf('capWordColor'));
+    put('style', 'Words colour', bare(labelOf('capColor')));
+    // Text
+    put('text', 'Font', bare(labelOf('capFont')));
+    put('text', 'Size', bare(labelOf('capSize')), document.getElementById('capFine'), document.getElementById('capFineWrap'));
+    put('text', 'Words on a line', bare(labelOf('capWords')));
+    put('text', 'Capitals', bare(labelOf('capCase')));
+    put('text', 'How wide the lines may run', labelOf('capWidth'));
+    // Motion
+    put('motion', 'How each line comes in', bare(labelOf('capTrans')));
+    put('motion', 'Where', bare(labelOf('capPos')));
+    // Fix: everything from the fixing row, then listening again and playback
+    const fixRow = box.querySelector('.cap-fix-row');
+    const fx = document.createElement('div'); fx.className = 'cap-fixes';
+    if (fixRow) [...fixRow.children].filter((c) => !c.classList.contains('cap-fix-sep')).forEach((c) => fx.appendChild(c));
+    put('fix', '', fx);
+    put('fix', 'Listen again with', bare(labelOf('capModelSel')));
+    put('fix', 'Playback', document.getElementById('capPlayRate'), labelOf('capPlayLoop'), ...[...player.querySelectorAll('.cap-pl-opt')]);
+    const drawLooks = () => {
+      const E = window.VideoEditor; if (!E || !E.captionLooks) return;
+      const L = E.captionLooks();
+      tiles.innerHTML = L.looks.map((x) => `<button type="button" class="cap-look${x.id === L.current ? ' on' : ''}" data-clook="${escAttr(x.id)}"><span style="${escAttr(x.css)}">Aa</span><small>${escHtml(x.name)}</small></button>`).join('');
+    };
+    tiles.addEventListener('click', (e) => { const t = e.target.closest('[data-clook]'); if (t && window.VideoEditor) { window.VideoEditor.setCaptionLook(t.dataset.clook); drawLooks(); } });
+    const show = (k) => {
+      box.dataset.ctab = k;
+      bar.querySelectorAll('[data-ctab]').forEach((b) => b.classList.toggle('on', b.dataset.ctab === k));
+      if (k === 'style') drawLooks();
+      panes.scrollTop = 0;
+    };
+    bar.addEventListener('click', (e) => { const b = e.target.closest('[data-ctab]'); if (b) show(b.dataset.ctab); });
+    show('words');
+    // the Fix tab says how many mistakes there are (as Fix N mistakes does)
+    const fixBtn = document.getElementById('capGrammarFix'), n = bar.querySelector('.cap-tab-n');
+    const count = () => { const v = +(fixBtn && fixBtn.dataset.count) || 0; n.textContent = String(v); n.classList.toggle('hidden', !v); };
+    if (fixBtn) new MutationObserver(count).observe(fixBtn, { attributes: true, attributeFilter: ['data-count'] });
+    count();
+    // always the lines' own layout (the settings are in the tabs now); opening starts on Words
+    // (the class only: the settings-open choice someone made on the computer stays theirs)
+    const fold = () => { if (!box.classList.contains('folded')) box.classList.add('folded'); };
+    new MutationObserver(fold).observe(box, { attributes: true, attributeFilter: ['class'] });
+    fold();
+    const modal = document.getElementById('capModal');
+    if (modal) new MutationObserver(() => { if (!modal.classList.contains('hidden')) { fold(); show('words'); count(); } }).observe(modal, { attributes: true, attributeFilter: ['class'] });
+  }
+
   function installCapChips() {
     const rows = [];
     for (const id of Object.keys(CAP_CHIPS)) {
@@ -6693,6 +6772,7 @@ let _hideTimer = null;
     installFirstFrame();
     installCrashRecorder();
     installCapTidy();
+    installCapTabs();
     installDropBridge();
 
     // A service worker makes it installable and makes the shell open instantly.

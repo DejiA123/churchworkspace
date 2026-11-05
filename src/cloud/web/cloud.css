@@ -4854,3 +4854,52 @@ body.mw-cloud .cff-search input[type="search"], body.mw-cloud .cff-search input[
 .cp-panel.cp-autocaps .cp-x, .cp-panel.cp-autocaps .cp-close { background: #2a2c33; color: #fff; }
 .cp-panel.cp-autocaps .cp-grab, .cp-panel.cp-autocaps .cp-grabber { background: #3a3c45; }
 .cp-panel.cp-autocaps .cp-foot { background: #17181d; }
+
+/* ►► THE CAPTIONS EDITOR, DESIGN A (installCapTabs) ◄◄ — the play bar, five tabs, then the lines or one tab's settings */
+@media (max-width: 900px) {
+  body.mw-cloud #capModal .cap-box.cap-tabbed :is(.cap-sum-row, .cap-controls, .cap-strip-row, .cap-fix-row, .cap-tools-btn, #capStyleSample, #capPlayLine) { display: none !important; }
+  /* the play bar: play, the time, where it is, back 3 s */
+  body.mw-cloud #capModal .cap-box.cap-tabbed .cap-player { display: flex !important; flex-wrap: nowrap; align-items: center; gap: 10px; padding: 6px 14px; }
+  body.mw-cloud #capModal .cap-box.cap-tabbed #capPlayScrub { display: block !important; flex: 1 1 auto; min-width: 0; order: 3; }
+  body.mw-cloud #capModal .cap-box.cap-tabbed #capPlayBack { display: inline-flex !important; order: 0; height: 32px; padding: 0 8px; font-size: 13px; }
+  body.mw-cloud #capModal .cap-box.cap-tabbed .cap-pl-play { order: 1; }
+  body.mw-cloud #capModal .cap-box.cap-tabbed .cap-pl-time { order: 2; flex: none; }
+  /* the tabs */
+  body.mw-cloud #capModal .cap-tabs { flex: none; display: flex; justify-content: space-around; padding: 2px 4px 0; border-bottom: 1px solid rgba(255,255,255,.07); }
+  body.mw-cloud #capModal .cap-tabs button { position: relative; flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 7px 0 9px;
+    border: 0; background: none; color: #8e8e93; font-size: 11.5px; font-weight: 650; }
+  body.mw-cloud #capModal .cap-tabs button .mi { width: 22px; height: 22px; }
+  body.mw-cloud #capModal .cap-tabs button.on { color: #fff; }
+  body.mw-cloud #capModal .cap-tabs button.on::after { content: ''; position: absolute; left: 30%; right: 30%; bottom: 0; height: 3px; border-radius: 2px; background: #fff; }
+  body.mw-cloud #capModal .cap-tab-n { position: absolute; top: 2px; left: calc(50% + 6px); min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px;
+    background: #f59e0b; color: #111; font: 800 10.5px/17px -apple-system, system-ui, sans-serif; font-style: normal; }
+  /* Words: the search and the lines. Any other tab: its settings, in place of them */
+  body.mw-cloud #capModal .cap-box.cap-tabbed:not([data-ctab="words"]) :is(.cap-search, #capList) { display: none !important; }
+  body.mw-cloud #capModal .cap-panes { display: none; }
+  body.mw-cloud #capModal .cap-box.cap-tabbed:not([data-ctab="words"]) .cap-panes { display: block; flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 10px 16px 18px; }
+  body.mw-cloud #capModal .cap-pane { display: none; }
+  body.mw-cloud #capModal .cap-box[data-ctab="style"] .cap-pane[data-cpane="style"],
+  body.mw-cloud #capModal .cap-box[data-ctab="text"] .cap-pane[data-cpane="text"],
+  body.mw-cloud #capModal .cap-box[data-ctab="motion"] .cap-pane[data-cpane="motion"],
+  body.mw-cloud #capModal .cap-box[data-ctab="fix"] .cap-pane[data-cpane="fix"] { display: flex; flex-direction: column; gap: 16px; }
+  body.mw-cloud #capModal .cap-sec { display: flex; flex-direction: column; gap: 8px; }
+  body.mw-cloud #capModal .cap-sec h5 { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #8e8e93; }
+  body.mw-cloud #capModal .cap-sec > label { display: flex; align-items: center; gap: 10px; margin: 0; color: #f2f3f7; font-size: 15px; font-weight: 600; }
+  body.mw-cloud #capModal .cap-sec > label .cloud-chips, body.mw-cloud #capModal .cap-sec > label .cloud-pick { flex: 1 1 auto; min-width: 0; }
+  body.mw-cloud #capModal .cap-sec input[type=range] { flex: 1 1 auto; }
+  body.mw-cloud #capModal .cap-sec input[type=color] { width: 54px; height: 34px; padding: 0; border: 0; border-radius: 10px; background: none; }
+  /* the looks as tiles */
+  body.mw-cloud #capModal .cap-looks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; }
+  body.mw-cloud #capModal .cap-look { aspect-ratio: 1; border: 0; border-radius: 14px; background: #2a2b31; display: grid; place-items: center; align-content: center; gap: 4px; padding: 0; }
+  body.mw-cloud #capModal .cap-look span { font-size: 21px !important; line-height: 1; }
+  body.mw-cloud #capModal .cap-look small { font-size: 10.5px; color: #a7aab6; font-weight: 600; }
+  body.mw-cloud #capModal .cap-look.on { box-shadow: 0 0 0 2.5px #fff; }
+  body.mw-cloud #capModal #capStyleMore { align-self: flex-start; height: 36px; padding: 0 14px; border-radius: 18px; }
+  /* Fix: one button a row */
+  body.mw-cloud #capModal .cap-fixes { display: flex; flex-direction: column; gap: 8px; }
+  body.mw-cloud #capModal .cap-fixes > button { width: 100%; height: 48px; justify-content: flex-start; padding: 0 14px; border-radius: 14px; font-size: 15px; text-align: left; }
+  body.mw-cloud #capModal .cap-fixes > label { min-height: 44px; padding: 0 4px; font-size: 15px; }
+  body.mw-cloud #capModal .cap-fixes #capClearAll { color: #f87171; }
+  body.mw-cloud #capModal .cap-sec #capPlayRate { display: block !important; width: 100%; }
+  body.mw-cloud #capModal .cap-sec .cap-pl-opt { display: flex !important; }
+}

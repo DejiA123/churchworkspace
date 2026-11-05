@@ -50,7 +50,8 @@ async function waitUp() { for (let k = 0; k < 60; k++) { try { await new Promise
     await page.evaluate(() => { const w = []; for (let i = 0; i < 60; i++) w.push({ text: 'word' + i, start: 2 + i * 0.6, end: 2.5 + i * 0.6 }); window.VideoEditor.__test.setCapWords(w, 0); });
     await sleep(800);
     const a1 = await page.evaluate(() => ({ folded: document.querySelector('#capModal .cap-box').classList.contains('folded'), seen: (() => { const l = document.getElementById('capList').getBoundingClientRect(); return [...document.querySelectorAll('#capList .cap-row')].filter((r) => { const b = r.getBoundingClientRect(); return b.height > 0 && b.bottom > l.top && b.top < Math.min(l.bottom, innerHeight); }).length; })() }));
-    check(!a0 && a1.folded && a1.seen >= 2, 'A) lines generated with the settings open: the settings fold and the lines are in sight', { a0, a1 });
+    // (design A: on a phone the settings are in tabs, so the editor is on the lines from the start)
+    check(a1.folded && a1.seen >= 2, 'A) lines generated: the lines are in sight (the settings are in the tabs)', { a0, a1 });
     await page.evaluate(() => document.getElementById('capSumToggle').click()); await sleep(300);
     await page.evaluate(() => document.querySelector('#capModal .cap-done, #capModal [data-cap-close], #capClose') && document.querySelector('#capModal .cap-done, #capModal [data-cap-close], #capClose').click());
     await page.evaluate(() => document.getElementById('capModal').classList.add('hidden'));

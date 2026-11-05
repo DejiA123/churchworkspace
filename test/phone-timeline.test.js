@@ -633,6 +633,7 @@ async function waitUp() {
       });
       check(chips.hidden && chips.labels.join(' ') === 'XS S M L XL' && chips.words, 'Size is a row of buttons (XS S M L XL), no dropdown — and Words per line too', chips);
       if (process.env.MW_SHOTS) await page.screenshot({ path: path.join(process.env.MW_SHOTS, 'size-chips.png') });
+      await page.locator('#capModal .cap-tabs [data-ctab="text"]').tap(); await sleep(200);   // (Size is in the Text tab)
       await page.locator('#capSize + .cloud-chips button[data-v="xs"]').tap();
       await sleep(200);
       check(await page.evaluate(() => document.getElementById('capSize').value) === 'xs', 'one tap on XS sets the extra-small size');
@@ -773,22 +774,24 @@ async function waitUp() {
         return {
           title: getComputedStyle(document.getElementById('capTitle'), '::after').content,
           sheetTop: Math.round(box.top), vh: innerHeight,
-          tools: vis('.cap-tools-btn'), style: vis('.cap-sum-row'), fix: vis('.cap-fix-row'), scrub: vis('#capPlayScrub'), loop: vis('.cap-pl-opt'),
+          tabs: vis('#capModal .cap-tabs'), style: vis('.cap-sum-row'), fix: vis('.cap-fix-row'), scrub: vis('#capPlayScrub'), loop: vis('.cap-pl-opt'),
+          wb: vis('#capWordBook'), looks: document.querySelectorAll('#capModal .cap-look').length && vis('#capModal .cap-look'), list: vis('#capList'),
           play: vis('#capPlay'), save: vis('#capBurn'), rows: document.querySelectorAll('#capList .cap-row').length,
           textBg: text ? getComputedStyle(text).backgroundColor : null,
         };
       }, vis.toString());
       const a = await look();
       check(/Edit captions/.test(a.title) && a.sheetTop > a.vh * 0.3, 'it reads "Edit captions", and the picture shows above the sheet', a);
-      check(a.tools && !a.style && !a.fix && !a.scrub && !a.loop && a.play && a.save && a.rows > 0, 'the lines, ▶ and Save — the rest is under Tools', a);
+      // design A: the play bar, five tabs, the lines — every setting in a tab
+      check(a.tabs && !a.style && !a.fix && a.scrub && !a.loop && a.play && a.save && a.rows > 0 && a.list, 'the play bar, the tabs, the lines and Save — the settings are in the tabs', a);
       check(a.textBg === 'rgba(0, 0, 0, 0)', 'each line is plain words, not a box', a.textBg);
-      await page.locator('.cap-tools-btn').tap();
-      await sleep(300);
+      await page.locator('#capModal .cap-tabs [data-ctab="fix"]').tap(); await sleep(300);
       const b = await look();
-      check(b.style && b.fix && b.scrub && b.loop, 'Tools brings back Style & settings, the Word Book and fixes, the scrubber, speed and loop', b);
-      await page.locator('.cap-tools-btn').tap();
-      await sleep(200);
-      check(!(await look()).scrub, 'and tucks them away again');
+      check(b.wb && b.loop && !b.list, 'Fix: the Word Book, the fixes and playback, in place of the lines', b);
+      await page.locator('#capModal .cap-tabs [data-ctab="style"]').tap(); await sleep(300);
+      check(!!(await look()).looks, 'Style: the looks as tiles');
+      await page.locator('#capModal .cap-tabs [data-ctab="words"]').tap(); await sleep(300);
+      check((await look()).list, 'Words brings the lines back');
       await page.locator('#capClose').tap();
       await sleep(300);
       check(await page.evaluate(() => document.getElementById('capModal').classList.contains('hidden')), '✓ closes it');
