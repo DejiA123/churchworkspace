@@ -118,6 +118,7 @@ const ALLOWED = {
   'sermon:exportShort': true,
   'sermon:exportReframed': true,
   'sermon:exportFramed': true,
+  'sermon:exportFrame': true,
 
   // speech
   'captions:available': true,

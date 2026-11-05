@@ -118,8 +118,11 @@ ipcMain.handle('fs:readImageDataUrl', async (_e, { path: p }) => ok(`data:image/
  * for, so it is the case the fixture reproduces.
  */
 let silentEncode = false;
+const burnsSent = [];
 async function encodeJob(e, a) {
   ran.push('encode');
+  // what the encode was handed to lay on in its own pass (see [7])
+  if (a && a.burn) burnsSent.push({ frames: (a.burn.track && a.burn.track.frames || []).length, images: (a.burn.images || []).length, draft: !!a.draft, authorW: a.burn.track && a.burn.track.authorW, authorH: a.burn.track && a.burn.track.authorH });
   for (const pct of (silentEncode ? [10, 25] : [15, 50, 85])) {
     if (!e.sender.isDestroyed()) e.sender.send('job:progress', { jobId: a.jobId, percent: pct });
     await sleep(45);
@@ -346,6 +349,59 @@ app.whenReady().then(async () => {
     check('>> a silent pass can never claim to have finished <<', ceiling < encodeEnd,
       `creeps to at most ${ceiling.toFixed(1)}% of a pass that ends at ${encodeEnd.toFixed(1)}%`);
   }
+
+  /* ---------------- one encode for the picture and the captions ---------------- */
+  head('[7] With a server that lays the captions on in the export, there is no burn pass');
+  // the studio asks what size the export will be, draws the captions for it, and
+  // hands them to the encode (burnForExport) — an older server, without this
+  // channel, is what [3] just exercised: the burn pass, exactly as before
+  ipcMain.handle('sermon:exportFrame', (_e, a) => { const p = video.presetSize(a.preset || 'reel-9x16', a.quality); return ok({ w: p.w, h: p.h }); });
+  const P2 = await js(`
+    const plan = window.VideoEditor.__test.exportPlan;
+    const s = { id: 'x', start: 0, end: 6, label: 'clip' };
+    // (the music and the outro [3] put on stay on: they follow, as they always do)
+    const P = (o) => plan(s, o).filter((k) => k !== 'music' && k !== 'outro');
+    return { batch: P({ captions: true, oneGo: true }), batchTracked: P({ track: true, captions: true, oneGo: true }),
+      single: P({ track: true, captions: true, oneGo: true, drawFirst: true }), textOnly: P({ oneGo: true }) };
+  `);
+  check('>> in one go the captions are drawn, then the encode — no burn pass <<',
+    JSON.stringify(P2.batch) === '["draw","encode"]', JSON.stringify(P2.batch));
+  check('…a batch tracks first (the look-ahead), then draws', JSON.stringify(P2.batchTracked) === '["track","draw","encode"]', JSON.stringify(P2.batchTracked));
+  check('…a single short draws first (its speaker is followed inside the export)', JSON.stringify(P2.single) === '["draw","track","encode"]', JSON.stringify(P2.single));
+  check('…and text alone adds no pass at all', JSON.stringify(P2.textOnly) === '["encode"]', JSON.stringify(P2.textOnly));
+  ran.length = 0; burnsSent.length = 0;
+  const R2 = await js(`
+    const T = window.VideoEditor.__test;
+    const seen = [];
+    const timer = setInterval(() => {
+      const el = document.querySelector('#bgDock .bgj.run .bgj-pct');
+      const b = document.querySelector('#bgDock .bgj.run .bgj-batch');
+      const v = el ? parseInt(el.textContent, 10) : NaN;
+      if (!isNaN(v)) seen.push({ pct: v, batch: b ? b.textContent : '' });
+    }, 15);
+    await T.exportAll();
+    clearInterval(timer);
+    return { seen };
+  `);
+  if (R2 && R2.__error) check('the batch ran in one go', false, R2.__error);
+  else {
+    check('>> each short was ONE encode, with its captions handed to it <<',
+      burnsSent.length === 2 && burnsSent.every((b) => b.frames > 0), JSON.stringify(burnsSent));
+    check('…drawn at the size the export will be', burnsSent.every((b) => b.authorW === 1080 && b.authorH === 1920), JSON.stringify(burnsSent));
+    check('…and that encode is the finished picture, never a draft', burnsSent.every((b) => !b.draft), JSON.stringify(burnsSent));
+    check('>> no burn pass ran after it <<', !ran.includes('burn') && !ran.includes('text'), ran.join(' -> '));
+    check('…the music and the outro still followed', ran.filter((r) => r === 'music').length === 2 && ran.filter((r) => r === 'outro').length === 2, ran.join(' -> '));
+    const by = {};
+    for (const d of R2.seen) (by[d.batch] = by[d.batch] || []).push(d.pct);
+    let bad = null;
+    for (const k of Object.keys(by).filter((k) => /of/.test(k))) {
+      const p = by[k];
+      for (let i = 1; i < p.length; i++) if (p[i] < p[i - 1]) bad = k + ': ' + p.join(' -> ');
+      if (Math.max(...p) !== 100) bad = k + ': peak ' + Math.max(...p);
+    }
+    check('>> and the number still only goes forward, to 100 <<', !bad, bad || 'both climb to 100');
+  }
+  ipcMain.removeHandler('sermon:exportFrame');
 
   head('[6] The animation stops when there is nothing to animate');
   const Z = await js(`

@@ -915,7 +915,7 @@ function voiceThenPicture(onProgress, af, hasAudio) {
  * Intel QSV / NVENC / AMF (via -hwaccel auto + h264_qsv) on Windows/Linux —
  * automatically falling back to libx264 so it still works on any machine.
  */
-async function encodeWithFallback(ctx, { inputArgs, cut, vfCore, af, dur, hasAudio, output, onProgress, cwd, quality, fps, signal }) {
+async function encodeWithFallback(ctx, { inputArgs, cut, vfCore, af, dur, hasAudio, output, onProgress, cwd, quality, fps, signal, burn, frame }) {
   const q = qualityDef(quality);
   // 30 was hard-coded here, which quietly halved every 60fps recording. The
   // caller passes the source rate; 30 remains the answer when it cannot be read.
@@ -946,15 +946,35 @@ async function encodeWithFallback(ctx, { inputArgs, cut, vfCore, af, dur, hasAud
   const lastI = inputArgs.lastIndexOf('-i');
   const headArgs = lastI >= 0 ? inputArgs.slice(0, lastI + 2) : inputArgs;
   const tailArgs = lastI >= 0 ? inputArgs.slice(lastI + 2) : [];
+  /*
+   * ►► THE CAPTIONS AND THE TEXT IN THE SAME ENCODE AS THE PICTURE. ◄◄
+   *
+   * A captioned short was made twice: the picture encoded to a file, then that
+   * whole file decoded again and encoded again only to lay the captions on it.
+   * Measured on a 60-second 1080p short on the server: 16.9 s for the picture
+   * and 13.5 s more for the captions. Laid on at the end of this graph instead
+   * (the same steps the caption burn ends with — burnGraph), the second pass is
+   * gone: one decode, one encode, and one fewer generation of quality lost.
+   * They go on the FINISHED frame, after the crop, the cover and the motion,
+   * exactly where the separate pass put them.
+   */
+  const g = burn && frame ? burnGraph({ track: burn.track, images: burn.images, W: frame.w, H: frame.h,
+    idx0: voiceIdx + (voiceTrack ? 1 : 0), base: 'vb', tfps: textFps({ fps: outFps }) }) : null;
+  const burning = !!(g && g.any);
 
   // Build one command. When a cut plan is joining pieces the graph has to be a
   // -filter_complex (several branches feeding a concat), and -filter_complex
   // switches off ffmpeg's automatic stream selection — so audio must be mapped
   // by hand from the concat's own output label.
   const build = (head, fmt, codecArgs) => {
-    const a = voiceTrack ? [...head, ...headArgs, '-i', voiceTrack, ...tailArgs] : [...head, ...inputArgs];
+    const more = [...(voiceTrack ? ['-i', voiceTrack] : []), ...(burning ? g.args : [])];
+    const a = [...head, ...headArgs, ...more, ...tailArgs];
+    // the picture's last step: straight out, or with the captions and text laid on
+    const pic = (src) => (burning
+      ? `${src}${vfCore}[vb];${g.steps.join(';')};[${g.out}]format=${fmt}[vout]`
+      : `${src}${vfCore},format=${fmt}[vout]`);
     if (joining) {
-      let fc = `${cut.chain};[${cut.v}]${vfCore},format=${fmt}[vout]`;
+      let fc = `${cut.chain};${pic(`[${cut.v}]`)}`;
       const cleaning = !!(af && hasAudio && cut.a && !voiceTrack);
       if (cleaning) fc += `;[${cut.a}]${af}[aout]`;
       // the checked voice plays instead of the joined sound, which then has to
@@ -963,6 +983,12 @@ async function encodeWithFallback(ctx, { inputArgs, cut, vfCore, af, dur, hasAud
       a.push('-filter_complex', fc, '-map', '[vout]');
       if (voiceTrack) a.push('-map', `${voiceIdx}:a`);
       else if (hasAudio && cut.a) a.push('-map', cleaning ? '[aout]' : `[${cut.a}]`);
+    } else if (burning) {
+      // more than one picture input: a -filter_complex, so the sound is mapped by hand
+      let fc = pic('[0:v:0]');
+      if (voiceTrack) a.push('-filter_complex', fc, '-map', '[vout]', '-map', `${voiceIdx}:a:0`);
+      else if (af && hasAudio) { fc += `;[0:a:0]${af}[aout]`; a.push('-filter_complex', fc, '-map', '[vout]', '-map', '[aout]'); }
+      else { a.push('-filter_complex', fc, '-map', '[vout]'); if (hasAudio) a.push('-map', '0:a:0'); }
     } else {
       a.push('-vf', `${vfCore},format=${fmt}`);
       // No -shortest: the checked track is one 10 ms frame shorter than the
@@ -1937,7 +1963,7 @@ function buildLerpExpr(kf, fallback) {
  * time-varying crop window driven by face-tracking keyframes [{t,x}] (clip
  * relative, in SOURCE pixels), then scaled to the target preset.
  */
-async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'reel-9x16', quality, keyframes, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, output, onProgress }) {
+async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'reel-9x16', quality, keyframes, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, burn, output, onProgress }) {
   const p = presetSize(preset, quality);
   const { info, cut, inputArgs, dur } = await shortSource(ctx, { input, startSec, endSec, pieces });
   const af = combineAf(await denoiseFilter(ctx, { input, denoise, startSec, endSec }), fadeFilter(fadeIn, fadeOut, dur));
@@ -1948,7 +1974,7 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
   // this is the belt to that pair of braces.)
   if (fillOpts(fill).mode !== 'crop') {
     await encodeWithFallback(ctx, { inputArgs, cut, vfCore: withMotion(withCover(fillChain(info.width, info.height, p.w, p.h, fill), info.width, info.height, cover), motion, p.w, p.h), af, dur, hasAudio: info.hasAudio, output, onProgress,
-      quality, fps: outputFps(info) });
+      quality, fps: outputFps(info), burn, frame: { w: p.w, h: p.h } });
     return output;
   }
   // With gaps closed the pauses are cut out inside this same graph, so the crop
@@ -2031,6 +2057,11 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
       const lastI = inputArgs.lastIndexOf('-i');
       const ins = voice ? [...inputArgs.slice(0, lastI + 2), '-i', voice, ...inputArgs.slice(lastI + 2)] : inputArgs;
       const voiceIdx = inputArgs.filter((x) => x === '-i').length;
+      // the captions and text, laid on in this same encode (see encodeWithFallback)
+      const bg = burn ? burnGraph({ track: burn.track, images: burn.images, W: p.w, H: p.h,
+        idx0: voiceIdx + (voice ? 1 : 0), base: 'vb', tfps: textFps({ fps: outputFps(info) }) }) : null;
+      const burning = !!(bg && bg.any);
+      const insB = burning ? addInputs(ins, bg.args) : ins;
       const padGraph = (fmt) => {
         /*
          * ►► CROPPED FIRST, THEN THE PICTURE LAID IN. ◄◄
@@ -2047,14 +2078,15 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
         let fc = cutPre + (twice
           ? `${srcV}split=2[bgs][fgs];[bgs]${bgChain},crop=${cropW}:${cropH}:x='${xi}':y=0[bg];[bg][fgs]overlay=x='${P}-(${xi})':y=0:eval=frame`
           : `${srcV}split=2[bgs][fgs];[bgs]${bgChain}[bg];[bg][fgs]overlay=${P}:0,crop=${cropW}:${cropH}:x='${xe}':y=0`)
-          + `,scale=${p.w}:${p.h}:flags=lanczos,setsar=1${motionChain(motion, p.w, p.h) ? ',' + motionChain(motion, p.w, p.h) : ''},format=${fmt}[vout]`;
+          + `,scale=${p.w}:${p.h}:flags=lanczos,setsar=1${motionChain(motion, p.w, p.h) ? ',' + motionChain(motion, p.w, p.h) : ''}`
+          + (burning ? `[vb];${bg.steps.join(';')};[${bg.out}]format=${fmt}[vout]` : `,format=${fmt}[vout]`);
         if (af && info.hasAudio && !voice) fc += `;${srcA}${af}[aout]`;
         // with the voice playing in, the cut plan's own sound is not used
         else if (voice && cut && cut.a) fc += `;[${cut.a}]anullsink`;
         return fc;
       };
       const padArgs = (head, fmt, codecArgs) => {
-        const a = [...head, ...ins, '-filter_complex', padGraph(fmt), '-map', '[vout]'];
+        const a = [...head, ...insB, '-filter_complex', padGraph(fmt), '-map', '[vout]'];
         if (info.hasAudio) a.push('-map', voice ? `${voiceIdx}:a` : (af ? '[aout]' : mapA), '-c:a', 'aac', '-b:a', '192k'); else a.push('-an');
         // outputFps, not a hard-coded 30: this path was halving every 60fps
         // recording exactly the way the main encode used to (see export-quality).
@@ -2105,7 +2137,7 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
     xExpr = '0';
   }
   const vfCore = withMotion(withCover(`crop=${cropW}:${cropH}:x='${xExpr}':y='${yExpr}',scale=${p.w}:${p.h}:flags=lanczos,setsar=1`, info.width, info.height, cover), motion, p.w, p.h);
-  const enc = { quality, fps: outputFps(info) };
+  const enc = { quality, fps: outputFps(info), burn, frame: { w: p.w, h: p.h } };
   try {
     await encodeWithFallback(ctx, { inputArgs, cut, vfCore, af, dur, hasAudio: info.hasAudio, output, onProgress, ...enc });
   } catch (e) {
@@ -2620,53 +2652,11 @@ async function burnCaptionFrames(ctx, { input, track, output, onProgress, images
   const frames = (track && track.frames) || [];
   if (!frames.length) throw new Error('No captions to burn.');
   const info = await getInfo(ctx, input);
-  const W = info.width, H = info.height;
-  const aw = track.authorW || W, ah = track.authorH || H;
-  const kx = W / aw, ky = H / ah;
-  const b = track.band;
-  // Even offsets and sizes: 4:2:0 chroma cannot land an overlay on an odd pixel.
-  const bx = Math.max(0, Math.min(W - 2, even(Math.round(b.x * kx))));
-  const by = Math.max(0, Math.min(H - 2, even(Math.round(b.y * ky))));
-  const bw = Math.max(2, Math.min(W - bx, even(Math.round(b.w * kx))));
-  const bh = Math.max(2, Math.min(H - by, even(Math.round(b.h * ky))));
-  const scaled = bw !== b.w || bh !== b.h;
-  const fps = Math.max(1, Math.min(60, Number(track.fps) || 30));
-
-  // The concat list lives beside the PNGs and names them relatively, so no
-  // Windows path ever has to survive ffmpeg's demuxer quoting.
-  const dir = path.dirname(frames[0].file);
-  const listPath = path.join(dir, 'captrack.txt');
-  const lines = ['ffconcat version 1.0'];
-  for (const f of frames) {
-    lines.push(`file '${path.basename(f.file).replace(/'/g, "'\\''")}'`);
-    lines.push(`duration ${Math.max(1 / fps, Number(f.dur) || 1 / fps).toFixed(4)}`);
-  }
-  // The concat demuxer gives the LAST entry no duration of its own unless the
-  // file is named once more — without this the final caption blinks out early.
-  lines.push(`file '${path.basename(frames[frames.length - 1].file)}'`);
-  fs.writeFileSync(listPath, lines.join('\n') + '\n', 'utf-8');
-
-  const pics = (images || []).filter((im) => im && im.path && fs.existsSync(im.path));
+  // Input 0 is the video; the caption strip and the text pictures follow it.
+  const g = burnGraph({ track, images, W: info.width, H: info.height, idx0: 1, base: '0:v', tfps: textFps(info) });
   const build = (fmt) => {
-    const parts = [];
-    /*
-     * The added text, if there is any. Input 0 is the video and input 1 is the
-     * caption strip, so these start at 2 — and each is laid on the running
-     * picture for its own window, exactly as burnImageOverlays does it alone.
-     */
-    let base = '0:v';
-    pics.forEach((im, i) => {
-      parts.push(...textOverlaySteps({ idx: i + 2, base, out: `tb${i}`, im, W, H, fps: textFps(info) }));
-      base = `tb${i}`;
-    });
-    parts.push(`[1:v]format=rgba,setpts=PTS-STARTPTS${scaled ? `,scale=${bw}:${bh}:flags=lanczos` : ''},fps=${fps}[ov]`);
-    // eof_action=pass: when the captions run out the picture carries on
-    // untouched — never truncated to the length of the caption track.
-    parts.push(`[${base}][ov]overlay=${bx}:${by}:eof_action=pass[cap]`);
-    parts.push(`[cap]format=${fmt}[vout]`);
-    const args = ['-i', input, '-f', 'concat', '-safe', '0', '-i', listPath];
-    pics.forEach((im) => args.push(...textInputArgs(im)));
-    args.push('-filter_complex', parts.join(';'), '-map', '[vout]');
+    const args = ['-i', input, ...g.args];
+    args.push('-filter_complex', [...g.steps, `[${g.out}]format=${fmt}[vout]`].join(';'), '-map', '[vout]');
     if (info.hasAudio) args.push('-map', '0:a');
     return args;
   };
@@ -2683,6 +2673,77 @@ async function burnCaptionFrames(ctx, { input, track, output, onProgress, images
   await ff.runFfmpeg(ctx.ffmpeg, [...build('yuv420p'), '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', ...tail],
     { onProgress, totalDurationSec: info.durationSec });
   return output;
+}
+
+/*
+ * ►► THE PICTURES LAID ON, AS FILTER STEPS ANY GRAPH CAN END WITH. ◄◄
+ *
+ * The caption strip and the added text, for a W×H picture labelled `base`: the
+ * inputs they need (numbered from `idx0`) and the steps that lay them on, the
+ * text first and the captions over it — the order the passes always ran in.
+ * The caption burn above ends its graph with these, and so does an export that
+ * lays them on in its own encode (see `burn` in encodeWithFallback): ONE
+ * definition of where a caption lands, whichever pass draws it.
+ *
+ * track: { band, fps, authorW, authorH, frames: [{ file, dur }] } (on disk —
+ * writeTrackFrames); images: [{ path, start, end, anim, cx, cy } | strip].
+ */
+function burnGraph({ track, images, W, H, idx0, base, tfps }) {
+  const args = [], steps = [];
+  let idx = idx0, cur = base, trackIdx = null, ov = null;
+  const frames = (track && track.frames) || [];
+  if (frames.length) {
+    const aw = track.authorW || W, ah = track.authorH || H;
+    const kx = W / aw, ky = H / ah;
+    const b = track.band;
+    // Even offsets and sizes: 4:2:0 chroma cannot land an overlay on an odd pixel.
+    const bx = Math.max(0, Math.min(W - 2, even(Math.round(b.x * kx))));
+    const by = Math.max(0, Math.min(H - 2, even(Math.round(b.y * ky))));
+    const bw = Math.max(2, Math.min(W - bx, even(Math.round(b.w * kx))));
+    const bh = Math.max(2, Math.min(H - by, even(Math.round(b.h * ky))));
+    const scaled = bw !== b.w || bh !== b.h;
+    const fps = Math.max(1, Math.min(60, Number(track.fps) || 30));
+    // The concat list lives beside the PNGs and names them relatively, so no
+    // Windows path ever has to survive ffmpeg's demuxer quoting.
+    const dir = path.dirname(frames[0].file);
+    const listPath = path.join(dir, 'captrack.txt');
+    const lines = ['ffconcat version 1.0'];
+    for (const f of frames) {
+      lines.push(`file '${path.basename(f.file).replace(/'/g, "'\\''")}'`);
+      lines.push(`duration ${Math.max(1 / fps, Number(f.dur) || 1 / fps).toFixed(4)}`);
+    }
+    // The concat demuxer gives the LAST entry no duration of its own unless the
+    // file is named once more — without this the final caption blinks out early.
+    lines.push(`file '${path.basename(frames[frames.length - 1].file)}'`);
+    fs.writeFileSync(listPath, lines.join('\n') + '\n', 'utf-8');
+    args.push('-f', 'concat', '-safe', '0', '-i', listPath);
+    trackIdx = idx++;
+    ov = { bx, by, bw, bh, scaled, fps };
+  }
+  const pics = (images || []).filter((im) => im && im.path && fs.existsSync(im.path));
+  pics.forEach((im, i) => {
+    // each is laid on the running picture for its own window, exactly as
+    // burnImageOverlays does it alone
+    args.push(...textInputArgs(im));
+    steps.push(...textOverlaySteps({ idx: idx++, base: cur, out: `tb${i}`, im, W, H, fps: tfps }));
+    cur = `tb${i}`;
+  });
+  if (ov) {
+    steps.push(`[${trackIdx}:v]format=rgba,setpts=PTS-STARTPTS${ov.scaled ? `,scale=${ov.bw}:${ov.bh}:flags=lanczos` : ''},fps=${ov.fps}[ov]`);
+    // eof_action=pass: when the captions run out the picture carries on
+    // untouched — never truncated to the length of the caption track.
+    steps.push(`[${cur}][ov]overlay=${ov.bx}:${ov.by}:eof_action=pass[cap]`);
+    cur = 'cap';
+  }
+  return { args, steps, out: cur, inputs: idx - idx0, any: !!(ov || pics.length) };
+}
+
+/** Extra inputs placed after the last `-i` pair, so a trailing output cap (`-t`) keeps meaning the output. */
+function addInputs(inputArgs, extra) {
+  if (!extra || !extra.length) return inputArgs;
+  const lastI = inputArgs.lastIndexOf('-i');
+  if (lastI < 0) return [...inputArgs, ...extra];
+  return [...inputArgs.slice(0, lastI + 2), ...extra, ...inputArgs.slice(lastI + 2)];
 }
 
 /**
@@ -2839,7 +2900,7 @@ const withMotion = (vfCore, motion, W, H) => {
   return c ? `${vfCore},${c}` : vfCore;
 };
 
-async function exportShort(ctx, { input, startSec, endSec, preset = 'reel-9x16', quality, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, output, onProgress }) {
+async function exportShort(ctx, { input, startSec, endSec, preset = 'reel-9x16', quality, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, burn, output, onProgress }) {
   const { info, cut, inputArgs, dur } = await shortSource(ctx, { input, startSec, endSec, pieces });
   // `preset: 'source'` keeps the recording's own SHAPE. It is what "Export
   // video" uses: an edited full-length service is not a social clip, and
@@ -2854,7 +2915,7 @@ async function exportShort(ctx, { input, startSec, endSec, preset = 'reel-9x16',
   const vfCore = withMotion(withCover(vfBase, info.width, info.height, cover), motion, fw, fh);
   const af = combineAf(await denoiseFilter(ctx, { input, denoise, startSec, endSec }), fadeFilter(fadeIn, fadeOut, dur));
   await encodeWithFallback(ctx, { inputArgs, cut, vfCore, af, dur, hasAudio: info.hasAudio, output, onProgress,
-    quality, fps: outputFps(info) });
+    quality, fps: outputFps(info), burn, frame: { w: fw, h: fh } });
   return output;
 }
 
@@ -2865,7 +2926,7 @@ async function exportShort(ctx, { input, startSec, endSec, preset = 'reel-9x16',
  * (0.5,0.5 = centered). Used when the user drags/zooms the crop guide instead of
  * relying on face-tracking.
  */
-async function exportShortFramed(ctx, { input, startSec, endSec, preset = 'reel-9x16', quality, zoom = 1, offsetX = 0.5, offsetY = 0.5, pieces, denoise, cover, fadeIn, fadeOut, motion, output, onProgress }) {
+async function exportShortFramed(ctx, { input, startSec, endSec, preset = 'reel-9x16', quality, zoom = 1, offsetX = 0.5, offsetY = 0.5, pieces, denoise, cover, fadeIn, fadeOut, motion, burn, output, onProgress }) {
   const p = presetSize(preset, quality);
   const { info, cut, inputArgs, dur } = await shortSource(ctx, { input, startSec, endSec, pieces });
   const targetAR = p.w / p.h, srcAR = info.width / info.height;
@@ -2885,7 +2946,7 @@ async function exportShortFramed(ctx, { input, startSec, endSec, preset = 'reel-
   const vfCore = withMotion(withCover(`crop=${cropW}:${cropH}:${cx}:${cy},scale=${p.w}:${p.h}:flags=lanczos,setsar=1`, info.width, info.height, cover), motion, p.w, p.h);
   const af = combineAf(await denoiseFilter(ctx, { input, denoise, startSec, endSec }), fadeFilter(fadeIn, fadeOut, dur));
   await encodeWithFallback(ctx, { inputArgs, cut, vfCore, af, dur, hasAudio: info.hasAudio, output, onProgress,
-    quality, fps: outputFps(info) });
+    quality, fps: outputFps(info), burn, frame: { w: p.w, h: p.h } });
   return { output, cropW, cropH, cropX: cx, cropY: cy, srcW: info.width, srcH: info.height };
 }
 
@@ -3704,7 +3765,7 @@ module.exports = { copyPieces, cssStep, LOOK_STEPS,
   exportOverlayComposite, burnImageOverlays, burnCaptionTrack,
   TEXT_ANIMS, textAnimOf, textAnimTimes, textAnimScale, TEXT_RISE, textOverlaySteps, writeStrip,
   cleanMotion, motionExpr, motionAt, motionChain, MOTION_MAX_Z, keyOf, inPreviewLane, transparentPng, writeTrackFrames, burnCaptionFrames,
-  cropFirstChain, fillChain,
+  cropFirstChain, fillChain, _burnGraph: burnGraph, _addInputs: addInputs,
   simplifyKeyframes, buildLerpExpr, isCleanEncode,
   detectSilences, mixMusic, audioPreview, soundOf, songGainDb, MUSIC_LUFS, appendClips, audioSample,
   // background noise removal + background-blur fill (pure, unit-tested)

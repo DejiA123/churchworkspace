@@ -1751,10 +1751,49 @@ ipcMain.handle('video:copyPieces', wrap(async (e, { input, pieces, label, jobId 
   return video.copyPieces(getCtx(), { input, pieces, output, onProgress: onProgress(e, jobId) });
 }));
 
-ipcMain.handle('sermon:exportShort', wrap(async (e, { input, startSec, endSec, preset, quality, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, label, jobId, draft }) => {
+/*
+ * ►► THE CAPTIONS AND THE TEXT, LAID ON IN THE EXPORT'S OWN ENCODE. ◄◄
+ * `burn` is what captions:burnTrack and overlays:burnImages are sent — the caption
+ * track the studio drew and the text pictures — handed to the export instead, so
+ * the short is decoded and encoded ONCE (video.encodeWithFallback). Written to a
+ * folder of their own for the encode and gone after it, the same as those passes.
+ */
+function burnFiles(burn) {
+  if (!burn || typeof burn !== 'object') return null;
+  const list = (Array.isArray(burn.images) ? burn.images : []).filter((im) => im && (im.png || im.strip));
+  const track = burn.track && Array.isArray(burn.track.frames) && burn.track.frames.length ? burn.track : null;
+  if (!track && !list.length) return null;
+  const dir = fs.mkdtempSync(path.join(app.getPath('temp'), 'mw-burn-'));
+  const done = () => {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (er) {}
+    // a batch's track stays until the batch has made the short (a restart re-runs it)
+    if (track && track.trackId && !track.keep) video.dropTrackFrames(track.trackId);
+  };
+  try {
+    return { burn: { track: track ? video.writeTrackFrames(track, dir) : null, images: list.length ? writeTextImages(list, dir, 'txt') : [] }, done };
+  } catch (er) { done(); throw er; }
+}
+/** An export with `burn` is the finished picture, never a draft to be encoded again. */
+async function exportWithBurn(burn, draft, run) {
+  const b = burnFiles(burn);
+  try { return await ffmod.asDraft(draft && !b, () => run(b ? b.burn : undefined)); } finally { if (b) b.done(); }
+}
+
+// The pixel frame an export will be — what the studio draws its captions for, before it is made.
+ipcMain.handle('sermon:exportFrame', wrap(async (e, { input, preset, quality }) => {
+  if (preset === 'source') {
+    const info = await video.getInfo(getCtx(), input);
+    const p = video.sourceSize(info, quality);
+    return p ? { w: p.w, h: p.h } : { w: Math.round(info.width / 2) * 2, h: Math.round(info.height / 2) * 2 };
+  }
+  const p = video.presetSize(preset || 'reel-9x16', quality);
+  return { w: p.w, h: p.h };
+}));
+
+ipcMain.handle('sermon:exportShort', wrap(async (e, { input, startSec, endSec, preset, quality, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, label, jobId, draft, burn }) => {
   const safe = fileSafeTitle(label || 'short');
   const output = outPath(`short-${safe}-${stamp()}.mp4`);
-  await ffmod.asDraft(draft, () => video.exportShort(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, output, onProgress: onProgress(e, jobId) }));
+  await exportWithBurn(burn, draft, (b) => video.exportShort(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, burn: b, output, onProgress: onProgress(e, jobId) }));
   return output;
 }));
 
@@ -1780,18 +1819,18 @@ ipcMain.handle('video:attachThumb', wrap(async (e, { input, imagePath, atSec, au
 ipcMain.handle('fs:rmdir', wrap(async (e, { dir }) => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch (er) {} return true; }));
 
 // Export a speaker-following (auto-reframed) 9:16 short from face-track keyframes.
-ipcMain.handle('sermon:exportReframed', wrap(async (e, { input, startSec, endSec, preset, quality, keyframes, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, label, jobId, draft }) => {
+ipcMain.handle('sermon:exportReframed', wrap(async (e, { input, startSec, endSec, preset, quality, keyframes, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, label, jobId, draft, burn }) => {
   const safe = fileSafeTitle(label || 'short');
   const output = outPath(`short-${safe}-${stamp()}.mp4`);
-  await ffmod.asDraft(draft, () => video.exportShortReframed(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, keyframes, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, output, onProgress: onProgress(e, jobId) }));
+  await exportWithBurn(burn, draft, (b) => video.exportShortReframed(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, keyframes, pieces, fill, denoise, cover, fadeIn, fadeOut, motion, burn: b, output, onProgress: onProgress(e, jobId) }));
   return output;
 }));
 
 // Export a short using a MANUAL pan/zoom crop the user dragged/zoomed in the preview.
-ipcMain.handle('sermon:exportFramed', wrap(async (e, { input, startSec, endSec, preset, quality, zoom, offsetX, offsetY, pieces, denoise, cover, fadeIn, fadeOut, motion, label, jobId, draft }) => {
+ipcMain.handle('sermon:exportFramed', wrap(async (e, { input, startSec, endSec, preset, quality, zoom, offsetX, offsetY, pieces, denoise, cover, fadeIn, fadeOut, motion, label, jobId, draft, burn }) => {
   const safe = fileSafeTitle(label || 'short');
   const output = outPath(`short-${safe}-${stamp()}.mp4`);
-  const res = await ffmod.asDraft(draft, () => video.exportShortFramed(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, zoom, offsetX, offsetY, pieces, denoise, cover, fadeIn, fadeOut, motion, output, onProgress: onProgress(e, jobId) }));
+  const res = await exportWithBurn(burn, draft, (b) => video.exportShortFramed(getCtx(), { input, startSec, endSec, preset: preset || 'reel-9x16', quality, zoom, offsetX, offsetY, pieces, denoise, cover, fadeIn, fadeOut, motion, burn: b, output, onProgress: onProgress(e, jobId) }));
   return res.output;
 }));
 

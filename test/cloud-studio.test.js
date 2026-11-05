@@ -395,6 +395,26 @@ async function run() {
     log(onLoud, 'and they sit on the loud moments, as they do on the desktop');
   }
 
+  /*
+   * ONE ENCODE: the captions and the text handed to the export itself (burnForExport
+   * in the studio, `burn` in the handlers) — through the real handlers, bytes and all.
+   */
+  const frame = await rpcOk('sermon:exportFrame', { input: sermon, preset: 'reel-9x16', quality: '720p' });
+  log(frame && frame.w === 720 && frame.h === 1280, 'the studio can ask what size a short will be, before it is made', JSON.stringify(frame));
+  const tid = 'onegotest' + Date.now().toString(36);
+  await rpcOk('captions:trackPut', { trackId: tid, pngs: [{ i: 0, png }] });
+  const oneGo = await rpcOk('sermon:exportShort', {
+    input: sermon, startSec: 2, endSec: 8, preset: 'reel-9x16', quality: '720p', label: 'one go', jobId: 'onego', draft: true,
+    burn: { track: { trackId: tid, frames: [{ png: null, dur: 0.5 }, { ref: 0, dur: 2 }, { png, dur: 1.5 }], band: { x: 20, y: 900, w: 320, h: 80 }, fps: 30, authorW: 720, authorH: 1280 },
+      images: [{ png, start: 0.5, end: 3 }] },
+  });
+  const oneInfo = await rpcOk('video:info', { input: oneGo });
+  log(fs.existsSync(oneGo) && oneInfo.width === 720 && oneInfo.height === 1280 && Math.abs(oneInfo.durationSec - 6) < 0.2,
+    'a short with its captions and text laid on in ONE encode comes out whole', `${oneInfo.width}x${oneInfo.height} ${oneInfo.durationSec}s`);
+  log(!fs.existsSync(path.join(os.tmpdir(), 'mw-captrack-' + tid)), '…and the caption pictures sent ahead are tidied away after it');
+  const leftBurn = (() => { try { return fs.readdirSync(shim.paths.temp).filter((d) => d.startsWith('mw-burn-')); } catch (e) { return []; } })();
+  log(leftBurn.length === 0, '…as is the folder they were laid on from', leftBurn.join(', '));
+
   try { es.destroy(); } catch (e) {}
 
   /* ───────────── [F] sending a file from the phone ───────────── */

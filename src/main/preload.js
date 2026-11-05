@@ -272,6 +272,7 @@ contextBridge.exposeInMainWorld('api', {
     titleFor: (a) => call('sermon:titleFor', a),
     exportReframed: (a) => call('sermon:exportReframed', a),
     exportFramed: (a) => call('sermon:exportFramed', a),
+    exportFrame: (a) => call('sermon:exportFrame', a),
     extractFrames: (a) => call('video:extractFrames', a),
     attachThumb: (a) => call('video:attachThumb', a),
     rmdir: (dir) => call('fs:rmdir', { dir }),

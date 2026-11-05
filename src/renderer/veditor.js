@@ -10455,15 +10455,23 @@
    * in advance — whisper hearing no speech at all, which sends the text off to
    * its own pass instead — simply rides inside the captions slice.
    */
-  function exportPlan(s, { track, captions, overlays } = {}) {
+  function exportPlan(s, { track, captions, overlays, oneGo, drawFirst } = {}) {
     const keys = [];
+    // In one go (burnForExport) the captions are drawn BEFORE the encode and laid
+    // on inside it: no burn pass, and no text pass, after it. A single short's
+    // speaker is followed inside its export, so there the drawing comes first.
+    const drawBefore = !!(oneGo && captions);
+    if (drawBefore && drawFirst) keys.push('draw');
     if (track) keys.push('track');
     // The edited-video export lays its overlays on BEFORE the encode; a short
     // lays them on the finished frame afterwards. Either way it is one pass.
     if (overlays === 'source' && overlaysFor(s, 'source').length) keys.push('overlays');
+    if (drawBefore && !drawFirst) keys.push('draw');
     keys.push('encode');
     if (overlays !== 'source' && overlaysFor(s).length) keys.push('overlays');
-    if (captions) {
+    if (oneGo) {
+      // nothing more to lay on: it went on in the encode
+    } else if (captions) {
       // Captions come only from the 💬 lane, so there is nothing to hear — only to draw.
       // Drawing the caption pictures here in the studio, then burning them into
       // the video, are two different pieces of work on two different machines.
@@ -10627,7 +10635,9 @@
    * step on the way and is re-encoded anyway — a small server encodes it fast
    * at a higher bitrate instead of carefully twice (see asDraft in ffmpeg.js).
    */
-  async function exportOneClip(s, pre, draft) {
+  async function exportOneClip(s, pre, draft, burn) {
+    // the captions and text laid on in this same encode (burnForExport): the finished picture, not a draft
+    const B = burn ? { burn } : {};
     const preset = ve.aspect;
     /*
      * 1) THE OVERLAY LANE GOES ON LAST, NOT FIRST.
@@ -10661,7 +10671,7 @@
       // nobody to follow (see computeReframeKeyframes): one steady shot
       const steady = keyframes && keyframes.noSpeaker;
       return burnOverlaysIntoShort(s, await window.__runJob(`Exporting "${s.label}" (${steady ? 'steady shot' : 'face-tracked'})${gaps}${clean}…`, jobId,
-        () => window.api.sermon.exportReframed({ input, startSec: ss, endSec: ee, preset, quality: qualityCfg(), keyframes, pieces, fill, denoise, cover: coverCfg(), fadeIn, fadeOut, motion: motionOf(s), label: s.label, jobId, draft: !!draft }), J(s, 'encode')));
+        () => window.api.sermon.exportReframed({ input, startSec: ss, endSec: ee, preset, quality: qualityCfg(), keyframes, pieces, fill, denoise, cover: coverCfg(), fadeIn, fadeOut, motion: motionOf(s), label: s.label, jobId, draft: !!draft && !burn, ...B }), J(s, 'encode')));
     }
     // A blurred/letterboxed fill shows the WHOLE picture, so a manual pan/zoom
     // crop would contradict it — the fill wins, same as it does over reframing.
@@ -10670,12 +10680,12 @@
     if (manualFraming) {
       const jobId = window.__newJobId();
       return burnOverlaysIntoShort(s, await window.__runJob(`Exporting "${s.label}" (custom framing)${gaps}${clean}…`, jobId,
-        () => window.api.sermon.exportFramed({ input, startSec: ss, endSec: ee, preset, quality: qualityCfg(), zoom: f.zoom, offsetX: f.offsetX, offsetY: f.offsetY, pieces, denoise, cover: coverCfg(), fadeIn, fadeOut, motion: motionOf(s), label: s.label, jobId, draft: !!draft }), J(s, 'encode')));
+        () => window.api.sermon.exportFramed({ input, startSec: ss, endSec: ee, preset, quality: qualityCfg(), zoom: f.zoom, offsetX: f.offsetX, offsetY: f.offsetY, pieces, denoise, cover: coverCfg(), fadeIn, fadeOut, motion: motionOf(s), label: s.label, jobId, draft: !!draft && !burn, ...B }), J(s, 'encode')));
     }
     const jobId = window.__newJobId();
     const how = fill ? (fill.mode === 'blur' ? ' (blurred background)' : ' (letterboxed)') : '';
     return burnOverlaysIntoShort(s, await window.__runJob(`Exporting "${s.label}"${how}${gaps}${clean}…`, jobId,
-      () => window.api.sermon.exportShort({ input, startSec: ss, endSec: ee, preset, quality: qualityCfg(), pieces, fill, denoise, cover: coverCfg(), fadeIn, fadeOut, motion: motionOf(s), label: s.label, jobId, draft: !!draft }), J(s, 'encode')));
+      () => window.api.sermon.exportShort({ input, startSec: ss, endSec: ee, preset, quality: qualityCfg(), pieces, fill, denoise, cover: coverCfg(), fadeIn, fadeOut, motion: motionOf(s), label: s.label, jobId, draft: !!draft && !burn, ...B }), J(s, 'encode')));
   }
 
   /**
@@ -10719,13 +10729,16 @@
     // engine on this machine (they may have come from the cloud ear, or been
     // typed). Only captions still to be HEARD wait on one.
     const withCaps = exportHasCaps(s);
+    const oneGo = canBurnInExport(s);
     if (window.__chainBegin) {
-      window.__chainBegin(task, exportPlan(s, { track: reframeOn() && !!window.FaceTrack, captions: withCaps }));
+      window.__chainBegin(task, exportPlan(s, { track: reframeOn() && !!window.FaceTrack, captions: withCaps, oneGo, drawFirst: true }));
     }
     try {
       const text = await textImagesFor(s);
-      let out = await exportOneClip(s, null, withCaps || !!(text && text.length));
-      if (withCaps) out = await autoCaptionExport(s, out, text);
+      const fused = oneGo ? await burnForExport(s, { caps: withCaps, text, input: clipFootage(s).input, preset: ve.aspect }) : null;
+      let out = await exportOneClip(s, null, willBurnAfter(s, withCaps, text), fused && fused.burn);
+      if (fused) out = keepBurnWords(out, fused);
+      else if (withCaps) out = await autoCaptionExport(s, out, text);
       else out = await burnTextIntoShort(s, out, null, text);
       out = await finishExport(s, out); // background music, the outro, then its thumbnail
       // …and onto the phone, when that is where it was asked from
@@ -11045,8 +11058,16 @@
     // The captions on the 💬 track over the kept stretch ALWAYS go in (this used
     // to wait on the auto-caption box and dropped them when it was off).
     const planCaps = exportHasCaps(whole);
+    /*
+     * In one go (burnForExport) unless something has to be laid on between the
+     * picture and the captions: overlays that go on after the encode (with
+     * keyframes, or parts cut out), or clips appended after the video.
+     */
+    const lateOn = !!(motionFor(whole) || (span.cuts && span.cuts.length) || (span.xfades && span.xfades.length));
+    const oneGo = canBurnInExport(whole, 'source') && !tailClips().length
+      && !(lateOn && overlayPayloadFor(whole, 'source', 'out').length);
     if (window.__chainBegin) {
-      window.__chainBegin(task, exportPlan(whole, { track: false, captions: planCaps, overlays: 'source' }));
+      window.__chainBegin(task, exportPlan(whole, { track: false, captions: planCaps, overlays: 'source', oneGo }));
     }
     try {
       /*
@@ -11096,6 +11117,16 @@
         && !span.pieces.some((p) => p.fx || p.trans) && !textOverlaysFor(whole).length
         && !overlayPayloadFor(whole, 'source', 'out').length && !denoiseCfg() && !fadeInCfg() && !fadeOutCfg()
         && !tailClips().length && window.api.sermon.copyPieces;
+      const info = ve.video.info;
+      const size = { w: info.width, h: info.height };
+      const caps = planCaps;    // already asked, above, to build the plan
+      // Same mapping this path has always used — only WHERE it is composited
+      // has changed, never how it is laid out. (See text-wysiwyg.test.js.)
+      const text = onlyCut ? null : await textImagesFor(whole, size);
+      // the captions and the text in this same encode (burnForExport)…
+      const fused = (!onlyCut && oneGo && late === lateOn) ? await burnForExport(whole, { caps, text, input, preset: 'source' }) : null;
+      // …or, when they get a pass of their own after it, this one is only a step on the way
+      const draft = !fused && willBurnAfter(whole, caps, text);
       let out = onlyCut
         ? await window.__runJob(`⚡ Saving your edited video (${fmt(span.kept)}): only cuts, so it is copied, not re-made…`, jobId,
           () => window.api.sermon.copyPieces({ input: ve.video.path, pieces: span.pieces.map((p) => ({ start: p.start, end: p.end })), label: title || 'edited', jobId }), J(whole, 'encode'))
@@ -11110,7 +11141,7 @@
         // keyframed push-ins on every clip, on the edited video's own clock
         motion,
         label: title || (ve.video.path.split(/[\\/]/).pop() || 'video').replace(/\.[^.]+$/, '') + '-edited',
-        jobId,
+        jobId, draft, ...(fused ? { burn: fused.burn } : {}),
       }), J(whole, 'encode'));
       if (late) {
         const post = overlayPayloadFor(whole, 'source', 'out');
@@ -11143,13 +11174,8 @@
         out = await window.__runJob(`🎞 Adding ${clips.length === 1 ? 'the clip' : clips.length + ' clips'} that come after…`, ja,
           () => window.api.video.appendClips({ input: out, clips, position: 'end', fill: { mode: 'blur' }, jobId: ja, deleteInput: true, outName: `${stem}-plus` }));
       }
-      const info = ve.video.info;
-      const size = { w: info.width, h: info.height };
-      const caps = planCaps;    // already asked, above, to build the plan
-      // Same mapping this path has always used — only WHERE it is composited
-      // has changed, never how it is laid out. (See text-wysiwyg.test.js.)
-      const text = await textImagesFor(whole, size);
-      if (caps) out = await autoCaptionExport(whole, out, text, size);
+      if (fused) out = keepBurnWords(out, fused);
+      else if (caps) out = await autoCaptionExport(whole, out, text, size);
       else out = await burnTextIntoShort(whole, out, size, text);
       out = await finishExport(whole, out);
       const saved = await deliverTask(task, out);   // onto the phone it was asked from, inside the same number
@@ -11401,8 +11427,9 @@
           // server batch: one short at a time — its tracking starts here
           if (sbatch && !ahead.has(s)) ahead.begin(s);
           const waitingOnTracking = ahead.pendingFor(s);
+          const oneGo = canBurnInExport(s);
           if (window.__chainBegin) {
-            window.__chainBegin(task, exportPlan(s, { track: waitingOnTracking, captions: caps }));
+            window.__chainBegin(task, exportPlan(s, { track: waitingOnTracking, captions: caps, oneGo }));
           }
           // ✕ Cancel answers at once: tracking runs on this page, where the
           // server's cancel cannot reach — so the wait is let go of here, and the
@@ -11426,8 +11453,11 @@
           if (i + 1 < list.length && !sbatch) ahead.begin(list[i + 1]);
           const chain = async () => {
             const text = await textImagesFor(s);
-            let out = await exportOneClip(s, got, caps || !!(text && text.length));
-            if (caps) out = await autoCaptionExport(s, out, text);
+            // one encode for the picture, the captions and the text (burnForExport)
+            const fused = oneGo ? await burnForExport(s, { caps, text, input: clipFootage(s).input, preset: ve.aspect }) : null;
+            let out = await exportOneClip(s, got, willBurnAfter(s, caps, text), fused && fused.burn);
+            if (fused) out = keepBurnWords(out, fused);
+            else if (caps) out = await autoCaptionExport(s, out, text);
             else out = await burnTextIntoShort(s, out, null, text);
             return finishExport(s, out); // background music, then the outro
           };
@@ -14975,11 +15005,73 @@
    * the pictures because the text fallback must re-draw them at the RIGHT frame
    * (Export video renders at the recording's own size, not the social preset).
    */
-  async function autoCaptionExport(s, shortPath, textImages, textSize) {
+  /** The caption lines an export of `s` burns, on the export's own clock. */
+  function capEventsFor(s) {
     const rel = capLinesIn(s, true)
       .map((e) => ({ start: Math.max(0, e.start - s.start), end: Math.min(s.end, e.end) - s.start, text: e.text }))
       .filter((e) => e.text && e.text.trim());
-    const timed = reTimed(s) ? remapCapEventsThroughCuts(s, rel) : rel;
+    return reTimed(s) ? remapCapEventsThroughCuts(s, rel) : rel;
+  }
+  /*
+   * ►► ONE ENCODE FOR THE PICTURE, THE CAPTIONS AND THE TEXT. ◄◄
+   *
+   * "Exporting videos takes way too long." A captioned short was made twice:
+   * the picture encoded to a file, then that whole file decoded and encoded
+   * AGAIN only to lay the captions on it. Measured on a 60-second 1080p short
+   * on the server: 16.9 s for the picture, 13.5 s more for the captions.
+   *
+   * Now the captions are drawn FIRST (the same drawing, at the size the export
+   * will be — sermon:exportFrame) and handed to the export, which lays them on
+   * in its own encode: the second pass is gone, and so is a generation of
+   * quality. Where the picture is not finished at the end of the export — an
+   * overlay lane to composite after the crop, clips appended before the
+   * captions — the passes stay as they were, so the layers keep their order.
+   *
+   * Null means "do it the old way": nothing to burn, an older server, or the
+   * captions would not draw (the old path then falls back to the subtitle burner
+   * exactly as before).
+   */
+  const canBurnInExport = (s, mode) => !!(window.api.sermon && window.api.sermon.exportFrame)
+    && !(mode === 'source' ? false : overlaysFor(s).length);
+  async function burnForExport(s, { caps, text, input, preset }) {
+    const images = (text && text.length) ? text : null;
+    if (!caps && !images) return null;
+    const list = caps ? capEventsFor(s) : [];
+    const task = taskOf(s);
+    const say = (m) => (window.__taskSay ? window.__taskSay(task, m, 'draw') : (window.__showOverlay && window.__showOverlay(m)));
+    const pct = (p) => (window.__taskProgress ? window.__taskProgress(task, p) : (window.__setProgress && window.__setProgress(p)));
+    // said at once: this is the export's first step now, and the chip must not sit on the last short's 100
+    if (list.length) say('💬 Drawing the captions exactly as you see them…');
+    let frame = null;
+    try { frame = await window.api.sermon.exportFrame({ input, preset, quality: qualityCfg() }); } catch (e) { frame = null; }
+    if (!frame || !(frame.w > 0) || !(frame.h > 0)) return null;
+    let track = null;
+    if (list.length) {
+      try {
+        track = await capTrackForExport(list, (F(s) && F(s).capStyle) || capStyleCfg(), frame.w, frame.h,
+          Math.max(0.1, ...list.map((e) => e.end || 0)), pct, say);
+      } catch (e) { track = null; }
+      if (!track) return null;
+    }
+    if (!track && !images) return null;
+    return { burn: { track, images: images || [] }, words: list.map((e) => String(e.text)) };
+  }
+  /*
+   * Will a pass of its own lay the captions or the text on after the export? Only
+   * then is the export a step on the way, encoded as a draft (asDraft) — when
+   * every caption line fell inside a removed pause and there is no text, the
+   * export IS the finished file and is made as one.
+   */
+  const willBurnAfter = (s, caps, text) => !!((caps && capEventsFor(s).length) || (text && text.length));
+  /** The captions' checked words go with the file (captions:keepWords), as burnCapsInto does. */
+  function keepBurnWords(out, fused) {
+    if (typeof out === 'string' && fused && fused.words.length && window.api.captions && window.api.captions.keepWords) {
+      window.api.captions.keepWords({ path: out, lines: fused.words }).catch(() => {});
+    }
+    return out;
+  }
+  async function autoCaptionExport(s, shortPath, textImages, textSize) {
+    const timed = capEventsFor(s);
     // Every line fell inside a removed pause: no captions to burn — but the TEXT
     // was handed to this pass instead of having its own, so it still goes on.
     if (!timed.length) return burnTextIntoShort(s, shortPath, textSize || null, textImages);

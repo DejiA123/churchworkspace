@@ -774,6 +774,7 @@ let _hideTimer = null;
       titleFor: (a) => call('sermon:titleFor', a),
       exportReframed: (a) => call('sermon:exportReframed', a),
       exportFramed: (a) => call('sermon:exportFramed', a),
+      exportFrame: (a) => call('sermon:exportFrame', a),
       extractFrames: (a) => call('video:extractFrames', a).then(servedFrames),
       attachThumb: (a) => call('video:attachThumb', a),
       rmdir: (dir) => call('fs:rmdir', { dir }),

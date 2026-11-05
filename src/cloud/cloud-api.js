@@ -248,6 +248,7 @@ const ALLOWED = {
   'video:copyPieces': true,
   'sermon:exportReframed': true,
   'sermon:exportFramed': true,
+  'sermon:exportFrame': true,
 
   // speech, captions, the word book
   'captions:available': true,

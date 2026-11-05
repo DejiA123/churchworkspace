@@ -303,7 +303,8 @@ async function runItem(b, it) {
   // through can start it again
   const steps = v8.deserialize(fs.readFileSync(it.file));
   // caption pictures the phone sent ahead for this short: kept until it is over
-  const tracks = steps.map((st) => st && st.args && st.args.track && st.args.track.keep && st.args.track.trackId).filter(Boolean);
+  const trackOf = (a) => (a && a.track) || (a && a.burn && a.burn.track);
+  const tracks = steps.map((st) => { const t = trackOf(st && st.args); return t && t.keep && t.trackId; }).filter(Boolean);
   try {
     await runSteps(b, it, steps);
   } finally {

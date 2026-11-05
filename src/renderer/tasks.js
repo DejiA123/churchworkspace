@@ -246,7 +246,9 @@
       : null;
     t.percent = 0;
     if (t.chain) startTicker();
-    if (t.bg) scheduleDock();
+    // painted at once: "2 of 2" has just gone up beside the LAST short's 100, and
+    // the next frame can be a while coming (a phone in the background, a hidden window)
+    if (t.bg) renderDock();
   }
 
   /* ---- the animation: one timer, however many exports are running ---- */
