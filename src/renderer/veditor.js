@@ -18745,6 +18745,28 @@
     },
     /** ＋ Add caption: a new line at the playhead (or the next gap), open for typing. */
     addCaptionHere() { return addCaptionHere(); },
+    /* ►► AUTO CAPTIONS, AS CAPCUT HAS THEM. ◄◄ The phone's "Generate auto captions" sheet reads and sets the same
+       settings the captions editor does — the look, how it listens, words per line — then generates. */
+    captionLooks() {
+      const base = capStyleCfg();
+      return {
+        current: capStyleDef().id,
+        looks: CAP_STYLES.map((def) => ({ id: def.id, name: def.name,
+          css: capSpanCss(Object.assign({}, base, { color: def.pickColor ? (document.getElementById('capColor') || {}).value || '#ffffff' : def.color,
+            outline: def.outline || '#000000', style: def.style, outlineScale: def.outlineScale || 1 }), 17) })),
+      };
+    },
+    setCaptionLook(id) { setCapStyle(id); return capStyleDef().id; },
+    captionSelect(id) {
+      const s = document.getElementById(id); if (!s) return null;
+      return { value: s.value, options: [...s.options].map((o) => ({ value: o.value, label: o.textContent })) };
+    },
+    setCaptionSelect(id, v) {
+      const s = document.getElementById(id); if (!s || s.value === v) return;
+      s.value = v; s.dispatchEvent(new Event('change', { bubbles: true }));
+    },
+    captionCount() { return (ve.capEvents || []).length; },
+    generateCaptions() { return generateCaptions(null); },
     /** 🎙 AI voice: type a line, it is spoken and laid on the Sounds row. */
     aiVoice() { return openAiVoice(); },
     /** Mute video: every clip of the video at 0% (true) or back as it was (false); no argument toggles. */

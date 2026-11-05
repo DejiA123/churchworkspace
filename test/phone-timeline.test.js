@@ -192,6 +192,29 @@ async function waitUp() {
     console.log('\n=== [E] the chosen Case ===');
     check(await page.evaluate((ci) => window.VideoEditor.__test.capLines()[ci].text, ci) === 'MY SHEPHERD IS GOOD', 'a line typed in lower case is saved in ALL CAPS when that is chosen');
 
+    console.log('\n=== [E2] Captions, as CapCut has them ===');
+    {
+      // "When you click the caption button there are sub buttons in the navigation bar": its own row, and
+      // Auto captions a short sheet with one big Generate
+      // (back to the main bar: the steps before may have left another row up)
+      for (let k = 0; k < 3; k++) await page.evaluate(() => { const r = document.querySelector('.cloud-dock-row.on'); const f = r && r.querySelector('.cloud-tool'); if (r && f && !f.textContent.trim()) f.click(); });
+      await page.evaluate(() => { document.querySelectorAll('.cp-panel .cp-x').forEach((x) => x.click()); const m = document.getElementById('capModal'); if (m) m.classList.add('hidden'); });
+      await sleep(500);
+      const dk = page.locator('.cloud-dock-row.on .cloud-tool').filter({ hasText: /^Captions/ }).first();
+      await dk.tap(); await sleep(500);
+      const row = await page.evaluate(() => [...document.querySelectorAll('.cloud-dock-row.on .cloud-tool')].filter((b) => !b.classList.contains('cloud-tool-hidden')).map((b) => b.textContent.trim()));
+      check(['Auto captions', 'Add captions', 'Edit captions', 'Caption style'].every((l) => row.some((r) => r.startsWith(l))), 'Captions in the bar opens its own row: Auto captions, Add, Edit, Style', row);
+      await page.locator('.cloud-dock-row.on .cloud-tool').filter({ hasText: 'Auto captions' }).tap(); await sleep(600);
+      const sh = await page.evaluate(() => ({ title: (document.querySelector('.cp-autocaps .cp-title') || {}).textContent, looks: document.querySelectorAll('.cp-autocaps [data-look]').length,
+        listen: !!document.querySelector('.cp-autocaps [data-acs="capModelSel"]'), wpl: document.querySelectorAll('.cp-autocaps [data-wpl]').length, go: (document.querySelector('.cp-autocaps .ac-go') || {}).textContent }));
+      check(sh.title === 'Generate auto captions' && sh.looks > 3 && sh.listen && sh.wpl >= 4 && /Generate/.test(sh.go || ''), 'Auto captions: how it listens, the looks as tiles, words per line, and Generate', sh);
+      const id = await page.evaluate(() => document.querySelectorAll('.cp-autocaps [data-look]')[2].dataset.look);
+      await page.locator('.cp-autocaps [data-look]').nth(2).tap(); await sleep(300);
+      check((await page.evaluate(() => window.VideoEditor.captionLooks().current)) === id, 'a look tapped there is the captions’ look');
+      await page.locator('.cp-autocaps .cp-x').tap(); await sleep(400);
+      await page.locator('.cloud-dock-row.on .cloud-tool').first().tap().catch(() => {}); await sleep(300);   // (back to the main bar)
+    }
+
     console.log('\n=== [F] every fixed line in one place ===');
     {
       await page.evaluate(() => window.VideoEditor.__test.openCaptionsWindow());

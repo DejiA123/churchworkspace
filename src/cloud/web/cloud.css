@@ -4822,3 +4822,35 @@ body.mw-cloud .cff-search input[type="search"], body.mw-cloud .cff-search input[
 .fs-crop-bar { display: flex; gap: 8px; padding: 12px 14px 14px; }
 .fs-crop-bar .fs-ghost { flex: 0 0 auto; padding: 0 14px; background: rgba(255,255,255,.1); color: #fff; }
 .fs-crop-bar .fs-go { flex: 1 1 auto; }
+/* Generate auto captions (CapCut's sheet): rows in cards, the looks as tiles, one big Generate */
+.cp-autocaps .ac { display: flex; flex-direction: column; gap: 12px; padding: 4px 0 8px; }
+.cp-autocaps .ac-card { border-radius: 16px; background: #23252c; padding: 4px 14px; }
+.cp-autocaps .ac-row { display: flex; align-items: center; gap: 12px; min-height: 52px; color: #f2f3f7; font-size: 16px; }
+.cp-autocaps .ac-row .mi { width: 22px; height: 22px; flex: none; }
+.cp-autocaps .ac-l { flex: 1 1 auto; min-width: 0; font-weight: 600; }
+.cp-autocaps .ac-sel { flex: 0 1 auto; max-width: 58%; height: 36px; border: 0; border-radius: 10px; background: #30333c; color: #fff; font-size: 15px; padding: 0 10px; }
+.cp-autocaps .ac-tiles { display: flex; gap: 10px; overflow-x: auto; padding: 2px 2px 14px; scrollbar-width: none; }
+.cp-autocaps .ac-tiles::-webkit-scrollbar { display: none; }
+.cp-autocaps .ac-tile { flex: none; width: 82px; height: 82px; border: 0; border-radius: 14px; background: #30333c; display: grid; place-items: center; align-content: center; gap: 4px; padding: 0; }
+.cp-autocaps .ac-tile span { font-size: 22px !important; line-height: 1; }
+.cp-autocaps .ac-tile small { font-size: 11px; color: #a7aab6; font-weight: 600; }
+.cp-autocaps .ac-tile.on { box-shadow: 0 0 0 2.5px #fff; }
+.cp-autocaps .ac-seg { display: flex; gap: 3px; padding: 3px; margin: 0 0 12px; border-radius: 12px; background: #30333c; }
+.cp-autocaps .ac-seg button { flex: 1; height: 38px; border: 0; border-radius: 9px; background: transparent; color: #a7aab6; font-size: 15px; font-weight: 700; }
+.cp-autocaps .ac-seg button.on { background: #4a4d58; color: #fff; }
+.cp-autocaps .ac-sw input { position: absolute; opacity: 0; pointer-events: none; }
+.cp-autocaps .ac-sw i { flex: none; width: 50px; height: 30px; border-radius: 15px; background: #44474f; position: relative; transition: background .2s; }
+.cp-autocaps .ac-sw i:after { content: ''; position: absolute; left: 3px; top: 3px; width: 24px; height: 24px; border-radius: 12px; background: #fff; transition: transform .2s; }
+.cp-autocaps .ac-sw input:checked + i { background: #22c3e0; }
+.cp-autocaps .ac-sw input:checked + i:after { transform: translateX(20px); }
+.cp-autocaps .ac-more summary { list-style: none; cursor: pointer; color: #c4b5fd; }
+.cp-autocaps .ac-more summary::-webkit-details-marker { display: none; }
+.cp-autocaps .ac-chev { transform: rotate(-90deg); transition: transform .2s; }
+.cp-autocaps .ac-more[open] .ac-chev { transform: rotate(90deg); }
+.cp-autocaps .ac-go { width: 100%; height: 56px; border: 0; border-radius: 16px; background: #22c3e0; color: #071216; font-size: 18px; font-weight: 800; }
+/* (the auto-captions sheet is dark, as CapCut's is: its looks are white letters with outlines) */
+.cp-panel.cp-autocaps { background: #17181d; color: #f2f3f7; }
+.cp-panel.cp-autocaps .cp-title { color: #fff; }
+.cp-panel.cp-autocaps .cp-x, .cp-panel.cp-autocaps .cp-close { background: #2a2c33; color: #fff; }
+.cp-panel.cp-autocaps .cp-grab, .cp-panel.cp-autocaps .cp-grabber { background: #3a3c45; }
+.cp-panel.cp-autocaps .cp-foot { background: #17181d; }

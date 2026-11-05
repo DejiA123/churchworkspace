@@ -4625,6 +4625,56 @@ let _hideTimer = null;
 
   /* What the dock holds. `press` is a desk button; `sheet` opens a sheet;
      `row` swaps the dock for that row of tools; `check` toggles a desk box. */
+  /*
+   * "Generate auto captions" (CapCut's own sheet): how it listens, the look as tiles, words per line, and — folded
+   * away — the AI proof-read; then one big Generate. Everything set here is the captions editor's own setting.
+   */
+  const CAP_SHEETS_FN = {
+    autoCaptions() { autoCapSheet('auto'); },
+    captionStyle() { autoCapSheet('style'); },
+  };
+  function autoCapSheet(kind) {
+    const E = window.VideoEditor; if (!E || !E.captionLooks) return;
+    const hearing = E.captionSelect('capModelSel'), words = E.captionSelect('capWords');
+    const auto = document.getElementById('capGrammarAuto'), hl = document.getElementById('capWordHl');
+    const P = openPanel({ id: 'cloudAutoCaps', title: kind === 'auto' ? 'Generate auto captions' : 'Caption style', cls: 'cp-autocaps' });
+    const row = (ic, label, right) => `<div class="ac-row">${mi(ic)}<span class="ac-l">${label}</span>${right}</div>`;
+    const sel = (id, d) => d ? `<select class="ac-sel" data-acs="${id}">${d.options.map((o) => `<option value="${escAttr(o.value)}"${o.value === d.value ? ' selected' : ''}>${escHtml(o.label)}</option>`).join('')}</select>` : '';
+    const draw = () => {
+      const L = E.captionLooks();
+      const tiles = L.looks.map((x) => `<button type="button" class="ac-tile${x.id === L.current ? ' on' : ''}" data-look="${escAttr(x.id)}"><span style="${escAttr(x.css)}">Aa</span><small>${escHtml(x.name)}</small></button>`).join('');
+      const wl = words ? `<div class="ac-seg">${words.options.map((o) => `<button type="button" data-wpl="${escAttr(o.value)}" class="${o.value === E.captionSelect('capWords').value ? 'on' : ''}">${escHtml(o.label)}</button>`).join('')}</div>` : '';
+      P.body.innerHTML = `<div class="ac">
+        ${kind === 'auto' ? `<div class="ac-card">${row('audio-lines', 'Listen with', sel('capModelSel', hearing))}</div>` : ''}
+        <div class="ac-card"><div class="ac-row">${mi('palette')}<span class="ac-l">Look</span></div><div class="ac-tiles">${tiles}</div>
+          ${hl ? `<label class="ac-row ac-sw">${mi('target')}<span class="ac-l">Follow the voice</span><input type="checkbox" data-hl${hl.checked ? ' checked' : ''}><i></i></label>` : ''}</div>
+        <div class="ac-card"><div class="ac-row">${mi('type')}<span class="ac-l">Words on a line</span></div>${wl}</div>
+        ${kind === 'auto' && auto ? `<details class="ac-card ac-more"><summary class="ac-row">${mi('sparkles')}<span class="ac-l">Advanced options</span>${mi('chev-left', 'ac-chev')}</summary>
+          <label class="ac-row ac-sw"><span class="ac-l">AI proof-read the new captions</span><input type="checkbox" data-auto${auto.checked ? ' checked' : ''}><i></i></label></details>` : ''}
+      </div>`;
+      P.foot.innerHTML = kind === 'auto'
+        ? `<button type="button" class="ac-go" data-act="gen">${E.captionCount() ? 'Generate again' : 'Generate'}</button>`
+        : `<button type="button" class="ac-go" data-act="done">Done</button>`;
+    };
+    draw();
+    P.body.addEventListener('click', (e) => {
+      const t = e.target.closest('[data-look]'); if (t) { E.setCaptionLook(t.dataset.look); draw(); return; }
+      const w = e.target.closest('[data-wpl]'); if (w) { E.setCaptionSelect('capWords', w.dataset.wpl); draw(); }
+    });
+    P.body.addEventListener('change', (e) => {
+      const s2 = e.target.closest('[data-acs]'); if (s2) E.setCaptionSelect(s2.dataset.acs, s2.value);
+      if (e.target.matches('[data-hl]') && hl) { hl.checked = e.target.checked; hl.dispatchEvent(new Event('change', { bubbles: true })); }
+      if (e.target.matches('[data-auto]') && auto) { auto.checked = e.target.checked; auto.dispatchEvent(new Event('change', { bubbles: true })); }
+    });
+    P.foot.addEventListener('click', async (e) => {
+      const b = e.target.closest('[data-act]'); if (!b) return;
+      if (b.dataset.act === 'done') return P.close();
+      if (E.captionCount() && !window.confirm('Make the captions again from the sound? The lines there now are replaced (Undo brings them back).')) return;
+      P.close();
+      await E.generateCaptions();
+    });
+  }
+
   const DOCK = {
     /* Ten doors, most used first, each one word. The rest is one tap in:
        Presets puts a saved edit on this video in one tap.
@@ -4632,8 +4682,8 @@ let _hideTimer = null;
        (Ratio, Background, Reframe), and Montage sits with the Project things. */
     main: [
       { icon: 'sparkles', label: 'AI Shorts', ai: true, sheet: 'shorts', count: true },
-      // ("No need to show that part, it should go straight to the caption editor": the editor itself, not a panel with a button to it)
-      { icon: 'captions', label: 'Captions', ai: true, press: '#veAutoCaptions' },
+      // (as CapCut has it: Captions swaps the bar for its own row — Auto captions, Add, Edit, Style, Clear)
+      { icon: 'captions', label: 'Captions', ai: true, row: 'captions' },
       // ⭐ the last sermon's text, music, ending and looks, on this one in a tap
       { icon: 'preset', label: 'Presets', call: 'presets' },
       { icon: 'scissors', label: 'Edit', row: 'edit' },
@@ -4700,7 +4750,7 @@ let _hideTimer = null;
       { icon: 'template', label: 'Templates', call: 'textTemplates' },
       { icon: 'animate', label: 'Animation', call: 'textAnimation' },
       { icon: 'plus', label: 'Add caption', call: 'addCaptionHere' },
-      { icon: 'captions', label: 'Captions', ai: true, press: '#veAutoCaptions' },
+      { icon: 'captions', label: 'Captions', ai: true, row: 'captions' },
     ],
     /* What a caption block on the timeline can do. Comes up by itself when
      * one is tapped (see followCaptionPick) — the way CapCut swaps its tools
@@ -4717,7 +4767,17 @@ let _hideTimer = null;
       { icon: 'trash', label: 'Delete', call: 'deleteSelectedCaption' },
       { icon: 'pen', label: 'Edit words', call: 'editSelectedCaption' },
       { icon: 'plus', label: 'Add caption', call: 'addCaptionHere' },
-      { icon: 'captions', label: 'Captions', press: '#veAutoCaptions' },
+      { icon: 'captions', label: 'Captions', row: 'captions' },
+    ],
+    /* ►► CAPTIONS, AS CAPCUT HAS THEM. ◄◄ "When you click the caption button there are sub buttons in the navigation
+       bar": the bar becomes the captions' own row. Auto captions is a short sheet with one big Generate; Edit
+       captions is the editor with every line; Style the looks; Clear goes once there are captions. */
+    captions: [
+      { icon: 'sparkles', label: 'Auto captions', ai: true, fn: 'autoCaptions' },
+      { icon: 'plus', label: 'Add captions', call: 'addCaptionHere' },
+      { icon: 'pen', label: 'Edit captions', press: '#veAutoCaptions' },
+      { icon: 'palette', label: 'Caption style', fn: 'captionStyle' },
+      { icon: 'trash', label: 'Clear captions', press: '#veClearCaps' },
     ],
     ratio: [],      // built from the desk's own list of shapes
     /* What fills the frame when the video is another shape (16:9 in a 9:16
@@ -5059,6 +5119,7 @@ let _hideTimer = null;
         const r = dock.querySelector('.cloud-dock-row.on'); if (r) for (const x of r.querySelectorAll('.cloud-tool')) if (x._sync) x._sync();
         return;
       }
+      if (t.fn) return CAP_SHEETS_FN[t.fn] && CAP_SHEETS_FN[t.fn]();
       if (t.row) return showRow(t.row);
       if (t.fx) return openFx(t.fx);
       if (t.call) { const ed = window.VideoEditor; if (ed && typeof ed[t.call] === 'function') ed[t.call](); return; }
