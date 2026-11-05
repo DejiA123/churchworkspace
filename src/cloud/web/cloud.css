@@ -4903,3 +4903,41 @@ body.mw-cloud .cff-search input[type="search"], body.mw-cloud .cff-search input[
   body.mw-cloud #capModal .cap-sec #capPlayRate { display: block !important; width: 100%; }
   body.mw-cloud #capModal .cap-sec .cap-pl-opt { display: flex !important; }
 }
+/* ►► COMPACT, SO MORE IS SEEN AT ONCE. ◄◄ "Make sure the things are not too big… that things are not viewable at
+   once": the header, the play bar and the tabs slimmer, the settings in smaller rows, Fix two to a row, the looks
+   five to a row. */
+@media (max-width: 900px) {
+  body.mw-cloud #capModal .cap-box.cap-tabbed.folded .cap-head { height: 44px; }
+  body.mw-cloud #capModal .cap-box.cap-tabbed .cap-player { padding: 3px 12px; gap: 8px; }
+  body.mw-cloud #capModal .cap-box.cap-tabbed .cap-pl-play { width: 30px !important; height: 30px !important; }
+  body.mw-cloud #capModal .cap-box.cap-tabbed #capPlayBack { height: 28px; padding: 0 6px; font-size: 12.5px; }
+  body.mw-cloud #capModal .cap-tabs { padding: 0 2px; }
+  body.mw-cloud #capModal .cap-tabs button { gap: 1px; padding: 5px 0 6px; font-size: 10.5px; }
+  body.mw-cloud #capModal .cap-tabs button .mi { width: 19px; height: 19px; }
+  body.mw-cloud #capModal .cap-tabs button.on::after { height: 2.5px; }
+  body.mw-cloud #capModal .cap-box.cap-tabbed:not([data-ctab="words"]) .cap-panes { padding: 8px 12px 12px; }
+  body.mw-cloud #capModal .cap-box[data-ctab] .cap-pane { gap: 10px !important; }
+  body.mw-cloud #capModal .cap-sec { gap: 5px; }
+  body.mw-cloud #capModal .cap-sec h5 { font-size: 10.5px; }
+  body.mw-cloud #capModal .cap-sec > label { font-size: 14px; gap: 8px; }
+  body.mw-cloud #capModal .cap-sec .cloud-chips { height: 34px !important; }
+  body.mw-cloud #capModal .cap-sec .cloud-chips button { font-size: 13px !important; }
+  body.mw-cloud #capModal .cap-sec .cloud-pick { min-height: 0 !important; height: 36px !important; font-size: 14px !important; }
+  body.mw-cloud #capModal .cap-sec input[type=color] { width: 44px; height: 28px; }
+  body.mw-cloud #capModal .cap-looks { grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  body.mw-cloud #capModal .cap-look { border-radius: 11px; gap: 2px; }
+  body.mw-cloud #capModal .cap-look span { font-size: 17px !important; }
+  body.mw-cloud #capModal .cap-look small { font-size: 9.5px; }
+  body.mw-cloud #capModal #capStyleMore { height: 30px; padding: 0 12px; font-size: 13px; }
+  body.mw-cloud #capModal .cap-fixes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  body.mw-cloud #capModal .cap-fixes > button { height: 40px !important; min-height: 0; padding: 0 10px; border-radius: 12px; font-size: 13px !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  body.mw-cloud #capModal .cap-fixes > label { grid-column: 1 / -1; min-height: 32px; font-size: 13.5px; }
+  body.mw-cloud #capModal .cap-sec #capPlayRate { height: 34px; font-size: 14px; }
+  body.mw-cloud #capModal .cap-sec .cap-pl-opt { font-size: 13.5px; min-height: 30px; }
+}
+@media (max-width: 900px) {
+  /* Size: the sizes and ⚙ (the exact size) on one row */
+  body.mw-cloud #capModal .cap-sec:has(#capFine) { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 6px; }
+  body.mw-cloud #capModal .cap-sec:has(#capFine) > h5, body.mw-cloud #capModal .cap-sec:has(#capFine) > #capFineWrap { grid-column: 1 / -1; }
+  body.mw-cloud #capModal .cap-sec #capFine { width: 40px !important; height: 34px !important; min-height: 0; margin: 0; padding: 0; border-radius: 10px; }
+}

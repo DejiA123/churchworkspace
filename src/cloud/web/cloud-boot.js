@@ -4241,6 +4241,9 @@ let _hideTimer = null;
     const fixRow = box.querySelector('.cap-fix-row');
     const fx = document.createElement('div'); fx.className = 'cap-fixes';
     if (fixRow) [...fixRow.children].filter((c) => !c.classList.contains('cap-fix-sep')).forEach((c) => fx.appendChild(c));
+    // ("auto" said nothing on its own)
+    const al = fx.querySelector('#capGrammarAuto'), alab = al && al.closest('label');   // (not yet on the page: looked for in the panel)
+    if (alab) [...alab.childNodes].forEach((nd) => { if (nd.nodeType === 3 && nd.textContent.trim()) nd.textContent = ' The AI checks new captions by itself'; });
     put('fix', '', fx);
     put('fix', 'Listen again with', bare(labelOf('capModelSel')));
     put('fix', 'Playback', document.getElementById('capPlayRate'), labelOf('capPlayLoop'), ...[...player.querySelectorAll('.cap-pl-opt')]);
