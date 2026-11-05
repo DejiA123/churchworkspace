@@ -118,6 +118,30 @@ const ssim = (a, b, crop) => {
     } catch (e) { check('made both ways', false, e.stack || e.message); }
   }
 
+  /*
+   * [5] Studio sound: the voice cleaned BESIDE the picture (voiceAlongside), not
+   * before it — the same sound, bit for bit, and the same picture.
+   */
+  for (const r of [routes[0], routes[1], routes[3]]) {
+    head(`[5] studio sound beside the picture: ${r.name}`);
+    const first = path.join(WORK, 'v1.mp4'), beside = path.join(WORK, 'v2.mp4');
+    try {
+      const a = Object.assign({}, r.a, { denoise: 'studio' });
+      process.env.MW_VOICE_FIRST = '1';
+      await video[r.fn](ctx, Object.assign({ input: SRC, output: first }, a));
+      delete process.env.MW_VOICE_FIRST;
+      const seen = [];
+      await video[r.fn](ctx, Object.assign({ input: SRC, output: beside, onProgress: (p) => seen.push(p) }, a));
+      const md5 = (f) => execFileSync(ffmpeg, ['-v', 'error', '-i', f, '-map', '0:a', '-f', 'md5', '-']).toString().trim();
+      const V = (f) => probe(f).find((x) => x.codec_type === 'video').nb_read_frames;
+      check('>> the same cleaned sound, bit for bit <<', md5(first) === md5(beside));
+      check('…under the same picture', V(first) === V(beside) && ssim(first, beside) > 0.99, `${V(first)} vs ${V(beside)} frames`);
+      check('…and the bar only went forward', seen.length > 2 && seen.every((p, i) => !i || p >= seen[i - 1]), seen.join(','));
+    } catch (e) { delete process.env.MW_VOICE_FIRST; check('made both ways', false, e.stack || e.message); }
+  }
+  const left = fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith('cws-part-'));
+  check('nothing the voice-beside route made is left behind', !left.length, left.join(', '));
+
   try { fs.rmSync(WORK, { recursive: true, force: true }); } catch (e) {}
   console.log(`\n${pass} PASS / ${fail} FAIL`);
   process.exit(fail ? 1 : 0);

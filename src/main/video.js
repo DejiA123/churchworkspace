@@ -910,12 +910,72 @@ function voiceThenPicture(onProgress, af, hasAudio) {
   };
 }
 
+/*
+ * ►► THE VOICE IS CLEANED WHILE THE PICTURE IS MADE, NOT BEFORE IT. ◄◄
+ *
+ * Studio sound rendered the cleaned voice first and only then started on the
+ * picture, so the two longest jobs of the export ran one after the other —
+ * measured on a 30-second 1080p short: 10.5 s of voice, then 13 s of picture.
+ * They need nothing from each other until the very end: the picture is made
+ * without its sound while the voice is cleaned and checked beside it, and the
+ * two are put together at the end without touching the picture again (-c:v
+ * copy). The sound is the same voice track, encoded the same way.
+ *
+ * Only where there is room for both at once: a machine with one CPU, or one
+ * the size of a small server, would only make each of them slower and risk its
+ * memory, so there it is one after the other, exactly as it was.
+ */
+const voiceBeside = (af, hasAudio) => voiceWillRender(af, hasAudio)
+  && machine.cpus() >= 2 && !machine.small() && process.env.MW_VOICE_FIRST !== '1';
+const partStem = () => path.join(os.tmpdir(), `cws-part-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+/** The sound alone, cleaned inline — when the checked voice could not be made. */
+async function soundOnly(ctx, { inputArgs, cut, af, cwd, signal, output }) {
+  const a = [...inputArgs];
+  if (cut && cut.chain && cut.a) a.push('-filter_complex', `${cut.chain};${cut.v ? `[${cut.v}]nullsink;` : ''}[${cut.a}]${af}[aout]`, '-map', '[aout]');
+  else a.push('-vn', '-af', af);
+  a.push('-c:a', 'aac', '-b:a', '192k', '-y', output);
+  await ff.runFfmpeg(ctx.ffmpeg, a, { signal, cwd });
+}
+/**
+ * `picture({ out, onProgress })` makes the picture with no sound into `out`;
+ * meanwhile the voice is cleaned; then both go into `output`. The bar is the
+ * two together, in the shares voiceThenPicture gives them.
+ */
+async function voiceAlongside(ctx, { inputArgs, cut, af, cwd, signal, dur, output, onProgress }, picture) {
+  const stem = partStem();
+  const picOut = stem + '.mp4', soundOut = stem + '.m4a';
+  const clamp = (v) => Math.max(0, Math.min(100, Number(v) || 0));
+  let vp = 0, pp = 0, hi = -1;
+  const tell = () => {
+    if (!onProgress) return;
+    const p = Math.min(99, Math.round((vp * VOICE_SHARE + pp * (100 - VOICE_SHARE)) / 100));
+    if (p > hi) { hi = p; try { onProgress(p); } catch (e) {} }
+  };
+  const [v, pic] = await Promise.allSettled([
+    renderVerifiedVoice(ctx, { inputArgs, cut, af, hasAudio: true, cwd, signal, onProgress: (p) => { vp = clamp(p); tell(); }, durSec: dur }),
+    picture({ out: picOut, onProgress: (p) => { pp = clamp(p); tell(); } }),
+  ]);
+  const voice = v.status === 'fulfilled' ? v.value : null;
+  const drop = (f) => { if (f) { try { fs.rmSync(f, { force: true }); } catch (e) {} } };
+  try {
+    if (pic.status === 'rejected') throw pic.reason;
+    if (v.status === 'rejected' && v.reason && v.reason.name === 'CancelledError') throw v.reason;
+    let sound = voice;
+    if (!sound) { await soundOnly(ctx, { inputArgs, cut, af, cwd, signal, output: soundOut }); sound = soundOut; }
+    // No -shortest, as in the encode it replaces: the checked voice is one 10 ms
+    // frame shorter than the picture, and the picture keeps its last frame.
+    await ff.runFfmpeg(ctx.ffmpeg, ['-i', picOut, '-i', sound, '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy',
+      ...(voice ? ['-c:a', 'aac', '-b:a', '192k'] : ['-c:a', 'copy']), '-movflags', '+faststart', '-y', output], { signal, cwd });
+    tell();
+  } finally { drop(picOut); drop(soundOut); drop(voice); }
+}
+
 /**
  * Encode with GPU acceleration when available — VideoToolbox on macOS,
  * Intel QSV / NVENC / AMF (via -hwaccel auto + h264_qsv) on Windows/Linux —
  * automatically falling back to libx264 so it still works on any machine.
  */
-async function encodeWithFallback(ctx, { inputArgs, cut, vfCore, af, dur, hasAudio, output, onProgress, cwd, quality, fps, signal, burn, frame }) {
+async function encodeWithFallback(ctx, { inputArgs, cut, vfCore, af, dur, hasAudio, output, onProgress, cwd, quality, fps, signal, burn, frame, noSound }) {
   const q = qualityDef(quality);
   // 30 was hard-coded here, which quietly halved every 60fps recording. The
   // caller passes the source rate; 30 remains the answer when it cannot be read.
@@ -928,9 +988,23 @@ async function encodeWithFallback(ctx, { inputArgs, cut, vfCore, af, dur, hasAud
    * audio and simply plays that file: the expensive video work then happens
    * exactly once, over sound already known to be clean.
    */
+  if (voiceBeside(af, hasAudio)) {
+    // (see voiceAlongside: the picture without its sound, the voice beside it)
+    try {
+      return await voiceAlongside(ctx, { inputArgs, cut, af, cwd, signal, dur, output, onProgress },
+        (o) => encodeWithFallback(ctx, { inputArgs, cut, vfCore, af: null, dur, hasAudio, output: o.out, onProgress: o.onProgress,
+          cwd, quality, fps, signal, burn, frame, noSound: true }));
+    } catch (e) {
+      if (e && e.name === 'CancelledError') throw e;
+      // never nothing: one after the other, the way it always worked
+      console.warn('[voice] beside the picture failed; making them one after the other: ' + ((e && e.message) || e));
+    }
+  }
   const bar = voiceThenPicture(onProgress, af, hasAudio);
   const voiceTrack = await renderVerifiedVoice(ctx, { inputArgs, cut, af, hasAudio, cwd, signal, onProgress: bar.voice, durSec: dur });
   onProgress = bar.picture;
+  // the picture alone: its sound is being made beside it (voiceAlongside)
+  if (noSound) hasAudio = false;
   // Which input the checked track is: it goes on the end, after however many
   // the caller already had.
   const voiceIdx = inputArgs.filter((x) => x === '-i').length;
@@ -977,9 +1051,10 @@ async function encodeWithFallback(ctx, { inputArgs, cut, vfCore, af, dur, hasAud
       let fc = `${cut.chain};${pic(`[${cut.v}]`)}`;
       const cleaning = !!(af && hasAudio && cut.a && !voiceTrack);
       if (cleaning) fc += `;[${cut.a}]${af}[aout]`;
-      // the checked voice plays instead of the joined sound, which then has to
-      // go somewhere: ffmpeg refuses a graph with an output left dangling
-      else if (voiceTrack && cut.a) fc += `;[${cut.a}]anullsink`;
+      // the checked voice plays instead of the joined sound (or the sound is made
+      // beside this), which then has to go somewhere: ffmpeg refuses a graph with
+      // an output left dangling
+      else if ((voiceTrack || noSound) && cut.a) fc += `;[${cut.a}]anullsink`;
       a.push('-filter_complex', fc, '-map', '[vout]');
       if (voiceTrack) a.push('-map', `${voiceIdx}:a`);
       else if (hasAudio && cut.a) a.push('-map', cleaning ? '[aout]' : `[${cut.a}]`);
@@ -2050,8 +2125,11 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
        * shorts kept the old sound. It goes in as one more input, AFTER the
        * clip's own (its `-t` stays the output's cap, see encodeWithFallback).
        */
+      // …or cleaned beside the picture, which is then made without its sound (voiceAlongside)
+      const beside = voiceBeside(af, info.hasAudio);
+      const sound = !beside;
       const bar = voiceThenPicture(onProgress, af, info.hasAudio);
-      const voice = (af && info.hasAudio) ? await renderVerifiedVoice(ctx, { inputArgs, cut, af, hasAudio: true, onProgress: bar.voice, durSec: dur }) : null;
+      const voice = (sound && af && info.hasAudio) ? await renderVerifiedVoice(ctx, { inputArgs, cut, af, hasAudio: true, onProgress: bar.voice, durSec: dur }) : null;
       // (its own name: a fall-through to the plain path below starts the bar over)
       const padProg = bar.picture;
       const lastI = inputArgs.lastIndexOf('-i');
@@ -2080,17 +2158,17 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
           : `${srcV}split=2[bgs][fgs];[bgs]${bgChain}[bg];[bg][fgs]overlay=${P}:0,crop=${cropW}:${cropH}:x='${xe}':y=0`)
           + `,scale=${p.w}:${p.h}:flags=lanczos,setsar=1${motionChain(motion, p.w, p.h) ? ',' + motionChain(motion, p.w, p.h) : ''}`
           + (burning ? `[vb];${bg.steps.join(';')};[${bg.out}]format=${fmt}[vout]` : `,format=${fmt}[vout]`);
-        if (af && info.hasAudio && !voice) fc += `;${srcA}${af}[aout]`;
-        // with the voice playing in, the cut plan's own sound is not used
-        else if (voice && cut && cut.a) fc += `;[${cut.a}]anullsink`;
+        if (sound && af && info.hasAudio && !voice) fc += `;${srcA}${af}[aout]`;
+        // with the voice playing in (or made beside this), the cut plan's own sound is not used
+        else if ((voice || !sound) && cut && cut.a) fc += `;[${cut.a}]anullsink`;
         return fc;
       };
-      const padArgs = (head, fmt, codecArgs) => {
+      const padArgs = (head, fmt, codecArgs, out) => {
         const a = [...head, ...insB, '-filter_complex', padGraph(fmt), '-map', '[vout]'];
-        if (info.hasAudio) a.push('-map', voice ? `${voiceIdx}:a` : (af ? '[aout]' : mapA), '-c:a', 'aac', '-b:a', '192k'); else a.push('-an');
+        if (info.hasAudio && sound) a.push('-map', voice ? `${voiceIdx}:a` : (af ? '[aout]' : mapA), '-c:a', 'aac', '-b:a', '192k'); else a.push('-an');
         // outputFps, not a hard-coded 30: this path was halving every 60fps
         // recording exactly the way the main encode used to (see export-quality).
-        a.push('-r', String(outputFps(info)), ...codecArgs, '-movflags', '+faststart', '-y', output);
+        a.push('-r', String(outputFps(info)), ...codecArgs, '-movflags', '+faststart', '-y', out);
         return a;
       };
       const qd = qualityDef(quality);
@@ -2101,27 +2179,38 @@ async function exportShortReframed(ctx, { input, startSec, endSec, preset = 'ree
        * encode plus a verify. Same rule here, for the same reason.
        */
       const hwOk = !(cut && cut.chain);
-      try {
-      if (hwOk) {
+      // the padded picture into `out`: true when made, false to fall through to the plain path below
+      const padPicture = async (out, prog) => {
+        if (hwOk) {
+          try {
+            const hw = process.platform === 'darwin'
+              ? padArgs(['-hwaccel', 'auto'], 'nv12', ['-c:v', 'h264_videotoolbox', '-q:v', '65'], out)
+              : padArgs(['-hwaccel', 'auto'], 'nv12', ['-c:v', 'h264_qsv', '-global_quality', String(qd.qsv)], out);
+            await ff.runFfmpeg(ctx.ffmpeg, hw, { onProgress: prog, totalDurationSec: dur });
+            if (await isCleanEncode(ctx, out)) return true;
+          } catch (e) { /* fall through to software */ }
+        }
         try {
-          const hw = process.platform === 'darwin'
-            ? padArgs(['-hwaccel', 'auto'], 'nv12', ['-c:v', 'h264_videotoolbox', '-q:v', '65'])
-            : padArgs(['-hwaccel', 'auto'], 'nv12', ['-c:v', 'h264_qsv', '-global_quality', String(qd.qsv)]);
-          await ff.runFfmpeg(ctx.ffmpeg, hw, { onProgress: padProg, totalDurationSec: dur });
-          if (await isCleanEncode(ctx, output)) return output;
-        } catch (e) { /* fall through to software */ }
-      }
+          // 'veryfast' stays, deliberately. This is the path a machine WITHOUT a
+          // working hardware encoder takes, and moving it to 'medium' to match the
+          // rest of the app would make those machines several times slower at the
+          // exact moment they have no GPU to make up for it. The CRF now comes
+          // from the quality tier, so 4K is no longer judged by a 1080p yardstick.
+          await ff.runFfmpeg(ctx.ffmpeg,
+            padArgs([], 'yuv420p', ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', String(qd.crf)], out),
+            { onProgress: prog, totalDurationSec: dur });
+          return true;
+        } catch (e) { return false; /* fall through to the plain clamped path below */ }
+      };
       try {
-        // 'veryfast' stays, deliberately. This is the path a machine WITHOUT a
-        // working hardware encoder takes, and moving it to 'medium' to match the
-        // rest of the app would make those machines several times slower at the
-        // exact moment they have no GPU to make up for it. The CRF now comes
-        // from the quality tier, so 4K is no longer judged by a 1080p yardstick.
-        await ff.runFfmpeg(ctx.ffmpeg,
-          padArgs([], 'yuv420p', ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', String(qd.crf)]),
-          { onProgress: padProg, totalDurationSec: dur });
-        return output;
-      } catch (e) { /* fall through to the plain clamped path below */ }
+        if (sound) { if (await padPicture(output, padProg)) return output; }
+        else {
+          try {
+            await voiceAlongside(ctx, { inputArgs, cut, af, dur, output, onProgress },
+              async (o) => { if (!(await padPicture(o.out, o.onProgress))) throw new Error('The padded picture could not be made.'); });
+            return output;
+          } catch (e) { if (e && e.name === 'CancelledError') throw e; /* fall through, as above */ }
+        }
       } finally {
         if (voice) { try { fs.rmSync(voice, { force: true }); } catch (e) {} }
       }
