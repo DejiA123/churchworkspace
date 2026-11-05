@@ -206,8 +206,8 @@ async function waitUp() {
       check(['Auto captions', 'Add captions', 'Edit captions', 'Caption style'].every((l) => row.some((r) => r.startsWith(l))), 'Captions in the bar opens its own row: Auto captions, Add, Edit, Style', row);
       await page.locator('.cloud-dock-row.on .cloud-tool').filter({ hasText: 'Auto captions' }).tap(); await sleep(600);
       const sh = await page.evaluate(() => ({ title: (document.querySelector('.cp-autocaps .cp-title') || {}).textContent, looks: document.querySelectorAll('.cp-autocaps [data-look]').length,
-        listen: !!document.querySelector('.cp-autocaps [data-acs="capModelSel"]'), wpl: document.querySelectorAll('.cp-autocaps [data-wpl]').length, go: (document.querySelector('.cp-autocaps .ac-go') || {}).textContent }));
-      check(sh.title === 'Generate auto captions' && sh.looks > 3 && sh.listen && sh.wpl >= 4 && /Generate/.test(sh.go || ''), 'Auto captions: how it listens, the looks as tiles, words per line, and Generate', sh);
+        listen: !document.querySelector('.cp-autocaps [data-acs="capModelSel"]') && /Highlight each word as it’s said/.test(document.querySelector('.cp-autocaps').textContent), wpl: document.querySelectorAll('.cp-autocaps [data-wpl]').length, go: (document.querySelector('.cp-autocaps .ac-go') || {}).textContent }));
+      check(sh.title === 'Generate auto captions' && sh.looks > 3 && sh.listen && sh.wpl >= 4 && /Generate/.test(sh.go || ''), 'Auto captions: the looks as tiles, "Highlight each word as it’s said", words per line, Generate (no "Listen with")', sh);
       const id = await page.evaluate(() => document.querySelectorAll('.cp-autocaps [data-look]')[2].dataset.look);
       await page.locator('.cp-autocaps [data-look]').nth(2).tap(); await sleep(300);
       check((await page.evaluate(() => window.VideoEditor.captionLooks().current)) === id, 'a look tapped there is the captions’ look');

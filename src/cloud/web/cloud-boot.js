@@ -4635,19 +4635,17 @@ let _hideTimer = null;
   };
   function autoCapSheet(kind) {
     const E = window.VideoEditor; if (!E || !E.captionLooks) return;
-    const hearing = E.captionSelect('capModelSel'), words = E.captionSelect('capWords');
+    // (no "Listen with": the studio's own choice, AssemblyAI where it is set up — "no need to show it")
+    const words = E.captionSelect('capWords');
     const auto = document.getElementById('capGrammarAuto'), hl = document.getElementById('capWordHl');
     const P = openPanel({ id: 'cloudAutoCaps', title: kind === 'auto' ? 'Generate auto captions' : 'Caption style', cls: 'cp-autocaps' });
-    const row = (ic, label, right) => `<div class="ac-row">${mi(ic)}<span class="ac-l">${label}</span>${right}</div>`;
-    const sel = (id, d) => d ? `<select class="ac-sel" data-acs="${id}">${d.options.map((o) => `<option value="${escAttr(o.value)}"${o.value === d.value ? ' selected' : ''}>${escHtml(o.label)}</option>`).join('')}</select>` : '';
     const draw = () => {
       const L = E.captionLooks();
       const tiles = L.looks.map((x) => `<button type="button" class="ac-tile${x.id === L.current ? ' on' : ''}" data-look="${escAttr(x.id)}"><span style="${escAttr(x.css)}">Aa</span><small>${escHtml(x.name)}</small></button>`).join('');
       const wl = words ? `<div class="ac-seg">${words.options.map((o) => `<button type="button" data-wpl="${escAttr(o.value)}" class="${o.value === E.captionSelect('capWords').value ? 'on' : ''}">${escHtml(o.label)}</button>`).join('')}</div>` : '';
       P.body.innerHTML = `<div class="ac">
-        ${kind === 'auto' ? `<div class="ac-card">${row('audio-lines', 'Listen with', sel('capModelSel', hearing))}</div>` : ''}
         <div class="ac-card"><div class="ac-row">${mi('palette')}<span class="ac-l">Look</span></div><div class="ac-tiles">${tiles}</div>
-          ${hl ? `<label class="ac-row ac-sw">${mi('target')}<span class="ac-l">Follow the voice</span><input type="checkbox" data-hl${hl.checked ? ' checked' : ''}><i></i></label>` : ''}</div>
+          ${hl ? `<label class="ac-row ac-sw">${mi('target')}<span class="ac-l">Highlight each word as it’s said</span><input type="checkbox" data-hl${hl.checked ? ' checked' : ''}><i></i></label>` : ''}</div>
         <div class="ac-card"><div class="ac-row">${mi('type')}<span class="ac-l">Words on a line</span></div>${wl}</div>
         ${kind === 'auto' && auto ? `<details class="ac-card ac-more"><summary class="ac-row">${mi('sparkles')}<span class="ac-l">Advanced options</span>${mi('chev-left', 'ac-chev')}</summary>
           <label class="ac-row ac-sw"><span class="ac-l">AI proof-read the new captions</span><input type="checkbox" data-auto${auto.checked ? ' checked' : ''}><i></i></label></details>` : ''}
@@ -4662,7 +4660,6 @@ let _hideTimer = null;
       const w = e.target.closest('[data-wpl]'); if (w) { E.setCaptionSelect('capWords', w.dataset.wpl); draw(); }
     });
     P.body.addEventListener('change', (e) => {
-      const s2 = e.target.closest('[data-acs]'); if (s2) E.setCaptionSelect(s2.dataset.acs, s2.value);
       if (e.target.matches('[data-hl]') && hl) { hl.checked = e.target.checked; hl.dispatchEvent(new Event('change', { bubbles: true })); }
       if (e.target.matches('[data-auto]') && auto) { auto.checked = e.target.checked; auto.dispatchEvent(new Event('change', { bubbles: true })); }
     });
