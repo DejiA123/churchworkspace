@@ -4240,13 +4240,11 @@ let _hideTimer = null;
     // Fix: everything from the fixing row, then listening again and playback
     const fixRow = box.querySelector('.cap-fix-row');
     const fx = document.createElement('div'); fx.className = 'cap-fixes';
-    if (fixRow) [...fixRow.children].filter((c) => !c.classList.contains('cap-fix-sep')).forEach((c) => fx.appendChild(c));
-    // ("auto" said nothing on its own)
-    const al = fx.querySelector('#capGrammarAuto'), alab = al && al.closest('label');   // (not yet on the page: looked for in the panel)
-    if (alab) [...alab.childNodes].forEach((nd) => { if (nd.nodeType === 3 && nd.textContent.trim()) nd.textContent = ' The AI checks new captions by itself'; });
+    // ("No need for: Listen again with, loop line, pause while typing, the AI checks new captions by itself" — they stay
+    //  where they were, hidden, doing what they did: the AI still checks new captions, typing still pauses the sound)
+    if (fixRow) [...fixRow.children].filter((c) => !c.classList.contains('cap-fix-sep') && !c.querySelector('#capGrammarAuto')).forEach((c) => fx.appendChild(c));
     put('fix', '', fx);
-    put('fix', 'Listen again with', bare(labelOf('capModelSel')));
-    put('fix', 'Playback', document.getElementById('capPlayRate'), labelOf('capPlayLoop'), ...[...player.querySelectorAll('.cap-pl-opt')]);
+    put('fix', 'Playback speed', document.getElementById('capPlayRate'));
     const drawLooks = () => {
       const E = window.VideoEditor; if (!E || !E.captionLooks) return;
       const L = E.captionLooks();
@@ -4719,7 +4717,7 @@ let _hideTimer = null;
     const E = window.VideoEditor; if (!E || !E.captionLooks) return;
     // (no "Listen with": the studio's own choice, AssemblyAI where it is set up — "no need to show it")
     const words = E.captionSelect('capWords');
-    const auto = document.getElementById('capGrammarAuto'), hl = document.getElementById('capWordHl');
+    const hl = document.getElementById('capWordHl');
     const P = openPanel({ id: 'cloudAutoCaps', title: kind === 'auto' ? 'Generate auto captions' : 'Caption style', cls: 'cp-autocaps' });
     const draw = () => {
       const L = E.captionLooks();
@@ -4729,8 +4727,6 @@ let _hideTimer = null;
         <div class="ac-card"><div class="ac-row">${mi('palette')}<span class="ac-l">Look</span></div><div class="ac-tiles">${tiles}</div>
           ${hl ? `<label class="ac-row ac-sw">${mi('target')}<span class="ac-l">Highlight each word as it’s said</span><input type="checkbox" data-hl${hl.checked ? ' checked' : ''}><i></i></label>` : ''}</div>
         <div class="ac-card"><div class="ac-row">${mi('type')}<span class="ac-l">Words on a line</span></div>${wl}</div>
-        ${kind === 'auto' && auto ? `<details class="ac-card ac-more"><summary class="ac-row">${mi('sparkles')}<span class="ac-l">Advanced options</span>${mi('chev-left', 'ac-chev')}</summary>
-          <label class="ac-row ac-sw"><span class="ac-l">AI proof-read the new captions</span><input type="checkbox" data-auto${auto.checked ? ' checked' : ''}><i></i></label></details>` : ''}
       </div>`;
       P.foot.innerHTML = kind === 'auto'
         ? `<button type="button" class="ac-go" data-act="gen">${E.captionCount() ? 'Generate again' : 'Generate'}</button>`
@@ -4743,7 +4739,6 @@ let _hideTimer = null;
     });
     P.body.addEventListener('change', (e) => {
       if (e.target.matches('[data-hl]') && hl) { hl.checked = e.target.checked; hl.dispatchEvent(new Event('change', { bubbles: true })); }
-      if (e.target.matches('[data-auto]') && auto) { auto.checked = e.target.checked; auto.dispatchEvent(new Event('change', { bubbles: true })); }
     });
     P.foot.addEventListener('click', async (e) => {
       const b = e.target.closest('[data-act]'); if (!b) return;

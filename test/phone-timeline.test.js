@@ -206,7 +206,7 @@ async function waitUp() {
       check(['Auto captions', 'Add captions', 'Edit captions', 'Caption style'].every((l) => row.some((r) => r.startsWith(l))), 'Captions in the bar opens its own row: Auto captions, Add, Edit, Style', row);
       await page.locator('.cloud-dock-row.on .cloud-tool').filter({ hasText: 'Auto captions' }).tap(); await sleep(600);
       const sh = await page.evaluate(() => ({ title: (document.querySelector('.cp-autocaps .cp-title') || {}).textContent, looks: document.querySelectorAll('.cp-autocaps [data-look]').length,
-        listen: !document.querySelector('.cp-autocaps [data-acs="capModelSel"]') && /Highlight each word as it’s said/.test(document.querySelector('.cp-autocaps').textContent), wpl: document.querySelectorAll('.cp-autocaps [data-wpl]').length, go: (document.querySelector('.cp-autocaps .ac-go') || {}).textContent }));
+        listen: !document.querySelector('.cp-autocaps [data-acs="capModelSel"]') && !document.querySelector('.cp-autocaps .ac-more') && /Highlight each word as it’s said/.test(document.querySelector('.cp-autocaps').textContent), wpl: document.querySelectorAll('.cp-autocaps [data-wpl]').length, go: (document.querySelector('.cp-autocaps .ac-go') || {}).textContent }));
       check(sh.title === 'Generate auto captions' && sh.looks > 3 && sh.listen && sh.wpl >= 4 && /Generate/.test(sh.go || ''), 'Auto captions: the looks as tiles, "Highlight each word as it’s said", words per line, Generate (no "Listen with")', sh);
       const id = await page.evaluate(() => document.querySelectorAll('.cp-autocaps [data-look]')[2].dataset.look);
       await page.locator('.cp-autocaps [data-look]').nth(2).tap(); await sleep(300);
@@ -787,7 +787,9 @@ async function waitUp() {
       check(a.textBg === 'rgba(0, 0, 0, 0)', 'each line is plain words, not a box', a.textBg);
       await page.locator('#capModal .cap-tabs [data-ctab="fix"]').tap(); await sleep(300);
       const b = await look();
-      check(b.wb && b.loop && !b.list, 'Fix: the Word Book, the fixes and playback, in place of the lines', b);
+      const fixPane = await page.evaluate(() => { const p = document.querySelector('#capModal .cap-pane[data-cpane="fix"]'); return { t: p.textContent, auto: !!p.querySelector('#capGrammarAuto'), loop: !!p.querySelector('#capPlayLoop'), hearing: !!p.querySelector('#capModelSel'), autoOn: document.getElementById('capGrammarAuto').checked }; });
+      check(b.wb && !b.list && !fixPane.auto && !fixPane.loop && !fixPane.hearing && fixPane.autoOn && /Playback speed/.test(fixPane.t),
+        'Fix: the Word Book, the fixes and playback speed — no Listen again with, loop, pause while typing or auto switch (the AI still checks new captions)', fixPane);
       await page.locator('#capModal .cap-tabs [data-ctab="style"]').tap(); await sleep(300);
       check(!!(await look()).looks, 'Style: the looks as tiles');
       await page.locator('#capModal .cap-tabs [data-ctab="words"]').tap(); await sleep(300);
